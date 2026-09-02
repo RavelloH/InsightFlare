@@ -2,11 +2,11 @@ import { classifyASN } from "asn-blocklist";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  BOT_ANALYTICS_BLOBS,
-  BOT_ANALYTICS_DOUBLES,
-  classifyCollectBotTraffic,
-  writeRequestObservationEvent,
-} from "@/lib/edge/bot-protection";
+  REQUEST_ANALYTICS_BLOBS,
+  REQUEST_ANALYTICS_DOUBLES,
+  writeRequestAnalyticsPoint,
+} from "@/lib/edge/analytics-engine/index";
+import { classifyCollectBotTraffic } from "@/lib/edge/bot-protection";
 import type { Env, TrackerClientPayload } from "@/lib/edge/types";
 
 vi.mock("asn-blocklist", () => ({
@@ -50,8 +50,8 @@ const payload: TrackerClientPayload = {
 
 describe("bot protection", () => {
   it("keeps the Analytics Engine schema within data point limits", () => {
-    expect(BOT_ANALYTICS_BLOBS).toHaveLength(20);
-    expect(BOT_ANALYTICS_DOUBLES.length).toBeLessThanOrEqual(20);
+    expect(REQUEST_ANALYTICS_BLOBS).toHaveLength(20);
+    expect(REQUEST_ANALYTICS_DOUBLES).toHaveLength(20);
   });
 
   it("classifies known bot user agents as high-threat traffic", () => {
@@ -251,10 +251,10 @@ describe("bot protection", () => {
   it("writes rich request observation points with site index and metadata", () => {
     const writeDataPoint = vi.fn();
     const env = {
-      BOT_ANALYTICS: { writeDataPoint },
+      REQUEST_ANALYTICS: { writeDataPoint },
     } as unknown as Env;
 
-    writeRequestObservationEvent(env, {
+    writeRequestAnalyticsPoint(env, {
       request: request(
         {
           "user-agent": "curl/8.14.1",
@@ -287,18 +287,19 @@ describe("bot protection", () => {
     const point = writeDataPoint.mock.calls[0]?.[0];
     expect(point).toMatchObject({
       indexes: ["site-1"],
-      doubles: [
+      doubles: expect.arrayContaining([
         1_800_000_000_000,
+        1_800_000_000_000,
+        expect.any(Number),
         137409,
         35.6895,
         139.69171,
         0,
         "curl/8.14.1".length,
-      ],
+      ]),
     });
     expect(point?.blobs).toEqual(
       expect.arrayContaining([
-        "site-1",
         "pageview",
         "high_threat",
         "script_ua",
@@ -311,15 +312,15 @@ describe("bot protection", () => {
     );
   });
 
-  it("drops bot analytics points when Analytics Engine is disabled", () => {
+  it("drops request observation points when Analytics Engine is disabled", () => {
     const writeDataPoint = vi.fn();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const env = {
-      BOT_ANALYTICS: { writeDataPoint },
+      REQUEST_ANALYTICS: { writeDataPoint },
       INSIGHTFLARE_ANALYTICS_ENGINE_DISABLED: "1",
     } as unknown as Env;
 
-    writeRequestObservationEvent(env, {
+    writeRequestAnalyticsPoint(env, {
       request: request({ "user-agent": "curl/8.14.1" }),
       payload,
       siteId: "site-1",

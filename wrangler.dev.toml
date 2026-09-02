@@ -40,9 +40,13 @@ binding = "SITE_SETTINGS_KV"
 id = "local-dev"
 
 [[analytics_engine_datasets]]
-binding = "BOT_ANALYTICS"
-dataset = "insightflare_bot_events"
+binding = "REQUEST_ANALYTICS"
+dataset = "insightflare_request_events"
 
 [[analytics_engine_datasets]]
-binding = "NORMAL_ANALYTICS"
-dataset = "insightflare_normal_events"
+binding = "TRAFFIC_ANALYTICS"
+dataset = "insightflare_traffic_events"
+
+[[analytics_engine_datasets]]
+binding = "EVENT_ANALYTICS"
+dataset = "insightflare_event_facts"

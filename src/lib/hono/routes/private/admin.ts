@@ -48,10 +48,13 @@ privateAdminRoutes.all(
   adminServiceRoute("login-turnstile/test"),
 );
 privateAdminRoutes.all(
-  "/bot-analytics-config",
-  adminServiceRoute("bot-analytics-config"),
+  "/analytics-engine-config",
+  adminServiceRoute("analytics-engine-config"),
 );
-privateAdminRoutes.all("/bot-analytics", adminServiceRoute("bot-analytics"));
+privateAdminRoutes.all(
+  "/request-observation",
+  adminServiceRoute("request-observation"),
+);
 privateAdminRoutes.all(
   "/notification-email-preview",
   adminServiceRoute("notification-email-preview"),

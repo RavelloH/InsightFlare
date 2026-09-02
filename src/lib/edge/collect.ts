@@ -5,14 +5,11 @@ import {
   matchBlockingRules,
   parseBlockingRules,
 } from "@/lib/blocking-rules";
-import {
-  classifyCollectBotTraffic,
-  writeRequestObservationEvent,
-} from "@/lib/edge/bot-protection";
+import { writeRequestAnalyticsPoint } from "@/lib/edge/analytics-engine/request-writer";
+import { classifyCollectBotTraffic } from "@/lib/edge/bot-protection";
 import { normalizeTrackerUaClientHints } from "@/lib/edge/client-hints";
 import { requestIp, verifyCollectToken } from "@/lib/edge/collect-token";
 import { expandCustomEventData } from "@/lib/edge/custom-event-json";
-import { writeNormalAnalyticsEvent } from "@/lib/edge/request-analytics";
 import {
   normalizeSiteSettingsKey,
   readSiteTrackingConfig,
@@ -581,7 +578,7 @@ export async function handleCollectRequest(
       decision.blockedFields.length > 0
     ) {
       logger?.info("collect.custom_blocked");
-      writeRequestObservationEvent(
+      writeRequestAnalyticsPoint(
         env,
         {
           request: requestWithCf,
@@ -608,7 +605,7 @@ export async function handleCollectRequest(
 
   if (classification.isBot && classification.threatLevel) {
     logger?.info("collect.bot_diverted");
-    writeRequestObservationEvent(
+    writeRequestAnalyticsPoint(
       env,
       {
         request: requestWithCf,
@@ -642,7 +639,7 @@ export async function handleCollectRequest(
 
   logger?.info("collect.forward_queued");
 
-  writeNormalAnalyticsEvent(
+  writeRequestAnalyticsPoint(
     env,
     {
       request: requestWithCf,
@@ -651,6 +648,8 @@ export async function handleCollectRequest(
       origin: decision.allowOrigin,
       traceId: trace.id,
       receivedAt: trace.acceptedAt,
+      category: "normal",
+      reasons: [],
     },
     logger,
   );

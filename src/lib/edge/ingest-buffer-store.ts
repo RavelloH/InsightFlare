@@ -373,7 +373,10 @@ export async function findRecentVisitorSession(
       input.visitId,
       cutoff,
     )
-    .first<RecentVisitorSession>();
+    .first<RecentVisitorSession>()
+    // A persisted-session lookup is an optimization for session continuity;
+    // a D1 outage must not turn a valid pageview into a failed ingest.
+    .catch(() => null);
 
   return persisted ?? null;
 }

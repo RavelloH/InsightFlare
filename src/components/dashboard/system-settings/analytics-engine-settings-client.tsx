@@ -34,34 +34,40 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { requestAdminService } from "@/lib/admin-service-client";
-import type { PublicBotAnalyticsConfig } from "@/lib/bot-analytics-config";
+import {
+  EVENT_ANALYTICS_DATASET,
+  type PublicAnalyticsEngineConfig,
+  REQUEST_ANALYTICS_DATASET,
+  TRAFFIC_ANALYTICS_DATASET,
+} from "@/lib/analytics-engine-config";
 import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
 import { SystemSettingsGuideDialog } from "./system-settings-guide-dialog";
 
-interface BotAnalyticsSettingsClientProps {
+interface AnalyticsEngineSettingsClientProps {
   messages: AppMessages;
   initialData?: SystemSettingsInitialData | null;
 }
 
-type FormState = Pick<PublicBotAnalyticsConfig, "accountId">;
+type FormState = Pick<PublicAnalyticsEngineConfig, "accountId">;
 
-function defaultConfig(): PublicBotAnalyticsConfig {
+function defaultConfig(): PublicAnalyticsEngineConfig {
   return {
     accountId: "",
     analyticsEngineDisabled: false,
     analyticsEngineEnableUrl: "",
-    dataset: "insightflare_bot_events",
-    normalDataset: "insightflare_normal_events",
+    requestDataset: REQUEST_ANALYTICS_DATASET,
+    trafficDataset: TRAFFIC_ANALYTICS_DATASET,
+    eventDataset: EVENT_ANALYTICS_DATASET,
     apiTokenConfigured: false,
     apiTokenHint: "",
     updatedAt: 0,
   };
 }
 
-function toFormState(config: PublicBotAnalyticsConfig): FormState {
+function toFormState(config: PublicAnalyticsEngineConfig): FormState {
   return {
     accountId: config.accountId,
   };
@@ -69,34 +75,43 @@ function toFormState(config: PublicBotAnalyticsConfig): FormState {
 
 async function fetchConfig(
   signal?: AbortSignal,
-): Promise<PublicBotAnalyticsConfig> {
-  return requestAdminService<PublicBotAnalyticsConfig>("bot-analytics-config", {
-    signal,
-  });
+): Promise<PublicAnalyticsEngineConfig> {
+  return requestAdminService<PublicAnalyticsEngineConfig>(
+    "analytics-engine-config",
+    {
+      signal,
+    },
+  );
 }
 
 async function saveConfig(
   body: Record<string, unknown>,
-): Promise<PublicBotAnalyticsConfig> {
-  return requestAdminService<PublicBotAnalyticsConfig>("bot-analytics-config", {
-    method: "PATCH",
-    body,
-  });
+): Promise<PublicAnalyticsEngineConfig> {
+  return requestAdminService<PublicAnalyticsEngineConfig>(
+    "analytics-engine-config",
+    {
+      method: "PATCH",
+      body,
+    },
+  );
 }
 
-async function deleteConfig(): Promise<PublicBotAnalyticsConfig> {
-  return requestAdminService<PublicBotAnalyticsConfig>("bot-analytics-config", {
-    method: "DELETE",
-  });
+async function deleteConfig(): Promise<PublicAnalyticsEngineConfig> {
+  return requestAdminService<PublicAnalyticsEngineConfig>(
+    "analytics-engine-config",
+    {
+      method: "DELETE",
+    },
+  );
 }
 
-export function BotAnalyticsSettingsClient({
+export function AnalyticsEngineSettingsClient({
   messages,
   initialData = null,
-}: BotAnalyticsSettingsClientProps) {
+}: AnalyticsEngineSettingsClientProps) {
   const copy = messages.systemSettings;
-  const [config, setConfig] = useState<PublicBotAnalyticsConfig>(
-    initialData?.botAnalytics ?? defaultConfig(),
+  const [config, setConfig] = useState<PublicAnalyticsEngineConfig>(
+    initialData?.analyticsEngine ?? defaultConfig(),
   );
   const [form, setForm] = useState<FormState>(() => toFormState(config));
   const [apiToken, setApiToken] = useState("");
@@ -104,11 +119,13 @@ export function BotAnalyticsSettingsClient({
   const [saving, setSaving] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const configAppliedRef = useRef(false);
+  // The route already provides the SSR snapshot. Mark it as applied up front
+  // so a background refetch cannot reset a user's input during hydration.
+  const configAppliedRef = useRef(Boolean(initialData?.analyticsEngine));
   const configQuery = useQuery({
-    queryKey: ["dashboard", "bot-analytics-config"],
+    queryKey: ["dashboard", "analytics-engine-config"],
     queryFn: ({ signal }) => fetchConfig(signal),
-    initialData: initialData?.botAnalytics,
+    initialData: initialData?.analyticsEngine,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
@@ -120,8 +137,8 @@ export function BotAnalyticsSettingsClient({
     ? config.apiTokenHint
     : apiToken;
   const apiTokenPlaceholder = analyticsEngineDisabled
-    ? copy.botAnalyticsEngineDisabledHint
-    : copy.botAnalyticsApiTokenPlaceholder;
+    ? copy.analyticsEngineDisabledHint
+    : copy.analyticsEngineApiTokenPlaceholder;
 
   useEffect(() => {
     if (configQuery.isPending || configAppliedRef.current) return;
@@ -163,10 +180,10 @@ export function BotAnalyticsSettingsClient({
       setForm(toFormState(next));
       setApiToken("");
       setApiTokenDirty(false);
-      toast.success(copy.botAnalyticsSaved);
+      toast.success(copy.analyticsEngineSaved);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : copy.botAnalyticsSaveFailed,
+        error instanceof Error ? error.message : copy.analyticsEngineSaveFailed,
       );
     } finally {
       setSaving(false);
@@ -183,10 +200,12 @@ export function BotAnalyticsSettingsClient({
       setApiToken("");
       setApiTokenDirty(false);
       setDeleteDialogOpen(false);
-      toast.success(copy.botAnalyticsDeleted);
+      toast.success(copy.analyticsEngineDeleted);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : copy.botAnalyticsDeleteFailed,
+        error instanceof Error
+          ? error.message
+          : copy.analyticsEngineDeleteFailed,
       );
     } finally {
       setDeleting(false);
@@ -202,9 +221,9 @@ export function BotAnalyticsSettingsClient({
           <div className="min-w-0">
             <CardTitle className="flex min-w-0 items-center gap-2">
               <RiLineChartLine className="size-4 shrink-0" />
-              <span className="truncate">{copy.botAnalyticsTitle}</span>
+              <span className="truncate">{copy.analyticsEngineTitle}</span>
             </CardTitle>
-            <CardDescription>{copy.botAnalyticsDescription}</CardDescription>
+            <CardDescription>{copy.analyticsEngineDescription}</CardDescription>
           </div>
         </div>
       </CardHeader>
@@ -224,10 +243,10 @@ export function BotAnalyticsSettingsClient({
                 {analyticsEngineDisabled ? (
                   <div className="border border-dashed bg-muted/40 p-4 text-sm text-muted-foreground lg:col-span-2">
                     <p className="font-medium text-foreground">
-                      {copy.botAnalyticsEngineDisabledTitle}
+                      {copy.analyticsEngineDisabledTitle}
                     </p>
                     <p className="mt-1">
-                      {copy.botAnalyticsEngineDisabledDescription}
+                      {copy.analyticsEngineDisabledDescription}
                     </p>
                     <Button asChild className="mt-3" variant="outline">
                       <a
@@ -236,17 +255,17 @@ export function BotAnalyticsSettingsClient({
                         rel="noreferrer"
                       >
                         <RiExternalLinkLine className="size-4" />
-                        {copy.botAnalyticsOpenCloudflare}
+                        {copy.analyticsEngineOpenCloudflare}
                       </a>
                     </Button>
                   </div>
                 ) : null}
                 <div className="space-y-2">
-                  <Label htmlFor="bot-analytics-account-id">
-                    {copy.botAnalyticsAccountIdLabel}
+                  <Label htmlFor="analytics-engine-account-id">
+                    {copy.analyticsEngineAccountIdLabel}
                   </Label>
                   <Input
-                    id="bot-analytics-account-id"
+                    id="analytics-engine-account-id"
                     value={form.accountId}
                     disabled={analyticsEngineDisabled}
                     onChange={(event) =>
@@ -258,11 +277,11 @@ export function BotAnalyticsSettingsClient({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="bot-analytics-api-token">
-                    {copy.botAnalyticsApiTokenLabel}
+                  <Label htmlFor="analytics-engine-api-token">
+                    {copy.analyticsEngineApiTokenLabel}
                   </Label>
                   <Input
-                    id="bot-analytics-api-token"
+                    id="analytics-engine-api-token"
                     type={showSavedApiToken ? "text" : "password"}
                     value={apiTokenDisplayValue}
                     disabled={analyticsEngineDisabled}
@@ -280,6 +299,25 @@ export function BotAnalyticsSettingsClient({
                       setApiToken(event.target.value);
                     }}
                   />
+                </div>
+                <div className="space-y-2 lg:col-span-2">
+                  <p className="text-sm font-medium">
+                    {copy.analyticsEngineDatasetsTitle}
+                  </p>
+                  <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
+                    <DatasetValue
+                      label={copy.analyticsEngineRequestDataset}
+                      value={config.requestDataset}
+                    />
+                    <DatasetValue
+                      label={copy.analyticsEngineTrafficDataset}
+                      value={config.trafficDataset}
+                    />
+                    <DatasetValue
+                      label={copy.analyticsEngineEventDataset}
+                      value={config.eventDataset}
+                    />
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 lg:col-span-2">
                   <Button
@@ -329,10 +367,10 @@ export function BotAnalyticsSettingsClient({
                     <AlertDialogContent size="sm">
                       <AlertDialogHeader>
                         <AlertDialogTitle icon={RiDeleteBinLine}>
-                          {copy.botAnalyticsTitle}
+                          {copy.analyticsEngineTitle}
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                          {copy.botAnalyticsDeleteConfirm}
+                          {copy.analyticsEngineDeleteConfirm}
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -360,9 +398,9 @@ export function BotAnalyticsSettingsClient({
                   </AlertDialog>
                   <SystemSettingsGuideDialog
                     triggerLabel={copy.guide}
-                    title={copy.botAnalyticsGuideTitle}
-                    description={copy.botAnalyticsGuideDescription}
-                    steps={copy.botAnalyticsGuideSteps}
+                    title={copy.analyticsEngineGuideTitle}
+                    description={copy.analyticsEngineGuideDescription}
+                    steps={copy.analyticsEngineGuideSteps}
                   />
                 </div>
               </div>
@@ -371,5 +409,19 @@ export function BotAnalyticsSettingsClient({
         </AutoResizer>
       </CardContent>
     </Card>
+  );
+}
+
+function DatasetValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 border bg-muted/30 px-3 py-2">
+      <div className="text-xs">{label}</div>
+      <code
+        className="mt-1 block truncate text-xs text-foreground"
+        title={value}
+      >
+        {value}
+      </code>
+    </div>
   );
 }

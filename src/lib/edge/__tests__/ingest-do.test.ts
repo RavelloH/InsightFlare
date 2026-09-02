@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AnalyticsEnginePoint } from "@/lib/edge/analytics-engine/schema";
 import { IngestDurableObject } from "@/lib/edge/ingest-do";
 import type {
   Env,
@@ -1350,6 +1351,65 @@ describe("IngestDurableObject", () => {
 
     expect(rows).toHaveLength(2);
     expect(rows[0]?.session_id).not.toBe(rows[1]?.session_id);
+  });
+
+  it("writes pageview facts and emits one session-ended fact at expiry", async () => {
+    const points: AnalyticsEnginePoint[] = [];
+    const writeDataPoint = vi.fn((point: AnalyticsEnginePoint) => {
+      points.push(point);
+    });
+    const ctx = createTestDo({
+      SESSION_WINDOW_MINUTES: "1",
+      TRAFFIC_ANALYTICS: { writeDataPoint },
+    });
+
+    await postIngest(
+      ctx.object,
+      envelope({
+        visitId: "session-page-1",
+        startedAt: NOW - 10_000,
+        timestamp: NOW - 10_000,
+        pathname: "/first",
+      }),
+    );
+    await postIngest(
+      ctx.object,
+      envelope({
+        visitId: "session-page-2",
+        startedAt: NOW,
+        timestamp: NOW,
+        pathname: "/second",
+      }),
+    );
+
+    expect(
+      localRows<{ page_count: number }>(
+        ctx.sql,
+        "SELECT page_count FROM analytics_sessions WHERE session_id = ?",
+        localRows<{ session_id: string }>(
+          ctx.sql,
+          "SELECT session_id FROM buffered_visits WHERE visit_id = ?",
+          "session-page-2",
+        )[0]?.session_id,
+      )[0]?.page_count,
+    ).toBe(2);
+    expect(points.map((point) => point.doubles[0])).toEqual([1, 1]);
+    expect(points.map((point) => point.doubles[6])).toEqual([1, 2]);
+
+    vi.setSystemTime(NOW + 60_001);
+    await ctx.object.alarm();
+
+    expect(points.map((point) => point.doubles[0])).toEqual([1, 1, 3]);
+    expect(points[2]?.doubles[7]).toBe(2);
+    expect(
+      localRows<{ sessions: number }>(
+        ctx.sql,
+        "SELECT COUNT(*) AS sessions FROM analytics_sessions",
+      )[0]?.sessions,
+    ).toBe(0);
+
+    await ctx.object.alarm();
+    expect(points.map((point) => point.doubles[0])).toEqual([1, 1, 3]);
   });
 
   it("keeps hidden visits pending and lets pagehide override within the grace window", async () => {

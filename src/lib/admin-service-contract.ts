@@ -19,8 +19,8 @@ export type AdminServiceRoute =
   | "notification-email/test"
   | "login-turnstile"
   | "login-turnstile/test"
-  | "bot-analytics-config"
-  | "bot-analytics"
+  | "analytics-engine-config"
+  | "request-observation"
   | "notification-email-preview"
   | "notification-rules"
   | "notification-rules/preview"
@@ -50,8 +50,8 @@ const STATIC_ADMIN_SERVICE_ROUTES = new Set<AdminServiceRoute>([
   "notification-email/test",
   "login-turnstile",
   "login-turnstile/test",
-  "bot-analytics-config",
-  "bot-analytics",
+  "analytics-engine-config",
+  "request-observation",
   "notification-email-preview",
   "notification-rules",
   "notification-rules/preview",

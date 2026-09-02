@@ -364,6 +364,55 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
       await botContext.close();
     }
 
+    const customBlockConfig = await apiRequest<unknown>(
+      page,
+      "POST",
+      "/api/private/admin/site-config",
+      {
+        blockingPatch: { paths: ["/e2e-custom-block"] },
+        siteId: siteA?.id || "",
+      },
+    );
+    expect(customBlockConfig.status).toBe(200);
+    const collectToken = await page.evaluate(async (siteId) => {
+      const script = await fetch(
+        `/script.js?siteId=${encodeURIComponent(siteId)}`,
+        { cache: "no-store" },
+      ).then((response) => response.text());
+      return script.match(/"collectToken":"([^"\\]+)"/)?.[1] || "";
+    }, siteA?.id || "");
+    expect(collectToken).not.toBe("");
+    const customBlockedStatus = await page.evaluate(
+      async ({ collectToken, siteId, timestamp }) => {
+        const response = await fetch("/collect", {
+          body: JSON.stringify({
+            collectToken,
+            hostname: "127.0.0.1",
+            kind: "pageview",
+            pathname: "/e2e-custom-block",
+            siteId,
+            timestamp,
+            visitId: crypto.randomUUID(),
+          }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        });
+        return response.status;
+      },
+      { collectToken, siteId: siteA?.id || "", timestamp: browserNowMs() },
+    );
+    expect(customBlockedStatus).toBe(204);
+    const customBlockCleared = await apiRequest<unknown>(
+      page,
+      "POST",
+      "/api/private/admin/site-config",
+      {
+        blockingPatch: { paths: [] },
+        siteId: siteA?.id || "",
+      },
+    );
+    expect(customBlockCleared.status).toBe(200);
+
     const invalidCollectStatus = await page.evaluate(
       async ({ siteId, timestamp }) => {
         const response = await fetch("/collect", {

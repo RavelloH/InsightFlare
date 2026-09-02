@@ -315,16 +315,16 @@ export const loadAdminUsersInitialData = createServerFn({
 export const loadSystemSettingsInitialData = createServerFn({
   method: "GET",
 }).handler(async (): Promise<SystemSettingsInitialData | null> => {
-  const [botAnalytics, loginTurnstile, notificationEmail, scheduledTasks] =
+  const [analyticsEngine, loginTurnstile, notificationEmail, scheduledTasks] =
     await Promise.all([
-      readDashboardAdmin("bot-analytics-config"),
+      readDashboardAdmin("analytics-engine-config"),
       readDashboardAdmin("login-turnstile"),
       readDashboardAdmin("notification-email"),
       readDashboardAdmin("scheduled-tasks", { page: 1, pageSize: 1 }),
     ]);
-  if (!botAnalytics || !loginTurnstile || !notificationEmail) return null;
+  if (!analyticsEngine || !loginTurnstile || !notificationEmail) return null;
   return {
-    botAnalytics,
+    analyticsEngine,
     loginTurnstile,
     notificationEmail,
     scheduledTaskRetention:

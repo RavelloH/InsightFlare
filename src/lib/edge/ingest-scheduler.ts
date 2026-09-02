@@ -1,12 +1,16 @@
 import { HIDDEN_LEAVE_GRACE_MS, VISIT_TIMEOUT_MS } from "./ingest-constants";
 import type { SqlReader } from "./ingest-types";
 
-export type ScheduleReason = "flush" | "hidden_fallback" | "visit_timeout";
+export type ScheduleReason =
+  | "flush"
+  | "hidden_fallback"
+  | "visit_timeout"
+  | "session_timeout";
 
 export interface NextDueWork {
   nextDueAt: number | null;
   reason: ScheduleReason | null;
-  entity: "visit" | "custom_event" | null;
+  entity: "visit" | "custom_event" | "session" | null;
 }
 
 interface ScheduledVisitRow {
@@ -23,6 +27,11 @@ interface ScheduledEventRow {
   nextDueAt: number | null;
   flushDueAt: number | null;
   eventId: string;
+}
+
+interface ScheduledSessionRow {
+  nextDueAt: number | null;
+  sessionId: string;
 }
 
 export function lifecycleDueAt(
@@ -102,26 +111,52 @@ export function getEarliestDueWork(
       LIMIT 1
     `,
   );
+  const sessionRow = context.sqlOne<ScheduledSessionRow>(
+    `
+      SELECT
+        next_due_at AS nextDueAt,
+        session_id AS sessionId
+      FROM analytics_sessions
+      ORDER BY next_due_at ASC, session_id ASC
+      LIMIT 1
+    `,
+  );
 
-  if (!visit && !event) {
+  const session = sessionRow?.sessionId ? sessionRow : null;
+
+  if (!visit && !event && !session) {
     return { nextDueAt: null, reason: null, entity: null };
   }
-  if (!event) {
+  if (!event && !session) {
     return {
       nextDueAt: visit!.nextDueAt ?? null,
       reason: classifyVisitReason(visit!),
       entity: "visit",
     };
   }
-  if (visit && (visit.nextDueAt ?? Infinity) <= (event.nextDueAt ?? Infinity)) {
+  if (
+    visit &&
+    (visit.nextDueAt ?? Infinity) <= (event?.nextDueAt ?? Infinity) &&
+    (visit.nextDueAt ?? Infinity) <= (session?.nextDueAt ?? Infinity)
+  ) {
     return {
       nextDueAt: visit.nextDueAt ?? null,
       reason: classifyVisitReason(visit),
       entity: "visit",
     };
   }
+  if (
+    session &&
+    (session.nextDueAt ?? Infinity) <= (event?.nextDueAt ?? Infinity)
+  ) {
+    return {
+      nextDueAt: session.nextDueAt ?? null,
+      reason: "session_timeout",
+      entity: "session",
+    };
+  }
   return {
-    nextDueAt: event.nextDueAt ?? null,
+    nextDueAt: event!.nextDueAt ?? null,
     reason: "flush",
     entity: "custom_event",
   };

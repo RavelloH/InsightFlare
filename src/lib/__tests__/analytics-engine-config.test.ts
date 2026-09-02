@@ -1,21 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  defaultBotAnalyticsConfig,
+  defaultAnalyticsEngineConfig,
+  EVENT_ANALYTICS_DATASET,
   makeSecretHint,
-  normalizeBotAnalyticsConfig,
-  validateBotAnalyticsConfig,
-  validateBotAnalyticsUpdateInput,
-} from "@/lib/bot-analytics-config";
+  normalizeAnalyticsEngineConfig,
+  redactAnalyticsEngineConfig,
+  REQUEST_ANALYTICS_DATASET,
+  TRAFFIC_ANALYTICS_DATASET,
+  validateAnalyticsEngineConfig,
+  validateAnalyticsEngineUpdateInput,
+} from "@/lib/analytics-engine-config";
 
-describe("bot analytics config helpers", () => {
+describe("Analytics Engine config helpers", () => {
   it("normalizes defaults, malformed values, and configured state", () => {
     expect(makeSecretHint("")).toBe("");
     expect(makeSecretHint("abcdef")).toBe("••••cdef");
 
-    const normalized = normalizeBotAnalyticsConfig({
+    const normalized = normalizeAnalyticsEngineConfig({
       accountId: " abc ",
-      dataset: "",
       apiTokenEncrypted: "",
       apiTokenHint: " hint ",
       configured: true,
@@ -25,15 +28,15 @@ describe("bot analytics config helpers", () => {
 
     expect(normalized).toMatchObject({
       accountId: "abc",
-      dataset: "insightflare_bot_events",
+      apiTokenEncrypted: "",
       configured: false,
       updatedAt: 0,
       updatedByUserId: undefined,
     });
 
     expect(
-      normalizeBotAnalyticsConfig({
-        ...defaultBotAnalyticsConfig(),
+      normalizeAnalyticsEngineConfig({
+        ...defaultAnalyticsEngineConfig(),
         apiTokenEncrypted: "v1:secret",
         configured: true,
         updatedAt: "123",
@@ -46,13 +49,14 @@ describe("bot analytics config helpers", () => {
     });
   });
 
-  it("validates update bodies and saved config", () => {
-    expect(validateBotAnalyticsUpdateInput(null).ok).toBe(false);
-    expect(validateBotAnalyticsUpdateInput([]).ok).toBe(false);
+  it("ignores client dataset fields and validates saved config", () => {
+    expect(validateAnalyticsEngineUpdateInput(null).ok).toBe(false);
+    expect(validateAnalyticsEngineUpdateInput([]).ok).toBe(false);
     expect(
-      validateBotAnalyticsUpdateInput({
+      validateAnalyticsEngineUpdateInput({
         accountId: " 442fe5198bff93bdf60d4223d9618033 ",
-        dataset: " dataset ",
+        dataset: "old_dataset",
+        [["normal", "Dataset"].join("")]: "old_normal_dataset",
         apiToken: " token ",
         clearApiToken: "yes",
       }),
@@ -66,29 +70,28 @@ describe("bot analytics config helpers", () => {
     });
 
     const valid = {
-      ...defaultBotAnalyticsConfig(),
+      ...defaultAnalyticsEngineConfig(),
       accountId: "442fe5198bff93bdf60d4223d9618033",
-      dataset: "insightflare_bot_events",
     };
-    expect(validateBotAnalyticsConfig(valid)).toBeNull();
-    expect(validateBotAnalyticsConfig({ ...valid, accountId: "" })).toMatch(
+    expect(validateAnalyticsEngineConfig(valid)).toBeNull();
+    expect(validateAnalyticsEngineConfig({ ...valid, accountId: "" })).toMatch(
       /Account ID/,
     );
-    expect(validateBotAnalyticsConfig({ ...valid, accountId: "bad" })).toMatch(
-      /32 character/,
-    );
-    expect(validateBotAnalyticsConfig({ ...valid, dataset: "" })).toMatch(
-      /dataset is required/,
-    );
     expect(
-      validateBotAnalyticsConfig({ ...valid, dataset: "bad.name" }),
-    ).toMatch(/unsupported/);
+      validateAnalyticsEngineConfig({ ...valid, accountId: "bad" }),
+    ).toMatch(/32 character/);
     expect(
-      validateBotAnalyticsConfig({
+      validateAnalyticsEngineConfig({
         ...valid,
         configured: true,
         apiTokenEncrypted: "",
       }),
     ).toMatch(/API token/);
+
+    expect(redactAnalyticsEngineConfig(valid)).toMatchObject({
+      requestDataset: REQUEST_ANALYTICS_DATASET,
+      trafficDataset: TRAFFIC_ANALYTICS_DATASET,
+      eventDataset: EVENT_ANALYTICS_DATASET,
+    });
   });
 });

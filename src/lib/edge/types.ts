@@ -1,8 +1,9 @@
 export interface Env {
   DB: D1Database;
   INGEST_DO: DurableObjectNamespace;
-  BOT_ANALYTICS?: AnalyticsEngineDataset;
-  NORMAL_ANALYTICS?: AnalyticsEngineDataset;
+  REQUEST_ANALYTICS?: AnalyticsEngineDataset;
+  TRAFFIC_ANALYTICS?: AnalyticsEngineDataset;
+  EVENT_ANALYTICS?: AnalyticsEngineDataset;
   ARCHIVE_BUCKET?: R2Bucket;
   MAIN_SECRET?: string;
   DAILY_SALT_SECRET?: string;

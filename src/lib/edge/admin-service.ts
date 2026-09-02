@@ -1,6 +1,6 @@
 import type { AdminServiceRoute } from "@/lib/admin-service-contract";
+import type { PublicAnalyticsEngineConfig } from "@/lib/analytics-engine-config";
 import type { AdminPublicLoginTurnstileConfig } from "@/lib/auth/login-turnstile-config";
-import type { PublicBotAnalyticsConfig } from "@/lib/bot-analytics-config";
 import type { ScriptSnippetData } from "@/lib/dashboard/management-data";
 import type { TeamInviteData } from "@/lib/dashboard/management-data";
 import type { NotificationPreferencesData } from "@/lib/edge-client";
@@ -69,7 +69,7 @@ export interface AdminServiceReadMap {
   "notification-rules": NotificationRuleData[];
   "notification-email": PublicNotificationEmailConfig;
   "login-turnstile": AdminPublicLoginTurnstileConfig;
-  "bot-analytics-config": PublicBotAnalyticsConfig;
+  "analytics-engine-config": PublicAnalyticsEngineConfig;
   "notifications/preferences": NotificationPreferencesData;
   "scheduled-tasks": ScheduledTasksData;
   "system-performance": SystemPerformanceData;

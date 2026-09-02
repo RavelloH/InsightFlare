@@ -553,12 +553,12 @@ describe("Dashboard route data loaders", () => {
       );
 
       mockAdminReads({
-        "bot-analytics-config": { enabled: true },
+        "analytics-engine-config": { enabled: true },
         "login-turnstile": { enabled: true },
         "notification-email": { enabled: true },
       });
       await expect(loadSystemSettingsInitialData()).resolves.toMatchObject({
-        botAnalytics: { enabled: true },
+        analyticsEngine: { enabled: true },
         loginTurnstile: { enabled: true },
         notificationEmail: { enabled: true },
         fetchedAt: expect.any(Number),

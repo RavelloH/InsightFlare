@@ -269,7 +269,8 @@ filterBuilder:
   expressionHelpSyntax: 構文
   expressionHelpLogicDescription: AND は OR より優先されます。ネストには括弧を使用し、AND(...) と OR(...) は明示的な単一条件グループを保持します。
   expressionHelpValues: 値
-  expressionHelpValuesDescription: 文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値] を使い、between には順序付きの値を 2 つ指定します。
+  expressionHelpValuesDescription: 文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値]
+    を使い、between には順序付きの値を 2 つ指定します。
   expressionHelpOperators: 利用可能な演算子
   expressionHelpUnaryOperators: 値を取らない演算子
   expressionHelpFields: 利用可能なフィールド
@@ -370,6 +371,18 @@ filterBuilder:
 realtime:
   title: リアルタイム
   subtitle: 直近 30 分間のトラフィックを確認します。
+  detailsSection: 情報
+  visitorMapSection: 訪問者の地域
+  visitorMapSubtitle: このイベントの座標から推定したおおよその地域です。
+  eventType: イベント種別
+  eventId: イベント ID
+  sequence: シーケンス
+  previousVisitId: 前回の訪問 ID
+  screenWidth: 画面の幅
+  screenHeight: 画面の高さ
+  hiddenAt: 非表示時刻
+  finalizedAt: 確定時刻
+  performanceVisitId: パフォーマンス訪問 ID
   logTitleSeparator: ":"
   activeNow: 現在アクティブ
   liveMetrics: 現在アクティブ / 過去30分の訪問者数 / 過去30分のページビュー数
@@ -383,7 +396,6 @@ realtime:
   viewPage: ページ表示
   customEvent: カスタムイベント
   detailsTitle: イベント詳細
-  detailsSection: 情報
   browsingSection: 閲覧
   geographySection: 地理位置
   sourceSection: 参照元
@@ -403,23 +415,17 @@ realtime:
   visitorHistorySubtitle: 現在のリアルタイム範囲における、この訪問者のすべての記録です。
   visitorHistoryRange: 閲覧期間
   visitorHistoryEmpty: この訪問者の追加記録はまだありません。
-  visitorMapSection: 訪問者の地域
-  visitorMapSubtitle: このイベントの座標から推定したおおよその地域です。
   visitorMapUnavailable: このイベントには利用可能な座標がありません。
   visitorId: 訪問者 ID
   sessionId: セッション ID
   visitId: 訪問 ID
-  eventType: イベント種別
   eventTime: イベント時刻
   eventKind: イベント種別
   eventName: イベント名
-  eventId: イベント ID
   siteId: サイト ID
   traceId: トレース ID
-  sequence: シーケンス
   receivedAt: 受信時刻
   startedAt: 開始時刻
-  previousVisitId: 前回の訪問 ID
   previousVisitStartedAt: 前回の訪問開始時刻
   userId: ユーザー ID
   userName: ユーザー名
@@ -433,20 +439,15 @@ realtime:
   browserVersion: ブラウザーのバージョン
   osVersion: OS バージョン
   userAgent: ユーザーエージェント
-  screenWidth: 画面の幅
-  screenHeight: 画面の高さ
   postalCode: 郵便番号
   metroCode: 都市圏コード
   status: ステータス
   visibilityState: 表示状態
-  hiddenAt: 非表示時刻
   endedAt: 終了時刻
-  finalizedAt: 確定時刻
   duration: 継続時間
   durationSource: 継続時間のソース
   exitReason: 退出理由
   leaveAt: 離脱時刻
-  performanceVisitId: パフォーマンス訪問 ID
 overview:
   title: トラフィック概要
   subtitle: 高レベルのパフォーマンスとオーディエンス行動を監視します。
@@ -945,8 +946,7 @@ performance:
   poor: 不良
   datasetTitle: データセット概要
   interpretationTitle: 現在の読み取り
-  currentReading:
-    "{metric} の P75 は {value}、{samples} 件のサンプルに基づく体験スコアは {score}
+  currentReading: "{metric} の P75 は {value}、{samples} 件のサンプルに基づく体験スコアは {score}
     です。現在の判定：{status}。"
   metricThresholdText: "良好：{good} 以下、要改善：{good} から {poor}、不良：{poor} 超。"
   scoreThresholdText: "良好：90 超、要改善：50 から 90、不良：50 未満。"
@@ -1067,7 +1067,8 @@ siteSettings:
         - "-example.com"
         - "-*.example.com"
         - "admin.example.com"
-      exampleDescription: この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する admin.example.com を再びブロックします。
+      exampleDescription: この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する
+        admin.example.com を再びブロックします。
       testLabel: Hostname
       testPlaceholder: www.example.com
       testHint: スキームやパスを含めず、ページの hostname を入力します。
@@ -1130,7 +1131,8 @@ siteSettings:
         - "*.example.com"
         - "social.example.com"
         - "-trusted.example.com"
-      exampleDescription: この設定は example.com の参照元ドメインと social.example.com をブロックし、trusted.example.com を許可します。
+      exampleDescription: この設定は example.com の参照元ドメインと social.example.com
+        をブロックし、trusted.example.com を許可します。
       testLabel: 参照元
       testPlaceholder: https://social.example.com/article
       testHint: 参照元の URL または hostname を入力します。
@@ -1507,8 +1509,7 @@ runtimeConfigError:
   title: ランタイム設定が必要です
   eyebrow: デプロイを一時停止中
   heading: UI を読み込む前に、InsightFlare にはランタイムシークレットが 1 つ必要です。
-  description:
-    アプリは起動していますが、現在のランタイム環境で必須の root secret
+  description: アプリは起動していますが、現在のランタイム環境で必須の root secret
     を取得できないため、ダッシュボードへのアクセスを一時的にブロックしています。
   requiredTitle: 必須のランタイムシークレット
   requiredDescription: Cloudflare のランタイムシークレットに、次の値のいずれかを少なくとも 1 つ設定してください。
@@ -1526,6 +1527,8 @@ login:
   signIn: サインイン
   invalidCredentials: ユーザー名またはパスワードが正しくありません。
 accountLinks:
+  noSites: このチームには利用可能なサイトがありません。
+  siteNotFound: チームまたはサイトが見つかりません。
   invite:
     title: チーム招待
     subtitle: 招待を承認してこのチームに参加します。
@@ -1680,6 +1683,10 @@ teamManagement:
     ruleInfoSection: ルール情報
     scheduleSection: スケジュール
     sendScheduleSection: 送信時刻
+    conditionMilestone: "{metric} が {step} ごと"
+    conditionThreshold: "{window} {metric} {operator} {value}"
+    conditionChange: "{window} {metric} 変化 {operator} {value}"
+    conditionHealth: "{hours}h データなし"
     checkSection: チェック頻度
     conditionSection: 条件
     deliverySection: 配信
@@ -1751,10 +1758,6 @@ teamManagement:
     scheduleInterval: "{minutes} 分ごと"
     scheduleCustom: カスタム
     conditionReport: "{period} レポート"
-    conditionMilestone: "{metric} が {step} ごと"
-    conditionThreshold: "{window} {metric} {operator} {value}"
-    conditionChange: "{window} {metric} 変化 {operator} {value}"
-    conditionHealth: "{hours}h データなし"
     summaryWhenConditions: "次の条件のうち {combinator} が一致したら、{type} 通知を送信します："
     summaryWhenSingleCondition: "この条件が一致したら、{type} 通知を送信します："
     summaryConditionThreshold: "{window} {metric} {operator} {value}"
@@ -2249,8 +2252,7 @@ requestObservation:
   loadFailed: リクエスト監視データを読み込めません。
   samplingNotice: リクエスト数は Analytics Engine のサンプル重みで補正されています。詳細行は代表サンプルで、重複除外値は近似値です。
   notConfiguredTitle: Analytics Engine リーダーが設定されていません
-  notConfiguredDescription:
-    リクエスト監視用の Analytics Engine データセットを読むには、システム設定で
+  notConfiguredDescription: リクエスト監視用の Analytics Engine データセットを読むには、システム設定で
     Cloudflare Account ID と API トークンを追加してください。
   analyticsEngineDisabledTitle: Analytics Engine が有効ではありません
   analyticsEngineDisabledDescription: Cloudflare アカウントで Analytics Engine
@@ -2265,7 +2267,7 @@ requestObservation:
   trendTitle: ルーティング推移
   trendDescription: 通常リクエスト、異常リクエスト、分流比率を間隔ごとに表示します。
   recentTitle: 最近の異常リクエスト
-  recentDescription: 異常 Analytics Engine データセットにのみ書き込まれた詳細記録です。
+  recentDescription: 統合された Request Analytics Engine データセットから読み取った詳細記録です。
   recentLoadedAll: すべての記録を読み込みました
   detailTitle: 異常リクエスト詳細
   detailSubtitle: この異常リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。
@@ -2340,8 +2342,8 @@ requestObservation:
     abnormalRatio: 異常リクエスト比率
     p50Latency: P50 Worker 処理時間
     p75Latency: P75 Worker 処理時間
-    p95Latency: P95 Worker 処理時間
     p99Latency: P99 Worker 処理時間
+    p95Latency: P95 Worker 処理時間
     avgLatency: 平均 Worker 処理時間
     pageviews: ページビュー
     customEvents: カスタムイベント
@@ -2368,40 +2370,42 @@ requestObservation:
     edgeLatency: Worker 処理時間
     eventAt: イベント時刻
     receivedAt: 受信時刻
-    coordinates: 座標
     continent: 大陸
+    coordinates: 座標
   recentNormal:
     title: 最近の通常リクエスト
-    description: 通常リクエスト用 Analytics Engine データセットにのみ書き込まれた詳細記録です。
+    description: 統合された Request Analytics Engine データセットから読み取った詳細記録です。
 systemSettings:
   title: システム設定
   subtitle: この InsightFlare デプロイ全体の設定を管理します。
   guide: ガイド
-  botAnalyticsTitle: Analytics Engine
-  botAnalyticsDescription: Bot 保護やその他の分析機能で Analytics Engine データを読むための Cloudflare 認証情報を設定します。
-  botAnalyticsAccountIdLabel: Cloudflare Account ID
-  botAnalyticsApiTokenLabel: Cloudflare API トークン
-  botAnalyticsApiTokenPlaceholder: ガイドを見て Cloudflare API トークンを取得
-  botAnalyticsSaved: Analytics Engine 設定を保存しました。
-  botAnalyticsSaveFailed: Analytics Engine 設定を保存できません。
-  botAnalyticsDeleted: Analytics Engine 設定を削除しました。
-  botAnalyticsDeleteFailed: Analytics Engine 設定を削除できません。
-  botAnalyticsDeleteConfirm: Analytics Engine の読み取り用認証情報を削除しますか？依存する機能は認証情報が復元されるまで設定が必要な状態になります。
-  botAnalyticsEngineDisabledTitle: Analytics Engine が有効ではありません
-  botAnalyticsEngineDisabledDescription:
-    Cloudflare アカウントで Analytics Engine
+  analyticsEngineTitle: Analytics Engine
+  analyticsEngineDescription: リクエスト監視と将来のトラフィック・イベント分析で使用する Analytics Engine の Cloudflare 認証情報を設定します。
+  analyticsEngineAccountIdLabel: Cloudflare Account ID
+  analyticsEngineApiTokenLabel: Cloudflare API トークン
+  analyticsEngineApiTokenPlaceholder: ガイドを見て Cloudflare API トークンを取得
+  analyticsEngineSaved: Analytics Engine 設定を保存しました。
+  analyticsEngineSaveFailed: Analytics Engine 設定を保存できません。
+  analyticsEngineDeleted: Analytics Engine 設定を削除しました。
+  analyticsEngineDeleteFailed: Analytics Engine 設定を削除できません。
+  analyticsEngineDeleteConfirm: Analytics Engine の読み取り用認証情報を削除しますか？依存する機能は認証情報が復元されるまで設定が必要な状態になります。
+  analyticsEngineDatasetsTitle: Analytics Engine データセット
+  analyticsEngineRequestDataset: Request
+  analyticsEngineTrafficDataset: Traffic
+  analyticsEngineEventDataset: Event
+  analyticsEngineDisabledTitle: Analytics Engine が有効ではありません
+  analyticsEngineDisabledDescription: Cloudflare アカウントで Analytics Engine
     が有効化されていないため、このデプロイでは Analytics Engine バインディングが自動的に無効化されました。Cloudflare で
     Analytics Engine を有効化し、InsightFlare を再デプロイすると関連分析機能が有効になります。
-  botAnalyticsEngineDisabledHint: Analytics Engine が有効化され Worker が再デプロイされるまで、Analytics Engine 設定はロックされます。
-  botAnalyticsOpenCloudflare: Cloudflare Analytics Engine を開く
-  botAnalyticsGuideTitle: Analytics Engine 認証情報を取得
-  botAnalyticsGuideDescription:
-    Analytics Engine には Cloudflare アカウント情報と、Analytics
-    Engine データを読み取れる API トークンが必要です。
-  botAnalyticsGuideSteps:
+  analyticsEngineDisabledHint: Analytics Engine が有効化され Worker が再デプロイされるまで、Analytics Engine 設定はロックされます。
+  analyticsEngineOpenCloudflare: Cloudflare Analytics Engine を開く
+  analyticsEngineGuideTitle: Analytics Engine 認証情報を取得
+  analyticsEngineGuideDescription: Analytics Engine には Cloudflare
+    アカウント情報と、Analytics Engine データを読み取れる API トークンが必要です。
+  analyticsEngineGuideSteps:
     - Cloudflare Dashboard を開き、対象アカウントに入り、Account ID をコピーします。
-    - Workers & Pages で Analytics Engine を有効化します。Bot
-      と通常リクエストのデータセットはデプロイ時に自動作成・バインドされます。
+    - Workers & Pages で Analytics Engine を有効化します。Request、Traffic、Event の 3
+      データセットはデプロイ時に自動作成・バインドされます。
     - My Profile → API Tokens に移動し、Custom token を作成します。
     - トークンに Account Analytics の読み取り権限を付与し、現在のアカウントにスコープします。
     - トークンをコピーし、ここに Account ID と API トークンを入力します。
@@ -2427,8 +2431,7 @@ systemSettings:
   retentionSaved: 保持期間を保存しました。
   retentionSaveFailed: 保持期間を保存できません。
   loginTurnstileTitle: ログイン Turnstile 保護
-  loginTurnstileDescription:
-    有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile
+  loginTurnstileDescription: 有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile
     Invisible 検証を実行し、サーバー側のサインイン処理で強制します。
   loginTurnstileEnabledLabel: ログイン保護を有効化
   loginTurnstileSiteKeyLabel: Site Key
@@ -2448,8 +2451,7 @@ systemSettings:
   loginTurnstileDeleteFailed: ログイン Turnstile 設定を削除できません。
   loginTurnstileDeleteConfirm: ログイン Turnstile 設定を削除しますか？ログイン保護は無効になります。
   loginTurnstileLoadFailed: ログイン Turnstile 設定を読み込めません。
-  loginTurnstilePrivacyNotice:
-    Cloudflare Turnstile コンソールで Invisible ウィジェット
+  loginTurnstilePrivacyNotice: Cloudflare Turnstile コンソールで Invisible ウィジェット
     を作成してください。セルフホスト環境では、プライバシーポリシーが Cloudflare Turnstile の要件に合っていることを確認してください。
   loginTurnstileGuideTitle: Turnstile 認証情報を取得
   loginTurnstileGuideDescription: ログイン保護には Cloudflare Turnstile の Site Key と Secret Key が必要です。
@@ -2570,8 +2572,7 @@ systemPerformance:
   doDiagnosticSiteNextDueHidden: 非表示フォールバック
   doDiagnosticSiteNextDueTimeout: 訪問タイムアウト
   doDiagnosticSiteResponseMs: 応答時間
-  doDiagnosticThresholdsHint:
-    "しきい値：stale {stale}、timeout {timeout}、hardAged
+  doDiagnosticThresholdsHint: "しきい値：stale {stale}、timeout {timeout}、hardAged
     {hardAged}、stuck flush_attempts ≥ {stuck}"
   doDiagnosticHealthy: 異常なバッファ行は検出されませんでした。
 loginForm:

@@ -1,9 +1,12 @@
-export const SYSTEM_BOT_ANALYTICS_CONFIG_KEY = "system.bot_analytics_reader.v1";
+export const SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY =
+  "system.analytics_engine_reader.v1";
 
-export interface BotAnalyticsConfig {
+export const REQUEST_ANALYTICS_DATASET = "insightflare_request_events";
+export const TRAFFIC_ANALYTICS_DATASET = "insightflare_traffic_events";
+export const EVENT_ANALYTICS_DATASET = "insightflare_event_facts";
+
+export interface AnalyticsEngineConfig {
   accountId: string;
-  dataset: string;
-  normalDataset: string;
   apiTokenEncrypted: string;
   apiTokenHint: string;
   configured: boolean;
@@ -11,35 +14,31 @@ export interface BotAnalyticsConfig {
   updatedByUserId?: string;
 }
 
-export interface PublicBotAnalyticsConfig {
+export interface PublicAnalyticsEngineConfig {
   accountId: string;
   analyticsEngineDisabled: boolean;
   analyticsEngineEnableUrl: string;
-  dataset: string;
-  normalDataset: string;
+  requestDataset: typeof REQUEST_ANALYTICS_DATASET;
+  trafficDataset: typeof TRAFFIC_ANALYTICS_DATASET;
+  eventDataset: typeof EVENT_ANALYTICS_DATASET;
   apiTokenConfigured: boolean;
   apiTokenHint: string;
   updatedAt: number;
 }
 
-export interface BotAnalyticsConfigUpdateInput {
+export interface AnalyticsEngineConfigUpdateInput {
   accountId?: string;
   apiToken?: string;
   clearApiToken?: boolean;
 }
 
-const DEFAULT_DATASET = "insightflare_bot_events";
-const DEFAULT_NORMAL_DATASET = "insightflare_normal_events";
-
 function cleanString(value: unknown, maxLength: number): string {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
-export function defaultBotAnalyticsConfig(): BotAnalyticsConfig {
+export function defaultAnalyticsEngineConfig(): AnalyticsEngineConfig {
   return {
     accountId: "",
-    dataset: DEFAULT_DATASET,
-    normalDataset: DEFAULT_NORMAL_DATASET,
     apiTokenEncrypted: "",
     apiTokenHint: "",
     configured: false,
@@ -52,13 +51,11 @@ export function makeSecretHint(secret: string): string {
   return value ? `••••${value.slice(-4)}` : "";
 }
 
-export function normalizeBotAnalyticsConfig(
+export function normalizeAnalyticsEngineConfig(
   raw: Record<string, unknown>,
-): BotAnalyticsConfig {
-  const config = defaultBotAnalyticsConfig();
+): AnalyticsEngineConfig {
+  const config = defaultAnalyticsEngineConfig();
   config.accountId = cleanString(raw.accountId, 128);
-  config.dataset = DEFAULT_DATASET;
-  config.normalDataset = DEFAULT_NORMAL_DATASET;
   config.apiTokenEncrypted = cleanString(raw.apiTokenEncrypted, 4096);
   config.apiTokenHint = cleanString(raw.apiTokenHint, 80);
   config.configured =
@@ -70,35 +67,36 @@ export function normalizeBotAnalyticsConfig(
   return config;
 }
 
-export function redactBotAnalyticsConfig(
-  config: BotAnalyticsConfig,
+export function redactAnalyticsEngineConfig(
+  config: AnalyticsEngineConfig,
   availability?: {
     analyticsEngineDisabled?: boolean;
     analyticsEngineEnableUrl?: string;
   },
-): PublicBotAnalyticsConfig {
+): PublicAnalyticsEngineConfig {
   return {
     accountId: config.accountId,
     analyticsEngineDisabled: availability?.analyticsEngineDisabled ?? false,
     analyticsEngineEnableUrl: availability?.analyticsEngineEnableUrl ?? "",
-    dataset: config.dataset,
-    normalDataset: config.normalDataset,
+    requestDataset: REQUEST_ANALYTICS_DATASET,
+    trafficDataset: TRAFFIC_ANALYTICS_DATASET,
+    eventDataset: EVENT_ANALYTICS_DATASET,
     apiTokenConfigured: config.configured,
     apiTokenHint: config.apiTokenHint,
     updatedAt: config.updatedAt,
   };
 }
 
-export function validateBotAnalyticsUpdateInput(
+export function validateAnalyticsEngineUpdateInput(
   raw: unknown,
 ):
-  | { ok: true; input: BotAnalyticsConfigUpdateInput }
+  | { ok: true; input: AnalyticsEngineConfigUpdateInput }
   | { ok: false; message: string } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, message: "Invalid request body" };
   }
   const body = raw as Record<string, unknown>;
-  const input: BotAnalyticsConfigUpdateInput = {};
+  const input: AnalyticsEngineConfigUpdateInput = {};
   if ("accountId" in body) input.accountId = cleanString(body.accountId, 128);
   if ("apiToken" in body) input.apiToken = cleanString(body.apiToken, 4096);
   if ("clearApiToken" in body) {
@@ -107,22 +105,12 @@ export function validateBotAnalyticsUpdateInput(
   return { ok: true, input };
 }
 
-export function validateBotAnalyticsConfig(
-  config: BotAnalyticsConfig,
+export function validateAnalyticsEngineConfig(
+  config: AnalyticsEngineConfig,
 ): string | null {
   if (!config.accountId) return "Cloudflare Account ID is required";
   if (!/^[a-f0-9]{32}$/i.test(config.accountId)) {
     return "Cloudflare Account ID must be a 32 character hex string";
-  }
-  if (!config.dataset) return "Analytics Engine dataset is required";
-  if (!/^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/.test(config.dataset)) {
-    return "Analytics Engine dataset contains unsupported characters";
-  }
-  if (!config.normalDataset) {
-    return "Normal request Analytics Engine dataset is required";
-  }
-  if (!/^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/.test(config.normalDataset)) {
-    return "Normal request Analytics Engine dataset contains unsupported characters";
   }
   if (config.configured && !config.apiTokenEncrypted) {
     return "Cloudflare API token is required";

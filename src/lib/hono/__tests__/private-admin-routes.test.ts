@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { handleAnalyticsEngineConfigAdmin } from "@/lib/edge/admin-analytics-engine-config";
 import { handleApiKeysAdmin } from "@/lib/edge/admin-api-keys";
 import {
   handleLoginTurnstileConfigAdmin,
@@ -17,6 +18,7 @@ import {
   handleNotificationRulesAdmin,
   handleNotificationTestAdmin,
 } from "@/lib/edge/admin-notifications";
+import { handleRequestObservationAdmin } from "@/lib/edge/admin-request-observation";
 import { nf } from "@/lib/edge/admin-response";
 import { handleScheduledTasksAdmin } from "@/lib/edge/admin-scheduled-tasks";
 import {
@@ -35,6 +37,14 @@ import type { AppEnv } from "@/lib/hono/types";
 
 vi.mock("@/lib/edge/admin-api-keys", () => ({
   handleApiKeysAdmin: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/admin-analytics-engine-config", () => ({
+  handleAnalyticsEngineConfigAdmin: vi.fn(),
+}));
+
+vi.mock("@/lib/edge/admin-request-observation", () => ({
+  handleRequestObservationAdmin: vi.fn(),
 }));
 
 vi.mock("@/lib/edge/admin-response", () => ({
@@ -103,6 +113,8 @@ const routeCases = [
   ["/notification-email/test", handleNotificationEmailTestAdmin, false],
   ["/login-turnstile", handleLoginTurnstileConfigAdmin, false],
   ["/login-turnstile/test", handleLoginTurnstileTestAdmin, false],
+  ["/analytics-engine-config", handleAnalyticsEngineConfigAdmin, false],
+  ["/request-observation", handleRequestObservationAdmin, true],
   ["/notification-email-preview", handleNotificationEmailPreviewAdmin, true],
   ["/notification-rules", handleNotificationRulesAdmin, true],
   ["/notification-rules/preview", handleNotificationRulePreviewAdmin, false],

@@ -31,17 +31,36 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     page,
   }) => {
     await signIn(page, "admin", context.adminPassword);
-    const configured = await apiRequest<{
-      accountId: string;
-      apiTokenConfigured: boolean;
-    }>(page, "PATCH", "/api/private/admin/bot-analytics-config", {
-      accountId: "0123456789abcdef0123456789abcdef",
-      apiToken: "e2e-cloudflare-token",
+    await page.goto("/zh/app/manage/system-settings", {
+      waitUntil: "networkidle",
     });
-    expect(configured.status).toBe(200);
-    expect(configured.payload.data).toMatchObject({
-      accountId: "0123456789abcdef0123456789abcdef",
-      apiTokenConfigured: true,
+    const analyticsEngineAccountId = page.locator(
+      "#analytics-engine-account-id",
+    );
+    const analyticsEngineApiToken = page.locator("#analytics-engine-api-token");
+    await expect(analyticsEngineAccountId).toBeVisible();
+    await analyticsEngineAccountId.fill("0123456789abcdef0123456789abcdef");
+    await analyticsEngineApiToken.fill("e2e-cloudflare-token");
+    await expect(analyticsEngineAccountId).toHaveValue(
+      "0123456789abcdef0123456789abcdef",
+    );
+    const configuredResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/private/admin/analytics-engine-config") &&
+        response.request().method() === "PATCH",
+    );
+    await page
+      .getByRole("button", { name: "保存配置", exact: true })
+      .first()
+      .click();
+    const configured = await configuredResponse;
+    expect(configured.status()).toBe(200);
+    expect(await configured.json()).toMatchObject({
+      ok: true,
+      data: {
+        accountId: "0123456789abcdef0123456789abcdef",
+        apiTokenConfigured: true,
+      },
     });
 
     const observed = await apiRequest<{
@@ -56,7 +75,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     }>(
       page,
       "GET",
-      `/api/private/admin/bot-analytics?from=${context.currentE2eNowMs() - 3_600_000}&to=${context.currentE2eNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
+      `/api/private/admin/request-observation?from=${context.currentE2eNowMs() - 3_600_000}&to=${context.currentE2eNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
     );
     expect(observed.status).toBe(200);
     expect(observed.payload).toMatchObject({
@@ -73,7 +92,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     const rejectedConfig = await apiRequest<unknown>(
       page,
       "PATCH",
-      "/api/private/admin/bot-analytics-config",
+      "/api/private/admin/analytics-engine-config",
       { apiToken: "e2e-rejected-cloudflare-token" },
     );
     expect(rejectedConfig.status).toBe(200);
@@ -81,7 +100,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
       const rejected = await apiRequest<unknown>(
         page,
         "GET",
-        `/api/private/admin/bot-analytics?from=${context.currentE2eNowMs() - 3_600_000}&to=${context.currentE2eNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
+        `/api/private/admin/request-observation?from=${context.currentE2eNowMs() - 3_600_000}&to=${context.currentE2eNowMs()}&interval=hour&timeZone=Asia%2FShanghai&limit=10`,
       );
       expect(rejected.status).toBe(400);
       expect(JSON.stringify(rejected.payload)).toContain(
@@ -91,7 +110,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
       const restored = await apiRequest<unknown>(
         page,
         "PATCH",
-        "/api/private/admin/bot-analytics-config",
+        "/api/private/admin/analytics-engine-config",
         { apiToken: "e2e-cloudflare-token" },
       );
       expect(restored.status).toBe(200);
@@ -103,6 +122,46 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     await expect(page.locator('[data-geo-map-mode="3d"]')).toBeVisible({
       timeout: 15_000,
     });
+    await expect(page.getByText("请求分流趋势", { exact: true })).toBeVisible();
+
+    await page.getByRole("link", { name: "异常请求", exact: true }).click();
+    await expect(page).toHaveURL(/requestTab=abnormal/);
+    await expect(page.getByText("最近异常请求", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("tab", { name: "ASN 组织", exact: true }).first(),
+    ).toBeVisible();
+    await page
+      .getByRole("tab", { name: "ASN 组织", exact: true })
+      .first()
+      .click();
+    await expect(
+      page.getByText("E2E Bot Network", { exact: true }).first(),
+    ).toBeVisible();
+
+    await page.locator('tr[role="button"]').first().click();
+    const abnormalDrawer = page.locator(
+      '[data-dashboard-floating-layer="request-observation-drawer"]',
+    );
+    await expect(abnormalDrawer).toBeVisible();
+    await expect(
+      abnormalDrawer.getByText("异常请求详情", { exact: true }).first(),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(abnormalDrawer).toBeHidden();
+
+    await expect(
+      page.getByRole("link", { name: "正常请求", exact: true }),
+    ).toHaveAttribute(
+      "href",
+      "/zh/app/manage/request-observation?requestTab=normal",
+    );
+    await page.goto("/zh/app/manage/request-observation?requestTab=normal", {
+      waitUntil: "commit",
+    });
+    await expect(page.getByText("最近正常请求", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("tab", { name: "国家/地区", exact: true }).last(),
+    ).toBeVisible();
   });
 
   test("22. administrator version updates render local release data in SSR and the client", async ({

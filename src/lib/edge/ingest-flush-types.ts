@@ -1,3 +1,7 @@
+import type {
+  TrafficSessionEndedInput,
+  TrafficVisitFinalizedInput,
+} from "./analytics-engine/traffic-writer";
 import type { RealtimeSnapshotRecord } from "./ingest-normalize";
 import type { BufferedVisitRow, SqlWriter } from "./ingest-types";
 import type {
@@ -17,6 +21,8 @@ export interface IngestFlushContext extends SqlWriter {
   insertBufferedVisitRow(row: BufferedVisitRow): void;
   hasOpenVisitsForVisitor(siteId: string, visitorId: string): boolean;
   pushRealtimeRecord(record: RealtimeSnapshotRecord): Promise<void>;
+  writeTrafficVisitFinalizedFact?: (input: TrafficVisitFinalizedInput) => void;
+  writeTrafficSessionEndedFact?: (input: TrafficSessionEndedInput) => void;
   /**
    * Owned by the DO invocation boundary.  Flush helpers only report stable
    * aggregate counters and event codes; they never emit their own logs.

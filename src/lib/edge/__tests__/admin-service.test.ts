@@ -19,6 +19,8 @@ describe("admin service route contract", () => {
       "teams",
       "notification-rules",
       "system-performance",
+      "analytics-engine-config",
+      "request-observation",
     ] as const;
 
     for (const route of routes) {
@@ -78,27 +80,6 @@ describe("admin service route contract", () => {
     expect(payload.ok).toBe(true);
     expect(payload.data?.ok).toBe(true);
     expect(payload.data?.summary).toBeDefined();
-  });
-
-  it("serves bot analytics mock data through the admin adapter", async () => {
-    const request = new Request(
-      "https://app.test/api/private/admin/bot-analytics?from=0&to=3600000&limit=10",
-    );
-    const response = await executeDemoAdminService({
-      route: "bot-analytics",
-      request,
-      env: {} as never,
-      url: new URL(request.url),
-    });
-    const payload = (await response.json()) as {
-      ok?: unknown;
-      data?: { ok?: unknown; events?: unknown[] };
-    };
-
-    expect(response.ok).toBe(true);
-    expect(payload.ok).toBe(true);
-    expect(payload.data?.ok).toBe(true);
-    expect(payload.data?.events).toBeInstanceOf(Array);
   });
 
   it("serves notification email previews through the demo service adapter", async () => {

@@ -1440,6 +1440,8 @@ export interface AppMessages {
     invalidCredentials: string;
   };
   accountLinks: {
+    noSites: string;
+    siteNotFound: string;
     invite: {
       title: string;
       subtitle: string;
@@ -2305,8 +2307,8 @@ export interface AppMessages {
       abnormalRatio: string;
       p50Latency: string;
       p75Latency: string;
-      p95Latency: string;
       p99Latency: string;
+      p95Latency: string;
       avgLatency: string;
       pageviews: string;
       customEvents: string;
@@ -2334,8 +2336,8 @@ export interface AppMessages {
       edgeLatency: string;
       eventAt: string;
       receivedAt: string;
-      coordinates: string;
       continent: string;
+      coordinates: string;
     };
     recentNormal: {
       title: string;
@@ -2346,23 +2348,27 @@ export interface AppMessages {
     title: string;
     subtitle: string;
     guide: string;
-    botAnalyticsTitle: string;
-    botAnalyticsDescription: string;
-    botAnalyticsAccountIdLabel: string;
-    botAnalyticsApiTokenLabel: string;
-    botAnalyticsApiTokenPlaceholder: string;
-    botAnalyticsSaved: string;
-    botAnalyticsSaveFailed: string;
-    botAnalyticsDeleted: string;
-    botAnalyticsDeleteFailed: string;
-    botAnalyticsDeleteConfirm: string;
-    botAnalyticsEngineDisabledTitle: string;
-    botAnalyticsEngineDisabledDescription: string;
-    botAnalyticsEngineDisabledHint: string;
-    botAnalyticsOpenCloudflare: string;
-    botAnalyticsGuideTitle: string;
-    botAnalyticsGuideDescription: string;
-    botAnalyticsGuideSteps: string[];
+    analyticsEngineTitle: string;
+    analyticsEngineDescription: string;
+    analyticsEngineAccountIdLabel: string;
+    analyticsEngineApiTokenLabel: string;
+    analyticsEngineApiTokenPlaceholder: string;
+    analyticsEngineSaved: string;
+    analyticsEngineSaveFailed: string;
+    analyticsEngineDeleted: string;
+    analyticsEngineDeleteFailed: string;
+    analyticsEngineDeleteConfirm: string;
+    analyticsEngineDatasetsTitle: string;
+    analyticsEngineRequestDataset: string;
+    analyticsEngineTrafficDataset: string;
+    analyticsEngineEventDataset: string;
+    analyticsEngineDisabledTitle: string;
+    analyticsEngineDisabledDescription: string;
+    analyticsEngineDisabledHint: string;
+    analyticsEngineOpenCloudflare: string;
+    analyticsEngineGuideTitle: string;
+    analyticsEngineGuideDescription: string;
+    analyticsEngineGuideSteps: string[];
     notificationEmailTitle: string;
     notificationEmailDescription: string;
     notificationEmailGuideTitle: string;
@@ -4180,6 +4186,8 @@ const enMessages = {
     invalidCredentials: "Invalid username or password.",
   },
   accountLinks: {
+    noSites: "No site is available under this team.",
+    siteNotFound: "Team or site not found.",
     invite: {
       title: "Team invitation",
       subtitle: "Accept the invitation to join this team.",
@@ -5006,7 +5014,7 @@ const enMessages = {
       "Normal requests, abnormal requests, and diversion ratio by interval.",
     recentTitle: "Recent Abnormal Requests",
     recentDescription:
-      "Detailed records written only to the abnormal Analytics Engine dataset.",
+      "Detailed records read from the unified Request Analytics Engine dataset.",
     recentLoadedAll: "All records loaded",
     detailTitle: "Abnormal Request Detail",
     detailSubtitle:
@@ -5084,8 +5092,8 @@ const enMessages = {
       abnormalRatio: "Abnormal request ratio",
       p50Latency: "P50 Worker processing time",
       p75Latency: "P75 Worker processing time",
-      p95Latency: "P95 Worker processing time",
       p99Latency: "P99 Worker processing time",
+      p95Latency: "P95 Worker processing time",
       avgLatency: "Average Worker processing time",
       pageviews: "Pageviews",
       customEvents: "Custom events",
@@ -5119,13 +5127,13 @@ const enMessages = {
       edgeLatency: "Worker processing time",
       eventAt: "Event time",
       receivedAt: "Received at",
-      coordinates: "Coordinates",
       continent: "Continent",
+      coordinates: "Coordinates",
     },
     recentNormal: {
       title: "Recent Normal Requests",
       description:
-        "Detailed records written only to the normal request Analytics Engine dataset.",
+        "Detailed records read from the unified Request Analytics Engine dataset.",
     },
   },
   systemSettings: {
@@ -5133,32 +5141,36 @@ const enMessages = {
     subtitle:
       "Manage instance-wide configuration for this InsightFlare deployment.",
     guide: "Guide",
-    botAnalyticsTitle: "Analytics Engine",
-    botAnalyticsDescription:
-      "Configure the Cloudflare credentials used to read Analytics Engine data for Bot Protection and other analysis features.",
-    botAnalyticsAccountIdLabel: "Cloudflare Account ID",
-    botAnalyticsApiTokenLabel: "Cloudflare API token",
-    botAnalyticsApiTokenPlaceholder:
+    analyticsEngineTitle: "Analytics Engine",
+    analyticsEngineDescription:
+      "Configure the Cloudflare credentials used to read Analytics Engine data for request observation and future traffic and event analytics.",
+    analyticsEngineAccountIdLabel: "Cloudflare Account ID",
+    analyticsEngineApiTokenLabel: "Cloudflare API token",
+    analyticsEngineApiTokenPlaceholder:
       "View the guide to get a Cloudflare API token",
-    botAnalyticsSaved: "Analytics Engine configuration saved.",
-    botAnalyticsSaveFailed: "Failed to save Analytics Engine configuration.",
-    botAnalyticsDeleted: "Analytics Engine configuration deleted.",
-    botAnalyticsDeleteFailed:
+    analyticsEngineSaved: "Analytics Engine configuration saved.",
+    analyticsEngineSaveFailed: "Failed to save Analytics Engine configuration.",
+    analyticsEngineDeleted: "Analytics Engine configuration deleted.",
+    analyticsEngineDeleteFailed:
       "Failed to delete Analytics Engine configuration.",
-    botAnalyticsDeleteConfirm:
+    analyticsEngineDeleteConfirm:
       "Delete the Analytics Engine read credentials? Features that depend on Analytics Engine will show configuration required until the credentials are restored.",
-    botAnalyticsEngineDisabledTitle: "Analytics Engine is not enabled",
-    botAnalyticsEngineDisabledDescription:
+    analyticsEngineDatasetsTitle: "Analytics Engine datasets",
+    analyticsEngineRequestDataset: "Request",
+    analyticsEngineTrafficDataset: "Traffic",
+    analyticsEngineEventDataset: "Events",
+    analyticsEngineDisabledTitle: "Analytics Engine is not enabled",
+    analyticsEngineDisabledDescription:
       "This deployment automatically disabled the Analytics Engine binding because the Cloudflare account has not enabled Analytics Engine. Enable Analytics Engine in Cloudflare, then redeploy InsightFlare to activate related analysis features.",
-    botAnalyticsEngineDisabledHint:
+    analyticsEngineDisabledHint:
       "Analytics Engine settings are locked until Analytics Engine is enabled and the Worker is redeployed.",
-    botAnalyticsOpenCloudflare: "Open Cloudflare Analytics Engine",
-    botAnalyticsGuideTitle: "Get Analytics Engine credentials",
-    botAnalyticsGuideDescription:
+    analyticsEngineOpenCloudflare: "Open Cloudflare Analytics Engine",
+    analyticsEngineGuideTitle: "Get Analytics Engine credentials",
+    analyticsEngineGuideDescription:
       "Analytics Engine needs Cloudflare account details and an API token that can read Analytics Engine data.",
-    botAnalyticsGuideSteps: [
+    analyticsEngineGuideSteps: [
       "Open the Cloudflare Dashboard, enter the target account, and copy the Account ID.",
-      "Enable Analytics Engine under Workers & Pages; the bot and normal request datasets are created and bound automatically during deployment.",
+      "Enable Analytics Engine under Workers & Pages; the Request, Traffic, and Event datasets are created and bound automatically during deployment.",
       "Go to My Profile → API Tokens and create a Custom token.",
       "Grant the token Account Analytics read access and scope it to the current account.",
       "Copy the token, then enter the Account ID and API token here.",
@@ -6956,6 +6968,8 @@ const zhMessages = {
     invalidCredentials: "用户名或密码错误。",
   },
   accountLinks: {
+    noSites: "该团队下暂无可访问站点。",
+    siteNotFound: "未找到对应团队或站点。",
     invite: {
       title: "团队邀请",
       subtitle: "接受邀请后加入该团队。",
@@ -7127,6 +7141,10 @@ const zhMessages = {
       ruleInfoSection: "规则信息",
       scheduleSection: "计划",
       sendScheduleSection: "发送时间",
+      conditionMilestone: "{metric} 每 {step} 触发",
+      conditionThreshold: "{window} {metric} {operator} {value}",
+      conditionChange: "{window} {metric} 变化 {operator} {value}",
+      conditionHealth: "{hours} 小时无数据",
       checkSection: "检查频率",
       conditionSection: "条件",
       deliverySection: "投递",
@@ -7199,10 +7217,6 @@ const zhMessages = {
       scheduleInterval: "每 {minutes} 分钟",
       scheduleCustom: "自定义",
       conditionReport: "{period}报告",
-      conditionMilestone: "{metric} 每 {step} 触发",
-      conditionThreshold: "{window} {metric} {operator} {value}",
-      conditionChange: "{window} {metric} 变化 {operator} {value}",
-      conditionHealth: "{hours} 小时无数据",
       summaryWhenConditions: "当满足下列{combinator}条件时，发送{type}通知：",
       summaryWhenSingleCondition: "当满足此条件时，发送{type}通知：",
       summaryConditionThreshold: "{window}{metric}{operator}{value}",
@@ -7758,7 +7772,8 @@ const zhMessages = {
     trendTitle: "分流趋势",
     trendDescription: "按时间间隔显示正常请求、异常请求与分流比例。",
     recentTitle: "最近异常请求",
-    recentDescription: "这些详细记录只写入异常 Analytics Engine 数据集。",
+    recentDescription:
+      "这些详细记录从统一的 Request Analytics Engine 数据集中读取。",
     recentLoadedAll: "已加载全部记录",
     detailTitle: "异常请求详情",
     detailSubtitle: "查看这次异常请求的检测信号、网络和客户端上下文。",
@@ -7835,8 +7850,8 @@ const zhMessages = {
       abnormalRatio: "异常请求比例",
       p50Latency: "P50 Worker 处理耗时",
       p75Latency: "P75 Worker 处理耗时",
-      p95Latency: "P95 Worker 处理耗时",
       p99Latency: "P99 Worker 处理耗时",
+      p95Latency: "P95 Worker 处理耗时",
       avgLatency: "平均 Worker 处理耗时",
       pageviews: "页面浏览",
       customEvents: "自定义事件",
@@ -7869,42 +7884,47 @@ const zhMessages = {
       edgeLatency: "Worker 处理耗时",
       eventAt: "事件时间",
       receivedAt: "接收时间",
-      coordinates: "坐标",
       continent: "大洲",
+      coordinates: "坐标",
     },
     recentNormal: {
       title: "最近正常请求",
-      description: "这些详细记录只写入正常请求 Analytics Engine 数据集。",
+      description:
+        "这些详细记录从统一的 Request Analytics Engine 数据集中读取。",
     },
   },
   systemSettings: {
     title: "系统设置",
     subtitle: "管理当前 InsightFlare 实例的全站配置。",
     guide: "教程",
-    botAnalyticsTitle: "分析引擎",
-    botAnalyticsDescription:
-      "配置用于读取 Analytics Engine 数据的 Cloudflare 凭据，供机器人防护等分析功能使用。",
-    botAnalyticsAccountIdLabel: "Cloudflare Account ID",
-    botAnalyticsApiTokenLabel: "Cloudflare API Token",
-    botAnalyticsApiTokenPlaceholder: "查看教程以获取 Cloudflare API Token",
-    botAnalyticsSaved: "分析引擎配置已保存。",
-    botAnalyticsSaveFailed: "保存分析引擎配置失败。",
-    botAnalyticsDeleted: "分析引擎配置已删除。",
-    botAnalyticsDeleteFailed: "删除分析引擎配置失败。",
-    botAnalyticsDeleteConfirm:
+    analyticsEngineTitle: "分析引擎",
+    analyticsEngineDescription:
+      "配置用于读取请求观测以及未来流量和事件分析数据的 Cloudflare 凭据。",
+    analyticsEngineAccountIdLabel: "Cloudflare Account ID",
+    analyticsEngineApiTokenLabel: "Cloudflare API Token",
+    analyticsEngineApiTokenPlaceholder: "查看教程以获取 Cloudflare API Token",
+    analyticsEngineSaved: "分析引擎配置已保存。",
+    analyticsEngineSaveFailed: "保存分析引擎配置失败。",
+    analyticsEngineDeleted: "分析引擎配置已删除。",
+    analyticsEngineDeleteFailed: "删除分析引擎配置失败。",
+    analyticsEngineDeleteConfirm:
       "确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。",
-    botAnalyticsEngineDisabledTitle: "Analytics Engine 尚未启用",
-    botAnalyticsEngineDisabledDescription:
+    analyticsEngineDatasetsTitle: "Analytics Engine 数据集",
+    analyticsEngineRequestDataset: "Request",
+    analyticsEngineTrafficDataset: "Traffic",
+    analyticsEngineEventDataset: "Event",
+    analyticsEngineDisabledTitle: "Analytics Engine 尚未启用",
+    analyticsEngineDisabledDescription:
       "当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare 账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用 Analytics Engine，然后重新部署 InsightFlare 以激活相关分析功能。",
-    botAnalyticsEngineDisabledHint:
+    analyticsEngineDisabledHint:
       "在启用 Analytics Engine 并重新部署 Worker 前，分析引擎设置不可修改。",
-    botAnalyticsOpenCloudflare: "打开 Cloudflare Analytics Engine",
-    botAnalyticsGuideTitle: "获取分析引擎配置",
-    botAnalyticsGuideDescription:
+    analyticsEngineOpenCloudflare: "打开 Cloudflare Analytics Engine",
+    analyticsEngineGuideTitle: "获取分析引擎配置",
+    analyticsEngineGuideDescription:
       "分析引擎需要 Cloudflare 账号信息和一个可读取 Analytics Engine 的 API Token。",
-    botAnalyticsGuideSteps: [
+    analyticsEngineGuideSteps: [
       "打开 Cloudflare Dashboard，进入目标账号并复制 Account ID。",
-      "在 Workers & Pages 中启用 Analytics Engine；机器人和普通请求数据集会随部署自动创建并绑定。",
+      "在 Workers & Pages 中启用 Analytics Engine；Request、Traffic 和 Event 三个数据集会随部署自动创建并绑定。",
       "前往 My Profile → API Tokens，创建 Custom token。",
       "为 Token 添加 Account Analytics 读取权限，并限制到当前账号。",
       "保存后复制 Token，回到这里填写 Account ID 和 API Token。",
@@ -8534,6 +8554,18 @@ const jaMessages = {
   realtime: {
     title: "リアルタイム",
     subtitle: "直近 30 分間のトラフィックを確認します。",
+    detailsSection: "情報",
+    visitorMapSection: "訪問者の地域",
+    visitorMapSubtitle: "このイベントの座標から推定したおおよその地域です。",
+    eventType: "イベント種別",
+    eventId: "イベント ID",
+    sequence: "シーケンス",
+    previousVisitId: "前回の訪問 ID",
+    screenWidth: "画面の幅",
+    screenHeight: "画面の高さ",
+    hiddenAt: "非表示時刻",
+    finalizedAt: "確定時刻",
+    performanceVisitId: "パフォーマンス訪問 ID",
     logTitleSeparator: ":",
     activeNow: "現在アクティブ",
     liveMetrics:
@@ -8548,7 +8580,6 @@ const jaMessages = {
     viewPage: "ページ表示",
     customEvent: "カスタムイベント",
     detailsTitle: "イベント詳細",
-    detailsSection: "情報",
     browsingSection: "閲覧",
     geographySection: "地理位置",
     sourceSection: "参照元",
@@ -8571,23 +8602,17 @@ const jaMessages = {
       "現在のリアルタイム範囲における、この訪問者のすべての記録です。",
     visitorHistoryRange: "閲覧期間",
     visitorHistoryEmpty: "この訪問者の追加記録はまだありません。",
-    visitorMapSection: "訪問者の地域",
-    visitorMapSubtitle: "このイベントの座標から推定したおおよその地域です。",
     visitorMapUnavailable: "このイベントには利用可能な座標がありません。",
     visitorId: "訪問者 ID",
     sessionId: "セッション ID",
     visitId: "訪問 ID",
-    eventType: "イベント種別",
     eventTime: "イベント時刻",
     eventKind: "イベント種別",
     eventName: "イベント名",
-    eventId: "イベント ID",
     siteId: "サイト ID",
     traceId: "トレース ID",
-    sequence: "シーケンス",
     receivedAt: "受信時刻",
     startedAt: "開始時刻",
-    previousVisitId: "前回の訪問 ID",
     previousVisitStartedAt: "前回の訪問開始時刻",
     userId: "ユーザー ID",
     userName: "ユーザー名",
@@ -8601,20 +8626,15 @@ const jaMessages = {
     browserVersion: "ブラウザーのバージョン",
     osVersion: "OS バージョン",
     userAgent: "ユーザーエージェント",
-    screenWidth: "画面の幅",
-    screenHeight: "画面の高さ",
     postalCode: "郵便番号",
     metroCode: "都市圏コード",
     status: "ステータス",
     visibilityState: "表示状態",
-    hiddenAt: "非表示時刻",
     endedAt: "終了時刻",
-    finalizedAt: "確定時刻",
     duration: "継続時間",
     durationSource: "継続時間のソース",
     exitReason: "退出理由",
     leaveAt: "離脱時刻",
-    performanceVisitId: "パフォーマンス訪問 ID",
   },
   overview: {
     title: "トラフィック概要",
@@ -9752,6 +9772,8 @@ const jaMessages = {
     invalidCredentials: "ユーザー名またはパスワードが正しくありません。",
   },
   accountLinks: {
+    noSites: "このチームには利用可能なサイトがありません。",
+    siteNotFound: "チームまたはサイトが見つかりません。",
     invite: {
       title: "チーム招待",
       subtitle: "招待を承認してこのチームに参加します。",
@@ -9926,6 +9948,10 @@ const jaMessages = {
       ruleInfoSection: "ルール情報",
       scheduleSection: "スケジュール",
       sendScheduleSection: "送信時刻",
+      conditionMilestone: "{metric} が {step} ごと",
+      conditionThreshold: "{window} {metric} {operator} {value}",
+      conditionChange: "{window} {metric} 変化 {operator} {value}",
+      conditionHealth: "{hours}h データなし",
       checkSection: "チェック頻度",
       conditionSection: "条件",
       deliverySection: "配信",
@@ -9999,10 +10025,6 @@ const jaMessages = {
       scheduleInterval: "{minutes} 分ごと",
       scheduleCustom: "カスタム",
       conditionReport: "{period} レポート",
-      conditionMilestone: "{metric} が {step} ごと",
-      conditionThreshold: "{window} {metric} {operator} {value}",
-      conditionChange: "{window} {metric} 変化 {operator} {value}",
-      conditionHealth: "{hours}h データなし",
       summaryWhenConditions:
         "次の条件のうち {combinator} が一致したら、{type} 通知を送信します：",
       summaryWhenSingleCondition:
@@ -10580,7 +10602,7 @@ const jaMessages = {
       "通常リクエスト、異常リクエスト、分流比率を間隔ごとに表示します。",
     recentTitle: "最近の異常リクエスト",
     recentDescription:
-      "異常 Analytics Engine データセットにのみ書き込まれた詳細記録です。",
+      "統合された Request Analytics Engine データセットから読み取った詳細記録です。",
     recentLoadedAll: "すべての記録を読み込みました",
     detailTitle: "異常リクエスト詳細",
     detailSubtitle:
@@ -10658,8 +10680,8 @@ const jaMessages = {
       abnormalRatio: "異常リクエスト比率",
       p50Latency: "P50 Worker 処理時間",
       p75Latency: "P75 Worker 処理時間",
-      p95Latency: "P95 Worker 処理時間",
       p99Latency: "P99 Worker 処理時間",
+      p95Latency: "P95 Worker 処理時間",
       avgLatency: "平均 Worker 処理時間",
       pageviews: "ページビュー",
       customEvents: "カスタムイベント",
@@ -10693,44 +10715,48 @@ const jaMessages = {
       edgeLatency: "Worker 処理時間",
       eventAt: "イベント時刻",
       receivedAt: "受信時刻",
-      coordinates: "座標",
       continent: "大陸",
+      coordinates: "座標",
     },
     recentNormal: {
       title: "最近の通常リクエスト",
       description:
-        "通常リクエスト用 Analytics Engine データセットにのみ書き込まれた詳細記録です。",
+        "統合された Request Analytics Engine データセットから読み取った詳細記録です。",
     },
   },
   systemSettings: {
     title: "システム設定",
     subtitle: "この InsightFlare デプロイ全体の設定を管理します。",
     guide: "ガイド",
-    botAnalyticsTitle: "Analytics Engine",
-    botAnalyticsDescription:
-      "Bot 保護やその他の分析機能で Analytics Engine データを読むための Cloudflare 認証情報を設定します。",
-    botAnalyticsAccountIdLabel: "Cloudflare Account ID",
-    botAnalyticsApiTokenLabel: "Cloudflare API トークン",
-    botAnalyticsApiTokenPlaceholder:
+    analyticsEngineTitle: "Analytics Engine",
+    analyticsEngineDescription:
+      "リクエスト監視と将来のトラフィック・イベント分析で使用する Analytics Engine の Cloudflare 認証情報を設定します。",
+    analyticsEngineAccountIdLabel: "Cloudflare Account ID",
+    analyticsEngineApiTokenLabel: "Cloudflare API トークン",
+    analyticsEngineApiTokenPlaceholder:
       "ガイドを見て Cloudflare API トークンを取得",
-    botAnalyticsSaved: "Analytics Engine 設定を保存しました。",
-    botAnalyticsSaveFailed: "Analytics Engine 設定を保存できません。",
-    botAnalyticsDeleted: "Analytics Engine 設定を削除しました。",
-    botAnalyticsDeleteFailed: "Analytics Engine 設定を削除できません。",
-    botAnalyticsDeleteConfirm:
+    analyticsEngineSaved: "Analytics Engine 設定を保存しました。",
+    analyticsEngineSaveFailed: "Analytics Engine 設定を保存できません。",
+    analyticsEngineDeleted: "Analytics Engine 設定を削除しました。",
+    analyticsEngineDeleteFailed: "Analytics Engine 設定を削除できません。",
+    analyticsEngineDeleteConfirm:
       "Analytics Engine の読み取り用認証情報を削除しますか？依存する機能は認証情報が復元されるまで設定が必要な状態になります。",
-    botAnalyticsEngineDisabledTitle: "Analytics Engine が有効ではありません",
-    botAnalyticsEngineDisabledDescription:
+    analyticsEngineDatasetsTitle: "Analytics Engine データセット",
+    analyticsEngineRequestDataset: "Request",
+    analyticsEngineTrafficDataset: "Traffic",
+    analyticsEngineEventDataset: "Event",
+    analyticsEngineDisabledTitle: "Analytics Engine が有効ではありません",
+    analyticsEngineDisabledDescription:
       "Cloudflare アカウントで Analytics Engine が有効化されていないため、このデプロイでは Analytics Engine バインディングが自動的に無効化されました。Cloudflare で Analytics Engine を有効化し、InsightFlare を再デプロイすると関連分析機能が有効になります。",
-    botAnalyticsEngineDisabledHint:
+    analyticsEngineDisabledHint:
       "Analytics Engine が有効化され Worker が再デプロイされるまで、Analytics Engine 設定はロックされます。",
-    botAnalyticsOpenCloudflare: "Cloudflare Analytics Engine を開く",
-    botAnalyticsGuideTitle: "Analytics Engine 認証情報を取得",
-    botAnalyticsGuideDescription:
+    analyticsEngineOpenCloudflare: "Cloudflare Analytics Engine を開く",
+    analyticsEngineGuideTitle: "Analytics Engine 認証情報を取得",
+    analyticsEngineGuideDescription:
       "Analytics Engine には Cloudflare アカウント情報と、Analytics Engine データを読み取れる API トークンが必要です。",
-    botAnalyticsGuideSteps: [
+    analyticsEngineGuideSteps: [
       "Cloudflare Dashboard を開き、対象アカウントに入り、Account ID をコピーします。",
-      "Workers & Pages で Analytics Engine を有効化します。Bot と通常リクエストのデータセットはデプロイ時に自動作成・バインドされます。",
+      "Workers & Pages で Analytics Engine を有効化します。Request、Traffic、Event の 3 データセットはデプロイ時に自動作成・バインドされます。",
       "My Profile → API Tokens に移動し、Custom token を作成します。",
       "トークンに Account Analytics の読み取り権限を付与し、現在のアカウントにスコープします。",
       "トークンをコピーし、ここに Account ID と API トークンを入力します。",

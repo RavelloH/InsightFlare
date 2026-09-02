@@ -758,8 +758,8 @@ describe("private admin edge handler", () => {
     for (const route of [
       "account-links",
       "team-invites",
-      "bot-analytics-config",
-      "bot-analytics",
+      "analytics-engine-config",
+      "request-observation",
       "do-diagnostic",
       "e2e/flush",
     ]) {

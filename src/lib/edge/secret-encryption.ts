@@ -150,25 +150,25 @@ export async function decryptLoginTurnstileSecret(
   );
 }
 
-export async function encryptBotAnalyticsSecret(
+export async function encryptAnalyticsEngineSecret(
   env: Pick<Env, "MAIN_SECRET" | "DAILY_SALT_SECRET">,
   secret: string,
 ): Promise<string> {
   return encryptSecret(
     env,
     secret,
-    SECRET_PURPOSES.botAnalyticsSecretEncryption,
+    SECRET_PURPOSES.analyticsEngineSecretEncryption,
   );
 }
 
-export async function decryptBotAnalyticsSecret(
+export async function decryptAnalyticsEngineSecret(
   env: Pick<Env, "MAIN_SECRET" | "DAILY_SALT_SECRET">,
   encrypted: string,
 ): Promise<string> {
   return decryptSecret(
     env,
     encrypted,
-    SECRET_PURPOSES.botAnalyticsSecretEncryption,
+    SECRET_PURPOSES.analyticsEngineSecretEncryption,
   );
 }
 

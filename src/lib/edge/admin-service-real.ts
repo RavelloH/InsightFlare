@@ -1,10 +1,7 @@
 import { handleAccountLinksAdmin } from "./admin-account-links";
+import { handleAnalyticsEngineConfigAdmin } from "./admin-analytics-engine-config";
 import { handleApiKeysAdmin } from "./admin-api-keys";
 import { requireActor } from "./admin-auth";
-import {
-  handleBotAnalyticsAdmin,
-  handleBotAnalyticsConfigAdmin,
-} from "./admin-bot-analytics";
 import {
   handleLoginTurnstileConfigAdmin,
   handleLoginTurnstileTestAdmin,
@@ -24,6 +21,7 @@ import {
   handleNotificationsReadAll,
   handleNotificationTestAdmin,
 } from "./admin-notifications";
+import { handleRequestObservationAdmin } from "./admin-request-observation";
 import { nf } from "./admin-response";
 import { handleScheduledTasksAdmin } from "./admin-scheduled-tasks";
 import type { AdminServiceRequest } from "./admin-service";
@@ -48,7 +46,7 @@ import {
 /**
  * Real adapter for the admin service. Existing handlers remain the source of
  * business rules during migration; this adapter is the only place that knows
- * how the legacy handler modules are composed.
+ * how the existing handler modules are composed.
  */
 export async function executeRealAdminService(
   input: AdminServiceRequest,
@@ -86,10 +84,10 @@ export async function executeRealAdminService(
       return handleLoginTurnstileConfigAdmin(request, env);
     case "login-turnstile/test":
       return handleLoginTurnstileTestAdmin(request, env);
-    case "bot-analytics-config":
-      return handleBotAnalyticsConfigAdmin(request, env);
-    case "bot-analytics":
-      return handleBotAnalyticsAdmin(request, env, url);
+    case "analytics-engine-config":
+      return handleAnalyticsEngineConfigAdmin(request, env);
+    case "request-observation":
+      return handleRequestObservationAdmin(request, env, url);
     case "notification-email-preview":
       return handleNotificationEmailPreviewAdmin(request, env, url);
     case "notification-rules":

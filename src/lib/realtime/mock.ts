@@ -1,7 +1,7 @@
 import {
-  defaultBotAnalyticsConfig,
-  redactBotAnalyticsConfig,
-} from "@/lib/bot-analytics-config";
+  defaultAnalyticsEngineConfig,
+  redactAnalyticsEngineConfig,
+} from "@/lib/analytics-engine-config";
 import { normalizeTimeZone } from "@/lib/dashboard/time-zone";
 import type { NotificationPreferencesData } from "@/lib/edge-client";
 import type {
@@ -542,20 +542,20 @@ function handleDemoRequestInner(options: {
       });
       return { ok: true, data: generateDemoScheduledTasks(params) };
     }
-    if (path.includes("/admin/bot-analytics-config")) {
+    if (path.includes("/admin/analytics-engine-config")) {
       const body = bodyRecord as {
         accountId?: unknown;
         apiToken?: unknown;
         clearApiToken?: unknown;
       };
-      const config = defaultBotAnalyticsConfig();
+      const config = defaultAnalyticsEngineConfig();
       config.accountId = String(body.accountId ?? "").trim();
       config.configured =
         body.clearApiToken !== true &&
         String(body.apiToken ?? "").trim() !== "";
       config.apiTokenHint = config.configured ? "••••demo" : "";
       config.updatedAt = Date.now();
-      return { ok: true, data: redactBotAnalyticsConfig(config) };
+      return { ok: true, data: redactAnalyticsEngineConfig(config) };
     }
     if (path.includes("/funnels")) {
       if (method === "DELETE") return deleteDemoFunnel(siteId, params);
@@ -953,12 +953,12 @@ function handleDemoRequestInner(options: {
     const tid = teamId || getDemoTeams()[0].id;
     return { ok: true, data: generateDemoApiKeys(tid) };
   }
-  if (path.includes("/admin/bot-analytics-config")) {
-    const config = defaultBotAnalyticsConfig();
-    return { ok: true, data: redactBotAnalyticsConfig(config) };
+  if (path.includes("/admin/analytics-engine-config")) {
+    const config = defaultAnalyticsEngineConfig();
+    return { ok: true, data: redactAnalyticsEngineConfig(config) };
   }
-  if (path.includes("/admin/bot-analytics")) {
-    return demoBotAnalyticsResponse(params);
+  if (path.includes("/admin/request-observation")) {
+    return demoRequestObservationResponse(params);
   }
   if (path.includes("/admin/notification-rules")) {
     return {
@@ -1328,7 +1328,7 @@ function handleDemoRequestInner(options: {
   return demoNotFoundResponse();
 }
 
-function demoBotAnalyticsResponse(
+function demoRequestObservationResponse(
   params: Record<string, string | number>,
 ): Record<string, unknown> {
   const from = Number(params.from);
@@ -1374,9 +1374,9 @@ function demoBotAnalyticsResponse(
   const events =
     source === "normal" ? (data.normal?.events ?? []) : data.events;
   if (params.page === "normal" || params.page === "abnormal") {
-    const page = paginateDemoBotEvents(
+    const page = paginateDemoRequestEvents(
       events,
-      parseDemoBotAnalyticsLimit(params.limit),
+      parseRequestObservationLimit(params.limit),
       params.cursor,
     );
     return {
@@ -1395,10 +1395,17 @@ function demoBotAnalyticsResponse(
     const tab = String(params.dimensionTab);
     const counts = new Map<
       string,
-      DemoBotAnalyticsDimensionValue & { count: number; highThreat: number }
+      DemoRequestObservationDimensionValue & {
+        count: number;
+        highThreat: number;
+      }
     >();
     for (const event of events) {
-      for (const value of demoBotAnalyticsDimensionValues(event, group, tab)) {
+      for (const value of demoRequestObservationDimensionValues(
+        event,
+        group,
+        tab,
+      )) {
         const current = counts.get(value.key) ?? {
           ...value,
           count: 0,
@@ -1430,13 +1437,13 @@ function demoBotAnalyticsResponse(
     };
   }
 
-  const abnormalPage = paginateDemoBotEvents(
+  const abnormalPage = paginateDemoRequestEvents(
     data.events,
-    parseDemoBotAnalyticsLimit(params.limit),
+    parseRequestObservationLimit(params.limit),
   );
-  const normalPage = paginateDemoBotEvents(
+  const normalPage = paginateDemoRequestEvents(
     data.normal?.events ?? [],
-    parseDemoBotAnalyticsLimit(params.limit),
+    parseRequestObservationLimit(params.limit),
   );
 
   return {
@@ -1462,7 +1469,7 @@ function demoBotAnalyticsResponse(
   };
 }
 
-interface DemoBotAnalyticsDimensionValue {
+interface DemoRequestObservationDimensionValue {
   key: string;
   label: string;
   iconLabel?: string;
@@ -1507,13 +1514,13 @@ function demoIpPrefix(value: unknown): string {
   return ip;
 }
 
-function demoBotAnalyticsDimensionValue(
+function demoRequestObservationDimensionValue(
   value: unknown,
   options?: Pick<
-    DemoBotAnalyticsDimensionValue,
+    DemoRequestObservationDimensionValue,
     "iconLabel" | "country" | "region"
   >,
-): DemoBotAnalyticsDimensionValue {
+): DemoRequestObservationDimensionValue {
   const label = demoDimensionString(value) || "Unknown";
   return {
     key: label,
@@ -1522,11 +1529,11 @@ function demoBotAnalyticsDimensionValue(
   };
 }
 
-function demoBotAnalyticsDimensionValues(
+function demoRequestObservationDimensionValues(
   event: Record<string, unknown>,
   group: string,
   tab: string,
-): DemoBotAnalyticsDimensionValue[] {
+): DemoRequestObservationDimensionValue[] {
   if (group === "detection") {
     if (tab === "reason") {
       const reasons = Array.isArray(event.reasons)
@@ -1535,12 +1542,12 @@ function demoBotAnalyticsDimensionValues(
             .split(",")
             .map((reason) => reason.trim())
             .filter(Boolean);
-      return [demoBotAnalyticsDimensionValue(reasons.join(","))];
+      return [demoRequestObservationDimensionValue(reasons.join(","))];
     }
     if (tab === "category") {
       const category = demoDimensionString(event.category);
       return [
-        demoBotAnalyticsDimensionValue(
+        demoRequestObservationDimensionValue(
           category === "high"
             ? "high_threat"
             : category === "medium"
@@ -1550,15 +1557,17 @@ function demoBotAnalyticsDimensionValues(
       ];
     }
     if (tab === "kind") {
-      return [demoBotAnalyticsDimensionValue(event.kind)];
+      return [demoRequestObservationDimensionValue(event.kind)];
     }
     if (tab === "botScoreBucket") {
       return [
-        demoBotAnalyticsDimensionValue(demoBotScoreBucket(event.botScore)),
+        demoRequestObservationDimensionValue(
+          demoBotScoreBucket(event.botScore),
+        ),
       ];
     }
     if (tab === "verifiedBotCategory") {
-      return [demoBotAnalyticsDimensionValue(event.verifiedBotCategory)];
+      return [demoRequestObservationDimensionValue(event.verifiedBotCategory)];
     }
   }
 
@@ -1570,81 +1579,81 @@ function demoBotAnalyticsDimensionValues(
         demoDimensionString(event.siteDomain) ||
         siteId;
       return [
-        demoBotAnalyticsDimensionValue(siteName, {
+        demoRequestObservationDimensionValue(siteName, {
           iconLabel: demoDimensionString(event.siteDomain) || undefined,
         }),
       ].map((value) => ({ ...value, key: siteId || value.key }));
     }
     if (tab === "hostname") {
-      return [demoBotAnalyticsDimensionValue(event.hostname)];
+      return [demoRequestObservationDimensionValue(event.hostname)];
     }
     if (tab === "pathname") {
       return [
-        demoBotAnalyticsDimensionValue(
+        demoRequestObservationDimensionValue(
           demoDimensionString(event.pathname) || "/",
         ),
       ];
     }
     if (tab === "origin") {
-      return [demoBotAnalyticsDimensionValue(event.origin)];
+      return [demoRequestObservationDimensionValue(event.origin)];
     }
   }
 
   if (group === "network") {
     if (tab === "asOrganization") {
-      return [demoBotAnalyticsDimensionValue(event.asOrganization)];
+      return [demoRequestObservationDimensionValue(event.asOrganization)];
     }
     if (tab === "asn") {
-      return [demoBotAnalyticsDimensionValue(event.asn)];
+      return [demoRequestObservationDimensionValue(event.asn)];
     }
     if (tab === "country") {
-      return [demoBotAnalyticsDimensionValue(event.country)];
+      return [demoRequestObservationDimensionValue(event.country)];
     }
     if (tab === "region") {
       return [
-        demoBotAnalyticsDimensionValue(event.region, {
+        demoRequestObservationDimensionValue(event.region, {
           country: demoDimensionString(event.country) || undefined,
         }),
       ];
     }
     if (tab === "city") {
       return [
-        demoBotAnalyticsDimensionValue(event.city, {
+        demoRequestObservationDimensionValue(event.city, {
           country: demoDimensionString(event.country) || undefined,
           region: demoDimensionString(event.region) || undefined,
         }),
       ];
     }
     if (tab === "colo") {
-      return [demoBotAnalyticsDimensionValue(event.colo)];
+      return [demoRequestObservationDimensionValue(event.colo)];
     }
   }
 
   if (group === "client") {
     if (tab === "ip") {
-      return [demoBotAnalyticsDimensionValue(event.ip)];
+      return [demoRequestObservationDimensionValue(event.ip)];
     }
     if (tab === "userAgent") {
-      return [demoBotAnalyticsDimensionValue(event.userAgent)];
+      return [demoRequestObservationDimensionValue(event.userAgent)];
     }
     if (tab === "userAgentLengthBucket") {
       return [
-        demoBotAnalyticsDimensionValue(
+        demoRequestObservationDimensionValue(
           demoUserAgentLengthBucket(event.userAgentLength),
         ),
       ];
     }
     if (tab === "ipPrefix") {
-      return [demoBotAnalyticsDimensionValue(demoIpPrefix(event.ip))];
+      return [demoRequestObservationDimensionValue(demoIpPrefix(event.ip))];
     }
   }
 
-  return [demoBotAnalyticsDimensionValue(event[tab])];
+  return [demoRequestObservationDimensionValue(event[tab])];
 }
 
-const DEMO_BOT_ANALYTICS_DEFAULT_LIMIT = 50;
+const DEMO_REQUEST_OBSERVATION_DEFAULT_LIMIT = 50;
 
-function parseDemoBotAnalyticsLimit(value: unknown): number {
+function parseRequestObservationLimit(value: unknown): number {
   const parsed = Number(value);
   return Math.max(
     1,
@@ -1652,12 +1661,12 @@ function parseDemoBotAnalyticsLimit(value: unknown): number {
       100,
       Number.isFinite(parsed)
         ? Math.trunc(parsed)
-        : DEMO_BOT_ANALYTICS_DEFAULT_LIMIT,
+        : DEMO_REQUEST_OBSERVATION_DEFAULT_LIMIT,
     ),
   );
 }
 
-function parseDemoBotAnalyticsCursor(
+function parseRequestObservationCursor(
   value: unknown,
 ): { timestamp: string; receivedAt: number } | null {
   if (typeof value !== "string" || !value) return null;
@@ -1675,7 +1684,7 @@ function parseDemoBotAnalyticsCursor(
   }
 }
 
-function paginateDemoBotEvents(
+function paginateDemoRequestEvents(
   events: Array<Record<string, unknown>>,
   limit: number,
   cursorValue?: unknown,
@@ -1684,7 +1693,7 @@ function paginateDemoBotEvents(
   hasMore: boolean;
   nextCursor: { timestamp: string; receivedAt: number } | null;
 } {
-  const cursor = parseDemoBotAnalyticsCursor(cursorValue);
+  const cursor = parseRequestObservationCursor(cursorValue);
   const startIndex = cursor
     ? Math.max(
         0,

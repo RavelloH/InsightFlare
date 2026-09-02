@@ -466,8 +466,8 @@ describe("mock — handleDemoRequest", () => {
       expect(res.ok).toBe(true);
     });
 
-    it("limits bot analytics overview data and paginates detail rows", () => {
-      const path = "/api/private/admin/bot-analytics";
+    it("limits request observation overview data and paginates detail rows", () => {
+      const path = "/api/private/admin/request-observation";
       const params = {
         from: FIXED_FROM,
         to: FIXED_FROM + 60 * 60 * 1000,
@@ -507,8 +507,8 @@ describe("mock — handleDemoRequest", () => {
       expect(nextPage.nextCursor).toEqual(expect.any(Object));
     });
 
-    it("resolves demo bot analytics dimensions from their semantic fields", () => {
-      const path = "/api/private/admin/bot-analytics";
+    it("resolves demo request observation dimensions from their semantic fields", () => {
+      const path = "/api/private/admin/request-observation";
       const params = {
         from: FIXED_FROM,
         to: FIXED_FROM + DAY_MS,

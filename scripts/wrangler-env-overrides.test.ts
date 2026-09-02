@@ -22,12 +22,16 @@ binding = "SITE_SETTINGS_KV"
 id = "YOUR_KV_ID"
 
 [[analytics_engine_datasets]]
-binding = "BOT_ANALYTICS"
-dataset = "insightflare_bot_events"
+binding = "REQUEST_ANALYTICS"
+dataset = "insightflare_request_events"
 
 [[analytics_engine_datasets]]
-binding = "NORMAL_ANALYTICS"
-dataset = "insightflare_normal_events"
+binding = "TRAFFIC_ANALYTICS"
+dataset = "insightflare_traffic_events"
+
+[[analytics_engine_datasets]]
+binding = "EVENT_ANALYTICS"
+dataset = "insightflare_event_facts"
 
 [env.production]
 name = "insightflare-production"
@@ -42,12 +46,16 @@ database_id = "PROD_D1_ID"
 migrations_dir = "./migrations"
 
 [[env.production.analytics_engine_datasets]]
-binding = "BOT_ANALYTICS"
-dataset = "insightflare_bot_events"
+binding = "REQUEST_ANALYTICS"
+dataset = "insightflare_request_events"
 
 [[env.production.analytics_engine_datasets]]
-binding = "NORMAL_ANALYTICS"
-dataset = "insightflare_normal_events"
+binding = "TRAFFIC_ANALYTICS"
+dataset = "insightflare_traffic_events"
+
+[[env.production.analytics_engine_datasets]]
+binding = "EVENT_ANALYTICS"
+dataset = "insightflare_event_facts"
 `;
 
 describe("applyWranglerEnvOverrides", () => {
@@ -147,10 +155,16 @@ describe("applyWranglerEnvOverrides", () => {
     const result = applyAnalyticsEngineDisabledFallback(BASE_CONFIG);
     const rootContent = result.content.split("[env.production]")[0] ?? "";
 
-    expect(rootContent).not.toContain('binding = "BOT_ANALYTICS"');
-    expect(rootContent).not.toContain('binding = "NORMAL_ANALYTICS"');
-    expect(rootContent).not.toContain('dataset = "insightflare_bot_events"');
-    expect(rootContent).not.toContain('dataset = "insightflare_normal_events"');
+    expect(rootContent).not.toContain('binding = "REQUEST_ANALYTICS"');
+    expect(rootContent).not.toContain('binding = "TRAFFIC_ANALYTICS"');
+    expect(rootContent).not.toContain('binding = "EVENT_ANALYTICS"');
+    expect(rootContent).not.toContain(
+      'dataset = "insightflare_request_events"',
+    );
+    expect(rootContent).not.toContain(
+      'dataset = "insightflare_traffic_events"',
+    );
+    expect(rootContent).not.toContain('dataset = "insightflare_event_facts"');
   });
 
   it("targets environment Analytics Engine binding for env deploys", () => {
@@ -164,8 +178,9 @@ describe("applyWranglerEnvOverrides", () => {
       "[[env.production.analytics_engine_datasets]]",
     );
     const envContent = result.content.split("[env.production]")[1] ?? "";
-    expect(envContent).not.toContain('binding = "BOT_ANALYTICS"');
-    expect(envContent).not.toContain('binding = "NORMAL_ANALYTICS"');
+    expect(envContent).not.toContain('binding = "REQUEST_ANALYTICS"');
+    expect(envContent).not.toContain('binding = "TRAFFIC_ANALYTICS"');
+    expect(envContent).not.toContain('binding = "EVENT_ANALYTICS"');
     expect(result.content).toContain("[env.production.vars]");
     expect(result.content).toContain(
       'INSIGHTFLARE_ANALYTICS_ENGINE_DISABLED = "1"',

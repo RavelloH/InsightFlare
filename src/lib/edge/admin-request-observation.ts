@@ -1,13 +1,12 @@
 import {
-  type BotAnalyticsConfig,
-  defaultBotAnalyticsConfig,
-  makeSecretHint,
-  normalizeBotAnalyticsConfig,
-  redactBotAnalyticsConfig,
-  SYSTEM_BOT_ANALYTICS_CONFIG_KEY,
-  validateBotAnalyticsConfig,
-  validateBotAnalyticsUpdateInput,
-} from "@/lib/bot-analytics-config";
+  type AnalyticsEngineConfig,
+  defaultAnalyticsEngineConfig,
+  normalizeAnalyticsEngineConfig,
+  redactAnalyticsEngineConfig,
+  REQUEST_ANALYTICS_DATASET,
+  SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY,
+  validateAnalyticsEngineConfig,
+} from "@/lib/analytics-engine-config";
 import {
   addZonedInterval,
   resolveReportingTimeZone,
@@ -15,17 +14,18 @@ import {
   startOfZonedInterval,
   timeZoneOffsetMinutes,
 } from "@/lib/dashboard/time-zone";
-import type { RequestObservationCategory } from "@/lib/edge/bot-protection";
+import { SECRET_PURPOSES } from "@/lib/secrets";
 
-import { requireActor } from "./admin-auth";
-import { bad, forb, jsonResponseFor, na, parseJson } from "./admin-response";
-import { analyticsEngineAvailability } from "./analytics-engine";
-import { NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION } from "./request-analytics";
 import {
-  decryptBotAnalyticsSecret,
-  encryptBotAnalyticsSecret,
-} from "./secret-encryption";
-import { deleteConfig, readConfig, upsertConfig } from "./system-config";
+  hasRequestFlag,
+  REQUEST_ANALYTICS_FLAGS,
+  REQUEST_ANALYTICS_SCHEMA_VERSION,
+} from "./analytics-engine/request-schema";
+import { requireActor } from "./admin-auth";
+import { bad, forb, jsonResponseFor, na } from "./admin-response";
+import { analyticsEngineAvailability } from "./analytics-engine";
+import { decryptSecret } from "./secret-encryption";
+import { readConfig } from "./system-config";
 import type { Env } from "./types";
 import { clampString, ONE_HOUR_MS } from "./utils";
 
@@ -37,10 +37,11 @@ const WINDOW_OPTIONS_MINUTES = new Set([60, 1440, 10080, 43200]);
 const MAX_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const CF_ANALYTICS_ENGINE_SQL_ENDPOINT =
   "https://api.cloudflare.com/client/v4/accounts";
+const NORMAL_CATEGORY_SQL_FILTER = "blob2 = 'normal'";
 const ABNORMAL_CATEGORY_SQL_FILTER =
-  "blob3 IN ('medium', 'high', 'medium_threat', 'high_threat', 'custom_block')";
+  "blob2 IN ('medium_threat', 'high_threat', 'custom_block')";
 const MAX_WORKER_LATENCY_MS = 60_000;
-const NORMAL_LATENCY_SQL_FILTER = `double8 = ${NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION} AND double3 BETWEEN 0 AND ${MAX_WORKER_LATENCY_MS}`;
+const NORMAL_LATENCY_SQL_FILTER = `double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND bitAnd(toInt64(double19), ${REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent}) != 0 AND double3 BETWEEN 0 AND ${MAX_WORKER_LATENCY_MS}`;
 
 function analyticsEngineSqlEndpoint(env: Env): string | null {
   if (env.INSIGHTFLARE_E2E === "1") {
@@ -51,7 +52,12 @@ function analyticsEngineSqlEndpoint(env: Env): string | null {
 }
 
 type AdminActor = Awaited<ReturnType<typeof requireActor>>;
-type BotAnalyticsInterval = "minute" | "hour" | "day" | "week";
+type RequestObservationCategory =
+  | "normal"
+  | "medium_threat"
+  | "high_threat"
+  | "custom_block";
+type RequestObservationInterval = "minute" | "hour" | "day" | "week";
 type NetworkDimension =
   | "asOrganization"
   | "asn"
@@ -80,7 +86,7 @@ const DIMENSION_TABS: Record<DimensionGroup, readonly string[]> = {
   client: ["ip", "userAgent", "userAgentLengthBucket", "ipPrefix"],
 };
 
-interface BotAnalyticsEvent {
+interface RequestObservationEvent {
   timestamp: string;
   receivedAt: number;
   siteId: string;
@@ -104,19 +110,22 @@ interface BotAnalyticsEvent {
   verifiedBotCategory: string;
   rayId: string;
   traceId: string;
+  requestMethod: string;
+  httpProtocol: string;
   metadataJson: string;
   latitude: number | null;
   longitude: number | null;
   botScore: number | null;
   userAgentLength: number;
+  flags: number;
 }
 
-interface NormalAnalyticsEvent {
+interface RequestObservationNormalEvent {
   timestamp: string;
   receivedAt: number;
   eventAt: number;
   edgeLatencyMs: number | null;
-  latencySchemaVersion: number;
+  schemaVersion: number;
   siteId: string;
   siteName: string;
   siteDomain: string;
@@ -138,6 +147,7 @@ interface NormalAnalyticsEvent {
   latitude: number | null;
   longitude: number | null;
   userAgentLength: number;
+  flags: number;
 }
 
 interface AnalyticsEngineSamplingMeta {
@@ -180,7 +190,6 @@ function toFiniteNumber(value: unknown, fallback = 0): number {
 function toNullableCoordinate(value: unknown): number | null {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
-  if (numeric === 0) return null;
   return numeric;
 }
 
@@ -217,7 +226,7 @@ function parseTimeWindow(url: URL, now = Date.now()) {
   };
 }
 
-function parseInterval(url: URL, spanMs: number): BotAnalyticsInterval {
+function parseInterval(url: URL, spanMs: number): RequestObservationInterval {
   const raw = url.searchParams.get("interval");
   if (raw === "minute" && spanMs <= 24 * 60 * 60 * 1000) return "minute";
   if (raw === "hour") return "hour";
@@ -228,7 +237,7 @@ function parseInterval(url: URL, spanMs: number): BotAnalyticsInterval {
   return "day";
 }
 
-function intervalToBucketMs(interval: BotAnalyticsInterval) {
+function intervalToBucketMs(interval: RequestObservationInterval) {
   if (interval === "minute") return 60 * 1000;
   if (interval === "hour") return ONE_HOUR_MS;
   if (interval === "week") return 7 * 24 * ONE_HOUR_MS;
@@ -257,14 +266,6 @@ function parseDetailCursor(url: URL): DetailCursor | null {
   }
 }
 
-function analyticsDatasetIdentifier(value: string): string {
-  const name = value.trim();
-  if (!/^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/.test(name)) {
-    throw new Error("Invalid Analytics Engine dataset name");
-  }
-  return name;
-}
-
 function analyticsSqlString(value: string): string {
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
 }
@@ -273,10 +274,10 @@ function normalizeObservationCategory(
   value: unknown,
 ): RequestObservationCategory | null {
   const category = String(value || "");
-  if (category === "high" || category === "high_threat") {
+  if (category === "high_threat") {
     return "high_threat";
   }
-  if (category === "medium" || category === "medium_threat") {
+  if (category === "medium_threat") {
     return "medium_threat";
   }
   if (category === "custom_block") {
@@ -285,150 +286,89 @@ function normalizeObservationCategory(
   return null;
 }
 
-function buildBotAnalyticsSql(input: {
-  dataset: string;
-  from: number;
-  to: number;
-  limit: number;
-  cursor?: DetailCursor | null;
-  includeDoubles?: boolean;
-}) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
-  const fromSeconds = Math.floor(input.from / 1000);
-  const toSeconds = Math.ceil(input.to / 1000);
-  const doubleSelect = input.includeDoubles
-    ? `,
-      double1 AS receivedAt,
-      double2 AS asn,
-      double3 AS latitude,
-      double4 AS longitude,
-      double5 AS botScore,
-      double6 AS userAgentLength`
-    : "";
-  const cursorFilter = input.cursor
-    ? `
-      AND (
-        timestamp < toDateTime(${analyticsSqlString(input.cursor.timestamp)})
-        ${
-          input.includeDoubles
-            ? `OR (
-          timestamp = toDateTime(${analyticsSqlString(input.cursor.timestamp)})
-          AND double1 < ${input.cursor.receivedAt}
-        )`
-            : ""
-        }
-      )`
-    : "";
-  return `
-    SELECT
-      timestamp,
-      _sample_interval AS sampleWeight,
-      blob1 AS siteId,
-      blob2 AS kind,
-      blob3 AS category,
-      blob4 AS reasons,
-      blob5 AS ip,
-      blob6 AS userAgent,
-      blob7 AS origin,
-      blob8 AS hostname,
-      blob9 AS pathname,
-      blob10 AS country,
-      blob11 AS region,
-      blob12 AS city,
-      blob13 AS continent,
-      blob14 AS colo,
-      blob15 AS asnText,
-      blob16 AS asOrganization,
-      blob17 AS verifiedBotCategory,
-      blob18 AS rayId,
-      '' AS traceId,
-      '' AS metadataJson${doubleSelect}
-    FROM ${dataset}
-    WHERE timestamp >= toDateTime(${fromSeconds})
-      AND timestamp <= toDateTime(${toSeconds})
-      AND ${ABNORMAL_CATEGORY_SQL_FILTER}${cursorFilter}
-    ORDER BY timestamp DESC${input.includeDoubles ? ", double1 DESC" : ""}
-    LIMIT ${input.limit}
-    FORMAT JSONEachRow
-  `;
+function requestTimeFilter(input: { from: number; to: number }): string {
+  return `timestamp >= toDateTime(${Math.floor(input.from / 1000)}) AND timestamp <= toDateTime(${Math.ceil(input.to / 1000)}) AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}`;
 }
 
-function buildNormalAnalyticsSql(input: {
-  dataset: string;
-  from: number;
-  to: number;
-  limit: number;
-  cursor?: DetailCursor | null;
-  includeDoubles?: boolean;
-}) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
-  const fromSeconds = Math.floor(input.from / 1000);
-  const toSeconds = Math.ceil(input.to / 1000);
-  const doubleSelect = input.includeDoubles
-    ? `,
+function requestCategoryFilter(source: DetailSource): string {
+  return source === "normal"
+    ? NORMAL_CATEGORY_SQL_FILTER
+    : ABNORMAL_CATEGORY_SQL_FILTER;
+}
+
+function requestCursorFilter(cursor?: DetailCursor | null): string {
+  if (!cursor) return "";
+  return `AND (timestamp < toDateTime(${analyticsSqlString(cursor.timestamp)}) OR (timestamp = toDateTime(${analyticsSqlString(cursor.timestamp)}) AND double1 < ${cursor.receivedAt}))`;
+}
+
+function requestRowSelect(): string {
+  return `
+      timestamp,
+      _sample_interval AS sampleWeight,
+      index1 AS siteId,
+      blob1 AS kind,
+      blob2 AS category,
+      blob3 AS reasons,
+      blob4 AS ip,
+      blob5 AS userAgent,
+      blob6 AS origin,
+      blob7 AS hostname,
+      blob8 AS pathname,
+      blob9 AS country,
+      blob10 AS region,
+      blob11 AS city,
+      blob12 AS continent,
+      blob13 AS colo,
+      blob14 AS asOrganization,
+      blob15 AS verifiedBotCategory,
+      blob16 AS rayId,
+      blob17 AS traceId,
+      blob18 AS requestMethod,
+      blob19 AS httpProtocol,
+      blob20 AS metadataJson,
       double1 AS receivedAt,
       double2 AS eventAt,
       double3 AS edgeLatencyMs,
       double4 AS asn,
       double5 AS latitude,
       double6 AS longitude,
-      double7 AS userAgentLength,
-      double8 AS latencySchemaVersion`
-    : "";
-  const cursorFilter = input.cursor
-    ? `
-      AND (
-        timestamp < toDateTime(${analyticsSqlString(input.cursor.timestamp)})
-        ${
-          input.includeDoubles
-            ? `OR (
-          timestamp = toDateTime(${analyticsSqlString(input.cursor.timestamp)})
-          AND double1 < ${input.cursor.receivedAt}
-        )`
-            : ""
-        }
-      )`
-    : "";
+      double7 AS botScore,
+      double8 AS userAgentLength,
+      double9 AS clientTcpRtt,
+      double10 AS clientQuicRtt,
+      double11 AS tlsClientHelloLength,
+      double19 AS flags,
+      double20 AS schemaVersion`;
+}
+
+function buildRequestAnalyticsSql(input: {
+  from: number;
+  to: number;
+  limit: number;
+  source: DetailSource;
+  cursor?: DetailCursor | null;
+}) {
   return `
-    SELECT
-      timestamp,
-      _sample_interval AS sampleWeight,
-      blob1 AS siteId,
-      blob2 AS kind,
-      blob3 AS origin,
-      blob4 AS hostname,
-      blob5 AS pathname,
-      blob6 AS country,
-      blob7 AS region,
-      blob8 AS city,
-      blob9 AS continent,
-      blob10 AS colo,
-      blob11 AS asnText,
-      blob12 AS asOrganization,
-      blob13 AS rayId,
-      blob14 AS traceId,
-      blob15 AS requestMethod,
-      blob16 AS metadataJson${doubleSelect}
-    FROM ${dataset}
-    WHERE timestamp >= toDateTime(${fromSeconds})
-      AND timestamp <= toDateTime(${toSeconds})${cursorFilter}
-    ORDER BY timestamp DESC${input.includeDoubles ? ", double1 DESC" : ""}
+    SELECT ${requestRowSelect()}
+    FROM ${REQUEST_ANALYTICS_DATASET}
+    WHERE ${requestTimeFilter(input)}
+      AND ${requestCategoryFilter(input.source)}
+      ${requestCursorFilter(input.cursor)}
+    ORDER BY timestamp DESC, double1 DESC
     LIMIT ${input.limit}
     FORMAT JSONEachRow
   `;
 }
 
 function buildCountByBucketSql(input: {
-  dataset: string;
   from: number;
   to: number;
   bucketMs: number;
-  interval: BotAnalyticsInterval;
+  interval: RequestObservationInterval;
   timeZone: string;
   source: "normal" | "abnormal";
   includeLatency?: boolean;
 }) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
   const bucketSeconds = Math.max(60, Math.floor(input.bucketMs / 1000));
@@ -446,17 +386,12 @@ function buildCountByBucketSql(input: {
       quantileExactWeighted(0.95)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p95LatencyMs,
       quantileExactWeighted(0.99)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p99LatencyMs`
       : "";
-  const categoryFilter =
-    input.source === "abnormal"
-      ? `
-      AND ${ABNORMAL_CATEGORY_SQL_FILTER}`
-      : "";
   const categorySelect =
     input.source === "abnormal"
       ? `,
-      sumIf(_sample_interval, blob3 IN ('medium', 'medium_threat')) AS mediumThreatCount,
-      sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreatCount,
-      sumIf(_sample_interval, blob3 = 'custom_block') AS customBlockedCount`
+      sumIf(_sample_interval, blob2 = 'medium_threat') AS mediumThreatCount,
+      sumIf(_sample_interval, blob2 = 'high_threat') AS highThreatCount,
+      sumIf(_sample_interval, blob2 = 'custom_block') AS customBlockedCount`
       : `,
       0 AS mediumThreatCount,
       0 AS highThreatCount,
@@ -464,29 +399,35 @@ function buildCountByBucketSql(input: {
   const businessEventSelect =
     input.source === "normal"
       ? `,
-      sumIf(_sample_interval, blob2 = 'pageview') AS pageviewCount,
-      sumIf(_sample_interval, blob2 = 'leave') AS leaveCount,
-      sumIf(_sample_interval, blob2 = 'visibility') AS visibilityCount,
-      sumIf(_sample_interval, blob2 = 'custom_event') AS customEventCount,
-      sumIf(_sample_interval, blob2 = 'identify') AS identifyCount`
+      sumIf(_sample_interval, blob1 = 'pageview') AS pageviewCount,
+      0 AS leaveCount,
+      0 AS visibilityCount,
+      sumIf(_sample_interval, blob1 = 'custom_event') AS customEventCount,
+      0 AS identifyCount`
       : `,
       0 AS pageviewCount,
       0 AS leaveCount,
       0 AS visibilityCount,
       0 AS customEventCount,
       0 AS identifyCount`;
+  const normalEventTotals =
+    input.source === "normal"
+      ? `sumIf(_sample_interval, blob1 = 'pageview') AS pageviews,
+      sumIf(_sample_interval, blob1 = 'custom_event') AS customEvents`
+      : `0 AS pageviews,
+      0 AS customEvents`;
   return `
     SELECT
       ${bucketExpression} AS timestampMs,
       max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS weightedRequestCount,
       sum(_sample_interval) AS count,
-      sumIf(_sample_interval, blob2 = 'pageview') AS pageviews,
-      sumIf(_sample_interval, blob2 = 'custom_event') AS customEvents${businessEventSelect}${categorySelect}${latencySelect}
-    FROM ${dataset}
+      ${normalEventTotals}${businessEventSelect}${categorySelect}${latencySelect}
+    FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
-      ${categoryFilter}
+      AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
+      AND ${requestCategoryFilter(input.source)}
     GROUP BY timestampMs
     ORDER BY timestampMs ASC
     FORMAT JSONEachRow
@@ -494,36 +435,28 @@ function buildCountByBucketSql(input: {
 }
 
 function buildMapPointsSql(input: {
-  dataset: string;
   from: number;
   to: number;
   source: "normal" | "abnormal";
   limit: number;
 }) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
-  const latColumn = input.source === "normal" ? "double5" : "double3";
-  const lonColumn = input.source === "normal" ? "double6" : "double4";
-  const countryBlob = input.source === "normal" ? "blob6" : "blob10";
-  const categoryFilter =
-    input.source === "abnormal"
-      ? `
-      AND ${ABNORMAL_CATEGORY_SQL_FILTER}`
-      : "";
+  const latColumn = "double5";
+  const lonColumn = "double6";
   return `
     SELECT
       round(${latColumn}, 3) AS latitude,
       round(${lonColumn}, 3) AS longitude,
-      ${countryBlob} AS country,
+      blob9 AS country,
       max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS pointCount
-    FROM ${dataset}
+    FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
-      AND ${latColumn} != 0
-      AND ${lonColumn} != 0
-      ${categoryFilter}
+      AND bitAnd(toInt64(double19), ${REQUEST_ANALYTICS_FLAGS.coordinatePresent}) != 0
+      AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
+      AND ${requestCategoryFilter(input.source)}
     GROUP BY latitude, longitude, country
     ORDER BY pointCount DESC
     LIMIT ${input.limit}
@@ -532,51 +465,36 @@ function buildMapPointsSql(input: {
 }
 
 function buildNetworkDimensionSql(input: {
-  dataset: string;
   from: number;
   to: number;
   source: "normal" | "abnormal";
   dimension: NetworkDimension;
 }) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
-  const columns =
-    input.source === "abnormal"
-      ? {
-          asOrganization: ["blob16 AS label"],
-          asn: ["blob15 AS label"],
-          country: ["blob10 AS label"],
-          region: ["blob11 AS label", "blob10 AS country"],
-          city: ["blob12 AS label", "blob10 AS country", "blob11 AS region"],
-          colo: ["blob14 AS label"],
-        }
-      : {
-          asOrganization: ["blob12 AS label"],
-          asn: ["blob11 AS label"],
-          country: ["blob6 AS label"],
-          region: ["blob7 AS label", "blob6 AS country"],
-          city: ["blob8 AS label", "blob6 AS country", "blob7 AS region"],
-          colo: ["blob10 AS label"],
-        };
+  const columns = {
+    asOrganization: ["blob14 AS label"],
+    asn: ["double4 AS label"],
+    country: ["blob9 AS label"],
+    region: ["blob10 AS label", "blob9 AS country"],
+    city: ["blob11 AS label", "blob9 AS country", "blob10 AS region"],
+    colo: ["blob13 AS label"],
+  };
   const groupColumns = columns[input.dimension];
   const threatSelect =
     input.source === "abnormal"
-      ? ",\n      sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat"
+      ? ",\n      sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat"
       : ",\n      0 AS highThreat";
-  const categoryFilter =
-    input.source === "abnormal"
-      ? `\n      AND ${ABNORMAL_CATEGORY_SQL_FILTER}`
-      : "";
   return `
     SELECT
       ${groupColumns.join(",\n      ")},
       max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS count${threatSelect}
-    FROM ${dataset}
+    FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
-      ${categoryFilter}
+      AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
+      AND ${requestCategoryFilter(input.source)}
     GROUP BY ${groupColumns.map((column) => column.split(" AS ")[1]).join(", ")}
     ORDER BY count DESC
     LIMIT ${NETWORK_DIMENSION_LIMIT}
@@ -585,28 +503,26 @@ function buildNetworkDimensionSql(input: {
 }
 
 function buildSourceSummarySql(input: {
-  dataset: string;
   from: number;
   to: number;
   source: DetailSource;
   includeLatency?: boolean;
 }) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
   const columns =
     input.source === "abnormal"
       ? `
-      sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat,
-      sumIf(_sample_interval, blob3 IN ('medium', 'medium_threat')) AS mediumThreat,
-      sumIf(_sample_interval, blob3 = 'custom_block') AS customBlocked,
-      count(DISTINCT blob1) AS affectedSites,
-      count(DISTINCT blob15) AS uniqueAsns,
-      count(DISTINCT blob10) AS uniqueCountries`
+      sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat,
+      sumIf(_sample_interval, blob2 = 'medium_threat') AS mediumThreat,
+      sumIf(_sample_interval, blob2 = 'custom_block') AS customBlocked,
+      count(DISTINCT index1) AS affectedSites,
+      count(DISTINCT double4) AS uniqueAsns,
+      count(DISTINCT blob9) AS uniqueCountries`
       : `
-      count(DISTINCT blob1) AS affectedSites,
-      count(DISTINCT blob11) AS uniqueAsns,
-      count(DISTINCT blob6) AS uniqueCountries`;
+      count(DISTINCT index1) AS affectedSites,
+      count(DISTINCT double4) AS uniqueAsns,
+      count(DISTINCT blob9) AS uniqueCountries`;
   const latencyColumns =
     input.source === "normal" && input.includeLatency !== false
       ? `,
@@ -621,90 +537,83 @@ function buildSourceSummarySql(input: {
     SELECT
       sum(_sample_interval) AS total,
       max(_sample_interval) AS maxSampleInterval,${columns}${latencyColumns}
-    FROM ${dataset}
+    FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
-      ${input.source === "abnormal" ? `AND ${ABNORMAL_CATEGORY_SQL_FILTER}` : ""}
+      AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
+      AND ${requestCategoryFilter(input.source)}
     FORMAT JSONEachRow
   `;
 }
 
 function buildDimensionSql(input: {
-  dataset: string;
   from: number;
   to: number;
   source: DetailSource;
   group: DimensionGroup;
   tab: string;
 }) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
   const abnormal = input.source === "abnormal";
   const fields: Record<string, string[]> = abnormal
     ? {
-        reason: ["blob4 AS label"],
-        category: [
-          "multiIf(blob3 IN ('high', 'high_threat'), 'high_threat', blob3 IN ('medium', 'medium_threat'), 'medium_threat', 'custom_block') AS label",
-        ],
-        kind: ["blob2 AS label"],
+        reason: ["blob3 AS label"],
+        category: ["blob2 AS label"],
+        kind: ["blob1 AS label"],
         botScoreBucket: [
-          "if(double5 <= 0, '', if(double5 < 20, '1-19', if(double5 < 40, '20-39', if(double5 < 60, '40-59', if(double5 < 80, '60-79', '80-99'))))) AS label",
+          `if(bitAnd(toInt64(double19), ${REQUEST_ANALYTICS_FLAGS.botScorePresent}) = 0, '', if(double7 < 20, '1-19', if(double7 < 40, '20-39', if(double7 < 60, '40-59', if(double7 < 80, '60-79', '80-99'))))) AS label`,
         ],
-        verifiedBotCategory: ["blob17 AS label"],
-        site: ["blob1 AS label"],
-        hostname: ["blob8 AS label"],
-        pathname: ["blob9 AS label"],
-        origin: ["blob7 AS label"],
-        asOrganization: ["blob16 AS label"],
-        asn: ["blob15 AS label"],
-        country: ["blob10 AS label"],
-        region: ["blob11 AS label", "blob10 AS country"],
-        city: ["blob12 AS label", "blob10 AS country", "blob11 AS region"],
-        colo: ["blob14 AS label"],
-        ip: ["blob5 AS label"],
-        userAgent: ["blob6 AS label"],
+        verifiedBotCategory: ["blob15 AS label"],
+        site: ["index1 AS label"],
+        hostname: ["blob7 AS label"],
+        pathname: ["blob8 AS label"],
+        origin: ["blob6 AS label"],
+        asOrganization: ["blob14 AS label"],
+        asn: ["double4 AS label"],
+        country: ["blob9 AS label"],
+        region: ["blob10 AS label", "blob9 AS country"],
+        city: ["blob11 AS label", "blob9 AS country", "blob10 AS region"],
+        colo: ["blob13 AS label"],
+        ip: ["blob4 AS label"],
+        userAgent: ["blob5 AS label"],
         userAgentLengthBucket: [
-          "if(double6 <= 0, '', if(double6 < 80, '1-79', if(double6 < 160, '80-159', if(double6 < 256, '160-255', if(double6 < 512, '256-511', '512+'))))) AS label",
+          "if(double8 <= 0, '', if(double8 < 80, '1-79', if(double8 < 160, '80-159', if(double8 < 256, '160-255', if(double8 < 512, '256-511', '512+'))))) AS label",
         ],
-        ipPrefix: ["blob5 AS label"],
+        ipPrefix: ["blob4 AS label"],
       }
     : {
-        site: ["blob1 AS label"],
-        hostname: ["blob4 AS label"],
-        pathname: ["blob5 AS label"],
-        origin: ["blob3 AS label"],
-        asOrganization: ["blob12 AS label"],
-        asn: ["blob11 AS label"],
-        country: ["blob6 AS label"],
-        region: ["blob7 AS label", "blob6 AS country"],
-        city: ["blob8 AS label", "blob6 AS country", "blob7 AS region"],
-        colo: ["blob10 AS label"],
+        site: ["index1 AS label"],
+        hostname: ["blob7 AS label"],
+        pathname: ["blob8 AS label"],
+        origin: ["blob6 AS label"],
+        asOrganization: ["blob14 AS label"],
+        asn: ["double4 AS label"],
+        country: ["blob9 AS label"],
+        region: ["blob10 AS label", "blob9 AS country"],
+        city: ["blob11 AS label", "blob9 AS country", "blob10 AS region"],
+        colo: ["blob13 AS label"],
       };
   const columns = fields[input.tab];
   if (!columns || !DIMENSION_TABS[input.group].includes(input.tab))
     throw new Error("Invalid analytics dimension");
   const groupBy = columns.map((column) => column.split(" AS ")[1]).join(", ");
-  return `SELECT ${columns.join(", ")}, max(_sample_interval) AS maxSampleInterval, sum(_sample_interval) AS count${abnormal ? ", sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat" : ", 0 AS highThreat"} FROM ${dataset} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds})${abnormal ? ` AND ${ABNORMAL_CATEGORY_SQL_FILTER}` : ""} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
+  return `SELECT ${columns.join(", ")}, max(_sample_interval) AS maxSampleInterval, sum(_sample_interval) AS count${abnormal ? ", sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat" : ", 0 AS highThreat"} FROM ${REQUEST_ANALYTICS_DATASET} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds}) AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND ${requestCategoryFilter(input.source)} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
 }
 
-function buildReasonSummarySql(input: {
-  dataset: string;
-  from: number;
-  to: number;
-}) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
+function buildReasonSummarySql(input: { from: number; to: number }) {
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
   return `
     SELECT
-      blob4 AS reasons,
+      blob3 AS reasons,
       max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS weight
-    FROM ${dataset}
+    FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
-      AND ${ABNORMAL_CATEGORY_SQL_FILTER}
+      AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
+      AND ${requestCategoryFilter("abnormal")}
     GROUP BY reasons
     ORDER BY weight DESC
     LIMIT 100
@@ -712,25 +621,21 @@ function buildReasonSummarySql(input: {
   `;
 }
 
-function buildAsnSummarySql(input: {
-  dataset: string;
-  from: number;
-  to: number;
-}) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
+function buildAsnSummarySql(input: { from: number; to: number }) {
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
   return `
     SELECT
-      blob15 AS asn,
-      blob16 AS asOrganization,
+      double4 AS asn,
+      blob14 AS asOrganization,
       max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS count,
-      sumIf(_sample_interval, blob3 IN ('high', 'high_threat')) AS highThreat
-    FROM ${dataset}
+      sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat
+    FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
-      AND ${ABNORMAL_CATEGORY_SQL_FILTER}
+      AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
+      AND ${requestCategoryFilter("abnormal")}
     GROUP BY asn, asOrganization
     ORDER BY count DESC
     LIMIT 30
@@ -738,105 +643,32 @@ function buildAsnSummarySql(input: {
   `;
 }
 
-function buildBotAnalyticsDetailSql(input: {
-  dataset: string;
+function buildRequestAnalyticsDetailSql(input: {
   since: number;
   traceId?: string;
   rayId?: string;
-  includeDoubles?: boolean;
-  includeExtendedIdentity?: boolean;
 }) {
-  const dataset = analyticsDatasetIdentifier(input.dataset);
   const sinceSeconds = Math.floor(input.since / 1000);
-  const doubleSelect = input.includeDoubles
-    ? `,
-      double1 AS receivedAt,
-      double2 AS asn,
-      double3 AS latitude,
-      double4 AS longitude,
-      double5 AS botScore,
-      double6 AS userAgentLength`
-    : "";
-  const extendedIdentitySelect = input.includeExtendedIdentity
-    ? `blob19 AS traceId,
-      blob20 AS metadataJson`
-    : `'' AS traceId,
-      '' AS metadataJson`;
-  // Existing datasets may have been created before traceId and metadataJson
-  // were added, so blob19/blob20 are not guaranteed to exist. rayId is the
-  // last compatible identity field in the original layout.
   const identityFilters = [
-    input.rayId ? `blob18 = ${analyticsSqlString(input.rayId)}` : "",
+    input.traceId ? `blob17 = ${analyticsSqlString(input.traceId)}` : "",
+    input.rayId ? `blob16 = ${analyticsSqlString(input.rayId)}` : "",
   ].filter(Boolean);
   return `
-    SELECT
-      timestamp,
-      _sample_interval AS sampleWeight,
-      blob1 AS siteId,
-      blob2 AS kind,
-      blob3 AS category,
-      blob4 AS reasons,
-      blob5 AS ip,
-      blob6 AS userAgent,
-      blob7 AS origin,
-      blob8 AS hostname,
-      blob9 AS pathname,
-      blob10 AS country,
-      blob11 AS region,
-      blob12 AS city,
-      blob13 AS continent,
-      blob14 AS colo,
-      blob15 AS asnText,
-      blob16 AS asOrganization,
-      blob17 AS verifiedBotCategory,
-      blob18 AS rayId,
-      ${extendedIdentitySelect}${doubleSelect ? `,${doubleSelect.slice(1)}` : ""}
-    FROM ${dataset}
+    SELECT ${requestRowSelect()}
+    FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${sinceSeconds})
-      AND ${ABNORMAL_CATEGORY_SQL_FILTER}
+      AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
+      AND ${requestCategoryFilter("abnormal")}
       AND (${identityFilters.join(" OR ") || "0"})
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, double1 DESC
     LIMIT 1
     FORMAT JSONEachRow
   `;
 }
 
-async function readBotAnalyticsConfig(env: Env): Promise<BotAnalyticsConfig> {
-  const raw = await readConfig(env, SYSTEM_BOT_ANALYTICS_CONFIG_KEY);
-  return raw ? normalizeBotAnalyticsConfig(raw) : defaultBotAnalyticsConfig();
-}
-
-function applyUpdateInput(
-  current: BotAnalyticsConfig,
-  input: {
-    accountId?: string;
-    apiToken?: string;
-    clearApiToken?: boolean;
-  },
-): BotAnalyticsConfig {
-  const next = normalizeBotAnalyticsConfig(
-    current as unknown as Record<string, unknown>,
-  );
-  if (input.accountId !== undefined) next.accountId = input.accountId;
-  if (input.clearApiToken) {
-    next.apiTokenEncrypted = "";
-    next.apiTokenHint = "";
-    next.configured = false;
-  }
-  return next;
-}
-
-function disabledResponseData(env: Env, config: BotAnalyticsConfig) {
-  const availability = analyticsEngineAvailability(env);
-  return {
-    ok: true,
-    data: redactBotAnalyticsConfig(config, availability),
-  };
-}
-
-function emptyBotAnalyticsResponse(
+function emptyRequestObservationResponse(
   env: Env,
-  config: BotAnalyticsConfig,
+  config: AnalyticsEngineConfig,
   error: string,
 ) {
   const now = Date.now();
@@ -844,7 +676,10 @@ function emptyBotAnalyticsResponse(
     ok: true,
     configured: false,
     generatedAt: now,
-    config: redactBotAnalyticsConfig(config, analyticsEngineAvailability(env)),
+    config: redactAnalyticsEngineConfig(
+      config,
+      analyticsEngineAvailability(env),
+    ),
     sampling: analyticsEngineSamplingMeta({
       observedSampled: false,
       aggregatesWeighted: false,
@@ -923,7 +758,7 @@ function requireAdmin(actor: AdminActor, request: Request): Response | null {
   if (actor instanceof Response) return actor;
   if (!actor.isAdmin) {
     return forb(
-      "Only system admin can manage bot analytics settings",
+      "Only system admin can manage request observation settings",
       undefined,
       request,
     );
@@ -939,29 +774,26 @@ function parseJsonEachRow(text: string): Record<string, unknown>[] {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-function parseAnalyticsTimestampMs(value: unknown): number {
-  const text = String(value || "").trim();
-  if (!text) return 0;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(text)
-    ? `${text.replace(" ", "T")}Z`
-    : text;
-  const parsed = Date.parse(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+function requestAnalyticsFlagPresent(
+  value: unknown,
+  flag: (typeof REQUEST_ANALYTICS_FLAGS)[keyof typeof REQUEST_ANALYTICS_FLAGS],
+): boolean {
+  return hasRequestFlag(Math.trunc(toFiniteNumber(value)), flag);
 }
 
-function normalizeBotRow(
+function normalizeAbnormalRow(
   row: Record<string, unknown>,
   sites: Map<string, { name: string; domain: string }>,
-): BotAnalyticsEvent {
+): RequestObservationEvent {
   const siteId = clampString(String(row.siteId || ""), 128);
   const site = sites.get(siteId);
   const reasons = String(row.reasons || "")
     .split(",")
     .map((reason) => reason.trim())
     .filter(Boolean);
-  const botScore = toFiniteNumber(row.botScore, 0);
-  const receivedAt =
-    toFiniteNumber(row.receivedAt) || parseAnalyticsTimestampMs(row.timestamp);
+  const flags = Math.trunc(toFiniteNumber(row.flags));
+  const botScore = toFiniteNumber(row.botScore, Number.NaN);
+  const receivedAt = toFiniteNumber(row.receivedAt);
   return {
     timestamp: clampString(String(row.timestamp || ""), 64),
     receivedAt,
@@ -969,7 +801,7 @@ function normalizeBotRow(
     siteName: clampString(site?.name || siteId || "Unknown site", 160),
     siteDomain: clampString(site?.domain || "", 255),
     kind: clampString(String(row.kind || ""), 40),
-    category: normalizeObservationCategory(row.category) ?? "medium_threat",
+    category: normalizeObservationCategory(row.category) ?? "custom_block",
     reasons,
     ip: clampString(String(row.ip || ""), 80),
     userAgent: clampString(String(row.userAgent || ""), 1024),
@@ -981,34 +813,55 @@ function normalizeBotRow(
     city: clampString(String(row.city || ""), 128),
     continent: clampString(String(row.continent || ""), 32),
     colo: clampString(String(row.colo || ""), 16),
-    asn: Math.trunc(toFiniteNumber(row.asn || row.asnText)),
+    asn: Math.trunc(toFiniteNumber(row.asn)),
     asOrganization: clampString(String(row.asOrganization || ""), 255),
     verifiedBotCategory: clampString(String(row.verifiedBotCategory || ""), 80),
     rayId: clampString(String(row.rayId || ""), 120),
     traceId: clampString(String(row.traceId || ""), 128),
+    requestMethod: clampString(String(row.requestMethod || ""), 16),
+    httpProtocol: clampString(String(row.httpProtocol || ""), 40),
     metadataJson: clampString(String(row.metadataJson || ""), 8000),
-    latitude: toNullableCoordinate(row.latitude),
-    longitude: toNullableCoordinate(row.longitude),
-    botScore: botScore > 0 ? botScore : null,
+    latitude: requestAnalyticsFlagPresent(
+      flags,
+      REQUEST_ANALYTICS_FLAGS.coordinatePresent,
+    )
+      ? toNullableCoordinate(row.latitude)
+      : null,
+    longitude: requestAnalyticsFlagPresent(
+      flags,
+      REQUEST_ANALYTICS_FLAGS.coordinatePresent,
+    )
+      ? toNullableCoordinate(row.longitude)
+      : null,
+    botScore:
+      requestAnalyticsFlagPresent(
+        flags,
+        REQUEST_ANALYTICS_FLAGS.botScorePresent,
+      ) && Number.isFinite(botScore)
+        ? botScore
+        : null,
     userAgentLength: Math.trunc(toFiniteNumber(row.userAgentLength)),
+    flags,
   };
 }
 
 function normalizeNormalRow(
   row: Record<string, unknown>,
   sites: Map<string, { name: string; domain: string }>,
-): NormalAnalyticsEvent {
+): RequestObservationNormalEvent {
   const siteId = clampString(String(row.siteId || ""), 128);
   const site = sites.get(siteId);
-  const receivedAt =
-    toFiniteNumber(row.receivedAt) || parseAnalyticsTimestampMs(row.timestamp);
-  const eventAt = toFiniteNumber(row.eventAt) || receivedAt;
-  const latencySchemaVersion = Math.trunc(
-    toFiniteNumber(row.latencySchemaVersion),
-  );
+  const receivedAt = toFiniteNumber(row.receivedAt);
+  const eventAt = toFiniteNumber(row.eventAt);
+  const schemaVersion = Math.trunc(toFiniteNumber(row.schemaVersion));
+  const flags = Math.trunc(toFiniteNumber(row.flags));
   const rawEdgeLatencyMs = toFiniteNumber(row.edgeLatencyMs, Number.NaN);
   const edgeLatencyMs =
-    latencySchemaVersion === NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION &&
+    schemaVersion === REQUEST_ANALYTICS_SCHEMA_VERSION &&
+    requestAnalyticsFlagPresent(
+      flags,
+      REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent,
+    ) &&
     Number.isFinite(rawEdgeLatencyMs) &&
     rawEdgeLatencyMs >= 0 &&
     rawEdgeLatencyMs <= MAX_WORKER_LATENCY_MS
@@ -1019,7 +872,7 @@ function normalizeNormalRow(
     receivedAt,
     eventAt,
     edgeLatencyMs,
-    latencySchemaVersion,
+    schemaVersion,
     siteId,
     siteName: clampString(site?.name || siteId || "Unknown site", 160),
     siteDomain: clampString(site?.domain || "", 255),
@@ -1032,32 +885,49 @@ function normalizeNormalRow(
     city: clampString(String(row.city || ""), 128),
     continent: clampString(String(row.continent || ""), 32),
     colo: clampString(String(row.colo || ""), 16),
-    asn: Math.trunc(toFiniteNumber(row.asn || row.asnText)),
+    asn: Math.trunc(toFiniteNumber(row.asn)),
     asOrganization: clampString(String(row.asOrganization || ""), 255),
     rayId: clampString(String(row.rayId || ""), 120),
     traceId: clampString(String(row.traceId || ""), 128),
     requestMethod: clampString(String(row.requestMethod || ""), 16),
     metadataJson: clampString(String(row.metadataJson || ""), 8000),
-    latitude: toNullableCoordinate(row.latitude),
-    longitude: toNullableCoordinate(row.longitude),
+    latitude: requestAnalyticsFlagPresent(
+      flags,
+      REQUEST_ANALYTICS_FLAGS.coordinatePresent,
+    )
+      ? toNullableCoordinate(row.latitude)
+      : null,
+    longitude: requestAnalyticsFlagPresent(
+      flags,
+      REQUEST_ANALYTICS_FLAGS.coordinatePresent,
+    )
+      ? toNullableCoordinate(row.longitude)
+      : null,
     userAgentLength: Math.trunc(toFiniteNumber(row.userAgentLength)),
+    flags,
   };
 }
 
-function serializeBotListEvent(event: BotAnalyticsEvent) {
-  const { metadataJson: _metadataJson, ...listEvent } = event;
+function serializeAbnormalListEvent(event: RequestObservationEvent) {
+  const {
+    metadataJson: _metadataJson,
+    requestMethod: _requestMethod,
+    httpProtocol: _httpProtocol,
+    flags: _flags,
+    ...listEvent
+  } = event;
   return listEvent;
 }
 
-function serializeNormalListEvent(event: NormalAnalyticsEvent) {
+function serializeNormalListEvent(event: RequestObservationNormalEvent) {
   // Normal requests open their Drawer from the selected list row, so retain
   // the compact metadata payload instead of requiring a second detail query.
-  const { latencySchemaVersion: _latencySchemaVersion, ...listEvent } = event;
+  const { schemaVersion: _schemaVersion, flags: _flags, ...listEvent } = event;
   return listEvent;
 }
 
 function detailCursorForEvent(
-  event: BotAnalyticsEvent | NormalAnalyticsEvent,
+  event: RequestObservationEvent | RequestObservationNormalEvent,
 ): DetailCursor {
   return {
     timestamp: event.timestamp,
@@ -1065,32 +935,10 @@ function detailCursorForEvent(
   };
 }
 
-function shouldRetryBotAnalyticsWithoutDoubles(result: {
-  status: number;
-  body: string;
-}): boolean {
-  if (result.status !== 422) return false;
-  const body = result.body.toLowerCase();
-  return (
-    body.includes("unable to find type of column") && /double\d+/.test(body)
-  );
-}
-
-function shouldRetryBotAnalyticsWithoutExtendedIdentity(result: {
-  status: number;
-  body: string;
-}): boolean {
-  if (result.status !== 422) return false;
-  const body = result.body.toLowerCase();
-  return (
-    body.includes("unable to find type of column") && /blob(?:19|20)/.test(body)
-  );
-}
-
 function buildTrendBuckets(
   from: number,
   to: number,
-  interval: BotAnalyticsInterval,
+  interval: RequestObservationInterval,
   timeZone: string,
 ) {
   const buckets: number[] = [];
@@ -1108,7 +956,7 @@ function buildTrendBuckets(
 
 function bucketTimestamp(
   timestampMs: number,
-  interval: BotAnalyticsInterval,
+  interval: RequestObservationInterval,
   timeZone: string,
 ): number {
   return startOfZonedInterval(timestampMs, interval, timeZone);
@@ -1116,7 +964,7 @@ function bucketTimestamp(
 
 async function siteLookup(
   env: Env,
-  events: Array<BotAnalyticsEvent | NormalAnalyticsEvent>,
+  events: Array<RequestObservationEvent | RequestObservationNormalEvent>,
 ) {
   const ids = [...new Set(events.map((event) => event.siteId).filter(Boolean))];
   return siteLookupByIds(env, ids);
@@ -1250,7 +1098,7 @@ function normalizeAsnRows(rows: Record<string, unknown>[]) {
     .map((row) => ({ ...row, count: Math.max(0, Math.trunc(row.count)) }));
 }
 
-function aggregateNormalEvents(events: NormalAnalyticsEvent[]) {
+function aggregateNormalEvents(events: RequestObservationNormalEvent[]) {
   const uniqueAsns = new Set(events.map((event) => event.asn).filter(Boolean));
   const uniqueCountries = new Set(
     events.map((event) => event.country).filter(Boolean),
@@ -1261,12 +1109,19 @@ function aggregateNormalEvents(events: NormalAnalyticsEvent[]) {
   const latencyValues = events
     .filter(
       (event) =>
-        event.latencySchemaVersion === NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION,
+        event.schemaVersion === REQUEST_ANALYTICS_SCHEMA_VERSION &&
+        requestAnalyticsFlagPresent(
+          event.flags,
+          REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent,
+        ),
     )
     .map((event) => event.edgeLatencyMs)
     .filter(
       (value): value is number =>
-        typeof value === "number" && Number.isFinite(value) && value >= 0,
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value >= 0 &&
+        value <= MAX_WORKER_LATENCY_MS,
     )
     .sort((left, right) => left - right);
   const avgLatencyMs =
@@ -1349,11 +1204,11 @@ function mergeTrendRows(input: {
   from: number;
   to: number;
   bucketMs: number;
-  interval: BotAnalyticsInterval;
+  interval: RequestObservationInterval;
   timeZone: string;
   abnormalRows: Record<string, unknown>[];
   normalRows: Record<string, unknown>[];
-  normalEvents?: NormalAnalyticsEvent[];
+  normalEvents?: RequestObservationNormalEvent[];
 }) {
   const trend = new Map<
     number,
@@ -1494,13 +1349,6 @@ function mergeTrendRows(input: {
     ) {
       current.latencyWeightedSumMs = latencyWeightedSumMs;
       current.latencySampleWeight = latencySampleWeight;
-    } else {
-      const legacyAvgLatencyMs = toFiniteNumber(row.avgLatencyMs, Number.NaN);
-      if (Number.isFinite(legacyAvgLatencyMs) && weightedRequestCount > 0) {
-        current.latencyWeightedSumMs =
-          legacyAvgLatencyMs * weightedRequestCount;
-        current.latencySampleWeight = weightedRequestCount;
-      }
     }
     const p50LatencyMs = toFiniteNumber(row.p50LatencyMs, Number.NaN);
     const p75LatencyMs = toFiniteNumber(row.p75LatencyMs, Number.NaN);
@@ -1523,48 +1371,9 @@ function mergeTrendRows(input: {
       ? p99LatencyMs
       : current.p95LatencyMs;
   }
-  const latencyBuckets = new Map<number, number[]>();
-  for (const event of input.normalEvents ?? []) {
-    if (
-      event.latencySchemaVersion !== NORMAL_ANALYTICS_LATENCY_SCHEMA_VERSION ||
-      typeof event.edgeLatencyMs !== "number" ||
-      !Number.isFinite(event.edgeLatencyMs) ||
-      event.edgeLatencyMs < 0
-    ) {
-      continue;
-    }
-    const timestamp = event.receivedAt || event.eventAt;
-    if (!Number.isFinite(timestamp) || timestamp <= 0) continue;
-    const timestampMs = bucketTimestamp(
-      Number(timestamp),
-      input.interval,
-      input.timeZone,
-    );
-    if (!trend.has(timestampMs)) continue;
-    const values = latencyBuckets.get(timestampMs) ?? [];
-    values.push(event.edgeLatencyMs);
-    latencyBuckets.set(timestampMs, values);
-  }
-  for (const [timestampMs, values] of latencyBuckets.entries()) {
-    const current = trend.get(timestampMs);
-    if (!current) continue;
-    const sortedValues = values.sort((left, right) => left - right);
-    if (current.latencySampleWeight <= 0) {
-      current.latencyWeightedSumMs = sortedValues.reduce(
-        (sum, value) => sum + value,
-        0,
-      );
-      current.latencySampleWeight = sortedValues.length;
-      current.avgLatencyMs =
-        current.latencyWeightedSumMs / current.latencySampleWeight;
-    }
-    current.p50LatencyMs ??= percentile(sortedValues, 0.5);
-    current.p75LatencyMs ??= percentile(sortedValues, 0.75);
-    current.p95LatencyMs ??= percentile(sortedValues, 0.95);
-    current.p99LatencyMs ??= percentile(sortedValues, 0.99);
-  }
   return [...trend.values()].map((point) => {
     const totalCount = point.normalCount + point.abnormalCount;
+    point.count = totalCount;
     point.avgLatencyMs =
       point.latencySampleWeight > 0
         ? point.latencyWeightedSumMs / point.latencySampleWeight
@@ -1638,74 +1447,7 @@ function cloudflareAnalyticsErrorMessage(input: {
   return `${fallback}: ${clampString(body, 500)}`;
 }
 
-export async function handleBotAnalyticsConfigAdmin(
-  req: Request,
-  env: Env,
-): Promise<Response> {
-  const actor = await requireActor(env, req);
-  const authError = requireAdmin(actor, req);
-  if (authError) return authError;
-
-  if (req.method === "GET") {
-    const config = await readBotAnalyticsConfig(env);
-    return jsonResponseFor(req, disabledResponseData(env, config));
-  }
-
-  if (analyticsEngineAvailability(env).analyticsEngineDisabled) {
-    return bad(
-      "Analytics Engine is disabled for this deployment. Enable Analytics Engine in Cloudflare and redeploy before editing bot analytics settings.",
-      "analytics_engine_disabled",
-      req,
-    );
-  }
-
-  if (req.method === "DELETE") {
-    await deleteConfig(env, SYSTEM_BOT_ANALYTICS_CONFIG_KEY);
-    return jsonResponseFor(
-      req,
-      disabledResponseData(env, defaultBotAnalyticsConfig()),
-    );
-  }
-
-  if (req.method !== "POST" && req.method !== "PATCH") return na(req);
-
-  const validation = validateBotAnalyticsUpdateInput(await parseJson(req));
-  if (!validation.ok) return bad(validation.message, undefined, req);
-
-  const current = await readBotAnalyticsConfig(env);
-  const next = applyUpdateInput(current, validation.input);
-  const nextToken = validation.input.apiToken?.trim() || "";
-  if (nextToken) {
-    try {
-      next.apiTokenEncrypted = await encryptBotAnalyticsSecret(env, nextToken);
-      next.apiTokenHint = makeSecretHint(nextToken);
-      next.configured = true;
-    } catch (error) {
-      return bad(
-        error instanceof Error
-          ? error.message
-          : "Unable to encrypt Cloudflare API token",
-        "bot_analytics_secret_encryption_failed",
-        req,
-      );
-    }
-  }
-
-  next.updatedAt = Date.now();
-  next.updatedByUserId = actor instanceof Response ? undefined : actor.user.id;
-
-  const configError = validateBotAnalyticsConfig(next);
-  if (configError) return bad(configError, undefined, req);
-
-  await upsertConfig(
-    env,
-    SYSTEM_BOT_ANALYTICS_CONFIG_KEY,
-    next as unknown as Record<string, unknown>,
-  );
-  return jsonResponseFor(req, disabledResponseData(env, next));
-}
-
-export async function handleBotAnalyticsAdmin(
+export async function handleRequestObservationAdmin(
   req: Request,
   env: Env,
   url: URL,
@@ -1715,32 +1457,39 @@ export async function handleBotAnalyticsAdmin(
   if (authError) return authError;
   if (req.method !== "GET") return na(req);
 
-  const config = await readBotAnalyticsConfig(env);
+  const rawConfig = await readConfig(env, SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY);
+  const config = rawConfig
+    ? normalizeAnalyticsEngineConfig(rawConfig)
+    : defaultAnalyticsEngineConfig();
   if (analyticsEngineAvailability(env).analyticsEngineDisabled) {
     return jsonResponseFor(
       req,
-      emptyBotAnalyticsResponse(env, config, "analytics_engine_disabled"),
+      emptyRequestObservationResponse(env, config, "analytics_engine_disabled"),
     );
   }
 
-  const configError = validateBotAnalyticsConfig(config);
+  const configError = validateAnalyticsEngineConfig(config);
   if (configError || !config.configured || !config.apiTokenEncrypted) {
     return jsonResponseFor(req, {
-      ...emptyBotAnalyticsResponse(
+      ...emptyRequestObservationResponse(
         env,
         config,
-        configError || "bot_analytics_not_configured",
+        configError || "request_observation_not_configured",
       ),
     });
   }
 
   let token: string;
   try {
-    token = await decryptBotAnalyticsSecret(env, config.apiTokenEncrypted);
+    token = await decryptSecret(
+      env,
+      config.apiTokenEncrypted,
+      SECRET_PURPOSES.analyticsEngineSecretEncryption,
+    );
   } catch {
     return bad(
       "Unable to decrypt Cloudflare API token",
-      "bot_analytics_secret_decryption_failed",
+      "request_observation_secret_decryption_failed",
       req,
     );
   }
@@ -1769,66 +1518,27 @@ export async function handleBotAnalyticsAdmin(
   if (url.searchParams.get("detail") === "1" || detailTraceId || detailRayId) {
     if (!detailTraceId && !detailRayId) {
       return bad(
-        "Bot analytics detail requires traceId or rayId",
-        "bot_analytics_detail_missing_id",
+        "Request observation detail requires traceId or rayId",
+        "request_observation_detail_missing_id",
         req,
       );
     }
 
-    const detailSql = buildBotAnalyticsDetailSql({
-      dataset: config.dataset,
+    const detailSql = buildRequestAnalyticsDetailSql({
       since: from,
       traceId: detailTraceId,
       rayId: detailRayId,
-      includeDoubles: true,
-      includeExtendedIdentity: true,
     });
-    let detailResult = await queryCloudflareAnalyticsEngine({
+    const detailResult = await queryCloudflareAnalyticsEngine({
       apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql: detailSql,
     });
-    if (
-      !detailResult.ok &&
-      shouldRetryBotAnalyticsWithoutExtendedIdentity(detailResult)
-    ) {
-      detailResult = await queryCloudflareAnalyticsEngine({
-        apiUrl: analyticsApiUrl,
-        accountId: config.accountId,
-        token,
-        sql: buildBotAnalyticsDetailSql({
-          dataset: config.dataset,
-          since: from,
-          traceId: detailTraceId,
-          rayId: detailRayId,
-          includeDoubles: true,
-          includeExtendedIdentity: false,
-        }),
-      });
-    }
-    if (
-      !detailResult.ok &&
-      shouldRetryBotAnalyticsWithoutDoubles(detailResult)
-    ) {
-      detailResult = await queryCloudflareAnalyticsEngine({
-        apiUrl: analyticsApiUrl,
-        accountId: config.accountId,
-        token,
-        sql: buildBotAnalyticsDetailSql({
-          dataset: config.dataset,
-          since: from,
-          traceId: detailTraceId,
-          rayId: detailRayId,
-          includeDoubles: false,
-          includeExtendedIdentity: false,
-        }),
-      });
-    }
     if (!detailResult.ok) {
       return bad(
         cloudflareAnalyticsErrorMessage(detailResult),
-        "bot_analytics_query_failed",
+        "request_observation_query_failed",
         req,
       );
     }
@@ -1839,21 +1549,23 @@ export async function handleBotAnalyticsAdmin(
     } catch {
       return bad(
         "Cloudflare Analytics Engine returned invalid JSONEachRow data",
-        "bot_analytics_parse_failed",
+        "request_observation_parse_failed",
         req,
       );
     }
 
     const preliminaryEvents = detailRows.map((row) =>
-      normalizeBotRow(row, new Map()),
+      normalizeAbnormalRow(row, new Map()),
     );
     const sites = await siteLookup(env, preliminaryEvents);
-    const detail = detailRows[0] ? normalizeBotRow(detailRows[0], sites) : null;
+    const detail = detailRows[0]
+      ? normalizeAbnormalRow(detailRows[0], sites)
+      : null;
     return jsonResponseFor(req, {
       ok: true,
       configured: true,
       generatedAt,
-      config: redactBotAnalyticsConfig(
+      config: redactAnalyticsEngineConfig(
         config,
         analyticsEngineAvailability(env),
       ),
@@ -1873,48 +1585,28 @@ export async function handleBotAnalyticsAdmin(
     const cursor = parseDetailCursor(url);
     if (url.searchParams.has("cursor") && !cursor) {
       return bad(
-        "Invalid bot analytics page cursor",
-        "bot_analytics_invalid_cursor",
+        "Invalid request observation page cursor",
+        "request_observation_invalid_cursor",
         req,
       );
     }
     const pageLimit = parseLimit(url);
-    const buildSql =
-      source === "abnormal" ? buildBotAnalyticsSql : buildNormalAnalyticsSql;
-    const dataset =
-      source === "abnormal" ? config.dataset : config.normalDataset;
-    let pageResult = await queryCloudflareAnalyticsEngine({
+    const pageResult = await queryCloudflareAnalyticsEngine({
       apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
-      sql: buildSql({
-        dataset,
+      sql: buildRequestAnalyticsSql({
         from,
         to,
         limit: pageLimit + 1,
+        source,
         cursor,
-        includeDoubles: true,
       }),
     });
-    if (!pageResult.ok && shouldRetryBotAnalyticsWithoutDoubles(pageResult)) {
-      pageResult = await queryCloudflareAnalyticsEngine({
-        apiUrl: analyticsApiUrl,
-        accountId: config.accountId,
-        token,
-        sql: buildSql({
-          dataset,
-          from,
-          to,
-          limit: pageLimit + 1,
-          cursor,
-          includeDoubles: false,
-        }),
-      });
-    }
     if (!pageResult.ok) {
       return bad(
         cloudflareAnalyticsErrorMessage(pageResult),
-        "bot_analytics_query_failed",
+        "request_observation_query_failed",
         req,
       );
     }
@@ -1924,7 +1616,7 @@ export async function handleBotAnalyticsAdmin(
     } catch {
       return bad(
         "Cloudflare Analytics Engine returned invalid JSONEachRow data",
-        "bot_analytics_parse_failed",
+        "request_observation_parse_failed",
         req,
       );
     }
@@ -1932,13 +1624,13 @@ export async function handleBotAnalyticsAdmin(
     const rows = pageRows.slice(0, pageLimit);
     const preliminaryEvents = rows.map((row) =>
       source === "abnormal"
-        ? normalizeBotRow(row, new Map())
+        ? normalizeAbnormalRow(row, new Map())
         : normalizeNormalRow(row, new Map()),
     );
     const sites = await siteLookup(env, preliminaryEvents);
     const events = rows.map((row) =>
       source === "abnormal"
-        ? serializeBotListEvent(normalizeBotRow(row, sites))
+        ? serializeAbnormalListEvent(normalizeAbnormalRow(row, sites))
         : serializeNormalListEvent(normalizeNormalRow(row, sites)),
     );
     const lastEvent = preliminaryEvents[preliminaryEvents.length - 1];
@@ -1973,18 +1665,14 @@ export async function handleBotAnalyticsAdmin(
   ) {
     if (!DIMENSION_TABS[dimensionGroup]?.includes(dimensionTab)) {
       return bad(
-        "Invalid bot analytics dimension",
-        "bot_analytics_invalid_dimension",
+        "Invalid request observation dimension",
+        "request_observation_invalid_dimension",
         req,
       );
     }
     let sql: string;
     try {
       sql = buildDimensionSql({
-        dataset:
-          dimensionSource === "abnormal"
-            ? config.dataset
-            : config.normalDataset,
         from,
         to,
         source: dimensionSource,
@@ -1993,8 +1681,8 @@ export async function handleBotAnalyticsAdmin(
       });
     } catch {
       return bad(
-        "Invalid bot analytics dimension",
-        "bot_analytics_invalid_dimension",
+        "Invalid request observation dimension",
+        "request_observation_invalid_dimension",
         req,
       );
     }
@@ -2007,7 +1695,7 @@ export async function handleBotAnalyticsAdmin(
     if (!result.ok)
       return bad(
         cloudflareAnalyticsErrorMessage(result),
-        "bot_analytics_query_failed",
+        "request_observation_query_failed",
         req,
       );
     let rows = normalizeNetworkDimensionRows(result.rows);
@@ -2047,72 +1735,42 @@ export async function handleBotAnalyticsAdmin(
     });
   }
 
-  const sql = buildBotAnalyticsSql({
-    dataset: config.dataset,
+  const sql = buildRequestAnalyticsSql({
     from,
     to,
     limit: limit + 1,
-    includeDoubles: true,
+    source: "abnormal",
   });
-  let result = await queryCloudflareAnalyticsEngine({
+  const result = await queryCloudflareAnalyticsEngine({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql,
   });
-  if (!result.ok && shouldRetryBotAnalyticsWithoutDoubles(result)) {
-    result = await queryCloudflareAnalyticsEngine({
-      apiUrl: analyticsApiUrl,
-      accountId: config.accountId,
-      token,
-      sql: buildBotAnalyticsSql({
-        dataset: config.dataset,
-        from,
-        to,
-        limit: limit + 1,
-        includeDoubles: false,
-      }),
-    });
-  }
   if (!result.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(result),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
 
-  const normalSql = buildNormalAnalyticsSql({
-    dataset: config.normalDataset,
+  const normalSql = buildRequestAnalyticsSql({
     from,
     to,
     limit: limit + 1,
-    includeDoubles: true,
+    source: "normal",
   });
-  let normalResult = await queryCloudflareAnalyticsEngine({
+  const normalResult = await queryCloudflareAnalyticsEngine({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: normalSql,
   });
-  if (!normalResult.ok && shouldRetryBotAnalyticsWithoutDoubles(normalResult)) {
-    normalResult = await queryCloudflareAnalyticsEngine({
-      apiUrl: analyticsApiUrl,
-      accountId: config.accountId,
-      token,
-      sql: buildNormalAnalyticsSql({
-        dataset: config.normalDataset,
-        from,
-        to,
-        limit: limit + 1,
-        includeDoubles: false,
-      }),
-    });
-  }
   if (!normalResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(normalResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
@@ -2123,7 +1781,7 @@ export async function handleBotAnalyticsAdmin(
   } catch {
     return bad(
       "Cloudflare Analytics Engine returned invalid JSONEachRow data",
-      "bot_analytics_parse_failed",
+      "request_observation_parse_failed",
       req,
     );
   }
@@ -2134,7 +1792,7 @@ export async function handleBotAnalyticsAdmin(
   } catch {
     return bad(
       "Cloudflare Analytics Engine returned invalid JSONEachRow data",
-      "bot_analytics_parse_failed",
+      "request_observation_parse_failed",
       req,
     );
   }
@@ -2145,7 +1803,7 @@ export async function handleBotAnalyticsAdmin(
   normalRawRows = normalRawRows.slice(0, limit);
 
   const preliminaryEvents = rawRows.map((row) =>
-    normalizeBotRow(row, new Map()),
+    normalizeAbnormalRow(row, new Map()),
   );
   const preliminaryNormalEvents = normalRawRows.map((row) =>
     normalizeNormalRow(row, new Map()),
@@ -2154,7 +1812,7 @@ export async function handleBotAnalyticsAdmin(
     ...preliminaryEvents,
     ...preliminaryNormalEvents,
   ]);
-  const events = rawRows.map((row) => normalizeBotRow(row, sites));
+  const events = rawRows.map((row) => normalizeAbnormalRow(row, sites));
   const normalEvents = normalRawRows.map((row) =>
     normalizeNormalRow(row, sites),
   );
@@ -2169,7 +1827,6 @@ export async function handleBotAnalyticsAdmin(
     accountId: config.accountId,
     token,
     sql: buildCountByBucketSql({
-      dataset: config.dataset,
       from,
       to,
       bucketMs,
@@ -2181,16 +1838,15 @@ export async function handleBotAnalyticsAdmin(
   if (!abnormalTrendResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(abnormalTrendResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
-  let normalTrendResult = await queryAnalyticsRows({
+  const normalTrendResult = await queryAnalyticsRows({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: buildCountByBucketSql({
-      dataset: config.normalDataset,
       from,
       to,
       bucketMs,
@@ -2200,33 +1856,10 @@ export async function handleBotAnalyticsAdmin(
       includeLatency: true,
     }),
   });
-  // double8 was introduced with the server-side Worker latency semantics.
-  // A dataset may not expose that column until the first new point is written;
-  // keep the dashboard usable and leave latency empty during that transition.
-  if (
-    !normalTrendResult.ok &&
-    shouldRetryBotAnalyticsWithoutDoubles(normalTrendResult)
-  ) {
-    normalTrendResult = await queryAnalyticsRows({
-      apiUrl: analyticsApiUrl,
-      accountId: config.accountId,
-      token,
-      sql: buildCountByBucketSql({
-        dataset: config.normalDataset,
-        from,
-        to,
-        bucketMs,
-        interval,
-        timeZone,
-        source: "normal",
-        includeLatency: false,
-      }),
-    });
-  }
   if (!normalTrendResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(normalTrendResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
@@ -2235,7 +1868,6 @@ export async function handleBotAnalyticsAdmin(
     accountId: config.accountId,
     token,
     sql: buildMapPointsSql({
-      dataset: config.dataset,
       from,
       to,
       source: "abnormal",
@@ -2245,7 +1877,7 @@ export async function handleBotAnalyticsAdmin(
   if (!abnormalMapResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(abnormalMapResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
@@ -2254,7 +1886,6 @@ export async function handleBotAnalyticsAdmin(
     accountId: config.accountId,
     token,
     sql: buildMapPointsSql({
-      dataset: config.normalDataset,
       from,
       to,
       source: "normal",
@@ -2264,47 +1895,28 @@ export async function handleBotAnalyticsAdmin(
   if (!normalMapResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(normalMapResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
 
-  const normalSummaryPromise = (async () => {
-    let result = await queryAnalyticsRows({
-      apiUrl: analyticsApiUrl,
-      accountId: config.accountId,
-      token,
-      sql: buildSourceSummarySql({
-        dataset: config.normalDataset,
-        from,
-        to,
-        source: "normal",
-        includeLatency: true,
-      }),
-    });
-    if (!result.ok && shouldRetryBotAnalyticsWithoutDoubles(result)) {
-      result = await queryAnalyticsRows({
-        apiUrl: analyticsApiUrl,
-        accountId: config.accountId,
-        token,
-        sql: buildSourceSummarySql({
-          dataset: config.normalDataset,
-          from,
-          to,
-          source: "normal",
-          includeLatency: false,
-        }),
-      });
-    }
-    return result;
-  })();
+  const normalSummaryPromise = queryAnalyticsRows({
+    apiUrl: analyticsApiUrl,
+    accountId: config.accountId,
+    token,
+    sql: buildSourceSummarySql({
+      from,
+      to,
+      source: "normal",
+      includeLatency: true,
+    }),
+  });
   const [abnormalSummaryResult, normalSummaryResult] = await Promise.all([
     queryAnalyticsRows({
       apiUrl: analyticsApiUrl,
       accountId: config.accountId,
       token,
       sql: buildSourceSummarySql({
-        dataset: config.dataset,
         from,
         to,
         source: "abnormal",
@@ -2315,14 +1927,14 @@ export async function handleBotAnalyticsAdmin(
   if (!abnormalSummaryResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(abnormalSummaryResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
   if (!normalSummaryResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(normalSummaryResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
@@ -2332,7 +1944,6 @@ export async function handleBotAnalyticsAdmin(
       accountId: config.accountId,
       token,
       sql: buildReasonSummarySql({
-        dataset: config.dataset,
         from,
         to,
       }),
@@ -2342,7 +1953,6 @@ export async function handleBotAnalyticsAdmin(
       accountId: config.accountId,
       token,
       sql: buildAsnSummarySql({
-        dataset: config.dataset,
         from,
         to,
       }),
@@ -2351,14 +1961,14 @@ export async function handleBotAnalyticsAdmin(
   if (!reasonResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(reasonResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
   if (!asnResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(asnResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
@@ -2420,7 +2030,6 @@ export async function handleBotAnalyticsAdmin(
         accountId: config.accountId,
         token,
         sql: buildNetworkDimensionSql({
-          dataset: config.dataset,
           from,
           to,
           source: "abnormal",
@@ -2432,7 +2041,6 @@ export async function handleBotAnalyticsAdmin(
         accountId: config.accountId,
         token,
         sql: buildNetworkDimensionSql({
-          dataset: config.normalDataset,
           from,
           to,
           source: "normal",
@@ -2447,7 +2055,7 @@ export async function handleBotAnalyticsAdmin(
   if (failedNetworkDimensionResult && !failedNetworkDimensionResult.ok) {
     return bad(
       cloudflareAnalyticsErrorMessage(failedNetworkDimensionResult),
-      "bot_analytics_query_failed",
+      "request_observation_query_failed",
       req,
     );
   }
@@ -2555,7 +2163,10 @@ export async function handleBotAnalyticsAdmin(
       interval,
       timeZone,
     },
-    config: redactBotAnalyticsConfig(config, analyticsEngineAvailability(env)),
+    config: redactAnalyticsEngineConfig(
+      config,
+      analyticsEngineAvailability(env),
+    ),
     sampling: analyticsEngineSamplingMeta({
       observedSampled,
       aggregatesWeighted: true,
@@ -2568,7 +2179,7 @@ export async function handleBotAnalyticsAdmin(
       botRequestRatio,
       ...abnormalSummaryValues,
     },
-    events: events.map(serializeBotListEvent),
+    events: events.map(serializeAbnormalListEvent),
     normalEvents: normalEvents.map(serializeNormalListEvent),
     ...aggregates,
     mapPoints,
@@ -2594,7 +2205,7 @@ export async function handleBotAnalyticsAdmin(
         ...abnormalSummaryValues,
       },
       mapPoints: abnormalMapPoints,
-      events: events.map(serializeBotListEvent),
+      events: events.map(serializeAbnormalListEvent),
       hasMore: abnormalHasMore,
       nextCursor: abnormalNextCursor,
       reasons: aggregates.reasons,

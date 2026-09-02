@@ -1,5 +1,5 @@
+import type { PublicAnalyticsEngineConfig } from "@/lib/analytics-engine-config";
 import type { AdminPublicLoginTurnstileConfig } from "@/lib/auth/login-turnstile-config";
-import type { PublicBotAnalyticsConfig } from "@/lib/bot-analytics-config";
 import type { NotificationPreferencesData } from "@/lib/edge-client";
 import type {
   AccountUserData,
@@ -169,7 +169,7 @@ export interface AdminUsersInitialData {
 }
 
 export interface SystemSettingsInitialData {
-  botAnalytics: PublicBotAnalyticsConfig;
+  analyticsEngine: PublicAnalyticsEngineConfig;
   loginTurnstile: AdminPublicLoginTurnstileConfig;
   notificationEmail: PublicNotificationEmailConfig;
   scheduledTaskRetention: ScheduledTaskRetentionConfig;

@@ -1,3 +1,8 @@
+import type { TrafficVisitSnapshot } from "./analytics-engine/traffic-writer";
+import {
+  deleteAnalyticsSession,
+  readDueAnalyticsSessions,
+} from "./analytics-session-state";
 import {
   D1_FLUSH_BATCH_SIZE,
   D1_FLUSH_CUSTOM_EVENT_BATCH_SIZE,
@@ -83,6 +88,59 @@ interface TimedOutVisitCandidate {
   screenSize: string;
   latitude: number | null;
   longitude: number | null;
+  perfTtfbMs: number | null;
+  perfFcpMs: number | null;
+  perfLcpMs: number | null;
+  perfCls: number | null;
+  perfInpMs: number | null;
+}
+
+function trafficVisitSnapshot(
+  visit: TimedOutVisitCandidate,
+): TrafficVisitSnapshot {
+  return {
+    siteId: visit.siteId,
+    visitId: visit.visitId,
+    visitorId: visit.visitorId,
+    sessionId: visit.sessionId,
+    startedAt: visit.startedAt,
+    pathname: visit.pathname,
+    queryString: visit.queryString,
+    hashFragment: visit.hash,
+    title: visit.title,
+    hostname: visit.hostname,
+    referrerUrl: visit.referrerUrl,
+    referrerHost: visit.referrerHost,
+    utmSource: visit.utmSource,
+    utmMedium: visit.utmMedium,
+    utmCampaign: visit.utmCampaign,
+    utmTerm: visit.utmTerm,
+    utmContent: visit.utmContent,
+    region: visit.region,
+    city: visit.city,
+    continent: visit.continent,
+    country: visit.country,
+    regionCode: visit.regionCode,
+    postalCode: visit.postalCode,
+    metroCode: visit.metroCode,
+    timezone: visit.timezone,
+    asOrganization: visit.organization,
+    browser: visit.browser,
+    browserVersion: visit.browserVersion,
+    os: visit.os,
+    osVersion: visit.osVersion,
+    deviceType: visit.deviceType,
+    language: visit.language,
+    latitude: visit.latitude,
+    longitude: visit.longitude,
+    screenWidth: visit.screenWidth,
+    screenHeight: visit.screenHeight,
+    perfTtfbMs: visit.perfTtfbMs,
+    perfFcpMs: visit.perfFcpMs,
+    perfLcpMs: visit.perfLcpMs,
+    perfCls: visit.perfCls,
+    perfInpMs: visit.perfInpMs,
+  };
 }
 
 async function pushFinalizedVisitRealtimeEvent(
@@ -409,7 +467,12 @@ export async function flushTimeouts(
           ELSE ''
         END AS screenSize,
         latitude,
-        longitude
+        longitude,
+        perf_ttfb_ms AS perfTtfbMs,
+        perf_fcp_ms AS perfFcpMs,
+        perf_lcp_ms AS perfLcpMs,
+        perf_cls AS perfCls,
+        perf_inp_ms AS perfInpMs
       FROM buffered_visits
       WHERE (
           status = 'open'
@@ -463,6 +526,14 @@ export async function flushTimeouts(
       visit.visitId,
     );
     if (rowsWritten === 0) continue;
+    context.writeTrafficVisitFinalizedFact?.({
+      visit: trafficVisitSnapshot(visit),
+      receivedAt: now,
+      endedAt: now,
+      durationMs: null,
+      durationSource: "timeout",
+      exitReason: "timeout",
+    });
     if (!context.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
       await pushFinalizedVisitRealtimeEvent(
         context,
@@ -530,7 +601,12 @@ async function flushHiddenFallbacks(
           ELSE ''
         END AS screenSize,
         latitude,
-        longitude
+        longitude,
+        perf_ttfb_ms AS perfTtfbMs,
+        perf_fcp_ms AS perfFcpMs,
+        perf_lcp_ms AS perfLcpMs,
+        perf_cls AS perfCls,
+        perf_inp_ms AS perfInpMs
       FROM buffered_visits
       WHERE status = 'hidden_pending'
         AND hidden_at IS NOT NULL
@@ -584,6 +660,14 @@ async function flushHiddenFallbacks(
       visit.visitId,
     );
     if (rowsWritten === 0) continue;
+    context.writeTrafficVisitFinalizedFact?.({
+      visit: trafficVisitSnapshot(visit),
+      receivedAt: now,
+      endedAt: hiddenAt,
+      durationMs,
+      durationSource: "hidden",
+      exitReason: "hidden_timeout",
+    });
     if (!context.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
       await pushFinalizedVisitRealtimeEvent(
         context,
@@ -594,6 +678,59 @@ async function flushHiddenFallbacks(
         "hidden_timeout",
       );
     }
+  }
+  flushExpiredAnalyticsSessions(context, now);
+}
+
+function flushExpiredAnalyticsSessions(
+  context: IngestFlushContext,
+  now: number,
+): void {
+  const sessions = readDueAnalyticsSessions(context, now);
+  for (const session of sessions) {
+    const lastVisit = context.sqlOne<{
+      title: string;
+      hostname: string;
+      referrerHost: string;
+      utmSource: string;
+      utmMedium: string;
+      utmCampaign: string;
+      browser: string;
+      browserVersion: string;
+      os: string;
+      osVersion: string;
+      language: string;
+      region: string;
+      city: string;
+      timezone: string;
+      asOrganization: string;
+      latitude: number | null;
+      longitude: number | null;
+      screenWidth: number | null;
+      screenHeight: number | null;
+    }>(
+      `
+        SELECT title, hostname, referrer_host AS referrerHost,
+               utm_source AS utmSource, utm_medium AS utmMedium,
+               utm_campaign AS utmCampaign, browser,
+               browser_version AS browserVersion, os,
+               os_version AS osVersion, language, region, city, timezone,
+               as_organization AS asOrganization, latitude, longitude,
+               screen_width AS screenWidth, screen_height AS screenHeight
+        FROM buffered_visits
+        WHERE site_id = ? AND visit_id = ?
+        LIMIT 1
+      `,
+      session.siteId,
+      session.lastVisitId,
+    );
+    context.writeTrafficSessionEndedFact?.({
+      ...session,
+      receivedAt: now,
+      endedAt: Math.max(now, session.lastActivityAt),
+      lastVisit: lastVisit ?? undefined,
+    });
+    deleteAnalyticsSession(context, session.sessionId);
   }
 }
 

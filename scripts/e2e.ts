@@ -193,12 +193,16 @@ binding = "ARCHIVE_BUCKET"
 bucket_name = ${tomlString(input.archiveBucketName)}
 
 [[analytics_engine_datasets]]
-binding = "BOT_ANALYTICS"
-dataset = "insightflare_e2e_bot_events"
+binding = "REQUEST_ANALYTICS"
+dataset = "insightflare_e2e_request_events"
 
 [[analytics_engine_datasets]]
-binding = "NORMAL_ANALYTICS"
-dataset = "insightflare_e2e_normal_events"
+binding = "TRAFFIC_ANALYTICS"
+dataset = "insightflare_e2e_traffic_events"
+
+[[analytics_engine_datasets]]
+binding = "EVENT_ANALYTICS"
+dataset = "insightflare_e2e_event_facts"
 `;
 }
 
@@ -333,7 +337,7 @@ function mockAnalyticsTimestamp(sql: string): number {
 function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
   const timestampMs = mockAnalyticsTimestamp(sql);
   const timestamp = new Date(timestampMs).toISOString();
-  const normal = sql.includes("normal_events");
+  const normal = /blob2\s*=\s*'normal'/i.test(sql);
   if (sql.includes("AS timestampMs")) {
     return [
       {
@@ -362,10 +366,10 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
       },
     ];
   }
-  if (sql.includes("blob4 AS reasons")) {
+  if (sql.includes("blob3 AS reasons") && !sql.includes("blob1 AS kind")) {
     return [{ reasons: "e2e_mock", weight: 2 }];
   }
-  if (sql.includes("blob15 AS asn")) {
+  if (sql.includes("double4 AS asn") && !sql.includes("blob1 AS kind")) {
     return [
       {
         asn: "64512",
@@ -425,7 +429,34 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
       },
     ];
   }
-  if (sql.includes("blob3 AS category")) {
+  if (normal && sql.includes("blob1 AS kind")) {
+    return [
+      {
+        asn: 64513,
+        asOrganization: "E2E Normal Network",
+        city: "Shanghai",
+        continent: "AS",
+        country: "CN",
+        edgeLatencyMs: 42,
+        eventAt: timestampMs,
+        hostname: "app.example.test",
+        kind: "pageview",
+        latitude: 31.23,
+        longitude: 121.47,
+        origin: "https://app.example.test",
+        pathname: "/home",
+        rayId: "e2e-normal-ray",
+        receivedAt: timestampMs,
+        region: "Shanghai",
+        requestMethod: "GET",
+        siteId: "",
+        timestamp,
+        traceId: "e2e-normal-trace",
+        userAgentLength: 12,
+      },
+    ];
+  }
+  if (!normal && sql.includes("blob2 AS category")) {
     return [
       {
         asn: 64512,
@@ -453,7 +484,7 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
       },
     ];
   }
-  if (sql.includes("blob3 AS origin")) {
+  if (sql.includes("blob6 AS origin")) {
     return [
       {
         asn: 64513,

@@ -1520,6 +1520,8 @@ login:
   signIn: 登录
   invalidCredentials: 用户名或密码错误。
 accountLinks:
+  noSites: 该团队下暂无可访问站点。
+  siteNotFound: 未找到对应团队或站点。
   invite:
     title: 团队邀请
     subtitle: 接受邀请后加入该团队。
@@ -1674,6 +1676,10 @@ teamManagement:
     ruleInfoSection: 规则信息
     scheduleSection: 计划
     sendScheduleSection: 发送时间
+    conditionMilestone: "{metric} 每 {step} 触发"
+    conditionThreshold: "{window} {metric} {operator} {value}"
+    conditionChange: "{window} {metric} 变化 {operator} {value}"
+    conditionHealth: "{hours} 小时无数据"
     checkSection: 检查频率
     conditionSection: 条件
     deliverySection: 投递
@@ -1745,10 +1751,6 @@ teamManagement:
     scheduleInterval: "每 {minutes} 分钟"
     scheduleCustom: 自定义
     conditionReport: "{period}报告"
-    conditionMilestone: "{metric} 每 {step} 触发"
-    conditionThreshold: "{window} {metric} {operator} {value}"
-    conditionChange: "{window} {metric} 变化 {operator} {value}"
-    conditionHealth: "{hours} 小时无数据"
     summaryWhenConditions: "当满足下列{combinator}条件时，发送{type}通知："
     summaryWhenSingleCondition: "当满足此条件时，发送{type}通知："
     summaryConditionThreshold: "{window}{metric}{operator}{value}"
@@ -2245,8 +2247,7 @@ requestObservation:
   notConfiguredTitle: 尚未配置 Analytics Engine 读取凭据
   notConfiguredDescription: 请先在系统设置中填写 Cloudflare Account ID 和 API Token，用于读取请求观测 Analytics Engine 数据集。
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用
-  analyticsEngineDisabledDescription:
-    当前部署未绑定 Analytics Engine，因为 Cloudflare
+  analyticsEngineDisabledDescription: 当前部署未绑定 Analytics Engine，因为 Cloudflare
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。
   openAnalyticsEngine: 打开 Analytics Engine
   openSettings: 打开设置
@@ -2257,7 +2258,7 @@ requestObservation:
   trendTitle: 分流趋势
   trendDescription: 按时间间隔显示正常请求、异常请求与分流比例。
   recentTitle: 最近异常请求
-  recentDescription: 这些详细记录只写入异常 Analytics Engine 数据集。
+  recentDescription: 这些详细记录从统一的 Request Analytics Engine 数据集中读取。
   recentLoadedAll: 已加载全部记录
   detailTitle: 异常请求详情
   detailSubtitle: 查看这次异常请求的检测信号、网络和客户端上下文。
@@ -2332,8 +2333,8 @@ requestObservation:
     abnormalRatio: 异常请求比例
     p50Latency: P50 Worker 处理耗时
     p75Latency: P75 Worker 处理耗时
-    p95Latency: P95 Worker 处理耗时
     p99Latency: P99 Worker 处理耗时
+    p95Latency: P95 Worker 处理耗时
     avgLatency: 平均 Worker 处理耗时
     pageviews: 页面浏览
     customEvents: 自定义事件
@@ -2360,37 +2361,41 @@ requestObservation:
     edgeLatency: Worker 处理耗时
     eventAt: 事件时间
     receivedAt: 接收时间
-    coordinates: 坐标
     continent: 大洲
+    coordinates: 坐标
   recentNormal:
     title: 最近正常请求
-    description: 这些详细记录只写入正常请求 Analytics Engine 数据集。
+    description: 这些详细记录从统一的 Request Analytics Engine 数据集中读取。
 systemSettings:
   title: 系统设置
   subtitle: 管理当前 InsightFlare 实例的全站配置。
   guide: 教程
-  botAnalyticsTitle: 分析引擎
-  botAnalyticsDescription: 配置用于读取 Analytics Engine 数据的 Cloudflare 凭据，供机器人防护等分析功能使用。
-  botAnalyticsAccountIdLabel: Cloudflare Account ID
-  botAnalyticsApiTokenLabel: Cloudflare API Token
-  botAnalyticsApiTokenPlaceholder: 查看教程以获取 Cloudflare API Token
-  botAnalyticsSaved: 分析引擎配置已保存。
-  botAnalyticsSaveFailed: 保存分析引擎配置失败。
-  botAnalyticsDeleted: 分析引擎配置已删除。
-  botAnalyticsDeleteFailed: 删除分析引擎配置失败。
-  botAnalyticsDeleteConfirm: 确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。
-  botAnalyticsEngineDisabledTitle: Analytics Engine 尚未启用
-  botAnalyticsEngineDisabledDescription:
-    当前部署已自动禁用 Analytics Engine 绑定，因为
-    Cloudflare 账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用 Analytics
-    Engine，然后重新部署 InsightFlare 以激活相关分析功能。
-  botAnalyticsEngineDisabledHint: 在启用 Analytics Engine 并重新部署 Worker 前，分析引擎设置不可修改。
-  botAnalyticsOpenCloudflare: 打开 Cloudflare Analytics Engine
-  botAnalyticsGuideTitle: 获取分析引擎配置
-  botAnalyticsGuideDescription: 分析引擎需要 Cloudflare 账号信息和一个可读取 Analytics Engine 的 API Token。
-  botAnalyticsGuideSteps:
+  analyticsEngineTitle: 分析引擎
+  analyticsEngineDescription: 配置用于读取请求观测以及未来流量和事件分析数据的 Cloudflare 凭据。
+  analyticsEngineAccountIdLabel: Cloudflare Account ID
+  analyticsEngineApiTokenLabel: Cloudflare API Token
+  analyticsEngineApiTokenPlaceholder: 查看教程以获取 Cloudflare API Token
+  analyticsEngineSaved: 分析引擎配置已保存。
+  analyticsEngineSaveFailed: 保存分析引擎配置失败。
+  analyticsEngineDeleted: 分析引擎配置已删除。
+  analyticsEngineDeleteFailed: 删除分析引擎配置失败。
+  analyticsEngineDeleteConfirm: 确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。
+  analyticsEngineDatasetsTitle: Analytics Engine 数据集
+  analyticsEngineRequestDataset: Request
+  analyticsEngineTrafficDataset: Traffic
+  analyticsEngineEventDataset: Event
+  analyticsEngineDisabledTitle: Analytics Engine 尚未启用
+  analyticsEngineDisabledDescription: 当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare
+    账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用 Analytics Engine，然后重新部署
+    InsightFlare 以激活相关分析功能。
+  analyticsEngineDisabledHint: 在启用 Analytics Engine 并重新部署 Worker 前，分析引擎设置不可修改。
+  analyticsEngineOpenCloudflare: 打开 Cloudflare Analytics Engine
+  analyticsEngineGuideTitle: 获取分析引擎配置
+  analyticsEngineGuideDescription: 分析引擎需要 Cloudflare 账号信息和一个可读取 Analytics Engine 的 API Token。
+  analyticsEngineGuideSteps:
     - 打开 Cloudflare Dashboard，进入目标账号并复制 Account ID。
-    - 在 Workers & Pages 中启用 Analytics Engine；机器人和普通请求数据集会随部署自动创建并绑定。
+    - 在 Workers & Pages 中启用 Analytics Engine；Request、Traffic 和 Event
+      三个数据集会随部署自动创建并绑定。
     - 前往 My Profile → API Tokens，创建 Custom token。
     - 为 Token 添加 Account Analytics 读取权限，并限制到当前账号。
     - 保存后复制 Token，回到这里填写 Account ID 和 API Token。

@@ -43,7 +43,7 @@ const env = {
     idFromName: vi.fn(),
     get: vi.fn(),
   },
-  BOT_ANALYTICS: {
+  REQUEST_ANALYTICS: {
     writeDataPoint: vi.fn(),
   },
   SITE_SETTINGS_KV: {},
@@ -147,7 +147,7 @@ describe("collect route", () => {
   beforeEach(() => {
     vi.useRealTimers();
     readSiteTrackingConfigMock.mockReset();
-    env.BOT_ANALYTICS.writeDataPoint.mockReset();
+    env.REQUEST_ANALYTICS.writeDataPoint.mockReset();
     env.INGEST_DO.idFromName.mockReset();
     env.INGEST_DO.get.mockReset();
     env.INGEST_DO.idFromName.mockReturnValue("do-id");
@@ -352,14 +352,13 @@ describe("collect route", () => {
     );
 
     expect(response.status).toBe(204);
-    expect(env.BOT_ANALYTICS.writeDataPoint).toHaveBeenCalledTimes(1);
-    const dataPoint = env.BOT_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
+    expect(env.REQUEST_ANALYTICS.writeDataPoint).toHaveBeenCalledTimes(1);
+    const dataPoint = env.REQUEST_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
     expect(dataPoint).toMatchObject({
       indexes: ["site-1"],
     });
     expect(dataPoint?.blobs).toEqual(
       expect.arrayContaining([
-        "site-1",
         "pageview",
         "high_threat",
         expect.stringContaining("ua_isbot"),
@@ -388,7 +387,7 @@ describe("collect route", () => {
 
     expect(response.status).toBe(204);
     expect(readSiteTrackingConfigMock).not.toHaveBeenCalled();
-    expect(env.BOT_ANALYTICS.writeDataPoint).not.toHaveBeenCalled();
+    expect(env.REQUEST_ANALYTICS.writeDataPoint).not.toHaveBeenCalled();
     expect(env.INGEST_DO.idFromName).not.toHaveBeenCalled();
     expect(ctx.waitUntil).not.toHaveBeenCalled();
   });
@@ -645,9 +644,9 @@ describe("collect route", () => {
       expect(response.status).toBe(204);
       expect(ctx.waitUntil).not.toHaveBeenCalled();
       expect(env.INGEST_DO.idFromName).not.toHaveBeenCalled();
-      expect(env.BOT_ANALYTICS.writeDataPoint).toHaveBeenCalledTimes(1);
+      expect(env.REQUEST_ANALYTICS.writeDataPoint).toHaveBeenCalledTimes(1);
       expect(
-        env.BOT_ANALYTICS.writeDataPoint.mock.calls[0]?.[0]?.blobs,
+        env.REQUEST_ANALYTICS.writeDataPoint.mock.calls[0]?.[0]?.blobs,
       ).toEqual(expect.arrayContaining(["custom_block"]));
     },
   );
@@ -684,13 +683,13 @@ describe("collect route", () => {
     );
 
     expect(response.status).toBe(204);
-    expect(env.BOT_ANALYTICS.writeDataPoint).toHaveBeenCalledTimes(1);
+    expect(env.REQUEST_ANALYTICS.writeDataPoint).toHaveBeenCalledTimes(1);
     expect(env.INGEST_DO.idFromName).not.toHaveBeenCalled();
-    const dataPoint = env.BOT_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
-    expect(dataPoint?.blobs?.[3]).toBe(
+    const dataPoint = env.REQUEST_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
+    expect(dataPoint?.blobs?.[2]).toBe(
       "custom_block,blocked_domains,blocked_paths,blocked_query_parameters",
     );
-    expect(dataPoint?.blobs?.[3]).not.toContain("ua_isbot");
+    expect(dataPoint?.blobs?.[2]).not.toContain("ua_isbot");
     expect(JSON.stringify(dataPoint?.blobs?.[19])).not.toContain(
       "blocked.example",
     );

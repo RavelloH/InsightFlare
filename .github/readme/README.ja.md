@@ -181,11 +181,15 @@ Cloudflare がこのリポジトリを複製し、必要なリソースを作成
 
 ### Analytics Engine を有効にして詳細分析を行う
 
-ボットトラフィック検出などの一部の任意機能では、主データベースへの負荷を抑えながらより高度な分析を行うため、Cloudflare Analytics Engine を使用します。
+Analytics Engine は InsightFlare のオプションの高スループット分析層です。リクエスト監視と、将来のトラフィック・イベント分析の投影を主データベースから分離します。
+
+- `REQUEST_ANALYTICS` → リクエスト監視と異常トラフィック
+- `TRAFFIC_ANALYTICS` → サンプリングされたトラフィック事実
+- `EVENT_ANALYTICS` → サンプリングされたカスタムイベント事実
 
 使用するには Analytics Engine を手動で有効にしてください。[Cloudflare Dashboard](https://dash.cloudflare.com/?to=/:account/workers/analytics-engine) を開き、右側の「Enable」ボタンをクリックします。その後のデプロイ時に、InsightFlare が Analytics Engine を Cloudflare アカウントへ自動的にバインドします。
 
-有効化後、InsightFlare は Analytics Engine にデータを書き込めます。データセットを読み取るには API トークンが必要です。システム設定で Cloudflare Account ID と「Account Analytics」の読み取り権限を持つ API トークンを入力してください。詳細は InsightFlare のダッシュボード設定ページにある「Guide」ボタンをご覧ください。
+有効化後、InsightFlare は上記 3 データセットへ書き込みます。現在のバージョンでは「リクエスト監視」ページが新しい `REQUEST_ANALYTICS` データセットを読み取ります。`TRAFFIC_ANALYTICS` と `EVENT_ANALYTICS` は将来の Analytics Engine Provider 用に蓄積されます。データセットの読み取りには API トークンが必要です。システム設定で Cloudflare Account ID と「Account Analytics」の読み取り権限を持つ API トークンを入力してください。Reader 設定は引き続き主データベースの D1 に保存されます。詳細はダッシュボード設定ページの「Guide」ボタンをご覧ください。
 
 ### AI エージェントを接続して分析する
 

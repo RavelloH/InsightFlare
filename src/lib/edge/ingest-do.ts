@@ -1,6 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 
 import {
+  type TrafficVisitSnapshot,
+  writeEventAnalyticsPoint,
+  writeTrafficPageviewFact,
+  writeTrafficSessionEndedFact,
+  writeTrafficVisitFinalizedFact,
+} from "./analytics-engine/index";
+import { advanceAnalyticsSession } from "./analytics-session-state";
+import {
   attachPerformanceToVisit as attachPerformanceToVisitInBufferStore,
   findRecentVisitorSession as findRecentVisitorSessionInBufferStore,
   getVisitContext as getVisitContextFromBufferStore,
@@ -63,6 +71,52 @@ import type {
   NormalizedVisibility,
   TrackerPerformancePayload,
 } from "./types";
+import { resolveSessionWindowMinutes } from "./utils";
+
+function pageviewTrafficSnapshot(
+  record: NormalizedPageview,
+  visitId = record.visitId,
+  startedAt = record.startedAt,
+): TrafficVisitSnapshot {
+  return {
+    siteId: record.siteId,
+    visitId,
+    visitorId: record.visitorId,
+    sessionId: record.sessionId,
+    startedAt,
+    pathname: record.pathname,
+    queryString: record.queryString,
+    hashFragment: record.hashFragment,
+    title: record.title,
+    hostname: record.hostname,
+    referrerUrl: record.referrerUrl,
+    referrerHost: record.referrerHost,
+    utmSource: record.utmSource,
+    utmMedium: record.utmMedium,
+    utmCampaign: record.utmCampaign,
+    utmTerm: record.utmTerm,
+    utmContent: record.utmContent,
+    region: record.region,
+    city: record.city,
+    continent: record.continent,
+    country: record.country,
+    regionCode: record.regionCode,
+    postalCode: record.postalCode,
+    metroCode: record.metroCode,
+    timezone: record.timezone,
+    asOrganization: record.asOrganization,
+    browser: record.browser,
+    browserVersion: record.browserVersion,
+    os: record.os,
+    osVersion: record.osVersion,
+    deviceType: record.deviceType,
+    language: record.language,
+    latitude: record.latitude,
+    longitude: record.longitude,
+    screenWidth: record.screenWidth,
+    screenHeight: record.screenHeight,
+  };
+}
 
 export class IngestDurableObject extends DurableObject {
   private readonly doState: DurableObjectState;
@@ -549,6 +603,10 @@ export class IngestDurableObject extends DurableObject {
     logger: InvocationLogger,
   ): Promise<void> {
     const now = toUnixSeconds(record.receivedAt);
+    const previousVisit =
+      record.previousVisitId && record.previousVisitStartedAt !== null
+        ? this.readTrafficVisitSnapshot(record.siteId, record.previousVisitId)
+        : null;
 
     if (record.previousVisitId && record.previousVisitStartedAt !== null) {
       const flushDueAt = record.receivedAt + D1_FLUSH_INTERVAL_MS;
@@ -591,6 +649,24 @@ export class IngestDurableObject extends DurableObject {
         record.previousVisitId,
       );
       if (closedPrevious > 0) {
+        writeTrafficVisitFinalizedFact(
+          this.doEnv,
+          {
+            visit:
+              previousVisit ??
+              pageviewTrafficSnapshot(
+                record,
+                record.previousVisitId,
+                record.previousVisitStartedAt,
+              ),
+            receivedAt: record.receivedAt,
+            endedAt: record.startedAt,
+            durationMs,
+            durationSource: "server",
+            exitReason: "route_change",
+          },
+          logger,
+        );
         logger.info("do.ingest.previous_visit_closed");
       }
     }
@@ -601,6 +677,26 @@ export class IngestDurableObject extends DurableObject {
       return;
     }
     logger.info("do.ingest.pageview_buffered");
+    let sessionPageIndex = 1;
+    try {
+      const sessionState = advanceAnalyticsSession(this.bufferStoreContext(), {
+        siteId: record.siteId,
+        sessionId: record.sessionId,
+        visitorId: record.visitorId,
+        startedAt: record.startedAt,
+        pathname: record.pathname,
+        visitId: record.visitId,
+        sessionWindowMs: resolveSessionWindowMinutes(this.doEnv) * 60 * 1000,
+      });
+      sessionPageIndex = sessionState.pageCount;
+    } catch {
+      logger.warn("do.ingest.session_state_failed");
+    }
+    writeTrafficPageviewFact(
+      this.doEnv,
+      { record, sessionPageIndex, sessionViewCount: sessionPageIndex },
+      logger,
+    );
     await this.advanceWaitingCustomEvents(record.siteId, record.visitId);
     await this.pushRealtimeRecord({
       id: record.visitId,
@@ -654,7 +750,7 @@ export class IngestDurableObject extends DurableObject {
       latitude: record.latitude,
       longitude: record.longitude,
     });
-    await this.pushBufferedCustomEventsForVisit(record);
+    await this.pushBufferedCustomEventsForVisit(record, logger);
   }
 
   private async advanceWaitingCustomEvents(
@@ -702,9 +798,8 @@ export class IngestDurableObject extends DurableObject {
 
   private async pushBufferedCustomEventsForVisit(
     record: NormalizedPageview,
+    logger?: InvocationLogger,
   ): Promise<void> {
-    if (this.sockets.size === 0) return;
-
     const pendingEvents = this.sqlAll<{
       eventId: string;
       eventAt: number;
@@ -732,6 +827,22 @@ export class IngestDurableObject extends DurableObject {
     );
 
     for (const pending of pendingEvents) {
+      writeEventAnalyticsPoint(
+        this.doEnv,
+        {
+          ...record,
+          kind: "custom_event",
+          eventId: pending.eventId,
+          sequence: pending.sequence,
+          receivedAt: pending.receivedAt,
+          eventAt: pending.eventAt,
+          eventName: pending.eventName,
+          eventDataJson: pending.eventDataJson,
+          userId: pending.userId || record.userId,
+        },
+        logger,
+      );
+      if (this.sockets.size === 0) continue;
       await this.pushRealtimeRecord({
         id: pending.eventId,
         eventType: pending.eventName,
@@ -840,6 +951,11 @@ export class IngestDurableObject extends DurableObject {
       screenSize: string;
       latitude: number | null;
       longitude: number | null;
+      perfTtfbMs: number | null;
+      perfFcpMs: number | null;
+      perfLcpMs: number | null;
+      perfCls: number | null;
+      perfInpMs: number | null;
       status: string;
       hiddenAt: number | null;
     }>(
@@ -866,6 +982,9 @@ export class IngestDurableObject extends DurableObject {
                latitude, longitude, ended_at AS endedAt, finalized_at AS finalizedAt,
                duration_ms AS durationMs, duration_source AS durationSource,
                exit_reason AS exitReason,
+               perf_ttfb_ms AS perfTtfbMs, perf_fcp_ms AS perfFcpMs,
+               perf_lcp_ms AS perfLcpMs, perf_cls AS perfCls,
+               perf_inp_ms AS perfInpMs,
                status, hidden_at AS hiddenAt
         FROM buffered_visits
         WHERE site_id = ? AND visit_id = ? AND status IN ('open', 'hidden_pending')
@@ -956,6 +1075,61 @@ export class IngestDurableObject extends DurableObject {
       logger.info("do.ingest.leave_ignored");
       return;
     }
+
+    writeTrafficVisitFinalizedFact(
+      this.doEnv,
+      {
+        visit: {
+          siteId: visit.siteId,
+          visitId: visit.visitId,
+          visitorId: visit.visitorId,
+          sessionId: visit.sessionId,
+          startedAt: visit.startedAt,
+          pathname: visit.pathname,
+          queryString: visit.queryString,
+          hashFragment: visit.hash,
+          title: visit.title,
+          hostname: visit.hostname,
+          referrerUrl: visit.referrerUrl,
+          referrerHost: visit.referrerHost,
+          utmSource: visit.utmSource,
+          utmMedium: visit.utmMedium,
+          utmCampaign: visit.utmCampaign,
+          utmTerm: visit.utmTerm,
+          utmContent: visit.utmContent,
+          region: visit.region,
+          city: visit.city,
+          continent: visit.continent,
+          country: visit.country,
+          regionCode: visit.regionCode,
+          postalCode: visit.postalCode,
+          metroCode: visit.metroCode,
+          timezone: visit.timezone,
+          asOrganization: visit.organization,
+          browser: visit.browser,
+          browserVersion: visit.browserVersion,
+          os: visit.os,
+          osVersion: visit.osVersion,
+          deviceType: visit.deviceType,
+          language: visit.language,
+          latitude: visit.latitude,
+          longitude: visit.longitude,
+          screenWidth: visit.screenWidth,
+          screenHeight: visit.screenHeight,
+          perfTtfbMs: record.performance?.ttfb ?? visit.perfTtfbMs,
+          perfFcpMs: record.performance?.fcp ?? visit.perfFcpMs,
+          perfLcpMs: record.performance?.lcp ?? visit.perfLcpMs,
+          perfCls: record.performance?.cls ?? visit.perfCls,
+          perfInpMs: record.performance?.inp ?? visit.perfInpMs,
+        },
+        receivedAt: record.receivedAt,
+        endedAt: closedLeaveAt,
+        durationMs: closedDurationMs,
+        durationSource: closedDurationSource,
+        exitReason: closedExitReason,
+      },
+      logger,
+    );
 
     if (!this.hasOpenVisitsForVisitor(visit.siteId, visit.visitorId)) {
       await this.pushRealtimeRecord({
@@ -1248,6 +1422,7 @@ export class IngestDurableObject extends DurableObject {
       return;
     }
     logger.info("do.ingest.custom_event_buffered");
+    writeEventAnalyticsPoint(this.doEnv, record, logger);
     await this.updateOpenVisitActivity(record.visitId, record.eventAt);
     await this.pushRealtimeRecord({
       id: record.eventId,
@@ -1546,6 +1721,63 @@ export class IngestDurableObject extends DurableObject {
     );
   }
 
+  private readTrafficVisitSnapshot(
+    siteId: string,
+    visitId: string,
+  ): TrafficVisitSnapshot | null {
+    return this.sqlOne<TrafficVisitSnapshot>(
+      `
+        SELECT
+          site_id AS siteId,
+          visit_id AS visitId,
+          visitor_id AS visitorId,
+          session_id AS sessionId,
+          started_at AS startedAt,
+          pathname,
+          query_string AS queryString,
+          hash_fragment AS hashFragment,
+          title,
+          hostname,
+          referrer_url AS referrerUrl,
+          referrer_host AS referrerHost,
+          utm_source AS utmSource,
+          utm_medium AS utmMedium,
+          utm_campaign AS utmCampaign,
+          utm_term AS utmTerm,
+          utm_content AS utmContent,
+          region,
+          city,
+          continent,
+          country,
+          region_code AS regionCode,
+          postal_code AS postalCode,
+          metro_code AS metroCode,
+          timezone,
+          as_organization AS asOrganization,
+          browser,
+          browser_version AS browserVersion,
+          os,
+          os_version AS osVersion,
+          device_type AS deviceType,
+          language,
+          latitude,
+          longitude,
+          screen_width AS screenWidth,
+          screen_height AS screenHeight,
+          perf_ttfb_ms AS perfTtfbMs,
+          perf_fcp_ms AS perfFcpMs,
+          perf_lcp_ms AS perfLcpMs,
+          perf_cls AS perfCls,
+          perf_inp_ms AS perfInpMs
+        FROM buffered_visits
+        WHERE site_id = ? AND visit_id = ?
+        LIMIT 1
+      `,
+      siteId,
+      visitId,
+    );
+  }
+
   private async findRecentVisitorSession(input: {
     siteId: string;
     visitorId: string;
@@ -1769,6 +2001,12 @@ export class IngestDurableObject extends DurableObject {
       insertBufferedVisitRow: this.insertBufferedVisitRow.bind(this),
       hasOpenVisitsForVisitor: this.hasOpenVisitsForVisitor.bind(this),
       pushRealtimeRecord: this.pushRealtimeRecord.bind(this),
+      writeTrafficVisitFinalizedFact: (
+        input: Parameters<typeof writeTrafficVisitFinalizedFact>[1],
+      ) => writeTrafficVisitFinalizedFact(this.doEnv, input, logger),
+      writeTrafficSessionEndedFact: (
+        input: Parameters<typeof writeTrafficSessionEndedFact>[1],
+      ) => writeTrafficSessionEndedFact(this.doEnv, input, logger),
       observability: logger,
     };
   }

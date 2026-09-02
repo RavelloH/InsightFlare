@@ -1745,7 +1745,7 @@ async function fetchRequestObservation(
   signal?: AbortSignal,
 ): Promise<RequestObservationData> {
   const payload = await requestAdminService<RequestObservationData>(
-    "bot-analytics",
+    "request-observation",
     {
       params: {
         from: String(Math.floor(timeWindow.from)),
@@ -1765,17 +1765,20 @@ async function fetchRequestObservationPage(
   source: "abnormal" | "normal",
   cursor: RequestDetailCursor,
 ): Promise<RequestObservationPageData> {
-  return requestAdminService<RequestObservationPageData>("bot-analytics", {
-    params: {
-      from: String(Math.floor(timeWindow.from)),
-      to: String(Math.floor(timeWindow.to)),
-      interval: timeWindow.interval,
-      timeZone: timeWindow.timeZone,
-      page: source,
-      limit: String(BOT_EVENT_FETCH_LIMIT),
-      cursor: JSON.stringify(cursor),
+  return requestAdminService<RequestObservationPageData>(
+    "request-observation",
+    {
+      params: {
+        from: String(Math.floor(timeWindow.from)),
+        to: String(Math.floor(timeWindow.to)),
+        interval: timeWindow.interval,
+        timeZone: timeWindow.timeZone,
+        page: source,
+        limit: String(BOT_EVENT_FETCH_LIMIT),
+        cursor: JSON.stringify(cursor),
+      },
     },
-  });
+  );
 }
 
 async function fetchRequestObservationDimension(
@@ -1785,7 +1788,7 @@ async function fetchRequestObservationDimension(
   tab: string,
 ): Promise<RequestNetworkDimensionRow[]> {
   const payload = await requestAdminService<RequestObservationDimensionData>(
-    "bot-analytics",
+    "request-observation",
     {
       params: {
         from: String(Math.floor(timeWindow.from)),
@@ -1810,7 +1813,7 @@ async function fetchRequestObservationDetail(
   signal?: AbortSignal,
 ): Promise<BotEvent | null> {
   const payload = await requestAdminService<RequestObservationDetailData>(
-    "bot-analytics",
+    "request-observation",
     {
       params: {
         from: String(Math.floor(timeWindow.from)),

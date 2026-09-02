@@ -429,4 +429,22 @@ export function initializeIngestSqlSchema(sql: DurableObjectSqlStorage): void {
       CREATE INDEX IF NOT EXISTS idx_buffered_custom_events_occurred
       ON buffered_custom_events(occurred_at)
     `);
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS analytics_sessions (
+      site_id TEXT NOT NULL,
+      session_id TEXT PRIMARY KEY,
+        visitor_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        last_activity_at INTEGER NOT NULL,
+        page_count INTEGER NOT NULL,
+        entry_path TEXT NOT NULL,
+        last_path TEXT NOT NULL,
+        last_visit_id TEXT NOT NULL,
+        next_due_at INTEGER NOT NULL
+      )
+    `);
+  sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_analytics_sessions_next_due
+      ON analytics_sessions(next_due_at, session_id)
+    `);
 }
