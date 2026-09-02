@@ -14,7 +14,6 @@ import {
   startOfZonedInterval,
   timeZoneOffsetMinutes,
 } from "@/lib/dashboard/time-zone";
-import { SECRET_PURPOSES } from "@/lib/secrets";
 
 import {
   hasRequestFlag,
@@ -24,7 +23,7 @@ import {
 import { requireActor } from "./admin-auth";
 import { bad, forb, jsonResponseFor, na } from "./admin-response";
 import { analyticsEngineAvailability } from "./analytics-engine";
-import { decryptSecret } from "./secret-encryption";
+import { decryptAnalyticsEngineSecret } from "./secret-encryption";
 import { readConfig } from "./system-config";
 import type { Env } from "./types";
 import { clampString, ONE_HOUR_MS } from "./utils";
@@ -1481,11 +1480,7 @@ export async function handleRequestObservationAdmin(
 
   let token: string;
   try {
-    token = await decryptSecret(
-      env,
-      config.apiTokenEncrypted,
-      SECRET_PURPOSES.analyticsEngineSecretEncryption,
-    );
+    token = await decryptAnalyticsEngineSecret(env, config.apiTokenEncrypted);
   } catch {
     return bad(
       "Unable to decrypt Cloudflare API token",

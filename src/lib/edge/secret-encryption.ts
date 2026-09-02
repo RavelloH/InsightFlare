@@ -165,11 +165,23 @@ export async function decryptAnalyticsEngineSecret(
   env: Pick<Env, "MAIN_SECRET" | "DAILY_SALT_SECRET">,
   encrypted: string,
 ): Promise<string> {
-  return decryptSecret(
-    env,
-    encrypted,
-    SECRET_PURPOSES.analyticsEngineSecretEncryption,
-  );
+  try {
+    return await decryptSecret(
+      env,
+      encrypted,
+      SECRET_PURPOSES.analyticsEngineSecretEncryption,
+    );
+  } catch (currentError) {
+    try {
+      return await decryptSecret(
+        env,
+        encrypted,
+        SECRET_PURPOSES.legacyBotAnalyticsSecretEncryption,
+      );
+    } catch {
+      throw currentError;
+    }
+  }
 }
 
 export async function encryptTeamInviteToken(

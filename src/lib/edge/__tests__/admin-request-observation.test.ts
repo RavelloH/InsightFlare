@@ -7,8 +7,12 @@ import {
 import { handleAnalyticsEngineConfigAdmin } from "@/lib/edge/admin-analytics-engine-config";
 import { requireActor } from "@/lib/edge/admin-auth";
 import { handleRequestObservationAdmin } from "@/lib/edge/admin-request-observation";
-import { encryptAnalyticsEngineSecret } from "@/lib/edge/secret-encryption";
+import {
+  encryptAnalyticsEngineSecret,
+  encryptSecret,
+} from "@/lib/edge/secret-encryption";
 import type { Env } from "@/lib/edge/types";
+import { SECRET_PURPOSES } from "@/lib/secrets";
 
 vi.mock("@/lib/edge/admin-auth", () => ({
   requireActor: vi.fn(),
@@ -243,6 +247,32 @@ describe("request observation admin reader", () => {
     );
     expect(sql).toContain("sum(_sample_interval)");
     expect(sql).toContain("quantileExactWeighted(0.95)");
+  });
+
+  it("reads tokens encrypted with the legacy bot analytics purpose", async () => {
+    const encrypted = await encryptSecret(
+      { MAIN_SECRET: "main-secret" },
+      "cf-token",
+      SECRET_PURPOSES.legacyBotAnalyticsSecretEncryption,
+    );
+    const config = statement({ first: configRow(encrypted) });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => analyticsResponse([]));
+
+    const response = await handleRequestObservationAdmin(
+      request("/api/private/admin/request-observation?from=0&to=3600000"),
+      createEnv([config]),
+      new URL(
+        "https://app.test/api/private/admin/request-observation?from=0&to=3600000",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(
+      new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("authorization"),
+    ).toBe("Bearer cf-token");
   });
 
   it("returns detail identity and metadata from the new blob slots", async () => {
