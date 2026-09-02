@@ -428,7 +428,8 @@ export function ApiKeysClient({
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
                                 <TableActionButton
-                                  label={copy.rotate}
+                                  label={`${copy.rotate}: ${key.name}`}
+                                  tone="destructive"
                                   disabled={
                                     key.status !== "active" ||
                                     busyKeyId === key.id
@@ -459,6 +460,7 @@ export function ApiKeysClient({
                                     <span>{cancelLabel}</span>
                                   </AlertDialogCancel>
                                   <AlertDialogAction
+                                    variant="destructive"
                                     onClick={() => void rotateKey(key.id)}
                                   >
                                     <RiRefreshLine className="size-4" />
@@ -470,7 +472,7 @@ export function ApiKeysClient({
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
                                 <TableActionButton
-                                  label={copy.revoke}
+                                  label={`${copy.revoke}: ${key.name}`}
                                   tone="destructive"
                                   disabled={
                                     key.status !== "active" ||

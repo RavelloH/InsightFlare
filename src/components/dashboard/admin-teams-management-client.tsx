@@ -221,7 +221,7 @@ export function AdminTeamsManagementClient({
                           `/${locale}/app/${team.slug}`,
                         );
                       }}
-                      label={t.open}
+                      label={`${t.open}: ${team.name}`}
                     >
                       <RiArrowRightLine className="size-4" />
                     </TableActionButton>
@@ -232,7 +232,7 @@ export function AdminTeamsManagementClient({
                           `/${locale}/app/${team.slug}/settings`,
                         );
                       }}
-                      label={t.settings}
+                      label={`${t.settings}: ${team.name}`}
                     >
                       <RiSettings3Line className="size-4" />
                     </TableActionButton>

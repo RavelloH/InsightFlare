@@ -327,6 +327,9 @@ export const AsyncDimensionBreakdownCard = memo(
         rowAdapter={rowAdapter}
         compareRows={compareRows}
         labelColumnLabel={labelColumnLabel}
+        sortActionLabel={(label) =>
+          formatI18nTemplate(messages.common.sortBy, { label })
+        }
         loadingLabel={messages.common.loading}
         emptyLabel={resolvedEmptyLabel}
         className={className}

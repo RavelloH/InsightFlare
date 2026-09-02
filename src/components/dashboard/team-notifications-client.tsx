@@ -2126,7 +2126,7 @@ export function TeamNotificationsClient({
                           <TableCell>
                             <div className="flex flex-wrap gap-2">
                               <TableActionButton
-                                label={copy.preview}
+                                label={`${copy.preview}: ${rule.name}`}
                                 disabled={previewingId === rule.id}
                                 onClick={() => void handlePreview(rule)}
                                 transitionKey={
@@ -2142,7 +2142,7 @@ export function TeamNotificationsClient({
                                 )}
                               </TableActionButton>
                               <TableActionButton
-                                label={copy.runNow}
+                                label={`${copy.runNow}: ${rule.name}`}
                                 disabled={runningId === rule.id}
                                 onClick={() => void handleRunNow(rule)}
                                 transitionKey={
@@ -2156,15 +2156,15 @@ export function TeamNotificationsClient({
                                 )}
                               </TableActionButton>
                               <TableActionButton
-                                label={copy.edit}
+                                label={`${copy.edit}: ${rule.name}`}
                                 onClick={() => openEdit(rule)}
                               >
                                 <RiEditLine className="size-4" />
                               </TableActionButton>
                               <TableActionButton
-                                label={
+                                label={`${
                                   rule.enabled ? copy.disable : copy.enable
-                                }
+                                }: ${rule.name}`}
                                 onClick={() => void toggleRule(rule)}
                                 transitionKey={
                                   rule.enabled ? "enabled" : "disabled"
@@ -2177,7 +2177,7 @@ export function TeamNotificationsClient({
                                 )}
                               </TableActionButton>
                               <TableActionButton
-                                label={copy.delete}
+                                label={`${copy.delete}: ${rule.name}`}
                                 tone="destructive"
                                 onClick={() => void removeRule(rule)}
                               >

@@ -1282,6 +1282,14 @@ function SearchableValueInput({
                   key={filterValueKey(value)}
                   type="button"
                   className="max-w-full truncate bg-muted px-1.5 py-0.5 text-xs hover:bg-accent"
+                  aria-label={formatI18nTemplate(
+                    messages.filterBuilder.removeValue,
+                    { value: filterValueText(value) },
+                  )}
+                  title={formatI18nTemplate(
+                    messages.filterBuilder.removeValue,
+                    { value: filterValueText(value) },
+                  )}
                   onClick={() =>
                     onListChange(
                       selectedValues.filter(

@@ -93,6 +93,7 @@ import type {
 import type { FilterDocument, FilterValue } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { useRouter } from "@/lib/router";
 import { cn } from "@/lib/utils";
@@ -713,6 +714,7 @@ function SortIndicator({
 
 function SortHeader({
   label,
+  ariaLabel,
   active,
   direction,
   onClick,
@@ -720,6 +722,7 @@ function SortHeader({
   className,
 }: {
   label: string;
+  ariaLabel?: string;
   active: boolean;
   direction: SortDirection;
   onClick: () => void;
@@ -742,6 +745,8 @@ function SortHeader({
       >
         <button
           type="button"
+          aria-label={ariaLabel ?? label}
+          title={ariaLabel ?? label}
           className={cn(
             "inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
             active ? "text-foreground" : "text-muted-foreground",
@@ -1099,6 +1104,9 @@ const EventRecordsTable = memo(function EventRecordsTable({
       eventName: (
         <SortHeader
           label={labels.eventName}
+          ariaLabel={formatI18nTemplate(messages.common.sortBy, {
+            label: labels.eventName,
+          })}
           active={sort.key === "eventName"}
           direction={sort.direction}
           onClick={() => onSort("eventName")}
@@ -1108,6 +1116,9 @@ const EventRecordsTable = memo(function EventRecordsTable({
       occurredAt: (
         <SortHeader
           label={labels.occurredAt}
+          ariaLabel={formatI18nTemplate(messages.common.sortBy, {
+            label: labels.occurredAt,
+          })}
           active={sort.key === "occurredAt"}
           direction={sort.direction}
           onClick={() => onSort("occurredAt")}
@@ -1118,6 +1129,9 @@ const EventRecordsTable = memo(function EventRecordsTable({
       page: (
         <SortHeader
           label={labels.page}
+          ariaLabel={formatI18nTemplate(messages.common.sortBy, {
+            label: labels.page,
+          })}
           active={sort.key === "pathname"}
           direction={sort.direction}
           onClick={() => onSort("pathname")}
@@ -1135,7 +1149,7 @@ const EventRecordsTable = memo(function EventRecordsTable({
         <TableHead className="pr-4 text-right">{labels.nodeCount}</TableHead>
       ),
     }),
-    [labels, onSort, sort],
+    [labels, messages.common.sortBy, onSort, sort],
   );
   const header = useMemo(
     () => (

@@ -143,6 +143,7 @@ export function ShareHeader({
               size="icon"
               className="inline-flex bg-background xl:hidden"
               aria-label={messages.common.theme}
+              title={messages.common.theme}
             >
               <ThemeIcon className="size-4 text-muted-foreground" />
             </Button>
@@ -242,6 +243,7 @@ export function ShareHeader({
               size="icon"
               className="inline-flex bg-background xl:hidden"
               aria-label={messages.common.language}
+              title={messages.common.language}
             >
               <RiGlobalLine className="size-4 text-muted-foreground" />
             </Button>

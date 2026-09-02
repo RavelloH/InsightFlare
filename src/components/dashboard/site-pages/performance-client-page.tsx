@@ -1918,6 +1918,9 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
           onSortChange={handleSortChange}
           rowAdapter={rowAdapter}
           requestKey={activePanel}
+          sortActionLabel={(label) =>
+            formatI18nTemplate(messages.common.sortBy, { label })
+          }
           loadingLabel={messages.common.loading}
           emptyLabel={messages.common.noData}
           headerHidden
@@ -2115,6 +2118,9 @@ const PathStatusColumn = memo(function PathStatusColumn({
           onSortChange={handleSortChange}
           rowAdapter={rowAdapter}
           requestKey={activePanel}
+          sortActionLabel={(label) =>
+            formatI18nTemplate(messages.common.sortBy, { label })
+          }
           loadingLabel={messages.common.loading}
           emptyLabel={messages.common.noData}
           headerHidden

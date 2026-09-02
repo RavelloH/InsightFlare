@@ -484,7 +484,7 @@ export function AdminUsersManagementClient({
                       disabled={
                         deletingUserId !== null || user.id === currentUserId
                       }
-                      label={t.delete}
+                      label={`${t.delete}: ${user.name || user.username}`}
                       tone="destructive"
                       transitionKey={
                         deletingUserId === user.id ? "deleting" : "delete"

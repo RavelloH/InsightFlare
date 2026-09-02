@@ -3130,8 +3130,8 @@ export function OverviewPagesSection({
             <Clickable
               className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
               onClick={(event) => openPageCardRowTarget(rowTargetUrl, event)}
-              aria-label={displayLabel}
-              title={displayLabel}
+              aria-label={`${messages.common.open}: ${displayLabel}`}
+              title={`${messages.common.open}: ${displayLabel}`}
             >
               <RiArrowRightUpLine size="1.4em" />
             </Clickable>
@@ -3385,8 +3385,8 @@ export function OverviewPagesSection({
                 onClick={(event) =>
                   openPageCardRowTarget(row.targetUrl!, event)
                 }
-                aria-label={displayLabel}
-                title={displayLabel}
+                aria-label={`${messages.common.open}: ${displayLabel}`}
+                title={`${messages.common.open}: ${displayLabel}`}
               >
                 <RiArrowRightUpLine size="1.4em" />
               </Clickable>
@@ -3575,6 +3575,9 @@ export function OverviewPagesSection({
               rowAdapter={pageCardRowAdapter}
               filterRows={filterPageCardRows}
               compareRows={comparePageRows}
+              sortActionLabel={(label) =>
+                formatI18nTemplate(messages.common.sortBy, { label })
+              }
               loadingLabel={messages.common.loading}
               emptyLabel={noDataText}
               search={searchConfig}
@@ -3596,6 +3599,9 @@ export function OverviewPagesSection({
               rowAdapter={sourceCardRowAdapter}
               filterRows={filterSourceCardRows}
               compareRows={comparePageRows}
+              sortActionLabel={(label) =>
+                formatI18nTemplate(messages.common.sortBy, { label })
+              }
               loadingLabel={messages.common.loading}
               emptyLabel={noDataText}
               search={searchConfig}
@@ -3621,6 +3627,9 @@ export function OverviewPagesSection({
               rowAdapter={clientDimensionCardRowAdapter}
               filterRows={filterClientDimensionCardRows}
               compareRows={comparePageRows}
+              sortActionLabel={(label) =>
+                formatI18nTemplate(messages.common.sortBy, { label })
+              }
               loadingLabel={messages.common.loading}
               emptyLabel={noDataText}
               search={searchConfig}
@@ -3646,6 +3655,9 @@ export function OverviewPagesSection({
               rowAdapter={geoDimensionCardRowAdapter}
               filterRows={filterGeoDimensionCardRows}
               compareRows={comparePageRows}
+              sortActionLabel={(label) =>
+                formatI18nTemplate(messages.common.sortBy, { label })
+              }
               loadingLabel={messages.common.loading}
               emptyLabel={noDataText}
               search={searchConfig}

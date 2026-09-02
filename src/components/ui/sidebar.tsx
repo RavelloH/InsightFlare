@@ -266,6 +266,7 @@ function SidebarTrigger({
       variant="ghost"
       size="icon-sm"
       className={cn(className)}
+      title="Toggle Sidebar"
       onClick={(event) => {
         onClick?.(event);
         toggleSidebar();

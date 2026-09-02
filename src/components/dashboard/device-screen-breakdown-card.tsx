@@ -36,6 +36,7 @@ import type { BrowserTrendData, BrowserTrendSeries } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
 
 const CHART_COLORS = [
   "var(--color-chart-1)",
@@ -258,6 +259,9 @@ function ScreenValueListCard({
       columns={columns}
       rowAdapter={rowAdapter}
       compareRows={compareRows}
+      sortActionLabel={(label) =>
+        formatI18nTemplate(messages.common.sortBy, { label })
+      }
       loadingLabel={messages.common.loading}
       emptyLabel={messages.common.noData}
       headerHidden

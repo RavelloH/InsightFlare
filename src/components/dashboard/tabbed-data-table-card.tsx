@@ -213,6 +213,7 @@ export interface TabbedDataTableCardProps<
   defaultSort?: TabbedDataTableSortState<TKey>;
   sortByTab?: Partial<Record<TTab, TabbedDataTableSortState<TKey>>>;
   onSortChange?: (tab: TTab, sort: TabbedDataTableSortState<TKey>) => void;
+  sortActionLabel?: (columnLabel: string) => string;
   labelColumnLabel?: string | ((tab: TabbedDataTableTab<TTab>) => string);
   loadingLabel: string;
   emptyLabel: string;
@@ -380,6 +381,7 @@ function TabbedDataTableCardImpl<
   defaultSort,
   sortByTab: controlledSortByTab,
   onSortChange,
+  sortActionLabel,
   labelColumnLabel,
   loadingLabel,
   emptyLabel,
@@ -798,11 +800,22 @@ function TabbedDataTableCardImpl<
           return (
             <TableHead
               key={column.key}
+              aria-sort={
+                sortable && active
+                  ? effectiveSortByTab[tab].direction === "asc"
+                    ? "ascending"
+                    : "descending"
+                  : "none"
+              }
               className={cn("h-8 w-20 p-0", column.widthClassName)}
             >
               <div className="flex justify-end px-2">
                 <button
                   type="button"
+                  aria-label={
+                    sortable ? sortActionLabel?.(column.label) : undefined
+                  }
+                  title={sortable ? sortActionLabel?.(column.label) : undefined}
                   className={cn(
                     "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
                     active ? "text-foreground" : "text-muted-foreground",

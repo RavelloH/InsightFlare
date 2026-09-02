@@ -81,6 +81,8 @@ common:
   admin: 管理者
   user: ユーザー
   search: 検索
+  open: 開く
+  sortBy: '{label}で並べ替え'
   tableExport:
     action: エクスポート
     title: CSV をエクスポート
@@ -143,7 +145,7 @@ dashboardHeader:
   customRange: カスタム範囲を選択
   customHint: 開始日と終了日を選択してください。
   customPendingEnd: 開始日が選択されました。終了日を選択してください。
-  customApply: 適用
+  customApply: 日付範囲を適用
   rangeGroupQuick: クイック範囲
   rangeGroupCalendar: カレンダー期間
   rangeGroupRolling: ローリング期間
@@ -252,6 +254,7 @@ filterBuilder:
   valueLoading: 値を読み込み中
   valueSearchPlaceholder: 値を検索または入力
   valueListPlaceholder: 値を検索または入力して Enter で追加
+  removeValue: 'フィルター値「{value}」を削除'
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
   jsonPointer: JSON ポインター
@@ -1978,7 +1981,9 @@ teamManagement:
   members:
     title: メンバー
     subtitle: メンバーを招待、または既存メンバーを削除します。
-    remove: 削除
+    remove: メンバーを削除
+    removeMemberAction: '"{target}" をメンバーから削除'
+    removeMemberConfirm: '"{target}" をこのチームから削除しますか？直ちにアクセスできなくなります。'
     noMembers: このチームにはメンバーがいません。
     invitesTitle: 招待リンクを作成
     invitesSubtitle: ユーザーは招待を承認した後にのみこのチームへ参加します。
@@ -1987,12 +1992,14 @@ teamManagement:
     inviteExpiresLabel: 有効期限（時間）
     createInvite: 招待リンクを作成
     creatingInvite: 作成中...
-    copyInvite: リンクをコピー
+    copyInvite: 招待リンクをコピー
     inviteLinksTitle: 招待リンク
     inviteLinksSubtitle: 招待ステータスを確認し、有効なリンクを取り消します。
     noInvites: このチームには招待リンクがありません。
     anyEmail: 任意のメールアドレス
     revokeInvite: 招待を取り消し
+    revokeInviteAction: '"{target}" の招待を取り消し'
+    revokeInviteConfirm: '"{target}" の招待を取り消しますか？このリンクは使用できなくなります。'
     siteAccessLabel: サイト権限
     siteAccessAll: 全サイト
     siteAccessRestricted: 制限付き

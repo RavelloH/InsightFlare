@@ -81,6 +81,8 @@ common:
   admin: Admin
   user: User
   search: Search
+  open: Open
+  sortBy: Sort by {label}
   tableExport:
     action: Export
     title: Export CSV
@@ -143,7 +145,7 @@ dashboardHeader:
   customRange: Select Custom Range
   customHint: Please select a start and end date.
   customPendingEnd: Start date selected. Please pick an end date.
-  customApply: Apply
+  customApply: Apply date range
   rangeGroupQuick: Quick Ranges
   rangeGroupCalendar: Calendar Periods
   rangeGroupRolling: Rolling Windows
@@ -252,6 +254,7 @@ filterBuilder:
   valueLoading: Loading values
   valueSearchPlaceholder: Search or enter a value
   valueListPlaceholder: Search or enter a value, then press Enter
+  removeValue: Remove filter value "{value}"
   rangeStartPlaceholder: Lower bound
   rangeEndPlaceholder: Upper bound
   jsonPointer: JSON Pointer
@@ -2032,7 +2035,9 @@ teamManagement:
   members:
     title: Members
     subtitle: Invite members or remove existing members.
-    remove: Remove
+    remove: Remove member
+    removeMemberAction: Remove member "{target}"
+    removeMemberConfirm: Remove "{target}" from this team? They will lose access immediately.
     noMembers: No members found for this team.
     invitesTitle: Create invite link
     invitesSubtitle: Users join this team only after accepting an invite.
@@ -2041,12 +2046,14 @@ teamManagement:
     inviteExpiresLabel: Expires in hours
     createInvite: Create invite link
     creatingInvite: Creating...
-    copyInvite: Copy link
+    copyInvite: Copy invite link
     inviteLinksTitle: Invite links
     inviteLinksSubtitle: Review invite status and revoke active links.
     noInvites: This team has no invite links yet.
     anyEmail: Any email
     revokeInvite: Revoke invite
+    revokeInviteAction: Revoke invite for "{target}"
+    revokeInviteConfirm: Revoke the invite for "{target}"? The link will stop working.
     siteAccessLabel: Site access
     siteAccessAll: All sites
     siteAccessRestricted: Restricted

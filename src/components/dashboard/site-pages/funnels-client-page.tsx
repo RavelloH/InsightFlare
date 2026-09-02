@@ -306,9 +306,10 @@ function FunnelList({
               </Button>
               <Button
                 type="button"
-                variant="ghost"
+                variant="destructive"
                 size="icon-sm"
-                aria-label={labels.delete}
+                aria-label={`${labels.deleteTitle}: ${funnel.name}`}
+                title={`${labels.deleteTitle}: ${funnel.name}`}
                 onClick={() => onDelete(funnel)}
               >
                 <RiDeleteBinLine />
@@ -470,6 +471,7 @@ function CreateFunnelDialog({
                         variant="ghost"
                         size="icon-sm"
                         aria-label={labels.removeStep}
+                        title={labels.removeStep}
                         disabled={steps.length <= 2}
                         onClick={() => removeStep(index)}
                       >

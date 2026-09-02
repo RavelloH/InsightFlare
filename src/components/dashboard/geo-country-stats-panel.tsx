@@ -29,6 +29,7 @@ import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
 import { cn } from "@/lib/utils";
 
 interface GeoCountryStatsPanelProps {
@@ -224,10 +225,25 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
       <TableHead className="h-8 p-0">
         <div className="px-4">{columnLabel}</div>
       </TableHead>
-      <TableHead className="h-8 w-[4.75rem] p-0">
+      <TableHead
+        aria-sort={
+          sort.key === "visitors"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[4.75rem] p-0"
+      >
         <div className="flex justify-end px-2">
           <button
             type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: messages.common.visitors,
+            })}
+            title={formatI18nTemplate(messages.common.sortBy, {
+              label: messages.common.visitors,
+            })}
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
               sort.key === "visitors"
@@ -241,10 +257,25 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
           </button>
         </div>
       </TableHead>
-      <TableHead className="h-8 w-[4.75rem] p-0">
+      <TableHead
+        aria-sort={
+          sort.key === "views"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[4.75rem] p-0"
+      >
         <div className="flex justify-end px-4">
           <button
             type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: messages.common.views,
+            })}
+            title={formatI18nTemplate(messages.common.sortBy, {
+              label: messages.common.views,
+            })}
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
               sort.key === "views"

@@ -72,6 +72,8 @@ export interface AppMessages {
     admin: string;
     user: string;
     search: string;
+    open: string;
+    sortBy: string;
     tableExport: {
       action: string;
       title: string;
@@ -204,6 +206,7 @@ export interface AppMessages {
     valueLoading: string;
     valueSearchPlaceholder: string;
     valueListPlaceholder: string;
+    removeValue: string;
     rangeStartPlaceholder: string;
     rangeEndPlaceholder: string;
     jsonPointer: string;
@@ -1925,6 +1928,8 @@ export interface AppMessages {
       title: string;
       subtitle: string;
       remove: string;
+      removeMemberAction: string;
+      removeMemberConfirm: string;
       noMembers: string;
       invitesTitle: string;
       invitesSubtitle: string;
@@ -1939,6 +1944,8 @@ export interface AppMessages {
       noInvites: string;
       anyEmail: string;
       revokeInvite: string;
+      revokeInviteAction: string;
+      revokeInviteConfirm: string;
       siteAccessLabel: string;
       siteAccessAll: string;
       siteAccessRestricted: string;
@@ -2622,6 +2629,8 @@ const enMessages = {
     admin: "Admin",
     user: "User",
     search: "Search",
+    open: "Open",
+    sortBy: "Sort by {label}",
     tableExport: {
       action: "Export",
       title: "Export CSV",
@@ -2690,7 +2699,7 @@ const enMessages = {
     customRange: "Select Custom Range",
     customHint: "Please select a start and end date.",
     customPendingEnd: "Start date selected. Please pick an end date.",
-    customApply: "Apply",
+    customApply: "Apply date range",
     rangeGroupQuick: "Quick Ranges",
     rangeGroupCalendar: "Calendar Periods",
     rangeGroupRolling: "Rolling Windows",
@@ -2809,6 +2818,7 @@ const enMessages = {
     valueLoading: "Loading values",
     valueSearchPlaceholder: "Search or enter a value",
     valueListPlaceholder: "Search or enter a value, then press Enter",
+    removeValue: 'Remove filter value "{value}"',
     rangeStartPlaceholder: "Lower bound",
     rangeEndPlaceholder: "Upper bound",
     jsonPointer: "JSON Pointer",
@@ -4682,7 +4692,10 @@ const enMessages = {
     members: {
       title: "Members",
       subtitle: "Invite members or remove existing members.",
-      remove: "Remove",
+      remove: "Remove member",
+      removeMemberAction: 'Remove member "{target}"',
+      removeMemberConfirm:
+        'Remove "{target}" from this team? They will lose access immediately.',
       noMembers: "No members found for this team.",
       invitesTitle: "Create invite link",
       invitesSubtitle: "Users join this team only after accepting an invite.",
@@ -4691,12 +4704,15 @@ const enMessages = {
       inviteExpiresLabel: "Expires in hours",
       createInvite: "Create invite link",
       creatingInvite: "Creating...",
-      copyInvite: "Copy link",
+      copyInvite: "Copy invite link",
       inviteLinksTitle: "Invite links",
       inviteLinksSubtitle: "Review invite status and revoke active links.",
       noInvites: "This team has no invite links yet.",
       anyEmail: "Any email",
       revokeInvite: "Revoke invite",
+      revokeInviteAction: 'Revoke invite for "{target}"',
+      revokeInviteConfirm:
+        'Revoke the invite for "{target}"? The link will stop working.',
       siteAccessLabel: "Site access",
       siteAccessAll: "All sites",
       siteAccessRestricted: "Restricted",
@@ -5442,6 +5458,8 @@ const zhMessages = {
     admin: "管理员",
     user: "普通用户",
     search: "搜索",
+    open: "打开",
+    sortBy: "按 {label} 排序",
     tableExport: {
       action: "导出",
       title: "导出 CSV",
@@ -5509,7 +5527,7 @@ const zhMessages = {
     customRange: "选择自定义区间",
     customHint: "请选择开始和结束日期。",
     customPendingEnd: "已选择开始日期，请继续选择结束日期。",
-    customApply: "确定",
+    customApply: "应用日期范围",
     rangeGroupQuick: "快速范围",
     rangeGroupCalendar: "自然周期",
     rangeGroupRolling: "滚动窗口",
@@ -5625,6 +5643,7 @@ const zhMessages = {
     valueLoading: "正在加载值",
     valueSearchPlaceholder: "搜索或输入值",
     valueListPlaceholder: "搜索或输入值后按 Enter 添加",
+    removeValue: "移除筛选值「{value}」",
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
     jsonPointer: "JSON 指针",
@@ -7428,7 +7447,10 @@ const zhMessages = {
     members: {
       title: "成员管理",
       subtitle: "创建邀请链接或移除现有成员。",
-      remove: "移除",
+      remove: "移除成员",
+      removeMemberAction: "移除成员「{target}」",
+      removeMemberConfirm:
+        "确认将「{target}」从该团队移除吗？移除后将立即失去访问权限。",
       noMembers: "当前团队暂无成员。",
       invitesTitle: "创建邀请链接",
       invitesSubtitle: "用户接受邀请后才会加入此团队。",
@@ -7437,12 +7459,15 @@ const zhMessages = {
       inviteExpiresLabel: "有效期（小时）",
       createInvite: "创建邀请链接",
       creatingInvite: "创建中...",
-      copyInvite: "复制链接",
+      copyInvite: "复制邀请链接",
       inviteLinksTitle: "邀请链接",
       inviteLinksSubtitle: "查看邀请状态并撤销有效链接。",
       noInvites: "当前团队暂无邀请链接。",
       anyEmail: "任意邮箱",
       revokeInvite: "撤销邀请",
+      revokeInviteAction: "撤销「{target}」的邀请",
+      revokeInviteConfirm:
+        "确认撤销「{target}」的邀请吗？该邀请链接将立即失效。",
       siteAccessLabel: "站点权限",
       siteAccessAll: "全部站点",
       siteAccessRestricted: "限定站点",
@@ -8172,6 +8197,8 @@ const jaMessages = {
     admin: "管理者",
     user: "ユーザー",
     search: "検索",
+    open: "開く",
+    sortBy: "{label}で並べ替え",
     tableExport: {
       action: "エクスポート",
       title: "CSV をエクスポート",
@@ -8240,7 +8267,7 @@ const jaMessages = {
     customRange: "カスタム範囲を選択",
     customHint: "開始日と終了日を選択してください。",
     customPendingEnd: "開始日が選択されました。終了日を選択してください。",
-    customApply: "適用",
+    customApply: "日付範囲を適用",
     rangeGroupQuick: "クイック範囲",
     rangeGroupCalendar: "カレンダー期間",
     rangeGroupRolling: "ローリング期間",
@@ -8358,6 +8385,7 @@ const jaMessages = {
     valueLoading: "値を読み込み中",
     valueSearchPlaceholder: "値を検索または入力",
     valueListPlaceholder: "値を検索または入力して Enter で追加",
+    removeValue: "フィルター値「{value}」を削除",
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
     jsonPointer: "JSON ポインター",
@@ -10230,7 +10258,10 @@ const jaMessages = {
     members: {
       title: "メンバー",
       subtitle: "メンバーを招待、または既存メンバーを削除します。",
-      remove: "削除",
+      remove: "メンバーを削除",
+      removeMemberAction: '"{target}" をメンバーから削除',
+      removeMemberConfirm:
+        '"{target}" をこのチームから削除しますか？直ちにアクセスできなくなります。',
       noMembers: "このチームにはメンバーがいません。",
       invitesTitle: "招待リンクを作成",
       invitesSubtitle:
@@ -10240,13 +10271,16 @@ const jaMessages = {
       inviteExpiresLabel: "有効期限（時間）",
       createInvite: "招待リンクを作成",
       creatingInvite: "作成中...",
-      copyInvite: "リンクをコピー",
+      copyInvite: "招待リンクをコピー",
       inviteLinksTitle: "招待リンク",
       inviteLinksSubtitle:
         "招待ステータスを確認し、有効なリンクを取り消します。",
       noInvites: "このチームには招待リンクがありません。",
       anyEmail: "任意のメールアドレス",
       revokeInvite: "招待を取り消し",
+      revokeInviteAction: '"{target}" の招待を取り消し',
+      revokeInviteConfirm:
+        '"{target}" の招待を取り消しますか？このリンクは使用できなくなります。',
       siteAccessLabel: "サイト権限",
       siteAccessAll: "全サイト",
       siteAccessRestricted: "制限付き",

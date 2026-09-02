@@ -33,6 +33,7 @@ import { numberFormat } from "@/lib/dashboard/format";
 import type { JourneySession } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
 import { cn } from "@/lib/utils";
 
 export type SessionSortDirection = "asc" | "desc";
@@ -204,6 +205,7 @@ function SortIndicator({
 
 function SortHeader({
   label,
+  ariaLabel,
   active,
   direction,
   onClick,
@@ -211,6 +213,7 @@ function SortHeader({
   className,
 }: {
   label: string;
+  ariaLabel?: string;
   active: boolean;
   direction: SessionSortDirection;
   onClick: () => void;
@@ -233,6 +236,8 @@ function SortHeader({
       >
         <button
           type="button"
+          aria-label={ariaLabel ?? label}
+          title={ariaLabel ?? label}
           className={cn(
             "inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
             active ? "text-foreground" : "text-muted-foreground",
@@ -606,6 +611,9 @@ export const SessionsTableCard = memo(function SessionsTableCard({
       started: (
         <SortHeader
           label={labels.started}
+          ariaLabel={formatI18nTemplate(messages.common.sortBy, {
+            label: labels.started,
+          })}
           active={sort.key === "startedAt"}
           direction={sort.direction}
           onClick={() => onSort("startedAt")}
@@ -616,6 +624,9 @@ export const SessionsTableCard = memo(function SessionsTableCard({
       duration: (
         <SortHeader
           label={labels.duration}
+          ariaLabel={formatI18nTemplate(messages.common.sortBy, {
+            label: labels.duration,
+          })}
           active={sort.key === "durationMs"}
           direction={sort.direction}
           onClick={() => onSort("durationMs")}
@@ -626,6 +637,9 @@ export const SessionsTableCard = memo(function SessionsTableCard({
       pageViews: (
         <SortHeader
           label={labels.pageViews}
+          ariaLabel={formatI18nTemplate(messages.common.sortBy, {
+            label: labels.pageViews,
+          })}
           active={sort.key === "views"}
           direction={sort.direction}
           onClick={() => onSort("views")}
@@ -650,7 +664,7 @@ export const SessionsTableCard = memo(function SessionsTableCard({
         <TableHead className="text-center">{labels.exitTime}</TableHead>
       ),
     }),
-    [labels, onSort, sort],
+    [labels, messages.common.sortBy, onSort, sort],
   );
   const header = useMemo(
     () => (

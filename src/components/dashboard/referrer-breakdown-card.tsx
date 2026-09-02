@@ -211,8 +211,8 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
             <Clickable
               className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
               onClick={(event) => openTarget(row.targetUrl!, event)}
-              aria-label={displayLabel}
-              title={displayLabel}
+              aria-label={`${messages.common.open}: ${displayLabel}`}
+              title={`${messages.common.open}: ${displayLabel}`}
             >
               {activeTab === "link" ? (
                 <RiArrowRightUpLine size="1.4em" />
@@ -278,6 +278,9 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
       rowAdapter={rowAdapter}
       filterRows={filterRows}
       compareRows={compareRows}
+      sortActionLabel={(label) =>
+        formatI18nTemplate(messages.common.sortBy, { label })
+      }
       loadingLabel={messages.common.loading}
       emptyLabel={messages.common.noData}
       className="h-full min-h-[420px]"

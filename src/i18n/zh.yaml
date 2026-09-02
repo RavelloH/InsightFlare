@@ -81,6 +81,8 @@ common:
   admin: 管理员
   user: 普通用户
   search: 搜索
+  open: 打开
+  sortBy: 按 {label} 排序
   tableExport:
     action: 导出
     title: 导出 CSV
@@ -143,7 +145,7 @@ dashboardHeader:
   customRange: 选择自定义区间
   customHint: 请选择开始和结束日期。
   customPendingEnd: 已选择开始日期，请继续选择结束日期。
-  customApply: 确定
+  customApply: 应用日期范围
   rangeGroupQuick: 快速范围
   rangeGroupCalendar: 自然周期
   rangeGroupRolling: 滚动窗口
@@ -252,6 +254,7 @@ filterBuilder:
   valueLoading: 正在加载值
   valueSearchPlaceholder: 搜索或输入值
   valueListPlaceholder: 搜索或输入值后按 Enter 添加
+  removeValue: 移除筛选值「{value}」
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
   jsonPointer: JSON 指针
@@ -1972,7 +1975,9 @@ teamManagement:
   members:
     title: 成员管理
     subtitle: 创建邀请链接或移除现有成员。
-    remove: 移除
+    remove: 移除成员
+    removeMemberAction: 移除成员「{target}」
+    removeMemberConfirm: 确认将「{target}」从该团队移除吗？移除后将立即失去访问权限。
     noMembers: 当前团队暂无成员。
     invitesTitle: 创建邀请链接
     invitesSubtitle: 用户接受邀请后才会加入此团队。
@@ -1981,12 +1986,14 @@ teamManagement:
     inviteExpiresLabel: 有效期（小时）
     createInvite: 创建邀请链接
     creatingInvite: 创建中...
-    copyInvite: 复制链接
+    copyInvite: 复制邀请链接
     inviteLinksTitle: 邀请链接
     inviteLinksSubtitle: 查看邀请状态并撤销有效链接。
     noInvites: 当前团队暂无邀请链接。
     anyEmail: 任意邮箱
     revokeInvite: 撤销邀请
+    revokeInviteAction: 撤销「{target}」的邀请
+    revokeInviteConfirm: 确认撤销「{target}」的邀请吗？该邀请链接将立即失效。
     siteAccessLabel: 站点权限
     siteAccessAll: 全部站点
     siteAccessRestricted: 限定站点
