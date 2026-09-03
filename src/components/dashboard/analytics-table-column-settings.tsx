@@ -133,18 +133,28 @@ export function useAnalyticsTableColumns<TId extends string = string>({
   columns: readonly AnalyticsTableColumnDefinition<TId>[];
 }) {
   const schemaKey = useMemo(
-    () => columns.map((column) => column.id).join("|"),
+    () =>
+      columns
+        .map((column) => `${column.id}:${column.required ? "required" : ""}`)
+        .join("|"),
     [columns],
   );
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
   const [state, setState] = useState<ColumnState>(() =>
     normalizeColumnState(columns, null),
   );
   const [storageHydrated, setStorageHydrated] = useState(false);
 
   useEffect(() => {
-    setState(normalizeColumnState(columns, readStoredColumnState(storageKey)));
+    setState(
+      normalizeColumnState(
+        columnsRef.current,
+        readStoredColumnState(storageKey),
+      ),
+    );
     setStorageHydrated(true);
-  }, [columns, schemaKey, storageKey]);
+  }, [schemaKey, storageKey]);
 
   useEffect(() => {
     if (!storageHydrated || typeof window === "undefined") return;

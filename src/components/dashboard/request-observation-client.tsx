@@ -1307,14 +1307,18 @@ export function RequestObservationClient({
     [copy, locale],
   );
   const mapAnimationControls = useAnimationControls();
-  const observationQueryKey = [
-    "dashboard",
-    "request-observation",
-    timeWindow.from,
-    timeWindow.to,
-    timeWindow.interval,
-    timeWindow.timeZone,
-  ] as const;
+  const observationQueryKey = useMemo(
+    () =>
+      [
+        "dashboard",
+        "request-observation",
+        timeWindow.from,
+        timeWindow.to,
+        timeWindow.interval,
+        timeWindow.timeZone,
+      ] as const,
+    [timeWindow.from, timeWindow.interval, timeWindow.timeZone, timeWindow.to],
+  );
   const observationQuery = useQuery({
     queryKey: observationQueryKey,
     queryFn: ({ signal }) => fetchRequestObservation(timeWindow, signal),
@@ -1323,21 +1327,6 @@ export function RequestObservationClient({
   const data = observationQuery.data ?? null;
   const loading = observationQuery.isPending;
   const refreshing = observationQuery.isFetching && !observationQuery.isPending;
-  const setData = (
-    updater:
-      | RequestObservationData
-      | null
-      | ((
-          current: RequestObservationData | null,
-        ) => RequestObservationData | null),
-  ) => {
-    queryClient.setQueryData<RequestObservationData | null>(
-      observationQueryKey,
-      (current = null) =>
-        typeof updater === "function" ? updater(current) : updater,
-    );
-  };
-
   const spanMs = Math.max(1, timeWindow.to - timeWindow.from);
   const windowDetail = formatI18nTemplate(copy.overviewLabels.windowDays, {
     days: Math.max(1, Math.ceil(spanMs / 86400000)),
@@ -1383,12 +1372,19 @@ export function RequestObservationClient({
     observationQuery.isError,
   ]);
 
-  const loadMoreEvents = useMemo(
-    () => async (source: "blocked" | "included") => {
-      const section = data?.[source];
-      if (!section?.hasMore || !section.nextCursor || loadingMore !== null) {
-        return;
-      }
+  const loadingMoreRef = useRef<"blocked" | "included" | null>(null);
+  const loadMoreEvents = useCallback(
+    async (source: "blocked" | "included") => {
+      if (loadingMoreRef.current !== null) return;
+
+      const currentData =
+        queryClient.getQueryData<RequestObservationData | null>(
+          observationQueryKey,
+        );
+      const section = currentData?.[source];
+      if (!section?.hasMore || !section.nextCursor) return;
+
+      loadingMoreRef.current = source;
       setLoadingMore(source);
       try {
         const page = await fetchRequestObservationPage(
@@ -1396,58 +1392,64 @@ export function RequestObservationClient({
           source,
           section.nextCursor,
         );
-        setData((current) => {
-          if (
-            !current ||
-            normalizeRequestObservationTab(page.page.source) !== source
-          ) {
-            return current;
-          }
-          const pageEvents = page.page.events.map((event) =>
-            normalizeRequestObservationEvent(
-              event as BotEvent & NormalRequestEvent,
-              source,
-            ),
-          );
-          if (source === "blocked") {
+        queryClient.setQueryData<RequestObservationData | null>(
+          observationQueryKey,
+          (current) => {
+            if (
+              !current ||
+              normalizeRequestObservationTab(page.page.source) !== source
+            ) {
+              return current;
+            }
+            const pageEvents = page.page.events.map((event) =>
+              normalizeRequestObservationEvent(
+                event as BotEvent & NormalRequestEvent,
+                source,
+              ),
+            );
+            if (source === "blocked") {
+              return {
+                ...current,
+                events: [...current.events, ...(pageEvents as BotEvent[])],
+                blocked: {
+                  ...current.blocked!,
+                  events: [
+                    ...current.blocked!.events,
+                    ...(pageEvents as BotEvent[]),
+                  ],
+                  hasMore: page.page.hasMore,
+                  nextCursor: page.page.nextCursor,
+                },
+              };
+            }
             return {
               ...current,
-              events: [...current.events, ...(pageEvents as BotEvent[])],
-              blocked: {
-                ...current.blocked!,
+              normalEvents: [
+                ...(current.normalEvents ?? []),
+                ...(pageEvents as NormalRequestEvent[]),
+              ],
+              included: {
+                ...current.included!,
                 events: [
-                  ...current.blocked!.events,
-                  ...(pageEvents as BotEvent[]),
+                  ...current.included!.events,
+                  ...(pageEvents as NormalRequestEvent[]),
                 ],
                 hasMore: page.page.hasMore,
                 nextCursor: page.page.nextCursor,
               },
             };
-          }
-          return {
-            ...current,
-            normalEvents: [
-              ...(current.normalEvents ?? []),
-              ...(pageEvents as NormalRequestEvent[]),
-            ],
-            included: {
-              ...current.included!,
-              events: [
-                ...current.included!.events,
-                ...(pageEvents as NormalRequestEvent[]),
-              ],
-              hasMore: page.page.hasMore,
-              nextCursor: page.page.nextCursor,
-            },
-          };
-        });
+          },
+        );
       } catch (error) {
         toast.error(error instanceof Error ? error.message : copy.loadFailed);
       } finally {
-        setLoadingMore(null);
+        if (loadingMoreRef.current === source) {
+          loadingMoreRef.current = null;
+          setLoadingMore(null);
+        }
       }
     },
-    [copy.loadFailed, data, loadingMore, timeWindow],
+    [copy.loadFailed, observationQueryKey, queryClient, timeWindow],
   );
   const loadMoreBlockedEvents = useCallback(() => {
     void loadMoreEvents("blocked");
@@ -1834,7 +1836,7 @@ export function RequestObservationClient({
       loadIncludedDimensionRows("network", tab),
     [loadIncludedDimensionRows],
   );
-  const requestKey = `${timeWindow.interval}:${data?.generatedAt ?? 0}`;
+  const requestKey = `${timeWindow.from}:${timeWindow.to}:${timeWindow.interval}:${timeWindow.timeZone}`;
   const overview = data?.overview;
   const blockedSummary = data?.blocked?.summary;
   const includedSummary = data?.included?.summary;
@@ -3182,7 +3184,10 @@ function BotRequestDetailDrawer({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const ui = requestObservationUiLabels(locale, copy);
+  const ui = useMemo(
+    () => requestObservationUiLabels(locale, copy),
+    [copy, locale],
+  );
   const empty = copy.emptyValue;
   const preview = detailEvent ?? previewEvent;
   const event = preview ?? BOT_EVENT_DETAIL_SKELETON_DATA;
@@ -4031,7 +4036,10 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
   onLoadMore: () => void;
   timeWindow: TimeWindow;
 }) {
-  const ui = requestObservationUiLabels(locale, copy);
+  const ui = useMemo(
+    () => requestObservationUiLabels(locale, copy),
+    [copy, locale],
+  );
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [selectedEvent, setSelectedEvent] = useState<BotEvent | null>(null);
@@ -4184,7 +4192,7 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
       { id: "botScore", label: copy.botScore },
       { id: "verifiedBotCategory", label: copy.verifiedBotCategory },
     ],
-    [copy, ui],
+    [copy],
   );
   const tableColumns = useAnalyticsTableColumns({
     storageKey:
@@ -4207,7 +4215,7 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
       pathname: <TableHead>{copy.pathname}</TableHead>,
       userAgent: <TableHead className="pr-4">{copy.userAgent}</TableHead>,
     }),
-    [copy, ui],
+    [copy],
   );
   const tableHeader = useMemo(
     () => (
@@ -4554,7 +4562,6 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
       now,
       openEvent,
       tableColumns.visibleIds,
-      ui,
     ],
   );
   const renderSkeletonRow = useCallback(
@@ -4737,7 +4744,10 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
   timeWindow: TimeWindow;
   requestKey?: string;
 }) {
-  const ui = requestObservationUiLabels(locale, copy);
+  const ui = useMemo(
+    () => requestObservationUiLabels(locale, copy),
+    [copy, locale],
+  );
   const [selectedEvent, setSelectedEvent] = useState<NormalRequestEvent | null>(
     null,
   );
@@ -4820,7 +4830,7 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
       { id: "pathname", label: copy.pathname },
       { id: "edgeLatency", label: copy.normalDetail.edgeLatency },
     ],
-    [copy, ui],
+    [copy],
   );
   const tableColumns = useAnalyticsTableColumns({
     storageKey:
@@ -4850,7 +4860,7 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
         </TableHead>
       ),
     }),
-    [copy, ui],
+    [copy],
   );
   const tableHeader = useMemo(
     () => (
@@ -5183,7 +5193,6 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
       now,
       openEvent,
       tableColumns.visibleIds,
-      ui,
     ],
   );
   const renderSkeletonRow = useCallback(
