@@ -147,7 +147,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(release): sync release artifacts to ${{ steps.changelog.outputs.version }} [skip ci]"
-          git push origin HEAD:${{ github.ref_name }}
+          HUSKY=0 git push origin HEAD:${{ github.ref_name }}
 
       - name: Finalize release commit
         id: finalize
