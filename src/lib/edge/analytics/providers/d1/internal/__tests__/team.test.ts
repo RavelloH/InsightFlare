@@ -223,6 +223,16 @@ describe("queryTeamTrendFromD1", () => {
     const result = await queryTeamTrendFromD1(env, [], makeWindow(), "day");
     expect(result).toEqual([]);
   });
+
+  it("connects the unfiltered source CTE directly to SELECT", async () => {
+    queryD1AllMock.mockResolvedValueOnce([]);
+
+    await queryTeamTrendFromD1(makeEnv(), ["s1"], makeWindow(), "day");
+
+    const sql = String(queryD1AllMock.mock.calls.at(-1)?.[1]);
+    expect(sql).toContain("visit_source AS (...)\nSELECT");
+    expect(sql).not.toMatch(/\),\s*SELECT/);
+  });
 });
 
 describe("filtered team dashboard aggregates", () => {

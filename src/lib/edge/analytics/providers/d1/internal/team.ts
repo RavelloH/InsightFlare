@@ -280,8 +280,8 @@ export async function queryTeamTrendFromD1(
       }));
   for (const { siteIds: chunk, dataset } of datasets) {
     const sourceCte = dataset
-      ? `${dataset.ctes},`
-      : `${buildVisitSourceCteForSites(chunk.length)},`;
+      ? dataset.ctes
+      : buildVisitSourceCteForSites(chunk.length);
     const metricSource = dataset?.visitRelation ?? "visit_source";
     const sql = `
 WITH
