@@ -1252,6 +1252,18 @@ export function RequestObservationClient({
   const [loadingMore, setLoadingMore] = useState<"blocked" | "included" | null>(
     null,
   );
+  const [blockedDetectionTab, setBlockedDetectionTab] =
+    useState<DetectionDimensionTab>("reason");
+  const [blockedTargetTab, setBlockedTargetTab] =
+    useState<TargetDimensionTab>("site");
+  const [blockedNetworkTab, setBlockedNetworkTab] =
+    useState<NetworkDimensionTab>("asOrganization");
+  const [blockedClientTab, setBlockedClientTab] =
+    useState<ClientDimensionTab>("ip");
+  const [includedTargetTab, setIncludedTargetTab] =
+    useState<IncludedTargetDimensionTab>("site");
+  const [includedNetworkTab, setIncludedNetworkTab] =
+    useState<NetworkDimensionTab>("asOrganization");
   const ui = useMemo(
     () => requestObservationUiLabels(locale, copy),
     [copy, locale],
@@ -1608,13 +1620,16 @@ export function RequestObservationClient({
   const includedTargetTabs = useMemo(
     () =>
       [
+        targetTabs[0],
+        targetTabs[1],
         {
           value: "category",
           label: copy.category,
           columnLabel: copy.category,
           primaryMetricLabel: labels.requests,
         },
-        ...targetTabs,
+        targetTabs[2],
+        targetTabs[3],
       ] satisfies [
         AsyncDimensionBreakdownTab<IncludedTargetDimensionTab>,
         ...AsyncDimensionBreakdownTab<IncludedTargetDimensionTab>[],
@@ -1901,14 +1916,20 @@ export function RequestObservationClient({
                   locale,
                   overview?.blockedRequestRatio ?? 0,
                 )}
-                detail={numberFormat(locale, overview?.blockedRequests ?? 0)}
+                detail={`${labels.requests}: ${numberFormat(
+                  locale,
+                  overview?.blockedRequests ?? 0,
+                )}`}
                 loading={loading}
               />
               <MetricTile
                 icon={RiRobot2Line}
                 label={ui.botRequestRatio}
                 value={percentFormat(locale, overview?.botRequestRatio ?? 0)}
-                detail={numberFormat(locale, overview?.botRequests ?? 0)}
+                detail={`${labels.requests}: ${numberFormat(
+                  locale,
+                  overview?.botRequests ?? 0,
+                )}`}
                 loading={loading}
               />
               <MetricTile
@@ -2025,9 +2046,6 @@ export function RequestObservationClient({
                 <div className="space-y-6">
                   <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
                     <div className="space-y-6">
-                      <div className="text-sm text-muted-foreground">
-                        {ui.blockedSubtitle}
-                      </div>
                       <Card className="py-0">
                         <CardContent className="p-0">
                           <div className="grid gap-px overflow-hidden bg-border/70 md:grid-cols-2 xl:grid-cols-4">
@@ -2052,7 +2070,12 @@ export function RequestObservationClient({
                                   overview?.blockedRequestRatio ??
                                   0,
                               )}
-                              detail={ui.totalRequests}
+                              detail={`${labels.requests}: ${numberFormat(
+                                locale,
+                                blockedSummary?.total ??
+                                  overview?.blockedRequests ??
+                                  0,
+                              )}`}
                               loading={loading}
                             />
                             <MetricTile
@@ -2103,6 +2126,8 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={detectionTabs}
+                          value={blockedDetectionTab}
+                          onValueChange={setBlockedDetectionTab}
                           loadRows={loadBlockedDetectionRows}
                           requestKey={`${requestKey}:detection`}
                           className="h-full"
@@ -2113,6 +2138,8 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={targetTabs}
+                          value={blockedTargetTab}
+                          onValueChange={setBlockedTargetTab}
                           loadRows={loadBlockedTargetRows}
                           requestKey={`${requestKey}:target`}
                           className="h-full"
@@ -2123,6 +2150,8 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={networkTabs}
+                          value={blockedNetworkTab}
+                          onValueChange={setBlockedNetworkTab}
                           loadRows={loadBlockedNetworkRows}
                           requestKey={`${requestKey}:network`}
                           className="h-full"
@@ -2133,6 +2162,8 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={clientTabs}
+                          value={blockedClientTab}
+                          onValueChange={setBlockedClientTab}
                           loadRows={loadBlockedClientRows}
                           requestKey={`${requestKey}:client`}
                           className="h-full"
@@ -2159,9 +2190,6 @@ export function RequestObservationClient({
                 <div className="space-y-6">
                   <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
                     <div className="space-y-6">
-                      <div className="text-sm text-muted-foreground">
-                        {ui.includedSubtitle}
-                      </div>
                       <Card className="py-0">
                         <CardContent className="p-0">
                           <div className="grid gap-px overflow-hidden bg-border/70 md:grid-cols-2 xl:grid-cols-4">
@@ -2249,6 +2277,8 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={includedTargetTabs}
+                          value={includedTargetTab}
+                          onValueChange={setIncludedTargetTab}
                           loadRows={loadIncludedTargetRows}
                           requestKey={`${requestKey}:included-target`}
                           className="h-full"
@@ -2259,6 +2289,8 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={networkTabs}
+                          value={includedNetworkTab}
+                          onValueChange={setIncludedNetworkTab}
                           loadRows={loadIncludedNetworkRows}
                           requestKey={`${requestKey}:included-network`}
                           className="h-full"
@@ -4480,11 +4512,6 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
               onReset={tableColumns.reset}
               labels={messages.common.tableColumns}
             />
-            <div className="text-xs text-muted-foreground">
-              {!loading && events.length > 0 && !hasMore
-                ? copy.recentLoadedAll
-                : ""}
-            </div>
           </div>
         </div>
 
@@ -5073,11 +5100,6 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
               onReset={tableColumns.reset}
               labels={messages.common.tableColumns}
             />
-            <div className="text-xs text-muted-foreground">
-              {!loading && events.length > 0 && !hasMore
-                ? copy.recentLoadedAll
-                : ""}
-            </div>
           </div>
         </div>
 

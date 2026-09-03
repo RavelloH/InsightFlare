@@ -72,6 +72,8 @@ interface AsyncDimensionBreakdownCardProps<T extends string> {
   locale: Locale;
   messages: AppMessages;
   tabs: NonEmptyArray<AsyncDimensionBreakdownTab<T>>;
+  value?: T;
+  onValueChange?: (value: T) => void;
   loadRows?: (
     tab: T,
     signal?: AbortSignal,
@@ -210,6 +212,8 @@ export const AsyncDimensionBreakdownCard = memo(
     locale,
     messages,
     tabs,
+    value,
+    onValueChange,
     loadRows,
     rowsByTab,
     loadingByTab,
@@ -318,6 +322,8 @@ export const AsyncDimensionBreakdownCard = memo(
     return (
       <TabbedDataTableCard<T, AsyncDimensionBreakdownRow, SortKey>
         tabs={tabs}
+        value={value}
+        onValueChange={onValueChange}
         columns={columns}
         requestKey={requestKey}
         rowsByTab={rowsByTab}
