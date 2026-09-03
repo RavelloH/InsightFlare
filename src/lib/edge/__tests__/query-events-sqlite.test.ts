@@ -279,6 +279,44 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
 }
 
 describe("event detail D1 SQL", () => {
+  it("runs event-record pages through the canonical scoped dataset", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const prepared = prepareScopedQuery("event-records", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: {
+        range: {
+          startMs: window.startMs,
+          endExclusiveMs: window.endExclusiveMs,
+        },
+        reportingTimeZone: "UTC",
+        capturedAtMs: window.nowMs,
+      },
+      filters: EMPTY_FILTER_DOCUMENT,
+      scopePreference: "auto",
+    } as QueryInput & { time: QueryTime });
+
+    try {
+      const page = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        prepared.filters!,
+        {
+          pageSize: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+        },
+      );
+
+      expect(page.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
+      expect(d1.calls.at(-1)?.sql).toContain("FROM scope_final_events es");
+    } finally {
+      d1.close();
+    }
+  });
+
   it("uses the event-name index for the all-events trend source", async () => {
     const { env, d1 } = createSqliteEventEnv();
 

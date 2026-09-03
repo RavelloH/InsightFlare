@@ -338,7 +338,7 @@ function eventRecordsSql(
 WITH
 ${
   scopedDataset
-    ? `${scopedDataset.ctes},`
+    ? scopedDataset.ctes
     : `${buildVisitSourceCte()},
 ${buildEventAnalyticsSourceCte({
   eventName,
