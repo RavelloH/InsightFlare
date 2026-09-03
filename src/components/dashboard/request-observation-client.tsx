@@ -902,6 +902,7 @@ type DetectionDimensionTab =
   | "botScoreBucket"
   | "verifiedBotCategory";
 type TargetDimensionTab = "site" | "hostname" | "pathname" | "origin";
+type IncludedTargetDimensionTab = "category" | TargetDimensionTab;
 type NetworkDimensionTab =
   | "asOrganization"
   | "asn"
@@ -1571,18 +1572,6 @@ export function RequestObservationClient({
       ],
     [copy],
   );
-  const includedDetectionTabs = useMemo(
-    () =>
-      [
-        {
-          value: "category",
-          label: copy.category,
-          columnLabel: copy.category,
-          primaryMetricLabel: labels.requests,
-        },
-      ] satisfies [AsyncDimensionBreakdownTab<"category">],
-    [copy.category, labels.requests],
-  );
   const targetTabs = useMemo(
     () =>
       [
@@ -1615,6 +1604,22 @@ export function RequestObservationClient({
         ...AsyncDimensionBreakdownTab<TargetDimensionTab>[],
       ],
     [copy, labels.requests],
+  );
+  const includedTargetTabs = useMemo(
+    () =>
+      [
+        {
+          value: "category",
+          label: copy.category,
+          columnLabel: copy.category,
+          primaryMetricLabel: labels.requests,
+        },
+        ...targetTabs,
+      ] satisfies [
+        AsyncDimensionBreakdownTab<IncludedTargetDimensionTab>,
+        ...AsyncDimensionBreakdownTab<IncludedTargetDimensionTab>[],
+      ],
+    [copy.category, labels.requests, targetTabs],
   );
   const networkTabs = useMemo(
     () =>
@@ -1726,7 +1731,7 @@ export function RequestObservationClient({
     [copy.emptyValue, locale, timeWindow],
   );
   const loadIncludedDimensionRows = useMemo(
-    () => async (group: "detection" | "target" | "network", tab: string) =>
+    () => async (group: "target" | "network", tab: string) =>
       toAsyncAggregatedDimensionRows(
         await fetchRequestObservationDimension(
           timeWindow,
@@ -1740,9 +1745,9 @@ export function RequestObservationClient({
               locale,
               unknownLabel: copy.emptyValue,
             }
-          : group === "target"
-            ? { targetTab: tab as TargetDimensionTab }
-            : { detectionTab: tab as DetectionDimensionTab, copy },
+          : tab === "category"
+            ? { detectionTab: "category", copy }
+            : { targetTab: tab as TargetDimensionTab },
       ),
     [copy, locale, timeWindow],
   );
@@ -1767,7 +1772,7 @@ export function RequestObservationClient({
     [loadBlockedDimensionRows],
   );
   const loadIncludedTargetRows = useCallback(
-    (tab: TargetDimensionTab, _signal?: AbortSignal) =>
+    (tab: IncludedTargetDimensionTab, _signal?: AbortSignal) =>
       loadIncludedDimensionRows("target", tab),
     [loadIncludedDimensionRows],
   );
@@ -1776,12 +1781,6 @@ export function RequestObservationClient({
       loadIncludedDimensionRows("network", tab),
     [loadIncludedDimensionRows],
   );
-  const loadIncludedDetectionRows = useCallback(
-    (tab: "category", _signal?: AbortSignal) =>
-      loadIncludedDimensionRows("detection", tab),
-    [loadIncludedDimensionRows],
-  );
-
   const requestKey = `${timeWindow.interval}:${data?.generatedAt ?? 0}`;
   const overview = data?.overview;
   const blockedSummary = data?.blocked?.summary;
@@ -2249,17 +2248,7 @@ export function RequestObservationClient({
                         <AsyncDimensionBreakdownCard
                           locale={locale}
                           messages={messages}
-                          tabs={includedDetectionTabs}
-                          loadRows={loadIncludedDetectionRows}
-                          requestKey={`${requestKey}:included-detection`}
-                          className="h-full"
-                          showVisitors={false}
-                          emptyLabel={copy.noData}
-                        />
-                        <AsyncDimensionBreakdownCard
-                          locale={locale}
-                          messages={messages}
-                          tabs={targetTabs}
+                          tabs={includedTargetTabs}
                           loadRows={loadIncludedTargetRows}
                           requestKey={`${requestKey}:included-target`}
                           className="h-full"

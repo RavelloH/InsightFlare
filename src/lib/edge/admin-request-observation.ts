@@ -87,6 +87,30 @@ const DIMENSION_TABS: Record<DimensionGroup, readonly string[]> = {
   network: ["asOrganization", "asn", "country", "region", "city", "colo"],
   client: ["ip", "userAgent", "userAgentLengthBucket", "ipPrefix"],
 };
+const INCLUDED_TARGET_DIMENSION_TABS = [
+  "category",
+  ...DIMENSION_TABS.target,
+] as const;
+const EMPTY_DIMENSION_TABS: readonly string[] = [];
+const DIMENSION_TABS_BY_SOURCE: Record<
+  DetailSource,
+  Record<DimensionGroup, readonly string[]>
+> = {
+  blocked: DIMENSION_TABS,
+  included: {
+    detection: EMPTY_DIMENSION_TABS,
+    target: INCLUDED_TARGET_DIMENSION_TABS,
+    network: DIMENSION_TABS.network,
+    client: EMPTY_DIMENSION_TABS,
+  },
+};
+
+function dimensionTabsFor(
+  source: DetailSource,
+  group: DimensionGroup,
+): readonly string[] {
+  return DIMENSION_TABS_BY_SOURCE[source][group];
+}
 
 interface RequestObservationEvent {
   timestamp: string;
@@ -559,7 +583,10 @@ function buildDimensionSql(input: {
         colo: ["blob13 AS label"],
       };
   const columns = fields[input.tab];
-  if (!columns || !DIMENSION_TABS[input.group].includes(input.tab))
+  if (
+    !columns ||
+    !dimensionTabsFor(input.source, input.group).includes(input.tab)
+  )
     throw new Error("Invalid analytics dimension");
   const groupBy = columns.map((column) => column.split(" AS ")[1]).join(", ");
   return `SELECT ${columns.join(", ")}, max(_sample_interval) AS maxSampleInterval, sum(_sample_interval) AS count, sumIf(_sample_interval, blob2 = 'bot') AS botCount FROM ${REQUEST_ANALYTICS_DATASET} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds}) AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND ${requestDispositionFilter(input.source)} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
@@ -1503,14 +1530,7 @@ export async function handleRequestObservationAdmin(
     dimensionGroup &&
     (dimensionSource === "blocked" || dimensionSource === "included")
   ) {
-    const dimensionTabs =
-      dimensionSource === "blocked"
-        ? DIMENSION_TABS[dimensionGroup]
-        : dimensionGroup === "target" || dimensionGroup === "network"
-          ? DIMENSION_TABS[dimensionGroup]
-          : dimensionGroup === "detection"
-            ? ["category"]
-            : [];
+    const dimensionTabs = dimensionTabsFor(dimensionSource, dimensionGroup);
     if (!dimensionTabs?.includes(dimensionTab)) {
       return bad(
         "Invalid request observation dimension",

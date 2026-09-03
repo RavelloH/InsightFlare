@@ -192,6 +192,7 @@ export function TabbedScrollMaskCard<T extends string = string>({
                     <TabsTrigger
                       key={tab.value}
                       value={tab.value}
+                      onClick={() => onValueChange(tab.value)}
                       className={cn(
                         "h-8 flex-none px-3 text-xs",
                         tabTriggerClassName,

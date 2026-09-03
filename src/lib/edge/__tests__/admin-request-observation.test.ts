@@ -759,6 +759,31 @@ describe("request observation admin reader", () => {
       regionBody.dimension.rows[0].label,
     );
 
+    const includedTargetCategory = await handleRequestObservationAdmin(
+      request(
+        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=category&dimensionSource=included",
+      ),
+      createEnv([statement({ first: configRow(encrypted) })]),
+      new URL(
+        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=category&dimensionSource=included",
+      ),
+    );
+    const includedTargetCategoryBody =
+      (await includedTargetCategory.json()) as Record<string, any>;
+    expect(includedTargetCategory.status).toBe(200);
+    expect(includedTargetCategoryBody.dimension.rows).toHaveLength(2);
+
+    const includedNetwork = await handleRequestObservationAdmin(
+      request(
+        "/api/private/admin/request-observation?dimensionGroup=network&dimensionTab=asn&dimensionSource=included",
+      ),
+      createEnv([statement({ first: configRow(encrypted) })]),
+      new URL(
+        "https://app.test/api/private/admin/request-observation?dimensionGroup=network&dimensionTab=asn&dimensionSource=included",
+      ),
+    );
+    expect(includedNetwork.status).toBe(200);
+
     const includedDetection = await handleRequestObservationAdmin(
       request(
         "/api/private/admin/request-observation?dimensionGroup=detection&dimensionTab=category&dimensionSource=included",
@@ -768,12 +793,7 @@ describe("request observation admin reader", () => {
         "https://app.test/api/private/admin/request-observation?dimensionGroup=detection&dimensionTab=category&dimensionSource=included",
       ),
     );
-    const includedDetectionBody = (await includedDetection.json()) as Record<
-      string,
-      any
-    >;
-    expect(includedDetection.status).toBe(200);
-    expect(includedDetectionBody.dimension.rows).toHaveLength(2);
+    expect(includedDetection.status).toBe(400);
 
     const invalidDimension = await handleRequestObservationAdmin(
       request(
