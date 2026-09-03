@@ -88,6 +88,20 @@ const E2E_GITHUB_RELEASES = [
     updated_at: "2026-07-13T12:00:00.000Z",
   },
 ];
+const E2E_RELEASE_INDEX = E2E_GITHUB_RELEASES.map((release) => ({
+  tagName: release.tag_name,
+  name: release.name,
+  htmlUrl: release.html_url,
+  changelogPath: `changelog/${release.tag_name}.md`,
+  publishedAt: release.published_at,
+  createdAt: release.created_at,
+  updatedAt: release.updated_at,
+  targetCommitish: release.target_commitish,
+  authorLogin: release.author.login,
+  draft: release.draft,
+  prerelease: release.prerelease,
+}));
+const E2E_RELEASE_NOTES = "E2E mock release notes";
 
 function optionValue(argv: string[], name: string): string | undefined {
   const flag = `--${name}`;
@@ -143,6 +157,7 @@ function generatedWranglerConfig(input: {
   mainSecret: string;
   nowMs: number;
   resendApiUrl: string;
+  testSiteURL: string;
 }): string {
   const root = (relativePath: string) =>
     tomlString(path.join(ROOT_DIR, relativePath));
@@ -163,6 +178,7 @@ DISABLE_CRON_TASKS = "1"
 INSIGHTFLARE_E2E = "1"
 INSIGHTFLARE_E2E_CONTROL_TOKEN = ${tomlString(input.controlToken)}
 INSIGHTFLARE_E2E_NOW = ${tomlString(String(input.nowMs))}
+INSIGHTFLARE_E2E_TEST_SITE_URL = ${tomlString(input.testSiteURL)}
 INSIGHTFLARE_E2E_CLOUDFLARE_API_URL = ${tomlString(`${input.resendApiUrl.replace("/resend/emails", "/cloudflare/client/v4/accounts")}`)}
 INSIGHTFLARE_E2E_RESEND_API_URL = ${tomlString(input.resendApiUrl)}
 INSIGHTFLARE_E2E_TURNSTILE_SITEVERIFY_URL = ${tomlString(`${input.resendApiUrl.replace("/resend/emails", "/turnstile/siteverify")}`)}
@@ -296,6 +312,7 @@ async function createEnvironment(options: Options): Promise<Environment> {
       mainSecret: environment.mainSecret,
       nowMs: environment.nowMs,
       resendApiUrl: `${environment.testSiteURL}/resend/emails`,
+      testSiteURL: environment.testSiteURL,
     }),
   );
   await writeRunManifest(environment, options);
@@ -317,6 +334,14 @@ function testSiteHtml(workerURL: string, requestURL: URL): string {
 
 function json(response: ServerResponse, body: unknown) {
   response.writeHead(200, {
+    "content-type": "application/json; charset=utf-8",
+  });
+  response.end(`${JSON.stringify(body)}\n`);
+}
+
+function releaseJson(response: ServerResponse, body: unknown) {
+  response.writeHead(200, {
+    "access-control-allow-origin": "*",
     "content-type": "application/json; charset=utf-8",
   });
   response.end(`${JSON.stringify(body)}\n`);
@@ -675,7 +700,27 @@ async function startTestSite(
         request.method === "GET" &&
         requestURL.pathname === "/github/repos/RavelloH/InsightFlare/releases"
       ) {
-        json(response, E2E_GITHUB_RELEASES);
+        releaseJson(response, E2E_GITHUB_RELEASES);
+        return;
+      }
+      if (
+        request.method === "GET" &&
+        requestURL.pathname === "/github/.github/releases/version.json"
+      ) {
+        releaseJson(response, E2E_RELEASE_INDEX);
+        return;
+      }
+      if (
+        request.method === "GET" &&
+        /^\/github\/(?:\.github\/releases\/i18n\/[^/]+|changelog)\/v0\.5\.0\.md$/.test(
+          requestURL.pathname,
+        )
+      ) {
+        response.writeHead(200, {
+          "access-control-allow-origin": "*",
+          "content-type": "text/plain; charset=utf-8",
+        });
+        response.end(`${E2E_RELEASE_NOTES}\n`);
         return;
       }
       if (

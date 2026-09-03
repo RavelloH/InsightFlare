@@ -79,6 +79,7 @@ import {
   formatFilterPanelExpression,
   parseFilterPanelExpression,
 } from "@/lib/dashboard/filter-panel-expression";
+import { resolveSuggestionScope } from "@/lib/dashboard/filter-suggestion-scope";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   SYSTEM_FILTER_PRESETS,
@@ -2029,7 +2030,7 @@ export function FilterPanel({
   expressionText: restoredExpressionText,
   messages,
   open,
-  resolvedScope,
+  resolvedScope: pageResolvedScope,
   siteId,
   scopePreference,
   window,
@@ -2081,8 +2082,10 @@ export function FilterPanel({
     [expressionRegistry, messages, root],
   );
   const eventName = directEventName(root);
-  const suggestionScope =
-    resolvedScope ?? (scopePreference === "auto" ? undefined : scopePreference);
+  const suggestionScope = resolveSuggestionScope(
+    scopePreference,
+    pageResolvedScope,
+  );
   const savedFiltersEnabled =
     audience === "private-dashboard" && open && Boolean(siteId);
   const savedFiltersQuery = useQuery({

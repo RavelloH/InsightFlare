@@ -35,6 +35,7 @@ function withPageHeaders(
   pathname: string,
   locale: string | null,
   demoMode: boolean,
+  e2eTestSiteURL?: string,
 ): Response {
   const headers = new Headers(response.headers);
   headers.set("x-pathname", pathname);
@@ -50,6 +51,14 @@ function withPageHeaders(
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=(), payment=()",
   );
+  const connectSources = ["'self'", "https:", "wss:"];
+  if (e2eTestSiteURL) {
+    try {
+      connectSources.push(new URL(e2eTestSiteURL).origin);
+    } catch {
+      // Keep the production CSP when the optional E2E URL is malformed.
+    }
+  }
   headers.set(
     "Content-Security-Policy",
     [
@@ -59,7 +68,7 @@ function withPageHeaders(
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
-      "connect-src 'self' https: wss:",
+      `connect-src ${connectSources.join(" ")}`,
       "worker-src 'self' blob:",
       "frame-src 'self' https:",
       "frame-ancestors 'none'",
@@ -126,6 +135,7 @@ export default {
             pathname,
             null,
             env.DEMO_MODE === "1",
+            env.INSIGHTFLARE_E2E_TEST_SITE_URL,
           );
           logger.setRequest({
             route: pageRouteForLog(pathname),
@@ -152,6 +162,7 @@ export default {
                 .pathname,
               decision.locale,
               env.DEMO_MODE === "1",
+              env.INSIGHTFLARE_E2E_TEST_SITE_URL,
             )
           : withPageHeaders(
               await logger.measure("page.handler", async () =>
@@ -162,6 +173,7 @@ export default {
               pathname,
               decision.locale,
               env.DEMO_MODE === "1",
+              env.INSIGHTFLARE_E2E_TEST_SITE_URL,
             );
         logger.setRequest({
           route: pageRouteForLog(pathname),

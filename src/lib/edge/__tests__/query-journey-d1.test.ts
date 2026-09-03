@@ -178,11 +178,15 @@ function eventBindings(window: QueryWindow): QueryBinding[] {
   return [siteId, window.startMs, window.endExclusiveMs];
 }
 
-function condition(field: string, value: string): FilterExpression {
+function condition(
+  field: string,
+  value: string,
+  operator: "eq" | "neq" = "eq",
+): FilterExpression {
   return {
     kind: "condition",
     target: { kind: "field", field: field as never },
-    operator: "eq",
+    operator,
     value,
   };
 }
@@ -1072,6 +1076,90 @@ describe("edge journey detail D1 queries", () => {
       await expect(
         visitorIds({ kind: "not", child: visitorA }),
       ).resolves.toEqual(["visitor-4", "visitor-3", "visitor-d", "visitor-c"]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("distinguishes neq from NOT(eq) for Session and Visitor scopes on real SQLite data", async () => {
+    const sqlite = createSqliteDetailEnv();
+    const targetWindow = queryWindow();
+    try {
+      const insertVisit = sqlite.database.prepare(`
+        INSERT INTO visits (
+          visit_id, site_id, visitor_id, session_id, status, started_at,
+          last_activity_at, pathname, hostname
+        ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test')
+      `);
+      const addVisit = (
+        visitId: string,
+        visitorId: string,
+        sessionId: string,
+        pathname: string,
+        offset: number,
+      ) => {
+        const startedAt = baseMs + offset;
+        insertVisit.run(
+          visitId,
+          siteId,
+          visitorId,
+          sessionId,
+          startedAt,
+          startedAt,
+          pathname,
+        );
+      };
+
+      // Visitor A / Session A has both observations. Visitor B / Session B
+      // has only /home, so the entity-level predicates have different sets.
+      addVisit("neq-not-a-home", "visitor-a", "session-a", "/home", 1_000);
+      addVisit(
+        "neq-not-a-pricing",
+        "visitor-a",
+        "session-a",
+        "/pricing",
+        2_000,
+      );
+      addVisit("neq-not-b-home", "visitor-b", "session-b", "/home", 3_000);
+
+      const neqRoot = condition("page.path", "/pricing", "neq");
+      const notEqRoot: FilterExpression = {
+        kind: "not",
+        child: condition("page.path", "/pricing"),
+      };
+      const sessionIds = async (root: FilterExpression) =>
+        (
+          await querySessionsFromD1(
+            sqlite.env,
+            siteId,
+            targetWindow,
+            prepareScopedFilters("sessions", "session", root, targetWindow),
+            20,
+          )
+        ).map((row) => row.sessionId);
+      const visitorIds = async (root: FilterExpression) =>
+        (
+          await queryVisitorsFromD1(
+            sqlite.env,
+            siteId,
+            targetWindow,
+            prepareScopedFilters("visitors", "visitor", root, targetWindow),
+            20,
+          )
+        ).map((row) => row.visitorId);
+
+      const neqSessionIds = await sessionIds(neqRoot);
+      expect(neqSessionIds).toEqual(
+        expect.arrayContaining(["session-a", "session-b"]),
+      );
+      expect(neqSessionIds).toHaveLength(2);
+      await expect(sessionIds(notEqRoot)).resolves.toEqual(["session-b"]);
+      const neqVisitorIds = await visitorIds(neqRoot);
+      expect(neqVisitorIds).toEqual(
+        expect.arrayContaining(["visitor-a", "visitor-b"]),
+      );
+      expect(neqVisitorIds).toHaveLength(2);
+      await expect(visitorIds(notEqRoot)).resolves.toEqual(["visitor-b"]);
     } finally {
       sqlite.close();
     }

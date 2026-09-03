@@ -82,6 +82,11 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_GITHUB_API_BASE": JSON.stringify(
         e2eGithubApiBase || "https://api.github.com",
       ),
+      "import.meta.env.VITE_GITHUB_RELEASES_RAW_BASE": JSON.stringify(
+        e2eGithubApiBase ||
+          env.VITE_GITHUB_RELEASES_RAW_BASE ||
+          "https://raw.githubusercontent.com/RavelloH/InsightFlare/main",
+      ),
       "import.meta.env.VITE_INSIGHTFLARE_ANALYTICS_ENGINE_DISABLED":
         JSON.stringify("0"),
     },

@@ -196,7 +196,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     ).toBeVisible();
   });
 
-  test("22. administrator version updates render local release data in SSR and the client", async ({
+  test("22. administrator version updates render local release data in the client", async ({
     page,
   }) => {
     await signIn(page, "admin", context.adminPassword);
@@ -209,7 +209,6 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     expect(html).toContain("发布数");
     expect(html).toContain("更新说明");
     expect(html).toContain("查看详细变更");
-    expect(html).toContain("E2E mock release notes");
 
     await page.goto("/zh/app/manage/version-updates", {
       waitUntil: "domcontentloaded",
