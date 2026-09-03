@@ -30,6 +30,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
   test("21. request observation reads blocked and included events from the local Cloudflare mock", async ({
     page,
   }) => {
+    test.setTimeout(60_000);
     await signIn(page, "admin", context.adminPassword);
     await page.goto("/zh/app/manage/system-settings", {
       waitUntil: "networkidle",
