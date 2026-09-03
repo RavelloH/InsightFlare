@@ -970,6 +970,9 @@ siteSettings:
     blocking:
       title: ブロックルール
       description: イベントを保存する前に、リクエストのコンテキストで収集を絞り込みます。
+    protection:
+      title: リクエスト保護
+      description: 検出したボットやホスティング・プロキシネットワークのリクエストを分析データに入れる前の扱いを設定します。
     danger:
       title: 危険な操作
       description: 破壊的な操作や慎重な取り扱いが必要な設定です。
@@ -996,8 +999,6 @@ siteSettings:
   trackingStrengthStrongDescription: 常に高精度の訪問者トラッキングを使用します。GDPR など、一部地域のプライバシー規制に抵触する可能性があります。
   trackingStrengthSmartDescription: 訪問者の国に基づいてトラッキング強度を自動で切り替えます。
   trackingStrengthWeakDescription: 常にトラッキング精度を下げます。同じ訪問者が複数回カウントされ、リテンション分析ができなくなる場合があります。
-  botProtectionGroupTitle: ボット保護
-  botProtectionGroupDescription: 高信頼度のボットをブロックするか、ホスティング・プロキシネットワークからのリクエストをブロックするかを設定します。
   botProtectionEnabledLabel: 検出したボットをブロック
   botProtectionEnabledHint: 有効にすると高信頼度のボットリクエストをブロックし、無効にすると統計に含めます。
   hostingProxyBlockingEnabledLabel: ホスティング・プロキシネットワークをブロック

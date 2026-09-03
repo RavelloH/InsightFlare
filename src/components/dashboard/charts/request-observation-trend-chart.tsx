@@ -772,9 +772,28 @@ function RequestObservationTrendChartComponent({
         {variant === "blocked" ? (
           <Bar
             yAxisId="requests"
-            dataKey="blockedCount"
-            fill="var(--color-blockedCount)"
-            radius={[3, 3, 0, 0]}
+            dataKey="suspectedBotCount"
+            stackId="blocked"
+            fill="var(--color-suspectedBotCount)"
+            radius={[0, 0, 0, 0]}
+          />
+        ) : null}
+        {variant === "blocked" ? (
+          <Bar
+            yAxisId="requests"
+            dataKey="botCount"
+            stackId="blocked"
+            fill="var(--color-botCount)"
+            radius={[0, 0, 0, 0]}
+          />
+        ) : null}
+        {variant === "blocked" ? (
+          <Bar
+            yAxisId="requests"
+            dataKey="customBlockedCount"
+            stackId="blocked"
+            fill="var(--color-customBlockedCount)"
+            radius={[0, 0, 0, 0]}
           />
         ) : null}
         {variant === "blocked" ? (
@@ -793,7 +812,7 @@ function RequestObservationTrendChartComponent({
             yAxisId="requests"
             dataKey="includedCount"
             fill="var(--color-includedCount)"
-            radius={[3, 3, 0, 0]}
+            radius={[0, 0, 0, 0]}
           />
         ) : null}
       </ComposedChart>

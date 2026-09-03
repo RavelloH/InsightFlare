@@ -989,6 +989,9 @@ siteSettings:
     blocking:
       title: Blocking Rules
       description: Filter collection by request context before events reach storage.
+    protection:
+      title: Request Protection
+      description: Control how detected bots and hosting or proxy traffic are handled before requests enter analytics.
     danger:
       title: Danger Zone
       description: Destructive actions and operationally sensitive settings.
@@ -1019,8 +1022,6 @@ siteSettings:
   trackingStrengthWeakDescription: Always reduce tracking precision. This can
     count the same visitor multiple times across visits and make retention
     impossible.
-  botProtectionGroupTitle: Bot Protection
-  botProtectionGroupDescription: Control whether high-confidence bots are blocked and whether hosting or proxy traffic is blocked.
   botProtectionEnabledLabel: Block detected bots
   botProtectionEnabledHint: High-confidence bot requests are blocked when this is enabled; otherwise they remain included in statistics.
   hostingProxyBlockingEnabledLabel: Block hosting and proxy traffic

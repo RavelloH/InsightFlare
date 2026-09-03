@@ -546,6 +546,7 @@ function buildDimensionSql(input: {
         ipPrefix: ["blob4 AS label"],
       }
     : {
+        category: ["blob2 AS label"],
         site: ["index1 AS label"],
         hostname: ["blob7 AS label"],
         pathname: ["blob8 AS label"],
@@ -823,8 +824,6 @@ function normalizeRequestRow(
 
 function serializeListEvent(event: RequestObservationEvent) {
   const {
-    metadataJson: _metadataJson,
-    requestMethod: _requestMethod,
     httpProtocol: _httpProtocol,
     flags: _flags,
     schemaVersion: _schemaVersion,
@@ -1505,11 +1504,13 @@ export async function handleRequestObservationAdmin(
     (dimensionSource === "blocked" || dimensionSource === "included")
   ) {
     const dimensionTabs =
-      dimensionSource === "blocked" ||
-      dimensionGroup === "target" ||
-      dimensionGroup === "network"
+      dimensionSource === "blocked"
         ? DIMENSION_TABS[dimensionGroup]
-        : [];
+        : dimensionGroup === "target" || dimensionGroup === "network"
+          ? DIMENSION_TABS[dimensionGroup]
+          : dimensionGroup === "detection"
+            ? ["category"]
+            : [];
     if (!dimensionTabs?.includes(dimensionTab)) {
       return bad(
         "Invalid request observation dimension",

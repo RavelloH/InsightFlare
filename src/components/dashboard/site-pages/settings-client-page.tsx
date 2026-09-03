@@ -905,6 +905,8 @@ export function SettingsClientPage({
   const [savingPublicSharing, setSavingPublicSharing] = useState(false);
   const [savingTrackingStrength, setSavingTrackingStrength] = useState(false);
   const [savingBotProtection, setSavingBotProtection] = useState(false);
+  const [savingHostingProxyBlocking, setSavingHostingProxyBlocking] =
+    useState(false);
   const [savingQueryHash, setSavingQueryHash] = useState(false);
   const [savingPerformanceTracking, setSavingPerformanceTracking] =
     useState(false);
@@ -957,6 +959,7 @@ export function SettingsClientPage({
   const trackingSaving =
     savingTrackingStrength ||
     savingBotProtection ||
+    savingHostingProxyBlocking ||
     savingQueryHash ||
     savingPerformanceTracking ||
     savingBlockingField !== null ||
@@ -974,9 +977,11 @@ export function SettingsClientPage({
     trackingStrength !== persistedSettings.trackingStrength;
 
   const hasBotProtectionChanges =
-    botProtectionEnabled !== persistedSettings.botProtectionEnabled ||
+    botProtectionEnabled !== persistedSettings.botProtectionEnabled;
+
+  const hasHostingProxyBlockingChanges =
     hostingProxyBlockingEnabled !==
-      persistedSettings.hostingProxyBlockingEnabled;
+    persistedSettings.hostingProxyBlockingEnabled;
 
   const hasQueryHashChanges =
     trackQueryParams !== persistedSettings.trackQueryParams ||
@@ -1219,18 +1224,37 @@ export function SettingsClientPage({
 
   async function handleSaveBotProtection() {
     if (!hasBotProtectionChanges) return;
+    const pendingHostingProxyBlocking = hostingProxyBlockingEnabled;
     setSavingBotProtection(true);
     try {
       await persistTrackingSettings({
         botProtectionEnabled,
-        hostingProxyBlockingEnabled,
       });
+      setHostingProxyBlockingEnabled(pendingHostingProxyBlocking);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : copy.toasts.saveFailed;
       toast.error(message || copy.toasts.saveFailed);
     } finally {
       setSavingBotProtection(false);
+    }
+  }
+
+  async function handleSaveHostingProxyBlocking() {
+    if (!hasHostingProxyBlockingChanges) return;
+    const pendingBotProtection = botProtectionEnabled;
+    setSavingHostingProxyBlocking(true);
+    try {
+      await persistTrackingSettings({
+        hostingProxyBlockingEnabled,
+      });
+      setBotProtectionEnabled(pendingBotProtection);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : copy.toasts.saveFailed;
+      toast.error(message || copy.toasts.saveFailed);
+    } finally {
+      setSavingHostingProxyBlocking(false);
     }
   }
 
@@ -1815,119 +1839,6 @@ export function SettingsClientPage({
         <Card className="h-full">
           <CardHeader>
             <CardTitle className="inline-flex items-center gap-2">
-              <RiTestTubeLine className="size-4" />
-              {copy.botProtectionGroupTitle}
-            </CardTitle>
-            <CardDescription>
-              {copy.botProtectionGroupDescription}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex h-full flex-col gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-bot-protection">
-                {copy.botProtectionEnabledLabel}
-              </Label>
-              <Select
-                value={botProtectionEnabled ? "true" : "false"}
-                onValueChange={(value) => {
-                  setBotProtectionEnabled(value === "true");
-                }}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
-                  loadingSettings
-                }
-              >
-                <SelectTrigger
-                  id="site-settings-bot-protection"
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
-                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {copy.botProtectionEnabledHint}
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-hosting-proxy-blocking">
-                {copy.hostingProxyBlockingEnabledLabel}
-              </Label>
-              <Select
-                value={hostingProxyBlockingEnabled ? "true" : "false"}
-                onValueChange={(value) => {
-                  setHostingProxyBlockingEnabled(value === "true");
-                }}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
-                  loadingSettings
-                }
-              >
-                <SelectTrigger
-                  id="site-settings-hosting-proxy-blocking"
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
-                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {copy.hostingProxyBlockingEnabledHint}
-              </p>
-            </div>
-            <Button
-              type="button"
-              className="mt-auto self-start"
-              onClick={() => {
-                void handleSaveBotProtection();
-              }}
-              disabled={
-                saving ||
-                trackingSaving ||
-                transferring ||
-                deleting ||
-                loadingSettings ||
-                !hasBotProtectionChanges
-              }
-            >
-              <AutoTransition className="inline-flex items-center gap-2">
-                {savingBotProtection ? (
-                  <span
-                    key="saving-bot-protection"
-                    className="inline-flex items-center gap-2"
-                  >
-                    <Spinner className="size-4" />
-                    {copy.savingTracking}
-                  </span>
-                ) : (
-                  <span
-                    key="save-bot-protection"
-                    className="inline-flex items-center gap-2"
-                  >
-                    <RiSave3Line className="size-4" />
-                    {copy.saveTracking}
-                  </span>
-                )}
-              </AutoTransition>
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="h-full">
-          <CardHeader>
-            <CardTitle className="inline-flex items-center gap-2">
               <RiLinksLine className="size-4" />
               {copy.queryHashGroupTitle}
             </CardTitle>
@@ -2251,6 +2162,178 @@ export function SettingsClientPage({
             savingLabel={copy.blockingRulesSaving}
           />
         ))}
+      </SettingsSection>
+
+      <SettingsSection
+        id="site-settings-protection"
+        title={copy.sections.protection.title}
+        description={copy.sections.protection.description}
+      >
+        <Card className="h-full">
+          <CardHeader>
+            <CardTitle className="inline-flex items-center gap-2">
+              <RiTestTubeLine className="size-4" />
+              {copy.botProtectionEnabledLabel}
+            </CardTitle>
+            <CardDescription>{copy.botProtectionEnabledHint}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex h-full flex-col gap-4">
+            {loadingSettings ? (
+              <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                <Spinner className="size-4" />
+                {copy.loadingSettings}
+              </div>
+            ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="site-settings-bot-protection">
+                {copy.botProtectionEnabledLabel}
+              </Label>
+              <Select
+                value={botProtectionEnabled ? "true" : "false"}
+                onValueChange={(value) => {
+                  setBotProtectionEnabled(value === "true");
+                }}
+                disabled={
+                  saving ||
+                  trackingSaving ||
+                  transferring ||
+                  deleting ||
+                  loadingSettings
+                }
+              >
+                <SelectTrigger
+                  id="site-settings-bot-protection"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              type="button"
+              className="mt-auto self-start"
+              onClick={() => {
+                void handleSaveBotProtection();
+              }}
+              disabled={
+                saving ||
+                trackingSaving ||
+                transferring ||
+                deleting ||
+                loadingSettings ||
+                !hasBotProtectionChanges
+              }
+            >
+              <AutoTransition className="inline-flex items-center gap-2">
+                {savingBotProtection ? (
+                  <span
+                    key="saving-bot-protection"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <Spinner className="size-4" />
+                    {copy.savingTracking}
+                  </span>
+                ) : (
+                  <span
+                    key="save-bot-protection"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <RiSave3Line className="size-4" />
+                    {copy.saveTracking}
+                  </span>
+                )}
+              </AutoTransition>
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="h-full">
+          <CardHeader>
+            <CardTitle className="inline-flex items-center gap-2">
+              <RiGlobalLine className="size-4" />
+              {copy.hostingProxyBlockingEnabledLabel}
+            </CardTitle>
+            <CardDescription>
+              {copy.hostingProxyBlockingEnabledHint}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex h-full flex-col gap-4">
+            {loadingSettings ? (
+              <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                <Spinner className="size-4" />
+                {copy.loadingSettings}
+              </div>
+            ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="site-settings-hosting-proxy-blocking">
+                {copy.hostingProxyBlockingEnabledLabel}
+              </Label>
+              <Select
+                value={hostingProxyBlockingEnabled ? "true" : "false"}
+                onValueChange={(value) => {
+                  setHostingProxyBlockingEnabled(value === "true");
+                }}
+                disabled={
+                  saving ||
+                  trackingSaving ||
+                  transferring ||
+                  deleting ||
+                  loadingSettings
+                }
+              >
+                <SelectTrigger
+                  id="site-settings-hosting-proxy-blocking"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              type="button"
+              className="mt-auto self-start"
+              onClick={() => {
+                void handleSaveHostingProxyBlocking();
+              }}
+              disabled={
+                saving ||
+                trackingSaving ||
+                transferring ||
+                deleting ||
+                loadingSettings ||
+                !hasHostingProxyBlockingChanges
+              }
+            >
+              <AutoTransition className="inline-flex items-center gap-2">
+                {savingHostingProxyBlocking ? (
+                  <span
+                    key="saving-hosting-proxy-blocking"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <Spinner className="size-4" />
+                    {copy.savingTracking}
+                  </span>
+                ) : (
+                  <span
+                    key="save-hosting-proxy-blocking"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <RiSave3Line className="size-4" />
+                    {copy.saveTracking}
+                  </span>
+                )}
+              </AutoTransition>
+            </Button>
+          </CardContent>
+        </Card>
       </SettingsSection>
 
       <SettingsSection

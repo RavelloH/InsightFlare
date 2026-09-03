@@ -141,6 +141,7 @@ interface BotEvent {
   verifiedBotCategory: string;
   rayId: string;
   traceId: string;
+  requestMethod: string;
   metadataJson?: string;
   latitude: number | null;
   longitude: number | null;
@@ -208,6 +209,7 @@ const BOT_EVENT_DETAIL_SKELETON_DATA: BotEvent = {
   verifiedBotCategory: "",
   rayId: "",
   traceId: "",
+  requestMethod: "",
   metadataJson: "",
   latitude: null,
   longitude: null,
@@ -424,7 +426,6 @@ type BlockedRequestTableColumnId =
   | "kind"
   | "reason"
   | "category"
-  | "disposition"
   | "botScore"
   | "verifiedBotCategory"
   | "network"
@@ -439,7 +440,6 @@ type NormalRequestTableColumnId =
   | "site"
   | "kind"
   | "category"
-  | "disposition"
   | "requestMethod"
   | "hostname"
   | "network"
@@ -455,7 +455,6 @@ const BOT_EVENT_SKELETON_WIDTHS: Record<BlockedRequestTableColumnId, string> = {
   kind: "w-20",
   reason: "w-28",
   category: "w-32",
-  disposition: "w-28",
   botScore: "w-24",
   verifiedBotCategory: "w-36",
   network: "w-40",
@@ -473,7 +472,6 @@ const NORMAL_REQUEST_SKELETON_WIDTHS: Record<
   site: "w-24",
   kind: "w-16",
   category: "w-32",
-  disposition: "w-28",
   requestMethod: "w-24",
   hostname: "w-36",
   network: "w-40",
@@ -493,7 +491,6 @@ const BOT_EVENT_COLUMN_ALIGNMENTS: Record<
   kind: "left",
   reason: "left",
   category: "center",
-  disposition: "center",
   botScore: "right",
   verifiedBotCategory: "left",
   network: "left",
@@ -511,7 +508,6 @@ const NORMAL_REQUEST_COLUMN_ALIGNMENTS: Record<
   site: "left",
   kind: "left",
   category: "center",
-  disposition: "center",
   requestMethod: "center",
   hostname: "left",
   network: "left",
@@ -903,8 +899,6 @@ type DetectionDimensionTab =
   | "reason"
   | "category"
   | "kind"
-  | "category"
-  | "disposition"
   | "botScoreBucket"
   | "verifiedBotCategory";
 type TargetDimensionTab = "site" | "hostname" | "pathname" | "origin";
@@ -1577,6 +1571,18 @@ export function RequestObservationClient({
       ],
     [copy],
   );
+  const includedDetectionTabs = useMemo(
+    () =>
+      [
+        {
+          value: "category",
+          label: copy.category,
+          columnLabel: copy.category,
+          primaryMetricLabel: labels.requests,
+        },
+      ] satisfies [AsyncDimensionBreakdownTab<"category">],
+    [copy.category, labels.requests],
+  );
   const targetTabs = useMemo(
     () =>
       [
@@ -1720,7 +1726,7 @@ export function RequestObservationClient({
     [copy.emptyValue, locale, timeWindow],
   );
   const loadIncludedDimensionRows = useMemo(
-    () => async (group: "target" | "network", tab: string) =>
+    () => async (group: "detection" | "target" | "network", tab: string) =>
       toAsyncAggregatedDimensionRows(
         await fetchRequestObservationDimension(
           timeWindow,
@@ -1736,9 +1742,9 @@ export function RequestObservationClient({
             }
           : group === "target"
             ? { targetTab: tab as TargetDimensionTab }
-            : undefined,
+            : { detectionTab: tab as DetectionDimensionTab, copy },
       ),
-    [copy.emptyValue, locale, timeWindow],
+    [copy, locale, timeWindow],
   );
   const loadBlockedDetectionRows = useCallback(
     (tab: DetectionDimensionTab, _signal?: AbortSignal) =>
@@ -1768,6 +1774,11 @@ export function RequestObservationClient({
   const loadIncludedNetworkRows = useCallback(
     (tab: NetworkDimensionTab, _signal?: AbortSignal) =>
       loadIncludedDimensionRows("network", tab),
+    [loadIncludedDimensionRows],
+  );
+  const loadIncludedDetectionRows = useCallback(
+    (tab: "category", _signal?: AbortSignal) =>
+      loadIncludedDimensionRows("detection", tab),
     [loadIncludedDimensionRows],
   );
 
@@ -1876,24 +1887,12 @@ export function RequestObservationClient({
       <div className="space-y-6">
         <Card className="py-0">
           <CardContent className="p-0">
-            <div className="grid gap-px overflow-hidden bg-border/70 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-px overflow-hidden bg-border/70 md:grid-cols-2 xl:grid-cols-4">
               <MetricTile
                 icon={RiRadarLine}
                 label={ui.totalRequests}
                 value={numberFormat(locale, overview?.totalRequests ?? 0)}
                 detail={windowDetail}
-                loading={loading}
-              />
-              <MetricTile
-                icon={RiShieldCheckLine}
-                label={ui.includedRequests}
-                value={numberFormat(locale, overview?.includedRequests ?? 0)}
-                detail={percentFormat(
-                  locale,
-                  overview && overview.totalRequests > 0
-                    ? (overview.includedRequests ?? 0) / overview.totalRequests
-                    : 0,
-                )}
                 loading={loading}
               />
               <MetricTile
@@ -2101,6 +2100,16 @@ export function RequestObservationClient({
                       </Card>
 
                       <section className="grid gap-4 xl:grid-cols-2">
+                        <AsyncDimensionBreakdownCard
+                          locale={locale}
+                          messages={messages}
+                          tabs={includedDetectionTabs}
+                          loadRows={loadIncludedDetectionRows}
+                          requestKey={`${requestKey}:included-detection`}
+                          className="h-full"
+                          showVisitors={false}
+                          emptyLabel={copy.noData}
+                        />
                         <AsyncDimensionBreakdownCard
                           locale={locale}
                           messages={messages}
@@ -3000,7 +3009,7 @@ function CategoryBlocks({
         : normalized === "bot"
           ? 3
           : normalized === "custom_block"
-            ? 4
+            ? 3
             : 0;
   const activeColor =
     normalized === "normal"
@@ -3018,7 +3027,7 @@ function CategoryBlocks({
       className="inline-flex items-center gap-0.5"
       aria-label={label || category || undefined}
     >
-      {Array.from({ length: 4 }, (_, index) => (
+      {Array.from({ length: 3 }, (_, index) => (
         <span
           key={index}
           className={cn(
@@ -3102,6 +3111,10 @@ function BotRequestDetailDrawer({
   const event = preview ?? BOT_EVENT_DETAIL_SKELETON_DATA;
   const hasEvent = Boolean(preview);
   const metadata = event ? metadataEntries(event.metadataJson) : [];
+  const requestMethod =
+    event.requestMethod ||
+    metadata.find(([key]) => key === "requestMethod")?.[1] ||
+    "";
   const eventId = event ? event.traceId || event.rayId : "";
   const subtitle = eventId || ui.detailSubtitle;
 
@@ -3297,10 +3310,7 @@ function BotRequestDetailDrawer({
                     <DetailItem
                       loading={loading}
                       label={copy.normalDetail.requestMethod}
-                      value={displayValue(
-                        metadata.find(([key]) => key === "requestMethod")?.[1],
-                        empty,
-                      )}
+                      value={displayValue(requestMethod, empty)}
                     />
                     <DetailItem
                       loading={loading}
@@ -3795,6 +3805,14 @@ function NormalRequestDetailDrawer({
                       }
                     />
                   </dl>
+                  <div className="space-y-1">
+                    <div className="text-muted-foreground">
+                      {copy.fullUserAgent}
+                    </div>
+                    <div className="break-all rounded-none border bg-muted/30 p-3 font-mono text-xs text-muted-foreground">
+                      {displayValue(event.userAgent, empty)}
+                    </div>
+                  </div>
                 </section>
 
                 <Separator />
@@ -4031,7 +4049,6 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
       { id: "kind", label: copy.kind },
       { id: "reason", label: copy.reason },
       { id: "category", label: copy.category },
-      { id: "disposition", label: ui.disposition },
       { id: "network", label: copy.network },
       { id: "ip", label: copy.ip },
       { id: "location", label: copy.location },
@@ -4055,9 +4072,6 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
       kind: <TableHead>{copy.kind}</TableHead>,
       reason: <TableHead>{copy.reason}</TableHead>,
       category: <TableHead className="text-center">{copy.category}</TableHead>,
-      disposition: (
-        <TableHead className="text-center">{ui.disposition}</TableHead>
-      ),
       botScore: <TableHead className="text-right">{copy.botScore}</TableHead>,
       verifiedBotCategory: <TableHead>{copy.verifiedBotCategory}</TableHead>,
       network: <TableHead>{copy.network}</TableHead>,
@@ -4103,12 +4117,6 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
       const categoryLabel = event.category
         ? requestCategoryLabel(copy, event.category)
         : emptyValue(copy);
-      const dispositionLabel =
-        event.disposition === "blocked"
-          ? ui.blocked
-          : event.disposition === "included"
-            ? ui.included
-            : emptyValue(copy);
       const siteLabel =
         event.siteName || event.siteDomain || event.siteId || emptyValue(copy);
       const siteCopyValue =
@@ -4243,13 +4251,6 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
             >
               <CategoryBlocks category={event.category} label={categoryLabel} />
             </AnalyticsDetailsTooltipTarget>
-          </TableCell>
-        ),
-        disposition: (
-          <TableCell className="max-w-28 text-center">
-            <span className="block truncate text-xs text-muted-foreground">
-              {dispositionLabel}
-            </span>
           </TableCell>
         ),
         botScore: (
@@ -4578,6 +4579,7 @@ function _aggregateNormalDimensionRows(
             reasons: [],
             ip: "",
             userAgent: "",
+            requestMethod: "",
             verifiedBotCategory: "",
             botScore: null,
             metadataJson: "",
@@ -4649,7 +4651,6 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
       { id: "site", label: copy.site, required: true },
       { id: "kind", label: copy.kind },
       { id: "category", label: copy.category },
-      { id: "disposition", label: ui.disposition },
       { id: "requestMethod", label: copy.normalDetail.requestMethod },
       { id: "hostname", label: copy.hostname },
       { id: "network", label: copy.network },
@@ -4672,9 +4673,6 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
       site: <TableHead>{copy.site}</TableHead>,
       kind: <TableHead>{copy.kind}</TableHead>,
       category: <TableHead className="text-center">{copy.category}</TableHead>,
-      disposition: (
-        <TableHead className="text-center">{ui.disposition}</TableHead>
-      ),
       requestMethod: (
         <TableHead className="text-center">
           {copy.normalDetail.requestMethod}
@@ -4710,12 +4708,6 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
       const categoryLabel = event.category
         ? requestCategoryLabel(copy, event.category)
         : emptyValue(copy);
-      const dispositionLabel =
-        event.disposition === "blocked"
-          ? ui.blocked
-          : event.disposition === "included"
-            ? ui.included
-            : emptyValue(copy);
       const requestMethodLabel = event.requestMethod || emptyValue(copy);
       const siteLabel =
         event.siteName || event.siteDomain || event.siteId || emptyValue(copy);
@@ -4837,13 +4829,6 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
             >
               <CategoryBlocks category={event.category} label={categoryLabel} />
             </AnalyticsDetailsTooltipTarget>
-          </TableCell>
-        ),
-        disposition: (
-          <TableCell className="max-w-28 text-center">
-            <span className="block truncate text-xs text-muted-foreground">
-              {dispositionLabel}
-            </span>
           </TableCell>
         ),
         requestMethod: (

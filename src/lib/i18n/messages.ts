@@ -942,6 +942,10 @@ export interface AppMessages {
         title: string;
         description: string;
       };
+      protection: {
+        title: string;
+        description: string;
+      };
       danger: {
         title: string;
         description: string;
@@ -970,8 +974,6 @@ export interface AppMessages {
     trackingStrengthStrongDescription: string;
     trackingStrengthSmartDescription: string;
     trackingStrengthWeakDescription: string;
-    botProtectionGroupTitle: string;
-    botProtectionGroupDescription: string;
     botProtectionEnabledLabel: string;
     botProtectionEnabledHint: string;
     hostingProxyBlockingEnabledLabel: string;
@@ -3644,6 +3646,11 @@ const enMessages = {
         description:
           "Filter collection by request context before events reach storage.",
       },
+      protection: {
+        title: "Request Protection",
+        description:
+          "Control how detected bots and hosting or proxy traffic are handled before requests enter analytics.",
+      },
       danger: {
         title: "Danger Zone",
         description:
@@ -3681,9 +3688,6 @@ const enMessages = {
       "Automatically switch tracking strength based on the visitor's country.",
     trackingStrengthWeakDescription:
       "Always reduce tracking precision. This can count the same visitor multiple times across visits and make retention impossible.",
-    botProtectionGroupTitle: "Bot Protection",
-    botProtectionGroupDescription:
-      "Control whether high-confidence bots are blocked and whether hosting or proxy traffic is blocked.",
     botProtectionEnabledLabel: "Block detected bots",
     botProtectionEnabledHint:
       "High-confidence bot requests are blocked when this is enabled; otherwise they remain included in statistics.",
@@ -5021,8 +5025,8 @@ const enMessages = {
       "Monitor total requests, anomaly routing, and the normal collection pipeline from Analytics Engine.",
     tabs: {
       overview: "Overview",
-      abnormal: "Abnormal Requests",
-      normal: "Normal Requests",
+      abnormal: "Blocked Requests",
+      normal: "Included Requests",
       blocked: "Blocked Requests",
       included: "Included Requests",
     },
@@ -5038,7 +5042,7 @@ const enMessages = {
       "This deployment was published without the Analytics Engine binding because the Cloudflare account has not enabled Analytics Engine. Enable it in Cloudflare, then redeploy to collect request-observation data.",
     openAnalyticsEngine: "Open Analytics Engine",
     openSettings: "Open settings",
-    highThreatBots: "High-threat Bots",
+    highThreatBots: "Bot Requests",
     botRequests: "Bot Requests",
     suspectedBotRequests: "Suspected Bot Requests",
     blockedRequests: "Blocked Requests",
@@ -5049,12 +5053,12 @@ const enMessages = {
     noData: "No request data in this window.",
     trendTitle: "Routing Trend",
     trendDescription:
-      "Normal requests, abnormal requests, and diversion ratio by interval.",
-    recentTitle: "Recent Abnormal Requests",
+      "Request categories, dispositions, and ratios by interval.",
+    recentTitle: "Recent Blocked Requests",
     recentDescription:
       "Detailed records read from the unified Request Analytics Engine dataset.",
     recentLoadedAll: "All records loaded",
-    detailTitle: "Abnormal Request Detail",
+    detailTitle: "Request Detail",
     detailSubtitle:
       "Inspect detection signals, network context, and client data for this abnormal request.",
     client: "Client",
@@ -5135,8 +5139,8 @@ const enMessages = {
       customBlockedRequests: "Custom-blocked requests",
       botRequestRatio: "Bot request ratio",
       blockedRequestRatio: "Blocked request ratio",
-      abnormalRequests: "Abnormal requests",
-      abnormalRatio: "Abnormal request ratio",
+      abnormalRequests: "Blocked requests",
+      abnormalRatio: "Blocked request ratio",
       p50Latency: "P50 Worker processing time",
       p75Latency: "P75 Worker processing time",
       p99Latency: "P99 Worker processing time",
@@ -5146,7 +5150,7 @@ const enMessages = {
       customEvents: "Custom events",
       overviewTrendTitle: "Request routing trend",
       overviewTrendDescription:
-        "Normal requests, abnormal requests, and abnormal ratio bucketed by the top-bar interval.",
+        "Request categories and blocked ratio bucketed by the top-bar interval.",
       trafficCompositionTitle: "Business request composition",
       trafficCompositionDescription:
         "Counts normal collection events by type over time, including pageviews, leaves, visibility changes, custom events, and identifications.",
@@ -5154,16 +5158,16 @@ const enMessages = {
       normalTrafficShare: "Normal traffic",
       suspectedBotTraffic: "Suspected bot traffic",
       botTraffic: "Bot traffic",
-      mediumThreatTraffic: "Medium-threat traffic",
-      highThreatTraffic: "High-threat traffic",
+      mediumThreatTraffic: "Suspected bot traffic",
+      highThreatTraffic: "Bot traffic",
       customBlockedTraffic: "Custom-blocked traffic",
       latencyTitle: "Worker processing time trend",
       latencyDescription:
         "P50 / P75 / P95 / P99 Worker processing time recorded when normal requests are written to AE.",
       abnormalSubtitle:
-        "Focus on abnormal requests. Maps and tables include medium-threat, high-threat, and custom-blocked traffic.",
+        "Focus on blocked requests. Category labels retain the detection result for each request.",
       normalSubtitle:
-        "Focus on requests that entered the normal collection pipeline. Maps and tables show only normal traffic.",
+        "Focus on requests included in statistics. This can include normal and suspected bot traffic.",
       blockedSubtitle:
         "Focus on requests that were blocked by custom rules or protection settings.",
       includedSubtitle:
@@ -6476,6 +6480,11 @@ const zhMessages = {
         title: "屏蔽规则",
         description: "在事件写入存储前，按请求上下文过滤采集数据。",
       },
+      protection: {
+        title: "请求防护",
+        description:
+          "控制检测到的机器人以及托管或代理网络请求在进入分析数据前的处理方式。",
+      },
       danger: {
         title: "危险区域",
         description: "包含破坏性操作和需要谨慎处理的设置。",
@@ -6507,9 +6516,6 @@ const zhMessages = {
     trackingStrengthSmartDescription: "自动根据访客所处国家切换跟踪强度。",
     trackingStrengthWeakDescription:
       "始终降低对访客的跟踪精度。这可能导致同一访客在不同时间访问时被计数多次、且无法计算留存率。",
-    botProtectionGroupTitle: "机器人防护",
-    botProtectionGroupDescription:
-      "控制是否拦截高置信度机器人，以及是否拦截来自托管或代理网络的请求。",
     botProtectionEnabledLabel: "机器人拦截",
     botProtectionEnabledHint:
       "开启后拦截高置信度机器人请求；关闭后这类请求仍会计入统计。",
@@ -7808,8 +7814,8 @@ const zhMessages = {
     subtitle: "基于 Analytics Engine 观察整体请求、异常分流与正常采集链路。",
     tabs: {
       overview: "总览",
-      abnormal: "异常请求",
-      normal: "正常请求",
+      abnormal: "拦截请求",
+      normal: "统计请求",
       blocked: "拦截请求",
       included: "统计请求",
     },
@@ -7825,7 +7831,7 @@ const zhMessages = {
       "当前部署未绑定 Analytics Engine，因为 Cloudflare 账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。",
     openAnalyticsEngine: "打开 Analytics Engine",
     openSettings: "打开设置",
-    highThreatBots: "高威胁机器人",
+    highThreatBots: "机器人请求",
     botRequests: "机器人请求",
     suspectedBotRequests: "疑似机器人请求",
     blockedRequests: "拦截请求",
@@ -7835,12 +7841,12 @@ const zhMessages = {
     uniqueCountries: "国家/地区",
     noData: "当前时间窗口内没有请求数据。",
     trendTitle: "分流趋势",
-    trendDescription: "按时间间隔显示正常请求、异常请求与分流比例。",
-    recentTitle: "最近异常请求",
+    trendDescription: "按时间间隔显示请求分类、处理结果和比例。",
+    recentTitle: "最近拦截请求",
     recentDescription:
       "这些详细记录从统一的 Request Analytics Engine 数据集中读取。",
     recentLoadedAll: "已加载全部记录",
-    detailTitle: "异常请求详情",
+    detailTitle: "请求详情",
     detailSubtitle: "查看这次异常请求的检测信号、网络和客户端上下文。",
     client: "客户端",
     edge: "边缘",
@@ -7920,8 +7926,8 @@ const zhMessages = {
       customBlockedRequests: "自定义拦截请求",
       botRequestRatio: "机器人请求比例",
       blockedRequestRatio: "拦截请求比例",
-      abnormalRequests: "异常请求",
-      abnormalRatio: "异常请求比例",
+      abnormalRequests: "拦截请求",
+      abnormalRatio: "拦截请求比例",
       p50Latency: "P50 Worker 处理耗时",
       p75Latency: "P75 Worker 处理耗时",
       p99Latency: "P99 Worker 处理耗时",
@@ -7931,7 +7937,7 @@ const zhMessages = {
       customEvents: "自定义事件",
       overviewTrendTitle: "请求分流趋势",
       overviewTrendDescription:
-        "按顶栏时间间隔分桶显示正常与异常请求，以及异常请求比例。",
+        "按顶栏时间间隔分桶显示请求分类和拦截请求比例。",
       trafficCompositionTitle: "业务请求构成",
       trafficCompositionDescription:
         "按时间显示正常采集链路中页面浏览、离开、可见性、自定义事件和用户识别的数量。",
@@ -7939,16 +7945,16 @@ const zhMessages = {
       normalTrafficShare: "正常流量",
       suspectedBotTraffic: "疑似机器人流量",
       botTraffic: "机器人流量",
-      mediumThreatTraffic: "中威胁流量",
-      highThreatTraffic: "高威胁流量",
+      mediumThreatTraffic: "疑似机器人流量",
+      highThreatTraffic: "机器人流量",
       customBlockedTraffic: "自定义屏蔽流量",
       latencyTitle: "Worker 处理耗时趋势",
       latencyDescription:
         "正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 Worker 处理耗时。",
       abnormalSubtitle:
-        "聚焦异常请求，地图和统计表包含中威胁、高威胁和自定义屏蔽流量。",
+        "聚焦实际被拦截的请求；分类标签保留每个请求的检测结果。",
       normalSubtitle:
-        "聚焦进入正常采集链路的请求，地图和统计表只显示绿色正常流量。",
+        "聚焦计入统计的请求，其中可能包含正常请求和疑似机器人请求。",
       blockedSubtitle: "聚焦被自定义规则或防护设置拦截的请求。",
       includedSubtitle: "聚焦计入统计的请求，包括正常请求和疑似机器人请求。",
       requests: "请求数",
@@ -9282,6 +9288,11 @@ const jaMessages = {
         description:
           "イベントを保存する前に、リクエストのコンテキストで収集を絞り込みます。",
       },
+      protection: {
+        title: "リクエスト保護",
+        description:
+          "検出したボットやホスティング・プロキシネットワークのリクエストを分析データに入れる前の扱いを設定します。",
+      },
       danger: {
         title: "危険な操作",
         description: "破壊的な操作や慎重な取り扱いが必要な設定です。",
@@ -9317,9 +9328,6 @@ const jaMessages = {
       "訪問者の国に基づいてトラッキング強度を自動で切り替えます。",
     trackingStrengthWeakDescription:
       "常にトラッキング精度を下げます。同じ訪問者が複数回カウントされ、リテンション分析ができなくなる場合があります。",
-    botProtectionGroupTitle: "ボット保護",
-    botProtectionGroupDescription:
-      "高信頼度のボットをブロックするか、ホスティング・プロキシネットワークからのリクエストをブロックするかを設定します。",
     botProtectionEnabledLabel: "検出したボットをブロック",
     botProtectionEnabledHint:
       "有効にすると高信頼度のボットリクエストをブロックし、無効にすると統計に含めます。",
@@ -10662,8 +10670,8 @@ const jaMessages = {
       "Analytics Engine をもとに、リクエスト全体、異常ルーティング、通常の収集経路を監視します。",
     tabs: {
       overview: "概要",
-      abnormal: "異常リクエスト",
-      normal: "通常リクエスト",
+      abnormal: "ブロック済みリクエスト",
+      normal: "統計対象リクエスト",
       blocked: "ブロック済みリクエスト",
       included: "統計対象リクエスト",
     },
@@ -10679,7 +10687,7 @@ const jaMessages = {
       "Cloudflare アカウントで Analytics Engine が有効化されていないため、このデプロイは Analytics Engine バインディングなしで公開されました。Cloudflare で有効化してから再デプロイすると、リクエスト監視データを収集できます。",
     openAnalyticsEngine: "Analytics Engine を開く",
     openSettings: "設定を開く",
-    highThreatBots: "高脅威 Bot",
+    highThreatBots: "ボットリクエスト",
     botRequests: "ボットリクエスト",
     suspectedBotRequests: "疑わしいボットリクエスト",
     blockedRequests: "ブロック済みリクエスト",
@@ -10689,13 +10697,12 @@ const jaMessages = {
     uniqueCountries: "国",
     noData: "この期間にリクエストデータはありません。",
     trendTitle: "ルーティング推移",
-    trendDescription:
-      "通常リクエスト、異常リクエスト、分流比率を間隔ごとに表示します。",
-    recentTitle: "最近の異常リクエスト",
+    trendDescription: "リクエストの分類、処置、比率を間隔ごとに表示します。",
+    recentTitle: "最近のブロック済みリクエスト",
     recentDescription:
       "統合された Request Analytics Engine データセットから読み取った詳細記録です。",
     recentLoadedAll: "すべての記録を読み込みました",
-    detailTitle: "異常リクエスト詳細",
+    detailTitle: "リクエスト詳細",
     detailSubtitle:
       "この異常リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。",
     client: "クライアント",
@@ -10776,8 +10783,8 @@ const jaMessages = {
       customBlockedRequests: "カスタムブロック済みリクエスト数",
       botRequestRatio: "ボットリクエスト比率",
       blockedRequestRatio: "ブロック済みリクエスト比率",
-      abnormalRequests: "異常リクエスト",
-      abnormalRatio: "異常リクエスト比率",
+      abnormalRequests: "ブロック済みリクエスト",
+      abnormalRatio: "ブロック済みリクエスト比率",
       p50Latency: "P50 Worker 処理時間",
       p75Latency: "P75 Worker 処理時間",
       p99Latency: "P99 Worker 処理時間",
@@ -10787,7 +10794,7 @@ const jaMessages = {
       customEvents: "カスタムイベント",
       overviewTrendTitle: "リクエストルーティング推移",
       overviewTrendDescription:
-        "通常リクエスト、異常リクエスト、異常比率をトップバーの間隔ごとに集計します。",
+        "リクエスト分類とブロック済み比率をトップバーの間隔ごとに集計します。",
       trafficCompositionTitle: "ビジネスリクエスト構成",
       trafficCompositionDescription:
         "ページビュー、離脱、可視性の変化、カスタムイベント、ユーザー識別など、通常の収集イベントを種類別に時系列で表示します。",
@@ -10795,16 +10802,16 @@ const jaMessages = {
       normalTrafficShare: "通常トラフィック",
       suspectedBotTraffic: "疑わしいボットトラフィック",
       botTraffic: "ボットトラフィック",
-      mediumThreatTraffic: "中脅威トラフィック",
-      highThreatTraffic: "高脅威トラフィック",
+      mediumThreatTraffic: "疑わしいボットトラフィック",
+      highThreatTraffic: "ボットトラフィック",
       customBlockedTraffic: "カスタムブロックトラフィック",
       latencyTitle: "Worker 処理時間の推移",
       latencyDescription:
         "通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 Worker 処理時間です。",
       abnormalSubtitle:
-        "異常リクエストに絞り込み、マップと表には中脅威・高脅威・カスタムブロックのトラフィックを表示します。",
+        "実際にブロックされたリクエストに絞り込み、分類ラベルには検出結果を表示します。",
       normalSubtitle:
-        "通常の収集経路に入ったリクエストに絞り込み、マップと表には通常リクエストのみを表示します。",
+        "統計に含まれるリクエストに絞り込みます。通常リクエストと疑わしいボットリクエストを含みます。",
       blockedSubtitle:
         "カスタムルールまたは保護設定でブロックされたリクエストに絞り込みます。",
       includedSubtitle:

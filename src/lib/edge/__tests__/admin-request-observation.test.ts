@@ -119,6 +119,7 @@ function blockedAnalyticsRow(overrides: Record<string, unknown> = {}) {
     receivedAt: 1_800_000_000_000,
     reasons: "ua_isbot,low_bot_score",
     region: "Shanghai",
+    requestMethod: "GET",
     schemaVersion: REQUEST_ANALYTICS_SCHEMA_VERSION,
     siteId: "site-1",
     timestamp: "2026-09-02 00:00:00",
@@ -153,9 +154,11 @@ function normalAnalyticsRow(overrides: Record<string, unknown> = {}) {
     rayId: "ray-normal",
     receivedAt: 1_800_000_000_000,
     region: "Shanghai",
+    requestMethod: "POST",
     schemaVersion: REQUEST_ANALYTICS_SCHEMA_VERSION,
     siteId: "site-1",
     timestamp: "2026-09-02 00:00:00",
+    userAgent: "Mozilla/5.0 (compatible; InsightFlare E2E)",
     traceId: "trace-normal",
     userAgentLength: 12,
     ...overrides,
@@ -643,6 +646,12 @@ describe("request observation admin reader", () => {
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
       const sql = String((init as RequestInit | undefined)?.body || "");
+      if (sql.includes("blob2 AS label")) {
+        return analyticsResponse([
+          { count: 2, label: "normal", maxSampleInterval: 1 },
+          { count: 1, label: "suspected_bot", maxSampleInterval: 1 },
+        ]);
+      }
       if (sql.includes("index1 AS label")) {
         return analyticsResponse([
           { count: 3, label: "site-1", maxSampleInterval: 3 },
@@ -689,6 +698,9 @@ describe("request observation admin reader", () => {
     expect(pageBody.page.events[0]).toMatchObject({
       pathname: "/first",
       siteName: "Site",
+      requestMethod: "POST",
+      metadataJson: '{"visitId":"visit-1"}',
+      userAgent: "Mozilla/5.0 (compatible; InsightFlare E2E)",
     });
     expect(pageBody.page.nextCursor).toMatchObject({
       receivedAt: 1_800_000_000_000,
@@ -756,7 +768,12 @@ describe("request observation admin reader", () => {
         "https://app.test/api/private/admin/request-observation?dimensionGroup=detection&dimensionTab=category&dimensionSource=included",
       ),
     );
-    expect(includedDetection.status).toBe(400);
+    const includedDetectionBody = (await includedDetection.json()) as Record<
+      string,
+      any
+    >;
+    expect(includedDetection.status).toBe(200);
+    expect(includedDetectionBody.dimension.rows).toHaveLength(2);
 
     const invalidDimension = await handleRequestObservationAdmin(
       request(
