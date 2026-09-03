@@ -229,6 +229,11 @@ function conditionAppliesToVisit(condition: FilterExpression): boolean {
   return analyticsFilterDefinition(condition.target.field)?.source !== "event";
 }
 
+/**
+ * Legacy direct-reader compatibility only. Canonical typed queries are
+ * prepared by the application service and must consume scoped-dataset.ts;
+ * they must never reconstruct entity membership through this predicate.
+ */
 function membershipSetSql(
   metadata: NonNullable<ReturnType<typeof scopedFilterMetadata>>,
 ): EntityMembershipSql {

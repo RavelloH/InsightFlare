@@ -148,6 +148,46 @@ describe("scoped filter contract", () => {
     }
   });
 
+  it("defaults only entity-oriented operations to entity scopes", () => {
+    expect(FILTER_SCOPE_CAPABILITIES.overview).toMatchObject({
+      kind: "scoped",
+      autoScope: "event",
+    });
+    expect(FILTER_SCOPE_CAPABILITIES.trend).toMatchObject({
+      kind: "scoped",
+      autoScope: "event",
+    });
+    expect(FILTER_SCOPE_CAPABILITIES.comparison).toMatchObject({
+      kind: "scoped",
+      autoScope: "event",
+    });
+    expect(FILTER_SCOPE_CAPABILITIES["comparison-breakdown"]).toMatchObject({
+      kind: "scoped",
+      autoScope: "event",
+    });
+
+    expect(FILTER_SCOPE_CAPABILITIES.sessions).toMatchObject({
+      kind: "scoped",
+      autoScope: "session",
+    });
+    expect(FILTER_SCOPE_CAPABILITIES["session-events"]).toMatchObject({
+      kind: "scoped",
+      autoScope: "session",
+    });
+    expect(FILTER_SCOPE_CAPABILITIES.visitors).toMatchObject({
+      kind: "scoped",
+      autoScope: "visitor",
+    });
+    expect(FILTER_SCOPE_CAPABILITIES["visitor-events"]).toMatchObject({
+      kind: "scoped",
+      autoScope: "visitor",
+    });
+    expect(FILTER_SCOPE_CAPABILITIES["visitor-sessions"]).toMatchObject({
+      kind: "scoped",
+      autoScope: "visitor",
+    });
+  });
+
   it("does not provide an implicit Realtime scope fallback", () => {
     expect(resolveFilterScope("realtime", "auto")).toBeNull();
     expect(() => resolveFilterScope("realtime", "event")).toThrow(
@@ -172,7 +212,7 @@ describe("scoped filter contract", () => {
     );
   });
 
-  it("keeps the requested Auto value while resolving Overview to Session", () => {
+  it("keeps the requested Auto value while resolving Overview to Event", () => {
     const prepared = prepareScopedQuery("overview", {
       context,
       time,
@@ -181,8 +221,8 @@ describe("scoped filter contract", () => {
     } as QueryInput & { time: QueryTime });
 
     expect(prepared.scopePreference).toBe("auto");
-    expect(prepared.scopePlan?.scope).toBe("session");
-    expect(prepared.scopePlan?.membership.kind).toBe("entity");
+    expect(prepared.scopePlan?.scope).toBe("event");
+    expect(prepared.scopePlan?.membership.kind).toBe("observation");
     expect(prepared.filters?.root).toEqual(filter("page.path", "/docs").root);
   });
 
@@ -193,7 +233,7 @@ describe("scoped filter contract", () => {
       scopePreference: "auto",
     } as QueryInput & { time: QueryTime });
 
-    expect(prepared.scopePlan?.scope).toBe("session");
+    expect(prepared.scopePlan?.scope).toBe("event");
     expect(prepared.filters?.root).toBeNull();
   });
 
@@ -254,13 +294,51 @@ describe("scoped filter contract", () => {
       reference: { filters?: FilterDocument };
     };
 
-    expect(current.scopePlan?.scope).toBe("session");
+    expect(current.scopePlan?.scope).toBe("event");
     expect(current.current.filters?.root).toEqual(
       filter("page.path", "/current").root,
     );
     expect(current.reference.filters?.root).toEqual(
       filter("page.path", "/reference").root,
     );
+  });
+
+  it.each([
+    ["auto", "auto", "event"],
+    ["auto", "visitor", "visitor"],
+    ["session", "auto", "session"],
+    ["session", "session", "session"],
+  ] as const)(
+    "resolves comparison sides %s + %s once to %s",
+    (currentScope, referenceScope, resolvedScope) => {
+      const prepared = prepareScopedQuery("comparison", {
+        context,
+        scopePreference: "auto",
+        current: { time, scopePreference: currentScope },
+        reference: { time, scopePreference: referenceScope },
+        metrics: ["views"],
+      } as unknown as QueryInput) as QueryInput & {
+        scopePlan?: { scope: string };
+        current: { scopePreference?: string };
+        reference: { scopePreference?: string };
+      };
+
+      expect(prepared.scopePlan?.scope).toBe(resolvedScope);
+      expect(prepared.current.scopePreference).toBe(resolvedScope);
+      expect(prepared.reference.scopePreference).toBe(resolvedScope);
+    },
+  );
+
+  it("rejects comparison sides with different concrete preferences", () => {
+    expect(() =>
+      prepareScopedQuery("comparison", {
+        context,
+        scopePreference: "auto",
+        current: { time, scopePreference: "session" },
+        reference: { time, scopePreference: "visitor" },
+        metrics: ["views"],
+      } as unknown as QueryInput),
+    ).toThrow("scope_conflict");
   });
 
   it("fills missing comparison side filters and preserves team site scope", () => {
@@ -279,9 +357,9 @@ describe("scoped filter contract", () => {
       reference: { filters?: FilterDocument; scopePreference?: string };
     };
 
-    expect(comparison.scopePlan?.scope).toBe("session");
-    expect(comparison.current.scopePreference).toBe("session");
-    expect(comparison.reference.scopePreference).toBe("session");
+    expect(comparison.scopePlan?.scope).toBe("event");
+    expect(comparison.current.scopePreference).toBe("event");
+    expect(comparison.reference.scopePreference).toBe("event");
     expect(comparison.current.filters?.root).toBeNull();
     expect(comparison.reference.filters?.root).toBeNull();
   });
@@ -341,6 +419,8 @@ describe("scoped filter contract", () => {
     });
     expect(dataset.ctes).toContain("scope_universe");
     expect(dataset.ctes).toContain("scope_final_visitors");
+    expect(dataset.ctes).not.toContain("matched_sessions");
+    expect(dataset.ctes).not.toContain("matched_visitors");
   });
 
   it("compiles observation scope filters and validates scoped metadata", () => {

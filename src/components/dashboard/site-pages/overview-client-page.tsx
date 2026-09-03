@@ -4060,7 +4060,7 @@ export function OverviewClientPage({
     () => parseOverviewCardFilters(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
-  // Overview's Auto scope is resolved once by the parent operation (session)
+  // Overview's Auto scope is resolved once by the parent operation (event)
   // and passed to every dashboard child request. The URL remains Auto.
   const resolvedRequestFilters = useMemo(
     () =>

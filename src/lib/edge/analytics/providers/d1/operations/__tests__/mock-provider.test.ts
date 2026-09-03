@@ -33,7 +33,7 @@ describe("mock query provider", () => {
     expect(mocks.executeDemoQueryPayload).toHaveBeenCalledWith(
       expect.objectContaining({
         ...input,
-        resolvedScope: "session",
+        resolvedScope: "event",
       }),
     );
     expect(mocks.createDemoQueryResponse).toHaveBeenCalledWith(

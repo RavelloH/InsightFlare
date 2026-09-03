@@ -207,6 +207,7 @@ export async function fetchFilterValues(
     limit?: number;
     search?: string;
     signal?: AbortSignal;
+    resolvedScope?: FilterScope;
   },
 ): Promise<DashboardFilterOptionData[]> {
   const payload = await fetchPrivateJson<DashboardFilterOptionsData>(
@@ -222,6 +223,7 @@ export async function fetchFilterValues(
         ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
       },
       filters,
+      options?.resolvedScope,
     ),
     { signal: options?.signal },
   ).catch(() => emptyDashboardFilterOptions());

@@ -6,7 +6,10 @@ import {
   createTypedQueryProviderRegistry,
   typedQueryProvider,
 } from "@/lib/edge/analytics/application/provider-registry";
-import { TypedQueryApplicationService } from "@/lib/edge/analytics/application/service";
+import {
+  type AnalyticsQueryEvent,
+  TypedQueryApplicationService,
+} from "@/lib/edge/analytics/application/service";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
@@ -148,7 +151,7 @@ describe("TypedQueryApplicationService", () => {
         time,
         source: "rollup",
         approximateVisitors: true,
-        filterScope: { requested: "auto", resolved: "session" },
+        filterScope: { requested: "auto", resolved: "event" },
       },
     });
     expect(run).toHaveBeenCalledOnce();
@@ -182,7 +185,7 @@ describe("TypedQueryApplicationService", () => {
         approximateVisitors: false,
         filterScope: {
           requested: "auto" as const,
-          resolved: "session" as const,
+          resolved: "event" as const,
         },
       },
     };
@@ -370,6 +373,22 @@ describe("TypedQueryApplicationService", () => {
       "pages:start",
       "pages:success",
     ]);
+  });
+
+  it("attaches the canonical scope plan to invocation diagnostics", async () => {
+    const events: AnalyticsQueryEvent[] = [];
+    await new TypedQueryApplicationService().execute(
+      overviewInvocation(reader()),
+      { operation: "overview", onEvent: (event) => events.push(event) },
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      phase: "success",
+      requestedScope: "auto",
+      resolvedScope: "event",
+      requiredSources: [],
+      requiresRawSource: false,
+    });
   });
 
   it("executes overview and timeseries through ordinary registry entries", async () => {

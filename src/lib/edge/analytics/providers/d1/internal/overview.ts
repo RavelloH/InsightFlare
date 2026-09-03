@@ -1,3 +1,4 @@
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import {
   hasFilterDocument,
   queryOverviewForSitesFromHourlyRollups,
@@ -23,7 +24,10 @@ import {
   timeBucketTimestamp,
   visitSourceBindings,
 } from "./core";
-import type { D1ReadDiagnostics } from "./diagnostics";
+import {
+  type D1ReadDiagnostics,
+  recordScopedFilterDiagnostics,
+} from "./diagnostics";
 import {
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
@@ -53,6 +57,7 @@ export async function queryOverviewFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<OverviewAggregateRow> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const filter = scopedDataset
     ? { clause: "", bindings: [] as Array<string | number> }
     : buildVisitFilterSql(filters);
@@ -68,6 +73,13 @@ export async function queryOverviewFromD1(
     : expandEntities
       ? "calculated_visits"
       : "filtered_visits";
+  const entityCounts = scopedDataset
+    ? `
+  (SELECT count(*) FROM ${scopedDataset.sessionRelation}) AS sessions,
+  (SELECT count(*) FROM ${scopedDataset.visitorRelation}) AS visitors,`
+    : `
+  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,`;
   const sourceSql = scopedDataset
     ? `${scopedDataset.ctes},`
     : `${visitSource},
@@ -87,8 +99,7 @@ session_rollup AS (
 )
 SELECT
   count(*) AS views,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+${entityCounts}
   COALESCE((SELECT count(*) FROM session_rollup WHERE visit_count = 1), 0) AS bounces,
   COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
   COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
@@ -124,6 +135,7 @@ export async function queryTrendFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<TrendAggregateRow[]> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const filter = scopedDataset
     ? { clause: "", bindings: [] as Array<string | number> }
     : buildVisitFilterSql(filters);
@@ -136,23 +148,41 @@ export async function queryTrendFromD1(
   );
   const buckets = buildTimeBuckets(window, interval);
   const visitBucket = timeBucketCase(buckets, "started_at");
-  const sessionBucket = timeBucketCase(buckets, "session_started_at");
+  const scopedVisitorBucket = scopedDataset
+    ? timeBucketCase(buckets, "observed_at")
+    : null;
+  const sessionBucket = timeBucketCase(
+    buckets,
+    scopedDataset ? "session_observed_at" : "session_started_at",
+  );
   const metricSource = scopedDataset
     ? scopedDataset.visitRelation
     : expandEntities
       ? "calculated_visits"
       : "filtered_visits";
-  const sourceSql = scopedDataset
-    ? `${scopedDataset.ctes},`
-    : `${visitSource},
-filtered_visits AS MATERIALIZED (
-  SELECT *
-  FROM visit_source
-  ${filter.clause}
-),${entityExpansion}`;
-  const sql = `
-WITH
-${sourceSql}
+  const scopedEntityObservations = scopedDataset
+    ? `
+scope_entity_observations AS (
+  SELECT visitor_id, session_id, started_at AS observed_at, 1 AS is_visit_observation
+  FROM ${scopedDataset.visitRelation}
+  UNION ALL
+  SELECT visitor_id, session_id, occurred_at AS observed_at, 0 AS is_visit_observation
+  FROM ${scopedDataset.eventRelation}
+),`
+    : "";
+  const visitBucketRollup = scopedDataset
+    ? `
+visit_bucket_rollup AS (
+  SELECT
+    ${visitBucket.sql} AS bucket,
+    count(*) AS views,
+    0 AS visitors,
+    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
+    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
+  FROM ${metricSource}
+  GROUP BY bucket
+),`
+    : `
 visit_bucket_rollup AS (
   SELECT
     ${visitBucket.sql} AS bucket,
@@ -162,7 +192,29 @@ visit_bucket_rollup AS (
     COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
   FROM ${metricSource}
   GROUP BY bucket
-),
+),`;
+  const scopedVisitorBucketRollup = scopedDataset
+    ? `
+visitor_bucket_rollup AS (
+  SELECT
+    ${scopedVisitorBucket?.sql} AS bucket,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM scope_entity_observations
+  GROUP BY bucket
+),`
+    : "";
+  const sessionRollup = scopedDataset
+    ? `
+session_rollup AS (
+  SELECT
+    session_id,
+    MIN(observed_at) AS session_observed_at,
+    COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS visit_count
+  FROM scope_entity_observations
+  WHERE session_id != ''
+  GROUP BY session_id
+),`
+    : `
 session_rollup AS (
   SELECT
     vs.session_id,
@@ -171,7 +223,37 @@ session_rollup AS (
   FROM ${metricSource} vs
   WHERE vs.session_id != ''
   GROUP BY vs.session_id
-),
+),`;
+  const combined = scopedDataset
+    ? `
+combined AS (
+  SELECT bucket, views, visitors, 0 AS sessions, 0 AS bounces, totalDuration, durationViews FROM visit_bucket_rollup
+  UNION ALL
+  SELECT bucket, 0 AS views, visitors, 0 AS sessions, 0 AS bounces, 0 AS totalDuration, 0 AS durationViews FROM visitor_bucket_rollup
+  UNION ALL
+  SELECT bucket, 0 AS views, 0 AS visitors, sessions, bounces, 0 AS totalDuration, 0 AS durationViews FROM session_bucket_rollup
+ )`
+    : `
+combined AS (
+  SELECT bucket, views, visitors, 0 AS sessions, 0 AS bounces, totalDuration, durationViews FROM visit_bucket_rollup
+  UNION ALL
+  SELECT bucket, 0 AS views, 0 AS visitors, sessions, bounces, 0 AS totalDuration, 0 AS durationViews FROM session_bucket_rollup
+ )`;
+  const sourceSql = scopedDataset
+    ? `${scopedDataset.ctes},
+${scopedEntityObservations}`
+    : `${visitSource},
+filtered_visits AS MATERIALIZED (
+  SELECT *
+  FROM visit_source
+  ${filter.clause}
+),${entityExpansion}`;
+  const sql = `
+WITH
+${sourceSql}
+${visitBucketRollup}
+${scopedVisitorBucketRollup}
+${sessionRollup}
 session_bucket_rollup AS (
   SELECT
     ${sessionBucket.sql} AS bucket,
@@ -180,11 +262,7 @@ session_bucket_rollup AS (
   FROM session_rollup
   GROUP BY bucket
 ),
-combined AS (
-  SELECT bucket, views, visitors, 0 AS sessions, 0 AS bounces, totalDuration, durationViews FROM visit_bucket_rollup
-  UNION ALL
-  SELECT bucket, 0 AS views, 0 AS visitors, sessions, bounces, 0 AS totalDuration, 0 AS durationViews FROM session_bucket_rollup
-)
+${combined}
 SELECT
   bucket,
   sum(views) AS views,
@@ -206,6 +284,7 @@ ORDER BY bucket ASC
           ? scopedDataset.bindings.map((binding) => binding.value)
           : [...visitSourceBindings(siteId, window), ...filter.bindings]),
         ...visitBucket.bindings,
+        ...(scopedVisitorBucket?.bindings ?? []),
         ...sessionBucket.bindings,
       ],
       diagnostics,
@@ -234,6 +313,7 @@ export async function queryLatestSiteActivity(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<number | null> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const filter = scopedDataset
     ? { clause: "", bindings: [] as Array<string | number> }
     : buildVisitFilterSql(filters);

@@ -91,11 +91,11 @@ const none: UnscopedFilteringCapability = Object.freeze({ kind: "none" });
 export const FILTER_SCOPE_CAPABILITIES: Readonly<
   Record<QueryOperation, FilterScopeCapability>
 > = {
-  overview: scoped("session"),
-  trend: scoped("session"),
+  overview: scoped("event"),
+  trend: scoped("event"),
   "team-sites": scoped("event"),
-  comparison: scoped("session"),
-  "comparison-breakdown": scoped("session"),
+  comparison: scoped("event"),
+  "comparison-breakdown": scoped("event"),
   dimension: scoped("event"),
   "cross-dimension": scoped("event"),
   "share-trend": scoped("event"),
@@ -238,6 +238,21 @@ export function reconcileFilterScopePreferences(
   throw new Error("scope_conflict");
 }
 
+/**
+ * Comparison is the one query shape with two independent filter documents.
+ * Auto is neutral here: resolve the common concrete preference once after
+ * both sides have reconciled their caller and Saved Filter preferences.
+ */
+export function reconcileComparisonFilterScopePreferences(
+  preferences: readonly FilterScopePreference[],
+): FilterScopePreference {
+  const concrete = new Set(
+    preferences.filter((preference) => preference !== "auto"),
+  );
+  if (concrete.size > 1) throw new Error("scope_conflict");
+  return [...concrete][0] ?? "auto";
+}
+
 export function resolveFilterScope(
   operation: QueryOperation,
   preference: FilterScopePreference,
@@ -374,23 +389,24 @@ function prepareScopedComparisonQuery(
   };
   const current = prepareSide(query.current);
   const reference = prepareSide(query.reference);
-  const currentScope = resolveFilterScope(operation, current.preference);
-  const referenceScope = resolveFilterScope(operation, reference.preference);
-  if (!currentScope || !referenceScope || currentScope !== referenceScope) {
-    throw new Error("scope_conflict");
-  }
+  const comparisonPreference = reconcileComparisonFilterScopePreferences([
+    current.preference,
+    reference.preference,
+  ]);
+  const resolvedScope = resolveFilterScope(operation, comparisonPreference);
+  if (!resolvedScope) throw new Error("scope_conflict");
   const subject = query.context.subject;
   const siteIds =
     subject.kind === "site" ? [subject.siteId] : [...subject.authorizedSiteIds];
   const currentPlan = createScopedFilterPlan(
     operation,
     current.side.filters ?? { version: 1, root: null },
-    currentScope,
+    resolvedScope,
   );
   const referencePlan = createScopedFilterPlan(
     operation,
     reference.side.filters ?? { version: 1, root: null },
-    currentScope,
+    resolvedScope,
   );
   if (!currentPlan || !referencePlan)
     throw new Error("unsupported_filter_scope");
@@ -400,12 +416,12 @@ function prepareScopedComparisonQuery(
     callerScope: FilterScopePreference;
   }): ComparisonSideInput => ({
     ...prepared.side,
-    scopePreference: currentScope,
+    scopePreference: resolvedScope,
     filters: attachScopedFilterMetadata(
       prepared.side.filters ?? { version: 1, root: null },
       {
         requestedScope: prepared.callerScope,
-        resolvedScope: currentScope,
+        resolvedScope,
         plan: prepared.plan,
         time: prepared.side.time,
         siteIds,

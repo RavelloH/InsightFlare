@@ -8,9 +8,12 @@ import {
 } from "@/lib/edge/analytics/application/cost";
 import type {
   AnalyticsResult,
+  EntitySetExpression,
+  FilterScope,
   QueryInput,
   QueryOperation,
   QueryTime,
+  ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract";
 import { prepareScopedQuery } from "@/lib/edge/analytics/contract/scoped-filter";
 import {
@@ -50,6 +53,10 @@ export interface AnalyticsQueryEvent {
     | "cost"
     | "failure";
   readonly cost?: number;
+  readonly requestedScope?: string;
+  readonly resolvedScope?: FilterScope;
+  readonly requiredSources?: readonly string[];
+  readonly requiresRawSource?: boolean;
 }
 
 /**
@@ -92,16 +99,62 @@ function emit(
   context: QueryExecutionContext,
   phase: AnalyticsQueryEvent["phase"],
   cost?: number,
+  query?: QueryInput,
 ): void {
   try {
+    const plan = query?.scopePlan;
     context.onEvent?.({
       operation: context.operation ?? "unknown",
       phase,
       ...(cost === undefined ? {} : { cost }),
+      ...(plan
+        ? {
+            requestedScope: query?.scopePreference ?? "auto",
+            resolvedScope: plan.scope,
+            requiredSources: [...plan.requiredSources].sort(),
+            requiresRawSource: plan.requiresRawSource,
+          }
+        : {}),
     });
   } catch {
     // Observability must never change query behavior.
   }
+}
+
+function entityExpressionComplexity(
+  expression: EntitySetExpression | null,
+): number {
+  if (!expression || expression.kind === "condition") return 1;
+  if (expression.kind === "not") {
+    return 1 + entityExpressionComplexity(expression.child);
+  }
+  return Math.max(
+    1,
+    1 +
+      expression.children.reduce(
+        (total, child) => total + entityExpressionComplexity(child),
+        0,
+      ),
+  );
+}
+
+function scopeAwareCostInput(
+  input: QueryCostInput | undefined,
+  query: QueryInput,
+): QueryCostInput | undefined {
+  const plan: ScopedFilterPlan | undefined = query.scopePlan;
+  if (!input || !plan) return input;
+  return {
+    ...input,
+    scope: plan.scope,
+    requiredSourceCount: Math.max(1, plan.requiredSources.size),
+    entityAlgebraComplexity:
+      plan.membership.kind === "entity"
+        ? entityExpressionComplexity(plan.membership.expression)
+        : 1,
+    eventPayloadComplexity: plan.requiredSources.has("payload") ? 2 : 1,
+    requiresRawSource: plan.requiresRawSource,
+  };
 }
 
 class UncacheableResult extends Error {
@@ -145,15 +198,15 @@ export class TypedQueryApplicationService {
     private readonly costPolicy: QueryCostPolicy = defaultQueryCostPolicy,
   ) {}
 
-  private costError(executionContext: QueryExecutionContext): {
+  private costError(costInput: QueryCostInput | undefined): {
     readonly ok: false;
     readonly error: {
       readonly kind: "query-cost-exceeded";
       readonly cost: number;
     };
   } | null {
-    if (!executionContext.cost) return null;
-    const cost = calculateQueryCost(executionContext.cost, this.costPolicy);
+    if (!costInput) return null;
+    const cost = calculateQueryCost(costInput, this.costPolicy);
     return cost >= this.costPolicy.maxCost
       ? { ok: false, error: { kind: "query-cost-exceeded", cost } }
       : null;
@@ -215,7 +268,8 @@ export class TypedQueryApplicationService {
       return { ok: false, error: validationError };
     }
 
-    const costError = this.costError(executionContext);
+    const costInput = scopeAwareCostInput(executionContext.cost, preparedQuery);
+    const costError = this.costError(costInput);
     if (costError) {
       emit(
         executionContext,
@@ -223,6 +277,7 @@ export class TypedQueryApplicationService {
         costError.error.kind === "query-cost-exceeded"
           ? costError.error.cost
           : undefined,
+        preparedQuery,
       );
       return costError;
     }
@@ -291,7 +346,7 @@ export class TypedQueryApplicationService {
         );
         return after;
       }
-      emit(executionContext, "success");
+      emit(executionContext, "success", undefined, preparedQuery);
       return {
         ok: true,
         data: result.value,

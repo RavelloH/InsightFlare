@@ -9,7 +9,14 @@ import {
   handleVisitorDetailContract as handleVisitorDetail,
   handleVisitorsContract as handleVisitors,
 } from "@/lib/edge/analytics/composition/protocol/journeys-contract-adapter";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  createQueryTime,
+  EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
+  type FilterExpression,
+  prepareScopedQuery,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   buildSessionAggregationSql,
@@ -169,6 +176,35 @@ function visitBindings(window: QueryWindow): QueryBinding[] {
 
 function eventBindings(window: QueryWindow): QueryBinding[] {
   return [siteId, window.startMs, window.endExclusiveMs];
+}
+
+function condition(field: string, value: string): FilterExpression {
+  return {
+    kind: "condition",
+    target: { kind: "field", field: field as never },
+    operator: "eq",
+    value,
+  };
+}
+
+function prepareScopedFilters(
+  operation: "sessions" | "visitors",
+  scope: "session" | "visitor",
+  root: FilterExpression,
+  targetWindow: QueryWindow,
+): FilterDocument {
+  const prepared = prepareScopedQuery(operation, {
+    context: siteQueryContext(siteId, "private-dashboard"),
+    time: createQueryTime(
+      targetWindow.startMs,
+      targetWindow.endExclusiveMs,
+      targetWindow.timeZone,
+      targetWindow.nowMs,
+    ),
+    filters: { version: 1, root },
+    scopePreference: scope,
+  } as never);
+  return prepared.filters!;
 }
 
 function url(path: string, params: Record<string, string | number | boolean>) {
@@ -787,6 +823,255 @@ describe("edge journey detail D1 queries", () => {
           detail.includes("idx_custom_events_site_pk_visit_time"),
         ),
       ).toBe(true);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("uses custom-event time for event-only scoped session and visitor rows", async () => {
+    const sqlite = createSqliteDetailEnv();
+    const targetWindow = queryWindow();
+    const eventAt = baseMs + 30_000;
+    try {
+      sqlite.database
+        .prepare(
+          `INSERT INTO visits (
+            visit_id, site_id, visitor_id, session_id, status, started_at,
+            last_activity_at, pathname, hostname
+          ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, ?)`,
+        )
+        .run(
+          "event-only-visit",
+          siteId,
+          "event-only-visitor",
+          "event-only-session",
+          baseMs - 60 * 60 * 1000,
+          baseMs - 60 * 60 * 1000,
+          "/event-only",
+          "example.test",
+        );
+      sqlite.database
+        .prepare(
+          "INSERT INTO custom_event_names (id, site_id, name, last_seen_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(1, siteId, "signup", eventAt);
+      sqlite.database
+        .prepare(
+          `INSERT INTO custom_events (
+            event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+            received_at, sequence, node_count, value_count
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          1,
+          "event-only-event",
+          siteId,
+          "event-only-visit",
+          1,
+          eventAt,
+          eventAt,
+          0,
+          0,
+          0,
+        );
+
+      const eventFilter = condition("event.name", "signup");
+      const sessionRows = await querySessionsFromD1(
+        sqlite.env,
+        siteId,
+        targetWindow,
+        prepareScopedFilters("sessions", "session", eventFilter, targetWindow),
+        10,
+      );
+      const visitorRows = await queryVisitorsFromD1(
+        sqlite.env,
+        siteId,
+        targetWindow,
+        prepareScopedFilters("visitors", "visitor", eventFilter, targetWindow),
+        10,
+      );
+
+      expect(sessionRows).toHaveLength(1);
+      expect(sessionRows[0]).toMatchObject({
+        sessionId: "event-only-session",
+        startedAt: eventAt,
+        endedAt: eventAt,
+        views: 0,
+        events: 1,
+        bounce: false,
+      });
+      expect(sessionRows[0]?.startedAt).not.toBe(0);
+      expect(visitorRows).toHaveLength(1);
+      expect(visitorRows[0]).toMatchObject({
+        visitorId: "event-only-visitor",
+        firstSeenAt: eventAt,
+        lastSeenAt: eventAt,
+        views: 0,
+        sessions: 1,
+        events: 1,
+      });
+      expect(visitorRows[0]?.firstSeenAt).not.toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("evaluates Session and Visitor AND/OR/NOT membership on real SQLite data", async () => {
+    const sqlite = createSqliteDetailEnv();
+    const targetWindow = queryWindow();
+    try {
+      const insertVisit = sqlite.database.prepare(`
+        INSERT INTO visits (
+          visit_id, site_id, visitor_id, session_id, status, started_at,
+          last_activity_at, pathname, hostname
+        ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test')
+      `);
+      const insertEvent = sqlite.database.prepare(`
+        INSERT INTO custom_events (
+          event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+          received_at, sequence, node_count, value_count
+        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, 0, 0)
+      `);
+      sqlite.database
+        .prepare(
+          "INSERT INTO custom_event_names (id, site_id, name, last_seen_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(1, siteId, "signup", baseMs);
+
+      const addVisit = (
+        visitId: string,
+        visitorId: string,
+        sessionId: string,
+        pathname: string,
+        offset: number,
+      ) => {
+        const startedAt = baseMs + offset;
+        insertVisit.run(
+          visitId,
+          siteId,
+          visitorId,
+          sessionId,
+          startedAt,
+          startedAt,
+          pathname,
+        );
+      };
+      const addEvent = (eventPk: number, eventId: string, visitId: string) => {
+        const occurredAt = baseMs + 10_000 + eventPk;
+        insertEvent.run(
+          eventPk,
+          eventId,
+          siteId,
+          visitId,
+          occurredAt,
+          occurredAt,
+          eventPk,
+        );
+      };
+
+      // Sessions: A is /a, B is signup.
+      addVisit("session-a-visit", "visitor-a", "session-a", "/a", 1_000);
+      addEvent(1, "session-a-event", "session-a-visit");
+      addVisit("session-b-visit", "visitor-b", "session-b", "/a", 2_000);
+      addVisit("session-c-visit", "visitor-c", "session-c", "/c", 3_000);
+      addEvent(2, "session-c-event", "session-c-visit");
+      addVisit("session-d-visit", "visitor-d", "session-d", "/d", 4_000);
+
+      const sessionA = condition("page.path", "/a");
+      const sessionB = condition("event.name", "signup");
+      const sessionIds = async (root: FilterExpression) =>
+        (
+          await querySessionsFromD1(
+            sqlite.env,
+            siteId,
+            targetWindow,
+            prepareScopedFilters("sessions", "session", root, targetWindow),
+            20,
+          )
+        ).map((row) => row.sessionId);
+
+      await expect(
+        sessionIds({ kind: "and", children: [sessionA, sessionB] }),
+      ).resolves.toEqual(["session-a"]);
+      await expect(
+        sessionIds({ kind: "or", children: [sessionA, sessionB] }),
+      ).resolves.toEqual(["session-c", "session-b", "session-a"]);
+      await expect(
+        sessionIds({ kind: "not", child: sessionB }),
+      ).resolves.toEqual(["session-d", "session-b"]);
+      await expect(
+        sessionIds({ kind: "and", children: [sessionA, sessionA] }),
+      ).resolves.toEqual(["session-b", "session-a"]);
+
+      // Visitors: A and B deliberately occur in different sessions for the
+      // same visitor, while visitor-c only has B and visitor-d has neither.
+      addVisit(
+        "visitor-a-first",
+        "visitor-1",
+        "visitor-session-a",
+        "/a",
+        5_000,
+      );
+      addVisit(
+        "visitor-a-second",
+        "visitor-1",
+        "visitor-session-b",
+        "/neutral",
+        6_000,
+      );
+      addEvent(3, "visitor-a-event", "visitor-a-second");
+      addVisit(
+        "visitor-b-only-a",
+        "visitor-2",
+        "visitor-session-c",
+        "/a",
+        7_000,
+      );
+      addVisit(
+        "visitor-c-only-b",
+        "visitor-3",
+        "visitor-session-d",
+        "/c",
+        8_000,
+      );
+      addEvent(4, "visitor-c-event", "visitor-c-only-b");
+      addVisit(
+        "visitor-d-neither",
+        "visitor-4",
+        "visitor-session-e",
+        "/d",
+        9_000,
+      );
+
+      const visitorA = condition("page.path", "/a");
+      const visitorB = condition("event.name", "signup");
+      const visitorIds = async (root: FilterExpression) =>
+        (
+          await queryVisitorsFromD1(
+            sqlite.env,
+            siteId,
+            targetWindow,
+            prepareScopedFilters("visitors", "visitor", root, targetWindow),
+            20,
+          )
+        ).map((row) => row.visitorId);
+
+      await expect(
+        visitorIds({ kind: "and", children: [visitorA, visitorB] }),
+      ).resolves.toEqual(["visitor-1", "visitor-a"]);
+      await expect(
+        visitorIds({ kind: "or", children: [visitorA, visitorB] }),
+      ).resolves.toEqual([
+        "visitor-3",
+        "visitor-2",
+        "visitor-1",
+        "visitor-c",
+        "visitor-b",
+        "visitor-a",
+      ]);
+      await expect(
+        visitorIds({ kind: "not", child: visitorA }),
+      ).resolves.toEqual(["visitor-4", "visitor-3", "visitor-d", "visitor-c"]);
     } finally {
       sqlite.close();
     }

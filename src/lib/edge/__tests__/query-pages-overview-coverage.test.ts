@@ -94,6 +94,56 @@ function createD1Env(
   };
 }
 
+function createScopedOverviewSqliteEnv(): {
+  env: Env;
+  database: DatabaseSync;
+  close: () => void;
+} {
+  const database = new DatabaseSync(":memory:");
+  for (const migration of [
+    "migrations/0008_rebuild_analytics.sql",
+    "migrations/0013_add_visit_performance_metrics.sql",
+    "migrations/0017_structured_custom_events.sql",
+  ]) {
+    database.exec(readFileSync(migration, "utf8"));
+  }
+  installVisitSiteIdentityFixture(database);
+  database.exec(`
+    ALTER TABLE custom_event_names ADD COLUMN site_pk INTEGER;
+    ALTER TABLE custom_events ADD COLUMN site_pk INTEGER;
+
+    CREATE TRIGGER test_custom_event_names_site_pk
+    AFTER INSERT ON custom_event_names
+    WHEN NEW.site_pk IS NULL
+    BEGIN
+      UPDATE custom_event_names
+      SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+      WHERE id = NEW.id;
+    END;
+
+    CREATE TRIGGER test_custom_events_site_pk
+    AFTER INSERT ON custom_events
+    WHEN NEW.site_pk IS NULL
+    BEGIN
+      UPDATE custom_events
+      SET site_pk = (SELECT site_pk FROM site_identities WHERE site_id = NEW.site_id)
+      WHERE event_pk = NEW.event_pk;
+    END;
+  `);
+  const env = {
+    DB: {
+      prepare: (sql: string) => ({
+        bind: (...bindings: QueryBinding[]) => ({
+          all: async () => ({
+            results: database.prepare(sql).all(...bindings) as D1Row[],
+          }),
+        }),
+      }),
+    },
+  } as unknown as Env;
+  return { env, database, close: () => database.close() };
+}
+
 function visitBindings(targetWindow = window): QueryBinding[] {
   return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
@@ -1167,6 +1217,99 @@ describe("edge overview D1 queries and handlers", () => {
       ).toBe(true);
     } finally {
       database.close();
+    }
+  });
+
+  it("counts event-only Session entities in scoped overview and trend", async () => {
+    const sqlite = createScopedOverviewSqliteEnv();
+    const eventAt = baseMs + 15 * 60 * 1000;
+    try {
+      sqlite.database
+        .prepare(
+          `
+          INSERT INTO visits (
+            visit_id, site_id, visitor_id, session_id, status, started_at,
+            last_activity_at, pathname, hostname
+          ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test')
+        `,
+        )
+        .run(
+          "event-only-visit",
+          siteId,
+          "event-only-visitor",
+          "event-only-session",
+          baseMs - 60 * 60 * 1000,
+          baseMs - 60 * 60 * 1000,
+          "/event-only",
+        );
+      sqlite.database
+        .prepare(
+          "INSERT INTO custom_event_names (id, site_id, name, last_seen_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(1, siteId, "signup", eventAt);
+      sqlite.database
+        .prepare(
+          `
+          INSERT INTO custom_events (
+            event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+            received_at, sequence, node_count, value_count
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        )
+        .run(
+          1,
+          "event-only-event",
+          siteId,
+          "event-only-visit",
+          1,
+          eventAt,
+          eventAt,
+          0,
+          0,
+          0,
+        );
+
+      const prepared = prepareScopedQuery("overview", {
+        context: siteQueryContext(siteId, "private-dashboard"),
+        time: createQueryTime(
+          window.startMs,
+          window.endExclusiveMs,
+          window.timeZone,
+          window.nowMs,
+        ),
+        filters: {
+          version: 1,
+          root: {
+            kind: "condition",
+            target: { kind: "field", field: "event.name" as never },
+            operator: "eq",
+            value: "signup",
+          },
+        },
+        scopePreference: "session",
+      } as never);
+      const filters = prepared.filters!;
+
+      await expect(
+        queryOverviewFromD1(sqlite.env, siteId, window, filters),
+      ).resolves.toMatchObject({
+        views: 0,
+        sessions: 1,
+        visitors: 1,
+      });
+      await expect(
+        queryTrendFromD1(sqlite.env, siteId, window, "hour", filters),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          bucket: 0,
+          views: 0,
+          sessions: 1,
+          visitors: 1,
+          bounces: 0,
+        }),
+      ]);
+    } finally {
+      sqlite.close();
     }
   });
 

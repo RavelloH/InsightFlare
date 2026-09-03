@@ -42,7 +42,13 @@ vi.mock("@/lib/dashboard/client-request", () => ({
 }));
 
 vi.mock("@/lib/dashboard/client-utils", () => ({
-  withFilters: vi.fn((params: Record<string, unknown>) => params),
+  withFilters: vi.fn(
+    (
+      params: Record<string, unknown>,
+      _filters: unknown,
+      resolvedScope?: string,
+    ) => (resolvedScope ? { ...params, scope: resolvedScope } : params),
+  ),
 }));
 
 import {
@@ -330,6 +336,18 @@ describe("fetchEventTypeFields", () => {
     );
   });
 
+  it("passes the resolved scope for payload field suggestions", async () => {
+    await fetchEventTypeFields("site-1", window, "click", undefined, {
+      resolvedScope: "session",
+    });
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/event-type-fields",
+      expect.objectContaining({ scope: "session" }),
+      { signal: undefined },
+    );
+  });
+
   it("falls back to empty fields when the request fails", async () => {
     fetchPrivateJsonMock.mockRejectedValueOnce(new Error("fail"));
 
@@ -404,6 +422,30 @@ describe("fetchEventTypeFieldValues", () => {
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
       "/api/private/event-type-field-values",
       expect.objectContaining({ search: "pro" }),
+      { signal: undefined },
+    );
+  });
+
+  it("passes the resolved scope with event payload value filters", async () => {
+    fetchPrivateJsonMock.mockResolvedValueOnce(
+      emptyEventFieldValues("payload.plan", "string"),
+    );
+
+    await fetchEventTypeFieldValues(
+      "site-1",
+      window,
+      "click",
+      "payload.plan",
+      "string",
+      dashboardFilterDocumentFromPresentation({ path: "/pricing" }),
+      { resolvedScope: "visitor" },
+    );
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/event-type-field-values",
+      expect.objectContaining({
+        scope: "visitor",
+      }),
       { signal: undefined },
     );
   });

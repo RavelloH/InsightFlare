@@ -75,6 +75,8 @@ function fullEntityFilterCtes(
   filterClause: string,
   searchCondition?: string,
 ): string {
+  // Legacy direct-reader path. Prepared scoped queries use the canonical
+  // scopedDataset relations below and never enter this branch.
   const column = entity === "visitor" ? "visitor_id" : "session_id";
   return `matched_${entity}s AS (
   SELECT DISTINCT visit_source.${column}
@@ -97,10 +99,10 @@ const EVENT_ONLY_VISIT_PROJECTION = `
     e.visitor_id,
     e.session_id,
     NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
+    e.occurred_at,
+    e.occurred_at,
+    e.occurred_at,
+    e.occurred_at,
     NULL,
     NULL,
     NULL,

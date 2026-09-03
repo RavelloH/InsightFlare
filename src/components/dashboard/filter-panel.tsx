@@ -100,6 +100,7 @@ import {
   type FilterFieldId,
   filterFingerprint,
   type FilterOperator,
+  type FilterScope,
   type FilterScopePreference,
   FilterValidationError,
   type FilterValue,
@@ -130,6 +131,68 @@ type ValueSuggestion = {
   readonly occurrences?: number;
   readonly label?: string;
 };
+
+function filterDocumentWithRoot(
+  document: FilterDocument,
+  root: FilterExpression | null,
+): FilterDocument {
+  const result = { version: document.version, root } as FilterDocument;
+  for (const key of Reflect.ownKeys(document)) {
+    if (typeof key !== "symbol") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(document, key);
+    if (descriptor) Object.defineProperty(result, key, descriptor);
+  }
+  return result;
+}
+
+function stripSuggestionFacet(
+  document: FilterDocument,
+  field: string,
+  payloadPath: string,
+): FilterDocument {
+  const matchesFacet = (expression: FilterExpression): boolean => {
+    if (expression.kind !== "condition") return false;
+    if (field === "event.payload") {
+      return (
+        expression.target.kind === "event-payload" &&
+        Boolean(payloadPath) &&
+        expression.target.path === payloadPath
+      );
+    }
+    return (
+      expression.target.kind === "field" && expression.target.field === field
+    );
+  };
+  const hasFacet = (expression: FilterExpression | null): boolean => {
+    if (!expression) return false;
+    if (matchesFacet(expression)) return true;
+    if (expression.kind === "not") return hasFacet(expression.child);
+    if (expression.kind === "condition") return false;
+    return expression.children.some(hasFacet);
+  };
+  const removeFacet = (
+    expression: FilterExpression,
+  ): FilterExpression | null => {
+    if (matchesFacet(expression)) return null;
+    if (expression.kind === "condition") return expression;
+    if (expression.kind === "not") {
+      const child = removeFacet(expression.child);
+      return child ? { kind: "not", child } : null;
+    }
+    const children = expression.children
+      .map(removeFacet)
+      .filter((child): child is FilterExpression => child !== null);
+    if (children.length === 0) return null;
+    if (children.length === 1) return children[0]!;
+    return { kind: expression.kind, children };
+  };
+
+  if (!hasFacet(document.root)) return document;
+  return filterDocumentWithRoot(
+    document,
+    document.root ? removeFacet(document.root) : null,
+  );
+}
 
 function systemPresetItem(messages: AppMessages, id: SystemFilterPresetId) {
   const items = {
@@ -199,6 +262,8 @@ interface FilterPanelProps {
   readonly messages: AppMessages;
   readonly open: boolean;
   readonly siteId?: string;
+  /** Concrete scope resolved by the parent page for the active operation. */
+  readonly resolvedScope?: FilterScope;
   readonly scopePreference: FilterScopePreference;
   readonly window?: TimeWindow;
   readonly onApply: (
@@ -1009,6 +1074,7 @@ function SearchablePayloadPathInput({
   needsValue,
   onChange,
   onSelect,
+  resolvedScope,
   siteId,
   window,
 }: {
@@ -1019,13 +1085,19 @@ function SearchablePayloadPathInput({
   needsValue: boolean;
   onChange: (payloadPath: string) => void;
   onSelect: (field: EventField) => void;
+  resolvedScope?: FilterScope;
   siteId: string | undefined;
   window: TimeWindow | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [searchToken, setSearchToken] = useState("");
   const deferredSearchToken = useDeferredValue(searchToken);
-  const canSearch = Boolean(siteId && window);
+  const canSearch = Boolean(siteId && window && resolvedScope);
+  const suggestionFilters = useMemo(
+    () =>
+      stripSuggestionFacet(document, condition.field, condition.payloadPath),
+    [condition.field, condition.payloadPath, document],
+  );
   const fieldsQuery = useQuery<{ fields: EventField[] }>({
     queryKey: [
       "dashboard",
@@ -1035,11 +1107,15 @@ function SearchablePayloadPathInput({
       window?.to,
       window?.timeZone,
       eventName,
-      document,
+      resolvedScope ?? "unresolved",
+      suggestionFilters,
       needsValue,
     ],
     queryFn: ({ signal }) =>
-      fetchEventTypeFields(siteId!, window!, eventName, document, { signal }),
+      fetchEventTypeFields(siteId!, window!, eventName, suggestionFilters, {
+        signal,
+        resolvedScope,
+      }),
     enabled: open && canSearch,
   });
   const fields = fieldsQuery.data?.fields ?? [];
@@ -1150,6 +1226,7 @@ function SearchableValueInput({
   messages,
   onChange,
   onListChange,
+  resolvedScope,
   siteId,
   valueKind,
   window,
@@ -1161,6 +1238,7 @@ function SearchableValueInput({
   messages: AppMessages;
   onChange: (valueText: string) => void;
   onListChange: (values: readonly FilterValue[]) => void;
+  resolvedScope?: FilterScope;
   siteId: string | undefined;
   valueKind: FilterValueKind;
   window: TimeWindow | undefined;
@@ -1169,6 +1247,11 @@ function SearchableValueInput({
   const [searchToken, setSearchToken] = useState("");
   const deferredSearchToken = useDeferredValue(searchToken);
   const isPayload = condition.field === "event.payload";
+  const suggestionFilters = useMemo(
+    () =>
+      stripSuggestionFacet(document, condition.field, condition.payloadPath),
+    [condition.field, condition.payloadPath, document],
+  );
   const isList = LIST_OPERATORS.has(condition.operator);
   const selectedValues = isList
     ? (condition.listValues ??
@@ -1177,6 +1260,7 @@ function SearchableValueInput({
   const canSearch = Boolean(
     siteId &&
     window &&
+    resolvedScope &&
     (isPayload
       ? condition.payloadPath.trim()
       : condition.field !== "event.payload"),
@@ -1193,7 +1277,8 @@ function SearchableValueInput({
         ? [eventName, condition.payloadPath, condition.scalarKind]
         : [condition.field]),
       deferredSearchToken,
-      ...(isPayload ? [document] : []),
+      resolvedScope ?? "unresolved",
+      suggestionFilters,
     ],
     queryFn: ({ signal }) => {
       if (isPayload) {
@@ -1203,16 +1288,26 @@ function SearchableValueInput({
           eventName,
           condition.payloadPath,
           condition.scalarKind,
-          document,
-          { limit: 12, search: deferredSearchToken, signal },
+          suggestionFilters,
+          {
+            limit: 12,
+            search: deferredSearchToken,
+            signal,
+            resolvedScope,
+          },
         ).then((result) => result.data);
       }
       return fetchFilterValues(
         siteId!,
         window!,
         condition.field as DashboardFilterOptionKey,
-        undefined,
-        { limit: 12, search: deferredSearchToken, signal },
+        suggestionFilters,
+        {
+          limit: 12,
+          search: deferredSearchToken,
+          signal,
+          resolvedScope,
+        },
       );
     },
     enabled: open && canSearch && !disabled,
@@ -1425,6 +1520,7 @@ function ConditionEditor({
   eventName,
   messages,
   path,
+  resolvedScope,
   onChange,
   onRemove,
   siteId,
@@ -1436,6 +1532,7 @@ function ConditionEditor({
   eventName: string | undefined;
   messages: AppMessages;
   path: readonly number[];
+  resolvedScope?: FilterScope;
   onChange: (update: (condition: EditorCondition) => EditorCondition) => void;
   onRemove: () => void;
   siteId: string | undefined;
@@ -1537,6 +1634,7 @@ function ConditionEditor({
             eventName={eventName}
             messages={messages}
             needsValue={needsValue}
+            resolvedScope={resolvedScope}
             siteId={siteId}
             window={window}
             onChange={(payloadPath) => {
@@ -1683,6 +1781,7 @@ function ConditionEditor({
               eventName={eventName}
               messages={messages}
               siteId={siteId}
+              resolvedScope={resolvedScope}
               valueKind={editorValueKind}
               window={window}
               onChange={(valueText) => {
@@ -1744,6 +1843,7 @@ function GroupEditor({
   isRoot,
   messages,
   path,
+  resolvedScope,
   onAddCondition,
   onAddGroup,
   onChange,
@@ -1758,6 +1858,7 @@ function GroupEditor({
   isRoot: boolean;
   messages: AppMessages;
   path: readonly number[];
+  resolvedScope?: FilterScope;
   onAddCondition: (groupId: string) => void;
   onAddGroup: (groupId: string) => void;
   onChange: (id: string, update: (node: EditorNode) => EditorNode) => void;
@@ -1860,6 +1961,7 @@ function GroupEditor({
                     eventName={eventName}
                     messages={messages}
                     path={[...path, index + 1]}
+                    resolvedScope={resolvedScope}
                     siteId={siteId}
                     window={window}
                     onChange={(update) => {
@@ -1878,6 +1980,7 @@ function GroupEditor({
                     isRoot={false}
                     messages={messages}
                     path={[...path, index + 1]}
+                    resolvedScope={resolvedScope}
                     onAddCondition={onAddCondition}
                     onAddGroup={onAddGroup}
                     onChange={onChange}
@@ -1926,6 +2029,7 @@ export function FilterPanel({
   expressionText: restoredExpressionText,
   messages,
   open,
+  resolvedScope,
   siteId,
   scopePreference,
   window,
@@ -1977,6 +2081,8 @@ export function FilterPanel({
     [expressionRegistry, messages, root],
   );
   const eventName = directEventName(root);
+  const suggestionScope =
+    resolvedScope ?? (scopePreference === "auto" ? undefined : scopePreference);
   const savedFiltersEnabled =
     audience === "private-dashboard" && open && Boolean(siteId);
   const savedFiltersQuery = useQuery({
@@ -2607,6 +2713,7 @@ export function FilterPanel({
           isRoot
           messages={messages}
           path={[]}
+          resolvedScope={suggestionScope}
           onAddCondition={addCondition}
           onAddGroup={addGroup}
           onChange={updateNode}

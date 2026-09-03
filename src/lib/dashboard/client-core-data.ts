@@ -45,7 +45,7 @@ import type {
   VisitorDetailData,
   VisitorsData,
 } from "@/lib/edge-client";
-import type { FilterDocument } from "@/lib/filter-contract";
+import type { FilterDocument, FilterScope } from "@/lib/filter-contract";
 
 import { fetchPrivateJson, fetchPrivateJsonMutate } from "./client-request";
 import { withFilters } from "./client-utils";
@@ -493,7 +493,10 @@ export async function fetchEventTypeFields(
   window: TimeWindow,
   eventName?: string,
   filters?: FilterDocument,
-  options?: { signal?: AbortSignal },
+  options?: {
+    signal?: AbortSignal;
+    resolvedScope?: FilterScope;
+  },
 ): Promise<Pick<EventTypeDetailData, "fields">> {
   const normalizedEventName = eventName?.trim() ?? "";
   return fetchPrivateJson<Pick<EventTypeDetailData, "fields">>(
@@ -507,6 +510,7 @@ export async function fetchEventTypeFields(
         ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
       },
       filters,
+      options?.resolvedScope,
     ),
     { signal: options?.signal },
   ).catch((error) => fallbackUnlessAborted(error, () => ({ fields: [] })));
@@ -554,6 +558,7 @@ export async function fetchEventTypeFieldValues(
     limit?: number;
     search?: string;
     signal?: AbortSignal;
+    resolvedScope?: FilterScope;
   },
 ): Promise<EventFieldValuesData> {
   const normalizedEventName = eventName?.trim() ?? "";
@@ -576,6 +581,7 @@ export async function fetchEventTypeFieldValues(
         ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
       },
       filters,
+      options?.resolvedScope,
     ),
     { signal: options?.signal },
   ).catch((error) =>

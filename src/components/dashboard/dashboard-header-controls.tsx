@@ -90,6 +90,7 @@ import {
   analyticsFilterRegistry,
   attachFilterScopePreference,
   type FilterDocument,
+  type FilterScope,
   type FilterScopePreference,
   filterScopePreferenceFromDocument,
   serializeFilterParams,
@@ -113,6 +114,8 @@ interface DashboardHeaderControlsProps {
   showFilterSheet: boolean;
   filterDisabled?: boolean;
   filterAudience?: "private-dashboard" | "public-share";
+  /** Concrete scope selected by the active dashboard page for Auto filters. */
+  resolvedScope?: FilterScope;
   showRealtimeBadge?: boolean;
 }
 
@@ -475,6 +478,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   showFilterSheet,
   filterDisabled = false,
   filterAudience = "private-dashboard",
+  resolvedScope,
   showRealtimeBadge: shouldShowRealtimeBadge = true,
 }: DashboardHeaderControlsProps) {
   const searchParams = useLiveSearchParams();
@@ -509,6 +513,8 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     () => serializeFilterParams(queryDocument, analyticsFilterRegistry).size,
     [queryDocument],
   );
+  const filterSuggestionScope =
+    resolvedScope ?? (filterDisabled ? undefined : "event");
   const hasActiveFilters = activeFilterCount > 0;
   const filterTriggerClassName = cn(
     "gap-2 transition-[color,background-color,border-color,opacity]",
@@ -805,6 +811,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                     expressionText={uiFilterDsl}
                     messages={messages}
                     open={mobileFilterDrawerOpen}
+                    resolvedScope={filterSuggestionScope}
                     siteId={siteId}
                     scopePreference={scopePreference}
                     window={window}
@@ -979,6 +986,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                     expressionText={uiFilterDsl}
                     messages={messages}
                     open={desktopFilterSheetOpen}
+                    resolvedScope={filterSuggestionScope}
                     siteId={siteId}
                     scopePreference={scopePreference}
                     window={window}

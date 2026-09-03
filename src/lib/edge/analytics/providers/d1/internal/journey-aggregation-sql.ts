@@ -148,7 +148,7 @@ session_metrics AS (
     SUM(COALESCE(duration_ms, 0)) AS totalDurationMs,
     MAX(CASE WHEN LOWER(COALESCE(status, '')) = 'open' THEN 1 ELSE 0 END) AS active,
     COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views,
-    CASE WHEN COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) <= 1 THEN 1 ELSE 0 END AS bounce,
+    CASE WHEN COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) = 1 THEN 1 ELSE 0 END AS bounce,
     MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entryPath,
     MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exitPath,
     MAX(CASE WHEN first_rank = 1 THEN referrer_host END) AS referrerHost,

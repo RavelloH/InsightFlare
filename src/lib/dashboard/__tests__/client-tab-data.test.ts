@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchPrivateJson } from "@/lib/dashboard/client-request";
 import { fetchFilterValues } from "@/lib/dashboard/client-tab-data";
+import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
+import { attachFilterScopePreference } from "@/lib/filter-contract";
 
 vi.mock("@/lib/dashboard/client-request", () => ({
   fetchPrivateJson: vi.fn(),
@@ -38,6 +40,27 @@ describe("fetchFilterValues", () => {
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
       "/api/private/filter-values",
       expect.objectContaining({ search: "Home", limit: 100 }),
+      expect.anything(),
+    );
+  });
+
+  it("passes the resolved scope with the inherited filter document", async () => {
+    fetchPrivateJsonMock.mockResolvedValue({ data: [] } as any);
+    const filters = attachFilterScopePreference(
+      dashboardFilterDocumentFromPresentation({ path: "/pricing" }),
+      "visitor",
+    );
+
+    await fetchFilterValues("site-1", window, "geo.country", filters, {
+      resolvedScope: "session",
+    });
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/filter-values",
+      expect.objectContaining({
+        scope: "session",
+        "filter[page.path]": "/pricing",
+      }),
       expect.anything(),
     );
   });

@@ -1,3 +1,5 @@
+import type { FilterScope } from "@/lib/edge/analytics/contract";
+
 export interface QueryCostInput {
   readonly rangeMs: number;
   readonly sideCount?: number;
@@ -11,6 +13,12 @@ export interface QueryCostInput {
   readonly pageLimit?: number;
   readonly provider?: "d1" | "rollup" | "realtime" | "mixed";
   readonly batchFanout?: number;
+  /** Resolved by the canonical scope planner before execution. */
+  readonly scope?: FilterScope;
+  readonly requiredSourceCount?: number;
+  readonly entityAlgebraComplexity?: number;
+  readonly eventPayloadComplexity?: number;
+  readonly requiresRawSource?: boolean;
 }
 
 export interface QueryCostPolicy {
@@ -48,6 +56,9 @@ export function calculateQueryCost(
     input.projectionFields ?? 1,
     input.pageLimit ?? 1,
     input.batchFanout ?? 1,
+    input.requiredSourceCount ?? 1,
+    input.entityAlgebraComplexity ?? 1,
+    input.eventPayloadComplexity ?? 1,
   ];
   if (values.some((value) => !Number.isFinite(value) || value < 0)) {
     return policy.maxCost;
@@ -56,6 +67,9 @@ export function calculateQueryCost(
   const providerFactor = input.provider
     ? policy.providerWeights[input.provider]
     : 1;
+  const scopeFactor =
+    input.scope === "visitor" ? 1.5 : input.scope === "session" ? 1.25 : 1;
+  const rawSourceFactor = input.requiresRawSource ? 1.15 : 1;
   const cost =
     rangeFactor *
     Math.max(1, input.sideCount ?? 1) *
@@ -66,6 +80,11 @@ export function calculateQueryCost(
     Math.max(1, input.filterComplexity ?? 1) ** 0.25 *
     Math.max(1, input.projectionFields ?? 1) ** 0.25 *
     Math.max(1, input.breakdownLimit ?? input.pageLimit ?? 1) ** 0.25 *
+    Math.max(1, input.requiredSourceCount ?? 1) ** 0.15 *
+    Math.max(1, input.entityAlgebraComplexity ?? 1) ** 0.2 *
+    Math.max(1, input.eventPayloadComplexity ?? 1) ** 0.2 *
+    scopeFactor *
+    rawSourceFactor *
     providerFactor *
     Math.max(1, input.batchFanout ?? 1);
   return Math.min(policy.maxCost, Math.max(1, Math.ceil(cost)));

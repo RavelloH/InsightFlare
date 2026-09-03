@@ -75,7 +75,10 @@ import {
   type SiteData,
   type TeamData,
 } from "@/lib/edge-client";
-import { parseFilterScopePreference } from "@/lib/filter-contract";
+import {
+  type FilterScope,
+  parseFilterScopePreference,
+} from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import Image from "@/lib/image";
@@ -546,6 +549,16 @@ export function DashboardShell({
     Boolean(liveActiveTeamSlug) &&
     routeState.mode === "site" &&
     resolvedActiveSiteSlug.length > 0;
+  const dashboardFilterResolvedScope: FilterScope | undefined =
+    currentAnalyticsSection === "sessions"
+      ? "session"
+      : currentAnalyticsSection === "visitors"
+        ? "visitor"
+        : currentAnalyticsSection === "realtime"
+          ? undefined
+          : hasActiveSite
+            ? "event"
+            : undefined;
   const activeSiteBase =
     hasActiveSite && liveActiveTeamSlug
       ? buildSitePath(locale, liveActiveTeamSlug, resolvedActiveSiteSlug)
@@ -1164,6 +1177,7 @@ export function DashboardShell({
                     locale={locale}
                     messages={messages}
                     siteId={activeSiteId}
+                    resolvedScope={dashboardFilterResolvedScope}
                     showControls={
                       Boolean(liveActiveTeamSlug) || isRequestObservationRoute
                     }
