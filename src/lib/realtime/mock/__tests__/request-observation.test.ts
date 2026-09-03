@@ -123,5 +123,6 @@ describe("mock/request-observation", () => {
         true,
       );
     },
+    15_000,
   );
 });

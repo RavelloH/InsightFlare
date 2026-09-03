@@ -6,6 +6,7 @@ import {
   EVENT_ANALYTICS_BLOBS,
   EVENT_ANALYTICS_DOUBLES,
   hasRequestFlag,
+  isAnalyticsEnginePointWithinLimits,
   REQUEST_ANALYTICS_BLOBS,
   REQUEST_ANALYTICS_DOUBLES,
   REQUEST_ANALYTICS_FLAGS,
@@ -90,6 +91,51 @@ describe("Analytics Engine v2 contract", () => {
     }
     expect(encodeDimensionCode("deviceType", "not-a-device")).toBe(0);
     expect(decodeDimensionCode(0)).toBeNull();
+  });
+
+  it("handles every supported dimension input shape and invalid code boundary", () => {
+    expect(encodeDimensionCode("country")).toBe(0);
+    expect(encodeDimensionCode("country", " us ")).toBe(
+      encodeDimensionCode({ dimension: "country", value: "US" }),
+    );
+    expect(encodeDimensionCode({ family: "continent", value: " na " })).toBe(
+      encodeDimensionCode("continent", "NA"),
+    );
+    expect(encodeDimensionCode({ kind: "deviceType", value: " MOBILE " })).toBe(
+      encodeDimensionCode("deviceType", "mobile"),
+    );
+    expect(encodeDimensionCode({ trafficChannel: "organic" })).toBe(
+      encodeDimensionCode("trafficChannel", "organic"),
+    );
+    expect(encodeDimensionCode({ country: "US", continent: "NA" })).toBe(
+      encodeDimensionCode("country", "US"),
+    );
+
+    expect(encodeDimensionCode({})).toBe(0);
+    expect(encodeDimensionCode("country", "USA")).toBe(0);
+    expect(encodeDimensionCode("country", "U1")).toBe(0);
+    expect(encodeDimensionCode("deviceType", "not-a-device")).toBe(0);
+    expect(encodeDimensionCode("trafficChannel", "not-a-channel")).toBe(0);
+
+    expect(decodeDimensionCode(Number.NaN)).toBeNull();
+    expect(decodeDimensionCode(1.5)).toBeNull();
+    expect(decodeDimensionCode(2 ** 32)).toBeNull();
+    expect(decodeDimensionCode(2 ** 32 + 5 * 2 ** 24 + 1)).toBeNull();
+    expect(decodeDimensionCode(2 ** 32 + 1 * 2 ** 24 + 27)).toBeNull();
+    expect(decodeDimensionCode(2 ** 32 + 3 * 2 ** 24 + 100)).toBeNull();
+
+    expect(
+      isAnalyticsEnginePointWithinLimits({ blobs: [], doubles: Array(20) }),
+    ).toBe(true);
+    expect(
+      isAnalyticsEnginePointWithinLimits({
+        blobs: Array(21),
+        doubles: Array(20),
+      }),
+    ).toBe(false);
+    expect(
+      isAnalyticsEnginePointWithinLimits({ blobs: [], doubles: Array(19) }),
+    ).toBe(false);
   });
 
   it("writes request slots with siteId only in index1 and explicit presence flags", () => {

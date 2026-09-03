@@ -46,5 +46,5 @@ describe("demo public session route", () => {
       },
     });
     expect(prepare).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 });

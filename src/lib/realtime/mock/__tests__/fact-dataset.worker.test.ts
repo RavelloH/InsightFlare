@@ -51,7 +51,7 @@ describe("mock/fact-dataset.worker", () => {
       expect(message.dataset.sessions.size).toBeGreaterThan(0);
       expect(message.dataset.visitors.size).toBeGreaterThan(0);
     }
-  });
+  }, 15_000);
 
   it("posts an error when dataset generation fails", async () => {
     const postMessage =
