@@ -217,6 +217,41 @@ const BOT_EVENT_DETAIL_SKELETON_DATA: BotEvent = {
   userAgentLength: 0,
 };
 
+const NORMAL_REQUEST_DETAIL_SKELETON_DATA: NormalRequestEvent = {
+  timestamp: "",
+  receivedAt: 0,
+  eventAt: 0,
+  edgeLatencyMs: null,
+  siteId: "",
+  siteName: "",
+  siteDomain: "",
+  kind: "",
+  category: "",
+  disposition: "",
+  reasons: [],
+  ip: "",
+  userAgent: "",
+  verifiedBotCategory: "",
+  botScore: null,
+  origin: "",
+  hostname: "",
+  pathname: "",
+  country: "",
+  region: "",
+  city: "",
+  continent: "",
+  colo: "",
+  asn: 0,
+  asOrganization: "",
+  rayId: "",
+  traceId: "",
+  requestMethod: "",
+  metadataJson: "",
+  latitude: null,
+  longitude: null,
+  userAgentLength: 0,
+};
+
 interface RequestMapPoint {
   latitude: number;
   longitude: number;
@@ -414,7 +449,7 @@ interface RequestObservationDetailData {
   configured: boolean;
   generatedAt: number;
   sampling?: RequestObservationSampling;
-  detail: BotEvent | null;
+  detail: BotEvent | NormalRequestEvent | null;
 }
 
 const DIMENSION_ROW_LIMIT = 30;
@@ -610,7 +645,10 @@ function shortId(value: string): string {
   return `${value.slice(0, 9)}...`;
 }
 
-function botEventDetailId(event: BotEvent): string {
+function requestObservationDetailId(event: {
+  traceId: string;
+  rayId: string;
+}): string {
   return event.traceId || event.rayId || "";
 }
 
@@ -2308,6 +2346,7 @@ export function RequestObservationClient({
                         hasMore={data?.included?.hasMore ?? false}
                         loadingMore={loadingMore === "included"}
                         onLoadMore={loadMoreIncludedEvents}
+                        timeWindow={timeWindow}
                       />
                     </div>
                   </div>
@@ -2411,11 +2450,9 @@ async function fetchRequestObservationDimension(
   return payload.dimension.rows;
 }
 
-async function fetchRequestObservationDetail(
-  timeWindow: TimeWindow,
-  event: BotEvent,
-  signal?: AbortSignal,
-): Promise<BotEvent | null> {
+async function fetchRequestObservationDetail<
+  T extends BotEvent | NormalRequestEvent,
+>(timeWindow: TimeWindow, event: T, signal?: AbortSignal): Promise<T | null> {
   const payload = await requestAdminService<RequestObservationDetailData>(
     "request-observation",
     {
@@ -2431,7 +2468,7 @@ async function fetchRequestObservationDetail(
       signal,
     },
   );
-  return payload.detail;
+  return payload.detail as T | null;
 }
 
 function compactReason(reason: string): string {
@@ -3576,20 +3613,29 @@ function NormalRequestDetailDrawer({
   locale,
   messages,
   copy,
-  event,
+  previewEvent,
+  detailEvent,
+  loading,
+  error,
   open,
   onOpenChange,
 }: {
   locale: Locale;
   messages: AppMessages;
   copy: AppMessages["requestObservation"];
-  event: NormalRequestEvent | null;
+  previewEvent: NormalRequestEvent | null;
+  detailEvent: NormalRequestEvent | null;
+  loading: boolean;
+  error: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const ui = requestObservationUiLabels(locale, copy);
   const empty = copy.emptyValue;
-  const eventId = event ? event.traceId || event.rayId : "";
+  const preview = detailEvent ?? previewEvent;
+  const event = preview ?? NORMAL_REQUEST_DETAIL_SKELETON_DATA;
+  const hasEvent = Boolean(preview);
+  const eventId = preview ? requestObservationDetailId(preview) : "";
   const title = ui.detailTitle;
   const subtitle = eventId || ui.detailSubtitle;
   const requestMethodLabel = copy.normalDetail.requestMethod;
@@ -3648,17 +3694,25 @@ function NormalRequestDetailDrawer({
             <DrawerTitle>{title}</DrawerTitle>
             <AutoTransition
               initial={false}
-              transitionKey={eventId || "ready"}
+              transitionKey={loading ? "loading" : eventId || "ready"}
               duration={0.18}
               type="fade"
               presenceMode="wait"
               className="h-5"
             >
-              <DrawerDescription key="ready">{subtitle}</DrawerDescription>
+              {loading ? (
+                <Skeleton key="loading" className="h-4 w-44" />
+              ) : (
+                <DrawerDescription key="ready">{subtitle}</DrawerDescription>
+              )}
             </AutoTransition>
           </DrawerHeader>
           <DrawerScrollArea contentClassName="p-4">
-            {!event ? (
+            {error ? (
+              <div className="flex h-64 items-center justify-center text-center text-sm text-muted-foreground">
+                {error}
+              </div>
+            ) : !hasEvent && !loading ? (
               <div className="flex h-64 items-center justify-center text-muted-foreground">
                 {copy.noData}
               </div>
@@ -3682,18 +3736,22 @@ function NormalRequestDetailDrawer({
                   </div>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={receivedAtLabel}
                       value={shortDateTimeWithSeconds(locale, event.receivedAt)}
                     />
                     <DetailItem
+                      loading={loading}
                       label={eventAtLabel}
                       value={shortDateTimeWithSeconds(locale, event.eventAt)}
                     />
                     <DetailItem
+                      loading={loading}
                       label={copy.kind}
                       value={requestKindLabel(copy, event.kind)}
                     />
                     <DetailItem
+                      loading={loading}
                       label={requestMethodLabel}
                       value={displayValue(event.requestMethod, empty)}
                     />
@@ -3706,6 +3764,7 @@ function NormalRequestDetailDrawer({
                   <h3 className="text-sm font-medium">{copy.request}</h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={copy.site}
                       value={
                         <div className="min-w-0">
@@ -3722,6 +3781,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.realtime.siteId}
                       value={
                         <span className="break-all font-mono text-xs">
@@ -3730,6 +3790,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       wide
                       label={copy.origin}
                       value={
@@ -3739,6 +3800,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       wide
                       label={copy.hostname}
                       value={
@@ -3748,6 +3810,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       wide
                       label={copy.pathname}
                       value={
@@ -3765,10 +3828,12 @@ function NormalRequestDetailDrawer({
                   <h3 className="text-sm font-medium">{copy.edge}</h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={edgeLatencyLabel}
                       value={latencyFormat(locale, copy, event.edgeLatencyMs)}
                     />
                     <DetailItem
+                      loading={loading}
                       wide
                       label={copy.location}
                       value={
@@ -3782,14 +3847,17 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={copy.colo}
                       value={displayValue(event.colo, empty)}
                     />
                     <DetailItem
+                      loading={loading}
                       label={copy.network}
                       value={displayValue(formatNormalAsn(event), empty)}
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.latitude}
                       value={
                         event.latitude === null ||
@@ -3799,6 +3867,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={messages.common.longitude}
                       value={
                         event.longitude === null ||
@@ -3808,6 +3877,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={continentLabel}
                       value={displayValue(event.continent, empty)}
                     />
@@ -3820,7 +3890,7 @@ function NormalRequestDetailDrawer({
                   country={event.country || ""}
                   latitude={event.latitude}
                   longitude={event.longitude}
-                  loading={false}
+                  loading={loading}
                 />
 
                 <Separator />
@@ -3829,6 +3899,7 @@ function NormalRequestDetailDrawer({
                   <h3 className="text-sm font-medium">{copy.client}</h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       label={copy.userAgentLengthBucket}
                       value={
                         event.userAgentLength
@@ -3837,6 +3908,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={copy.userAgentLength}
                       value={
                         event.userAgentLength > 0
@@ -3861,6 +3933,7 @@ function NormalRequestDetailDrawer({
                   <h3 className="text-sm font-medium">{copy.identifiers}</h3>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <DetailItem
+                      loading={loading}
                       wide
                       label={copy.id}
                       value={
@@ -3870,6 +3943,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       wide
                       label="Trace ID"
                       value={
@@ -3879,6 +3953,7 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       wide
                       label="Ray ID"
                       value={
@@ -3888,10 +3963,12 @@ function NormalRequestDetailDrawer({
                       }
                     />
                     <DetailItem
+                      loading={loading}
                       label={copy.country}
                       value={displayValue(event.country, empty)}
                     />
                     <DetailItem
+                      loading={loading}
                       label={copy.asn}
                       value={displayValue(
                         event.asn ? `AS${event.asn}` : "",
@@ -3910,6 +3987,7 @@ function NormalRequestDetailDrawer({
                         {metadata.map(([key, value]) => (
                           <DetailItem
                             key={key}
+                            loading={loading}
                             inline
                             label={key}
                             value={
@@ -3962,7 +4040,9 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
   const [detailParam, setDetailParam] = useState(
     () => searchParams.get("detail")?.trim() || "",
   );
-  const selectedEventId = selectedEvent ? botEventDetailId(selectedEvent) : "";
+  const selectedEventId = selectedEvent
+    ? requestObservationDetailId(selectedEvent)
+    : "";
   const selectedEventCacheKey = selectedEventId
     ? selectedEventId
     : selectedEvent
@@ -3980,7 +4060,11 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
     ],
     queryFn: ({ signal }) =>
       selectedEvent
-        ? fetchRequestObservationDetail(timeWindow, selectedEvent, signal)
+        ? fetchRequestObservationDetail<BotEvent>(
+            timeWindow,
+            selectedEvent,
+            signal,
+          )
         : null,
     enabled:
       typeof window !== "undefined" && drawerOpen && Boolean(selectedEvent),
@@ -4038,7 +4122,7 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
       setDrawerOpen(true);
 
       if (options?.syncUrl !== false) {
-        const detailId = botEventDetailId(event);
+        const detailId = requestObservationDetailId(event);
         if (detailId) updateDetailParam(detailId, "push");
       }
     },
@@ -4063,7 +4147,10 @@ const BlockedRequestsTable = memo(function BlockedRequestsTable({
       (event) => event.traceId === detailParam || event.rayId === detailParam,
     );
     if (!matchingEvent) return;
-    if (selectedEvent && botEventDetailId(selectedEvent) === detailParam) {
+    if (
+      selectedEvent &&
+      requestObservationDetailId(selectedEvent) === detailParam
+    ) {
       setDrawerOpen(true);
       return;
     }
@@ -4637,6 +4724,7 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
   hasMore,
   loadingMore,
   onLoadMore,
+  timeWindow,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -4646,6 +4734,7 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
+  timeWindow: TimeWindow;
   requestKey?: string;
 }) {
   const ui = requestObservationUiLabels(locale, copy);
@@ -4654,6 +4743,43 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const selectedEventId = selectedEvent
+    ? requestObservationDetailId(selectedEvent)
+    : "";
+  const selectedEventCacheKey = selectedEventId
+    ? selectedEventId
+    : selectedEvent
+      ? `${selectedEvent.siteId}:${selectedEvent.pathname}:${selectedEvent.receivedAt}`
+      : "";
+  const detailQuery = useQuery({
+    queryKey: [
+      "dashboard",
+      "request-observation-detail",
+      selectedEventCacheKey,
+      timeWindow.from,
+      timeWindow.to,
+      timeWindow.interval,
+      timeWindow.timeZone,
+    ],
+    queryFn: ({ signal }) =>
+      selectedEvent
+        ? fetchRequestObservationDetail<NormalRequestEvent>(
+            timeWindow,
+            selectedEvent,
+            signal,
+          )
+        : null,
+    enabled:
+      typeof window !== "undefined" && drawerOpen && Boolean(selectedEvent),
+    retry: false,
+  });
+  const detailEvent = detailQuery.data ?? null;
+  const detailLoading = detailQuery.isPending;
+  const detailError = detailQuery.isError
+    ? detailQuery.error instanceof Error
+      ? detailQuery.error.message
+      : "load_request_observation_detail_failed"
+    : null;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -5127,7 +5253,10 @@ const IncludedRequestsTable = memo(function IncludedRequestsTable({
         locale={locale}
         messages={messages}
         copy={copy}
-        event={selectedEvent}
+        previewEvent={selectedEvent}
+        detailEvent={detailEvent}
+        loading={detailLoading}
+        error={detailError}
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
       />

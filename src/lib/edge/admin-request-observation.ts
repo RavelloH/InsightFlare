@@ -345,6 +345,42 @@ function requestRowSelect(): string {
       double20 AS schemaVersion`;
 }
 
+function requestListSelect(source: DetailSource): string {
+  const columns = [
+    "timestamp",
+    "_sample_interval AS sampleWeight",
+    "index1 AS siteId",
+    "blob1 AS kind",
+    "blob2 AS category",
+    `'${source}' AS disposition`,
+    ...(source === "blocked"
+      ? [
+          "blob3 AS reasons",
+          "blob4 AS ip",
+          "blob5 AS userAgent",
+          "blob15 AS verifiedBotCategory",
+          "double7 AS botScore",
+        ]
+      : [
+          "blob7 AS hostname",
+          "blob13 AS colo",
+          "blob18 AS requestMethod",
+          "double3 AS edgeLatencyMs",
+        ]),
+    "blob8 AS pathname",
+    "blob9 AS country",
+    "blob10 AS region",
+    "blob14 AS asOrganization",
+    "blob16 AS rayId",
+    "blob17 AS traceId",
+    "double1 AS receivedAt",
+    "double4 AS asn",
+    "double19 AS flags",
+    "double20 AS schemaVersion",
+  ];
+  return columns.join(",\n      ");
+}
+
 function buildRequestAnalyticsSql(input: {
   from: number;
   to: number;
@@ -353,7 +389,7 @@ function buildRequestAnalyticsSql(input: {
   cursor?: DetailCursor | null;
 }) {
   return `
-    SELECT ${requestRowSelect()}
+    SELECT ${requestListSelect(input.source)}
     FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE ${requestTimeFilter(input)}
       AND ${requestDispositionFilter(input.source)}
@@ -849,14 +885,44 @@ function normalizeRequestRow(
   };
 }
 
-function serializeListEvent(event: RequestObservationEvent) {
-  const {
-    httpProtocol: _httpProtocol,
-    flags: _flags,
-    schemaVersion: _schemaVersion,
-    ...listEvent
-  } = event;
-  return listEvent;
+function serializeListEvent(
+  event: RequestObservationEvent,
+  source: DetailSource,
+) {
+  const shared = {
+    timestamp: event.timestamp,
+    receivedAt: event.receivedAt,
+    siteId: event.siteId,
+    siteName: event.siteName,
+    siteDomain: event.siteDomain,
+    kind: event.kind,
+    category: event.category,
+    disposition: event.disposition,
+    pathname: event.pathname,
+    country: event.country,
+    region: event.region,
+    asOrganization: event.asOrganization,
+    asn: event.asn,
+    rayId: event.rayId,
+    traceId: event.traceId,
+  };
+  if (source === "blocked") {
+    return {
+      ...shared,
+      reasons: event.reasons,
+      ip: event.ip,
+      userAgent: event.userAgent,
+      verifiedBotCategory: event.verifiedBotCategory,
+      botScore: event.botScore,
+    };
+  }
+  return {
+    ...shared,
+    hostname: event.hostname,
+    colo: event.colo,
+    requestMethod: event.requestMethod,
+    edgeLatencyMs: event.edgeLatencyMs,
+  };
 }
 
 function detailCursorForEvent(event: RequestObservationEvent): DetailCursor {
@@ -1498,7 +1564,7 @@ export async function handleRequestObservationAdmin(
     );
     const sites = await siteLookup(env, preliminaryEvents);
     const events = rows.map((row) =>
-      serializeListEvent(normalizeRequestRow(row, sites)),
+      serializeListEvent(normalizeRequestRow(row, sites), source),
     );
     const lastEvent = preliminaryEvents[preliminaryEvents.length - 1];
     return jsonResponseFor(req, {
@@ -2123,10 +2189,16 @@ export async function handleRequestObservationAdmin(
         blockedSummaryValues.uniqueCountries +
         includedSummaryValues.uniqueCountries,
     },
-    events: blockedEvents.map(serializeListEvent),
-    normalEvents: includedEvents.map(serializeListEvent),
-    blockedEvents: blockedEvents.map(serializeListEvent),
-    includedEvents: includedEvents.map(serializeListEvent),
+    events: blockedEvents.map((event) => serializeListEvent(event, "blocked")),
+    normalEvents: includedEvents.map((event) =>
+      serializeListEvent(event, "included"),
+    ),
+    blockedEvents: blockedEvents.map((event) =>
+      serializeListEvent(event, "blocked"),
+    ),
+    includedEvents: includedEvents.map((event) =>
+      serializeListEvent(event, "included"),
+    ),
     ...aggregates,
     mapPoints,
     trend: trendWithRatio,
@@ -2152,7 +2224,9 @@ export async function handleRequestObservationAdmin(
     blocked: {
       summary: blockedPartitionSummary,
       mapPoints: blockedMapPoints,
-      events: blockedEvents.map(serializeListEvent),
+      events: blockedEvents.map((event) =>
+        serializeListEvent(event, "blocked"),
+      ),
       hasMore: blockedHasMore,
       nextCursor: blockedNextCursor,
       reasons: aggregates.reasons,
@@ -2165,7 +2239,9 @@ export async function handleRequestObservationAdmin(
     included: {
       summary: includedPartitionSummary,
       mapPoints: includedMapPoints,
-      events: includedEvents.map(serializeListEvent),
+      events: includedEvents.map((event) =>
+        serializeListEvent(event, "included"),
+      ),
       hasMore: includedHasMore,
       nextCursor: includedNextCursor,
       dimensions: {

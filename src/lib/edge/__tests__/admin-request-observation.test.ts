@@ -254,9 +254,6 @@ describe("request observation admin reader", () => {
     expect(sql).not.toContain(legacyNormalDataset);
     expect(sql).not.toContain(legacyAbnormalDataset);
     expect(sql).toContain("blob1 AS kind");
-    expect(sql).toContain("blob20 AS metadataJson");
-    expect(sql).toContain("double19 AS flags");
-    expect(sql).toContain("double20 AS schemaVersion");
     expect(sql).toContain("ORDER BY timestamp DESC, receivedAt DESC");
     expect(sql).not.toContain("ORDER BY timestamp DESC, double1 DESC");
     expect(sql).toContain("blob2 = 'normal'");
@@ -278,6 +275,23 @@ describe("request observation admin reader", () => {
     expect(sql).toContain("intDiv(double19");
     expect(sql).not.toContain("toInt64");
     expect(sql).toContain("GROUP BY double5, double6, blob9");
+
+    const listSql = fetchSpy.mock.calls
+      .map(([, init]) => String((init as RequestInit).body || ""))
+      .filter((body) =>
+        body.includes("ORDER BY timestamp DESC, receivedAt DESC"),
+      );
+    expect(listSql).toHaveLength(2);
+    const blockedListSql = listSql.find((body) => body.includes("blob4 AS ip"));
+    const includedListSql = listSql.find((body) =>
+      body.includes("blob18 AS requestMethod"),
+    );
+    expect(blockedListSql).toContain("blob5 AS userAgent");
+    expect(blockedListSql).not.toContain("blob20 AS metadataJson");
+    expect(includedListSql).toContain("blob7 AS hostname");
+    expect(includedListSql).not.toContain("blob4 AS ip");
+    expect(includedListSql).not.toContain("blob5 AS userAgent");
+    expect(includedListSql).not.toContain("blob20 AS metadataJson");
   });
 
   it("reads tokens encrypted with the legacy bot analytics purpose", async () => {
@@ -315,7 +329,7 @@ describe("request observation admin reader", () => {
     const sites = statement({
       all: [{ id: "site-1", name: "Site", domain: "site.test" }],
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         jsonEachRow([
           {
@@ -369,6 +383,12 @@ describe("request observation admin reader", () => {
       latitude: 0,
       longitude: 0,
     });
+    const detailSql = String(
+      (fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined)?.body || "",
+    );
+    expect(detailSql).toContain("blob20 AS metadataJson");
+    expect(detailSql).toContain("double19 AS flags");
+    expect(detailSql).toContain("double20 AS schemaVersion");
     expect(config.bind).toHaveBeenCalledWith(
       SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY,
     );
@@ -605,6 +625,14 @@ describe("request observation admin reader", () => {
       edgeLatencyMs: 42,
       siteName: "Site",
     });
+    expect(body.blocked.events[0]).toHaveProperty("ip");
+    expect(body.blocked.events[0]).toHaveProperty("userAgent");
+    expect(body.blocked.events[0]).not.toHaveProperty("metadataJson");
+    expect(body.included.events[0]).toHaveProperty("requestMethod");
+    expect(body.included.events[0]).toHaveProperty("hostname");
+    expect(body.included.events[0]).not.toHaveProperty("ip");
+    expect(body.included.events[0]).not.toHaveProperty("userAgent");
+    expect(body.included.events[0]).not.toHaveProperty("metadataJson");
     expect(
       body.included.events.map(
         (event: Record<string, unknown>) => event.category,
@@ -699,9 +727,9 @@ describe("request observation admin reader", () => {
       pathname: "/first",
       siteName: "Site",
       requestMethod: "POST",
-      metadataJson: '{"visitId":"visit-1"}',
-      userAgent: "Mozilla/5.0 (compatible; InsightFlare E2E)",
     });
+    expect(pageBody.page.events[0]).not.toHaveProperty("metadataJson");
+    expect(pageBody.page.events[0]).not.toHaveProperty("userAgent");
     expect(pageBody.page.nextCursor).toMatchObject({
       receivedAt: 1_800_000_000_000,
     });
@@ -861,9 +889,9 @@ describe("request observation admin reader", () => {
       siteName: "missing-site",
       siteDomain: "",
       edgeLatencyMs: null,
-      latitude: null,
-      longitude: null,
     });
+    expect(normalBody.page.events[0]).not.toHaveProperty("latitude");
+    expect(normalBody.page.events[0]).not.toHaveProperty("longitude");
     expect(normalBody.page.events[1].siteName).toBe("Unknown site");
 
     const abnormalResponse = await handleRequestObservationAdmin(
@@ -884,9 +912,9 @@ describe("request observation admin reader", () => {
       siteName: "missing-site",
       siteDomain: "",
       botScore: null,
-      latitude: null,
-      longitude: null,
     });
+    expect(abnormalBody.page.events[0]).not.toHaveProperty("latitude");
+    expect(abnormalBody.page.events[0]).not.toHaveProperty("longitude");
     expect(abnormalBody.page.events[1].siteName).toBe("Unknown site");
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });

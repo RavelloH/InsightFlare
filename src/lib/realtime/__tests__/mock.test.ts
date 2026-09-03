@@ -490,6 +490,14 @@ describe("mock — handleDemoRequest", () => {
           (event) => !(event as Record<string, unknown>).sampleWeight,
         ),
       ).toBe(true);
+      expect(blockedEvents[0]).toHaveProperty("ip");
+      expect(blockedEvents[0]).toHaveProperty("userAgent");
+      expect(blockedEvents[0]).not.toHaveProperty("metadataJson");
+      expect(includedEvents[0]).toHaveProperty("requestMethod");
+      expect(includedEvents[0]).toHaveProperty("hostname");
+      expect(includedEvents[0]).not.toHaveProperty("ip");
+      expect(includedEvents[0]).not.toHaveProperty("userAgent");
+      expect(includedEvents[0]).not.toHaveProperty("metadataJson");
 
       const nextPage = asRecord(
         handleDemoRequest({

@@ -1349,9 +1349,48 @@ function demoRequestObservationResponse(
     minutes,
     Number.isFinite(to) && to > 0 ? to : undefined,
   );
-  const serializeEvent = (event: Record<string, unknown>) => {
+  const serializeDetailEvent = (event: Record<string, unknown>) => {
     const { sampleWeight: _sampleWeight, ...serialized } = event;
     return serialized;
+  };
+  const serializeListEvent = (
+    event: Record<string, unknown>,
+    source: "blocked" | "included",
+  ) => {
+    const shared = {
+      timestamp: event.timestamp,
+      receivedAt: event.receivedAt,
+      siteId: event.siteId,
+      siteName: event.siteName,
+      siteDomain: event.siteDomain,
+      kind: event.kind,
+      category: event.category,
+      disposition: event.disposition,
+      pathname: event.pathname,
+      country: event.country,
+      region: event.region,
+      asOrganization: event.asOrganization,
+      asn: event.asn,
+      rayId: event.rayId,
+      traceId: event.traceId,
+    };
+    if (source === "blocked") {
+      return {
+        ...shared,
+        reasons: event.reasons,
+        ip: event.ip,
+        userAgent: event.userAgent,
+        verifiedBotCategory: event.verifiedBotCategory,
+        botScore: event.botScore,
+      };
+    }
+    return {
+      ...shared,
+      hostname: event.hostname,
+      colo: event.colo,
+      requestMethod: event.requestMethod,
+      edgeLatencyMs: event.edgeLatencyMs,
+    };
   };
   const blockedEvents = data.blockedEvents as unknown as Array<
     Record<string, unknown>
@@ -1371,7 +1410,7 @@ function demoRequestObservationResponse(
       configured: data.configured,
       generatedAt: data.generatedAt,
       sampling: data.sampling,
-      detail: detail ? serializeEvent(detail) : null,
+      detail: detail ? serializeDetailEvent(detail) : null,
     };
   }
 
@@ -1397,7 +1436,7 @@ function demoRequestObservationResponse(
       page: {
         source,
         ...page,
-        events: page.events.map(serializeEvent),
+        events: page.events.map((event) => serializeListEvent(event, source)),
       },
     };
   }
@@ -1471,8 +1510,12 @@ function demoRequestObservationResponse(
     includedEvents,
     parseRequestObservationLimit(params.limit),
   );
-  const serializedBlockedEvents = blockedPage.events.map(serializeEvent);
-  const serializedIncludedEvents = includedPage.events.map(serializeEvent);
+  const serializedBlockedEvents = blockedPage.events.map((event) =>
+    serializeListEvent(event, "blocked"),
+  );
+  const serializedIncludedEvents = includedPage.events.map((event) =>
+    serializeListEvent(event, "included"),
+  );
 
   return {
     ...data,
