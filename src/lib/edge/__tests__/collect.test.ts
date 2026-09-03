@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  hasRequestFlag,
+  REQUEST_ANALYTICS_FLAGS,
+} from "@/lib/edge/analytics-engine/request-schema";
+import {
   handleCollectOptionsRequest,
   handleCollectRequest,
 } from "@/lib/edge/collect";
@@ -23,6 +27,9 @@ vi.mock("@/lib/edge/site-settings-store", async () => {
 });
 
 const readSiteTrackingConfigMock = vi.mocked(readSiteTrackingConfig);
+
+const CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 const baseSettings: SiteTrackingConfig = {
   siteId: "site-1",
@@ -335,7 +342,7 @@ describe("collect route", () => {
     stringifySpy.mockRestore();
   });
 
-  it("diverts bot traffic to Analytics Engine without forwarding", async () => {
+  it("blocks bot traffic by default and records a bot disposition", async () => {
     const request = makeRuntimeRequest({
       origin: "https://example.com",
       body: await makePayload(),
@@ -360,13 +367,119 @@ describe("collect route", () => {
     expect(dataPoint?.blobs).toEqual(
       expect.arrayContaining([
         "pageview",
-        "high_threat",
+        "bot",
         expect.stringContaining("ua_isbot"),
         "Googlebot/2.1",
       ]),
     );
+    expect(
+      hasRequestFlag(
+        dataPoint?.doubles?.[18],
+        REQUEST_ANALYTICS_FLAGS.dispositionBlocked,
+      ),
+    ).toBe(true);
     expect(readSiteTrackingConfigMock).toHaveBeenCalledWith(env, "site-1");
     expect(ctx.waitUntil).not.toHaveBeenCalled();
+  });
+
+  it("forwards bot traffic when bot protection is disabled and keeps its category", async () => {
+    readSiteTrackingConfigMock.mockResolvedValue({
+      ...baseSettings,
+      botProtectionEnabled: false,
+    });
+    const request = makeRuntimeRequest({
+      origin: "https://example.com",
+      body: await makePayload(),
+      headers: {
+        "user-agent": "Googlebot/2.1",
+      },
+    });
+
+    const response = await handleCollectRequest(
+      request,
+      env as never,
+      ctx as never,
+      new URL(request.url),
+    );
+
+    expect(response.status).toBe(204);
+    expect(env.INGEST_DO.idFromName).toHaveBeenCalledWith("site-1");
+    expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+    const dataPoint = env.REQUEST_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
+    expect(dataPoint?.blobs?.[1]).toBe("bot");
+    expect(dataPoint?.blobs?.[3]).toBe("");
+    expect(
+      hasRequestFlag(
+        dataPoint?.doubles?.[18],
+        REQUEST_ANALYTICS_FLAGS.dispositionBlocked,
+      ),
+    ).toBe(false);
+  });
+
+  it("blocks suspected hosting traffic only when hosting proxy blocking is enabled", async () => {
+    readSiteTrackingConfigMock.mockResolvedValue({
+      ...baseSettings,
+      hostingProxyBlockingEnabled: true,
+    });
+    const request = makeRuntimeRequest({
+      origin: "https://example.com",
+      body: await makePayload(),
+      headers: {
+        "user-agent": CHROME_UA,
+      },
+      cf: { asn: 13335 },
+    });
+
+    const response = await handleCollectRequest(
+      request,
+      env as never,
+      ctx as never,
+      new URL(request.url),
+    );
+
+    expect(response.status).toBe(204);
+    expect(env.INGEST_DO.idFromName).not.toHaveBeenCalled();
+    expect(ctx.waitUntil).not.toHaveBeenCalled();
+    const dataPoint = env.REQUEST_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
+    expect(dataPoint?.blobs?.[1]).toBe("suspected_bot");
+    expect(dataPoint?.blobs?.[3]).toBe("");
+    expect(
+      hasRequestFlag(
+        dataPoint?.doubles?.[18],
+        REQUEST_ANALYTICS_FLAGS.dispositionBlocked,
+      ),
+    ).toBe(true);
+  });
+
+  it("forwards suspected hosting traffic with the original category when hosting proxy blocking is disabled", async () => {
+    const request = makeRuntimeRequest({
+      origin: "https://example.com",
+      body: await makePayload(),
+      headers: {
+        "user-agent": CHROME_UA,
+      },
+      cf: { asn: 13335 },
+    });
+
+    const response = await handleCollectRequest(
+      request,
+      env as never,
+      ctx as never,
+      new URL(request.url),
+    );
+
+    expect(response.status).toBe(204);
+    expect(env.INGEST_DO.idFromName).toHaveBeenCalledWith("site-1");
+    expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+    const dataPoint = env.REQUEST_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
+    expect(dataPoint?.blobs?.[1]).toBe("suspected_bot");
+    expect(dataPoint?.blobs?.[3]).toBe("");
+    expect(
+      hasRequestFlag(
+        dataPoint?.doubles?.[18],
+        REQUEST_ANALYTICS_FLAGS.dispositionBlocked,
+      ),
+    ).toBe(false);
   });
 
   it("drops direct collect requests without a valid collect token", async () => {
@@ -690,6 +803,13 @@ describe("collect route", () => {
       "custom_block,blocked_domains,blocked_paths,blocked_query_parameters",
     );
     expect(dataPoint?.blobs?.[2]).not.toContain("ua_isbot");
+    expect(dataPoint?.blobs?.[3]).toBe("");
+    expect(
+      hasRequestFlag(
+        dataPoint?.doubles?.[18],
+        REQUEST_ANALYTICS_FLAGS.dispositionBlocked,
+      ),
+    ).toBe(true);
     expect(JSON.stringify(dataPoint?.blobs?.[19])).not.toContain(
       "blocked.example",
     );
@@ -745,6 +865,9 @@ describe("collect route", () => {
       cf: {
         country: "US",
       },
+      headers: {
+        "user-agent": CHROME_UA,
+      },
     });
 
     const response = await handleCollectRequest(
@@ -792,6 +915,15 @@ describe("collect route", () => {
       id: expect.any(String),
       acceptedAt: expect.any(Number),
     });
+    const dataPoint = env.REQUEST_ANALYTICS.writeDataPoint.mock.calls[0]?.[0];
+    expect(dataPoint?.blobs?.[1]).toBe("normal");
+    expect(dataPoint?.blobs?.[3]).toBe("");
+    expect(
+      hasRequestFlag(
+        dataPoint?.doubles?.[18],
+        REQUEST_ANALYTICS_FLAGS.dispositionBlocked,
+      ),
+    ).toBe(false);
   });
 
   it("normalizes query-only pageview paths to root while ignoring empty blacklist entries", async () => {

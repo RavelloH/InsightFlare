@@ -27,7 +27,7 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     }
   });
 
-  test("21. request observation reads normal and abnormal events from the local Cloudflare mock", async ({
+  test("21. request observation reads blocked and included events from the local Cloudflare mock", async ({
     page,
   }) => {
     await signIn(page, "admin", context.adminPassword);
@@ -65,11 +65,25 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
 
     const observed = await apiRequest<{
       configured: boolean;
-      events: Array<{ category: string; rayId: string }>;
-      normalEvents: Array<{ pathname: string; traceId: string }>;
+      blockedEvents: Array<{
+        category: string;
+        disposition: string;
+        rayId: string;
+      }>;
+      includedEvents: Array<{
+        category: string;
+        disposition: string;
+        pathname: string;
+        traceId: string;
+      }>;
       overview: {
-        abnormalRequests: number;
+        totalRequests: number;
+        includedRequests: number;
+        blockedRequests: number;
+        botRequests: number;
         normalRequests: number;
+        blockedRequestRatio: number;
+        botRequestRatio: number;
         p95LatencyMs: number | null;
       };
     }>(
@@ -80,11 +94,29 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     expect(observed.status).toBe(200);
     expect(observed.payload).toMatchObject({
       configured: true,
-      events: [{ category: "high_threat", rayId: "e2e-bot-ray" }],
-      normalEvents: [{ pathname: "/home", traceId: "e2e-normal-trace" }],
+      blockedEvents: [
+        {
+          category: "bot",
+          disposition: "blocked",
+          rayId: "e2e-bot-ray",
+        },
+      ],
+      includedEvents: [
+        {
+          category: "normal",
+          disposition: "included",
+          pathname: "/home",
+          traceId: "e2e-normal-trace",
+        },
+      ],
       overview: {
-        abnormalRequests: 2,
+        totalRequests: 5,
+        includedRequests: 3,
+        blockedRequests: 2,
+        botRequests: 2,
         normalRequests: 3,
+        blockedRequestRatio: 0.4,
+        botRequestRatio: 0.4,
         p95LatencyMs: 50,
       },
     });
@@ -124,9 +156,9 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     });
     await expect(page.getByText("请求分流趋势", { exact: true })).toBeVisible();
 
-    await page.getByRole("link", { name: "异常请求", exact: true }).click();
-    await expect(page).toHaveURL(/requestTab=abnormal/);
-    await expect(page.getByText("最近异常请求", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "拦截请求", exact: true }).click();
+    await expect(page).toHaveURL(/requestTab=blocked/);
+    await expect(page.getByText("最近拦截请求", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("tab", { name: "ASN 组织", exact: true }).first(),
     ).toBeVisible();
@@ -139,26 +171,26 @@ export function registerPlatformIntegrationScenarios(context: E2eContext) {
     ).toBeVisible();
 
     await page.locator('tr[role="button"]').first().click();
-    const abnormalDrawer = page.locator(
+    const blockedDrawer = page.locator(
       '[data-dashboard-floating-layer="request-observation-drawer"]',
     );
-    await expect(abnormalDrawer).toBeVisible();
+    await expect(blockedDrawer).toBeVisible();
     await expect(
-      abnormalDrawer.getByText("异常请求详情", { exact: true }).first(),
+      blockedDrawer.getByText("请求详情", { exact: true }).first(),
     ).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(abnormalDrawer).toBeHidden();
+    await expect(blockedDrawer).toBeHidden();
 
     await expect(
-      page.getByRole("link", { name: "正常请求", exact: true }),
+      page.getByRole("link", { name: "统计请求", exact: true }),
     ).toHaveAttribute(
       "href",
-      "/zh/app/manage/request-observation?requestTab=normal",
+      "/zh/app/manage/request-observation?requestTab=included",
     );
-    await page.goto("/zh/app/manage/request-observation?requestTab=normal", {
+    await page.goto("/zh/app/manage/request-observation?requestTab=included", {
       waitUntil: "commit",
     });
-    await expect(page.getByText("最近正常请求", { exact: true })).toBeVisible();
+    await expect(page.getByText("最近统计请求", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("tab", { name: "国家/地区", exact: true }).last(),
     ).toBeVisible();

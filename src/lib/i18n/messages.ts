@@ -970,6 +970,12 @@ export interface AppMessages {
     trackingStrengthStrongDescription: string;
     trackingStrengthSmartDescription: string;
     trackingStrengthWeakDescription: string;
+    botProtectionGroupTitle: string;
+    botProtectionGroupDescription: string;
+    botProtectionEnabledLabel: string;
+    botProtectionEnabledHint: string;
+    hostingProxyBlockingEnabledLabel: string;
+    hostingProxyBlockingEnabledHint: string;
     queryHashGroupTitle: string;
     queryHashGroupDescription: string;
     trackQueryParamsLabel: string;
@@ -2213,6 +2219,8 @@ export interface AppMessages {
       overview: string;
       abnormal: string;
       normal: string;
+      blocked: string;
+      included: string;
     };
     refresh: string;
     loadFailed: string;
@@ -2224,6 +2232,11 @@ export interface AppMessages {
     openAnalyticsEngine: string;
     openSettings: string;
     highThreatBots: string;
+    botRequests: string;
+    suspectedBotRequests: string;
+    blockedRequests: string;
+    includedRequests: string;
+    customBlockedRequests: string;
     affectedSites: string;
     uniqueCountries: string;
     noData: string;
@@ -2250,6 +2263,8 @@ export interface AppMessages {
     userAgent: string;
     category: string;
     blocked: string;
+    included: string;
+    disposition: string;
     highThreatRequests: string;
     emptyValue: string;
     kind: string;
@@ -2302,7 +2317,14 @@ export interface AppMessages {
     };
     overviewLabels: {
       totalRequests: string;
+      includedRequests: string;
+      blockedRequests: string;
       normalRequests: string;
+      suspectedBotRequests: string;
+      botRequests: string;
+      customBlockedRequests: string;
+      botRequestRatio: string;
+      blockedRequestRatio: string;
       abnormalRequests: string;
       abnormalRatio: string;
       p50Latency: string;
@@ -2318,6 +2340,8 @@ export interface AppMessages {
       trafficCompositionDescription: string;
       categoryShareTitle: string;
       normalTrafficShare: string;
+      suspectedBotTraffic: string;
+      botTraffic: string;
       mediumThreatTraffic: string;
       highThreatTraffic: string;
       customBlockedTraffic: string;
@@ -2325,6 +2349,8 @@ export interface AppMessages {
       latencyDescription: string;
       abnormalSubtitle: string;
       normalSubtitle: string;
+      blockedSubtitle: string;
+      includedSubtitle: string;
       requests: string;
       windowDays: string;
       latencyMilliseconds: string;
@@ -3655,6 +3681,15 @@ const enMessages = {
       "Automatically switch tracking strength based on the visitor's country.",
     trackingStrengthWeakDescription:
       "Always reduce tracking precision. This can count the same visitor multiple times across visits and make retention impossible.",
+    botProtectionGroupTitle: "Bot Protection",
+    botProtectionGroupDescription:
+      "Control whether high-confidence bots are blocked and whether hosting or proxy traffic is blocked.",
+    botProtectionEnabledLabel: "Block detected bots",
+    botProtectionEnabledHint:
+      "High-confidence bot requests are blocked when this is enabled; otherwise they remain included in statistics.",
+    hostingProxyBlockingEnabledLabel: "Block hosting and proxy traffic",
+    hostingProxyBlockingEnabledHint:
+      "Block suspected bot requests from hosting or proxy networks. This is disabled by default.",
     queryHashGroupTitle: "Query and Hash Tracking",
     queryHashGroupDescription:
       "Control how query strings, URL hashes, and Do Not Track are handled.",
@@ -4988,6 +5023,8 @@ const enMessages = {
       overview: "Overview",
       abnormal: "Abnormal Requests",
       normal: "Normal Requests",
+      blocked: "Blocked Requests",
+      included: "Included Requests",
     },
     refresh: "Refresh",
     loadFailed: "Failed to load request observability data.",
@@ -5002,6 +5039,11 @@ const enMessages = {
     openAnalyticsEngine: "Open Analytics Engine",
     openSettings: "Open settings",
     highThreatBots: "High-threat Bots",
+    botRequests: "Bot Requests",
+    suspectedBotRequests: "Suspected Bot Requests",
+    blockedRequests: "Blocked Requests",
+    includedRequests: "Included Requests",
+    customBlockedRequests: "Custom-blocked Requests",
     affectedSites: "Affected Sites",
     uniqueCountries: "Countries",
     noData: "No request data in this window.",
@@ -5031,6 +5073,8 @@ const enMessages = {
     userAgent: "User agent",
     category: "Category",
     blocked: "Blocked",
+    included: "Included in statistics",
+    disposition: "Disposition",
     highThreatRequests: "High-threat Requests",
     emptyValue: "Unknown",
     kind: "Type",
@@ -5083,7 +5127,14 @@ const enMessages = {
     },
     overviewLabels: {
       totalRequests: "Total requests",
+      includedRequests: "Included requests",
+      blockedRequests: "Blocked requests",
       normalRequests: "Normal requests",
+      suspectedBotRequests: "Suspected bot requests",
+      botRequests: "Bot requests",
+      customBlockedRequests: "Custom-blocked requests",
+      botRequestRatio: "Bot request ratio",
+      blockedRequestRatio: "Blocked request ratio",
       abnormalRequests: "Abnormal requests",
       abnormalRatio: "Abnormal request ratio",
       p50Latency: "P50 Worker processing time",
@@ -5101,6 +5152,8 @@ const enMessages = {
         "Counts normal collection events by type over time, including pageviews, leaves, visibility changes, custom events, and identifications.",
       categoryShareTitle: "Request category breakdown",
       normalTrafficShare: "Normal traffic",
+      suspectedBotTraffic: "Suspected bot traffic",
+      botTraffic: "Bot traffic",
       mediumThreatTraffic: "Medium-threat traffic",
       highThreatTraffic: "High-threat traffic",
       customBlockedTraffic: "Custom-blocked traffic",
@@ -5111,6 +5164,10 @@ const enMessages = {
         "Focus on abnormal requests. Maps and tables include medium-threat, high-threat, and custom-blocked traffic.",
       normalSubtitle:
         "Focus on requests that entered the normal collection pipeline. Maps and tables show only normal traffic.",
+      blockedSubtitle:
+        "Focus on requests that were blocked by custom rules or protection settings.",
+      includedSubtitle:
+        "Focus on requests included in statistics, including normal and suspected bot traffic.",
       requests: "Requests",
       windowDays: "Last {days} days",
       latencyMilliseconds: "{value} ms",
@@ -6450,6 +6507,15 @@ const zhMessages = {
     trackingStrengthSmartDescription: "自动根据访客所处国家切换跟踪强度。",
     trackingStrengthWeakDescription:
       "始终降低对访客的跟踪精度。这可能导致同一访客在不同时间访问时被计数多次、且无法计算留存率。",
+    botProtectionGroupTitle: "机器人防护",
+    botProtectionGroupDescription:
+      "控制是否拦截高置信度机器人，以及是否拦截来自托管或代理网络的请求。",
+    botProtectionEnabledLabel: "机器人拦截",
+    botProtectionEnabledHint:
+      "开启后拦截高置信度机器人请求；关闭后这类请求仍会计入统计。",
+    hostingProxyBlockingEnabledLabel: "拦截托管/代理网络请求",
+    hostingProxyBlockingEnabledHint:
+      "开启后拦截来自托管或代理网络的疑似机器人请求，默认关闭。",
     queryHashGroupTitle: "查询参数与 Hash 跟踪",
     queryHashGroupDescription:
       "控制 URL 查询参数、Hash 与 Do Not Track 的处理方式。",
@@ -7744,6 +7810,8 @@ const zhMessages = {
       overview: "总览",
       abnormal: "异常请求",
       normal: "正常请求",
+      blocked: "拦截请求",
+      included: "统计请求",
     },
     refresh: "刷新",
     loadFailed: "加载请求观测数据失败。",
@@ -7758,6 +7826,11 @@ const zhMessages = {
     openAnalyticsEngine: "打开 Analytics Engine",
     openSettings: "打开设置",
     highThreatBots: "高威胁机器人",
+    botRequests: "机器人请求",
+    suspectedBotRequests: "疑似机器人请求",
+    blockedRequests: "拦截请求",
+    includedRequests: "统计请求",
+    customBlockedRequests: "自定义拦截请求",
     affectedSites: "受影响站点",
     uniqueCountries: "国家/地区",
     noData: "当前时间窗口内没有请求数据。",
@@ -7785,6 +7858,8 @@ const zhMessages = {
     userAgent: "User-Agent",
     category: "分类",
     blocked: "拦截",
+    included: "已计入统计",
+    disposition: "处理结果",
     highThreatRequests: "高威胁请求",
     emptyValue: "未知",
     kind: "类型",
@@ -7837,7 +7912,14 @@ const zhMessages = {
     },
     overviewLabels: {
       totalRequests: "总请求数",
+      includedRequests: "统计请求数",
+      blockedRequests: "拦截请求数",
       normalRequests: "正常请求",
+      suspectedBotRequests: "疑似机器人请求",
+      botRequests: "机器人请求",
+      customBlockedRequests: "自定义拦截请求",
+      botRequestRatio: "机器人请求比例",
+      blockedRequestRatio: "拦截请求比例",
       abnormalRequests: "异常请求",
       abnormalRatio: "异常请求比例",
       p50Latency: "P50 Worker 处理耗时",
@@ -7855,6 +7937,8 @@ const zhMessages = {
         "按时间显示正常采集链路中页面浏览、离开、可见性、自定义事件和用户识别的数量。",
       categoryShareTitle: "请求分类占比",
       normalTrafficShare: "正常流量",
+      suspectedBotTraffic: "疑似机器人流量",
+      botTraffic: "机器人流量",
       mediumThreatTraffic: "中威胁流量",
       highThreatTraffic: "高威胁流量",
       customBlockedTraffic: "自定义屏蔽流量",
@@ -7865,6 +7949,8 @@ const zhMessages = {
         "聚焦异常请求，地图和统计表包含中威胁、高威胁和自定义屏蔽流量。",
       normalSubtitle:
         "聚焦进入正常采集链路的请求，地图和统计表只显示绿色正常流量。",
+      blockedSubtitle: "聚焦被自定义规则或防护设置拦截的请求。",
+      includedSubtitle: "聚焦计入统计的请求，包括正常请求和疑似机器人请求。",
       requests: "请求数",
       windowDays: "最近 {days} 天",
       latencyMilliseconds: "{value} 毫秒",
@@ -9231,6 +9317,16 @@ const jaMessages = {
       "訪問者の国に基づいてトラッキング強度を自動で切り替えます。",
     trackingStrengthWeakDescription:
       "常にトラッキング精度を下げます。同じ訪問者が複数回カウントされ、リテンション分析ができなくなる場合があります。",
+    botProtectionGroupTitle: "ボット保護",
+    botProtectionGroupDescription:
+      "高信頼度のボットをブロックするか、ホスティング・プロキシネットワークからのリクエストをブロックするかを設定します。",
+    botProtectionEnabledLabel: "検出したボットをブロック",
+    botProtectionEnabledHint:
+      "有効にすると高信頼度のボットリクエストをブロックし、無効にすると統計に含めます。",
+    hostingProxyBlockingEnabledLabel:
+      "ホスティング・プロキシネットワークをブロック",
+    hostingProxyBlockingEnabledHint:
+      "有効にするとホスティングまたはプロキシネットワークからの疑わしいボットリクエストをブロックします。デフォルトはオフです。",
     queryHashGroupTitle: "クエリとハッシュのトラッキング",
     queryHashGroupDescription:
       "クエリ文字列、URL ハッシュ、Do Not Track の扱いを制御します。",
@@ -10568,6 +10664,8 @@ const jaMessages = {
       overview: "概要",
       abnormal: "異常リクエスト",
       normal: "通常リクエスト",
+      blocked: "ブロック済みリクエスト",
+      included: "統計対象リクエスト",
     },
     refresh: "更新",
     loadFailed: "リクエスト監視データを読み込めません。",
@@ -10582,6 +10680,11 @@ const jaMessages = {
     openAnalyticsEngine: "Analytics Engine を開く",
     openSettings: "設定を開く",
     highThreatBots: "高脅威 Bot",
+    botRequests: "ボットリクエスト",
+    suspectedBotRequests: "疑わしいボットリクエスト",
+    blockedRequests: "ブロック済みリクエスト",
+    includedRequests: "統計対象リクエスト",
+    customBlockedRequests: "カスタムブロック済みリクエスト",
     affectedSites: "影響サイト",
     uniqueCountries: "国",
     noData: "この期間にリクエストデータはありません。",
@@ -10611,6 +10714,8 @@ const jaMessages = {
     userAgent: "User-Agent",
     category: "カテゴリ",
     blocked: "ブロック済み",
+    included: "統計に含める",
+    disposition: "処理結果",
     highThreatRequests: "高脅威リクエスト",
     emptyValue: "不明",
     kind: "種別",
@@ -10663,7 +10768,14 @@ const jaMessages = {
     },
     overviewLabels: {
       totalRequests: "総リクエスト数",
+      includedRequests: "統計対象リクエスト数",
+      blockedRequests: "ブロック済みリクエスト数",
       normalRequests: "通常リクエスト",
+      suspectedBotRequests: "疑わしいボットリクエスト数",
+      botRequests: "ボットリクエスト数",
+      customBlockedRequests: "カスタムブロック済みリクエスト数",
+      botRequestRatio: "ボットリクエスト比率",
+      blockedRequestRatio: "ブロック済みリクエスト比率",
       abnormalRequests: "異常リクエスト",
       abnormalRatio: "異常リクエスト比率",
       p50Latency: "P50 Worker 処理時間",
@@ -10681,6 +10793,8 @@ const jaMessages = {
         "ページビュー、離脱、可視性の変化、カスタムイベント、ユーザー識別など、通常の収集イベントを種類別に時系列で表示します。",
       categoryShareTitle: "リクエストカテゴリの内訳",
       normalTrafficShare: "通常トラフィック",
+      suspectedBotTraffic: "疑わしいボットトラフィック",
+      botTraffic: "ボットトラフィック",
       mediumThreatTraffic: "中脅威トラフィック",
       highThreatTraffic: "高脅威トラフィック",
       customBlockedTraffic: "カスタムブロックトラフィック",
@@ -10691,6 +10805,10 @@ const jaMessages = {
         "異常リクエストに絞り込み、マップと表には中脅威・高脅威・カスタムブロックのトラフィックを表示します。",
       normalSubtitle:
         "通常の収集経路に入ったリクエストに絞り込み、マップと表には通常リクエストのみを表示します。",
+      blockedSubtitle:
+        "カスタムルールまたは保護設定でブロックされたリクエストに絞り込みます。",
+      includedSubtitle:
+        "統計に含めるリクエストに絞り込みます。通常リクエストと疑わしいボットリクエストを含みます。",
       requests: "リクエスト数",
       windowDays: "過去 {days} 日",
       latencyMilliseconds: "{value} ミリ秒",

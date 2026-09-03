@@ -99,7 +99,7 @@ describe("Traffic and Event Analytics Engine projections", () => {
       1, 1_000, 1_100, 1_000, 0, 0, 1, 1,
     ]);
     expect(point.doubles[17]).toBeGreaterThan(0);
-    expect(point.doubles[19]).toBe(1);
+    expect(point.doubles[19]).toBe(2);
   });
 
   it("writes visit finalization exactly from the transition snapshot", () => {

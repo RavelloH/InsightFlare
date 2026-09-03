@@ -30,14 +30,15 @@ export interface RequestObservationTrendPoint {
   count: number;
   baselineCount: number;
   normalCount: number;
-  abnormalCount: number;
+  suspectedBotCount: number;
+  botCount: number;
+  customBlockedCount: number;
+  includedCount: number;
+  blockedCount: number;
   totalCount: number;
   botRatio: number;
-  abnormalRatio: number;
+  blockedRatio: number;
   normalRatio: number;
-  mediumThreatCount: number;
-  highThreatCount: number;
-  customBlockedCount: number;
   pageviews: number;
   customEvents: number;
   pageviewCount: number;
@@ -57,7 +58,11 @@ export interface RequestObservationTrendPoint {
 
 export interface RequestObservationTrendLabels {
   normalRequests: string;
-  abnormalRequests: string;
+  suspectedBotRequests: string;
+  botRequests: string;
+  customBlockedRequests: string;
+  includedRequests: string;
+  blockedRequests: string;
   totalRequests: string;
   pageviews: string;
   customEvents: string;
@@ -66,15 +71,17 @@ export interface RequestObservationTrendLabels {
   visibility: string;
   customEvent: string;
   identify: string;
-  abnormalRatio: string;
+  botRatio: string;
+  blockedRatio: string;
+  normalRatio: string;
   avgLatency: string;
   p50Latency: string;
   p75Latency: string;
   p95Latency: string;
   p99Latency: string;
   normalTrafficShare: string;
-  mediumThreatTraffic: string;
-  highThreatTraffic: string;
+  suspectedBotTraffic: string;
+  botTraffic: string;
   customBlockedTraffic: string;
 }
 
@@ -82,7 +89,8 @@ export type RequestObservationTrendVariant =
   | "overview"
   | "traffic-composition"
   | "latency"
-  | "abnormal";
+  | "blocked"
+  | "included";
 
 export interface RequestObservationTrendChartProps {
   data: ReadonlyArray<RequestObservationTrendPoint>;
@@ -96,8 +104,8 @@ export interface RequestObservationTrendChartProps {
 
 const PERFORMANCE_WARNING_COLOR = "oklch(0.75 0.16 80)";
 const NORMAL_TRAFFIC_SHARE_COLOR = "var(--color-chart-4)";
-const MEDIUM_THREAT_TRAFFIC_COLOR = PERFORMANCE_WARNING_COLOR;
-const HIGH_THREAT_TRAFFIC_COLOR = "var(--color-destructive)";
+const SUSPECTED_BOT_TRAFFIC_COLOR = PERFORMANCE_WARNING_COLOR;
+const BOT_TRAFFIC_COLOR = "var(--color-destructive)";
 const CUSTOM_BLOCKED_TRAFFIC_COLOR = "var(--muted-foreground)";
 const BUSINESS_CUSTOM_EVENT_COLOR = PERFORMANCE_WARNING_COLOR;
 const BUSINESS_IDENTIFY_COLOR = "oklch(0.7 0.14 250)";
@@ -225,7 +233,9 @@ function createTrendTooltipFormatter({
   ) {
     const key = String(name || "");
     const row = (payload ?? null) as Record<string, unknown> | null;
-    const isRatio = key === "botRatio" || key.endsWith("Ratio");
+    const isRatio = key.endsWith("Ratio");
+    // Latency fields are explicitly suffixed with Ms by the API. Delegate
+    // formatting to the caller so the tooltip never assumes seconds.
     const isLatency = key.toLowerCase().includes("latency");
     const numeric = Number(value);
     const displayValue = Number(row?.[key] ?? numeric ?? 0);
@@ -244,10 +254,11 @@ function createTrendTooltipFormatter({
           );
     const labelByDataKey: Record<string, string> = {
       normalCount: labels.normalTrafficShare,
-      mediumThreatCount: labels.mediumThreatTraffic,
-      highThreatCount: labels.highThreatTraffic,
+      suspectedBotCount: labels.suspectedBotTraffic,
+      botCount: labels.botTraffic,
       customBlockedCount: labels.customBlockedTraffic,
-      abnormalCount: labels.abnormalRequests,
+      includedCount: labels.includedRequests,
+      blockedCount: labels.blockedRequests,
       totalCount: labels.totalRequests,
       pageviews: labels.pageviews,
       customEvents: labels.customEvents,
@@ -256,8 +267,9 @@ function createTrendTooltipFormatter({
       visibilityCount: labels.visibility,
       customEventCount: labels.customEvent,
       identifyCount: labels.identify,
-      abnormalRatio: labels.abnormalRatio,
-      botRatio: labels.abnormalRatio,
+      botRatio: labels.botRatio,
+      blockedRatio: labels.blockedRatio,
+      normalRatio: labels.normalRatio,
       avgLatencyMs: labels.avgLatency,
       p50LatencyMs: labels.p50Latency,
       p75LatencyMs: labels.p75Latency,
@@ -267,43 +279,49 @@ function createTrendTooltipFormatter({
     const label =
       labelByDataKey[key] ??
       labels[key as keyof RequestObservationTrendLabels] ??
-      (isRatio ? labels.abnormalRatio : labels.abnormalRequests);
+      (isRatio ? labels.blockedRatio : labels.totalRequests);
     const indicatorColor =
       key === "normalCount"
         ? "var(--color-normalCount)"
-        : key === "mediumThreatCount"
-          ? "var(--color-mediumThreatCount)"
-          : key === "highThreatCount"
-            ? "var(--color-highThreatCount)"
+        : key === "suspectedBotCount"
+          ? "var(--color-suspectedBotCount)"
+          : key === "botCount"
+            ? "var(--color-botCount)"
             : key === "customBlockedCount"
               ? "var(--color-customBlockedCount)"
-              : key === "totalCount"
-                ? "var(--color-totalCount)"
-                : key === "pageviews"
-                  ? "var(--color-pageviews)"
-                  : key === "customEvents"
-                    ? "var(--color-customEvents)"
-                    : key === "pageviewCount"
-                      ? "var(--color-pageviewCount)"
-                      : key === "leaveCount"
-                        ? "var(--color-leaveCount)"
-                        : key === "visibilityCount"
-                          ? "var(--color-visibilityCount)"
-                          : key === "customEventCount"
-                            ? "var(--color-customEventCount)"
-                            : key === "identifyCount"
-                              ? "var(--color-identifyCount)"
-                              : key === "p50LatencyMs"
-                                ? "var(--color-p50LatencyMs)"
-                                : key === "p75LatencyMs"
-                                  ? "var(--color-p75LatencyMs)"
-                                  : key === "p95LatencyMs"
-                                    ? "var(--color-p95LatencyMs)"
-                                    : key === "p99LatencyMs"
-                                      ? "var(--color-p99LatencyMs)"
-                                      : isRatio
-                                        ? "var(--color-abnormalRatio, var(--color-botRatio))"
-                                        : "var(--color-abnormalCount, var(--color-count))";
+              : key === "includedCount"
+                ? "var(--color-includedCount)"
+                : key === "blockedCount"
+                  ? "var(--color-blockedCount)"
+                  : key === "totalCount"
+                    ? "var(--color-totalCount)"
+                    : key === "pageviews"
+                      ? "var(--color-pageviews)"
+                      : key === "customEvents"
+                        ? "var(--color-customEvents)"
+                        : key === "pageviewCount"
+                          ? "var(--color-pageviewCount)"
+                          : key === "leaveCount"
+                            ? "var(--color-leaveCount)"
+                            : key === "visibilityCount"
+                              ? "var(--color-visibilityCount)"
+                              : key === "customEventCount"
+                                ? "var(--color-customEventCount)"
+                                : key === "identifyCount"
+                                  ? "var(--color-identifyCount)"
+                                  : key === "p50LatencyMs"
+                                    ? "var(--color-p50LatencyMs)"
+                                    : key === "p75LatencyMs"
+                                      ? "var(--color-p75LatencyMs)"
+                                      : key === "p95LatencyMs"
+                                        ? "var(--color-p95LatencyMs)"
+                                        : key === "p99LatencyMs"
+                                          ? "var(--color-p99LatencyMs)"
+                                          : isRatio
+                                            ? key === "blockedRatio"
+                                              ? "var(--color-blockedRatio)"
+                                              : "var(--color-botRatio)"
+                                            : "var(--color-count)";
 
     return (
       <TrendTooltipValue
@@ -323,8 +341,24 @@ function createTrendChartConfig(
       label: labels.normalRequests,
       color: NORMAL_TRAFFIC_SHARE_COLOR,
     },
-    abnormalCount: {
-      label: labels.abnormalRequests,
+    suspectedBotCount: {
+      label: labels.suspectedBotRequests,
+      color: SUSPECTED_BOT_TRAFFIC_COLOR,
+    },
+    botCount: {
+      label: labels.botRequests,
+      color: BOT_TRAFFIC_COLOR,
+    },
+    customBlockedCount: {
+      label: labels.customBlockedRequests,
+      color: CUSTOM_BLOCKED_TRAFFIC_COLOR,
+    },
+    includedCount: {
+      label: labels.includedRequests,
+      color: NORMAL_TRAFFIC_SHARE_COLOR,
+    },
+    blockedCount: {
+      label: labels.blockedRequests,
       color: "var(--color-destructive)",
     },
     totalCount: {
@@ -359,9 +393,17 @@ function createTrendChartConfig(
       label: labels.identify,
       color: BUSINESS_IDENTIFY_COLOR,
     },
-    abnormalRatio: {
-      label: labels.abnormalRatio,
+    botRatio: {
+      label: labels.botRatio,
+      color: BOT_TRAFFIC_COLOR,
+    },
+    blockedRatio: {
+      label: labels.blockedRatio,
       color: "var(--color-destructive)",
+    },
+    normalRatio: {
+      label: labels.normalRatio,
+      color: NORMAL_TRAFFIC_SHARE_COLOR,
     },
     avgLatencyMs: {
       label: labels.avgLatency,
@@ -386,18 +428,6 @@ function createTrendChartConfig(
     normalTrafficShare: {
       label: labels.normalTrafficShare,
       color: NORMAL_TRAFFIC_SHARE_COLOR,
-    },
-    mediumThreatCount: {
-      label: labels.mediumThreatTraffic,
-      color: MEDIUM_THREAT_TRAFFIC_COLOR,
-    },
-    highThreatCount: {
-      label: labels.highThreatTraffic,
-      color: HIGH_THREAT_TRAFFIC_COLOR,
-    },
-    customBlockedCount: {
-      label: labels.customBlockedTraffic,
-      color: CUSTOM_BLOCKED_TRAFFIC_COLOR,
     },
   };
 }
@@ -437,7 +467,8 @@ function RequestObservationTrendChartComponent({
   );
   const trendConfig = useMemo(() => createTrendChartConfig(labels), [labels]);
   const isLatency = variant === "latency";
-  const isLargeTrend = variant === "overview" || variant === "abnormal";
+  const isLargeTrend =
+    variant === "overview" || variant === "blocked" || variant === "included";
   const formatLatency =
     latencyFormatter ?? ((valueMs: number) => durationFormat(locale, valueMs));
 
@@ -549,7 +580,7 @@ function RequestObservationTrendChartComponent({
           }
           minTickGap={14}
         />
-        {variant === "overview" || variant === "abnormal" ? (
+        {isLargeTrend ? (
           <YAxis
             yAxisId="requests"
             width={52}
@@ -558,7 +589,7 @@ function RequestObservationTrendChartComponent({
             tickFormatter={(value) => numberFormatter.format(Number(value))}
           />
         ) : null}
-        {variant === "overview" || variant === "abnormal" ? (
+        {isLargeTrend ? (
           <YAxis
             yAxisId="ratio"
             orientation="right"
@@ -568,7 +599,7 @@ function RequestObservationTrendChartComponent({
             tickFormatter={(value) => percentFormat(locale, Number(value))}
           />
         ) : null}
-        {variant !== "overview" && variant !== "abnormal" ? (
+        {!isLargeTrend ? (
           <YAxis
             width={isLatency ? 60 : 52}
             tickLine={false}
@@ -612,18 +643,18 @@ function RequestObservationTrendChartComponent({
         {variant === "overview" ? (
           <Bar
             yAxisId="requests"
-            dataKey="mediumThreatCount"
+            dataKey="suspectedBotCount"
             stackId="requests"
-            fill="var(--color-mediumThreatCount)"
+            fill="var(--color-suspectedBotCount)"
             radius={[0, 0, 0, 0]}
           />
         ) : null}
         {variant === "overview" ? (
           <Bar
             yAxisId="requests"
-            dataKey="highThreatCount"
+            dataKey="botCount"
             stackId="requests"
-            fill="var(--color-highThreatCount)"
+            fill="var(--color-botCount)"
             radius={[0, 0, 0, 0]}
           />
         ) : null}
@@ -640,8 +671,8 @@ function RequestObservationTrendChartComponent({
           <Line
             yAxisId="ratio"
             type="linear"
-            dataKey="abnormalRatio"
-            stroke="var(--color-abnormalRatio)"
+            dataKey="blockedRatio"
+            stroke="var(--color-blockedRatio)"
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 4 }}
@@ -738,23 +769,31 @@ function RequestObservationTrendChartComponent({
             connectNulls
           />
         ) : null}
-        {variant === "abnormal" ? (
+        {variant === "blocked" ? (
           <Bar
             yAxisId="requests"
-            dataKey="abnormalCount"
-            fill="var(--color-abnormalCount)"
+            dataKey="blockedCount"
+            fill="var(--color-blockedCount)"
             radius={[3, 3, 0, 0]}
           />
         ) : null}
-        {variant === "abnormal" ? (
+        {variant === "blocked" ? (
           <Line
             yAxisId="ratio"
             type="linear"
-            dataKey="abnormalRatio"
-            stroke="var(--color-abnormalRatio)"
+            dataKey="blockedRatio"
+            stroke="var(--color-blockedRatio)"
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 4 }}
+          />
+        ) : null}
+        {variant === "included" ? (
+          <Bar
+            yAxisId="requests"
+            dataKey="includedCount"
+            fill="var(--color-includedCount)"
+            radius={[3, 3, 0, 0]}
           />
         ) : null}
       </ComposedChart>

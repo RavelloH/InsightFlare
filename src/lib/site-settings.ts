@@ -9,6 +9,8 @@ export interface SiteScriptSettings {
   pathBlacklist: string[];
   ignoreDoNotTrack: boolean;
   performanceSampleRate: number;
+  botProtectionEnabled: boolean;
+  hostingProxyBlockingEnabled: boolean;
 }
 
 export type SiteSettingsJsonValue =
@@ -19,7 +21,14 @@ export type SiteSettingsJsonValue =
   | SiteSettingsJsonValue[]
   | { [key: string]: SiteSettingsJsonValue };
 
-export interface SiteSettingsConfig extends SiteScriptSettings {
+export interface SiteSettingsConfig extends Omit<
+  SiteScriptSettings,
+  "botProtectionEnabled" | "hostingProxyBlockingEnabled"
+> {
+  /** Legacy/raw KV values may omit newly introduced settings. */
+  botProtectionEnabled?: boolean;
+  /** Legacy/raw KV values may omit newly introduced settings. */
+  hostingProxyBlockingEnabled?: boolean;
   /** Raw versioned rules are kept for the shared blocking-rules parser. */
   blockingRules?: SiteSettingsJsonValue;
 }
@@ -39,6 +48,8 @@ export const DEFAULT_SITE_SCRIPT_SETTINGS: SiteScriptSettings = {
   pathBlacklist: [],
   ignoreDoNotTrack: true,
   performanceSampleRate: 100,
+  botProtectionEnabled: true,
+  hostingProxyBlockingEnabled: false,
 };
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -221,6 +232,14 @@ export function normalizeSiteScriptSettings(
           record.performanceSampleRate ?? record.performanceSamplingRate,
           DEFAULT_SITE_SCRIPT_SETTINGS.performanceSampleRate,
         ),
+    botProtectionEnabled: normalizeBoolean(
+      record.botProtectionEnabled,
+      DEFAULT_SITE_SCRIPT_SETTINGS.botProtectionEnabled,
+    ),
+    hostingProxyBlockingEnabled: normalizeBoolean(
+      record.hostingProxyBlockingEnabled,
+      DEFAULT_SITE_SCRIPT_SETTINGS.hostingProxyBlockingEnabled,
+    ),
   };
 }
 

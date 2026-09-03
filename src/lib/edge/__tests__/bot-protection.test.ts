@@ -54,7 +54,7 @@ describe("bot protection", () => {
     expect(REQUEST_ANALYTICS_DOUBLES).toHaveLength(20);
   });
 
-  it("classifies known bot user agents as high-threat traffic", () => {
+  it("classifies known bot user agents as bot traffic", () => {
     const result = classifyCollectBotTraffic({
       request: request({
         "user-agent": "Googlebot/2.1",
@@ -65,13 +65,12 @@ describe("bot protection", () => {
     });
 
     expect(result).toMatchObject({
-      isBot: true,
-      threatLevel: "high",
+      category: "bot",
     });
     expect(result.reasons).toContain("ua_isbot");
   });
 
-  it("classifies script user agents as high-threat traffic", () => {
+  it("classifies script user agents as bot traffic", () => {
     const result = classifyCollectBotTraffic({
       request: request({
         "user-agent": "curl/8.14.1",
@@ -82,13 +81,31 @@ describe("bot protection", () => {
     });
 
     expect(result).toMatchObject({
-      isBot: true,
-      threatLevel: "high",
+      category: "bot",
     });
     expect(result.reasons).toContain("script_ua");
   });
 
-  it("classifies configured hosting ASNs as medium-threat traffic", () => {
+  it("classifies verified bot categories as bot traffic", () => {
+    const result = classifyCollectBotTraffic({
+      request: request(
+        {
+          "user-agent": CHROME_UA,
+          origin: "https://example.com",
+        },
+        { verifiedBotCategory: "Search Engine Crawler" },
+      ),
+      payload,
+      origin: "https://example.com",
+    });
+
+    expect(result).toMatchObject({
+      category: "bot",
+    });
+    expect(result.reasons).toContain("cf_verified_bot_category");
+  });
+
+  it("classifies configured hosting ASNs as suspected bot traffic", () => {
     const result = classifyCollectBotTraffic({
       request: request(
         {
@@ -105,8 +122,7 @@ describe("bot protection", () => {
     });
 
     expect(result).toMatchObject({
-      isBot: true,
-      threatLevel: "medium",
+      category: "suspected_bot",
     });
     expect(result.reasons).toContain("hosting_asn");
     expect(vi.mocked(classifyASN)).toHaveBeenCalledWith(13335);
@@ -131,8 +147,7 @@ describe("bot protection", () => {
     });
 
     expect(result).toEqual({
-      isBot: false,
-      threatLevel: null,
+      category: "normal",
       reasons: [],
     });
   });
@@ -155,13 +170,12 @@ describe("bot protection", () => {
     });
 
     expect(result).toEqual({
-      isBot: false,
-      threatLevel: null,
+      category: "suspected_bot",
       reasons: ["network_service_asn"],
     });
   });
 
-  it("classifies network-service ASNs with missing browser provenance as medium-threat traffic", () => {
+  it("classifies network-service ASNs with missing browser provenance as suspected bot traffic", () => {
     const result = classifyCollectBotTraffic({
       request: request(
         {
@@ -177,8 +191,7 @@ describe("bot protection", () => {
     });
 
     expect(result).toMatchObject({
-      isBot: true,
-      threatLevel: "medium",
+      category: "suspected_bot",
     });
     expect(result.reasons).toEqual([
       "network_service_asn",
@@ -219,13 +232,11 @@ describe("bot protection", () => {
     });
 
     expect(transit).toEqual({
-      isBot: false,
-      threatLevel: null,
+      category: "suspected_bot",
       reasons: ["transit_asn"],
     });
     expect(access).toEqual({
-      isBot: false,
-      threatLevel: null,
+      category: "suspected_bot",
       reasons: ["access_asn"],
     });
   });
@@ -242,8 +253,7 @@ describe("bot protection", () => {
     });
 
     expect(result).toEqual({
-      isBot: false,
-      threatLevel: null,
+      category: "normal",
       reasons: [],
     });
   });
@@ -279,7 +289,8 @@ describe("bot protection", () => {
       origin: "https://example.com",
       traceId: "trace-1",
       receivedAt: 1_800_000_000_000,
-      category: "high_threat",
+      category: "bot",
+      disposition: "blocked",
       reasons: ["script_ua"],
     });
 
@@ -301,7 +312,7 @@ describe("bot protection", () => {
     expect(point?.blobs).toEqual(
       expect.arrayContaining([
         "pageview",
-        "high_threat",
+        "bot",
         "script_ua",
         "203.0.113.10",
         "curl/8.14.1",
@@ -327,7 +338,8 @@ describe("bot protection", () => {
       origin: "https://example.com",
       traceId: "trace-1",
       receivedAt: 1_800_000_000_000,
-      category: "high_threat",
+      category: "bot",
+      disposition: "blocked",
       reasons: ["script_ua"],
     });
 

@@ -128,6 +128,18 @@ function serializeSiteTrackingConfig(
   ) {
     payload.performanceSampleRate = settings.performanceSampleRate;
   }
+  if (
+    settings.botProtectionEnabled !==
+    DEFAULT_SITE_SCRIPT_SETTINGS.botProtectionEnabled
+  ) {
+    payload.botProtectionEnabled = settings.botProtectionEnabled;
+  }
+  if (
+    settings.hostingProxyBlockingEnabled !==
+    DEFAULT_SITE_SCRIPT_SETTINGS.hostingProxyBlockingEnabled
+  ) {
+    payload.hostingProxyBlockingEnabled = settings.hostingProxyBlockingEnabled;
+  }
 
   return payload;
 }

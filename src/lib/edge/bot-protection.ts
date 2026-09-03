@@ -4,16 +4,14 @@ import { isbot } from "isbot";
 import type { TrackerClientPayload } from "./types";
 import { clampString, coerceNumber, coerceString, safeHostname } from "./utils";
 
-export type BotThreatLevel = "high" | "medium";
+export type BotClassificationCategory = "normal" | "suspected_bot" | "bot";
 export interface BotClassification {
-  isBot: boolean;
-  threatLevel: BotThreatLevel | null;
+  category: BotClassificationCategory;
   reasons: string[];
 }
 
 const EMPTY_CLASSIFICATION: BotClassification = {
-  isBot: false,
-  threatLevel: null,
+  category: "normal",
   reasons: [],
 };
 
@@ -125,20 +123,10 @@ export function classifyCollectBotTraffic(input: {
     "cf_verified_bot_category",
   ]);
   if (reasons.some((reason) => highReasons.has(reason))) {
-    return { isBot: true, threatLevel: "high", reasons };
-  }
-
-  if (hostedByAsn) {
-    return { isBot: true, threatLevel: "medium", reasons };
-  }
-  if (
-    networkServiceAsn &&
-    (missingBrowserProvenance || reasons.includes("origin_hostname_mismatch"))
-  ) {
-    return { isBot: true, threatLevel: "medium", reasons };
+    return { category: "bot", reasons };
   }
 
   return reasons.length > 0
-    ? { isBot: false, threatLevel: null, reasons }
+    ? { category: "suspected_bot", reasons }
     : EMPTY_CLASSIFICATION;
 }

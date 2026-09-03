@@ -43,7 +43,7 @@ function environment(writeDataPoint: (point: AnalyticsEnginePoint) => void) {
   } as unknown as RequestAnalyticsEnvironment;
 }
 
-describe("Analytics Engine v1 contract", () => {
+describe("Analytics Engine v2 contract", () => {
   it("keeps all published slot arrays within the AE contract", () => {
     expect(REQUEST_ANALYTICS_BLOBS).toEqual([
       "kind",
@@ -127,7 +127,8 @@ describe("Analytics Engine v1 contract", () => {
       origin: "https://example.test",
       traceId: "trace-1",
       receivedAt: 1_000,
-      category: "high_threat",
+      category: "bot",
+      disposition: "blocked",
       reasons: ["cf_bot_score_low"],
     });
 
@@ -137,7 +138,7 @@ describe("Analytics Engine v1 contract", () => {
     expect(point.blobs).toHaveLength(20);
     expect(point.blobs.slice(0, 8)).toEqual([
       "pageview",
-      "high_threat",
+      "bot",
       "cf_bot_score_low",
       "203.0.113.10",
       "Mozilla/5.0",
@@ -180,6 +181,13 @@ describe("Analytics Engine v1 contract", () => {
         REQUEST_ANALYTICS_FLAGS.botScorePresent,
       ),
     ).toBe(true);
+    expect(
+      hasRequestFlag(
+        point.doubles[18],
+        REQUEST_ANALYTICS_FLAGS.dispositionBlocked,
+      ),
+    ).toBe(true);
+    expect(point.doubles[19]).toBe(2);
     expect(JSON.parse(point.blobs[19])).toMatchObject({
       requestPathname: "/collect",
       eventId: "event-1",
@@ -187,26 +195,56 @@ describe("Analytics Engine v1 contract", () => {
     });
   });
 
-  it("does not write IP addresses for normal requests", () => {
+  it.each(["normal", "suspected_bot", "custom_block"] as const)(
+    "does not write IP addresses for %s requests",
+    (category) => {
+      const writeDataPoint = vi.fn<(point: AnalyticsEnginePoint) => void>();
+      const payload: TrackerClientPayload = {
+        kind: "pageview",
+        startedAt: 1_000,
+        timestamp: 2_000,
+        hostname: "example.test",
+        pathname: "/",
+        visitId: "visit-1",
+      };
+
+      writeRequestAnalyticsPoint(environment(writeDataPoint), {
+        request: request({}),
+        payload,
+        siteId: "site-1",
+        origin: "https://example.test",
+        traceId: "trace-1",
+        receivedAt: 1_000,
+        category,
+        disposition: category === "custom_block" ? "blocked" : "included",
+        reasons: [],
+      });
+
+      expect(writeDataPoint).toHaveBeenCalledTimes(1);
+      expect(writeDataPoint.mock.calls[0]?.[0]?.blobs?.[3]).toBe("");
+    },
+  );
+
+  it("does not write an IP for a bot request that is included by policy", () => {
     const writeDataPoint = vi.fn<(point: AnalyticsEnginePoint) => void>();
-    const payload: TrackerClientPayload = {
-      kind: "pageview",
-      startedAt: 1_000,
-      timestamp: 2_000,
-      hostname: "example.test",
-      pathname: "/",
-      visitId: "visit-1",
-    };
 
     writeRequestAnalyticsPoint(environment(writeDataPoint), {
-      request: request({}),
-      payload,
+      request: request({ "cf-connecting-ip": "203.0.113.10" }),
+      payload: {
+        kind: "pageview",
+        startedAt: 1_000,
+        timestamp: 2_000,
+        hostname: "example.test",
+        pathname: "/",
+        visitId: "visit-1",
+      },
       siteId: "site-1",
       origin: "https://example.test",
       traceId: "trace-1",
       receivedAt: 1_000,
-      category: "normal",
-      reasons: [],
+      category: "bot",
+      disposition: "included",
+      reasons: ["script_ua"],
     });
 
     expect(writeDataPoint).toHaveBeenCalledTimes(1);

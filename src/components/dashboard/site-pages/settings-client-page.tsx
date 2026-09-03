@@ -904,6 +904,7 @@ export function SettingsClientPage({
   const [saving, setSaving] = useState(false);
   const [savingPublicSharing, setSavingPublicSharing] = useState(false);
   const [savingTrackingStrength, setSavingTrackingStrength] = useState(false);
+  const [savingBotProtection, setSavingBotProtection] = useState(false);
   const [savingQueryHash, setSavingQueryHash] = useState(false);
   const [savingPerformanceTracking, setSavingPerformanceTracking] =
     useState(false);
@@ -917,6 +918,11 @@ export function SettingsClientPage({
   const [trackingStrength, setTrackingStrength] = useState<TrackingStrength>(
     initialTrackerSettings.trackingStrength,
   );
+  const [botProtectionEnabled, setBotProtectionEnabled] = useState(
+    initialTrackerSettings.botProtectionEnabled,
+  );
+  const [hostingProxyBlockingEnabled, setHostingProxyBlockingEnabled] =
+    useState(initialTrackerSettings.hostingProxyBlockingEnabled);
   const [trackQueryParams, setTrackQueryParams] = useState(
     initialTrackerSettings.trackQueryParams,
   );
@@ -950,6 +956,7 @@ export function SettingsClientPage({
 
   const trackingSaving =
     savingTrackingStrength ||
+    savingBotProtection ||
     savingQueryHash ||
     savingPerformanceTracking ||
     savingBlockingField !== null ||
@@ -965,6 +972,11 @@ export function SettingsClientPage({
 
   const hasTrackingStrengthChanges =
     trackingStrength !== persistedSettings.trackingStrength;
+
+  const hasBotProtectionChanges =
+    botProtectionEnabled !== persistedSettings.botProtectionEnabled ||
+    hostingProxyBlockingEnabled !==
+      persistedSettings.hostingProxyBlockingEnabled;
 
   const hasQueryHashChanges =
     trackQueryParams !== persistedSettings.trackQueryParams ||
@@ -1003,6 +1015,8 @@ export function SettingsClientPage({
     const normalized = normalizeSiteScriptSettings(raw);
     setPersistedSettings(normalized);
     setTrackingStrength(normalized.trackingStrength);
+    setBotProtectionEnabled(normalized.botProtectionEnabled);
+    setHostingProxyBlockingEnabled(normalized.hostingProxyBlockingEnabled);
     setTrackQueryParams(normalized.trackQueryParams);
     setTrackHash(normalized.trackHash);
     setIgnoreDoNotTrack(normalized.ignoreDoNotTrack);
@@ -1200,6 +1214,23 @@ export function SettingsClientPage({
       toast.error(message || copy.toasts.saveFailed);
     } finally {
       setSavingTrackingStrength(false);
+    }
+  }
+
+  async function handleSaveBotProtection() {
+    if (!hasBotProtectionChanges) return;
+    setSavingBotProtection(true);
+    try {
+      await persistTrackingSettings({
+        botProtectionEnabled,
+        hostingProxyBlockingEnabled,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : copy.toasts.saveFailed;
+      toast.error(message || copy.toasts.saveFailed);
+    } finally {
+      setSavingBotProtection(false);
     }
   }
 
@@ -1770,6 +1801,119 @@ export function SettingsClientPage({
                 ) : (
                   <span
                     key="save-strength"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <RiSave3Line className="size-4" />
+                    {copy.saveTracking}
+                  </span>
+                )}
+              </AutoTransition>
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="h-full">
+          <CardHeader>
+            <CardTitle className="inline-flex items-center gap-2">
+              <RiTestTubeLine className="size-4" />
+              {copy.botProtectionGroupTitle}
+            </CardTitle>
+            <CardDescription>
+              {copy.botProtectionGroupDescription}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex h-full flex-col gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="site-settings-bot-protection">
+                {copy.botProtectionEnabledLabel}
+              </Label>
+              <Select
+                value={botProtectionEnabled ? "true" : "false"}
+                onValueChange={(value) => {
+                  setBotProtectionEnabled(value === "true");
+                }}
+                disabled={
+                  saving ||
+                  trackingSaving ||
+                  transferring ||
+                  deleting ||
+                  loadingSettings
+                }
+              >
+                <SelectTrigger
+                  id="site-settings-bot-protection"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {copy.botProtectionEnabledHint}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="site-settings-hosting-proxy-blocking">
+                {copy.hostingProxyBlockingEnabledLabel}
+              </Label>
+              <Select
+                value={hostingProxyBlockingEnabled ? "true" : "false"}
+                onValueChange={(value) => {
+                  setHostingProxyBlockingEnabled(value === "true");
+                }}
+                disabled={
+                  saving ||
+                  trackingSaving ||
+                  transferring ||
+                  deleting ||
+                  loadingSettings
+                }
+              >
+                <SelectTrigger
+                  id="site-settings-hosting-proxy-blocking"
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {copy.hostingProxyBlockingEnabledHint}
+              </p>
+            </div>
+            <Button
+              type="button"
+              className="mt-auto self-start"
+              onClick={() => {
+                void handleSaveBotProtection();
+              }}
+              disabled={
+                saving ||
+                trackingSaving ||
+                transferring ||
+                deleting ||
+                loadingSettings ||
+                !hasBotProtectionChanges
+              }
+            >
+              <AutoTransition className="inline-flex items-center gap-2">
+                {savingBotProtection ? (
+                  <span
+                    key="saving-bot-protection"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <Spinner className="size-4" />
+                    {copy.savingTracking}
+                  </span>
+                ) : (
+                  <span
+                    key="save-bot-protection"
                     className="inline-flex items-center gap-2"
                   >
                     <RiSave3Line className="size-4" />

@@ -15,8 +15,13 @@ import {
   timeZoneOffsetMinutes,
 } from "@/lib/dashboard/time-zone";
 
+import type {
+  RequestAnalyticsCategory,
+  RequestAnalyticsDisposition,
+} from "./analytics-engine/request-schema";
 import {
   hasRequestFlag,
+  REQUEST_ANALYTICS_CATEGORIES,
   REQUEST_ANALYTICS_FLAGS,
   REQUEST_ANALYTICS_SCHEMA_VERSION,
 } from "./analytics-engine/request-schema";
@@ -36,11 +41,12 @@ const WINDOW_OPTIONS_MINUTES = new Set([60, 1440, 10080, 43200]);
 const MAX_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 const CF_ANALYTICS_ENGINE_SQL_ENDPOINT =
   "https://api.cloudflare.com/client/v4/accounts";
-const NORMAL_CATEGORY_SQL_FILTER = "blob2 = 'normal'";
-const ABNORMAL_CATEGORY_SQL_FILTER =
-  "blob2 IN ('medium_threat', 'high_threat', 'custom_block')";
+const REQUEST_CATEGORIES = REQUEST_ANALYTICS_CATEGORIES;
+const DISPOSITION_BLOCKED_FLAG = REQUEST_ANALYTICS_FLAGS.dispositionBlocked;
+const BLOCKED_DISPOSITION_SQL_FILTER = `intDiv(double19, ${DISPOSITION_BLOCKED_FLAG}) % 2 != 0`;
+const INCLUDED_DISPOSITION_SQL_FILTER = `intDiv(double19, ${DISPOSITION_BLOCKED_FLAG}) % 2 = 0`;
 const MAX_WORKER_LATENCY_MS = 60_000;
-const NORMAL_LATENCY_SQL_FILTER = `double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND intDiv(double19, ${REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent}) % 2 != 0 AND double3 BETWEEN 0 AND ${MAX_WORKER_LATENCY_MS}`;
+const REQUEST_LATENCY_SQL_FILTER = `double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND intDiv(double19, ${REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent}) % 2 != 0 AND double3 BETWEEN 0 AND ${MAX_WORKER_LATENCY_MS}`;
 
 function analyticsEngineSqlEndpoint(env: Env): string | null {
   if (env.INSIGHTFLARE_E2E === "1") {
@@ -51,11 +57,8 @@ function analyticsEngineSqlEndpoint(env: Env): string | null {
 }
 
 type AdminActor = Awaited<ReturnType<typeof requireActor>>;
-type RequestObservationCategory =
-  | "normal"
-  | "medium_threat"
-  | "high_threat"
-  | "custom_block";
+type RequestObservationCategory = RequestAnalyticsCategory;
+type RequestObservationDisposition = RequestAnalyticsDisposition;
 type RequestObservationInterval = "minute" | "hour" | "day" | "week";
 type NetworkDimension =
   | "asOrganization"
@@ -64,7 +67,7 @@ type NetworkDimension =
   | "region"
   | "city"
   | "colo";
-type DetailSource = "abnormal" | "normal";
+type DetailSource = "blocked" | "included";
 type DimensionGroup = "detection" | "target" | "network" | "client";
 
 interface DetailCursor {
@@ -88,11 +91,15 @@ const DIMENSION_TABS: Record<DimensionGroup, readonly string[]> = {
 interface RequestObservationEvent {
   timestamp: string;
   receivedAt: number;
+  eventAt: number;
+  edgeLatencyMs: number | null;
+  schemaVersion: number;
   siteId: string;
   siteName: string;
   siteDomain: string;
   kind: string;
   category: RequestObservationCategory;
+  disposition: RequestObservationDisposition;
   reasons: string[];
   ip: string;
   userAgent: string;
@@ -115,36 +122,6 @@ interface RequestObservationEvent {
   latitude: number | null;
   longitude: number | null;
   botScore: number | null;
-  userAgentLength: number;
-  flags: number;
-}
-
-interface RequestObservationNormalEvent {
-  timestamp: string;
-  receivedAt: number;
-  eventAt: number;
-  edgeLatencyMs: number | null;
-  schemaVersion: number;
-  siteId: string;
-  siteName: string;
-  siteDomain: string;
-  kind: string;
-  origin: string;
-  hostname: string;
-  pathname: string;
-  country: string;
-  region: string;
-  city: string;
-  continent: string;
-  colo: string;
-  asn: number;
-  asOrganization: string;
-  rayId: string;
-  traceId: string;
-  requestMethod: string;
-  metadataJson: string;
-  latitude: number | null;
-  longitude: number | null;
   userAgentLength: number;
   flags: number;
 }
@@ -273,26 +250,29 @@ function normalizeObservationCategory(
   value: unknown,
 ): RequestObservationCategory | null {
   const category = String(value || "");
-  if (category === "high_threat") {
-    return "high_threat";
-  }
-  if (category === "medium_threat") {
-    return "medium_threat";
-  }
-  if (category === "custom_block") {
-    return category;
-  }
-  return null;
+  return (REQUEST_CATEGORIES as readonly string[]).includes(category)
+    ? (category as RequestObservationCategory)
+    : null;
+}
+
+function normalizeObservationDisposition(
+  value: unknown,
+  flags: number,
+): RequestObservationDisposition {
+  if (value === "blocked" || value === "included") return value;
+  return requestAnalyticsFlagPresent(flags, DISPOSITION_BLOCKED_FLAG)
+    ? "blocked"
+    : "included";
 }
 
 function requestTimeFilter(input: { from: number; to: number }): string {
   return `timestamp >= toDateTime(${Math.floor(input.from / 1000)}) AND timestamp <= toDateTime(${Math.ceil(input.to / 1000)}) AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}`;
 }
 
-function requestCategoryFilter(source: DetailSource): string {
-  return source === "normal"
-    ? NORMAL_CATEGORY_SQL_FILTER
-    : ABNORMAL_CATEGORY_SQL_FILTER;
+function requestDispositionFilter(source: DetailSource): string {
+  return source === "blocked"
+    ? BLOCKED_DISPOSITION_SQL_FILTER
+    : INCLUDED_DISPOSITION_SQL_FILTER;
 }
 
 function requestCursorFilter(cursor?: DetailCursor | null): string {
@@ -307,6 +287,7 @@ function requestRowSelect(): string {
       index1 AS siteId,
       blob1 AS kind,
       blob2 AS category,
+      if(${BLOCKED_DISPOSITION_SQL_FILTER}, 'blocked', 'included') AS disposition,
       blob3 AS reasons,
       blob4 AS ip,
       blob5 AS userAgent,
@@ -351,7 +332,7 @@ function buildRequestAnalyticsSql(input: {
     SELECT ${requestRowSelect()}
     FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE ${requestTimeFilter(input)}
-      AND ${requestCategoryFilter(input.source)}
+      AND ${requestDispositionFilter(input.source)}
       ${requestCursorFilter(input.cursor)}
     ORDER BY timestamp DESC, receivedAt DESC
     LIMIT ${input.limit}
@@ -365,7 +346,7 @@ function buildCountByBucketSql(input: {
   bucketMs: number;
   interval: RequestObservationInterval;
   timeZone: string;
-  source: "normal" | "abnormal";
+  source: DetailSource;
   includeLatency?: boolean;
 }) {
   const fromSeconds = Math.floor(input.from / 1000);
@@ -375,58 +356,42 @@ function buildCountByBucketSql(input: {
     timeZoneOffsetMinutes(input.timeZone, input.from) * 60 +
     (input.interval === "week" ? 3 * 24 * 60 * 60 : 0);
   const bucketExpression = `(intDiv(toUnixTimestamp(timestamp) + ${bucketOffsetSeconds}, ${bucketSeconds}) * ${bucketSeconds} - ${bucketOffsetSeconds}) * 1000`;
-  const latencySelect =
-    input.includeLatency && input.source === "normal"
-      ? `,
-      sumIf(_sample_interval * double3, ${NORMAL_LATENCY_SQL_FILTER}) AS latencyWeightedSumMs,
-      sumIf(_sample_interval, ${NORMAL_LATENCY_SQL_FILTER}) AS latencySampleWeight,
-      quantileExactWeighted(0.5)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p50LatencyMs,
-      quantileExactWeighted(0.75)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p75LatencyMs,
-      quantileExactWeighted(0.95)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p95LatencyMs,
-      quantileExactWeighted(0.99)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p99LatencyMs`
-      : "";
-  const categorySelect =
-    input.source === "abnormal"
-      ? `,
-      sumIf(_sample_interval, blob2 = 'medium_threat') AS mediumThreatCount,
-      sumIf(_sample_interval, blob2 = 'high_threat') AS highThreatCount,
-      sumIf(_sample_interval, blob2 = 'custom_block') AS customBlockedCount`
-      : `,
-      0 AS mediumThreatCount,
-      0 AS highThreatCount,
-      0 AS customBlockedCount`;
-  const businessEventSelect =
-    input.source === "normal"
-      ? `,
+  const latencySelect = input.includeLatency
+    ? `,
+      sumIf(_sample_interval * double3, ${REQUEST_LATENCY_SQL_FILTER}) AS latencyWeightedSumMs,
+      sumIf(_sample_interval, ${REQUEST_LATENCY_SQL_FILTER}) AS latencySampleWeight,
+      quantileExactWeighted(0.5)(double3, if(${REQUEST_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p50LatencyMs,
+      quantileExactWeighted(0.75)(double3, if(${REQUEST_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p75LatencyMs,
+      quantileExactWeighted(0.95)(double3, if(${REQUEST_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p95LatencyMs,
+      quantileExactWeighted(0.99)(double3, if(${REQUEST_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p99LatencyMs`
+    : "";
+  const categorySelect = `,
+      sumIf(_sample_interval, blob2 = 'normal') AS normalCount,
+      sumIf(_sample_interval, blob2 = 'suspected_bot') AS suspectedBotCount,
+      sumIf(_sample_interval, blob2 = 'bot') AS botCount,
+      sumIf(_sample_interval, blob2 = 'custom_block') AS customBlockedCount,
+      sumIf(_sample_interval, ${INCLUDED_DISPOSITION_SQL_FILTER}) AS includedCount,
+      sumIf(_sample_interval, ${BLOCKED_DISPOSITION_SQL_FILTER}) AS blockedCount`;
+  const businessEventSelect = `
       sumIf(_sample_interval, blob1 = 'pageview') AS pageviewCount,
-      0 AS leaveCount,
-      0 AS visibilityCount,
+      sumIf(_sample_interval, blob1 = 'leave') AS leaveCount,
+      sumIf(_sample_interval, blob1 = 'visibility') AS visibilityCount,
       sumIf(_sample_interval, blob1 = 'custom_event') AS customEventCount,
-      0 AS identifyCount`
-      : `,
-      0 AS pageviewCount,
-      0 AS leaveCount,
-      0 AS visibilityCount,
-      0 AS customEventCount,
-      0 AS identifyCount`;
-  const normalEventTotals =
-    input.source === "normal"
-      ? `sumIf(_sample_interval, blob1 = 'pageview') AS pageviews,
-      sumIf(_sample_interval, blob1 = 'custom_event') AS customEvents`
-      : `0 AS pageviews,
-      0 AS customEvents`;
+      sumIf(_sample_interval, blob1 = 'identify') AS identifyCount,
+      sumIf(_sample_interval, blob1 = 'pageview') AS pageviews,
+      sumIf(_sample_interval, blob1 = 'custom_event') AS customEvents`;
   return `
     SELECT
       ${bucketExpression} AS timestampMs,
       max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS weightedRequestCount,
       sum(_sample_interval) AS count,
-      ${normalEventTotals}${businessEventSelect}${categorySelect}${latencySelect}
+      ${businessEventSelect}${categorySelect}${latencySelect}
     FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
-      AND ${requestCategoryFilter(input.source)}
+      AND ${requestDispositionFilter(input.source)}
     GROUP BY timestampMs
     ORDER BY timestampMs ASC
     FORMAT JSONEachRow
@@ -436,7 +401,7 @@ function buildCountByBucketSql(input: {
 function buildMapPointsSql(input: {
   from: number;
   to: number;
-  source: "normal" | "abnormal";
+  source: DetailSource;
   limit: number;
 }) {
   const fromSeconds = Math.floor(input.from / 1000);
@@ -455,7 +420,7 @@ function buildMapPointsSql(input: {
       AND timestamp <= toDateTime(${toSeconds})
       AND intDiv(double19, ${REQUEST_ANALYTICS_FLAGS.coordinatePresent}) % 2 != 0
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
-      AND ${requestCategoryFilter(input.source)}
+      AND ${requestDispositionFilter(input.source)}
     GROUP BY double5, double6, blob9
     ORDER BY pointCount DESC
     LIMIT ${input.limit}
@@ -466,7 +431,7 @@ function buildMapPointsSql(input: {
 function buildNetworkDimensionSql(input: {
   from: number;
   to: number;
-  source: "normal" | "abnormal";
+  source: DetailSource;
   dimension: NetworkDimension;
 }) {
   const fromSeconds = Math.floor(input.from / 1000);
@@ -480,20 +445,17 @@ function buildNetworkDimensionSql(input: {
     colo: ["blob13 AS label"],
   };
   const groupColumns = columns[input.dimension];
-  const threatSelect =
-    input.source === "abnormal"
-      ? ",\n      sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat"
-      : ",\n      0 AS highThreat";
+  const botSelect = `,\n      sumIf(_sample_interval, blob2 = 'bot') AS botCount`;
   return `
     SELECT
       ${groupColumns.join(",\n      ")},
       max(_sample_interval) AS maxSampleInterval,
-      sum(_sample_interval) AS count${threatSelect}
+      sum(_sample_interval) AS count${botSelect}
     FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
-      AND ${requestCategoryFilter(input.source)}
+      AND ${requestDispositionFilter(input.source)}
     GROUP BY ${groupColumns.map((column) => column.split(" AS ")[1]).join(", ")}
     ORDER BY count DESC
     LIMIT ${NETWORK_DIMENSION_LIMIT}
@@ -512,28 +474,27 @@ function buildSourceSummarySql(input: {
   // index1 is the Analytics Engine sampling key. Distinct fields that are
   // not the sampling key remain estimates; multiplying them by sample weight
   // would be incorrect, so the response advertises them as approximate.
-  const columns =
-    input.source === "abnormal"
-      ? `
-      sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat,
-      sumIf(_sample_interval, blob2 = 'medium_threat') AS mediumThreat,
-      sumIf(_sample_interval, blob2 = 'custom_block') AS customBlocked,
-      count(DISTINCT index1) AS affectedSites,
-      count(DISTINCT double4) AS uniqueAsns,
-      count(DISTINCT blob9) AS uniqueCountries`
-      : `
+  const columns = `
+      sumIf(_sample_interval, blob2 = 'normal') AS normalRequests,
+      sumIf(_sample_interval, blob2 = 'suspected_bot') AS suspectedBotRequests,
+      sumIf(_sample_interval, blob2 = 'bot') AS botRequests,
+      sumIf(_sample_interval, blob2 = 'custom_block') AS customBlockedRequests,
+      sumIf(_sample_interval, ${INCLUDED_DISPOSITION_SQL_FILTER}) AS includedRequests,
+      sumIf(_sample_interval, ${BLOCKED_DISPOSITION_SQL_FILTER}) AS blockedRequests,
+      sumIf(_sample_interval, blob1 = 'pageview') AS pageviews,
+      sumIf(_sample_interval, blob1 = 'custom_event') AS customEvents,
       count(DISTINCT index1) AS affectedSites,
       count(DISTINCT double4) AS uniqueAsns,
       count(DISTINCT blob9) AS uniqueCountries`;
   const latencyColumns =
-    input.source === "normal" && input.includeLatency !== false
+    input.includeLatency !== false
       ? `,
-      sumIf(_sample_interval * double3, ${NORMAL_LATENCY_SQL_FILTER}) AS latencyWeightedSumMs,
-      sumIf(_sample_interval, ${NORMAL_LATENCY_SQL_FILTER}) AS latencySampleWeight,
-      quantileExactWeighted(0.5)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p50LatencyMs,
-      quantileExactWeighted(0.75)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p75LatencyMs,
-      quantileExactWeighted(0.95)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p95LatencyMs,
-      quantileExactWeighted(0.99)(double3, if(${NORMAL_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p99LatencyMs`
+      sumIf(_sample_interval * double3, ${REQUEST_LATENCY_SQL_FILTER}) AS latencyWeightedSumMs,
+      sumIf(_sample_interval, ${REQUEST_LATENCY_SQL_FILTER}) AS latencySampleWeight,
+      quantileExactWeighted(0.5)(double3, if(${REQUEST_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p50LatencyMs,
+      quantileExactWeighted(0.75)(double3, if(${REQUEST_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p75LatencyMs,
+      quantileExactWeighted(0.95)(double3, if(${REQUEST_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p95LatencyMs,
+      quantileExactWeighted(0.99)(double3, if(${REQUEST_LATENCY_SQL_FILTER}, _sample_interval, 0)) AS p99LatencyMs`
       : "";
   return `
     SELECT
@@ -543,7 +504,7 @@ function buildSourceSummarySql(input: {
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
-      AND ${requestCategoryFilter(input.source)}
+      AND ${requestDispositionFilter(input.source)}
     FORMAT JSONEachRow
   `;
 }
@@ -557,8 +518,8 @@ function buildDimensionSql(input: {
 }) {
   const fromSeconds = Math.floor(input.from / 1000);
   const toSeconds = Math.ceil(input.to / 1000);
-  const abnormal = input.source === "abnormal";
-  const fields: Record<string, string[]> = abnormal
+  const blocked = input.source === "blocked";
+  const fields: Record<string, string[]> = blocked
     ? {
         reason: ["blob3 AS label"],
         category: ["blob2 AS label"],
@@ -600,7 +561,7 @@ function buildDimensionSql(input: {
   if (!columns || !DIMENSION_TABS[input.group].includes(input.tab))
     throw new Error("Invalid analytics dimension");
   const groupBy = columns.map((column) => column.split(" AS ")[1]).join(", ");
-  return `SELECT ${columns.join(", ")}, max(_sample_interval) AS maxSampleInterval, sum(_sample_interval) AS count${abnormal ? ", sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat" : ", 0 AS highThreat"} FROM ${REQUEST_ANALYTICS_DATASET} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds}) AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND ${requestCategoryFilter(input.source)} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
+  return `SELECT ${columns.join(", ")}, max(_sample_interval) AS maxSampleInterval, sum(_sample_interval) AS count, sumIf(_sample_interval, blob2 = 'bot') AS botCount FROM ${REQUEST_ANALYTICS_DATASET} WHERE timestamp >= toDateTime(${fromSeconds}) AND timestamp <= toDateTime(${toSeconds}) AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION} AND ${requestDispositionFilter(input.source)} GROUP BY ${groupBy} ORDER BY count DESC LIMIT 30 FORMAT JSONEachRow`;
 }
 
 function buildReasonSummarySql(input: { from: number; to: number }) {
@@ -615,7 +576,7 @@ function buildReasonSummarySql(input: { from: number; to: number }) {
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
-      AND ${requestCategoryFilter("abnormal")}
+      AND ${requestDispositionFilter("blocked")}
     GROUP BY reasons
     ORDER BY weight DESC
     LIMIT 100
@@ -632,12 +593,12 @@ function buildAsnSummarySql(input: { from: number; to: number }) {
       blob14 AS asOrganization,
       max(_sample_interval) AS maxSampleInterval,
       sum(_sample_interval) AS count,
-      sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat
+      sumIf(_sample_interval, blob2 = 'bot') AS botCount
     FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${fromSeconds})
       AND timestamp <= toDateTime(${toSeconds})
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
-      AND ${requestCategoryFilter("abnormal")}
+      AND ${requestDispositionFilter("blocked")}
     GROUP BY asn, asOrganization
     ORDER BY count DESC
     LIMIT 30
@@ -660,7 +621,6 @@ function buildRequestAnalyticsDetailSql(input: {
     FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE timestamp >= toDateTime(${sinceSeconds})
       AND double20 = ${REQUEST_ANALYTICS_SCHEMA_VERSION}
-      AND ${requestCategoryFilter("abnormal")}
       AND (${identityFilters.join(" OR ") || "0"})
     ORDER BY timestamp DESC, receivedAt DESC
     LIMIT 1
@@ -674,6 +634,36 @@ function emptyRequestObservationResponse(
   error: string,
 ) {
   const now = Date.now();
+  const emptySummary = {
+    total: 0,
+    normalRequests: 0,
+    suspectedBotRequests: 0,
+    botRequests: 0,
+    customBlockedRequests: 0,
+    includedRequests: 0,
+    blockedRequests: 0,
+    affectedSites: 0,
+    uniqueAsns: 0,
+    uniqueCountries: 0,
+  };
+  const emptyPartition = {
+    summary: {
+      ...emptySummary,
+      ratio: 0,
+      pageviews: 0,
+      customEvents: 0,
+      avgLatencyMs: null,
+      p50LatencyMs: null,
+      p75LatencyMs: null,
+      p95LatencyMs: null,
+      p99LatencyMs: null,
+    },
+    mapPoints: [],
+    events: [],
+    hasMore: false,
+    nextCursor: null,
+    dimensions: { network: {} },
+  };
   return {
     ok: true,
     configured: false,
@@ -691,17 +681,7 @@ function emptyRequestObservationResponse(
     error,
     events: [],
     normalEvents: [],
-    summary: {
-      total: 0,
-      baselineRequests: 0,
-      botRequestRatio: 0,
-      highThreat: 0,
-      mediumThreat: 0,
-      customBlocked: 0,
-      affectedSites: 0,
-      uniqueAsns: 0,
-      uniqueCountries: 0,
-    },
+    summary: emptySummary,
     mapPoints: [],
     trend: [],
     reasons: [],
@@ -709,9 +689,14 @@ function emptyRequestObservationResponse(
     asns: [],
     overview: {
       totalRequests: 0,
+      includedRequests: 0,
+      blockedRequests: 0,
       normalRequests: 0,
-      abnormalRequests: 0,
-      abnormalRequestRatio: 0,
+      suspectedBotRequests: 0,
+      botRequests: 0,
+      customBlockedRequests: 0,
+      botRequestRatio: 0,
+      blockedRequestRatio: 0,
       normalRequestRatio: 0,
       pageviews: 0,
       customEvents: 0,
@@ -721,38 +706,8 @@ function emptyRequestObservationResponse(
       p95LatencyMs: null,
       p99LatencyMs: null,
     },
-    abnormal: {
-      summary: {
-        total: 0,
-        ratio: 0,
-        highThreat: 0,
-        mediumThreat: 0,
-        customBlocked: 0,
-        affectedSites: 0,
-        uniqueAsns: 0,
-        uniqueCountries: 0,
-      },
-      mapPoints: [],
-      events: [],
-    },
-    normal: {
-      summary: {
-        total: 0,
-        ratio: 0,
-        pageviews: 0,
-        customEvents: 0,
-        affectedSites: 0,
-        uniqueAsns: 0,
-        uniqueCountries: 0,
-        avgLatencyMs: null,
-        p50LatencyMs: null,
-        p75LatencyMs: null,
-        p95LatencyMs: null,
-        p99LatencyMs: null,
-      },
-      mapPoints: [],
-      events: [],
-    },
+    blocked: emptyPartition,
+    included: emptyPartition,
   };
 }
 
@@ -776,16 +731,17 @@ function parseJsonEachRow(text: string): Record<string, unknown>[] {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-function requestAnalyticsFlagPresent(
-  value: unknown,
-  flag: (typeof REQUEST_ANALYTICS_FLAGS)[keyof typeof REQUEST_ANALYTICS_FLAGS],
-): boolean {
-  return hasRequestFlag(Math.trunc(toFiniteNumber(value)), flag);
+function requestAnalyticsFlagPresent(value: unknown, flag: number): boolean {
+  return hasRequestFlag(
+    Math.trunc(toFiniteNumber(value)),
+    flag as (typeof REQUEST_ANALYTICS_FLAGS)[keyof typeof REQUEST_ANALYTICS_FLAGS],
+  );
 }
 
-function normalizeAbnormalRow(
+function normalizeRequestRow(
   row: Record<string, unknown>,
   sites: Map<string, { name: string; domain: string }>,
+  fallbackCategory: RequestObservationCategory = "normal",
 ): RequestObservationEvent {
   const siteId = clampString(String(row.siteId || ""), 128);
   const site = sites.get(siteId);
@@ -796,14 +752,32 @@ function normalizeAbnormalRow(
   const flags = Math.trunc(toFiniteNumber(row.flags));
   const botScore = toFiniteNumber(row.botScore, Number.NaN);
   const receivedAt = toFiniteNumber(row.receivedAt);
+  const eventAt = toFiniteNumber(row.eventAt);
+  const schemaVersion = Math.trunc(toFiniteNumber(row.schemaVersion));
+  const rawEdgeLatencyMs = toFiniteNumber(row.edgeLatencyMs, Number.NaN);
+  const edgeLatencyMs =
+    schemaVersion === REQUEST_ANALYTICS_SCHEMA_VERSION &&
+    requestAnalyticsFlagPresent(
+      flags,
+      REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent,
+    ) &&
+    Number.isFinite(rawEdgeLatencyMs) &&
+    rawEdgeLatencyMs >= 0 &&
+    rawEdgeLatencyMs <= MAX_WORKER_LATENCY_MS
+      ? rawEdgeLatencyMs
+      : null;
   return {
     timestamp: clampString(String(row.timestamp || ""), 64),
     receivedAt,
+    eventAt,
+    edgeLatencyMs,
+    schemaVersion,
     siteId,
     siteName: clampString(site?.name || siteId || "Unknown site", 160),
     siteDomain: clampString(site?.domain || "", 255),
     kind: clampString(String(row.kind || ""), 40),
-    category: normalizeObservationCategory(row.category) ?? "custom_block",
+    category: normalizeObservationCategory(row.category) ?? fallbackCategory,
+    disposition: normalizeObservationDisposition(row.disposition, flags),
     reasons,
     ip: clampString(String(row.ip || ""), 80),
     userAgent: clampString(String(row.userAgent || ""), 1024),
@@ -847,90 +821,19 @@ function normalizeAbnormalRow(
   };
 }
 
-function normalizeNormalRow(
-  row: Record<string, unknown>,
-  sites: Map<string, { name: string; domain: string }>,
-): RequestObservationNormalEvent {
-  const siteId = clampString(String(row.siteId || ""), 128);
-  const site = sites.get(siteId);
-  const receivedAt = toFiniteNumber(row.receivedAt);
-  const eventAt = toFiniteNumber(row.eventAt);
-  const schemaVersion = Math.trunc(toFiniteNumber(row.schemaVersion));
-  const flags = Math.trunc(toFiniteNumber(row.flags));
-  const rawEdgeLatencyMs = toFiniteNumber(row.edgeLatencyMs, Number.NaN);
-  const edgeLatencyMs =
-    schemaVersion === REQUEST_ANALYTICS_SCHEMA_VERSION &&
-    requestAnalyticsFlagPresent(
-      flags,
-      REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent,
-    ) &&
-    Number.isFinite(rawEdgeLatencyMs) &&
-    rawEdgeLatencyMs >= 0 &&
-    rawEdgeLatencyMs <= MAX_WORKER_LATENCY_MS
-      ? rawEdgeLatencyMs
-      : null;
-  return {
-    timestamp: clampString(String(row.timestamp || ""), 64),
-    receivedAt,
-    eventAt,
-    edgeLatencyMs,
-    schemaVersion,
-    siteId,
-    siteName: clampString(site?.name || siteId || "Unknown site", 160),
-    siteDomain: clampString(site?.domain || "", 255),
-    kind: clampString(String(row.kind || ""), 40),
-    origin: clampString(String(row.origin || ""), 255),
-    hostname: clampString(String(row.hostname || ""), 255),
-    pathname: clampString(String(row.pathname || ""), 2048),
-    country: clampString(String(row.country || ""), 10),
-    region: clampString(String(row.region || ""), 128),
-    city: clampString(String(row.city || ""), 128),
-    continent: clampString(String(row.continent || ""), 32),
-    colo: clampString(String(row.colo || ""), 16),
-    asn: Math.trunc(toFiniteNumber(row.asn)),
-    asOrganization: clampString(String(row.asOrganization || ""), 255),
-    rayId: clampString(String(row.rayId || ""), 120),
-    traceId: clampString(String(row.traceId || ""), 128),
-    requestMethod: clampString(String(row.requestMethod || ""), 16),
-    metadataJson: clampString(String(row.metadataJson || ""), 8000),
-    latitude: requestAnalyticsFlagPresent(
-      flags,
-      REQUEST_ANALYTICS_FLAGS.coordinatePresent,
-    )
-      ? toNullableCoordinate(row.latitude)
-      : null,
-    longitude: requestAnalyticsFlagPresent(
-      flags,
-      REQUEST_ANALYTICS_FLAGS.coordinatePresent,
-    )
-      ? toNullableCoordinate(row.longitude)
-      : null,
-    userAgentLength: Math.trunc(toFiniteNumber(row.userAgentLength)),
-    flags,
-  };
-}
-
-function serializeAbnormalListEvent(event: RequestObservationEvent) {
+function serializeListEvent(event: RequestObservationEvent) {
   const {
     metadataJson: _metadataJson,
     requestMethod: _requestMethod,
     httpProtocol: _httpProtocol,
     flags: _flags,
+    schemaVersion: _schemaVersion,
     ...listEvent
   } = event;
   return listEvent;
 }
 
-function serializeNormalListEvent(event: RequestObservationNormalEvent) {
-  // Normal requests open their Drawer from the selected list row, so retain
-  // the compact metadata payload instead of requiring a second detail query.
-  const { schemaVersion: _schemaVersion, flags: _flags, ...listEvent } = event;
-  return listEvent;
-}
-
-function detailCursorForEvent(
-  event: RequestObservationEvent | RequestObservationNormalEvent,
-): DetailCursor {
+function detailCursorForEvent(event: RequestObservationEvent): DetailCursor {
   return {
     timestamp: event.timestamp,
     receivedAt: event.receivedAt,
@@ -964,10 +867,7 @@ function bucketTimestamp(
   return startOfZonedInterval(timestampMs, interval, timeZone);
 }
 
-async function siteLookup(
-  env: Env,
-  events: Array<RequestObservationEvent | RequestObservationNormalEvent>,
-) {
+async function siteLookup(env: Env, events: RequestObservationEvent[]) {
   const ids = [...new Set(events.map((event) => event.siteId).filter(Boolean))];
   return siteLookupByIds(env, ids);
 }
@@ -1045,7 +945,7 @@ function normalizeNetworkDimensionRows(rows: Record<string, unknown>[]) {
       key: [label, country, region].join("\u0000"),
       label,
       count: Math.max(0, Math.trunc(toFiniteNumber(row.count))),
-      highThreat: Math.max(0, Math.trunc(toFiniteNumber(row.highThreat))),
+      botCount: Math.max(0, Math.trunc(toFiniteNumber(row.botCount))),
       country,
       region,
     };
@@ -1075,7 +975,7 @@ function normalizeReasonRows(rows: Record<string, unknown>[]) {
 function normalizeAsnRows(rows: Record<string, unknown>[]) {
   const asns = new Map<
     number,
-    { asn: number; asOrganization: string; count: number }
+    { asn: number; asOrganization: string; count: number; botCount: number }
   >();
   for (const row of rows) {
     const asn = Math.trunc(toFiniteNumber(row.asn ?? row.label));
@@ -1084,8 +984,10 @@ function normalizeAsnRows(rows: Record<string, unknown>[]) {
       asn,
       asOrganization: "",
       count: 0,
+      botCount: 0,
     };
     current.count += Math.max(0, toFiniteNumber(row.count));
+    current.botCount += Math.max(0, toFiniteNumber(row.botCount));
     if (!current.asOrganization) {
       current.asOrganization = clampString(
         String(row.asOrganization || ""),
@@ -1097,71 +999,11 @@ function normalizeAsnRows(rows: Record<string, unknown>[]) {
   return [...asns.values()]
     .sort((left, right) => right.count - left.count)
     .slice(0, 30)
-    .map((row) => ({ ...row, count: Math.max(0, Math.trunc(row.count)) }));
-}
-
-function aggregateNormalEvents(events: RequestObservationNormalEvent[]) {
-  const uniqueAsns = new Set(events.map((event) => event.asn).filter(Boolean));
-  const uniqueCountries = new Set(
-    events.map((event) => event.country).filter(Boolean),
-  );
-  const affectedSites = new Set(
-    events.map((event) => event.siteId).filter(Boolean),
-  );
-  const latencyValues = events
-    .filter(
-      (event) =>
-        event.schemaVersion === REQUEST_ANALYTICS_SCHEMA_VERSION &&
-        requestAnalyticsFlagPresent(
-          event.flags,
-          REQUEST_ANALYTICS_FLAGS.edgeLatencyPresent,
-        ),
-    )
-    .map((event) => event.edgeLatencyMs)
-    .filter(
-      (value): value is number =>
-        typeof value === "number" &&
-        Number.isFinite(value) &&
-        value >= 0 &&
-        value <= MAX_WORKER_LATENCY_MS,
-    )
-    .sort((left, right) => left - right);
-  const avgLatencyMs =
-    latencyValues.length > 0
-      ? latencyValues.reduce((sum, value) => sum + value, 0) /
-        latencyValues.length
-      : null;
-  const p50LatencyMs = percentile(latencyValues, 0.5);
-  const p75LatencyMs = percentile(latencyValues, 0.75);
-  const p95LatencyMs = percentile(latencyValues, 0.95);
-  const p99LatencyMs = percentile(latencyValues, 0.99);
-  return {
-    total: events.length,
-    pageviews: events.filter((event) => event.kind === "pageview").length,
-    customEvents: events.filter((event) => event.kind === "custom_event")
-      .length,
-    affectedSites: affectedSites.size,
-    uniqueAsns: uniqueAsns.size,
-    uniqueCountries: uniqueCountries.size,
-    avgLatencyMs,
-    p50LatencyMs,
-    p75LatencyMs,
-    p95LatencyMs,
-    p99LatencyMs,
-  };
-}
-
-function percentile(
-  sortedValues: number[],
-  percentileValue: number,
-): number | null {
-  if (sortedValues.length === 0) return null;
-  return sortedValues[
-    Math.min(
-      sortedValues.length - 1,
-      Math.ceil(sortedValues.length * percentileValue) - 1,
-    )
-  ];
+    .map((row) => ({
+      ...row,
+      count: Math.max(0, Math.trunc(row.count)),
+      botCount: Math.max(0, Math.trunc(row.botCount)),
+    }));
 }
 
 function normalizeLatencySummary(row: Record<string, unknown>) {
@@ -1208,25 +1050,24 @@ function mergeTrendRows(input: {
   bucketMs: number;
   interval: RequestObservationInterval;
   timeZone: string;
-  abnormalRows: Record<string, unknown>[];
-  normalRows: Record<string, unknown>[];
-  normalEvents?: RequestObservationNormalEvent[];
+  blockedRows: Record<string, unknown>[];
+  includedRows: Record<string, unknown>[];
 }) {
   const trend = new Map<
     number,
     {
       timestampMs: number;
       count: number;
-      baselineCount: number;
       normalCount: number;
-      abnormalCount: number;
+      suspectedBotCount: number;
+      botCount: number;
+      customBlockedCount: number;
+      includedCount: number;
+      blockedCount: number;
       totalCount: number;
       botRatio: number;
-      abnormalRatio: number;
+      blockedRatio: number;
       normalRatio: number;
-      mediumThreatCount: number;
-      highThreatCount: number;
-      customBlockedCount: number;
       pageviews: number;
       customEvents: number;
       pageviewCount: number;
@@ -1253,16 +1094,16 @@ function mergeTrendRows(input: {
     trend.set(timestampMs, {
       timestampMs,
       count: 0,
-      baselineCount: 0,
       normalCount: 0,
-      abnormalCount: 0,
+      suspectedBotCount: 0,
+      botCount: 0,
+      customBlockedCount: 0,
+      includedCount: 0,
+      blockedCount: 0,
       totalCount: 0,
       botRatio: 0,
-      abnormalRatio: 0,
+      blockedRatio: 0,
       normalRatio: 0,
-      mediumThreatCount: 0,
-      highThreatCount: 0,
-      customBlockedCount: 0,
       pageviews: 0,
       customEvents: 0,
       pageviewCount: 0,
@@ -1280,111 +1121,117 @@ function mergeTrendRows(input: {
       p99LatencyMs: null,
     });
   }
-  for (const row of input.abnormalRows) {
-    const timestampMs = bucketTimestamp(
-      Math.floor(toFiniteNumber(row.timestampMs)),
-      input.interval,
-      input.timeZone,
-    );
-    const current = trend.get(timestampMs);
-    if (!current) continue;
-    const weightedRequestCount = Math.max(
-      0,
-      toFiniteNumber(row.weightedRequestCount, toFiniteNumber(row.count)),
-    );
-    current.abnormalCount = weightedRequestCount;
-    current.count = current.abnormalCount;
-    current.weightedRequestCount += weightedRequestCount;
-    current.mediumThreatCount = Math.max(
-      0,
-      toFiniteNumber(row.mediumThreatCount),
-    );
-    current.highThreatCount = Math.max(0, toFiniteNumber(row.highThreatCount));
-    current.customBlockedCount = Math.max(
-      0,
-      toFiniteNumber(row.customBlockedCount),
-    );
-    current.pageviews += Math.max(0, toFiniteNumber(row.pageviews));
-    current.customEvents += Math.max(0, toFiniteNumber(row.customEvents));
-  }
-  for (const row of input.normalRows) {
-    const timestampMs = bucketTimestamp(
-      Math.floor(toFiniteNumber(row.timestampMs)),
-      input.interval,
-      input.timeZone,
-    );
-    const current = trend.get(timestampMs);
-    if (!current) continue;
-    const weightedRequestCount = Math.max(
-      0,
-      toFiniteNumber(row.weightedRequestCount, toFiniteNumber(row.count)),
-    );
-    current.normalCount = weightedRequestCount;
-    current.baselineCount = current.normalCount;
-    current.weightedRequestCount += weightedRequestCount;
-    current.pageviews += Math.max(0, toFiniteNumber(row.pageviews));
-    current.customEvents += Math.max(0, toFiniteNumber(row.customEvents));
-    current.pageviewCount += Math.max(
-      0,
-      toFiniteNumber(row.pageviewCount, toFiniteNumber(row.pageviews)),
-    );
-    current.leaveCount += Math.max(0, toFiniteNumber(row.leaveCount));
-    current.visibilityCount += Math.max(0, toFiniteNumber(row.visibilityCount));
-    current.customEventCount += Math.max(
-      0,
-      toFiniteNumber(row.customEventCount, toFiniteNumber(row.customEvents)),
-    );
-    current.identifyCount += Math.max(0, toFiniteNumber(row.identifyCount));
-    const latencyWeightedSumMs = toFiniteNumber(
-      row.latencyWeightedSumMs,
-      Number.NaN,
-    );
-    const latencySampleWeight = toFiniteNumber(
-      row.latencySampleWeight,
-      Number.NaN,
-    );
-    if (
-      Number.isFinite(latencyWeightedSumMs) &&
-      latencyWeightedSumMs >= 0 &&
-      Number.isFinite(latencySampleWeight) &&
-      latencySampleWeight > 0
-    ) {
-      current.latencyWeightedSumMs = latencyWeightedSumMs;
-      current.latencySampleWeight = latencySampleWeight;
+  const addRows = (rows: Record<string, unknown>[], source: DetailSource) => {
+    for (const row of rows) {
+      const timestampMs = bucketTimestamp(
+        Math.floor(toFiniteNumber(row.timestampMs)),
+        input.interval,
+        input.timeZone,
+      );
+      const current = trend.get(timestampMs);
+      if (!current) continue;
+      const weightedRequestCount = Math.max(
+        0,
+        toFiniteNumber(row.weightedRequestCount, toFiniteNumber(row.count)),
+      );
+      const categoryCounts = {
+        normalCount: Math.max(0, toFiniteNumber(row.normalCount)),
+        suspectedBotCount: Math.max(0, toFiniteNumber(row.suspectedBotCount)),
+        botCount: Math.max(0, toFiniteNumber(row.botCount)),
+        customBlockedCount: Math.max(0, toFiniteNumber(row.customBlockedCount)),
+      };
+      const categoryTotal = Object.values(categoryCounts).reduce(
+        (sum, value) => sum + value,
+        0,
+      );
+      current.normalCount += categoryCounts.normalCount;
+      current.suspectedBotCount += categoryCounts.suspectedBotCount;
+      current.botCount += categoryCounts.botCount;
+      current.customBlockedCount += categoryCounts.customBlockedCount;
+      const includedCount = Math.max(
+        0,
+        toFiniteNumber(
+          row.includedCount,
+          source === "included" ? weightedRequestCount : 0,
+        ),
+      );
+      const blockedCount = Math.max(
+        0,
+        toFiniteNumber(
+          row.blockedCount,
+          source === "blocked" ? weightedRequestCount : 0,
+        ),
+      );
+      current.includedCount += includedCount;
+      current.blockedCount += blockedCount;
+      if (categoryTotal === 0 && weightedRequestCount > 0) {
+        if (source === "included")
+          current.includedCount += weightedRequestCount - includedCount;
+        else current.blockedCount += weightedRequestCount - blockedCount;
+      }
+      current.weightedRequestCount += weightedRequestCount;
+      current.pageviews += Math.max(0, toFiniteNumber(row.pageviews));
+      current.customEvents += Math.max(0, toFiniteNumber(row.customEvents));
+      current.pageviewCount += Math.max(0, toFiniteNumber(row.pageviewCount));
+      current.leaveCount += Math.max(0, toFiniteNumber(row.leaveCount));
+      current.visibilityCount += Math.max(
+        0,
+        toFiniteNumber(row.visibilityCount),
+      );
+      current.customEventCount += Math.max(
+        0,
+        toFiniteNumber(row.customEventCount),
+      );
+      current.identifyCount += Math.max(0, toFiniteNumber(row.identifyCount));
+      const latencyWeightedSumMs = toFiniteNumber(
+        row.latencyWeightedSumMs,
+        Number.NaN,
+      );
+      const latencySampleWeight = toFiniteNumber(
+        row.latencySampleWeight,
+        Number.NaN,
+      );
+      if (
+        Number.isFinite(latencyWeightedSumMs) &&
+        latencyWeightedSumMs >= 0 &&
+        Number.isFinite(latencySampleWeight) &&
+        latencySampleWeight > 0
+      ) {
+        current.latencyWeightedSumMs += latencyWeightedSumMs;
+        current.latencySampleWeight += latencySampleWeight;
+        current.p50LatencyMs = toFiniteNumber(
+          row.p50LatencyMs,
+          current.p50LatencyMs ?? Number.NaN,
+        );
+        current.p75LatencyMs = toFiniteNumber(
+          row.p75LatencyMs,
+          current.p75LatencyMs ?? Number.NaN,
+        );
+        current.p95LatencyMs = toFiniteNumber(
+          row.p95LatencyMs,
+          current.p95LatencyMs ?? Number.NaN,
+        );
+        current.p99LatencyMs = toFiniteNumber(
+          row.p99LatencyMs,
+          current.p99LatencyMs ?? Number.NaN,
+        );
+      }
     }
-    const p50LatencyMs = toFiniteNumber(row.p50LatencyMs, Number.NaN);
-    const p75LatencyMs = toFiniteNumber(row.p75LatencyMs, Number.NaN);
-    const p95LatencyMs = toFiniteNumber(row.p95LatencyMs, Number.NaN);
-    const p99LatencyMs = toFiniteNumber(row.p99LatencyMs, Number.NaN);
-    current.avgLatencyMs =
-      current.latencySampleWeight > 0
-        ? current.latencyWeightedSumMs / current.latencySampleWeight
-        : null;
-    current.p50LatencyMs = Number.isFinite(p50LatencyMs)
-      ? p50LatencyMs
-      : current.avgLatencyMs;
-    current.p75LatencyMs = Number.isFinite(p75LatencyMs)
-      ? p75LatencyMs
-      : Number.isFinite(p95LatencyMs)
-        ? p95LatencyMs
-        : null;
-    current.p95LatencyMs = Number.isFinite(p95LatencyMs) ? p95LatencyMs : null;
-    current.p99LatencyMs = Number.isFinite(p99LatencyMs)
-      ? p99LatencyMs
-      : current.p95LatencyMs;
-  }
+  };
+  addRows(input.blockedRows, "blocked");
+  addRows(input.includedRows, "included");
   return [...trend.values()].map((point) => {
-    const totalCount = point.normalCount + point.abnormalCount;
+    const totalCount = point.includedCount + point.blockedCount;
     point.count = totalCount;
+    point.totalCount = totalCount;
     point.avgLatencyMs =
       point.latencySampleWeight > 0
         ? point.latencyWeightedSumMs / point.latencySampleWeight
         : null;
     return {
       ...point,
-      totalCount,
-      botRatio: totalCount > 0 ? point.abnormalCount / totalCount : 0,
-      abnormalRatio: totalCount > 0 ? point.abnormalCount / totalCount : 0,
+      botRatio: totalCount > 0 ? point.botCount / totalCount : 0,
+      blockedRatio: totalCount > 0 ? point.blockedCount / totalCount : 0,
       normalRatio: totalCount > 0 ? point.normalCount / totalCount : 0,
     };
   });
@@ -1553,11 +1400,11 @@ export async function handleRequestObservationAdmin(
     }
 
     const preliminaryEvents = detailRows.map((row) =>
-      normalizeAbnormalRow(row, new Map()),
+      normalizeRequestRow(row, new Map()),
     );
     const sites = await siteLookup(env, preliminaryEvents);
     const detail = detailRows[0]
-      ? normalizeAbnormalRow(detailRows[0], sites)
+      ? normalizeRequestRow(detailRows[0], sites)
       : null;
     return jsonResponseFor(req, {
       ok: true,
@@ -1578,7 +1425,7 @@ export async function handleRequestObservationAdmin(
   }
 
   const pageSource = url.searchParams.get("page");
-  if (pageSource === "abnormal" || pageSource === "normal") {
+  if (pageSource === "blocked" || pageSource === "included") {
     const source: DetailSource = pageSource;
     const cursor = parseDetailCursor(url);
     if (url.searchParams.has("cursor") && !cursor) {
@@ -1621,15 +1468,11 @@ export async function handleRequestObservationAdmin(
     const hasMore = pageRows.length > pageLimit;
     const rows = pageRows.slice(0, pageLimit);
     const preliminaryEvents = rows.map((row) =>
-      source === "abnormal"
-        ? normalizeAbnormalRow(row, new Map())
-        : normalizeNormalRow(row, new Map()),
+      normalizeRequestRow(row, new Map()),
     );
     const sites = await siteLookup(env, preliminaryEvents);
     const events = rows.map((row) =>
-      source === "abnormal"
-        ? serializeAbnormalListEvent(normalizeAbnormalRow(row, sites))
-        : serializeNormalListEvent(normalizeNormalRow(row, sites)),
+      serializeListEvent(normalizeRequestRow(row, sites)),
     );
     const lastEvent = preliminaryEvents[preliminaryEvents.length - 1];
     return jsonResponseFor(req, {
@@ -1659,9 +1502,15 @@ export async function handleRequestObservationAdmin(
   const dimensionSource = url.searchParams.get("dimensionSource");
   if (
     dimensionGroup &&
-    (dimensionSource === "abnormal" || dimensionSource === "normal")
+    (dimensionSource === "blocked" || dimensionSource === "included")
   ) {
-    if (!DIMENSION_TABS[dimensionGroup]?.includes(dimensionTab)) {
+    const dimensionTabs =
+      dimensionSource === "blocked" ||
+      dimensionGroup === "target" ||
+      dimensionGroup === "network"
+        ? DIMENSION_TABS[dimensionGroup]
+        : [];
+    if (!dimensionTabs?.includes(dimensionTab)) {
       return bad(
         "Invalid request observation dimension",
         "request_observation_invalid_dimension",
@@ -1737,7 +1586,7 @@ export async function handleRequestObservationAdmin(
     from,
     to,
     limit: limit + 1,
-    source: "abnormal",
+    source: "blocked",
   });
   const result = await queryCloudflareAnalyticsEngine({
     apiUrl: analyticsApiUrl,
@@ -1753,29 +1602,29 @@ export async function handleRequestObservationAdmin(
     );
   }
 
-  const normalSql = buildRequestAnalyticsSql({
+  const includedSql = buildRequestAnalyticsSql({
     from,
     to,
     limit: limit + 1,
-    source: "normal",
+    source: "included",
   });
-  const normalResult = await queryCloudflareAnalyticsEngine({
+  const includedResult = await queryCloudflareAnalyticsEngine({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
-    sql: normalSql,
+    sql: includedSql,
   });
-  if (!normalResult.ok) {
+  if (!includedResult.ok) {
     return bad(
-      cloudflareAnalyticsErrorMessage(normalResult),
+      cloudflareAnalyticsErrorMessage(includedResult),
       "request_observation_query_failed",
       req,
     );
   }
 
-  let rawRows: Record<string, unknown>[];
+  let blockedRawRows: Record<string, unknown>[];
   try {
-    rawRows = parseJsonEachRow(result.body);
+    blockedRawRows = parseJsonEachRow(result.body);
   } catch {
     return bad(
       "Cloudflare Analytics Engine returned invalid JSONEachRow data",
@@ -1784,9 +1633,9 @@ export async function handleRequestObservationAdmin(
     );
   }
 
-  let normalRawRows: Record<string, unknown>[];
+  let includedRawRows: Record<string, unknown>[];
   try {
-    normalRawRows = parseJsonEachRow(normalResult.body);
+    includedRawRows = parseJsonEachRow(includedResult.body);
   } catch {
     return bad(
       "Cloudflare Analytics Engine returned invalid JSONEachRow data",
@@ -1795,32 +1644,34 @@ export async function handleRequestObservationAdmin(
     );
   }
 
-  const abnormalHasMore = rawRows.length > limit;
-  const normalHasMore = normalRawRows.length > limit;
-  rawRows = rawRows.slice(0, limit);
-  normalRawRows = normalRawRows.slice(0, limit);
+  const blockedHasMore = blockedRawRows.length > limit;
+  const includedHasMore = includedRawRows.length > limit;
+  blockedRawRows = blockedRawRows.slice(0, limit);
+  includedRawRows = includedRawRows.slice(0, limit);
 
-  const preliminaryEvents = rawRows.map((row) =>
-    normalizeAbnormalRow(row, new Map()),
+  const preliminaryBlockedEvents = blockedRawRows.map((row) =>
+    normalizeRequestRow(row, new Map()),
   );
-  const preliminaryNormalEvents = normalRawRows.map((row) =>
-    normalizeNormalRow(row, new Map()),
+  const preliminaryIncludedEvents = includedRawRows.map((row) =>
+    normalizeRequestRow(row, new Map()),
   );
   const sites = await siteLookup(env, [
-    ...preliminaryEvents,
-    ...preliminaryNormalEvents,
+    ...preliminaryBlockedEvents,
+    ...preliminaryIncludedEvents,
   ]);
-  const events = rawRows.map((row) => normalizeAbnormalRow(row, sites));
-  const normalEvents = normalRawRows.map((row) =>
-    normalizeNormalRow(row, sites),
+  const blockedEvents = blockedRawRows.map((row) =>
+    normalizeRequestRow(row, sites),
   );
-  const abnormalNextCursor = abnormalHasMore
-    ? detailCursorForEvent(events[events.length - 1])
+  const includedEvents = includedRawRows.map((row) =>
+    normalizeRequestRow(row, sites),
+  );
+  const blockedNextCursor = blockedHasMore
+    ? detailCursorForEvent(blockedEvents[blockedEvents.length - 1])
     : null;
-  const normalNextCursor = normalHasMore
-    ? detailCursorForEvent(normalEvents[normalEvents.length - 1])
+  const includedNextCursor = includedHasMore
+    ? detailCursorForEvent(includedEvents[includedEvents.length - 1])
     : null;
-  const abnormalTrendResult = await queryAnalyticsRows({
+  const blockedTrendResult = await queryAnalyticsRows({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
@@ -1830,17 +1681,17 @@ export async function handleRequestObservationAdmin(
       bucketMs,
       interval,
       timeZone,
-      source: "abnormal",
+      source: "blocked",
     }),
   });
-  if (!abnormalTrendResult.ok) {
+  if (!blockedTrendResult.ok) {
     return bad(
-      cloudflareAnalyticsErrorMessage(abnormalTrendResult),
+      cloudflareAnalyticsErrorMessage(blockedTrendResult),
       "request_observation_query_failed",
       req,
     );
   }
-  const normalTrendResult = await queryAnalyticsRows({
+  const includedTrendResult = await queryAnalyticsRows({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
@@ -1850,66 +1701,66 @@ export async function handleRequestObservationAdmin(
       bucketMs,
       interval,
       timeZone,
-      source: "normal",
+      source: "included",
       includeLatency: true,
     }),
   });
-  if (!normalTrendResult.ok) {
+  if (!includedTrendResult.ok) {
     return bad(
-      cloudflareAnalyticsErrorMessage(normalTrendResult),
+      cloudflareAnalyticsErrorMessage(includedTrendResult),
       "request_observation_query_failed",
       req,
     );
   }
-  const abnormalMapResult = await queryAnalyticsRows({
+  const blockedMapResult = await queryAnalyticsRows({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: buildMapPointsSql({
       from,
       to,
-      source: "abnormal",
+      source: "blocked",
       limit: 500,
     }),
   });
-  if (!abnormalMapResult.ok) {
+  if (!blockedMapResult.ok) {
     return bad(
-      cloudflareAnalyticsErrorMessage(abnormalMapResult),
+      cloudflareAnalyticsErrorMessage(blockedMapResult),
       "request_observation_query_failed",
       req,
     );
   }
-  const normalMapResult = await queryAnalyticsRows({
+  const includedMapResult = await queryAnalyticsRows({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: buildMapPointsSql({
       from,
       to,
-      source: "normal",
+      source: "included",
       limit: 500,
     }),
   });
-  if (!normalMapResult.ok) {
+  if (!includedMapResult.ok) {
     return bad(
-      cloudflareAnalyticsErrorMessage(normalMapResult),
+      cloudflareAnalyticsErrorMessage(includedMapResult),
       "request_observation_query_failed",
       req,
     );
   }
 
-  const normalSummaryPromise = queryAnalyticsRows({
+  const includedSummaryPromise = queryAnalyticsRows({
     apiUrl: analyticsApiUrl,
     accountId: config.accountId,
     token,
     sql: buildSourceSummarySql({
       from,
       to,
-      source: "normal",
+      source: "included",
       includeLatency: true,
     }),
   });
-  const [abnormalSummaryResult, normalSummaryResult] = await Promise.all([
+  const [blockedSummaryResult, includedSummaryResult] = await Promise.all([
     queryAnalyticsRows({
       apiUrl: analyticsApiUrl,
       accountId: config.accountId,
@@ -1917,21 +1768,21 @@ export async function handleRequestObservationAdmin(
       sql: buildSourceSummarySql({
         from,
         to,
-        source: "abnormal",
+        source: "blocked",
       }),
     }),
-    normalSummaryPromise,
+    includedSummaryPromise,
   ]);
-  if (!abnormalSummaryResult.ok) {
+  if (!blockedSummaryResult.ok) {
     return bad(
-      cloudflareAnalyticsErrorMessage(abnormalSummaryResult),
+      cloudflareAnalyticsErrorMessage(blockedSummaryResult),
       "request_observation_query_failed",
       req,
     );
   }
-  if (!normalSummaryResult.ok) {
+  if (!includedSummaryResult.ok) {
     return bad(
-      cloudflareAnalyticsErrorMessage(normalSummaryResult),
+      cloudflareAnalyticsErrorMessage(includedSummaryResult),
       "request_observation_query_failed",
       req,
     );
@@ -1970,46 +1821,62 @@ export async function handleRequestObservationAdmin(
       req,
     );
   }
-  const abnormalSummaryRow = abnormalSummaryResult.rows[0] ?? {};
-  const normalSummaryRow = normalSummaryResult.rows[0] ?? {};
-  const abnormalSummaryValues = {
-    highThreat: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(abnormalSummaryRow.highThreat)),
+  const blockedSummaryRow = blockedSummaryResult.rows[0] ?? {};
+  const includedSummaryRow = includedSummaryResult.rows[0] ?? {};
+  const weightedSummaryValue = (row: Record<string, unknown>, key: string) =>
+    Math.max(0, toFiniteNumber(row[key]));
+  const distinctSummaryValue = (row: Record<string, unknown>, key: string) =>
+    Math.max(0, Math.trunc(toFiniteNumber(row[key])));
+  const blockedSummaryValues = {
+    total: weightedSummaryValue(blockedSummaryRow, "total"),
+    normalRequests: weightedSummaryValue(blockedSummaryRow, "normalRequests"),
+    suspectedBotRequests: weightedSummaryValue(
+      blockedSummaryRow,
+      "suspectedBotRequests",
     ),
-    mediumThreat: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(abnormalSummaryRow.mediumThreat)),
+    botRequests: weightedSummaryValue(blockedSummaryRow, "botRequests"),
+    customBlockedRequests: weightedSummaryValue(
+      blockedSummaryRow,
+      "customBlockedRequests",
     ),
-    customBlocked: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(abnormalSummaryRow.customBlocked)),
+    includedRequests: weightedSummaryValue(
+      blockedSummaryRow,
+      "includedRequests",
     ),
-    affectedSites: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(abnormalSummaryRow.affectedSites)),
-    ),
-    uniqueAsns: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(abnormalSummaryRow.uniqueAsns)),
-    ),
-    uniqueCountries: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(abnormalSummaryRow.uniqueCountries)),
-    ),
+    blockedRequests: weightedSummaryValue(blockedSummaryRow, "blockedRequests"),
+    pageviews: weightedSummaryValue(blockedSummaryRow, "pageviews"),
+    customEvents: weightedSummaryValue(blockedSummaryRow, "customEvents"),
+    affectedSites: distinctSummaryValue(blockedSummaryRow, "affectedSites"),
+    uniqueAsns: distinctSummaryValue(blockedSummaryRow, "uniqueAsns"),
+    uniqueCountries: distinctSummaryValue(blockedSummaryRow, "uniqueCountries"),
   };
-  const normalSummaryValues = {
-    affectedSites: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(normalSummaryRow.affectedSites)),
+  const includedSummaryValues = {
+    total: weightedSummaryValue(includedSummaryRow, "total"),
+    normalRequests: weightedSummaryValue(includedSummaryRow, "normalRequests"),
+    suspectedBotRequests: weightedSummaryValue(
+      includedSummaryRow,
+      "suspectedBotRequests",
     ),
-    uniqueAsns: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(normalSummaryRow.uniqueAsns)),
+    botRequests: weightedSummaryValue(includedSummaryRow, "botRequests"),
+    customBlockedRequests: weightedSummaryValue(
+      includedSummaryRow,
+      "customBlockedRequests",
     ),
-    uniqueCountries: Math.max(
-      0,
-      Math.trunc(toFiniteNumber(normalSummaryRow.uniqueCountries)),
+    includedRequests: weightedSummaryValue(
+      includedSummaryRow,
+      "includedRequests",
+    ),
+    blockedRequests: weightedSummaryValue(
+      includedSummaryRow,
+      "blockedRequests",
+    ),
+    pageviews: weightedSummaryValue(includedSummaryRow, "pageviews"),
+    customEvents: weightedSummaryValue(includedSummaryRow, "customEvents"),
+    affectedSites: distinctSummaryValue(includedSummaryRow, "affectedSites"),
+    uniqueAsns: distinctSummaryValue(includedSummaryRow, "uniqueAsns"),
+    uniqueCountries: distinctSummaryValue(
+      includedSummaryRow,
+      "uniqueCountries",
     ),
   };
 
@@ -2030,7 +1897,7 @@ export async function handleRequestObservationAdmin(
         sql: buildNetworkDimensionSql({
           from,
           to,
-          source: "abnormal",
+          source: "blocked",
           dimension,
         }),
       }),
@@ -2041,7 +1908,7 @@ export async function handleRequestObservationAdmin(
         sql: buildNetworkDimensionSql({
           from,
           to,
-          source: "normal",
+          source: "included",
           dimension,
         }),
       }),
@@ -2060,13 +1927,13 @@ export async function handleRequestObservationAdmin(
   const networkDimensionRows = networkDimensionResults.map((result) =>
     result.ok ? result.rows : [],
   );
-  const abnormalNetworkDimensions = Object.fromEntries(
+  const blockedNetworkDimensions = Object.fromEntries(
     networkDimensions.map((dimension, index) => [
       dimension,
       normalizeNetworkDimensionRows(networkDimensionRows[index * 2]),
     ]),
   );
-  const normalNetworkDimensions = Object.fromEntries(
+  const includedNetworkDimensions = Object.fromEntries(
     networkDimensions.map((dimension, index) => [
       dimension,
       normalizeNetworkDimensionRows(networkDimensionRows[index * 2 + 1]),
@@ -2074,7 +1941,7 @@ export async function handleRequestObservationAdmin(
   );
   const aggregates = {
     reasons: normalizeReasonRows(reasonResult.rows),
-    countries: abnormalNetworkDimensions.country.map((row) => ({
+    countries: blockedNetworkDimensions.country.map((row) => ({
       country: row.label,
       count: row.count,
     })),
@@ -2087,30 +1954,31 @@ export async function handleRequestObservationAdmin(
     bucketMs,
     interval,
     timeZone,
-    abnormalRows: abnormalTrendResult.rows,
-    normalRows: normalTrendResult.rows,
-    normalEvents,
+    blockedRows: blockedTrendResult.rows,
+    includedRows: includedTrendResult.rows,
   });
-  const botRequests = trendWithRatio.reduce(
-    (sum, point) => sum + point.abnormalCount,
-    0,
-  );
-  const normalRequests = trendWithRatio.reduce(
-    (sum, point) => sum + point.normalCount,
-    0,
-  );
-  const totalRequests = normalRequests + botRequests;
+  const includedRequests = includedSummaryValues.total;
+  const blockedRequests = blockedSummaryValues.total;
+  const totalRequests = includedRequests + blockedRequests;
+  const normalRequests =
+    includedSummaryValues.normalRequests + blockedSummaryValues.normalRequests;
+  const suspectedBotRequests =
+    includedSummaryValues.suspectedBotRequests +
+    blockedSummaryValues.suspectedBotRequests;
+  const botRequests =
+    includedSummaryValues.botRequests + blockedSummaryValues.botRequests;
+  const customBlockedRequests =
+    includedSummaryValues.customBlockedRequests +
+    blockedSummaryValues.customBlockedRequests;
   const botRequestRatio = totalRequests > 0 ? botRequests / totalRequests : 0;
+  const blockedRequestRatio =
+    totalRequests > 0 ? blockedRequests / totalRequests : 0;
   const normalRequestRatio =
     totalRequests > 0 ? normalRequests / totalRequests : 0;
-  const pageviews = trendWithRatio.reduce(
-    (sum, point) => sum + point.pageviews,
-    0,
-  );
-  const customEvents = trendWithRatio.reduce(
-    (sum, point) => sum + point.customEvents,
-    0,
-  );
+  const pageviews =
+    includedSummaryValues.pageviews + blockedSummaryValues.pageviews;
+  const customEvents =
+    includedSummaryValues.customEvents + blockedSummaryValues.customEvents;
   const trendLatencyPoints = trendWithRatio.filter(
     (point) => point.latencySampleWeight > 0,
   );
@@ -2122,33 +1990,79 @@ export async function handleRequestObservationAdmin(
     },
     { sampleWeight: 0, weightedSumMs: 0 },
   );
-  const latencySummary = normalizeLatencySummary(normalSummaryRow);
+  const blockedLatencySummary = normalizeLatencySummary(blockedSummaryRow);
+  const includedLatencySummary = normalizeLatencySummary(includedSummaryRow);
+  const blockedLatencySum = toFiniteNumber(
+    blockedSummaryRow.latencyWeightedSumMs,
+    Number.NaN,
+  );
+  const includedLatencySum = toFiniteNumber(
+    includedSummaryRow.latencyWeightedSumMs,
+    Number.NaN,
+  );
+  const blockedLatencyWeight = toFiniteNumber(
+    blockedSummaryRow.latencySampleWeight,
+    Number.NaN,
+  );
+  const includedLatencyWeight = toFiniteNumber(
+    includedSummaryRow.latencySampleWeight,
+    Number.NaN,
+  );
+  const summaryLatencyWeight =
+    (Number.isFinite(blockedLatencyWeight) ? blockedLatencyWeight : 0) +
+    (Number.isFinite(includedLatencyWeight) ? includedLatencyWeight : 0);
+  const summaryLatencySum =
+    (Number.isFinite(blockedLatencySum) ? blockedLatencySum : 0) +
+    (Number.isFinite(includedLatencySum) ? includedLatencySum : 0);
   const avgLatencyMs =
-    latencySummary.avgLatencyMs ??
-    (trendLatencyTotals.sampleWeight > 0
-      ? trendLatencyTotals.weightedSumMs / trendLatencyTotals.sampleWeight
-      : null);
-  const p50LatencyMs = latencySummary.p50LatencyMs;
-  const p75LatencyMs = latencySummary.p75LatencyMs;
-  const p95LatencyMs = latencySummary.p95LatencyMs;
-  const p99LatencyMs = latencySummary.p99LatencyMs;
-  const normalListSummary = aggregateNormalEvents(normalEvents);
-  const abnormalMapPoints = normalizeMapRows(abnormalMapResult.rows);
-  const normalMapPoints = normalizeMapRows(normalMapResult.rows);
-  const mapPoints = abnormalMapPoints;
+    summaryLatencyWeight > 0
+      ? summaryLatencySum / summaryLatencyWeight
+      : trendLatencyTotals.sampleWeight > 0
+        ? trendLatencyTotals.weightedSumMs / trendLatencyTotals.sampleWeight
+        : null;
+  const p50LatencyMs =
+    includedLatencySummary.p50LatencyMs ?? blockedLatencySummary.p50LatencyMs;
+  const p75LatencyMs =
+    includedLatencySummary.p75LatencyMs ?? blockedLatencySummary.p75LatencyMs;
+  const p95LatencyMs =
+    includedLatencySummary.p95LatencyMs ?? blockedLatencySummary.p95LatencyMs;
+  const p99LatencyMs =
+    includedLatencySummary.p99LatencyMs ?? blockedLatencySummary.p99LatencyMs;
+  const blockedMapPoints = normalizeMapRows(blockedMapResult.rows);
+  const includedMapPoints = normalizeMapRows(includedMapResult.rows);
+  const mapPoints = blockedMapPoints;
   const observedSampled = [
-    rawRows,
-    normalRawRows,
-    abnormalTrendResult.rows,
-    normalTrendResult.rows,
-    abnormalMapResult.rows,
-    normalMapResult.rows,
-    abnormalSummaryResult.rows,
-    normalSummaryResult.rows,
+    blockedRawRows,
+    includedRawRows,
+    blockedTrendResult.rows,
+    includedTrendResult.rows,
+    blockedMapResult.rows,
+    includedMapResult.rows,
+    blockedSummaryResult.rows,
+    includedSummaryResult.rows,
     ...networkDimensionRows,
     reasonResult.rows,
     asnResult.rows,
   ].some(rowsContainObservedSampling);
+
+  const blockedPartitionSummary = {
+    ...blockedSummaryValues,
+    ratio: blockedRequestRatio,
+    avgLatencyMs: blockedLatencySummary.avgLatencyMs,
+    p50LatencyMs: blockedLatencySummary.p50LatencyMs,
+    p75LatencyMs: blockedLatencySummary.p75LatencyMs,
+    p95LatencyMs: blockedLatencySummary.p95LatencyMs,
+    p99LatencyMs: blockedLatencySummary.p99LatencyMs,
+  };
+  const includedPartitionSummary = {
+    ...includedSummaryValues,
+    ratio: totalRequests > 0 ? includedRequests / totalRequests : 0,
+    avgLatencyMs: includedLatencySummary.avgLatencyMs,
+    p50LatencyMs: includedLatencySummary.p50LatencyMs,
+    p75LatencyMs: includedLatencySummary.p75LatencyMs,
+    p95LatencyMs: includedLatencySummary.p95LatencyMs,
+    p99LatencyMs: includedLatencySummary.p99LatencyMs,
+  };
 
   return jsonResponseFor(req, {
     ok: true,
@@ -2172,21 +2086,39 @@ export async function handleRequestObservationAdmin(
       distinctAreApproximate: true,
     }),
     summary: {
-      total: botRequests,
-      baselineRequests: normalRequests,
-      botRequestRatio,
-      ...abnormalSummaryValues,
+      total: totalRequests,
+      normalRequests,
+      suspectedBotRequests,
+      botRequests,
+      customBlockedRequests,
+      includedRequests,
+      blockedRequests,
+      affectedSites:
+        blockedSummaryValues.affectedSites +
+        includedSummaryValues.affectedSites,
+      uniqueAsns:
+        blockedSummaryValues.uniqueAsns + includedSummaryValues.uniqueAsns,
+      uniqueCountries:
+        blockedSummaryValues.uniqueCountries +
+        includedSummaryValues.uniqueCountries,
     },
-    events: events.map(serializeAbnormalListEvent),
-    normalEvents: normalEvents.map(serializeNormalListEvent),
+    events: blockedEvents.map(serializeListEvent),
+    normalEvents: includedEvents.map(serializeListEvent),
+    blockedEvents: blockedEvents.map(serializeListEvent),
+    includedEvents: includedEvents.map(serializeListEvent),
     ...aggregates,
     mapPoints,
     trend: trendWithRatio,
     overview: {
       totalRequests,
+      includedRequests,
+      blockedRequests,
       normalRequests,
-      abnormalRequests: botRequests,
-      abnormalRequestRatio: botRequestRatio,
+      suspectedBotRequests,
+      botRequests,
+      customBlockedRequests,
+      botRequestRatio,
+      blockedRequestRatio,
       normalRequestRatio,
       pageviews,
       customEvents,
@@ -2196,43 +2128,27 @@ export async function handleRequestObservationAdmin(
       p95LatencyMs,
       p99LatencyMs,
     },
-    abnormal: {
-      summary: {
-        total: botRequests,
-        ratio: botRequestRatio,
-        ...abnormalSummaryValues,
-      },
-      mapPoints: abnormalMapPoints,
-      events: events.map(serializeAbnormalListEvent),
-      hasMore: abnormalHasMore,
-      nextCursor: abnormalNextCursor,
+    blocked: {
+      summary: blockedPartitionSummary,
+      mapPoints: blockedMapPoints,
+      events: blockedEvents.map(serializeListEvent),
+      hasMore: blockedHasMore,
+      nextCursor: blockedNextCursor,
       reasons: aggregates.reasons,
       countries: aggregates.countries,
       asns: aggregates.asns,
       dimensions: {
-        network: abnormalNetworkDimensions,
+        network: blockedNetworkDimensions,
       },
     },
-    normal: {
-      summary: {
-        ...normalListSummary,
-        ...normalSummaryValues,
-        total: normalRequests,
-        ratio: normalRequestRatio,
-        pageviews,
-        customEvents,
-        avgLatencyMs,
-        p50LatencyMs,
-        p75LatencyMs,
-        p95LatencyMs,
-        p99LatencyMs,
-      },
-      mapPoints: normalMapPoints,
-      events: normalEvents.map(serializeNormalListEvent),
-      hasMore: normalHasMore,
-      nextCursor: normalNextCursor,
+    included: {
+      summary: includedPartitionSummary,
+      mapPoints: includedMapPoints,
+      events: includedEvents.map(serializeListEvent),
+      hasMore: includedHasMore,
+      nextCursor: includedNextCursor,
       dimensions: {
-        network: normalNetworkDimensions,
+        network: includedNetworkDimensions,
       },
     },
   });

@@ -25,6 +25,7 @@ import type { TrackerPayloadKind } from "@/lib/edge/types";
 import { jsonCloneRecord } from "@/lib/edge/utils";
 import { assertContentSize, BODY_SIZE_LIMITS } from "@/lib/form-helpers";
 import { jsonResponse } from "@/lib/response";
+import { normalizeSiteScriptSettings } from "@/lib/site-settings";
 
 import type { InvocationLogger } from "./observability-logger";
 
@@ -265,6 +266,7 @@ type CollectionDecision =
       allowOrigin: string | null;
       siteId: string;
       payload: TrackerClientPayload;
+      scriptSettings: ReturnType<typeof normalizeSiteScriptSettings>;
     };
 
 async function decideCollectionPolicy(
@@ -400,6 +402,7 @@ async function decideCollectionPolicy(
     allowOrigin: origin,
     siteId,
     payload: normalizedPayloadResult.payload,
+    scriptSettings: normalizeSiteScriptSettings(settings),
   };
 }
 
@@ -588,6 +591,7 @@ export async function handleCollectRequest(
           traceId: trace.id,
           receivedAt: trace.acceptedAt,
           category: "custom_block",
+          disposition: "blocked",
           reasons: customBlockReasons(decision.blockedFields),
         },
         logger,
@@ -603,7 +607,10 @@ export async function handleCollectRequest(
     origin,
   });
 
-  if (classification.isBot && classification.threatLevel) {
+  if (
+    classification.category === "bot" &&
+    decision.scriptSettings.botProtectionEnabled !== false
+  ) {
     logger?.info("collect.bot_diverted");
     writeRequestAnalyticsPoint(
       env,
@@ -614,10 +621,33 @@ export async function handleCollectRequest(
         origin: decision.allowOrigin,
         traceId: trace.id,
         receivedAt: trace.acceptedAt,
-        category:
-          classification.threatLevel === "high"
-            ? "high_threat"
-            : "medium_threat",
+        category: "bot",
+        disposition: "blocked",
+        reasons: classification.reasons,
+      },
+      logger,
+    );
+    return noContent(decision.allowOrigin);
+  }
+
+  if (
+    classification.category === "suspected_bot" &&
+    decision.scriptSettings.hostingProxyBlockingEnabled === true &&
+    (classification.reasons.includes("hosting_asn") ||
+      classification.reasons.includes("network_service_asn"))
+  ) {
+    logger?.info("collect.bot_diverted");
+    writeRequestAnalyticsPoint(
+      env,
+      {
+        request: requestWithCf,
+        payload: decision.payload,
+        siteId: decision.siteId,
+        origin: decision.allowOrigin,
+        traceId: trace.id,
+        receivedAt: trace.acceptedAt,
+        category: "suspected_bot",
+        disposition: "blocked",
         reasons: classification.reasons,
       },
       logger,
@@ -648,8 +678,9 @@ export async function handleCollectRequest(
       origin: decision.allowOrigin,
       traceId: trace.id,
       receivedAt: trace.acceptedAt,
-      category: "normal",
-      reasons: [],
+      category: classification.category,
+      disposition: "included",
+      reasons: classification.reasons,
     },
     logger,
   );

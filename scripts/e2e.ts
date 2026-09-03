@@ -337,22 +337,65 @@ function mockAnalyticsTimestamp(sql: string): number {
 function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
   const timestampMs = mockAnalyticsTimestamp(sql);
   const timestamp = new Date(timestampMs).toISOString();
-  const normal = /blob2\s*=\s*'normal'/i.test(sql);
+  const normalDetail = /e2e-normal-trace/i.test(sql);
+  const dispositionFilters = [
+    ...sql.matchAll(/intDiv\(double19,\s*128\)\s*%\s*2\s*(=|!=)\s*0/gi),
+  ];
+  const finalDispositionFilter =
+    dispositionFilters[dispositionFilters.length - 1]?.[1];
+  const source =
+    normalDetail || finalDispositionFilter === "=" ? "included" : "blocked";
+  const sourceCounts =
+    source === "blocked"
+      ? {
+          total: 2,
+          normalRequests: 0,
+          suspectedBotRequests: 0,
+          botRequests: 2,
+          customBlockedRequests: 0,
+          includedRequests: 0,
+          blockedRequests: 2,
+          pageviews: 0,
+          customEvents: 0,
+          affectedSites: 1,
+          uniqueAsns: 1,
+          uniqueCountries: 1,
+        }
+      : {
+          total: 3,
+          normalRequests: 3,
+          suspectedBotRequests: 0,
+          botRequests: 0,
+          customBlockedRequests: 0,
+          includedRequests: 3,
+          blockedRequests: 0,
+          pageviews: 2,
+          customEvents: 1,
+          affectedSites: 1,
+          uniqueAsns: 1,
+          uniqueCountries: 1,
+        };
   if (sql.includes("AS timestampMs")) {
     return [
       {
-        avgLatencyMs: normal ? 42 : undefined,
-        count: normal ? 3 : 2,
-        customEvents: normal ? 1 : 0,
-        customBlockedCount: normal ? 0 : 0,
-        highThreatCount: normal ? 0 : 2,
-        mediumThreatCount: 0,
-        p50LatencyMs: normal ? 40 : undefined,
-        p75LatencyMs: normal ? 45 : undefined,
-        p95LatencyMs: normal ? 50 : undefined,
-        p99LatencyMs: normal ? 50 : undefined,
-        pageviews: normal ? 2 : 0,
+        avgLatencyMs: source === "included" ? 42 : undefined,
+        blockedCount: sourceCounts.blockedRequests,
+        botCount: sourceCounts.botRequests,
+        count: sourceCounts.total,
+        customBlockedCount: sourceCounts.customBlockedRequests,
+        customEvents: sourceCounts.customEvents,
+        includedCount: sourceCounts.includedRequests,
+        maxSampleInterval: source === "blocked" ? 2 : 3,
+        normalCount: sourceCounts.normalRequests,
+        p50LatencyMs: source === "included" ? 40 : undefined,
+        p75LatencyMs: source === "included" ? 45 : undefined,
+        p95LatencyMs: source === "included" ? 50 : undefined,
+        p99LatencyMs: source === "included" ? 50 : undefined,
+        pageviewCount: sourceCounts.pageviews,
+        suspectedBotCount: sourceCounts.suspectedBotRequests,
         timestampMs,
+        totalCount: sourceCounts.total,
+        weightedRequestCount: sourceCounts.total,
       },
     ];
   }
@@ -360,14 +403,21 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
     return [
       {
         country: "CN",
-        latitude: normal ? 31.23 : 39.9,
-        longitude: normal ? 121.47 : 116.4,
-        pointCount: normal ? 3 : 2,
+        latitude: source === "included" ? 31.23 : 39.9,
+        longitude: source === "included" ? 121.47 : 116.4,
+        maxSampleInterval: source === "blocked" ? 2 : 3,
+        pointCount: sourceCounts.total,
       },
     ];
   }
   if (sql.includes("blob3 AS reasons") && !sql.includes("blob1 AS kind")) {
-    return [{ reasons: "e2e_mock", weight: 2 }];
+    return [
+      {
+        maxSampleInterval: 2,
+        reasons: "e2e_mock",
+        weight: 2,
+      },
+    ];
   }
   if (sql.includes("double4 AS asn") && !sql.includes("blob1 AS kind")) {
     return [
@@ -375,112 +425,87 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
         asn: "64512",
         asOrganization: "E2E Bot Network",
         count: 2,
-        highThreat: 2,
+        botCount: 2,
+        maxSampleInterval: 2,
       },
     ];
   }
   if (sql.includes("sum(_sample_interval) AS total")) {
     return [
-      normal
-        ? {
-            affectedSites: 1,
-            latencySampleWeight: 3,
-            latencyWeightedSumMs: 126,
-            p50LatencyMs: 40,
-            p75LatencyMs: 45,
-            p95LatencyMs: 50,
-            p99LatencyMs: 50,
-            total: 3,
-            uniqueAsns: 1,
-            uniqueCountries: 1,
-          }
-        : {
-            affectedSites: 1,
-            customBlocked: 0,
-            highThreat: 2,
-            mediumThreat: 0,
-            total: 2,
-            uniqueAsns: 1,
-            uniqueCountries: 1,
-          },
+      {
+        ...sourceCounts,
+        ...(source === "included"
+          ? {
+              latencySampleWeight: 3,
+              latencyWeightedSumMs: 126,
+              p50LatencyMs: 40,
+              p75LatencyMs: 45,
+              p95LatencyMs: 50,
+              p99LatencyMs: 50,
+            }
+          : {}),
+        maxSampleInterval: source === "blocked" ? 2 : 3,
+      },
     ];
   }
   if (sql.includes("count() AS total")) {
     return [
-      normal
-        ? { affectedSites: 1, total: 3, uniqueAsns: 1, uniqueCountries: 1 }
-        : {
-            affectedSites: 1,
-            customBlocked: 0,
-            highThreat: 2,
-            mediumThreat: 0,
-            total: 2,
-            uniqueAsns: 1,
-            uniqueCountries: 1,
-          },
+      { ...sourceCounts, maxSampleInterval: source === "blocked" ? 2 : 3 },
     ];
   }
   if (sql.includes(" AS label")) {
+    const label = sql.includes("blob2 AS label")
+      ? source === "blocked"
+        ? "bot"
+        : "normal"
+      : source === "blocked"
+        ? "E2E Bot Network"
+        : "E2E Normal Network";
     return [
       {
-        count: normal ? 3 : 2,
-        highThreat: normal ? 0 : 2,
-        label: normal ? "E2E Normal Network" : "E2E Bot Network",
+        botCount: sourceCounts.botRequests,
+        count: sourceCounts.total,
+        label,
+        maxSampleInterval: source === "blocked" ? 2 : 3,
       },
     ];
   }
-  if (normal && sql.includes("blob1 AS kind")) {
+  if (sql.includes("blob2 AS category")) {
+    const isBlockedEvent = source === "blocked";
     return [
       {
-        asn: 64513,
-        asOrganization: "E2E Normal Network",
-        city: "Shanghai",
+        asn: isBlockedEvent ? 64512 : 64513,
+        asOrganization: isBlockedEvent
+          ? "E2E Bot Network"
+          : "E2E Normal Network",
+        botScore: isBlockedEvent ? 5 : undefined,
+        category: isBlockedEvent ? "bot" : "normal",
+        disposition: isBlockedEvent ? "blocked" : "included",
+        city: isBlockedEvent ? "Beijing" : "Shanghai",
         continent: "AS",
         country: "CN",
-        edgeLatencyMs: 42,
+        edgeLatencyMs: isBlockedEvent ? undefined : 42,
         eventAt: timestampMs,
         hostname: "app.example.test",
-        kind: "pageview",
-        latitude: 31.23,
-        longitude: 121.47,
+        ip: isBlockedEvent ? "198.51.100.8" : "",
+        kind: isBlockedEvent ? "bot" : "pageview",
+        latitude: isBlockedEvent ? 39.9 : 31.23,
+        longitude: isBlockedEvent ? 116.4 : 121.47,
         origin: "https://app.example.test",
-        pathname: "/home",
-        rayId: "e2e-normal-ray",
+        pathname: isBlockedEvent ? "/crawl" : "/home",
+        rayId: isBlockedEvent ? "e2e-bot-ray" : "e2e-normal-ray",
+        reasons: isBlockedEvent ? "e2e_mock" : "",
         receivedAt: timestampMs,
-        region: "Shanghai",
+        region: isBlockedEvent ? "Beijing" : "Shanghai",
         requestMethod: "GET",
+        sampleWeight: isBlockedEvent ? 2 : 3,
+        schemaVersion: 2,
         siteId: "",
         timestamp,
-        traceId: "e2e-normal-trace",
-        userAgentLength: 12,
-      },
-    ];
-  }
-  if (!normal && sql.includes("blob2 AS category")) {
-    return [
-      {
-        asn: 64512,
-        asOrganization: "E2E Bot Network",
-        botScore: 5,
-        city: "Beijing",
-        category: "high_threat",
-        continent: "AS",
-        country: "CN",
-        hostname: "app.example.test",
-        ip: "198.51.100.8",
-        kind: "bot",
-        latitude: 39.9,
-        longitude: 116.4,
-        origin: "https://app.example.test",
-        pathname: "/crawl",
-        rayId: "e2e-bot-ray",
-        reasons: "e2e_mock",
-        receivedAt: timestampMs,
-        region: "Beijing",
-        siteId: "",
-        timestamp,
-        userAgent: "E2E Bot",
-        userAgentLength: 7,
+        traceId: isBlockedEvent ? "e2e-bot-trace" : "e2e-normal-trace",
+        userAgent: isBlockedEvent ? "E2E Bot" : "Mozilla/5.0 E2E",
+        userAgentLength: isBlockedEvent ? 7 : 14,
+        flags: isBlockedEvent ? 140 : 14,
       },
     ];
   }
@@ -489,8 +514,10 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
       {
         asn: 64513,
         asOrganization: "E2E Normal Network",
+        category: "normal",
         city: "Shanghai",
         continent: "AS",
+        disposition: "included",
         country: "CN",
         edgeLatencyMs: 42,
         eventAt: timestampMs,
@@ -501,6 +528,7 @@ function mockAnalyticsRows(sql: string): Record<string, unknown>[] {
         origin: "https://app.example.test",
         pathname: "/home",
         rayId: "e2e-normal-ray",
+        reasons: "",
         receivedAt: timestampMs,
         region: "Shanghai",
         requestMethod: "GET",

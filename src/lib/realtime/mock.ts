@@ -1348,32 +1348,42 @@ function demoRequestObservationResponse(
   const data = generateDemoRequestObservationData(
     minutes,
     Number.isFinite(to) && to > 0 ? to : undefined,
-  ) as unknown as {
-    ok: true;
-    configured: boolean;
-    generatedAt: number;
-    events: Array<Record<string, unknown>>;
-    normal?: { events?: Array<Record<string, unknown>> };
-  } & Record<string, unknown>;
+  );
+  const serializeEvent = (event: Record<string, unknown>) => {
+    const { sampleWeight: _sampleWeight, ...serialized } = event;
+    return serialized;
+  };
+  const blockedEvents = data.blockedEvents as unknown as Array<
+    Record<string, unknown>
+  >;
+  const includedEvents = data.includedEvents as unknown as Array<
+    Record<string, unknown>
+  >;
 
   if (params.detail === "1") {
     const traceId = String(params.traceId || "");
     const rayId = String(params.rayId || "");
-    const detail = data.events.find(
+    const detail = [...blockedEvents, ...includedEvents].find(
       (event) => event.traceId === traceId || event.rayId === rayId,
     );
     return {
       ok: true,
       configured: data.configured,
       generatedAt: data.generatedAt,
-      detail: detail ?? null,
+      sampling: data.sampling,
+      detail: detail ? serializeEvent(detail) : null,
     };
   }
 
-  const source = params.page === "normal" ? "normal" : "abnormal";
-  const events =
-    source === "normal" ? (data.normal?.events ?? []) : data.events;
-  if (params.page === "normal" || params.page === "abnormal") {
+  const rawPage = String(params.page || "");
+  const source =
+    rawPage === "abnormal"
+      ? "blocked"
+      : rawPage === "normal"
+        ? "included"
+        : rawPage;
+  const events = source === "included" ? includedEvents : blockedEvents;
+  if (source === "blocked" || source === "included") {
     const page = paginateDemoRequestEvents(
       events,
       parseRequestObservationLimit(params.limit),
@@ -1383,9 +1393,11 @@ function demoRequestObservationResponse(
       ok: true,
       configured: data.configured,
       generatedAt: data.generatedAt,
+      sampling: data.sampling,
       page: {
         source,
         ...page,
+        events: page.events.map(serializeEvent),
       },
     };
   }
@@ -1393,14 +1405,25 @@ function demoRequestObservationResponse(
   if (params.dimensionTab) {
     const group = String(params.dimensionGroup || "");
     const tab = String(params.dimensionTab);
+    const rawDimensionSource = String(params.dimensionSource || "blocked");
+    const dimensionSource =
+      rawDimensionSource === "abnormal"
+        ? "blocked"
+        : rawDimensionSource === "normal"
+          ? "included"
+          : rawDimensionSource === "included"
+            ? "included"
+            : "blocked";
+    const dimensionEvents =
+      dimensionSource === "included" ? includedEvents : blockedEvents;
     const counts = new Map<
       string,
       DemoRequestObservationDimensionValue & {
         count: number;
-        highThreat: number;
+        botCount: number;
       }
     >();
-    for (const event of events) {
+    for (const event of dimensionEvents) {
       for (const value of demoRequestObservationDimensionValues(
         event,
         group,
@@ -1409,24 +1432,27 @@ function demoRequestObservationResponse(
         const current = counts.get(value.key) ?? {
           ...value,
           count: 0,
-          highThreat: 0,
+          botCount: 0,
         };
-        current.count += 1;
-        if (event.category === "high_threat" || event.category === "high") {
-          current.highThreat += 1;
-        }
+        const sampleWeight = Math.max(1, Number(event.sampleWeight) || 1);
+        current.count += sampleWeight;
+        if (event.category === "bot") current.botCount += sampleWeight;
         counts.set(value.key, current);
       }
     }
     return {
       ok: true,
+      sampling: data.sampling,
       dimension: {
+        group,
+        tab,
+        source: dimensionSource,
         rows: [...counts.entries()]
           .map(([key, value]) => ({
             key,
             label: value.label,
             count: value.count,
-            highThreat: value.highThreat,
+            botCount: value.botCount,
             ...(value.iconLabel ? { iconLabel: value.iconLabel } : {}),
             ...(value.country ? { country: value.country } : {}),
             ...(value.region ? { region: value.region } : {}),
@@ -1437,35 +1463,37 @@ function demoRequestObservationResponse(
     };
   }
 
-  const abnormalPage = paginateDemoRequestEvents(
-    data.events,
+  const blockedPage = paginateDemoRequestEvents(
+    blockedEvents,
     parseRequestObservationLimit(params.limit),
   );
-  const normalPage = paginateDemoRequestEvents(
-    data.normal?.events ?? [],
+  const includedPage = paginateDemoRequestEvents(
+    includedEvents,
     parseRequestObservationLimit(params.limit),
   );
+  const serializedBlockedEvents = blockedPage.events.map(serializeEvent);
+  const serializedIncludedEvents = includedPage.events.map(serializeEvent);
 
   return {
     ...data,
-    events: abnormalPage.events,
-    normalEvents: normalPage.events,
-    abnormal: data.abnormal
-      ? {
-          ...data.abnormal,
-          events: abnormalPage.events,
-          hasMore: abnormalPage.hasMore,
-          nextCursor: abnormalPage.nextCursor,
-        }
-      : data.abnormal,
-    normal: data.normal
-      ? {
-          ...data.normal,
-          events: normalPage.events,
-          hasMore: normalPage.hasMore,
-          nextCursor: normalPage.nextCursor,
-        }
-      : data.normal,
+    events: serializedBlockedEvents,
+    normalEvents: serializedIncludedEvents.filter(
+      (event) => event.category === "normal",
+    ),
+    blockedEvents: serializedBlockedEvents,
+    includedEvents: serializedIncludedEvents,
+    blocked: {
+      ...data.blocked,
+      events: serializedBlockedEvents,
+      hasMore: blockedPage.hasMore,
+      nextCursor: blockedPage.nextCursor,
+    },
+    included: {
+      ...data.included,
+      events: serializedIncludedEvents,
+      hasMore: includedPage.hasMore,
+      nextCursor: includedPage.nextCursor,
+    },
   };
 }
 
@@ -1546,15 +1574,7 @@ function demoRequestObservationDimensionValues(
     }
     if (tab === "category") {
       const category = demoDimensionString(event.category);
-      return [
-        demoRequestObservationDimensionValue(
-          category === "high"
-            ? "high_threat"
-            : category === "medium"
-              ? "medium_threat"
-              : category,
-        ),
-      ];
+      return [demoRequestObservationDimensionValue(category)];
     }
     if (tab === "kind") {
       return [demoRequestObservationDimensionValue(event.kind)];

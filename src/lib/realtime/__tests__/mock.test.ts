@@ -466,7 +466,7 @@ describe("mock — handleDemoRequest", () => {
       expect(res.ok).toBe(true);
     });
 
-    it("limits request observation overview data and paginates detail rows", () => {
+    it("returns blocked/included request observation data and paginates detail rows", () => {
       const path = "/api/private/admin/request-observation";
       const params = {
         from: FIXED_FROM,
@@ -474,35 +474,41 @@ describe("mock — handleDemoRequest", () => {
         limit: 7,
       };
       const overview = asRecord(handleDemoRequest({ path, params }));
-      const abnormal = overview.abnormal as Record<string, unknown>;
-      const normal = overview.normal as Record<string, unknown>;
-      const abnormalEvents = overview.events as unknown[];
-      const normalEvents = overview.normalEvents as unknown[];
+      const blocked = overview.blocked as Record<string, unknown>;
+      const included = overview.included as Record<string, unknown>;
+      const blockedEvents = overview.blockedEvents as unknown[];
+      const includedEvents = overview.includedEvents as unknown[];
 
-      expect(abnormalEvents).toHaveLength(7);
-      expect(normalEvents).toHaveLength(7);
-      expect(abnormal.events).toEqual(abnormalEvents);
-      expect(normal.events).toEqual(normalEvents);
-      expect(abnormal.hasMore).toBe(true);
-      expect(normal.hasMore).toBe(true);
+      expect(blockedEvents).toHaveLength(7);
+      expect(includedEvents).toHaveLength(7);
+      expect(blocked.events).toEqual(blockedEvents);
+      expect(included.events).toEqual(includedEvents);
+      expect(blocked.hasMore).toBe(true);
+      expect(included.hasMore).toBe(true);
+      expect(
+        [...blockedEvents, ...includedEvents].every(
+          (event) => !(event as Record<string, unknown>).sampleWeight,
+        ),
+      ).toBe(true);
 
       const nextPage = asRecord(
         handleDemoRequest({
           path,
           params: {
             ...params,
-            page: "abnormal",
-            cursor: JSON.stringify(abnormal.nextCursor),
+            page: "blocked",
+            cursor: JSON.stringify(blocked.nextCursor),
           },
         }),
       ).page as Record<string, unknown>;
 
       const nextPageEvents = nextPage.events as unknown[];
       expect(nextPageEvents).toHaveLength(7);
-      expect(nextPageEvents).not.toEqual(abnormalEvents);
+      expect(nextPageEvents).not.toEqual(blockedEvents);
       expect((nextPageEvents[0] as Record<string, unknown>).traceId).not.toBe(
-        (abnormalEvents[0] as Record<string, unknown>).traceId,
+        (blockedEvents[0] as Record<string, unknown>).traceId,
       );
+      expect(nextPage.source).toBe("blocked");
       expect(nextPage.hasMore).toBe(true);
       expect(nextPage.nextCursor).toEqual(expect.any(Object));
     });
@@ -512,7 +518,7 @@ describe("mock — handleDemoRequest", () => {
       const params = {
         from: FIXED_FROM,
         to: FIXED_FROM + DAY_MS,
-        dimensionSource: "abnormal",
+        dimensionSource: "blocked",
       };
       const dimensionRows = (group: string, tab: string) => {
         const response = asRecord(
@@ -528,6 +534,7 @@ describe("mock — handleDemoRequest", () => {
       const reasonRows = dimensionRows("detection", "reason");
       expect(reasonRows.length).toBeGreaterThan(0);
       expect(reasonRows.every((row) => row.label !== "Unknown")).toBe(true);
+      expect(reasonRows.every((row) => Number(row.botCount) >= 0)).toBe(true);
 
       const siteRows = dimensionRows("target", "site");
       expect(siteRows.length).toBeGreaterThan(0);
@@ -540,7 +547,14 @@ describe("mock — handleDemoRequest", () => {
       const ipPrefixRows = dimensionRows("client", "ipPrefix");
       expect(ipPrefixRows.length).toBeGreaterThan(0);
       expect(
-        ipPrefixRows.every((row) => String(row.label).endsWith("/24")),
+        ipPrefixRows.every(
+          (row) =>
+            String(row.label) === "Unknown" ||
+            String(row.label).endsWith("/24"),
+        ),
+      ).toBe(true);
+      expect(
+        ipPrefixRows.some((row) => String(row.label).endsWith("/24")),
       ).toBe(true);
     });
 

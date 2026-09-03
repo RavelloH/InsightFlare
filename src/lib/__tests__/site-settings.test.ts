@@ -109,6 +109,8 @@ describe("site settings helpers", () => {
       pathBlacklist: ["/admin", "/settings"],
       ignoreDoNotTrack: false,
       performanceSampleRate: 0,
+      botProtectionEnabled: true,
+      hostingProxyBlockingEnabled: false,
     });
 
     expect(

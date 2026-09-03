@@ -992,6 +992,12 @@ siteSettings:
   trackingStrengthStrongDescription: 始终进行针对访客的高精度跟踪。这可能违反某些国家的法规，例如 GDPR。
   trackingStrengthSmartDescription: 自动根据访客所处国家切换跟踪强度。
   trackingStrengthWeakDescription: 始终降低对访客的跟踪精度。这可能导致同一访客在不同时间访问时被计数多次、且无法计算留存率。
+  botProtectionGroupTitle: 机器人防护
+  botProtectionGroupDescription: 控制是否拦截高置信度机器人，以及是否拦截来自托管或代理网络的请求。
+  botProtectionEnabledLabel: 机器人拦截
+  botProtectionEnabledHint: 开启后拦截高置信度机器人请求；关闭后这类请求仍会计入统计。
+  hostingProxyBlockingEnabledLabel: 拦截托管/代理网络请求
+  hostingProxyBlockingEnabledHint: 开启后拦截来自托管或代理网络的疑似机器人请求，默认关闭。
   queryHashGroupTitle: 查询参数与 Hash 跟踪
   queryHashGroupDescription: 控制 URL 查询参数、Hash 与 Do Not Track 的处理方式。
   trackQueryParamsLabel: 开启查询参数跟踪
@@ -2239,8 +2245,10 @@ requestObservation:
   subtitle: 基于 Analytics Engine 观察整体请求、异常分流与正常采集链路。
   tabs:
     overview: 总览
-    abnormal: 异常请求
-    normal: 正常请求
+    abnormal: 拦截请求
+    normal: 统计请求
+    blocked: 拦截请求
+    included: 统计请求
   refresh: 刷新
   loadFailed: 加载请求观测数据失败。
   samplingNotice: 请求计数已按 Analytics Engine 采样权重校正；明细行仅代表采样样本，去重指标为近似值。
@@ -2251,16 +2259,21 @@ requestObservation:
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。
   openAnalyticsEngine: 打开 Analytics Engine
   openSettings: 打开设置
-  highThreatBots: 高威胁机器人
+  highThreatBots: 机器人请求
+  botRequests: 机器人请求
+  suspectedBotRequests: 疑似机器人请求
+  blockedRequests: 拦截请求
+  includedRequests: 统计请求
+  customBlockedRequests: 自定义拦截请求
   affectedSites: 受影响站点
   uniqueCountries: 国家/地区
   noData: 当前时间窗口内没有请求数据。
   trendTitle: 分流趋势
-  trendDescription: 按时间间隔显示正常请求、异常请求与分流比例。
-  recentTitle: 最近异常请求
+  trendDescription: 按时间间隔显示请求分类、处理结果和比例。
+  recentTitle: 最近拦截请求
   recentDescription: 这些详细记录从统一的 Request Analytics Engine 数据集中读取。
   recentLoadedAll: 已加载全部记录
-  detailTitle: 异常请求详情
+  detailTitle: 请求详情
   detailSubtitle: 查看这次异常请求的检测信号、网络和客户端上下文。
   client: 客户端
   edge: 边缘
@@ -2278,6 +2291,8 @@ requestObservation:
   userAgent: User-Agent
   category: 分类
   blocked: 拦截
+  included: 已计入统计
+  disposition: 处理结果
   highThreatRequests: 高威胁请求
   emptyValue: 未知
   kind: 类型
@@ -2328,9 +2343,16 @@ requestObservation:
     identify: 用户识别
   overviewLabels:
     totalRequests: 总请求数
+    includedRequests: 统计请求数
+    blockedRequests: 拦截请求数
     normalRequests: 正常请求
-    abnormalRequests: 异常请求
-    abnormalRatio: 异常请求比例
+    suspectedBotRequests: 疑似机器人请求
+    botRequests: 机器人请求
+    customBlockedRequests: 自定义拦截请求
+    botRequestRatio: 机器人请求比例
+    blockedRequestRatio: 拦截请求比例
+    abnormalRequests: 拦截请求
+    abnormalRatio: 拦截请求比例
     p50Latency: P50 Worker 处理耗时
     p75Latency: P75 Worker 处理耗时
     p99Latency: P99 Worker 处理耗时
@@ -2339,18 +2361,22 @@ requestObservation:
     pageviews: 页面浏览
     customEvents: 自定义事件
     overviewTrendTitle: 请求分流趋势
-    overviewTrendDescription: 按顶栏时间间隔分桶显示正常与异常请求，以及异常请求比例。
+    overviewTrendDescription: 按顶栏时间间隔分桶显示请求分类和拦截请求比例。
     trafficCompositionTitle: 业务请求构成
     trafficCompositionDescription: 按时间显示正常采集链路中页面浏览、离开、可见性、自定义事件和用户识别的数量。
     categoryShareTitle: 请求分类占比
     normalTrafficShare: 正常流量
-    mediumThreatTraffic: 中威胁流量
-    highThreatTraffic: 高威胁流量
+    suspectedBotTraffic: 疑似机器人流量
+    botTraffic: 机器人流量
+    mediumThreatTraffic: 疑似机器人流量
+    highThreatTraffic: 机器人流量
     customBlockedTraffic: 自定义屏蔽流量
     latencyTitle: Worker 处理耗时趋势
     latencyDescription: 正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 Worker 处理耗时。
-    abnormalSubtitle: 聚焦异常请求，地图和统计表包含中威胁、高威胁和自定义屏蔽流量。
-    normalSubtitle: 聚焦进入正常采集链路的请求，地图和统计表只显示绿色正常流量。
+    abnormalSubtitle: 聚焦实际被拦截的请求；分类标签保留每个请求的检测结果。
+    normalSubtitle: 聚焦计入统计的请求，其中可能包含正常请求和疑似机器人请求。
+    blockedSubtitle: 聚焦被自定义规则或防护设置拦截的请求。
+    includedSubtitle: 聚焦计入统计的请求，包括正常请求和疑似机器人请求。
     requests: 请求数
     windowDays: "最近 {days} 天"
     latencyMilliseconds: "{value} 毫秒"

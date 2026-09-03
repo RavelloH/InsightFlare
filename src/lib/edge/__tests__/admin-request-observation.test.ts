@@ -8,6 +8,10 @@ import { handleAnalyticsEngineConfigAdmin } from "@/lib/edge/admin-analytics-eng
 import { requireActor } from "@/lib/edge/admin-auth";
 import { handleRequestObservationAdmin } from "@/lib/edge/admin-request-observation";
 import {
+  REQUEST_ANALYTICS_FLAGS,
+  REQUEST_ANALYTICS_SCHEMA_VERSION,
+} from "@/lib/edge/analytics-engine/request-schema";
+import {
   encryptAnalyticsEngineSecret,
   encryptSecret,
 } from "@/lib/edge/secret-encryption";
@@ -83,18 +87,25 @@ function analyticsResponse(rows: Record<string, unknown>[] = []) {
   });
 }
 
-function abnormalAnalyticsRow(overrides: Record<string, unknown> = {}) {
+const dispositionBlockedFlag = Number(
+  (REQUEST_ANALYTICS_FLAGS as Record<string, unknown>).dispositionBlocked ??
+    1 << 7,
+);
+const metricFlags = 127;
+
+function blockedAnalyticsRow(overrides: Record<string, unknown> = {}) {
   return {
     asOrganization: "E2E Bot Network",
     asn: 64512,
     botScore: 7,
-    category: "high_threat",
+    category: "bot",
     city: "Shanghai",
     continent: "AS",
     country: "CN",
     edgeLatencyMs: 12,
     eventAt: 1_800_000_000_000,
-    flags: 127,
+    disposition: "blocked",
+    flags: metricFlags | dispositionBlockedFlag,
     hostname: "app.example.test",
     httpProtocol: "HTTP/3",
     ip: "203.0.113.10",
@@ -108,10 +119,10 @@ function abnormalAnalyticsRow(overrides: Record<string, unknown> = {}) {
     receivedAt: 1_800_000_000_000,
     reasons: "ua_isbot,low_bot_score",
     region: "Shanghai",
-    schemaVersion: 1,
+    schemaVersion: REQUEST_ANALYTICS_SCHEMA_VERSION,
     siteId: "site-1",
     timestamp: "2026-09-02 00:00:00",
-    traceId: "trace-abnormal",
+    traceId: "trace-blocked",
     userAgent: "E2E Bot",
     userAgentLength: 8,
     verifiedBotCategory: "Crawler",
@@ -128,7 +139,9 @@ function normalAnalyticsRow(overrides: Record<string, unknown> = {}) {
     country: "CN",
     edgeLatencyMs: 42,
     eventAt: 1_800_000_000_000,
-    flags: 127,
+    category: "normal",
+    disposition: "included",
+    flags: metricFlags,
     hostname: "app.example.test",
     httpProtocol: "HTTP/3",
     kind: "pageview",
@@ -140,7 +153,7 @@ function normalAnalyticsRow(overrides: Record<string, unknown> = {}) {
     rayId: "ray-normal",
     receivedAt: 1_800_000_000_000,
     region: "Shanghai",
-    schemaVersion: 1,
+    schemaVersion: REQUEST_ANALYTICS_SCHEMA_VERSION,
     siteId: "site-1",
     timestamp: "2026-09-02 00:00:00",
     traceId: "trace-normal",
@@ -244,8 +257,14 @@ describe("request observation admin reader", () => {
     expect(sql).toContain("ORDER BY timestamp DESC, receivedAt DESC");
     expect(sql).not.toContain("ORDER BY timestamp DESC, double1 DESC");
     expect(sql).toContain("blob2 = 'normal'");
+    expect(sql).toContain("blob2 = 'suspected_bot'");
+    expect(sql).toContain("blob2 = 'bot'");
+    expect(sql).toContain("blob2 = 'custom_block'");
     expect(sql).toContain(
-      "blob2 IN ('medium_threat', 'high_threat', 'custom_block')",
+      `intDiv(double19, ${dispositionBlockedFlag}) % 2 != 0`,
+    );
+    expect(sql).toContain(
+      `intDiv(double19, ${dispositionBlockedFlag}) % 2 = 0`,
     );
     expect(sql).toContain("sum(_sample_interval)");
     expect(sql).toContain("quantileExactWeighted(0.95)");
@@ -301,7 +320,8 @@ describe("request observation admin reader", () => {
             sampleWeight: 1,
             siteId: "site-1",
             kind: "request",
-            category: "high_threat",
+            category: "suspected_bot",
+            disposition: "blocked",
             reasons: "ua_isbot",
             rayId: "ray-new",
             traceId: "trace-new",
@@ -316,8 +336,8 @@ describe("request observation admin reader", () => {
             longitude: 0,
             botScore: 7,
             userAgentLength: 10,
-            flags: 12,
-            schemaVersion: 1,
+            flags: 12 | dispositionBlockedFlag,
+            schemaVersion: 2,
           },
         ]),
         { status: 200 },
@@ -339,6 +359,8 @@ describe("request observation admin reader", () => {
     expect(body.detail).toMatchObject({
       rayId: "ray-new",
       traceId: "trace-new",
+      category: "suspected_bot",
+      disposition: "blocked",
       httpProtocol: "HTTP/3",
       metadataJson: '{"eventId":"event-1"}',
       latitude: 0,
@@ -364,40 +386,75 @@ describe("request observation admin reader", () => {
         const sql = String((init as RequestInit | undefined)?.body || "");
         if (sql.includes("blob1 AS kind")) {
           return analyticsResponse(
-            sql.includes("blob2 = 'normal'")
+            sql.includes(
+              `AND intDiv(double19, ${dispositionBlockedFlag}) % 2 = 0`,
+            )
               ? [
                   normalAnalyticsRow(),
                   normalAnalyticsRow({
                     pathname: "/pricing",
                     traceId: "trace-normal-2",
                   }),
+                  normalAnalyticsRow({
+                    category: "suspected_bot",
+                    pathname: "/suspected",
+                    traceId: "trace-suspected-included",
+                  }),
+                  normalAnalyticsRow({
+                    category: "bot",
+                    pathname: "/allowed-bot",
+                    traceId: "trace-bot-included",
+                  }),
                 ]
-              : [abnormalAnalyticsRow()],
+              : [
+                  blockedAnalyticsRow(),
+                  blockedAnalyticsRow({
+                    category: "suspected_bot",
+                    pathname: "/managed-bot",
+                    traceId: "trace-suspected-blocked",
+                  }),
+                  blockedAnalyticsRow({
+                    category: "custom_block",
+                    pathname: "/custom-block",
+                    traceId: "trace-custom-block",
+                  }),
+                ],
           );
         }
         if (sql.includes("timestampMs")) {
           return analyticsResponse([
             sql.includes("latencyWeightedSumMs")
               ? {
+                  blockedCount: 0,
+                  botCount: 0,
+                  customBlockedCount: 0,
                   customEventCount: 1,
                   customEvents: 1,
+                  includedCount: 3,
                   latencySampleWeight: 2,
                   latencyWeightedSumMs: 84,
+                  normalCount: 2,
                   p50LatencyMs: "invalid",
                   p75LatencyMs: 42,
                   p95LatencyMs: 42,
                   p99LatencyMs: 42,
                   pageviewCount: 1,
                   pageviews: 1,
+                  suspectedBotCount: 1,
                   timestampMs: 3_600_000,
-                  weightedRequestCount: 2,
+                  totalCount: 3,
+                  weightedRequestCount: 3,
                 }
               : {
-                  customBlockedCount: 0,
-                  highThreatCount: 2,
-                  mediumThreatCount: 1,
+                  blockedCount: 4,
+                  botCount: 2,
+                  customBlockedCount: 1,
+                  includedCount: 0,
+                  normalCount: 0,
+                  suspectedBotCount: 1,
                   timestampMs: 3_600_000,
-                  weightedRequestCount: 2,
+                  totalCount: 4,
+                  weightedRequestCount: 4,
                 },
           ]);
         }
@@ -425,43 +482,58 @@ describe("request observation admin reader", () => {
             {
               asOrganization: "E2E Bot Network",
               asn: 64512,
+              botCount: 2,
               count: 2,
-              highThreat: 2,
               maxSampleInterval: 2,
             },
             {
               asOrganization: "E2E Other Network",
               asn: 64511,
+              botCount: 0,
               count: 1,
-              highThreat: 0,
               maxSampleInterval: 1,
             },
           ]);
         }
         if (sql.includes("sum(_sample_interval) AS total")) {
           return analyticsResponse([
-            sql.includes("blob2 = 'normal'")
+            sql.includes(
+              `AND intDiv(double19, ${dispositionBlockedFlag}) % 2 = 0`,
+            )
               ? {
                   affectedSites: 1,
                   avgLatencyMs: 42,
+                  blockedRequests: 0,
+                  botRequests: 0,
+                  customBlockedRequests: 0,
+                  customEvents: 1,
+                  includedRequests: 3,
                   latencySampleWeight: 2,
                   latencyWeightedSumMs: 84,
                   maxSampleInterval: 2,
+                  normalRequests: 2,
                   p50LatencyMs: -1,
                   p75LatencyMs: 42,
                   p95LatencyMs: 42,
                   p99LatencyMs: 42,
-                  total: 2,
+                  pageviews: 1,
+                  suspectedBotRequests: 1,
+                  total: 3,
                   uniqueAsns: 1,
                   uniqueCountries: 1,
                 }
               : {
                   affectedSites: 1,
-                  customBlocked: 0,
-                  highThreat: 2,
+                  blockedRequests: 4,
+                  botRequests: 2,
+                  customBlockedRequests: 1,
+                  customEvents: 0,
+                  includedRequests: 0,
                   maxSampleInterval: 2,
-                  mediumThreat: 0,
-                  total: 2,
+                  normalRequests: 0,
+                  pageviews: 0,
+                  suspectedBotRequests: 1,
+                  total: 4,
                   uniqueAsns: 1,
                   uniqueCountries: 1,
                 },
@@ -471,7 +543,7 @@ describe("request observation admin reader", () => {
           return analyticsResponse([
             {
               country: "CN",
-              highThreat: 2,
+              botCount: 2,
               label: "E2E Bot Network",
               maxSampleInterval: 2,
               region: "Shanghai",
@@ -495,9 +567,17 @@ describe("request observation admin reader", () => {
 
     expect(response.status).toBe(200);
     expect(body.overview).toMatchObject({
-      abnormalRequests: 2,
-      avgLatencyMs: 42,
+      totalRequests: 7,
+      includedRequests: 3,
+      blockedRequests: 4,
       normalRequests: 2,
+      suspectedBotRequests: 2,
+      botRequests: 2,
+      customBlockedRequests: 1,
+      botRequestRatio: 2 / 7,
+      blockedRequestRatio: 4 / 7,
+      normalRequestRatio: 2 / 7,
+      avgLatencyMs: 42,
       pageviews: 1,
     });
     expect(body.sampling).toMatchObject({
@@ -505,14 +585,40 @@ describe("request observation admin reader", () => {
       detailsAreSampled: true,
       distinctAreApproximate: true,
     });
-    expect(body.abnormal.events[0]).toMatchObject({
-      category: "high_threat",
+    expect(body.blocked.events[0]).toMatchObject({
+      category: "bot",
+      disposition: "blocked",
       siteName: "Site",
-      traceId: "trace-abnormal",
+      traceId: "trace-blocked",
     });
-    expect(body.normal.events[0]).toMatchObject({
+    expect(
+      body.blocked.events.map(
+        (event: Record<string, unknown>) => event.category,
+      ),
+    ).toEqual(["bot", "suspected_bot", "custom_block"]);
+    expect(body.included.events[0]).toMatchObject({
+      category: "normal",
+      disposition: "included",
       edgeLatencyMs: 42,
       siteName: "Site",
+    });
+    expect(
+      body.included.events.map(
+        (event: Record<string, unknown>) => event.category,
+      ),
+    ).toEqual(["normal", "normal", "suspected_bot", "bot"]);
+    expect(
+      body.trend.find(
+        (point: Record<string, unknown>) => Number(point.totalCount) > 0,
+      ),
+    ).toMatchObject({
+      blockedCount: 4,
+      botCount: 2,
+      customBlockedCount: 1,
+      includedCount: 3,
+      normalCount: 2,
+      suspectedBotCount: 2,
+      totalCount: 7,
     });
     expect(body.mapPoints).toEqual([
       { country: "CN", latitude: 31.23, longitude: 121.47, pointCount: 2 },
@@ -542,6 +648,16 @@ describe("request observation admin reader", () => {
           { count: 3, label: "site-1", maxSampleInterval: 3 },
         ]);
       }
+      if (sql.includes("blob1 AS kind")) {
+        return sql.includes(
+          `AND intDiv(double19, ${dispositionBlockedFlag}) % 2 != 0`,
+        )
+          ? analyticsResponse([blockedAnalyticsRow()])
+          : analyticsResponse([
+              normalAnalyticsRow({ pathname: "/first" }),
+              normalAnalyticsRow({ pathname: "/second" }),
+            ]);
+      }
       return analyticsResponse([
         normalAnalyticsRow({ pathname: "/first" }),
         normalAnalyticsRow({ pathname: "/second" }),
@@ -550,14 +666,14 @@ describe("request observation admin reader", () => {
 
     const pageResponse = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?page=normal&limit=1&cursor=" +
+        "/api/private/admin/request-observation?page=included&limit=1&cursor=" +
           encodeURIComponent(
             JSON.stringify({ receivedAt: 1, timestamp: "2026-09-01 00:00:00" }),
           ),
       ),
       createEnv([config, sites]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=normal&limit=1&cursor=" +
+        "https://app.test/api/private/admin/request-observation?page=included&limit=1&cursor=" +
           encodeURIComponent(
             JSON.stringify({ receivedAt: 1, timestamp: "2026-09-01 00:00:00" }),
           ),
@@ -565,7 +681,11 @@ describe("request observation admin reader", () => {
     );
     const pageBody = (await pageResponse.json()) as Record<string, any>;
     expect(pageResponse.status).toBe(200);
-    expect(pageBody.page).toMatchObject({ hasMore: true, source: "normal" });
+    expect(pageBody.page).toMatchObject({ hasMore: true, source: "included" });
+    expect(pageBody.page.events[0]).toMatchObject({
+      category: "normal",
+      disposition: "included",
+    });
     expect(pageBody.page.events[0]).toMatchObject({
       pathname: "/first",
       siteName: "Site",
@@ -574,13 +694,31 @@ describe("request observation admin reader", () => {
       receivedAt: 1_800_000_000_000,
     });
 
+    const blockedPageResponse = await handleRequestObservationAdmin(
+      request("/api/private/admin/request-observation?page=blocked"),
+      createEnv([statement({ first: configRow(encrypted) }), sites]),
+      new URL(
+        "https://app.test/api/private/admin/request-observation?page=blocked",
+      ),
+    );
+    const blockedPageBody = (await blockedPageResponse.json()) as Record<
+      string,
+      any
+    >;
+    expect(blockedPageResponse.status).toBe(200);
+    expect(blockedPageBody.page).toMatchObject({ source: "blocked" });
+    expect(blockedPageBody.page.events[0]).toMatchObject({
+      category: "bot",
+      disposition: "blocked",
+    });
+
     const dimensionResponse = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=normal",
+        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=included",
       ),
       createEnv([statement({ first: configRow(encrypted) }), sites]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=normal",
+        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=included",
       ),
     );
     const dimensionBody = (await dimensionResponse.json()) as Record<
@@ -589,17 +727,18 @@ describe("request observation admin reader", () => {
     >;
     expect(dimensionResponse.status).toBe(200);
     expect(dimensionBody.dimension.rows[0]).toMatchObject({
+      botCount: 0,
       iconLabel: "site.test",
       label: "Site",
     });
 
     const regionResponse = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?dimensionGroup=network&dimensionTab=region&dimensionSource=abnormal",
+        "/api/private/admin/request-observation?dimensionGroup=network&dimensionTab=region&dimensionSource=blocked",
       ),
       createEnv([statement({ first: configRow(encrypted) })]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?dimensionGroup=network&dimensionTab=region&dimensionSource=abnormal",
+        "https://app.test/api/private/admin/request-observation?dimensionGroup=network&dimensionTab=region&dimensionSource=blocked",
       ),
     );
     const regionBody = (await regionResponse.json()) as Record<string, any>;
@@ -608,24 +747,35 @@ describe("request observation admin reader", () => {
       regionBody.dimension.rows[0].label,
     );
 
-    const invalidDimension = await handleRequestObservationAdmin(
+    const includedDetection = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=invalid&dimensionSource=normal",
+        "/api/private/admin/request-observation?dimensionGroup=detection&dimensionTab=category&dimensionSource=included",
       ),
       createEnv([statement({ first: configRow(encrypted) })]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=invalid&dimensionSource=normal",
+        "https://app.test/api/private/admin/request-observation?dimensionGroup=detection&dimensionTab=category&dimensionSource=included",
+      ),
+    );
+    expect(includedDetection.status).toBe(400);
+
+    const invalidDimension = await handleRequestObservationAdmin(
+      request(
+        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=invalid&dimensionSource=included",
+      ),
+      createEnv([statement({ first: configRow(encrypted) })]),
+      new URL(
+        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=invalid&dimensionSource=included",
       ),
     );
     expect(invalidDimension.status).toBe(400);
 
     const invalidCursor = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?page=abnormal&cursor=invalid",
+        "/api/private/admin/request-observation?page=blocked&cursor=invalid",
       ),
       createEnv([statement({ first: configRow(encrypted) })]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=abnormal&cursor=invalid",
+        "https://app.test/api/private/admin/request-observation?page=blocked&cursor=invalid",
       ),
     );
     expect(invalidCursor.status).toBe(400);
@@ -641,21 +791,31 @@ describe("request observation admin reader", () => {
       .mockImplementation(async (_input, init) => {
         const sql = String((init as RequestInit | undefined)?.body || "");
         return analyticsResponse([
-          sql.includes("blob2 = 'normal'")
-            ? { siteId: "missing-site" }
-            : { siteId: "missing-site", category: "unknown" },
+          sql.includes(`intDiv(double19, ${dispositionBlockedFlag}) % 2 = 0`)
+            ? {
+                siteId: "missing-site",
+                category: "normal",
+                disposition: "included",
+                flags: metricFlags,
+              }
+            : {
+                siteId: "missing-site",
+                category: "custom_block",
+                disposition: "blocked",
+                flags: metricFlags | dispositionBlockedFlag,
+              },
           {},
         ]);
       });
 
     const normalResponse = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=normal"),
+      request("/api/private/admin/request-observation?page=included"),
       createEnv([
         statement({ first: configRow(encrypted) }),
         statement({ all: [{}] }),
       ]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=normal",
+        "https://app.test/api/private/admin/request-observation?page=included",
       ),
     );
     const normalBody = (await normalResponse.json()) as Record<string, any>;
@@ -670,19 +830,20 @@ describe("request observation admin reader", () => {
     expect(normalBody.page.events[1].siteName).toBe("Unknown site");
 
     const abnormalResponse = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=abnormal"),
+      request("/api/private/admin/request-observation?page=blocked"),
       createEnv([
         statement({ first: configRow(encrypted) }),
         statement({ all: [{}] }),
       ]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=abnormal",
+        "https://app.test/api/private/admin/request-observation?page=blocked",
       ),
     );
     const abnormalBody = (await abnormalResponse.json()) as Record<string, any>;
     expect(abnormalResponse.status).toBe(200);
     expect(abnormalBody.page.events[0]).toMatchObject({
       category: "custom_block",
+      disposition: "blocked",
       siteName: "missing-site",
       siteDomain: "",
       botScore: null,
@@ -748,11 +909,12 @@ describe("request observation admin reader", () => {
     expect(body.mapPoints).toEqual([]);
     expect(body.reasons).toEqual([]);
     expect(body.asns).toEqual([
-      { asn: 64512, asOrganization: "Sparse ASN", count: 1 },
-      { asn: 64513, asOrganization: "", count: 1 },
+      { asn: 64512, asOrganization: "Sparse ASN", botCount: 0, count: 1 },
+      { asn: 64513, asOrganization: "", botCount: 0, count: 1 },
     ]);
     expect(body.overview).toMatchObject({
-      abnormalRequests: 0,
+      blockedRequests: 0,
+      includedRequests: 0,
       normalRequests: 0,
       avgLatencyMs: null,
       p50LatencyMs: null,
@@ -767,43 +929,45 @@ describe("request observation admin reader", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const failureMatchers: Array<[string, (sql: string) => boolean]> = [
       [
-        "abnormal trend",
+        "blocked trend",
         (sql) =>
           sql.includes("timestampMs") && !sql.includes("latencyWeightedSumMs"),
       ],
       [
-        "normal trend",
+        "included trend",
         (sql) =>
           sql.includes("timestampMs") && sql.includes("latencyWeightedSumMs"),
       ],
       [
-        "abnormal map",
-        (sql) => sql.includes("pointCount") && sql.includes("blob2 IN"),
+        "blocked map",
+        (sql) =>
+          sql.includes("pointCount") &&
+          sql.includes(`intDiv(double19, ${dispositionBlockedFlag}) % 2 != 0`),
       ],
       [
-        "normal map",
-        (sql) => sql.includes("pointCount") && sql.includes("blob2 = 'normal'"),
+        "included map",
+        (sql) =>
+          sql.includes("pointCount") &&
+          sql.includes(`intDiv(double19, ${dispositionBlockedFlag}) % 2 = 0`),
       ],
       [
-        "abnormal summary",
+        "blocked summary",
         (sql) =>
           sql.includes("sum(_sample_interval) AS total") &&
-          sql.includes("blob2 IN"),
+          sql.includes(`intDiv(double19, ${dispositionBlockedFlag}) % 2 != 0`),
       ],
       [
-        "normal summary",
+        "included summary",
         (sql) =>
           sql.includes("sum(_sample_interval) AS total") &&
-          sql.includes("blob2 = 'normal'"),
+          sql.includes(`intDiv(double19, ${dispositionBlockedFlag}) % 2 = 0`),
       ],
       ["reason summary", (sql) => sql.includes("blob3 AS reasons")],
       [
         "asn summary",
         (sql) =>
           sql.includes("double4 AS asn") &&
-          sql.includes(
-            "sumIf(_sample_interval, blob2 = 'high_threat') AS highThreat",
-          ),
+          sql.includes("sumIf(_sample_interval, blob2 = 'bot') AS botCount"),
       ],
       ["network dimensions", (sql) => sql.includes("AS label")],
     ];
@@ -870,21 +1034,21 @@ describe("request observation admin reader", () => {
     expect(detailFailure.status).toBe(400);
 
     const pageFailure = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=normal"),
+      request("/api/private/admin/request-observation?page=included"),
       createEnv([configured()]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=normal",
+        "https://app.test/api/private/admin/request-observation?page=included",
       ),
     );
     expect(pageFailure.status).toBe(400);
 
     const dimensionFailure = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=normal",
+        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=included",
       ),
       createEnv([configured()]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=normal",
+        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=included",
       ),
     );
     expect(dimensionFailure.status).toBe(400);
@@ -897,11 +1061,11 @@ describe("request observation admin reader", () => {
     });
     const siteFallback = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=normal",
+        "/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=included",
       ),
       createEnv([configured(), statement({ all: [] })]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=normal",
+        "https://app.test/api/private/admin/request-observation?dimensionGroup=target&dimensionTab=site&dimensionSource=included",
       ),
     );
     expect(siteFallback.status).toBe(200);
@@ -1025,10 +1189,10 @@ describe("request observation admin reader", () => {
       new Response("not json\n", { status: 200 }),
     );
     const invalidJsonPage = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=normal"),
+      request("/api/private/admin/request-observation?page=included"),
       createEnv([configuredStatement()]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=normal",
+        "https://app.test/api/private/admin/request-observation?page=included",
       ),
     );
     expect(invalidJsonPage.status).toBe(400);

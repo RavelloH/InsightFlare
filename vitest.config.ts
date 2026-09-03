@@ -7,7 +7,7 @@ import { parse } from "yaml";
 // Keep the test pool bounded on high-core machines.  V8 coverage writes one
 // temporary file per worker; an unbounded pool makes that merge flaky under
 // the full check and can also starve the integration tests of CPU.
-const VITEST_MAX_WORKERS = Math.min(8, Math.max(1, osCpus().length));
+const VITEST_MAX_WORKERS = Math.min(16, Math.max(1, osCpus().length));
 
 export default defineConfig({
   plugins: [

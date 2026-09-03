@@ -5,7 +5,7 @@
  * module only contains values that are common to every dataset.
  */
 
-export const ANALYTICS_ENGINE_SCHEMA_VERSION = 1 as const;
+export const ANALYTICS_ENGINE_SCHEMA_VERSION = 2 as const;
 export const ANALYTICS_ENGINE_MAX_BLOBS = 20 as const;
 export const ANALYTICS_ENGINE_MAX_DOUBLES = 20 as const;
 export const ANALYTICS_ENGINE_INDEXES = ["siteId"] as const;

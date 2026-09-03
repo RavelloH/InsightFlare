@@ -6,6 +6,7 @@ import {
   REQUEST_ANALYTICS_SCHEMA_VERSION,
   REQUEST_FLAG_BOT_SCORE_PRESENT,
   REQUEST_FLAG_COORDINATE_PRESENT,
+  REQUEST_FLAG_DISPOSITION_BLOCKED,
   REQUEST_FLAG_EDGE_LATENCY_PRESENT,
   REQUEST_FLAG_EVENT_AT_PRESENT,
   REQUEST_FLAG_QUIC_RTT_PRESENT,
@@ -91,7 +92,10 @@ export function writeRequestAnalyticsPoint(
     const receivedAt = finiteNumber(input.receivedAt) ?? 0;
     const eventAt = resolveEventAt(payload, receivedAt);
     const edgeLatency = resolveEdgeLatency(input.receivedAt);
-    const ip = input.category === "normal" ? "" : requestIp(request);
+    const ip =
+      input.category === "bot" && input.disposition === "blocked"
+        ? requestIp(request)
+        : "";
 
     let flags = 0;
     flags = setRequestFlag(
@@ -128,6 +132,11 @@ export function writeRequestAnalyticsPoint(
       flags,
       REQUEST_FLAG_TLS_CLIENT_HELLO_LENGTH_PRESENT,
       tlsClientHelloLength !== null,
+    );
+    flags = setRequestFlag(
+      flags,
+      REQUEST_FLAG_DISPOSITION_BLOCKED,
+      input.disposition === "blocked",
     );
 
     const point = {

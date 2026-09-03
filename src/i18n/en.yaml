@@ -1019,6 +1019,12 @@ siteSettings:
   trackingStrengthWeakDescription: Always reduce tracking precision. This can
     count the same visitor multiple times across visits and make retention
     impossible.
+  botProtectionGroupTitle: Bot Protection
+  botProtectionGroupDescription: Control whether high-confidence bots are blocked and whether hosting or proxy traffic is blocked.
+  botProtectionEnabledLabel: Block detected bots
+  botProtectionEnabledHint: High-confidence bot requests are blocked when this is enabled; otherwise they remain included in statistics.
+  hostingProxyBlockingEnabledLabel: Block hosting and proxy traffic
+  hostingProxyBlockingEnabledHint: Block suspected bot requests from hosting or proxy networks. This is disabled by default.
   queryHashGroupTitle: Query and Hash Tracking
   queryHashGroupDescription: Control how query strings, URL hashes, and Do Not Track are handled.
   trackQueryParamsLabel: Track Query Parameters
@@ -2304,8 +2310,10 @@ requestObservation:
     pipeline from Analytics Engine.
   tabs:
     overview: Overview
-    abnormal: Abnormal Requests
-    normal: Normal Requests
+    abnormal: Blocked Requests
+    normal: Included Requests
+    blocked: Blocked Requests
+    included: Included Requests
   refresh: Refresh
   loadFailed: Failed to load request observability data.
   samplingNotice: Counts are corrected for Analytics Engine sampling; detailed
@@ -2320,16 +2328,21 @@ requestObservation:
     request-observation data.
   openAnalyticsEngine: Open Analytics Engine
   openSettings: Open settings
-  highThreatBots: High-threat Bots
+  highThreatBots: Bot Requests
+  botRequests: Bot Requests
+  suspectedBotRequests: Suspected Bot Requests
+  blockedRequests: Blocked Requests
+  includedRequests: Included Requests
+  customBlockedRequests: Custom-blocked Requests
   affectedSites: Affected Sites
   uniqueCountries: Countries
   noData: No request data in this window.
   trendTitle: Routing Trend
-  trendDescription: Normal requests, abnormal requests, and diversion ratio by interval.
-  recentTitle: Recent Abnormal Requests
+  trendDescription: Request categories, dispositions, and ratios by interval.
+  recentTitle: Recent Blocked Requests
   recentDescription: Detailed records read from the unified Request Analytics Engine dataset.
   recentLoadedAll: All records loaded
-  detailTitle: Abnormal Request Detail
+  detailTitle: Request Detail
   detailSubtitle: Inspect detection signals, network context, and client data for
     this abnormal request.
   client: Client
@@ -2348,6 +2361,8 @@ requestObservation:
   userAgent: User agent
   category: Category
   blocked: Blocked
+  included: Included in statistics
+  disposition: Disposition
   highThreatRequests: High-threat Requests
   emptyValue: Unknown
   kind: Type
@@ -2398,9 +2413,16 @@ requestObservation:
     identify: Identify
   overviewLabels:
     totalRequests: Total requests
+    includedRequests: Included requests
+    blockedRequests: Blocked requests
     normalRequests: Normal requests
-    abnormalRequests: Abnormal requests
-    abnormalRatio: Abnormal request ratio
+    suspectedBotRequests: Suspected bot requests
+    botRequests: Bot requests
+    customBlockedRequests: Custom-blocked requests
+    botRequestRatio: Bot request ratio
+    blockedRequestRatio: Blocked request ratio
+    abnormalRequests: Blocked requests
+    abnormalRatio: Blocked request ratio
     p50Latency: P50 Worker processing time
     p75Latency: P75 Worker processing time
     p99Latency: P99 Worker processing time
@@ -2409,24 +2431,28 @@ requestObservation:
     pageviews: Pageviews
     customEvents: Custom events
     overviewTrendTitle: Request routing trend
-    overviewTrendDescription: Normal requests, abnormal requests, and abnormal ratio
-      bucketed by the top-bar interval.
+    overviewTrendDescription: Request categories and blocked ratio bucketed by the
+      top-bar interval.
     trafficCompositionTitle: Business request composition
     trafficCompositionDescription: Counts normal collection events by type over
       time, including pageviews, leaves, visibility changes, custom events, and
       identifications.
     categoryShareTitle: Request category breakdown
     normalTrafficShare: Normal traffic
-    mediumThreatTraffic: Medium-threat traffic
-    highThreatTraffic: High-threat traffic
+    suspectedBotTraffic: Suspected bot traffic
+    botTraffic: Bot traffic
+    mediumThreatTraffic: Suspected bot traffic
+    highThreatTraffic: Bot traffic
     customBlockedTraffic: Custom-blocked traffic
     latencyTitle: Worker processing time trend
     latencyDescription: P50 / P75 / P95 / P99 Worker processing time recorded when
       normal requests are written to AE.
-    abnormalSubtitle: Focus on abnormal requests. Maps and tables include
-      medium-threat, high-threat, and custom-blocked traffic.
-    normalSubtitle: Focus on requests that entered the normal collection pipeline.
-      Maps and tables show only normal traffic.
+    abnormalSubtitle: Focus on blocked requests. Category labels retain the
+      detection result for each request.
+    normalSubtitle: Focus on requests included in statistics. This can include
+      normal and suspected bot traffic.
+    blockedSubtitle: Focus on requests that were blocked by custom rules or protection settings.
+    includedSubtitle: Focus on requests included in statistics, including normal and suspected bot traffic.
     requests: Requests
     windowDays: "Last {days} days"
     latencyMilliseconds: "{value} ms"

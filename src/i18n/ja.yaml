@@ -996,6 +996,12 @@ siteSettings:
   trackingStrengthStrongDescription: 常に高精度の訪問者トラッキングを使用します。GDPR など、一部地域のプライバシー規制に抵触する可能性があります。
   trackingStrengthSmartDescription: 訪問者の国に基づいてトラッキング強度を自動で切り替えます。
   trackingStrengthWeakDescription: 常にトラッキング精度を下げます。同じ訪問者が複数回カウントされ、リテンション分析ができなくなる場合があります。
+  botProtectionGroupTitle: ボット保護
+  botProtectionGroupDescription: 高信頼度のボットをブロックするか、ホスティング・プロキシネットワークからのリクエストをブロックするかを設定します。
+  botProtectionEnabledLabel: 検出したボットをブロック
+  botProtectionEnabledHint: 有効にすると高信頼度のボットリクエストをブロックし、無効にすると統計に含めます。
+  hostingProxyBlockingEnabledLabel: ホスティング・プロキシネットワークをブロック
+  hostingProxyBlockingEnabledHint: 有効にするとホスティングまたはプロキシネットワークからの疑わしいボットリクエストをブロックします。デフォルトはオフです。
   queryHashGroupTitle: クエリとハッシュのトラッキング
   queryHashGroupDescription: クエリ文字列、URL ハッシュ、Do Not Track の扱いを制御します。
   trackQueryParamsLabel: クエリパラメータを追跡
@@ -2246,8 +2252,10 @@ requestObservation:
   subtitle: Analytics Engine をもとに、リクエスト全体、異常ルーティング、通常の収集経路を監視します。
   tabs:
     overview: 概要
-    abnormal: 異常リクエスト
-    normal: 通常リクエスト
+    abnormal: ブロック済みリクエスト
+    normal: 統計対象リクエスト
+    blocked: ブロック済みリクエスト
+    included: 統計対象リクエスト
   refresh: 更新
   loadFailed: リクエスト監視データを読み込めません。
   samplingNotice: リクエスト数は Analytics Engine のサンプル重みで補正されています。詳細行は代表サンプルで、重複除外値は近似値です。
@@ -2260,16 +2268,21 @@ requestObservation:
     で有効化してから再デプロイすると、リクエスト監視データを収集できます。
   openAnalyticsEngine: Analytics Engine を開く
   openSettings: 設定を開く
-  highThreatBots: 高脅威 Bot
+  highThreatBots: ボットリクエスト
+  botRequests: ボットリクエスト
+  suspectedBotRequests: 疑わしいボットリクエスト
+  blockedRequests: ブロック済みリクエスト
+  includedRequests: 統計対象リクエスト
+  customBlockedRequests: カスタムブロック済みリクエスト
   affectedSites: 影響サイト
   uniqueCountries: 国
   noData: この期間にリクエストデータはありません。
   trendTitle: ルーティング推移
-  trendDescription: 通常リクエスト、異常リクエスト、分流比率を間隔ごとに表示します。
-  recentTitle: 最近の異常リクエスト
+  trendDescription: リクエストの分類、処置、比率を間隔ごとに表示します。
+  recentTitle: 最近のブロック済みリクエスト
   recentDescription: 統合された Request Analytics Engine データセットから読み取った詳細記録です。
   recentLoadedAll: すべての記録を読み込みました
-  detailTitle: 異常リクエスト詳細
+  detailTitle: リクエスト詳細
   detailSubtitle: この異常リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。
   client: クライアント
   edge: エッジ
@@ -2287,6 +2300,8 @@ requestObservation:
   userAgent: User-Agent
   category: カテゴリ
   blocked: ブロック済み
+  included: 統計に含める
+  disposition: 処理結果
   highThreatRequests: 高脅威リクエスト
   emptyValue: 不明
   kind: 種別
@@ -2337,9 +2352,16 @@ requestObservation:
     identify: ユーザー識別
   overviewLabels:
     totalRequests: 総リクエスト数
+    includedRequests: 統計対象リクエスト数
+    blockedRequests: ブロック済みリクエスト数
     normalRequests: 通常リクエスト
-    abnormalRequests: 異常リクエスト
-    abnormalRatio: 異常リクエスト比率
+    suspectedBotRequests: 疑わしいボットリクエスト数
+    botRequests: ボットリクエスト数
+    customBlockedRequests: カスタムブロック済みリクエスト数
+    botRequestRatio: ボットリクエスト比率
+    blockedRequestRatio: ブロック済みリクエスト比率
+    abnormalRequests: ブロック済みリクエスト
+    abnormalRatio: ブロック済みリクエスト比率
     p50Latency: P50 Worker 処理時間
     p75Latency: P75 Worker 処理時間
     p99Latency: P99 Worker 処理時間
@@ -2348,18 +2370,22 @@ requestObservation:
     pageviews: ページビュー
     customEvents: カスタムイベント
     overviewTrendTitle: リクエストルーティング推移
-    overviewTrendDescription: 通常リクエスト、異常リクエスト、異常比率をトップバーの間隔ごとに集計します。
+    overviewTrendDescription: リクエスト分類とブロック済み比率をトップバーの間隔ごとに集計します。
     trafficCompositionTitle: ビジネスリクエスト構成
     trafficCompositionDescription: ページビュー、離脱、可視性の変化、カスタムイベント、ユーザー識別など、通常の収集イベントを種類別に時系列で表示します。
     categoryShareTitle: リクエストカテゴリの内訳
     normalTrafficShare: 通常トラフィック
-    mediumThreatTraffic: 中脅威トラフィック
-    highThreatTraffic: 高脅威トラフィック
+    suspectedBotTraffic: 疑わしいボットトラフィック
+    botTraffic: ボットトラフィック
+    mediumThreatTraffic: 疑わしいボットトラフィック
+    highThreatTraffic: ボットトラフィック
     customBlockedTraffic: カスタムブロックトラフィック
     latencyTitle: Worker 処理時間の推移
     latencyDescription: 通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 Worker 処理時間です。
-    abnormalSubtitle: 異常リクエストに絞り込み、マップと表には中脅威・高脅威・カスタムブロックのトラフィックを表示します。
-    normalSubtitle: 通常の収集経路に入ったリクエストに絞り込み、マップと表には通常リクエストのみを表示します。
+    abnormalSubtitle: 実際にブロックされたリクエストに絞り込み、分類ラベルには検出結果を表示します。
+    normalSubtitle: 統計に含まれるリクエストに絞り込みます。通常リクエストと疑わしいボットリクエストを含みます。
+    blockedSubtitle: カスタムルールまたは保護設定でブロックされたリクエストに絞り込みます。
+    includedSubtitle: 統計に含めるリクエストに絞り込みます。通常リクエストと疑わしいボットリクエストを含みます。
     requests: リクエスト数
     windowDays: 過去 {days} 日
     latencyMilliseconds: "{value} ミリ秒"

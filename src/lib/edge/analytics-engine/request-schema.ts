@@ -103,16 +103,23 @@ export const REQUEST_ANALYTICS_DOUBLE_SLOTS = {
 
 export type RequestAnalyticsCategory =
   | "normal"
-  | "medium_threat"
-  | "high_threat"
+  | "suspected_bot"
+  | "bot"
   | "custom_block";
 
 export const REQUEST_ANALYTICS_CATEGORIES = [
   "normal",
-  "medium_threat",
-  "high_threat",
+  "suspected_bot",
+  "bot",
   "custom_block",
 ] as const satisfies readonly RequestAnalyticsCategory[];
+
+export type RequestAnalyticsDisposition = "included" | "blocked";
+
+export const REQUEST_ANALYTICS_DISPOSITIONS = [
+  "included",
+  "blocked",
+] as const satisfies readonly RequestAnalyticsDisposition[];
 
 export const REQUEST_FLAG_EVENT_AT_PRESENT = 1 << 0;
 export const REQUEST_FLAG_EDGE_LATENCY_PRESENT = 1 << 1;
@@ -121,6 +128,7 @@ export const REQUEST_FLAG_BOT_SCORE_PRESENT = 1 << 3;
 export const REQUEST_FLAG_TCP_RTT_PRESENT = 1 << 4;
 export const REQUEST_FLAG_QUIC_RTT_PRESENT = 1 << 5;
 export const REQUEST_FLAG_TLS_CLIENT_HELLO_LENGTH_PRESENT = 1 << 6;
+export const REQUEST_FLAG_DISPOSITION_BLOCKED = 1 << 7;
 
 export const REQUEST_ANALYTICS_FLAGS = {
   eventAtPresent: REQUEST_FLAG_EVENT_AT_PRESENT,
@@ -130,6 +138,7 @@ export const REQUEST_ANALYTICS_FLAGS = {
   tcpRttPresent: REQUEST_FLAG_TCP_RTT_PRESENT,
   quicRttPresent: REQUEST_FLAG_QUIC_RTT_PRESENT,
   tlsClientHelloLengthPresent: REQUEST_FLAG_TLS_CLIENT_HELLO_LENGTH_PRESENT,
+  dispositionBlocked: REQUEST_FLAG_DISPOSITION_BLOCKED,
 } as const;
 
 export const REQUEST_FLAGS = REQUEST_ANALYTICS_FLAGS;
@@ -164,5 +173,6 @@ export interface RequestAnalyticsInput {
   traceId: string;
   receivedAt: number;
   category: RequestAnalyticsCategory;
+  disposition: RequestAnalyticsDisposition;
   reasons: readonly string[];
 }
