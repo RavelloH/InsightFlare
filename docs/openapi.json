@@ -3,7 +3,7 @@
   "info": {
     "title": "InsightFlare API",
     "description": "Privacy-focused web analytics API. API v1 endpoints use an API key passed as a Bearer token in the Authorization header. All timestamps in typed API v1 query bodies and response objects are ISO 8601 date-time strings unless the field name explicitly ends with `Ms`. Fields ending with `Ms` represent millisecond values, such as durations or Unix timestamps depending on context. Analytics ranges use [from, to) semantics.",
-    "version": "0.7.0",
+    "version": "0.7.1",
     "contact": {
       "name": "InsightFlare",
       "url": "https://github.com/ravelloh/InsightFlare"

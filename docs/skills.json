@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "api": "InsightFlare API",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "baseUrl": "${baseUrl}",
   "description": "Agent operating guide for the InsightFlare public API.",
   "openapi": {
