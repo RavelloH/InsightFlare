@@ -17,6 +17,8 @@ const EMPTY_FILTER_DOCUMENT: FilterDocument = { version: 1, root: null };
 export function filterQueryKey(filters?: FilterDocument): string {
   const document = filters ?? EMPTY_FILTER_DOCUMENT;
   const fingerprint = filterFingerprint(document, analyticsFilterRegistry);
-  const scope = filterScopePreferenceFromDocument(document) ?? "auto";
+  const scope = document.root
+    ? (filterScopePreferenceFromDocument(document) ?? "auto")
+    : "auto";
   return `${fingerprint}:scope=${scope}`;
 }

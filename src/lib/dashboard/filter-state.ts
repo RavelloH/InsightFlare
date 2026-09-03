@@ -313,6 +313,9 @@ export function withDashboardFilterSearchParams(
       next.delete(key);
     }
   }
+  // A scope preference only has meaning together with an active filter. Keep
+  // stale scope-only URLs from surviving when the last filter is removed.
+  if (!document.root) next.delete("scope");
   for (const [key, value] of serializeFilterParams(
     document,
     analyticsFilterRegistry,

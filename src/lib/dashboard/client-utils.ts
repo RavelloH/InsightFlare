@@ -63,7 +63,8 @@ export function withFilters(
   const next = { ...params };
   delete next.scope;
   const scopePreference =
-    resolvedScope ?? filterScopePreferenceFromDocument(filters);
+    resolvedScope ??
+    (filters?.root ? filterScopePreferenceFromDocument(filters) : undefined);
   if (scopePreference) {
     const scopeParams = serializeFilterScopePreference(
       new URLSearchParams(),

@@ -664,7 +664,9 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   const handleScopeChange = useCallback(
     (next: FilterScopePreference) => {
       setScopePreference(next);
-      const params = serializeFilterScopeToSearchParams(searchParams, next);
+      const params = queryDocument.root
+        ? serializeFilterScopeToSearchParams(searchParams, next)
+        : serializeFilterScopeToSearchParams(searchParams, "auto");
       const updated = serializeDashboardSearchParams(params);
       const current = serializeDashboardSearchParams(searchParams);
       if (updated !== current) {
@@ -672,7 +674,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
         replaceUrlWithoutNavigation(target);
       }
     },
-    [livePathname, searchParams, setScopePreference],
+    [livePathname, queryDocument, searchParams, setScopePreference],
   );
 
   useEffect(() => {
@@ -692,10 +694,13 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
         nextScope,
       );
       setUiFilters(scopedDocument, rawDsl);
-      const params = serializeFilterScopeToSearchParams(
-        withDashboardFilterSearchParams(searchParams, scopedDocument),
-        nextScope,
+      const filterParams = withDashboardFilterSearchParams(
+        searchParams,
+        scopedDocument,
       );
+      const params = scopedDocument.root
+        ? serializeFilterScopeToSearchParams(filterParams, nextScope)
+        : serializeFilterScopeToSearchParams(filterParams, "auto");
       const updated = serializeDashboardSearchParams(params);
       const current = serializeDashboardSearchParams(searchParams);
       if (updated !== current) {

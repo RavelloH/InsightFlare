@@ -360,6 +360,17 @@ describe("dashboard query-state helpers", () => {
 
       expect(url.searchParams.get("scope")).toBe("visitor");
     });
+
+    it("does not serialize a scope preference without an active filter", () => {
+      const filters = attachFilterScopePreference(
+        dashboardFilterDocumentFromPresentation({}),
+        "visitor",
+      );
+
+      expect(withRangeAndFilters("/dashboard", "7d", filters)).toBe(
+        "/dashboard?range=7d",
+      );
+    });
   });
 
   describe("withDashboardFilterSearchParams", () => {
@@ -380,6 +391,16 @@ describe("dashboard query-state helpers", () => {
       expect(next.get("geoCountry")).toBeNull();
       expect(next.get("filter[geo.country]")).toBeNull();
       expect(next.get("filter[referrer.domain]")).toBe("google.com");
+    });
+
+    it("removes a stale scope when the active filter document is empty", () => {
+      const next = withDashboardFilterSearchParams(
+        new URLSearchParams("range=7d&scope=visitor"),
+        dashboardFilterDocumentFromPresentation({}),
+      );
+
+      expect(next.get("range")).toBe("7d");
+      expect(next.get("scope")).toBeNull();
     });
   });
 

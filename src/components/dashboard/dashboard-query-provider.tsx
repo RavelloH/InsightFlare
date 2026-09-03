@@ -10,7 +10,10 @@ import {
 } from "react";
 
 import { useReportingTimeZone } from "@/components/time-zone-provider";
-import { useLiveSearchParams } from "@/lib/client-history";
+import {
+  replaceUrlWithoutNavigation,
+  useLiveSearchParams,
+} from "@/lib/client-history";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import {
   readDashboardQueryPreferences,
@@ -126,12 +129,16 @@ function buildInitialState(
   initialScope?: FilterScopePreference,
   initialFilters?: FilterDocument,
 ) {
-  const scopePreference =
+  const normalizedFilters = normalizeFilters(initialFilters ?? EMPTY_FILTERS);
+  const requestedScopePreference =
     initialScope ??
     filterScopePreferenceFromDocument(initialFilters) ??
     readInitialScopePreference();
+  const scopePreference = normalizedFilters.root
+    ? requestedScopePreference
+    : "auto";
   const uiFilters = attachFilterScopePreference(
-    normalizeFilters(initialFilters ?? EMPTY_FILTERS),
+    normalizedFilters,
     scopePreference,
   );
   if (initialWindow) {
@@ -357,11 +364,15 @@ export function DashboardQueryProvider({
     }
     previousRouteSearchParamsKeyRef.current = routeSearchParamsKey;
 
-    const nextScopePreference = parseFilterScopePreference(
+    const requestedScopePreference = parseFilterScopePreference(
       new URLSearchParams(routeSearchParamsKey),
     );
+    const normalizedFilters = normalizeFilters(routeQueryDocument);
+    const nextScopePreference = normalizedFilters.root
+      ? requestedScopePreference
+      : "auto";
     const nextFilters = attachFilterScopePreference(
-      normalizeFilters(routeQueryDocument),
+      normalizedFilters,
       nextScopePreference,
     );
     const nextDocumentKey = filterDocumentKey(nextFilters);
@@ -373,6 +384,20 @@ export function DashboardQueryProvider({
       setUiFilterDslDocumentKey(undefined);
     }
   }, [routeQueryDocument, routeSearchParamsKey, uiFilterDslDocumentKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("scope")) return;
+    if (parseFilterDocumentFromSearchParams(params).root) return;
+
+    params.delete("scope");
+    const search = params.toString();
+    replaceUrlWithoutNavigation(
+      `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`,
+    );
+  }, [routeSearchParamsKey]);
 
   const setRange = useCallback(
     (next: RangePreset) => {

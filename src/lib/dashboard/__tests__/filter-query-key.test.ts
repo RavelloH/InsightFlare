@@ -23,6 +23,15 @@ describe("filterQueryKey", () => {
     expect(filterQueryKey(session)).toContain(":scope=session");
   });
 
+  it("treats scope metadata as Auto when there is no active filter", () => {
+    const empty = attachFilterScopePreference(
+      dashboardFilterDocumentFromPresentation({}),
+      "visitor",
+    );
+
+    expect(filterQueryKey(empty)).toContain(":scope=auto");
+  });
+
   it("is stable for equivalent filter documents", () => {
     const first = dashboardFilterDocumentFromPresentation({
       path: "/docs",

@@ -190,6 +190,17 @@ describe("Dashboard Client Data Processing Utilities", () => {
       const baseParams = { siteId: "123" };
       expect(withFilters(baseParams, undefined)).toEqual(baseParams);
     });
+
+    it("should omit a scope preference when the filter document is empty", () => {
+      const filters = attachFilterScopePreference(
+        dashboardFilterDocumentFromPresentation({}),
+        "visitor",
+      );
+
+      expect(withFilters({ siteId: "123" }, filters)).toEqual({
+        siteId: "123",
+      });
+    });
   });
 
   describe("Dashboard demo API contract smoke", () => {

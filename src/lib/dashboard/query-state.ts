@@ -312,7 +312,7 @@ export function withRangeAndFilters(
   );
   params.set("range", range);
   const scopePreference = filterScopePreferenceFromDocument(filters);
-  if (scopePreference) {
+  if (scopePreference && filters?.root) {
     return `${pathname}?${serializeDashboardSearchParams(
       serializeFilterScopePreference(params, scopePreference),
     )}`;

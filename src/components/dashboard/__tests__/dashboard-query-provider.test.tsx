@@ -68,6 +68,23 @@ describe("DashboardQueryProvider", () => {
     expect(container.textContent).toBe("filtered:visitor");
   });
 
+  it("clears a scope-only URL and falls back to Auto", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/zh/app/team/site/pages?scope=visitor",
+    );
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(createElement(ScopeApp, { scopeKey: "site-id" }));
+      await Promise.resolve();
+    });
+
+    expect(window.location.search).toBe("");
+    expect(container.textContent).toBe("empty:auto");
+  });
+
   it("keeps URL filters when the initial site scope resolves", async () => {
     await act(async () => {
       root = createRoot(container);
