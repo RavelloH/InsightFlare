@@ -2103,16 +2103,6 @@ export function RequestObservationClient({
                         <AsyncDimensionBreakdownCard
                           locale={locale}
                           messages={messages}
-                          tabs={includedDetectionTabs}
-                          loadRows={loadIncludedDetectionRows}
-                          requestKey={`${requestKey}:included-detection`}
-                          className="h-full"
-                          showVisitors={false}
-                          emptyLabel={copy.noData}
-                        />
-                        <AsyncDimensionBreakdownCard
-                          locale={locale}
-                          messages={messages}
                           tabs={detectionTabs}
                           loadRows={loadBlockedDetectionRows}
                           requestKey={`${requestKey}:detection`}
@@ -2236,7 +2226,36 @@ export function RequestObservationClient({
                         </CardContent>
                       </Card>
 
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>{copy.trendTitle}</CardTitle>
+                          <CardDescription>
+                            {ui.includedTrendDescription}
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <RequestObservationTrendChart
+                            data={trend}
+                            labels={trendLabels}
+                            locale={locale}
+                            spanMs={spanMs}
+                            variant="included"
+                            className="h-[320px]"
+                          />
+                        </CardContent>
+                      </Card>
+
                       <section className="grid gap-4 xl:grid-cols-2">
+                        <AsyncDimensionBreakdownCard
+                          locale={locale}
+                          messages={messages}
+                          tabs={includedDetectionTabs}
+                          loadRows={loadIncludedDetectionRows}
+                          requestKey={`${requestKey}:included-detection`}
+                          className="h-full"
+                          showVisitors={false}
+                          emptyLabel={copy.noData}
+                        />
                         <AsyncDimensionBreakdownCard
                           locale={locale}
                           messages={messages}
