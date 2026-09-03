@@ -170,7 +170,7 @@ describe("bot protection", () => {
     });
 
     expect(result).toEqual({
-      category: "suspected_bot",
+      category: "normal",
       reasons: ["network_service_asn"],
     });
   });
@@ -232,11 +232,11 @@ describe("bot protection", () => {
     });
 
     expect(transit).toEqual({
-      category: "suspected_bot",
+      category: "normal",
       reasons: ["transit_asn"],
     });
     expect(access).toEqual({
-      category: "suspected_bot",
+      category: "normal",
       reasons: ["access_asn"],
     });
   });

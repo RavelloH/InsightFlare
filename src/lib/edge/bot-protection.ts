@@ -126,7 +126,17 @@ export function classifyCollectBotTraffic(input: {
     return { category: "bot", reasons };
   }
 
+  if (hostedByAsn) {
+    return { category: "suspected_bot", reasons };
+  }
+  if (
+    networkServiceAsn &&
+    (missingBrowserProvenance || reasons.includes("origin_hostname_mismatch"))
+  ) {
+    return { category: "suspected_bot", reasons };
+  }
+
   return reasons.length > 0
-    ? { category: "suspected_bot", reasons }
+    ? { category: "normal", reasons }
     : EMPTY_CLASSIFICATION;
 }
