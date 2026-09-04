@@ -2,6 +2,7 @@ import {
   AnalysisDefinitionReadCancelledError,
   type AnalysisDefinitionReader,
 } from "@/lib/api-v1/analysis-definition-reader";
+import { parseApiV1FilterDsl } from "@/lib/api-v1/analytics-overview";
 import { SiteFunnelAnalysisQueryDtoSchema } from "@/lib/api-v1/dto/analytics";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
@@ -66,6 +67,7 @@ function filterForInput(
   input: {
     readonly filter?:
       | { readonly type: "inline"; readonly expression: unknown }
+      | { readonly type: "dsl"; readonly expression: string }
       | { readonly type: "saved"; readonly id: string }
       | null;
   },
@@ -86,6 +88,13 @@ function filterForInput(
             )
           : null,
       );
+  }
+  if (input.filter.type === "dsl") {
+    try {
+      return Promise.resolve(parseApiV1FilterDsl(input.filter.expression));
+    } catch {
+      return Promise.resolve(null);
+    }
   }
   try {
     return Promise.resolve(
@@ -241,10 +250,11 @@ export async function handlePlannedSiteFunnelAnalysis(
     );
   }
   if (!filters) {
+    const isSavedFilter = parsed.data.filter?.type === "saved";
     return jsonError(
-      "resource_not_found",
-      "Saved filter or funnel not found",
-      404,
+      isSavedFilter ? "resource_not_found" : "validation_failed",
+      isSavedFilter ? "Saved filter or funnel not found" : "Invalid filter",
+      isSavedFilter ? 404 : 400,
       undefined,
       request,
     );

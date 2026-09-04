@@ -1,4 +1,7 @@
-export const SAVED_FILTER_DSL_VERSION = 1 as const;
+import { FILTER_DSL_VERSION } from "@/lib/filter-contract";
+
+/** Saved filters currently persist the shared Filter DSL v1 source. */
+export const SAVED_FILTER_DSL_VERSION = FILTER_DSL_VERSION;
 
 export const SAVED_FILTER_VISIBILITIES = ["private", "team"] as const;
 export type SavedFilterVisibility = (typeof SAVED_FILTER_VISIBILITIES)[number];

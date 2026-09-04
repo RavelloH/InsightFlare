@@ -1,3 +1,4 @@
+import { parseApiV1FilterDsl } from "@/lib/api-v1/analytics-overview";
 import {
   type TeamBreakdownQueryDto,
   TeamBreakdownQueryDtoSchema,
@@ -10,6 +11,7 @@ import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application
 import {
   type BreakdownResult,
   type FilterDocument,
+  type FilterScopePreference,
   isReportingTimeZone,
   parseApiV1FilterDocument,
   teamQueryContext,
@@ -29,6 +31,7 @@ export interface TeamBreakdownReaderInput {
   readonly timeZone: string;
   readonly limit: number;
   readonly filters: FilterDocument;
+  readonly scopePreference?: FilterScopePreference;
   readonly signal?: AbortSignal;
 }
 
@@ -102,6 +105,13 @@ function acceptsJson(request: Request): boolean {
 
 function parseFilter(input: TeamBreakdownQueryDto): FilterDocument | null {
   if (!input.filter) return { version: 1, root: null };
+  if (input.filter.type === "dsl") {
+    try {
+      return parseApiV1FilterDsl(input.filter.expression);
+    } catch {
+      return null;
+    }
+  }
   try {
     return parseApiV1FilterDocument({
       version: 1,
@@ -184,6 +194,7 @@ export async function handleTeamBreakdown(
       timeZone,
       limit: input.limit,
       filters,
+      scopePreference: input.scope ?? "auto",
     };
     const serviceResult = await createApiV1QueryApplicationAdapter().execute<
       TeamBreakdownReaderInput,

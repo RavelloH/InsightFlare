@@ -1,7 +1,8 @@
-import { parseFilterPanelExpression } from "@/lib/dashboard/filter-panel-expression";
 import {
   analyticsFilterRegistry,
   assertFilterAudience,
+  FILTER_DSL_MAX_LENGTH,
+  parseFilterDsl,
 } from "@/lib/filter-contract";
 import {
   SAVED_FILTER_DSL_VERSION,
@@ -18,7 +19,6 @@ import { demoBadRequest, demoNotFound } from "./envelope";
 const DEMO_USER_ID = "demo-user-001";
 const MAX_NAME_LENGTH = 120;
 const MAX_DESCRIPTION_LENGTH = 2_000;
-const MAX_DSL_LENGTH = 65_536;
 
 interface SavedFilterPreset {
   readonly name: string;
@@ -419,7 +419,7 @@ function parseInput(
     return demoBadRequest("name is required");
   if (description === null || description.length > MAX_DESCRIPTION_LENGTH)
     return demoBadRequest("description is invalid");
-  if (filterDsl === null || filterDsl.length > MAX_DSL_LENGTH)
+  if (filterDsl === null || filterDsl.length > FILTER_DSL_MAX_LENGTH)
     return demoBadRequest("filterDsl is invalid");
   if (
     typeof visibility !== "string" ||
@@ -436,10 +436,7 @@ function parseInput(
     return demoBadRequest("scopePreference is invalid");
   }
   try {
-    const document = parseFilterPanelExpression(
-      filterDsl,
-      analyticsFilterRegistry,
-    );
+    const document = parseFilterDsl(filterDsl, analyticsFilterRegistry);
     if (!document.root)
       return demoBadRequest("filterDsl must contain a filter");
     assertFilterAudience(

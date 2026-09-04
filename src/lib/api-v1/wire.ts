@@ -1414,6 +1414,34 @@ const AnalyticsSchemaFilterFieldSchema = z
   })
   .strict();
 
+const AnalyticsSchemaFilterProtocolJsonSchema = z
+  .object({
+    documentVersion: z.number().int().positive(),
+    fields: z.array(AnalyticsSchemaFilterFieldSchema),
+    operators: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+
+const AnalyticsSchemaFilterProtocolDslSchema = z
+  .object({
+    version: z.number().int().positive(),
+    maxLength: z.number().int().positive(),
+    operators: z.array(z.string().min(1)).min(1),
+    syntax: z
+      .object({
+        condition: z.string().min(1),
+        boolean: z.string().min(1),
+        grouping: z.string().min(1),
+        value: z.string().min(1),
+        list: z.string().min(1),
+        payloadTarget: z.string().min(1),
+        caseSensitivity: z.string().min(1),
+      })
+      .strict(),
+    examples: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+
 export const AnalyticsSchemaDataSchema = z
   .object({
     metrics: z.array(AnalyticsSchemaMetricSchema),
@@ -1424,6 +1452,8 @@ export const AnalyticsSchemaDataSchema = z
       .object({
         version: z.number().int().positive(),
         fields: z.array(AnalyticsSchemaFilterFieldSchema),
+        json: AnalyticsSchemaFilterProtocolJsonSchema,
+        dsl: AnalyticsSchemaFilterProtocolDslSchema,
       })
       .strict(),
     intervals: z.array(z.enum(["minute", "hour", "day", "week", "month"])),

@@ -620,6 +620,19 @@ describe("API v1 comparison v2 handler", () => {
     );
     expect(filteredTeam.status).toBe(200);
 
+    const dslTeam = await handleTeamComparison(
+      request({
+        ...baseBody,
+        current: {
+          ...baseBody.current,
+          filter: { type: "dsl", expression: 'geo.country eq "US"' },
+        },
+      }),
+      principal,
+      env,
+    );
+    expect(dslTeam.status).toBe(200);
+
     const tooManyBuckets = await handleSiteComparison(
       request({
         ...baseBody,

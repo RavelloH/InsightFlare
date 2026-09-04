@@ -1,7 +1,8 @@
-import { parseFilterPanelExpression } from "@/lib/dashboard/filter-panel-expression";
 import {
   analyticsFilterRegistry,
   assertFilterAudience,
+  FILTER_DSL_MAX_LENGTH,
+  parseFilterDsl,
 } from "@/lib/filter-contract";
 import { bad, forb, jsonResponseFor, na, nf } from "@/lib/response";
 import {
@@ -20,7 +21,6 @@ import type { Env } from "./types";
 const MAX_FILTER_ID_LENGTH = 120;
 const MAX_FILTER_NAME_LENGTH = 120;
 const MAX_FILTER_DESCRIPTION_LENGTH = 2_000;
-const MAX_FILTER_DSL_LENGTH = 65_536;
 
 interface SavedFilterRow {
   id: string;
@@ -71,7 +71,7 @@ function savedFilterInput(
     body.description ?? "",
     MAX_FILTER_DESCRIPTION_LENGTH,
   );
-  const rawDsl = text(body.filterDsl, MAX_FILTER_DSL_LENGTH);
+  const rawDsl = text(body.filterDsl, FILTER_DSL_MAX_LENGTH);
   const rawVisibility = body.visibility;
   const rawScopePreference =
     body.scopePreference === undefined ? "auto" : body.scopePreference;
@@ -102,10 +102,7 @@ function savedFilterInput(
     return bad("filterDsl is invalid", "invalid_saved_filter_dsl");
   }
   try {
-    const document = parseFilterPanelExpression(
-      rawDsl,
-      analyticsFilterRegistry,
-    );
+    const document = parseFilterDsl(rawDsl, analyticsFilterRegistry);
     if (!document.root) {
       return bad("filterDsl must contain a filter", "empty_saved_filter_dsl");
     }

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { analyticsFilterDefinition } from "@/lib/edge/analytics/contract/filter-registry";
 import type { FilterScopePreference } from "@/lib/edge/analytics/contract/scoped-filter";
+import { FILTER_DSL_MAX_LENGTH } from "@/lib/filter-contract";
 
 const rfc3339 = z.string().datetime({ offset: true }).max(64);
 const timeZone = z.string().min(1).max(80);
@@ -141,16 +142,35 @@ export const InlineQueryFilterDtoSchema = z
   })
   .strict();
 
+const dslExpression = z
+  .string()
+  .min(1)
+  .max(FILTER_DSL_MAX_LENGTH)
+  .refine((expression) => expression.trim().length > 0, {
+    message: "DSL expression must contain a non-whitespace character.",
+  });
+
+export const DslQueryFilterDtoSchema = z
+  .object({
+    type: z.literal("dsl"),
+    expression: dslExpression,
+  })
+  .strict();
+
 export const SavedFilterReferenceDtoSchema = z
   .object({ type: z.literal("saved"), id: z.string().min(1).max(256) })
   .strict();
 
 export const SiteQueryFilterDtoSchema = z.discriminatedUnion("type", [
   InlineQueryFilterDtoSchema,
+  DslQueryFilterDtoSchema,
   SavedFilterReferenceDtoSchema,
 ]);
 
-export const TeamQueryFilterDtoSchema = InlineQueryFilterDtoSchema;
+export const TeamQueryFilterDtoSchema = z.discriminatedUnion("type", [
+  InlineQueryFilterDtoSchema,
+  DslQueryFilterDtoSchema,
+]);
 
 const overviewMetricsSchema = z
   .array(
@@ -640,9 +660,12 @@ export type SiteFunnelAnalysisQueryDto = z.infer<
   typeof SiteFunnelAnalysisQueryDtoSchema
 >;
 export type InlineQueryFilterDto = z.infer<typeof InlineQueryFilterDtoSchema>;
+export type DslQueryFilterDto = z.infer<typeof DslQueryFilterDtoSchema>;
 export type SavedFilterReferenceDto = z.infer<
   typeof SavedFilterReferenceDtoSchema
 >;
+export type SiteQueryFilterDto = z.infer<typeof SiteQueryFilterDtoSchema>;
+export type TeamQueryFilterDto = z.infer<typeof TeamQueryFilterDtoSchema>;
 export type SiteAnalyticsQueryBaseDto = z.infer<
   typeof SiteAnalyticsQueryBaseDtoSchema
 >;

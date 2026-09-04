@@ -29,7 +29,7 @@ type OperationObject = {
   requestBody?: { content?: { "application/json"?: JsonContent } };
   responses?: Record<
     string,
-    { content?: { "application/json"?: JsonContent } }
+    { description?: string; content?: { "application/json"?: JsonContent } }
   >;
   parameters?: unknown[];
 };
@@ -59,6 +59,31 @@ type JsonSchemaObject = {
   $ref?: string;
   additionalProperties?: boolean | JsonSchemaObject;
 };
+
+function resolvePointer(spec: OpenApiSpec, pointer: string): unknown {
+  if (!pointer.startsWith("#/")) return undefined;
+  let current: unknown = spec;
+  for (const rawSegment of pointer.slice(2).split("/")) {
+    if (!current || typeof current !== "object") return undefined;
+    const segment = rawSegment.replaceAll("~1", "/").replaceAll("~0", "~");
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function resolveSchema(
+  spec: OpenApiSpec,
+  schema: JsonSchemaObject | undefined,
+  seen = new Set<string>(),
+): JsonSchemaObject | undefined {
+  if (!schema?.$ref || seen.has(schema.$ref)) return schema;
+  seen.add(schema.$ref);
+  return resolveSchema(
+    spec,
+    resolvePointer(spec, schema.$ref) as JsonSchemaObject | undefined,
+    seen,
+  );
+}
 
 function defaultExampleValue(operation?: OperationObject): unknown {
   const content = operation?.responses?.["200"]?.content?.["application/json"];
@@ -214,6 +239,26 @@ describe("api v1 public docs", () => {
     expect(spec.components.securitySchemes?.DashboardSession).toBeUndefined();
   });
 
+  it("deduplicates repeated schemas into reusable components", () => {
+    const spec = readJson<OpenApiSpec>("docs/openapi.json");
+    expect(spec.components.schemas.ApiV1ErrorEnvelope).toBeDefined();
+
+    let apiV1ErrorRefs = 0;
+    for (const [path, pathItem] of Object.entries(spec.paths)) {
+      if (!path.startsWith("/api/v1")) continue;
+      for (const operation of Object.values(pathItem)) {
+        for (const response of Object.values(operation.responses ?? {})) {
+          if (!response.description?.startsWith("API v1 error:")) continue;
+          expect(response.content?.["application/json"]?.schema?.$ref).toBe(
+            "#/components/schemas/ApiV1ErrorEnvelope",
+          );
+          apiV1ErrorRefs += 1;
+        }
+      }
+    }
+    expect(apiV1ErrorRefs).toBeGreaterThan(100);
+  });
+
   it("publishes only supported external non-v1 integrations", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
 
@@ -297,12 +342,16 @@ describe("api v1 public docs", () => {
 
   it("constrains typed analytics request bodies", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
-    const overview =
+    const overview = resolveSchema(
+      spec,
       spec.paths["/api/v1/sites/{siteId}/analytics/overview"]?.post?.requestBody
-        ?.content?.["application/json"]?.schema;
-    const search =
+        ?.content?.["application/json"]?.schema,
+    );
+    const search = resolveSchema(
+      spec,
       spec.paths["/api/v1/sites/{siteId}/analytics/events/search"]?.post
-        ?.requestBody?.content?.["application/json"]?.schema;
+        ?.requestBody?.content?.["application/json"]?.schema,
+    );
 
     expect(overview?.properties?.metrics).toEqual(
       expect.objectContaining({
@@ -313,7 +362,7 @@ describe("api v1 public docs", () => {
     expect(overview?.properties?.metrics?.items).toEqual(
       expect.objectContaining({ type: "string" }),
     );
-    expect(search?.properties?.page).toEqual(
+    expect(resolveSchema(spec, search?.properties?.page)).toEqual(
       expect.objectContaining({
         properties: expect.objectContaining({
           limit: expect.objectContaining({ minimum: 1, maximum: 200 }),
@@ -362,6 +411,7 @@ describe("api v1 public docs", () => {
     const funnel = spec.paths["/api/v1/sites/{siteId}/funnels"]?.post;
 
     expect(JSON.stringify(overview?.requestBody)).toContain('"inline"');
+    expect(JSON.stringify(overview?.requestBody)).toContain('"dsl"');
     expect(JSON.stringify(overview?.requestBody)).toContain('"saved"');
     expect(
       eventSearch?.requestBody?.content?.["application/json"]?.schema,

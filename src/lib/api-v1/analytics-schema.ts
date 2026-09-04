@@ -7,6 +7,13 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { INTERVALS, TIME_PRESETS } from "@/lib/edge/analytics/contract/catalog";
 import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
+import {
+  FILTER_DSL_EXAMPLES,
+  FILTER_DSL_MAX_LENGTH,
+  FILTER_DSL_OPERATOR_IDS,
+  FILTER_DSL_SYNTAX,
+  FILTER_DSL_VERSION,
+} from "@/lib/filter-contract";
 
 function metricType(key: string): "integer" | "rate" | "duration_ms" {
   if (key.endsWith("Rate")) return "rate";
@@ -44,6 +51,31 @@ function analyticsSchemaOperations(
     });
 }
 
+function analyticsFilterProtocol(): AnalyticsSchemaData["filterProtocol"] {
+  const fields = [...analyticsFilterRegistry.entries()].map(([id, field]) => ({
+    id,
+    valueKind: field.valueKind,
+    operators: [...field.operators],
+  }));
+  const jsonOperators = [...FILTER_OPERATOR_IDS];
+  return {
+    version: FILTER_DOCUMENT_VERSION,
+    fields,
+    json: {
+      documentVersion: FILTER_DOCUMENT_VERSION,
+      fields,
+      operators: jsonOperators,
+    },
+    dsl: {
+      version: FILTER_DSL_VERSION,
+      maxLength: FILTER_DSL_MAX_LENGTH,
+      operators: [...FILTER_DSL_OPERATOR_IDS],
+      syntax: { ...FILTER_DSL_SYNTAX },
+      examples: [...FILTER_DSL_EXAMPLES],
+    },
+  };
+}
+
 /** Builds the catalog from the canonical analytics/filter registries. */
 export function buildSiteAnalyticsSchema(
   siteId: string,
@@ -67,14 +99,7 @@ export function buildSiteAnalyticsSchema(
     })),
     filters: [...analyticsFilterRegistry.keys()],
     operators: [...FILTER_OPERATOR_IDS],
-    filterProtocol: {
-      version: FILTER_DOCUMENT_VERSION,
-      fields: [...analyticsFilterRegistry.entries()].map(([id, field]) => ({
-        id,
-        valueKind: field.valueKind,
-        operators: [...field.operators],
-      })),
-    },
+    filterProtocol: analyticsFilterProtocol(),
     intervals: [...INTERVALS],
     presets: [...TIME_PRESETS],
     timeRange: { earliestAvailableAt: null, latestAvailableAt },
@@ -106,14 +131,7 @@ export function buildTeamAnalyticsSchema(
     })),
     filters: [...analyticsFilterRegistry.keys()],
     operators: [...FILTER_OPERATOR_IDS],
-    filterProtocol: {
-      version: FILTER_DOCUMENT_VERSION,
-      fields: [...analyticsFilterRegistry.entries()].map(([id, field]) => ({
-        id,
-        valueKind: field.valueKind,
-        operators: [...field.operators],
-      })),
-    },
+    filterProtocol: analyticsFilterProtocol(),
     intervals: [...INTERVALS],
     presets: [...TIME_PRESETS],
     timeRange: { earliestAvailableAt: null, latestAvailableAt },

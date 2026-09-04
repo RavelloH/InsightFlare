@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseFilterPanelExpression } from "@/lib/dashboard/filter-panel-expression";
-import { analyticsFilterRegistry } from "@/lib/filter-contract";
+import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import { DEMO_SITE_PROFILES } from "@/lib/realtime/demo-site-profiles";
 import { handleDemoSavedFilters } from "@/lib/realtime/mock/saved-filters";
 import type { ErrorEnvelope } from "@/lib/response-envelope";
@@ -44,8 +43,7 @@ describe("mock/saved-filters", () => {
         expect(filter.scopePreference).toBe("auto");
         expect(filter.filterDsl).toMatch(/\b(?:AND|OR|NOT)\b/);
         expect(
-          parseFilterPanelExpression(filter.filterDsl, analyticsFilterRegistry)
-            .root,
+          parseFilterDsl(filter.filterDsl, analyticsFilterRegistry).root,
         ).not.toBeNull();
       }
     }

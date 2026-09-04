@@ -135,6 +135,72 @@ describe("API v1 overview adapter", () => {
     expect(result).toMatchObject({ ok: true, value: { ok: true } });
   });
 
+  it("parses DSL filters into the canonical API filter document", async () => {
+    const reader = overviewReader();
+    const result = await executeApiV1SiteOverview(
+      {
+        ...body,
+        filter: {
+          type: "dsl",
+          expression: 'geo.country eq "US" AND page.path startsWith "/docs"',
+        },
+      },
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+
+    expect(result).toMatchObject({ ok: true, value: { ok: true } });
+    expect(reader.readOverview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: {
+          version: 1,
+          root: {
+            kind: "and",
+            children: [
+              {
+                kind: "condition",
+                target: { kind: "field", field: "geo.country" },
+                operator: "eq",
+                value: "us",
+              },
+              {
+                kind: "condition",
+                target: { kind: "field", field: "page.path" },
+                operator: "startsWith",
+                value: "/docs",
+              },
+            ],
+          },
+        },
+      }),
+    );
+  });
+
+  it("rejects invalid DSL filters with the API filter error", async () => {
+    const reader = overviewReader();
+    const result = await executeApiV1SiteOverview(
+      {
+        ...body,
+        filter: {
+          type: "dsl",
+          expression: 'page.path unsupportedOperator "/docs"',
+        },
+      },
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: "invalid_input", reason: "invalid_filter" },
+    });
+    expect(reader.readOverview).not.toHaveBeenCalled();
+  });
+
   it("requires analysis:read in addition to analytics:read for saved filters", async () => {
     const reader = overviewReader();
     const definitions: AnalysisDefinitionReader = {

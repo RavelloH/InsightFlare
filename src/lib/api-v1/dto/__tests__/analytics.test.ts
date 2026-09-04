@@ -22,6 +22,7 @@ import {
   TeamAnalyticsQueryBaseDtoSchema,
   TeamComparisonQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
+import { FILTER_DSL_MAX_LENGTH } from "@/lib/filter-contract";
 
 const timeRange = {
   kind: "absolute" as const,
@@ -65,6 +66,54 @@ describe("API v1 analytics DTOs", () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+
+  it("accepts DSL filters for site, team, and comparison queries", () => {
+    const filter = { type: "dsl", expression: 'geo.country eq "US"' };
+
+    expect(
+      SiteOverviewQueryDtoSchema.safeParse({ timeRange, filter }).success,
+    ).toBe(true);
+    expect(
+      TeamAnalyticsQueryBaseDtoSchema.safeParse({ timeRange, filter }).success,
+    ).toBe(true);
+    expect(
+      TeamComparisonQueryDtoSchema.safeParse({
+        version: 2,
+        timeZone: "UTC",
+        current: { timeRange: { kind: "preset", preset: "today" }, filter },
+        reference: { timeRange: { kind: "previous_period" }, filter },
+        select: { metrics: ["views"] },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects blank, overlong, and extra-field DSL filters", () => {
+    expect(
+      SiteOverviewQueryDtoSchema.safeParse({
+        timeRange,
+        filter: { type: "dsl", expression: " \t\n" },
+      }).success,
+    ).toBe(false);
+    expect(
+      TeamAnalyticsQueryBaseDtoSchema.safeParse({
+        timeRange,
+        filter: {
+          type: "dsl",
+          expression: "x".repeat(FILTER_DSL_MAX_LENGTH + 1),
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      SiteOverviewQueryDtoSchema.safeParse({
+        timeRange,
+        filter: {
+          type: "dsl",
+          expression: 'geo.country eq "US"',
+          unexpected: true,
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects unknown fields and ambiguous timestamp values", () => {

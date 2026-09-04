@@ -40,6 +40,7 @@ import {
 } from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import { sha256Hex } from "@/lib/edge/utils";
+import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_JSON_DEPTH = 16;
@@ -204,6 +205,17 @@ export function toApiV1QueryTime(
   };
 }
 
+/**
+ * Parse the human-readable API v1 filter surface through the shared DSL
+ * contract, then apply the same API audience policy as the structured filter
+ * surface. Every API handler should receive a canonical FilterDocument.
+ */
+export function parseApiV1FilterDsl(expression: string): FilterDocument {
+  return parseApiV1FilterDocument(
+    parseFilterDsl(expression, analyticsFilterRegistry),
+  );
+}
+
 export async function resolveApiV1Filter(
   siteId: string,
   filter: SiteAnalyticsQueryBaseDto["filter"],
@@ -238,6 +250,16 @@ export async function resolveApiV1Filter(
         return { ok: false, error: { kind: "internal_error" } };
       }
       return { ok: false, error: { kind: "internal_error" } };
+    }
+  }
+  if (filter.type === "dsl") {
+    try {
+      return { ok: true, value: parseApiV1FilterDsl(filter.expression) };
+    } catch {
+      return {
+        ok: false,
+        error: { kind: "invalid_input", reason: "invalid_filter" },
+      };
     }
   }
   try {

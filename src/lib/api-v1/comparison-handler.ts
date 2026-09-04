@@ -2,6 +2,7 @@ import type { ZodType } from "zod";
 
 import {
   type AnalysisDefinitionReader,
+  parseApiV1FilterDsl,
   resolveApiV1Filter,
 } from "@/lib/api-v1/analytics-overview";
 import {
@@ -225,6 +226,7 @@ function resolveTeamFilter(
   filter: TeamReportInput["current"]["filter"],
 ): FilterDocument {
   if (!filter) return emptyFilter();
+  if (filter.type === "dsl") return parseApiV1FilterDsl(filter.expression);
   return parseApiV1FilterDocument({ version: 1, root: filter.expression });
 }
 

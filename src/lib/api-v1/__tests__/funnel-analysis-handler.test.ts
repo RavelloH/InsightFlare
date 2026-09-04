@@ -212,6 +212,20 @@ describe("typed site funnel-analysis HTTP adapter", () => {
         createTestProviderRegistry(provider),
       ),
     ).resolves.toHaveProperty("status", 404);
+    await expect(
+      handlePlannedSiteFunnelAnalysis(
+        request({
+          ...body,
+          filter: {
+            type: "dsl",
+            expression: 'page.path unsupportedOperator "/docs"',
+          },
+        }),
+        principal(),
+        "site-1",
+        createTestProviderRegistry(provider),
+      ),
+    ).resolves.toHaveProperty("status", 400);
 
     const cancelledDefinitions = {
       resolveTeamVisibleSavedFilter: vi

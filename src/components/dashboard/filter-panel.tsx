@@ -75,10 +75,6 @@ import {
   updateSavedFilter,
 } from "@/lib/dashboard/client-data";
 import { describeFilterExpression } from "@/lib/dashboard/filter-description";
-import {
-  formatFilterPanelExpression,
-  parseFilterPanelExpression,
-} from "@/lib/dashboard/filter-panel-expression";
 import { resolveSuggestionScope } from "@/lib/dashboard/filter-suggestion-scope";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
@@ -106,7 +102,9 @@ import {
   FilterValidationError,
   type FilterValue,
   type FilterValueKind,
+  formatFilterDsl,
   normalizeFilterDocument,
+  parseFilterDsl,
 } from "@/lib/filter-contract";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -543,7 +541,7 @@ function expressionTextFromEditor(root: EditorGroup): string {
     // Do not normalize before formatting. Normalization is required when a
     // filter is applied, but it sorts and deduplicates equivalent branches.
     // The expression field should instead mirror the editor's current tree.
-    return formatFilterPanelExpression({
+    return formatFilterDsl({
       version: FILTER_DOCUMENT_VERSION,
       root: displayRootExpression(root),
     });
@@ -2181,10 +2179,7 @@ export function FilterPanel({
       try {
         return (
           filterFingerprint(
-            parseFilterPanelExpression(
-              filter.filterDsl,
-              analyticsFilterRegistry,
-            ),
+            parseFilterDsl(filter.filterDsl, analyticsFilterRegistry),
             analyticsFilterRegistry,
           ) === currentFilterFingerprint
         );
@@ -2212,10 +2207,7 @@ export function FilterPanel({
       try {
         return (
           filterFingerprint(
-            parseFilterPanelExpression(
-              preset.filterDsl,
-              analyticsFilterRegistry,
-            ),
+            parseFilterDsl(preset.filterDsl, analyticsFilterRegistry),
             analyticsFilterRegistry,
           ) === currentFilterFingerprint
         );
@@ -2275,10 +2267,7 @@ export function FilterPanel({
     if (restoredExpressionText !== undefined) {
       try {
         nextRoot = editorRootFromDocument(
-          parseFilterPanelExpression(
-            restoredExpressionText,
-            expressionRegistry,
-          ),
+          parseFilterDsl(restoredExpressionText, expressionRegistry),
           createId,
         );
       } catch {
@@ -2315,7 +2304,7 @@ export function FilterPanel({
       try {
         return source.trim()
           ? editorRootFromDocument(
-              parseFilterPanelExpression(source, expressionRegistry),
+              parseFilterDsl(source, expressionRegistry),
               createId,
             )
           : emptyEditorGroup(createId);

@@ -160,6 +160,32 @@ describe("team breakdown HTTP adapter", () => {
     );
     expect(invalidFilter.status).toBe(400);
 
+    const dslFilter = await handleTeamBreakdown(
+      request({
+        ...input,
+        scope: "session",
+        filter: { type: "dsl", expression: 'geo.country eq "US"' },
+      }),
+      principal,
+      "page.path",
+      createTestProviderRegistry(provider),
+    );
+    expect(dslFilter.status).toBe(200);
+    expect(provider).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        scopePreference: "session",
+        filters: {
+          version: 1,
+          root: {
+            kind: "condition",
+            target: { kind: "field", field: "geo.country" },
+            operator: "eq",
+            value: "us",
+          },
+        },
+      }),
+    );
+
     const unrestricted = await handleTeamBreakdown(
       request(),
       { ...principal, siteIds: [] },

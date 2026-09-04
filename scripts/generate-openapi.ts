@@ -1,5 +1,7 @@
 #!/usr/bin/env tsx
 
+import { createHash } from "node:crypto";
+
 import { readFileSync, renameSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import YAML from "yaml";
@@ -166,6 +168,345 @@ function schemaRefName(schema: unknown): string | null {
       .split("/")
       .at(-1) ?? null
   );
+}
+
+type SchemaVisitor = (schema: Record<string, unknown>) => void;
+
+const schemaChildKeys = new Set([
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "else",
+  "if",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
+
+const schemaChildArrayKeys = new Set([
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "prefixItems",
+]);
+
+function isSchemaObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const schema = value as Record<string, unknown>;
+  return [
+    "$defs",
+    "$ref",
+    "additionalProperties",
+    "allOf",
+    "anyOf",
+    "const",
+    "enum",
+    "format",
+    "items",
+    "not",
+    "oneOf",
+    "pattern",
+    "properties",
+    "type",
+  ].some((key) => key in schema);
+}
+
+function visitSchemaChildren(
+  schema: Record<string, unknown>,
+  visitor: SchemaVisitor,
+): void {
+  for (const [key, value] of Object.entries(schema)) {
+    if (
+      key === "properties" ||
+      key === "$defs" ||
+      key === "patternProperties"
+    ) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        continue;
+      }
+      for (const child of Object.values(value)) {
+        if (isSchemaObject(child)) visitor(child);
+      }
+      continue;
+    }
+    if (schemaChildKeys.has(key)) {
+      if (isSchemaObject(value)) visitor(value);
+      continue;
+    }
+    if (schemaChildArrayKeys.has(key)) {
+      if (!Array.isArray(value)) continue;
+      for (const child of value) {
+        if (isSchemaObject(child)) visitor(child);
+      }
+    }
+  }
+}
+
+function stableSchemaKey(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableSchemaKey).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${stableSchemaKey(
+            (value as Record<string, unknown>)[key],
+          )}`,
+      )
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function hasNonComponentReference(schema: Record<string, unknown>): boolean {
+  let invalid = false;
+  const visit = (current: Record<string, unknown>) => {
+    if (
+      typeof current.$ref === "string" &&
+      !current.$ref.startsWith("#/components/")
+    ) {
+      invalid = true;
+      return;
+    }
+    visitSchemaChildren(current, visit);
+  };
+  visit(schema);
+  return invalid;
+}
+
+function forEachOperationSchema(
+  spec: OpenAPISpec,
+  visitor: (schema: Record<string, unknown>) => void,
+): void {
+  for (const pathItem of Object.values(spec.paths)) {
+    for (const operation of Object.values(pathItem)) {
+      if (
+        !operation ||
+        typeof operation !== "object" ||
+        Array.isArray(operation)
+      ) {
+        continue;
+      }
+      for (const parameter of operation.parameters ?? []) {
+        const schema =
+          parameter &&
+          typeof parameter === "object" &&
+          !Array.isArray(parameter)
+            ? (parameter as Record<string, unknown>).schema
+            : undefined;
+        if (isSchemaObject(schema)) {
+          visitor(schema);
+        }
+      }
+      const requestContents = (
+        operation.requestBody as
+          | { content?: Record<string, unknown> }
+          | undefined
+      )?.content;
+      for (const content of Object.values(requestContents ?? {})) {
+        const schema =
+          content && typeof content === "object"
+            ? (content as Record<string, unknown>).schema
+            : undefined;
+        if (isSchemaObject(schema)) {
+          visitor(schema);
+        }
+      }
+      for (const response of Object.values(operation.responses ?? {})) {
+        const responseContents = (
+          response as { content?: Record<string, unknown> } | undefined
+        )?.content;
+        for (const content of Object.values(responseContents ?? {})) {
+          const schema =
+            content && typeof content === "object"
+              ? (content as Record<string, unknown>).schema
+              : undefined;
+          if (isSchemaObject(schema)) {
+            visitor(schema);
+          }
+        }
+      }
+    }
+  }
+}
+
+function schemaNameHint(schema: Record<string, unknown>): string | undefined {
+  if (
+    schema.type === "string" &&
+    schema.format === "date-time" &&
+    typeof schema.pattern === "string"
+  ) {
+    return "IsoDateTime";
+  }
+
+  const properties = schema.properties;
+  if (
+    !properties ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  ) {
+    return undefined;
+  }
+  const names = new Set(Object.keys(properties));
+  if (names.has("error") && names.has("meta")) return "ApiV1ErrorEnvelope";
+  if (names.size === 1 && names.has("requestId")) return "ApiV1ResponseMeta";
+  if (names.size === 2 && names.has("path") && names.has("code")) {
+    return "ApiV1ErrorIssue";
+  }
+  if (
+    Array.isArray(schema.oneOf) &&
+    schema.oneOf.some(
+      (variant) =>
+        isSchemaObject(variant) &&
+        (variant.properties as Record<string, unknown> | undefined)?.kind &&
+        (
+          (variant.properties as Record<string, unknown>).kind as Record<
+            string,
+            unknown
+          >
+        ).const === "absolute",
+    ) &&
+    schema.oneOf.some(
+      (variant) =>
+        isSchemaObject(variant) &&
+        (variant.properties as Record<string, unknown> | undefined)?.kind &&
+        (
+          (variant.properties as Record<string, unknown>).kind as Record<
+            string,
+            unknown
+          >
+        ).const === "preset",
+    )
+  ) {
+    return "AnalyticsTimeRange";
+  }
+  return undefined;
+}
+
+function schemaComponentName(
+  schema: Record<string, unknown>,
+  key: string,
+): string {
+  const hint = schemaNameHint(schema);
+  if (hint) return hint;
+  return `SharedSchema_${createHash("sha1").update(key).digest("hex").slice(0, 12)}`;
+}
+
+function rewriteSchemaChildren(
+  schema: Record<string, unknown>,
+  componentNames: Map<string, string>,
+  replaceRoot: boolean,
+): Record<string, unknown> {
+  const key = stableSchemaKey(schema);
+  const componentName = componentNames.get(key);
+  if (replaceRoot && componentName) {
+    return { $ref: `#/components/schemas/${componentName}` };
+  }
+
+  const result: Record<string, unknown> = { ...schema };
+  for (const [childKey, value] of Object.entries(schema)) {
+    if (
+      childKey === "properties" ||
+      childKey === "$defs" ||
+      childKey === "patternProperties"
+    ) {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        result[childKey] = Object.fromEntries(
+          Object.entries(value).map(([name, child]) => [
+            name,
+            isSchemaObject(child)
+              ? rewriteSchemaChildren(child, componentNames, true)
+              : child,
+          ]),
+        );
+      }
+      continue;
+    }
+    if (schemaChildKeys.has(childKey)) {
+      if (isSchemaObject(value)) {
+        result[childKey] = rewriteSchemaChildren(value, componentNames, true);
+      }
+      continue;
+    }
+    if (schemaChildArrayKeys.has(childKey) && Array.isArray(value)) {
+      result[childKey] = value.map((child) =>
+        isSchemaObject(child)
+          ? rewriteSchemaChildren(child, componentNames, true)
+          : child,
+      );
+    }
+  }
+  return result;
+}
+
+/** Factor repeated, self-contained JSON Schemas into OpenAPI components. */
+function deduplicateOperationSchemas(spec: OpenAPISpec): void {
+  const counts = new Map<
+    string,
+    { count: number; schema: Record<string, unknown> }
+  >();
+  const collect = (schema: Record<string, unknown>) => {
+    const key = stableSchemaKey(schema);
+    const entry = counts.get(key) ?? { count: 0, schema };
+    entry.count += 1;
+    counts.set(key, entry);
+    visitSchemaChildren(schema, collect);
+  };
+  forEachOperationSchema(spec, collect);
+
+  const componentNames = new Map<string, string>();
+  const definitions = new Map<string, Record<string, unknown>>();
+  const existingByKey = new Map<string, string>();
+  const usedNames = new Set(Object.keys(spec.components.schemas));
+  for (const [name, schema] of Object.entries(spec.components.schemas)) {
+    existingByKey.set(stableSchemaKey(schema), name);
+  }
+
+  const candidates = [...counts.entries()]
+    .filter(
+      ([, entry]) =>
+        entry.count >= 2 &&
+        stableSchemaKey(entry.schema).length >= 256 &&
+        !hasNonComponentReference(entry.schema),
+    )
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  for (const [key, entry] of candidates) {
+    const existingName = existingByKey.get(key);
+    if (existingName) {
+      componentNames.set(key, existingName);
+      continue;
+    }
+    const baseName = schemaComponentName(entry.schema, key);
+    let name = baseName;
+    let suffix = 2;
+    while (usedNames.has(name)) name = `${baseName}${suffix++}`;
+    usedNames.add(name);
+    componentNames.set(key, name);
+    definitions.set(name, JSON.parse(JSON.stringify(entry.schema)));
+  }
+
+  if (componentNames.size === 0) return;
+  forEachOperationSchema(spec, (schema) => {
+    const rewritten = rewriteSchemaChildren(schema, componentNames, true);
+    for (const key of Object.keys(schema)) {
+      Reflect.deleteProperty(schema, key);
+    }
+    Object.assign(schema, rewritten);
+  });
+  for (const [name, schema] of definitions) {
+    spec.components.schemas[name] = rewriteSchemaChildren(
+      schema,
+      componentNames,
+      false,
+    );
+  }
 }
 
 function jsonContent(container: unknown) {
@@ -4577,6 +4918,7 @@ async function main() {
   mergeApiV1TargetOperations(spec);
   mergeProjectOperations(spec);
   retainPublishedOperations(spec);
+  deduplicateOperationSchemas(spec);
   populateTypedApiV1Examples(spec);
   pruneUnusedComponents(spec);
   pruneUnusedTags(spec);

@@ -1,3 +1,4 @@
+import { parseApiV1FilterDsl } from "@/lib/api-v1/analytics-overview";
 import {
   type TeamSitesQueryDto,
   TeamSitesQueryDtoSchema,
@@ -101,6 +102,13 @@ async function readBody(request: Request): Promise<unknown> {
 
 function filter(input: TeamSitesQueryDto): FilterDocument | null {
   if (!input.filter) return { version: 1, root: null };
+  if (input.filter.type === "dsl") {
+    try {
+      return parseApiV1FilterDsl(input.filter.expression);
+    } catch {
+      return null;
+    }
+  }
   try {
     return parseApiV1FilterDocument({
       version: 1,

@@ -1,16 +1,17 @@
-import { parseFilterPanelExpression } from "@/lib/dashboard/filter-panel-expression";
 import type { FilterScopePreference } from "@/lib/edge/analytics/contract";
 import {
-  analyticsFilterRegistry,
   attachSavedFilterScopePreference,
   type FilterDocument,
   parseApiV1FilterDocument,
 } from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
 import type { Env } from "@/lib/edge/types";
-import { SAVED_FILTER_DSL_VERSION } from "@/lib/saved-filters";
-
-const MAX_FILTER_DSL_LENGTH = 65_536;
+import {
+  analyticsFilterRegistry,
+  FILTER_DSL_MAX_LENGTH,
+  FILTER_DSL_VERSION,
+  parseFilterDsl,
+} from "@/lib/filter-contract";
 
 interface SavedFilterDefinitionRow {
   readonly filterDsl: string;
@@ -69,16 +70,16 @@ export function parseSavedFilterDsl(
   row: SavedFilterDefinitionRow,
 ): FilterDocument {
   if (
-    row.filterDslVersion !== SAVED_FILTER_DSL_VERSION ||
+    row.filterDslVersion !== FILTER_DSL_VERSION ||
     typeof row.filterDsl !== "string" ||
     row.filterDsl.length === 0 ||
-    row.filterDsl.length > MAX_FILTER_DSL_LENGTH
+    row.filterDsl.length > FILTER_DSL_MAX_LENGTH
   ) {
     throw new AnalysisDefinitionIntegrityError();
   }
   try {
     return parseApiV1FilterDocument(
-      parseFilterPanelExpression(row.filterDsl, analyticsFilterRegistry),
+      parseFilterDsl(row.filterDsl, analyticsFilterRegistry),
     );
   } catch {
     throw new AnalysisDefinitionIntegrityError();

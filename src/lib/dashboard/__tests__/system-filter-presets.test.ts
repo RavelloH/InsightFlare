@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { parseFilterPanelExpression } from "@/lib/dashboard/filter-panel-expression";
 import {
   SYSTEM_FILTER_PRESETS,
   systemFilterPresetFromOptionValue,
@@ -11,6 +10,7 @@ import {
   analyticsFilterRegistry,
   assertFilterAudience,
   filterConditionCount,
+  parseFilterDsl,
 } from "@/lib/filter-contract";
 
 describe("system filter presets", () => {
@@ -21,7 +21,7 @@ describe("system filter presets", () => {
       expect(ids.has(preset.id)).toBe(false);
       ids.add(preset.id);
 
-      const document = parseFilterPanelExpression(
+      const document = parseFilterDsl(
         preset.filterDsl,
         analyticsFilterRegistry,
       );

@@ -102,6 +102,38 @@ describe("planned team overview HTTP adapter", () => {
     );
   });
 
+  it("accepts the shared DSL filter and forwards its canonical document", async () => {
+    const provider = reader();
+    const response = await handlePlannedTeamOverview(
+      request(
+        JSON.stringify({
+          ...input,
+          filter: {
+            type: "dsl",
+            expression: 'geo.country eq "US"',
+          },
+        }),
+      ),
+      principal,
+      createTestProviderRegistry(provider),
+    );
+
+    expect(response.status).toBe(200);
+    expect(provider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: {
+          version: 1,
+          root: {
+            kind: "condition",
+            target: { kind: "field", field: "geo.country" },
+            operator: "eq",
+            value: "us",
+          },
+        },
+      }),
+    );
+  });
+
   it("rejects invalid protocol, policy, and time inputs before provider access", async () => {
     const provider = reader();
     for (const invalid of [
