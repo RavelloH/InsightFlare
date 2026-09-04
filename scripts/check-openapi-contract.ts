@@ -148,6 +148,7 @@ function schemaContainsPagination(schema, seen = new Set()) {
 
 const operationIds = new Map();
 const operations = [];
+let apiV1ErrorResponses = 0;
 
 for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
   if (path.includes("queryName")) {
@@ -168,6 +169,24 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
       );
     } else {
       operationIds.set(operation.operationId, key);
+    }
+
+    for (const response of Object.values(operation.responses ?? {})) {
+      if (
+        !path.startsWith("/api/v1") ||
+        !response?.description?.startsWith("API v1 error:")
+      ) {
+        continue;
+      }
+      apiV1ErrorResponses += 1;
+      if (
+        response.content?.["application/json"]?.schema?.$ref !==
+        "#/components/schemas/ApiV1ErrorEnvelope"
+      ) {
+        issues.push(
+          `${key} API v1 error response must reference ApiV1ErrorEnvelope`,
+        );
+      }
     }
 
     const parameters = [
@@ -252,6 +271,15 @@ for (const [path, pathItem] of Object.entries(openapi.paths ?? {})) {
       issues.push(`${key} authenticated operation should declare a scope`);
     }
   }
+}
+
+if (
+  apiV1ErrorResponses > 0 &&
+  !openapi.components?.schemas?.ApiV1ErrorEnvelope
+) {
+  issues.push(
+    "OpenAPI components must define ApiV1ErrorEnvelope for API v1 errors",
+  );
 }
 
 for (const [name, schema] of Object.entries(
