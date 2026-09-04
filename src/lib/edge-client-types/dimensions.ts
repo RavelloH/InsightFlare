@@ -1,3 +1,5 @@
+import type { PaginatedCollection } from "./pagination";
+
 export interface DimensionData {
   ok: boolean;
   data: Array<{
@@ -18,5 +20,5 @@ export interface DashboardFilterOption {
 
 export interface DashboardFilterOptionsData {
   ok: boolean;
-  data: DashboardFilterOption[];
+  data: PaginatedCollection<DashboardFilterOption>;
 }

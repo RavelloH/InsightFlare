@@ -1,4 +1,4 @@
-import { memo, type MouseEvent, useMemo } from "react";
+import { memo, type MouseEvent, useCallback, useMemo } from "react";
 import {
   RiArrowRightUpLine,
   RiSearchLine,
@@ -11,11 +11,14 @@ import {
   REFERRER_FILTER_CONTROL_BY_TAB,
   type ReferrerBreakdownRow,
   type ReferrerRowsByTab,
+  type ReferrerSortKey,
   type ReferrerTab,
 } from "@/components/dashboard/referrer-utils";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
+  type TabbedDataTableExportPage,
+  type TabbedDataTableExportPageOptions,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { TrafficChannelIcon } from "@/components/dashboard/traffic-channel-icon";
@@ -41,8 +44,6 @@ import { formatI18nTemplate } from "@/lib/i18n/template";
 import { usePathname } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
-type ReferrerSortKey = "views" | "visitors";
-
 interface ReferrerBreakdownCardProps {
   locale: Locale;
   messages: AppMessages;
@@ -50,6 +51,23 @@ interface ReferrerBreakdownCardProps {
   filters: FilterDocument;
   rowsByTab: ReferrerRowsByTab;
   loading: boolean;
+  sortByTab?: Partial<
+    Record<ReferrerTab, { key: ReferrerSortKey; direction: "asc" | "desc" }>
+  >;
+  onSortChange?: (
+    tab: ReferrerTab,
+    sort: { key: ReferrerSortKey; direction: "asc" | "desc" },
+  ) => void;
+  searchByTab?: Partial<Record<ReferrerTab, string>>;
+  onSearchChange?: (tab: ReferrerTab, value: string) => void;
+  loadingMoreByTab?: Partial<Record<ReferrerTab, boolean>>;
+  hasMoreByTab?: Partial<Record<ReferrerTab, boolean>>;
+  nextCursorByTab?: Partial<Record<ReferrerTab, string | null>>;
+  onLoadMore?: (tab: ReferrerTab) => void;
+  loadPageForExport?: (
+    tab: ReferrerTab,
+    options: TabbedDataTableExportPageOptions,
+  ) => Promise<TabbedDataTableExportPage<ReferrerBreakdownRow>>;
   showSourceLinkTab?: boolean;
 }
 
@@ -60,7 +78,16 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
   filters,
   rowsByTab,
   loading,
+  sortByTab,
+  onSortChange,
+  searchByTab,
+  onSearchChange,
+  loadingMoreByTab,
+  hasMoreByTab,
+  nextCursorByTab,
+  onLoadMore,
   showSourceLinkTab = true,
+  loadPageForExport,
 }: ReferrerBreakdownCardProps) {
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
@@ -264,6 +291,10 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
         tab: activeTab.label,
       }),
   };
+  const handleSearchTermChange = useCallback(
+    (value: string, tab: ReferrerTab) => onSearchChange?.(tab, value),
+    [onSearchChange],
+  );
   const renderTable = (
     tabs: [
       TabbedDataTableTab<ReferrerTab>,
@@ -274,6 +305,15 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
       tabs={tabs}
       rowsByTab={rowsByTab}
       loadingByTab={loadingByTab}
+      sortByTab={sortByTab}
+      onSortChange={onSortChange}
+      searchValue={(tab) => searchByTab?.[tab] ?? ""}
+      onSearchTermChange={handleSearchTermChange}
+      loadingMoreByTab={loadingMoreByTab}
+      hasMoreByTab={hasMoreByTab}
+      nextCursorByTab={nextCursorByTab}
+      onLoadMore={onLoadMore}
+      loadPageForExport={loadPageForExport}
       columns={columns}
       rowAdapter={rowAdapter}
       filterRows={filterRows}

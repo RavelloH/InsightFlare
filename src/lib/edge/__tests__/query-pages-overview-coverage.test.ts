@@ -722,15 +722,23 @@ describe("edge pages handlers", () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      data: [
-        {
-          pathname: "/home",
-          query: "x=1",
-          hash: "",
-          views: 7,
-          sessions: 0,
+      data: {
+        items: [
+          {
+            pathname: "/home",
+            query: "x=1",
+            hash: "",
+            views: 7,
+            sessions: 0,
+          },
+        ],
+        pagination: {
+          limit: 5,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
         },
-      ],
+      },
       tabs: {
         path: [
           { label: "/home", views: 2, sessions: 2, visitors: 2 },
@@ -751,7 +759,7 @@ describe("edge pages handlers", () => {
       },
     });
     expect(calls).toHaveLength(2);
-    expect(calls[0].bindings.slice(-2)).toEqual(["us", 5]);
+    expect(calls[0].bindings.slice(-2)).toEqual(["us", 6]);
     expect(calls[1].bindings.slice(-2)).toEqual(["us", 5]);
     expect(calls[1].sql).toContain("ranked_cards AS");
   });
@@ -782,16 +790,24 @@ describe("edge pages handlers", () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      data: [
-        {
-          referrer: "https://news.example/post",
-          views: 6,
-          sessions: 3,
+      data: {
+        items: [
+          {
+            referrer: "https://news.example/post",
+            views: 6,
+            sessions: 3,
+          },
+        ],
+        pagination: {
+          limit: 7,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
         },
-      ],
+      },
     });
     expect(calls[0].sql).toContain("COALESCE(referrer_url, '') AS referrer");
-    expect(calls[0].bindings.slice(-2)).toEqual(["Chrome", 7]);
+    expect(calls[0].bindings.slice(-2)).toEqual(["Chrome", 8]);
   });
 
   it("maps dimension aggregate rows and drops geo filters before querying", async () => {
@@ -1854,7 +1870,7 @@ describe("edge overview D1 queries and handlers", () => {
         ],
         [
           {
-            channel: "organic_search",
+            value: "organic_search",
             views: "3",
             sessions: "2",
             visitors: "2",
@@ -1934,44 +1950,84 @@ describe("edge overview D1 queries and handlers", () => {
 
     await expect(pageTab.json()).resolves.toEqual({
       ok: true,
-      data: [{ label: "/home", views: 1, sessions: 1, visitors: 1 }],
+      data: {
+        items: [{ label: "/home", views: 1, sessions: 1, visitors: 1 }],
+        pagination: {
+          limit: 2,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     await expect(sourceTab.json()).resolves.toEqual({
       ok: true,
-      data: [{ label: "", views: 4, sessions: 2, visitors: 2 }],
+      data: {
+        items: [{ label: "", views: 4, sessions: 2, visitors: 2 }],
+        pagination: {
+          limit: 3,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     await expect(sourceChannelTab.json()).resolves.toEqual({
       ok: true,
-      data: [
-        {
-          label: "organic_search",
-          views: 3,
-          sessions: 2,
-          visitors: 2,
+      data: {
+        items: [
+          {
+            label: "organic_search",
+            views: 3,
+            sessions: 2,
+            visitors: 2,
+          },
+        ],
+        pagination: {
+          limit: 3,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
         },
-      ],
+      },
     });
     await expect(clientTab.json()).resolves.toEqual({
       ok: true,
-      data: [{ label: "1440x900", views: 2, sessions: 2, visitors: 0 }],
+      data: {
+        items: [{ label: "1440x900", views: 2, sessions: 2, visitors: 0 }],
+        pagination: {
+          limit: 3,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     await expect(geoTab.json()).resolves.toEqual({
       ok: true,
-      data: [
-        {
-          value: "US",
-          label: "US",
-          views: 1,
-          sessions: 1,
-          visitors: 1,
+      data: {
+        items: [
+          {
+            value: "US",
+            label: "US",
+            views: 1,
+            sessions: 1,
+            visitors: 1,
+          },
+        ],
+        pagination: {
+          limit: 3,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
         },
-      ],
+      },
     });
-    expect(calls.map((call) => call.bindings.at(-1))).toEqual([2, 3, 3, 3, 3]);
-    expect(calls[2].sql).toContain("channel_rollup AS");
+    expect(calls.map((call) => call.bindings.at(-1))).toEqual([3, 4, 4, 4, 4]);
+    expect(calls[2].sql).toContain("dimension_rollup AS");
     for (const call of [calls[0], calls[3], calls[4]]) {
       expect(call.sql).toContain("GROUP BY value");
-      expect(call.sql).toContain("WHERE TRIM(value) != ''");
+      expect(call.sql).toContain("TRIM(value) != ''");
     }
   });
 
@@ -2127,11 +2183,14 @@ describe("edge overview D1 queries and handlers", () => {
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         field,
-        data: expect.any(Array),
+        data: {
+          items: expect.any(Array),
+          pagination: expect.any(Object),
+        },
       });
     }
-    expect(calls[0]?.bindings.at(-1)).toBe(4);
-    expect(calls.every((call) => call.bindings.at(-1) === 4)).toBe(true);
+    expect(calls[0]?.bindings.at(-1)).toBe(5);
+    expect(calls.every((call) => call.bindings.at(-1) === 5)).toBe(true);
     expect(calls.flatMap((call) => call.bindings)).toEqual(
       expect.arrayContaining(["us"]),
     );
@@ -2185,16 +2244,32 @@ describe("edge overview D1 queries and handlers", () => {
     await expect(device.json()).resolves.toEqual({
       ok: true,
       field: "client.deviceType",
-      data: [{ value: "desktop", label: "desktop", occurrences: 6 }],
+      data: {
+        items: [{ value: "desktop", label: "desktop", occurrences: 6 }],
+        pagination: {
+          limit: 4,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     await expect(browser.json()).resolves.toEqual({
       ok: true,
       field: "client.browser",
-      data: [{ value: "Chrome", label: "Chrome", occurrences: 5 }],
+      data: {
+        items: [{ value: "Chrome", label: "Chrome", occurrences: 5 }],
+        pagination: {
+          limit: 4,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     expect(calls[0].sql).toContain("TRIM(COALESCE(device_type, ''))");
     expect(calls[1].sql).toContain("TRIM(COALESCE(browser, ''))");
-    expect(calls.map((call) => call.bindings.at(-1))).toEqual([4, 4]);
+    expect(calls.map((call) => call.bindings.at(-1))).toEqual([5, 5]);
   });
 
   it("maps overview geo points with and without applying geo filters", async () => {

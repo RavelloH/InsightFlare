@@ -1,3 +1,5 @@
+import type { PaginatedCollection } from "./pagination";
+
 export interface OverviewMetrics {
   views: number;
   sessions: number;
@@ -120,7 +122,7 @@ export interface OverviewGeoPointsData {
 
 export interface OverviewTabData {
   ok: boolean;
-  data: Array<{
+  data: PaginatedCollection<{
     label: string;
     views: number;
     sessions: number;

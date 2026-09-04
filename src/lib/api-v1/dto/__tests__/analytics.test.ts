@@ -266,19 +266,19 @@ describe("API v1 analytics DTOs", () => {
         timeRange,
         visitorId: "visitor-1",
       }).data,
-    ).toMatchObject({ limit: 100 });
+    ).toMatchObject({ page: { limit: 100 } });
     expect(
       SiteVisitorSessionsQueryDtoSchema.safeParse({
         timeRange,
         visitorId: "visitor-1",
-        limit: 500,
+        page: { limit: 500 },
       }).success,
     ).toBe(true);
     expect(
       SiteSessionEventsQueryDtoSchema.safeParse({
         timeRange,
         sessionId: "session-1",
-        limit: 501,
+        page: { limit: 501 },
       }).success,
     ).toBe(false);
     expect(

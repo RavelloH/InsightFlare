@@ -1,3 +1,4 @@
+import type { PaginatedCollection } from "./pagination";
 import type {
   JourneyPerformanceSummary,
   VisitPerformanceMetrics,
@@ -145,6 +146,18 @@ export interface VisitorDetailData {
     performance: JourneyPerformanceSummary;
   } | null;
 }
+
+export type JourneyEventsData = {
+  ok: boolean;
+  data: PaginatedCollection<JourneyEvent>;
+};
+
+export type VisitorSessionsData = {
+  ok: boolean;
+  data: PaginatedCollection<JourneySession>;
+};
+
+export type SessionEventsData = JourneyEventsData;
 
 export interface SessionsMeta {
   pageSize: number;

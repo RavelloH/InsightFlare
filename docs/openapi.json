@@ -370,7 +370,7 @@
             }
           },
           "400": {
-            "description": "API v1 error: validation_failed.",
+            "description": "API v1 error: validation_failed, invalid_cursor.",
             "headers": {
               "X-Request-Id": {
                 "required": true,
@@ -840,7 +840,7 @@
             }
           },
           "400": {
-            "description": "API v1 error: validation_failed.",
+            "description": "API v1 error: validation_failed, invalid_cursor.",
             "headers": {
               "X-Request-Id": {
                 "required": true,
@@ -7001,10 +7001,41 @@
                       "week",
                       "month"
                     ]
+                  },
+                  "page": {
+                    "default": {
+                      "limit": 20
+                    },
+                    "type": "object",
+                    "properties": {
+                      "limit": {
+                        "default": 20,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      },
+                      "cursor": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 12288
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "limit"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
-                  "timeRange"
+                  "timeRange",
+                  "page"
                 ],
                 "additionalProperties": false,
                 "$defs": {
@@ -7098,7 +7129,10 @@
                   }
                 },
                 "scope": "auto",
-                "interval": "minute"
+                "interval": "minute",
+                "page": {
+                  "limit": 20
+                }
               }
             }
           }
@@ -7272,10 +7306,14 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
-                        "sites"
+                        "sites",
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -7324,7 +7362,13 @@
                         ],
                         "lastEventAt": "2026-01-01T00:00:00Z"
                       }
-                    ]
+                    ],
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
+                    }
                   },
                   "meta": {
                     "requestId": "example",
@@ -9396,11 +9440,8 @@
                       "visitor"
                     ]
                   },
-                  "limit": {
-                    "default": 20,
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 200
+                  "page": {
+                    "$ref": "#/components/schemas/SharedSchema_70ada349f9c7"
                   },
                   "includeDetails": {
                     "default": false,
@@ -9409,7 +9450,7 @@
                 },
                 "required": [
                   "timeRange",
-                  "limit",
+                  "page",
                   "includeDetails"
                 ],
                 "additionalProperties": false,
@@ -9504,7 +9545,9 @@
                   }
                 },
                 "scope": "auto",
-                "limit": 20,
+                "page": {
+                  "limit": 20
+                },
                 "includeDetails": false
               }
             }
@@ -9560,10 +9603,14 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
-                        "items"
+                        "items",
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -9587,7 +9634,13 @@
                         "views": 0,
                         "sessions": 0
                       }
-                    ]
+                    ],
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
+                    }
                   },
                   "meta": {
                     "requestId": "example",
@@ -9970,20 +10023,40 @@
                       "visitor"
                     ]
                   },
-                  "limit": {
-                    "default": 20,
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 200
+                  "sort": {
+                    "default": "views",
+                    "type": "string",
+                    "enum": [
+                      "views",
+                      "visitors"
+                    ]
+                  },
+                  "direction": {
+                    "default": "desc",
+                    "type": "string",
+                    "enum": [
+                      "asc",
+                      "desc"
+                    ]
+                  },
+                  "page": {
+                    "$ref": "#/components/schemas/SharedSchema_70ada349f9c7"
                   },
                   "includeFullUrl": {
                     "default": false,
                     "type": "boolean"
+                  },
+                  "search": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
                   }
                 },
                 "required": [
                   "timeRange",
-                  "limit",
+                  "sort",
+                  "direction",
+                  "page",
                   "includeFullUrl"
                 ],
                 "additionalProperties": false,
@@ -10078,8 +10151,13 @@
                   }
                 },
                 "scope": "auto",
-                "limit": 20,
-                "includeFullUrl": false
+                "sort": "views",
+                "direction": "asc",
+                "page": {
+                  "limit": 20
+                },
+                "includeFullUrl": false,
+                "search": "example"
               }
             }
           }
@@ -10130,10 +10208,14 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
-                        "items"
+                        "items",
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -10156,7 +10238,13 @@
                         "sessions": 0,
                         "visitors": 0
                       }
-                    ]
+                    ],
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
+                    }
                   },
                   "meta": {
                     "requestId": "example",
@@ -11135,6 +11223,18 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 200
+                      },
+                      "cursor": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 12288
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       }
                     },
                     "required": [
@@ -11296,34 +11396,14 @@
                             "additionalProperties": false
                           }
                         },
-                        "page": {
-                          "type": "object",
-                          "properties": {
-                            "limit": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            "hasMore": {
-                              "type": "boolean",
-                              "const": false
-                            },
-                            "nextCursor": {
-                              "type": "null"
-                            }
-                          },
-                          "required": [
-                            "limit",
-                            "hasMore",
-                            "nextCursor"
-                          ],
-                          "additionalProperties": false
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
                         "field",
                         "items",
-                        "page"
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -11347,10 +11427,11 @@
                         "occurrences": 0
                       }
                     ],
-                    "page": {
+                    "pagination": {
                       "limit": 1,
+                      "returned": 0,
                       "hasMore": false,
-                      "nextCursor": null
+                      "nextCursor": "example"
                     }
                   },
                   "meta": {
@@ -17599,22 +17680,7 @@
                     "maxLength": 160
                   },
                   "page": {
-                    "default": {
-                      "limit": 20
-                    },
-                    "type": "object",
-                    "properties": {
-                      "limit": {
-                        "default": 20,
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 200
-                      }
-                    },
-                    "required": [
-                      "limit"
-                    ],
-                    "additionalProperties": false
+                    "$ref": "#/components/schemas/SharedSchema_70ada349f9c7"
                   }
                 },
                 "required": [
@@ -17772,24 +17838,13 @@
                             "additionalProperties": false
                           }
                         },
-                        "page": {
-                          "type": "object",
-                          "properties": {
-                            "limit": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            }
-                          },
-                          "required": [
-                            "limit"
-                          ],
-                          "additionalProperties": false
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
                         "items",
-                        "page"
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -17814,8 +17869,11 @@
                         "visitors": 0
                       }
                     ],
-                    "page": {
-                      "limit": 1
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
                     }
                   },
                   "meta": {
@@ -19622,6 +19680,18 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 200
+                      },
+                      "cursor": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 12288
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       }
                     },
                     "required": [
@@ -19758,28 +19828,17 @@
                         "eventName": {
                           "type": "string"
                         },
-                        "fields": {
+                        "items": {
                           "$ref": "#/components/schemas/SharedSchema_05f52499a24a"
                         },
-                        "page": {
-                          "type": "object",
-                          "properties": {
-                            "limit": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            }
-                          },
-                          "required": [
-                            "limit"
-                          ],
-                          "additionalProperties": false
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
                         "eventName",
-                        "fields",
-                        "page"
+                        "items",
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -19796,7 +19855,7 @@
                 "example": {
                   "data": {
                     "eventName": "example",
-                    "fields": [
+                    "items": [
                       {
                         "path": "example",
                         "valueType": "string",
@@ -19807,8 +19866,11 @@
                         "exampleValue": "example"
                       }
                     ],
-                    "page": {
-                      "limit": 1
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
                     }
                   },
                   "meta": {
@@ -20228,6 +20290,18 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 100
+                      },
+                      "cursor": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 12288
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       }
                     },
                     "required": [
@@ -20427,19 +20501,8 @@
                             "additionalProperties": false
                           }
                         },
-                        "page": {
-                          "type": "object",
-                          "properties": {
-                            "limit": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            }
-                          },
-                          "required": [
-                            "limit"
-                          ],
-                          "additionalProperties": false
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
@@ -20447,7 +20510,7 @@
                         "fieldPath",
                         "fieldValueType",
                         "items",
-                        "page"
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -20475,8 +20538,11 @@
                         "lastSeenAt": 0
                       }
                     ],
-                    "page": {
-                      "limit": 1
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
                     }
                   },
                   "meta": {
@@ -20987,12 +21053,6 @@
                           ],
                           "additionalProperties": false
                         },
-                        "sessions": {
-                          "$ref": "#/components/schemas/SharedSchema_ffd4d8b33e22"
-                        },
-                        "events": {
-                          "$ref": "#/components/schemas/SharedSchema_3a8f76151019"
-                        },
                         "visitedPages": {
                           "type": "array",
                           "items": {
@@ -21057,8 +21117,6 @@
                       "required": [
                         "visitor",
                         "metrics",
-                        "sessions",
-                        "events",
                         "visitedPages",
                         "eventDistribution",
                         "activity",
@@ -21114,78 +21172,6 @@
                       "conversionEvents": 0,
                       "avgTimeBetweenSessionsMs": 0
                     },
-                    "sessions": [
-                      {
-                        "sessionId": "example",
-                        "visitorId": "example",
-                        "startedAt": 0,
-                        "endedAt": 0,
-                        "durationMs": 0,
-                        "active": false,
-                        "views": 0,
-                        "events": 0,
-                        "bounce": false,
-                        "entryPath": "example",
-                        "exitPath": "example",
-                        "referrerHost": "example",
-                        "referrerUrl": "example",
-                        "country": "example",
-                        "region": "example",
-                        "regionCode": "example",
-                        "city": "example",
-                        "latitude": 0,
-                        "longitude": 0,
-                        "browser": "example",
-                        "browserVersion": "example",
-                        "os": "example",
-                        "osVersion": "example",
-                        "deviceType": "example",
-                        "screenWidth": 0,
-                        "screenHeight": 0,
-                        "performance": {
-                          "ttfb": 0,
-                          "fcp": 0,
-                          "lcp": 0,
-                          "cls": 0,
-                          "inp": 0
-                        }
-                      }
-                    ],
-                    "events": [
-                      {
-                        "id": "example",
-                        "kind": "session_start",
-                        "eventType": "example",
-                        "occurredAt": 0,
-                        "visitId": "example",
-                        "sessionId": "example",
-                        "visitorId": "example",
-                        "pathname": "example",
-                        "hash": "example",
-                        "title": "example",
-                        "hostname": "example",
-                        "referrerHost": "example",
-                        "referrerUrl": "example",
-                        "country": "example",
-                        "region": "example",
-                        "city": "example",
-                        "browser": "example",
-                        "browserVersion": "example",
-                        "os": "example",
-                        "osVersion": "example",
-                        "deviceType": "example",
-                        "screenWidth": 0,
-                        "screenHeight": 0,
-                        "durationMs": 0,
-                        "performance": {
-                          "ttfb": 0,
-                          "fcp": 0,
-                          "lcp": 0,
-                          "cls": 0,
-                          "inp": 0
-                        }
-                      }
-                    ],
                     "visitedPages": [
                       {
                         "pathname": "example",
@@ -21770,9 +21756,6 @@
                             "additionalProperties": false
                           }
                         },
-                        "events": {
-                          "$ref": "#/components/schemas/SharedSchema_3a8f76151019"
-                        },
                         "visitedPages": {
                           "type": "array",
                           "items": {
@@ -21818,7 +21801,6 @@
                       "required": [
                         "session",
                         "locationPoints",
-                        "events",
                         "visitedPages",
                         "eventDistribution",
                         "performance"
@@ -21882,41 +21864,6 @@
                         "regionCode": "example",
                         "city": "example",
                         "pointCount": 0
-                      }
-                    ],
-                    "events": [
-                      {
-                        "id": "example",
-                        "kind": "session_start",
-                        "eventType": "example",
-                        "occurredAt": 0,
-                        "visitId": "example",
-                        "sessionId": "example",
-                        "visitorId": "example",
-                        "pathname": "example",
-                        "hash": "example",
-                        "title": "example",
-                        "hostname": "example",
-                        "referrerHost": "example",
-                        "referrerUrl": "example",
-                        "country": "example",
-                        "region": "example",
-                        "city": "example",
-                        "browser": "example",
-                        "browserVersion": "example",
-                        "os": "example",
-                        "osVersion": "example",
-                        "deviceType": "example",
-                        "screenWidth": 0,
-                        "screenHeight": 0,
-                        "durationMs": 0,
-                        "performance": {
-                          "ttfb": 0,
-                          "fcp": 0,
-                          "lcp": 0,
-                          "cls": 0,
-                          "inp": 0
-                        }
                       }
                     ],
                     "visitedPages": [
@@ -24228,17 +24175,14 @@
                     "minLength": 1,
                     "maxLength": 512
                   },
-                  "limit": {
-                    "default": 100,
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 500
+                  "page": {
+                    "$ref": "#/components/schemas/SharedSchema_64d3297ebf12"
                   }
                 },
                 "required": [
                   "timeRange",
                   "visitorId",
-                  "limit"
+                  "page"
                 ],
                 "additionalProperties": false,
                 "$defs": {
@@ -24333,7 +24277,9 @@
                 },
                 "scope": "auto",
                 "visitorId": "example",
-                "limit": 100
+                "page": {
+                  "limit": 100
+                }
               }
             }
           }
@@ -24353,7 +24299,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SharedSchema_0db83bd64226"
+                  "$ref": "#/components/schemas/SharedSchema_fea62b48b995"
                 },
                 "example": {
                   "data": {
@@ -24391,7 +24337,13 @@
                           "inp": 0
                         }
                       }
-                    ]
+                    ],
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
+                    }
                   },
                   "meta": {
                     "requestId": "example",
@@ -24413,7 +24365,7 @@
             }
           },
           "400": {
-            "description": "API v1 error: validation_failed.",
+            "description": "API v1 error: validation_failed, invalid_cursor.",
             "headers": {
               "X-Request-Id": {
                 "required": true,
@@ -24779,17 +24731,14 @@
                     "minLength": 1,
                     "maxLength": 512
                   },
-                  "limit": {
-                    "default": 100,
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 500
+                  "page": {
+                    "$ref": "#/components/schemas/SharedSchema_64d3297ebf12"
                   }
                 },
                 "required": [
                   "timeRange",
                   "visitorId",
-                  "limit"
+                  "page"
                 ],
                 "additionalProperties": false,
                 "$defs": {
@@ -24884,7 +24833,9 @@
                 },
                 "scope": "auto",
                 "visitorId": "example",
-                "limit": 100
+                "page": {
+                  "limit": 100
+                }
               }
             }
           }
@@ -24911,10 +24862,14 @@
                       "properties": {
                         "items": {
                           "$ref": "#/components/schemas/SharedSchema_ffd4d8b33e22"
+                        },
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
-                        "items"
+                        "items",
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -24966,7 +24921,13 @@
                           "inp": 0
                         }
                       }
-                    ]
+                    ],
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
+                    }
                   },
                   "meta": {
                     "requestId": "example",
@@ -24988,7 +24949,7 @@
             }
           },
           "400": {
-            "description": "API v1 error: validation_failed.",
+            "description": "API v1 error: validation_failed, invalid_cursor.",
             "headers": {
               "X-Request-Id": {
                 "required": true,
@@ -25354,17 +25315,14 @@
                     "minLength": 1,
                     "maxLength": 512
                   },
-                  "limit": {
-                    "default": 100,
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 500
+                  "page": {
+                    "$ref": "#/components/schemas/SharedSchema_64d3297ebf12"
                   }
                 },
                 "required": [
                   "timeRange",
                   "sessionId",
-                  "limit"
+                  "page"
                 ],
                 "additionalProperties": false,
                 "$defs": {
@@ -25459,7 +25417,9 @@
                 },
                 "scope": "auto",
                 "sessionId": "example",
-                "limit": 100
+                "page": {
+                  "limit": 100
+                }
               }
             }
           }
@@ -25479,7 +25439,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SharedSchema_0db83bd64226"
+                  "$ref": "#/components/schemas/SharedSchema_fea62b48b995"
                 },
                 "example": {
                   "data": {
@@ -25517,7 +25477,13 @@
                           "inp": 0
                         }
                       }
-                    ]
+                    ],
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
+                    }
                   },
                   "meta": {
                     "requestId": "example",
@@ -25539,7 +25505,7 @@
             }
           },
           "400": {
-            "description": "API v1 error: validation_failed.",
+            "description": "API v1 error: validation_failed, invalid_cursor.",
             "headers": {
               "X-Request-Id": {
                 "required": true,
@@ -33421,6 +33387,66 @@
         ],
         "additionalProperties": false
       },
+      "SharedSchema_64d3297ebf12": {
+        "default": {
+          "limit": 100
+        },
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 100,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 12288
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false
+      },
+      "SharedSchema_70ada349f9c7": {
+        "default": {
+          "limit": 20
+        },
+        "type": "object",
+        "properties": {
+          "limit": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 12288
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false
+      },
       "SharedSchema_368ccef822b3": {
         "default": {
           "limit": 80
@@ -34964,11 +34990,11 @@
         ],
         "additionalProperties": false
       },
-      "SharedSchema_0db83bd64226": {
+      "SharedSchema_fea62b48b995": {
         "type": "object",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/SharedSchema_07e4fcb61561"
+            "$ref": "#/components/schemas/SharedSchema_dec1b9541133"
           },
           "meta": {
             "$ref": "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -35291,6 +35317,41 @@
         ],
         "additionalProperties": false
       },
+      "SharedSchema_84bd4e13bfb1": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "returned": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "limit",
+          "returned",
+          "hasMore",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
       "SharedSchema_96182d97894c": {
         "type": "object",
         "properties": {
@@ -35383,15 +35444,19 @@
         ],
         "additionalProperties": false
       },
-      "SharedSchema_07e4fcb61561": {
+      "SharedSchema_dec1b9541133": {
         "type": "object",
         "properties": {
           "items": {
             "$ref": "#/components/schemas/SharedSchema_3a8f76151019"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
           }
         },
         "required": [
-          "items"
+          "items",
+          "pagination"
         ],
         "additionalProperties": false
       },

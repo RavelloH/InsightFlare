@@ -17,8 +17,8 @@ const SITE_ID = "demo-site-001";
 type FunnelResult = ReturnType<typeof generateDemoFunnels>;
 
 function listOf(result: FunnelResult): FunnelDefinition[] {
-  if (result.ok === true && "data" in result && "funnels" in result.data) {
-    return result.data.funnels;
+  if (result.ok === true && "data" in result && "items" in result.data) {
+    return result.data.items;
   }
   throw new Error("expected funnel list");
 }

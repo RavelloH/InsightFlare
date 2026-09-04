@@ -1,4 +1,7 @@
-import type { UtmDimensionTab } from "@/lib/dashboard/client-data-types";
+import type {
+  DashboardListRequestOptions,
+  UtmDimensionTab,
+} from "@/lib/dashboard/client-data-types";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserTrendData,
@@ -6,6 +9,7 @@ import type {
   ReferrerChannelTrendData,
   ReferrerRadarData,
   ReferrersData,
+  ReferrerSummaryData,
 } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
 
@@ -24,9 +28,8 @@ export async function fetchReferrers(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: {
+  options?: DashboardListRequestOptions & {
     fullUrl?: boolean;
-    limit?: number;
   },
 ): Promise<ReferrersData> {
   return fetchPrivateJson<ReferrersData>(
@@ -38,10 +41,34 @@ export async function fetchReferrers(
         to: window.to,
         timeZone: window.timeZone,
         limit: options?.limit ?? 100,
+        ...(options?.cursor ? { cursor: options.cursor } : {}),
         fullUrl: options?.fullUrl ? 1 : 0,
       },
       filters,
     ),
+    { signal: options?.signal },
+  );
+}
+
+export async function fetchReferrerSummary(
+  siteId: string,
+  window: TimeWindow,
+  filters?: FilterDocument,
+  options?: { topN?: number; signal?: AbortSignal },
+): Promise<ReferrerSummaryData> {
+  return fetchPrivateJson<ReferrerSummaryData>(
+    "/api/private/referrer-summary",
+    withFilters(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        timeZone: window.timeZone,
+        topN: options?.topN ?? 5,
+      },
+      filters,
+    ),
+    { signal: options?.signal },
   );
 }
 

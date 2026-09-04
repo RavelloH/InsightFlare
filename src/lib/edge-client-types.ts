@@ -7,6 +7,7 @@ export type * from "./edge-client-types/funnels";
 export type * from "./edge-client-types/journeys";
 export type * from "./edge-client-types/overview";
 export type * from "./edge-client-types/pages";
+export type * from "./edge-client-types/pagination";
 export type * from "./edge-client-types/performance";
 export type * from "./edge-client-types/referrers";
 export type * from "./edge-client-types/technology";

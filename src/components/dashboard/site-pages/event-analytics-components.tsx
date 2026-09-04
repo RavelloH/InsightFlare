@@ -1511,7 +1511,7 @@ export const EventFieldsCard = memo(function EventFieldsCard({
     observer.observe(section);
     return () => observer.disconnect();
   }, []);
-  const fieldsQuery = useQuery({
+  const fieldsQuery = useInfiniteQuery({
     queryKey: [
       "dashboard",
       "event-type-fields",
@@ -1523,13 +1523,20 @@ export const EventFieldsCard = memo(function EventFieldsCard({
       timeWindow.timeZone,
       baseFiltersKey,
     ],
-    queryFn: ({ signal }) =>
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) =>
       fetchEventTypeFields(siteId, timeWindow, eventName, filters, {
+        limit: 100,
+        cursor: pageParam,
         signal,
       }),
     enabled: typeof window !== "undefined" && fieldsVisible && !loading,
+    getNextPageParam: (lastPage) =>
+      lastPage.data?.pagination?.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
   });
-  const filteredFieldsQuery = useQuery({
+  const filteredFieldsQuery = useInfiniteQuery({
     queryKey: [
       "dashboard",
       "event-filtered-fields",
@@ -1541,8 +1548,11 @@ export const EventFieldsCard = memo(function EventFieldsCard({
       timeWindow.timeZone,
       effectiveFiltersKey,
     ],
-    queryFn: ({ signal }) =>
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) =>
       fetchEventTypeFields(siteId, timeWindow, eventName, effectiveFilters, {
+        limit: 100,
+        cursor: pageParam,
         signal,
       }),
     enabled:
@@ -1550,9 +1560,15 @@ export const EventFieldsCard = memo(function EventFieldsCard({
       fieldsVisible &&
       activePayloadFilterCount > 0 &&
       !loading,
+    getNextPageParam: (lastPage) =>
+      lastPage.data?.pagination?.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
   });
-  const baseFields = fieldsQuery.data?.fields ?? fields;
-  const filteredFields = filteredFieldsQuery.data?.fields ?? [];
+  const baseFields =
+    fieldsQuery.data?.pages.flatMap((page) => page.data.items) ?? fields;
+  const filteredFields =
+    filteredFieldsQuery.data?.pages.flatMap((page) => page.data.items) ?? [];
   const filteredFieldsLoading = filteredFieldsQuery.isPending;
   const filteredFieldsError = filteredFieldsQuery.isError;
   const activeFields =
@@ -1637,7 +1653,7 @@ export const EventFieldsCard = memo(function EventFieldsCard({
     setExpandedFieldKeys(new Set(defaultExpandedFieldKeys));
   }, [defaultExpandedFieldKeys, fieldRequestKey]);
 
-  const fieldValuesQuery = useQuery({
+  const fieldValuesQuery = useInfiniteQuery({
     queryKey: [
       "dashboard",
       "event-field-values",
@@ -1651,7 +1667,8 @@ export const EventFieldsCard = memo(function EventFieldsCard({
       timeWindow.timeZone,
       effectiveFiltersKey,
     ],
-    queryFn: ({ signal }) =>
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) =>
       fetchEventTypeFieldValues(
         siteId,
         timeWindow,
@@ -1659,14 +1676,19 @@ export const EventFieldsCard = memo(function EventFieldsCard({
         selectedField?.path ?? "",
         selectedField?.valueType ?? "string",
         effectiveFilters,
-        { limit: 25, signal },
+        { limit: 25, cursor: pageParam, signal },
       ),
     enabled:
       typeof window !== "undefined" &&
       !fieldListLoading &&
       Boolean(selectedField),
+    getNextPageParam: (lastPage) =>
+      lastPage.data?.pagination?.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
   });
-  const fieldValues = fieldValuesQuery.data?.data ?? [];
+  const fieldValues =
+    fieldValuesQuery.data?.pages.flatMap((page) => page.data.items) ?? [];
   const fieldValuesLoading = fieldValuesQuery.isPending;
   const fieldValuesError = fieldValuesQuery.isError;
 

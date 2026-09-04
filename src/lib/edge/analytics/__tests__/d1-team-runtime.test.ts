@@ -146,6 +146,8 @@ describe("D1 team query runtime", () => {
       teamId: "",
       allowedSiteIds: undefined,
       interval: undefined,
+      page: undefined,
+      audience: "api-v1",
       window: {
         startMs: 100,
         endExclusiveMs: 200,

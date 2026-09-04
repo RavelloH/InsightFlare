@@ -48,6 +48,12 @@ export async function handleFilterValuesContract(
     filters,
     field,
     limit: parseLimit(url, 50, 500),
+    page: {
+      limit: parseLimit(url, 50, 500),
+      ...(url.searchParams.get("cursor")
+        ? { cursor: url.searchParams.get("cursor") }
+        : {}),
+    },
     search: parseListSearch(url),
   } satisfies FilterValuesQuery;
   const result = await createD1SiteQueryRuntime({

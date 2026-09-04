@@ -102,7 +102,10 @@ export type SiteListReader<
 
 export type SitePagesReader = SiteListReader<
   SitePagesQueryDto,
-  { readonly items: readonly unknown[] }
+  {
+    readonly items: readonly unknown[];
+    readonly pagination: unknown;
+  }
 >;
 export type SiteChannelsReader = SiteListReader<
   SiteChannelsQueryDto,
@@ -110,14 +113,17 @@ export type SiteChannelsReader = SiteListReader<
 >;
 export type SiteReferrersReader = SiteListReader<
   SiteReferrersQueryDto,
-  { readonly items: readonly unknown[] }
+  {
+    readonly items: readonly unknown[];
+    readonly pagination: unknown;
+  }
 >;
 export type SiteFilterValuesReader = SiteListReader<
   SiteFilterValuesQueryDto,
   {
     readonly field: string;
     readonly items: readonly unknown[];
-    readonly page: unknown;
+    readonly pagination: unknown;
   }
 >;
 export type SiteRetentionReader = SiteListReader<
@@ -176,7 +182,10 @@ export type SiteJourneyEventDetailReader = SiteListReader<
 >;
 export type SiteEventTypesReader = SiteListReader<
   SiteEventTypesQueryDto,
-  { readonly items: readonly unknown[]; readonly page: unknown }
+  {
+    readonly items: readonly unknown[];
+    readonly pagination: unknown;
+  }
 >;
 export type SiteEventTypeDetailReader = SiteListReader<
   SiteEventTypeDetailQueryDto,
@@ -193,8 +202,8 @@ export type SiteEventFieldsReader = SiteListReader<
   SiteEventFieldsQueryDto,
   {
     readonly eventName: string;
-    readonly fields: readonly unknown[];
-    readonly page: unknown;
+    readonly items: readonly unknown[];
+    readonly pagination: unknown;
   }
 >;
 export type SiteEventFieldValuesReader = SiteListReader<
@@ -204,7 +213,7 @@ export type SiteEventFieldValuesReader = SiteListReader<
     readonly fieldPath: string;
     readonly fieldValueType: string;
     readonly items: readonly unknown[];
-    readonly page: unknown;
+    readonly pagination: unknown;
   }
 >;
 export type SiteVisitorDetailReader = SiteListReader<
@@ -212,8 +221,6 @@ export type SiteVisitorDetailReader = SiteListReader<
   {
     readonly visitor: unknown;
     readonly metrics: unknown;
-    readonly sessions: readonly unknown[];
-    readonly events: readonly unknown[];
     readonly visitedPages: readonly unknown[];
     readonly eventDistribution: readonly unknown[];
     readonly activity: readonly unknown[];
@@ -225,7 +232,6 @@ export type SiteSessionDetailReader = SiteListReader<
   {
     readonly session: unknown;
     readonly locationPoints: readonly unknown[];
-    readonly events: readonly unknown[];
     readonly visitedPages: readonly unknown[];
     readonly eventDistribution: readonly unknown[];
     readonly performance: unknown;
@@ -241,15 +247,15 @@ export type SiteSessionsSearchReader = SiteListReader<
 >;
 export type SiteVisitorEventsReader = SiteListReader<
   SiteVisitorEventsQueryDto,
-  { readonly items: readonly unknown[] }
+  { readonly items: readonly unknown[]; readonly pagination?: unknown }
 >;
 export type SiteVisitorSessionsReader = SiteListReader<
   SiteVisitorSessionsQueryDto,
-  { readonly items: readonly unknown[] }
+  { readonly items: readonly unknown[]; readonly pagination?: unknown }
 >;
 export type SiteSessionEventsReader = SiteListReader<
   SiteSessionEventsQueryDto,
-  { readonly items: readonly unknown[] }
+  { readonly items: readonly unknown[]; readonly pagination?: unknown }
 >;
 export type SiteRealtimeSnapshotReader = SiteListReader<
   SiteRealtimeSnapshotQueryDto,

@@ -23,11 +23,13 @@ import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   EventField,
   EventFieldValuesData,
+  EventFieldValueStat,
   EventRecordDetailData,
   EventsRecordsData,
   EventsSummaryData,
   EventsTrendData,
   EventTypeDetailData,
+  EventTypeFieldsData,
   FunnelDeleteData,
   FunnelDetailData,
   FunnelListData,
@@ -35,20 +37,27 @@ import type {
   FunnelStep,
   JourneyEvent,
   JourneyEventDetailData,
+  JourneyEventsData,
   OverviewData,
   PagesData,
   PerformanceData,
   RetentionData,
   SessionDetailData,
+  SessionEventsData,
   SessionsData,
   TrendData,
   VisitorDetailData,
   VisitorsData,
+  VisitorSessionsData,
 } from "@/lib/edge-client";
 import type { FilterDocument, FilterScope } from "@/lib/filter-contract";
 
 import { fetchPrivateJson, fetchPrivateJsonMutate } from "./client-request";
-import { withFilters } from "./client-utils";
+import {
+  normalizePaginatedCollection,
+  withFilters,
+  withPagination,
+} from "./client-utils";
 
 function emptySessionsUnlessAborted(error: unknown): SessionsData {
   if (error instanceof Error && error.name === "AbortError") throw error;
@@ -120,20 +129,29 @@ export async function fetchPages(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    signal?: AbortSignal;
+  },
 ): Promise<PagesData> {
   return fetchPrivateJson<PagesData>(
     "/api/private/pages",
     withFilters(
-      {
-        siteId,
-        from: window.from,
-        to: window.to,
-        timeZone: window.timeZone,
-        limit: 100,
-        details: 1,
-      },
+      withPagination(
+        {
+          siteId,
+          from: window.from,
+          to: window.to,
+          timeZone: window.timeZone,
+          details: 1,
+        },
+        options,
+        100,
+      ),
       filters,
     ),
+    { signal: options?.signal },
   );
 }
 
@@ -191,7 +209,7 @@ export async function fetchVisitorDetail(
 ): Promise<VisitorDetailData> {
   const normalizedVisitorId = visitorId.trim();
   if (!normalizedVisitorId) return emptyVisitorDetail();
-  return fetchPrivateJson<VisitorDetailData>(
+  const result = await fetchPrivateJson<VisitorDetailData>(
     "/api/private/visitor-detail",
     {
       siteId,
@@ -200,6 +218,69 @@ export async function fetchVisitorDetail(
       ...(timeZone ? { timeZone } : {}),
     },
     { signal: options?.signal, dedupe: false },
+  );
+  if (!result.data) return result;
+  return {
+    ...result,
+    data: {
+      ...result.data,
+      sessions: result.data.sessions ?? [],
+      events: result.data.events ?? [],
+    },
+  };
+}
+
+export async function fetchVisitorEvents(
+  siteId: string,
+  visitorId: string,
+  window: TimeWindow,
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    signal?: AbortSignal;
+  },
+): Promise<JourneyEventsData> {
+  return fetchPrivateJson<JourneyEventsData>(
+    "/api/private/visitor-events",
+    withPagination(
+      {
+        siteId,
+        visitorId: visitorId.trim(),
+        from: window.from,
+        to: window.to,
+        timeZone: window.timeZone,
+      },
+      options,
+      100,
+    ),
+    { signal: options?.signal },
+  );
+}
+
+export async function fetchVisitorSessions(
+  siteId: string,
+  visitorId: string,
+  window: TimeWindow,
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    signal?: AbortSignal;
+  },
+): Promise<VisitorSessionsData> {
+  return fetchPrivateJson<VisitorSessionsData>(
+    "/api/private/visitor-sessions",
+    withPagination(
+      {
+        siteId,
+        visitorId: visitorId.trim(),
+        from: window.from,
+        to: window.to,
+        timeZone: window.timeZone,
+      },
+      options,
+      100,
+    ),
+    { signal: options?.signal },
   );
 }
 
@@ -269,19 +350,47 @@ export async function fetchSessionDetail(
   );
 }
 
+export async function fetchSessionEvents(
+  siteId: string,
+  sessionId: string,
+  window: TimeWindow,
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    signal?: AbortSignal;
+  },
+): Promise<SessionEventsData> {
+  return fetchPrivateJson<SessionEventsData>(
+    "/api/private/session-events",
+    withPagination(
+      {
+        siteId,
+        sessionId: sessionId.trim(),
+        from: window.from,
+        to: window.to,
+        timeZone: window.timeZone,
+      },
+      options,
+      100,
+    ),
+    { signal: options?.signal },
+  );
+}
+
 export async function fetchFunnels(
   siteId: string,
-  options?: { signal?: AbortSignal },
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    signal?: AbortSignal;
+  },
 ): Promise<FunnelListData> {
+  const requestParams = withPagination({ siteId }, options, 100);
   return options?.signal
-    ? fetchPrivateJson<FunnelListData>(
-        "/api/private/funnels",
-        { siteId },
-        {
-          signal: options.signal,
-        },
-      )
-    : fetchPrivateJson<FunnelListData>("/api/private/funnels", { siteId });
+    ? fetchPrivateJson<FunnelListData>("/api/private/funnels", requestParams, {
+        signal: options.signal,
+      })
+    : fetchPrivateJson<FunnelListData>("/api/private/funnels", requestParams);
 }
 
 export async function fetchFunnelDetail(
@@ -494,26 +603,56 @@ export async function fetchEventTypeFields(
   eventName?: string,
   filters?: FilterDocument,
   options?: {
+    limit?: number;
+    cursor?: string | null;
     signal?: AbortSignal;
     resolvedScope?: FilterScope;
   },
-): Promise<Pick<EventTypeDetailData, "fields">> {
+): Promise<EventTypeFieldsData> {
   const normalizedEventName = eventName?.trim() ?? "";
-  return fetchPrivateJson<Pick<EventTypeDetailData, "fields">>(
+  const payload = await fetchPrivateJson<EventTypeFieldsData>(
     "/api/private/event-type-fields",
     withFilters(
-      {
-        siteId,
-        from: window.from,
-        to: window.to,
-        timeZone: window.timeZone,
-        ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
-      },
+      withPagination(
+        {
+          siteId,
+          from: window.from,
+          to: window.to,
+          timeZone: window.timeZone,
+          ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
+        },
+        options,
+        100,
+      ),
       filters,
       options?.resolvedScope,
     ),
     { signal: options?.signal },
-  ).catch((error) => fallbackUnlessAborted(error, () => ({ fields: [] })));
+  ).catch((error) =>
+    fallbackUnlessAborted(error, () => ({
+      ok: true,
+      eventName: normalizedEventName,
+      data: {
+        items: [],
+        pagination: {
+          limit: options?.limit ?? 100,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    })),
+  );
+  const rawPayload = payload as EventTypeFieldsData & {
+    fields?: unknown;
+  };
+  return {
+    ...rawPayload,
+    data: normalizePaginatedCollection<EventField>(
+      rawPayload.data ?? rawPayload.fields,
+      options?.limit ?? 100,
+    ),
+  };
 }
 
 export async function fetchEventTypeContextCards(
@@ -556,6 +695,7 @@ export async function fetchEventTypeFieldValues(
   filters?: FilterDocument,
   options?: {
     limit?: number;
+    cursor?: string | null;
     search?: string;
     signal?: AbortSignal;
     resolvedScope?: FilterScope;
@@ -566,20 +706,23 @@ export async function fetchEventTypeFieldValues(
   if (!normalizedFieldPath) {
     return emptyEventFieldValues(normalizedFieldPath, fieldValueType);
   }
-  return fetchPrivateJson<EventFieldValuesData>(
+  const payload = await fetchPrivateJson<EventFieldValuesData>(
     "/api/private/event-type-field-values",
     withFilters(
-      {
-        siteId,
-        from: window.from,
-        to: window.to,
-        timeZone: window.timeZone,
-        ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
-        fieldPath: normalizedFieldPath,
-        fieldValueType,
-        limit: options?.limit ?? 25,
-        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
-      },
+      withPagination(
+        {
+          siteId,
+          from: window.from,
+          to: window.to,
+          timeZone: window.timeZone,
+          ...(normalizedEventName ? { eventName: normalizedEventName } : {}),
+          fieldPath: normalizedFieldPath,
+          fieldValueType,
+          ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+        },
+        options,
+        25,
+      ),
       filters,
       options?.resolvedScope,
     ),
@@ -589,6 +732,13 @@ export async function fetchEventTypeFieldValues(
       emptyEventFieldValues(normalizedFieldPath, fieldValueType),
     ),
   );
+  return {
+    ...payload,
+    data: normalizePaginatedCollection<EventFieldValueStat>(
+      payload.data,
+      options?.limit ?? 25,
+    ),
+  };
 }
 
 export async function fetchEventRecordDetail(

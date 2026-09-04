@@ -84,6 +84,7 @@ const PUBLIC_QUERY_PATHS = new Set([
   "trend",
   "pages",
   "referrers",
+  "referrer-summary",
   "pages-dashboard",
   "retention",
   "performance",
@@ -163,6 +164,18 @@ export function executePublicQuery(
           url,
           8,
           false,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "referrer-summary") {
+    return import("../composition/protocol/pages-contract-adapter").then(
+      ({ handleReferrerSummaryContract }) =>
+        handleReferrerSummaryContract(
+          input.env,
+          input.siteId,
+          url,
           ctx,
           queryContext,
         ),

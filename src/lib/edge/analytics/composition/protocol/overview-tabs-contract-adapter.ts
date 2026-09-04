@@ -60,9 +60,13 @@ export async function handleOverviewTabContract(
     filters,
     tab,
     limit: parseLimit(url, 100, 200),
+    cursor: url.searchParams.get("cursor") ?? "",
   } as BaseQuery & { readonly tab: OverviewTab; readonly limit: number };
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
-    readonly data: readonly unknown[];
+    readonly data: {
+      readonly items: readonly unknown[];
+      readonly pagination: unknown;
+    };
   }>(operation, query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });

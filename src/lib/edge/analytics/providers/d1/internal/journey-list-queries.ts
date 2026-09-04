@@ -36,6 +36,7 @@ import {
   visitorListOrderBy,
   whereClauseWithTarget,
 } from "./journey-helpers";
+import { pageResult } from "./pagination";
 import { scopedDatasetFor } from "./scoped-dataset";
 
 const JOURNEY_LIST_CURSOR_MAX_LENGTH = 12_288;
@@ -64,6 +65,21 @@ export interface VisitorListPage {
 export interface SessionListPage {
   rows: SessionRow[];
   nextCursor: SessionListCursor | null;
+}
+
+export interface JourneyEventCursor {
+  readonly occurredAt: number;
+  readonly id: string;
+}
+
+export interface JourneyEventPage {
+  readonly items: readonly JourneyEventRow[];
+  readonly pagination: {
+    readonly limit: number;
+    readonly returned: number;
+    readonly hasMore: boolean;
+    readonly nextCursor: JourneyEventCursor | null;
+  };
 }
 
 function hasJourneyFilters(filters: FilterDocument): boolean {
@@ -655,6 +671,7 @@ export async function querySessionListPageFromD1(
     sort: ListSort<SessionListSortKey>;
     search?: string;
     cursor?: SessionListCursor | null;
+    target?: { readonly type: "visitor" | "session"; readonly value: string };
   },
 ): Promise<SessionListPage> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
@@ -676,23 +693,33 @@ matched_sessions AS (
   const cursor = options.cursor
     ? sessionCursorFilter(options.cursor, options.sort)
     : { clause: "", bindings: [] };
+  const targetColumn =
+    options.target?.type === "visitor"
+      ? "visitor_id"
+      : options.target?.type === "session"
+        ? "session_id"
+        : "";
+  const targetClause = options.target
+    ? scopedDataset
+      ? `WHERE ${targetColumn} = ?`
+      : whereClauseWithTarget(filter?.clause ?? "", {
+          column: targetColumn,
+          value: options.target.value,
+        })
+    : (filter?.clause ?? "");
   const sql = `
 WITH
 ${scopedDataset?.ctes ?? `${buildVisitSourceCte()},\n${buildCustomEventSourceCte()}`},
 ${scopedDataset ? `event_source AS (SELECT * FROM ${scopedDataset.eventRelation}),` : ""}
 ${
   scopedDataset
-    ? scopedAggregationFilteredVisitsCte(scopedDataset, "session", "")
+    ? scopedAggregationFilteredVisitsCte(scopedDataset, "session", targetClause)
     : expandEntities
-      ? fullEntityFilterCtes(
-          "session",
-          filter?.clause ?? "",
-          searchSql?.condition,
-        )
+      ? fullEntityFilterCtes("session", targetClause, searchSql?.condition)
       : `filtered_visits AS (
   SELECT visit_source.*, 1 AS is_visit_observation
   FROM visit_source
-  ${filter?.clause ?? ""}
+  ${targetClause}
   )`
 }
 ${expandEntities ? "" : searchCte},
@@ -710,6 +737,11 @@ ${buildSessionAggregationSql({
           ...visitSourceBindings(siteId, window),
           ...eventSourceBindings(siteId, window),
         ]),
+    ...(scopedDataset && options.target
+      ? [options.target.value, options.target.value]
+      : options.target
+        ? [options.target.value]
+        : []),
     ...(filter?.bindings ?? []),
     ...(searchSql?.bindings ?? []),
     ...cursor.bindings,
@@ -726,14 +758,15 @@ ${buildSessionAggregationSql({
   };
 }
 
-export async function queryJourneyEventsFromD1(
+export async function queryJourneyEventsPageFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
   target: { type: "visitor" | "session"; value: string },
   limit: number,
-): Promise<JourneyEventRow[]> {
+  cursor?: JourneyEventCursor | null,
+): Promise<JourneyEventPage> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
   const filter = scopedDataset ? null : buildVisitFilterSql(filters);
   const targetColumn = target.type === "visitor" ? "visitor_id" : "session_id";
@@ -795,6 +828,9 @@ export async function queryJourneyEventsFromD1(
     fv.perf_lcp_ms AS perfLcpMs,
     fv.perf_cls AS perfCls,
     fv.perf_inp_ms AS perfInpMs`;
+  const cursorClause = cursor
+    ? "WHERE occurredAt < ? OR (occurredAt = ? AND id < ?)"
+    : "";
   const sql = `
 WITH
 ${scopedDataset?.ctes ?? `${buildVisitSourceCte()},\n${buildCustomEventSourceCte()}`},
@@ -856,21 +892,56 @@ FROM (
   UNION ALL
   SELECT * FROM custom_event_rows
 )
+AS journey_events
+${cursorClause}
 ORDER BY occurredAt DESC, id DESC
 LIMIT ?
 `;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...eventSourceBindings(siteId, window),
-          ]),
-      target.value,
-      ...(filter?.bindings ?? []),
-      ...(scopedDataset ? [target.value] : []),
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...(scopedDataset
+      ? scopedDataset.bindings.map((binding) => binding.value)
+      : [
+          ...visitSourceBindings(siteId, window),
+          ...eventSourceBindings(siteId, window),
+        ]),
+    target.value,
+    ...(filter?.bindings ?? []),
+    ...(scopedDataset ? [target.value] : []),
+    ...(cursor ? [cursor.occurredAt, cursor.occurredAt, cursor.id] : []),
+    limit + 1,
+  ]);
+  const mapped = rows.map(mapJourneyEventRow);
+  const page = pageResult(mapped, limit);
+  const last = page.last;
+  return {
+    items: page.rows,
+    pagination: {
       limit,
-    ])
-  ).map(mapJourneyEventRow);
+      returned: page.rows.length,
+      hasMore: page.hasMore,
+      nextCursor:
+        page.hasMore && last
+          ? { occurredAt: last.occurredAt, id: last.id }
+          : null,
+    },
+  };
+}
+
+export async function queryJourneyEventsFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  target: { type: "visitor" | "session"; value: string },
+  limit: number,
+): Promise<JourneyEventRow[]> {
+  const page = await queryJourneyEventsPageFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    target,
+    limit,
+  );
+  return [...page.items];
 }

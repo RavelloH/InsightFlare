@@ -5,8 +5,8 @@ import type {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryOverviewAggregate } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import {
-  queryPagesAggregate,
-  queryReferrerAggregate,
+  queryTopPagesFromD1,
+  queryTopReferrersFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
@@ -416,15 +416,15 @@ async function loadReportDataUncached(
       EMPTY_FILTER_DOCUMENT,
       input.cache,
     ),
-    queryPagesAggregate(
+    queryTopPagesFromD1(
       env,
       input.siteId,
       window,
-      EMPTY_FILTER_DOCUMENT,
       5,
       false,
+      EMPTY_FILTER_DOCUMENT,
     ),
-    queryReferrerAggregate(
+    queryTopReferrersFromD1(
       env,
       input.siteId,
       window,

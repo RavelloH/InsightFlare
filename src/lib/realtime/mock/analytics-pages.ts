@@ -186,6 +186,47 @@ export function generateDemoReferrers(
   };
 }
 
+export function generateDemoReferrerSummary(
+  siteId: string,
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const topN = parseDemoLimit(params.topN, 5, 1, 20);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, filters);
+  const domains = new Set<string>();
+  const links = new Set<string>();
+  let directViews = 0;
+  for (const visit of filtered.visits) {
+    const domain = visit.referrerHost.trim();
+    const link = visit.referrerUrl.trim();
+    if (domain) domains.add(domain);
+    else directViews += dataset.viewWeight;
+    if (link) links.add(link);
+  }
+  const totalViews = filtered.visits.length * dataset.viewWeight;
+  const topSources = collectReferrerRows(dataset, filtered, topN + 1).filter(
+    (row) => row.referrer !== "(direct)",
+  );
+  return {
+    ok: true,
+    data: {
+      totalViews,
+      directViews,
+      externalViews: totalViews - directViews,
+      uniqueDomains: domains.size,
+      uniqueLinks: links.size,
+      truncated: topSources.length > topN,
+      topSources: topSources.slice(0, topN).map((row) => ({
+        referrer: row.referrer,
+        views: row.views,
+      })),
+    },
+  };
+}
+
 export function generateDemoDimension(
   siteId: string,
   dimensionType: string,

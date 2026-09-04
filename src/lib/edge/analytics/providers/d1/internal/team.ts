@@ -437,6 +437,68 @@ export async function listTeamSites(
   return result.results;
 }
 
+export interface TeamSiteListPage {
+  readonly rows: readonly TeamSiteRow[];
+  readonly nextCursor: {
+    readonly createdAt: number;
+    readonly id: string;
+  } | null;
+}
+
+export async function queryTeamSitesPageFromD1(
+  env: Env,
+  teamId: string,
+  limit: number,
+  cursor?: { readonly createdAt: number; readonly id: string } | null,
+  allowedSiteIds?: readonly string[],
+  diagnostics?: D1ReadDiagnostics,
+): Promise<TeamSiteListPage> {
+  if (allowedSiteIds && allowedSiteIds.length === 0) {
+    return { rows: [], nextCursor: null };
+  }
+  const allowedClause = allowedSiteIds?.length
+    ? `AND id IN (${allowedSiteIds.map(() => "?").join(",")})`
+    : "";
+  const cursorClause = cursor
+    ? "AND (created_at < ? OR (created_at = ? AND id > ?))"
+    : "";
+  const result = await env.DB.prepare(
+    `
+      SELECT
+        id,
+        team_id AS teamId,
+        name,
+        domain,
+        public_enabled AS publicEnabled,
+        public_slug AS publicSlug,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM sites
+      WHERE team_id = ?
+      ${allowedClause}
+      ${cursorClause}
+      ORDER BY created_at DESC, id ASC
+      LIMIT ?
+    `,
+  )
+    .bind(
+      teamId,
+      ...(allowedSiteIds ?? []),
+      ...(cursor ? [cursor.createdAt, cursor.createdAt, cursor.id] : []),
+      limit + 1,
+    )
+    .all<TeamSiteRow>();
+  recordD1RowsRead(diagnostics, result);
+  const hasMore = result.results.length > limit;
+  const rows = hasMore ? result.results.slice(0, limit) : result.results;
+  const last = rows.at(-1);
+  return {
+    rows,
+    nextCursor:
+      hasMore && last ? { createdAt: last.createdAt, id: last.id } : null,
+  };
+}
+
 export interface TeamDashboardQueryResult {
   readonly data: TeamDashboardData;
   readonly source: AnalyticsDataSource;

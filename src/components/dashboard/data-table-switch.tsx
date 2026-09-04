@@ -19,6 +19,7 @@ interface DataTableSwitchProps {
   colSpan: number;
   header: ReactNode;
   rows: ReactNode;
+  footer?: ReactNode;
   contentKey?: string | number;
   animate?: boolean;
 }
@@ -31,6 +32,7 @@ export function DataTableSwitch({
   colSpan,
   header,
   rows,
+  footer,
   contentKey,
   animate = true,
 }: DataTableSwitchProps) {
@@ -54,7 +56,10 @@ export function DataTableSwitch({
   ) : hasContent ? (
     <Table key={contentKey ?? "content"}>
       <TableHeader>{header}</TableHeader>
-      <TableBody>{rows}</TableBody>
+      <TableBody>
+        {rows}
+        {footer}
+      </TableBody>
     </Table>
   ) : (
     <Table key="empty">

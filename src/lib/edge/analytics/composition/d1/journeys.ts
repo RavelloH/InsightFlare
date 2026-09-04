@@ -14,7 +14,14 @@ import {
   queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
   queryVisitorDetailFromD1,
+  stripSessionDetailCollections,
+  stripVisitorDetailCollections,
 } from "@/lib/edge/analytics/providers/d1/internal/journeys";
+import {
+  readSiteSessionEvents,
+  readSiteVisitorEvents,
+  readSiteVisitorSessions,
+} from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
 
 import {
   type D1SiteQueryRuntimeOptions,
@@ -124,6 +131,96 @@ export function registerJourneyProviders(
       }),
     )
     .register(
+      "visitor-events",
+      typedQueryProvider(async (input) => {
+        const request = query(input!);
+        const page =
+          request.page && typeof request.page === "object"
+            ? (request.page as {
+                readonly limit?: unknown;
+                readonly cursor?: unknown;
+              })
+            : {};
+        return {
+          value: await readSiteVisitorEvents({
+            env: options.env,
+            siteId: options.siteId,
+            visitorId: stringField(request, "visitorId"),
+            window: timeWindow(request.time),
+            filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+            audience: request.context.policy.audience,
+            page: {
+              limit:
+                typeof page.limit === "number" && Number.isFinite(page.limit)
+                  ? page.limit
+                  : 100,
+              cursor: typeof page.cursor === "string" ? page.cursor : null,
+            },
+          }),
+        };
+      }),
+    )
+    .register(
+      "visitor-sessions",
+      typedQueryProvider(async (input) => {
+        const request = query(input!);
+        const page =
+          request.page && typeof request.page === "object"
+            ? (request.page as {
+                readonly limit?: unknown;
+                readonly cursor?: unknown;
+              })
+            : {};
+        return {
+          value: await readSiteVisitorSessions({
+            env: options.env,
+            siteId: options.siteId,
+            visitorId: stringField(request, "visitorId"),
+            window: timeWindow(request.time),
+            filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+            audience: request.context.policy.audience,
+            page: {
+              limit:
+                typeof page.limit === "number" && Number.isFinite(page.limit)
+                  ? page.limit
+                  : 100,
+              cursor: typeof page.cursor === "string" ? page.cursor : null,
+            },
+          }),
+        };
+      }),
+    )
+    .register(
+      "session-events",
+      typedQueryProvider(async (input) => {
+        const request = query(input!);
+        const page =
+          request.page && typeof request.page === "object"
+            ? (request.page as {
+                readonly limit?: unknown;
+                readonly cursor?: unknown;
+              })
+            : {};
+        return {
+          value: await readSiteSessionEvents({
+            env: options.env,
+            siteId: options.siteId,
+            sessionId: stringField(request, "sessionId"),
+            window: timeWindow(request.time),
+            filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+            audience: request.context.policy.audience,
+            page: {
+              limit:
+                typeof page.limit === "number" && Number.isFinite(page.limit)
+                  ? page.limit
+                  : 100,
+              cursor: typeof page.cursor === "string" ? page.cursor : null,
+            },
+          }),
+        };
+      }),
+    )
+    .register(
       "journey-event-detail",
       typedQueryProvider(async (input) => {
         const request = query(input!);
@@ -142,27 +239,25 @@ export function registerJourneyProviders(
       "visitor-detail",
       typedQueryProvider(async (input) => {
         const request = query(input!);
-        return {
-          value: await queryVisitorDetailFromD1(
-            options.env,
-            options.siteId,
-            stringField(request, "visitorId"),
-            stringField(request, "timeZone", "UTC"),
-          ),
-        };
+        const detail = await queryVisitorDetailFromD1(
+          options.env,
+          options.siteId,
+          stringField(request, "visitorId"),
+          stringField(request, "timeZone", "UTC"),
+        );
+        return { value: detail ? stripVisitorDetailCollections(detail) : null };
       }),
     )
     .register(
       "session-detail",
       typedQueryProvider(async (input) => {
         const request = query(input!);
-        return {
-          value: await querySessionDetailFromD1(
-            options.env,
-            options.siteId,
-            stringField(request, "sessionId"),
-          ),
-        };
+        const detail = await querySessionDetailFromD1(
+          options.env,
+          options.siteId,
+          stringField(request, "sessionId"),
+        );
+        return { value: detail ? stripSessionDetailCollections(detail) : null };
       }),
     );
 }

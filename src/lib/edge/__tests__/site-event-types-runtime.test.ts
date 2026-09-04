@@ -81,7 +81,7 @@ describe("site event-types runtime", () => {
       readSiteEventFields({ ...base, eventName: "signup", limit: 100 }),
     ).resolves.toEqual({
       eventName: "signup",
-      fields: [],
+      items: [],
       page: { limit: 100 },
     });
     await expect(

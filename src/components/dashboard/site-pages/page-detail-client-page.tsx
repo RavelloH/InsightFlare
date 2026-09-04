@@ -102,17 +102,39 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
         requestedSiteId: string,
         requestedWindow: TimeWindow,
         requestedFilters: FilterDocument,
+        _resolvedScope?: unknown,
+        options?: {
+          limit?: number;
+          cursor?: string | null;
+          signal?: AbortSignal;
+        },
       ) =>
         fetchPageHashTab(requestedSiteId, requestedWindow, requestedFilters, {
-          limit: 100,
+          limit: options?.limit ?? 100,
+          cursor: options?.cursor,
+          signal: options?.signal,
         }),
       query: (
         requestedSiteId: string,
         requestedWindow: TimeWindow,
         requestedFilters: FilterDocument,
+        resolvedScope?: unknown,
+        options?: {
+          limit?: number;
+          cursor?: string | null;
+          signal?: AbortSignal;
+        },
       ) =>
         fetchPageQueryTab(requestedSiteId, requestedWindow, requestedFilters, {
-          limit: 100,
+          limit: options?.limit ?? 100,
+          cursor: options?.cursor,
+          signal: options?.signal,
+          resolvedScope:
+            resolvedScope === "event" ||
+            resolvedScope === "session" ||
+            resolvedScope === "visitor"
+              ? resolvedScope
+              : undefined,
         }),
     }),
     [],
@@ -231,7 +253,7 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
   });
   const titles = useMemo(
     () =>
-      (titleRows ?? [])
+      (titleRows?.items ?? [])
         .map((row) => String(row.label ?? "").trim())
         .filter((value) => value.length > 0)
         .slice(0, 3),
@@ -345,9 +367,11 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
         requestKey={`${detailRequestKey}:event`}
         loadRows={async () =>
           mapOverviewRows(
-            await fetchEventTypesTab(siteId, window, detailFilters, {
-              limit: 100,
-            }),
+            (
+              await fetchEventTypesTab(siteId, window, detailFilters, {
+                limit: 100,
+              })
+            ).items,
             messages.common.unknown,
             { mono: true },
           )

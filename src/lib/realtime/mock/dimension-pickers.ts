@@ -204,6 +204,21 @@ export function buildReferrerPool(
     pool.set(candidate.name, weight);
   }
 
+  // Keep large demo collections useful for exercising cursor pagination even
+  // when a site profile only contains a small curated referrer list. These
+  // deterministic partner domains model the long tail without bloating the
+  // static fixture catalog used by the other mock generators.
+  let generatedIndex = 1;
+  while (pool.size < normalizedTarget) {
+    const label = `partner-${generatedIndex.toString().padStart(3, "0")}.example`;
+    generatedIndex += 1;
+    if (pool.has(label)) continue;
+    pool.set(
+      label,
+      Math.max(0.002, longTailScale * 0.12 * (0.75 + rng() * 0.5)),
+    );
+  }
+
   return Array.from(pool.entries())
     .map(([label, weight]) => ({ label, weight }))
     .sort((left, right) => right.weight - left.weight);

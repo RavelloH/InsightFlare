@@ -16,7 +16,8 @@ export type OverviewClientDimensionTabsData =
   OverviewClientDimensionTabsResponse["tabs"];
 export type OverviewGeoDimensionTabsData =
   OverviewGeoDimensionTabsResponse["tabs"];
-export type OverviewTabRows = OverviewTabData["data"];
+export type OverviewTabRows = OverviewTabData["data"]["items"];
+export type OverviewTabCollection = OverviewTabData["data"];
 export type OverviewGeoTabRows = Array<{
   value: string;
   label: string;
@@ -38,6 +39,11 @@ export type EventRecordSortKey = "occurredAt" | "eventName" | "pathname";
 export type RetentionGranularity = TimeWindow["interval"];
 
 export type PrivateRequestParams = Record<string, string | number>;
+export type DashboardListRequestOptions = {
+  limit?: number;
+  cursor?: string | null;
+  signal?: AbortSignal;
+};
 export type FetchPrivateJsonOptions = {
   signal?: AbortSignal;
   dedupe?: boolean;

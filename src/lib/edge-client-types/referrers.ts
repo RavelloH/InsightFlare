@@ -1,3 +1,5 @@
+import type { PaginatedCollection } from "./pagination";
+
 export interface ReferrerRadarMetrics {
   /** Average session duration in ms */
   duration: number;
@@ -27,9 +29,25 @@ export interface ReferrerRadarData {
 
 export interface ReferrersData {
   ok: boolean;
-  data: Array<{
+  data: PaginatedCollection<{
     referrer: string;
     views: number;
     sessions: number;
   }>;
+}
+
+export interface ReferrerSummaryData {
+  ok: boolean;
+  data: {
+    totalViews: number;
+    directViews: number;
+    externalViews: number;
+    uniqueDomains: number;
+    uniqueLinks: number;
+    truncated: boolean;
+    topSources: Array<{
+      referrer: string;
+      views: number;
+    }>;
+  };
 }

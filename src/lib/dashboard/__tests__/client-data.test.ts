@@ -57,6 +57,16 @@ import { handleDemoRequest } from "@/lib/realtime/mock";
 import { isErrorEnvelope } from "@/lib/realtime/mock/envelope";
 
 describe("Dashboard Client Data Processing Utilities", () => {
+  const emptyPaginatedCollection = {
+    items: [],
+    pagination: {
+      limit: 0,
+      returned: 0,
+      hasMore: false,
+      nextCursor: null,
+    },
+  };
+
   describe("normalizeOverviewRows", () => {
     it("should correctly normalize standard valid rows", () => {
       const input = [
@@ -469,7 +479,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         "",
         "string",
       );
-      expect(emptyEvtField.data).toHaveLength(0);
+      expect(emptyEvtField.data.items).toHaveLength(0);
 
       const emptyEvtRecord = await fetchEventRecordDetail("demo-site-001", "");
       expect(emptyEvtRecord.data).toBeNull();
@@ -1707,7 +1717,15 @@ describe("Dashboard Client Data Processing Utilities", () => {
         ok: true,
         fieldPath: "payload.plan",
         fieldValueType: "string",
-        data: [],
+        data: {
+          items: [],
+          pagination: {
+            limit: 0,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
       });
 
       const recordDetail = await fetchEventRecordDetail(
@@ -1748,29 +1766,29 @@ describe("Dashboard Client Data Processing Utilities", () => {
       });
       await expect(
         fetchOverviewPageCardTab("fallback-page-tab", mockWindow, "path"),
-      ).resolves.toEqual([]);
+      ).resolves.toEqual(emptyPaginatedCollection);
       await expect(
         fetchPageHashTab("fallback-hash", mockWindow),
-      ).resolves.toEqual([]);
+      ).resolves.toEqual(emptyPaginatedCollection);
       await expect(
         fetchOverviewSourceCardTab("fallback-source", mockWindow, "link"),
-      ).resolves.toEqual([]);
+      ).resolves.toEqual(emptyPaginatedCollection);
       await expect(
         fetchEventTypesTab("fallback-types", mockWindow),
-      ).resolves.toEqual([]);
+      ).resolves.toEqual(emptyPaginatedCollection);
       await expect(
         fetchOverviewClientDimensionTab(
           "fallback-client-tab",
           mockWindow,
           "language",
         ),
-      ).resolves.toEqual([]);
+      ).resolves.toEqual(emptyPaginatedCollection);
       await expect(
         fetchOverviewGeoDimensionTab("fallback-geo-tab", mockWindow, "country"),
       ).resolves.toEqual([]);
       await expect(
         fetchFilterValues("fallback-filter-options", mockWindow, "geo.country"),
-      ).resolves.toEqual([]);
+      ).resolves.toEqual(emptyPaginatedCollection);
     });
 
     it("should normalize geo point and count payloads", async () => {
@@ -2147,7 +2165,15 @@ describe("Dashboard Client Data Processing Utilities", () => {
         ok: true,
         fieldPath: "",
         fieldValueType: "string",
-        data: [],
+        data: {
+          items: [],
+          pagination: {
+            limit: 0,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
       });
     });
   });

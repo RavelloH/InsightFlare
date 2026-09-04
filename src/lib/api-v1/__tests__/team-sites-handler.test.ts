@@ -67,6 +67,12 @@ function reader() {
           lastEventAtMs: 0,
         },
       ],
+      pagination: {
+        limit: 20,
+        returned: 1,
+        hasMore: false,
+        nextCursor: null,
+      },
     },
   });
 }

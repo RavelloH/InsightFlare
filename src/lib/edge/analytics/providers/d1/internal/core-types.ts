@@ -307,6 +307,16 @@ export interface ReferrerRow {
   visitors: number;
 }
 
+export interface ReferrerSummaryRow {
+  totalViews: number;
+  directViews: number;
+  externalViews: number;
+  uniqueDomains: number;
+  uniqueLinks: number;
+  truncated: boolean;
+  topSources: Array<Pick<ReferrerRow, "referrer" | "views">>;
+}
+
 export interface ReferrerRadarRow {
   referrer: string;
   sessions: number;

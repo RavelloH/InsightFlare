@@ -258,9 +258,10 @@ function registerSiteOperation(
             siteId: siteId(input, configuredSiteId),
             field: stringField(input, "field"),
             search: typeof input.search === "string" ? input.search : undefined,
-            limit: limitField(input),
+            page: page(input),
             window: timeWindow(input.time),
             filters: filters(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );
@@ -361,7 +362,7 @@ function registerSiteOperation(
             env,
             siteId: siteId(input, configuredSiteId),
             search: typeof input.search === "string" ? input.search : undefined,
-            limit: limitField(input),
+            page: page(input),
             window: timeWindow(input.time),
             filters: filters(input),
           }),
@@ -391,9 +392,10 @@ function registerSiteOperation(
             env,
             siteId: siteId(input, configuredSiteId),
             eventName: stringField(input, "eventName"),
-            limit: limitField(input),
+            page: page(input),
             window: timeWindow(input.time),
             filters: filters(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );
@@ -409,9 +411,10 @@ function registerSiteOperation(
             fieldPath: stringField(input, "fieldPath"),
             fieldValueType: stringField(input, "fieldValueType"),
             search: typeof input.search === "string" ? input.search : undefined,
-            limit: limitField(input),
+            page: page(input),
             window: timeWindow(input.time),
             filters: filters(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );
@@ -503,6 +506,7 @@ function registerSiteOperation(
             page: page(input),
             window: timeWindow(input.time),
             filters: filters(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );
@@ -519,6 +523,7 @@ function registerSiteOperation(
             page: page(input),
             window: timeWindow(input.time),
             filters: filters(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );
@@ -535,6 +540,7 @@ function registerSiteOperation(
             window: timeWindow(input.time),
             filters: filters(input),
             page: page(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );
@@ -551,6 +557,7 @@ function registerSiteOperation(
             window: timeWindow(input.time),
             filters: filters(input),
             page: page(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );
@@ -567,6 +574,7 @@ function registerSiteOperation(
             window: timeWindow(input.time),
             filters: filters(input),
             page: page(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );

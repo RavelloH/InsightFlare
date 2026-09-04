@@ -1,3 +1,5 @@
+import type { PaginatedCollection } from "./pagination";
+
 export interface FunnelStep {
   type: "pageview" | "event";
   value: string;
@@ -38,9 +40,7 @@ export interface FunnelAnalysis {
 
 export interface FunnelListData {
   ok: boolean;
-  data: {
-    funnels: FunnelDefinition[];
-  };
+  data: PaginatedCollection<FunnelDefinition>;
 }
 
 export interface FunnelDetailData {

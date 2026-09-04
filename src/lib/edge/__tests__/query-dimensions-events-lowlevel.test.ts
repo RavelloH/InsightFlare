@@ -893,7 +893,15 @@ describe("edge query event handlers low-level coverage", () => {
       ok: true,
       fieldPath: "/paid",
       fieldValueType: "boolean",
-      data: [],
+      data: {
+        items: [],
+        pagination: {
+          limit: 25,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     await expect(missingFieldPath.json()).resolves.toMatchObject({
       ok: false,
@@ -984,7 +992,15 @@ describe("edge query event handlers low-level coverage", () => {
     await expect(fields.json()).resolves.toMatchObject({
       ok: true,
       eventName: "Signup",
-      fields: [{ path: "/plan", valueType: "string", exampleValue: "pro" }],
+      data: {
+        items: [{ path: "/plan", valueType: "string", exampleValue: "pro" }],
+        pagination: {
+          limit: 100,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     await expect(context.json()).resolves.toMatchObject({
       ok: true,
@@ -1017,12 +1033,20 @@ describe("edge query event handlers low-level coverage", () => {
 
     await expect(response.json()).resolves.toEqual({
       ok: true,
-      data: [{ label: "Signup", views: 6, sessions: 3, visitors: 2 }],
+      data: {
+        items: [{ label: "Signup", views: 6, sessions: 3, visitors: 2 }],
+        pagination: {
+          limit: 4,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     expect(calls[0].bindings).toEqual([
       ...eventBindings(),
       ...eventBindings(),
-      4,
+      5,
     ]);
   });
 
@@ -1283,15 +1307,23 @@ describe("edge query event handlers low-level coverage", () => {
       ok: true,
       fieldPath: "/paid",
       fieldValueType: "boolean",
-      data: [
-        {
-          value: true,
-          events: 2,
-          occurrences: 2,
-          firstSeenAt: baseMs,
-          lastSeenAt: baseMs + 1,
+      data: {
+        items: [
+          {
+            value: true,
+            events: 2,
+            occurrences: 2,
+            firstSeenAt: baseMs,
+            lastSeenAt: baseMs + 1,
+          },
+        ],
+        pagination: {
+          limit: 3,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
         },
-      ],
+      },
     });
     await expect(detailResponse.json()).resolves.toMatchObject({
       ok: true,

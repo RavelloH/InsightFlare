@@ -137,7 +137,22 @@ export function generateDemoFunnels(
 ): FunnelListData | FunnelDetailData | ErrorEnvelope {
   const id = String(params.id ?? "").trim();
   const funnels = siteFunnels(siteId);
-  if (!id) return { ok: true, data: { funnels } };
+  if (!id) {
+    const limit = Math.max(1, Number(params.limit ?? funnels.length));
+    const items = funnels.slice(0, limit);
+    return {
+      ok: true,
+      data: {
+        items,
+        pagination: {
+          limit,
+          returned: items.length,
+          hasMore: items.length < funnels.length,
+          nextCursor: null,
+        },
+      },
+    };
+  }
 
   const funnel = funnels.find((item) => item.id === id);
   if (!funnel) return demoNotFound();

@@ -239,6 +239,11 @@ export interface BaseQuery extends QueryInput {
   readonly time: QueryTime;
 }
 
+export interface PageRequest {
+  readonly limit: number;
+  readonly cursor?: string | null;
+}
+
 export const COMPARISON_METRIC_KEYS = [
   "views",
   "sessions",
@@ -381,6 +386,7 @@ export interface ComparisonBreakdownResult {
 export interface DimensionQuery extends BaseQuery {
   readonly dimension?: AnalyticsDimension;
   readonly limit?: number;
+  readonly page?: PageRequest;
   readonly sort?: Sort;
 }
 
@@ -414,14 +420,16 @@ export type FilterOptionsQuery = DimensionQuery;
 export interface FilterValuesQuery extends BaseQuery {
   readonly field: string;
   readonly search?: string;
-  readonly limit: number;
+  readonly limit?: number;
+  readonly page?: PageRequest;
 }
 export interface EventFieldValuesQuery extends BaseQuery {
   readonly eventName: string;
   readonly fieldPath: string;
   readonly fieldValueType: string;
   readonly search?: string;
-  readonly limit: number;
+  readonly limit?: number;
+  readonly page?: PageRequest;
 }
 export type GeoPointsQuery = BaseQuery;
 export type TopPagesQuery = PagesQuery;
@@ -462,6 +470,13 @@ export interface PageItem {
   readonly sessions: number;
 }
 
+export interface PaginationMeta {
+  readonly limit: number;
+  readonly returned: number;
+  readonly hasMore: boolean;
+  readonly nextCursor: string | null;
+}
+
 export interface ReferrerItem {
   readonly referrer: string;
   readonly views: number;
@@ -479,11 +494,18 @@ export interface ChannelItem {
 export interface PagesQuery extends BaseQuery {
   readonly limit: number;
   readonly includeDetails: boolean;
+  readonly page?: PageRequest;
 }
 
 export interface ReferrersQuery extends BaseQuery {
   readonly limit: number;
   readonly includeFullUrl: boolean;
+  readonly search?: string;
+  readonly page?: PageRequest;
+  readonly sort?: "views" | "visitors";
+  readonly direction?: SortDirection;
+  readonly variant?: "list" | "summary";
+  readonly topN?: number;
 }
 
 export interface ChannelsQuery extends BaseQuery {
@@ -492,10 +514,25 @@ export interface ChannelsQuery extends BaseQuery {
 
 export interface PagesResult {
   readonly items: readonly PageItem[];
+  readonly pagination?: PaginationMeta;
 }
 
 export interface ReferrersResult {
   readonly items: readonly ReferrerItem[];
+  readonly pagination?: PaginationMeta;
+}
+
+export interface ReferrerSummaryResult {
+  readonly totalViews: number;
+  readonly directViews: number;
+  readonly externalViews: number;
+  readonly uniqueDomains: number;
+  readonly uniqueLinks: number;
+  readonly truncated: boolean;
+  readonly topSources: readonly {
+    readonly referrer: string;
+    readonly views: number;
+  }[];
 }
 
 export interface ChannelsResult {
@@ -584,7 +621,10 @@ export interface FilterValueOption {
 }
 export interface FilterValuesResult {
   readonly field: string;
-  readonly data: readonly FilterValueOption[];
+  readonly data: {
+    readonly items: readonly FilterValueOption[];
+    readonly pagination: PaginationMeta;
+  };
 }
 export type GeoPointsResult = CanonicalObject;
 export type TopPagesResult = PagesResult;

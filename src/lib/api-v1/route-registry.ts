@@ -562,6 +562,7 @@ export const apiV1AnalyticsRouteRegistry = [
     responseSchema: AnalyticsOverviewResponseSchema,
     declaredErrors: [
       "validation_failed",
+      "invalid_cursor",
       "missing_scope",
       "resource_not_found",
       "data_unavailable",
@@ -580,6 +581,7 @@ export const apiV1AnalyticsRouteRegistry = [
     responseSchema: AnalyticsOverviewResponseSchema,
     declaredErrors: [
       "validation_failed",
+      "invalid_cursor",
       "missing_scope",
       "resource_not_found",
       "data_unavailable",
@@ -1492,6 +1494,7 @@ export const apiV1AnalyticsJourneyTrajectoryRouteRegistry = [
     responseSchema: AnalyticsJourneyEventsResponseSchema,
     declaredErrors: [
       "validation_failed",
+      "invalid_cursor",
       "missing_scope",
       "resource_not_found",
       "deadline_exceeded",
@@ -1518,6 +1521,7 @@ export const apiV1AnalyticsJourneyTrajectoryRouteRegistry = [
     responseSchema: AnalyticsJourneySessionsResponseSchema,
     declaredErrors: [
       "validation_failed",
+      "invalid_cursor",
       "missing_scope",
       "resource_not_found",
       "deadline_exceeded",
@@ -1544,6 +1548,7 @@ export const apiV1AnalyticsJourneyTrajectoryRouteRegistry = [
     responseSchema: AnalyticsJourneyEventsResponseSchema,
     declaredErrors: [
       "validation_failed",
+      "invalid_cursor",
       "missing_scope",
       "resource_not_found",
       "deadline_exceeded",

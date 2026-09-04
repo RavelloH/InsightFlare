@@ -7,6 +7,7 @@ export {
   generateDemoPages,
   generateDemoPagesDashboard,
   generateDemoReferrers,
+  generateDemoReferrerSummary,
 } from "@/lib/realtime/mock/analytics-pages";
 export {
   generateDemoPerformance,

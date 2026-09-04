@@ -20,6 +20,8 @@ export {
   querySessionsForDetailFromD1,
   queryVisitorDetailFromD1,
   queryVisitorForDetailFromD1,
+  stripSessionDetailCollections,
+  stripVisitorDetailCollections,
 } from "./journey-detail-queries";
 export {
   queryGeoPointsFromD1,

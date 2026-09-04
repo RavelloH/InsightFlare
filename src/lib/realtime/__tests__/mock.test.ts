@@ -896,6 +896,131 @@ describe("mock — handleDemoRequest", () => {
       expect((res.data as unknown[]).length).toBeGreaterThan(0);
     });
 
+    it("serializes dashboard collection routes with pagination metadata", () => {
+      const serialize = (
+        path: string,
+        params: Record<string, string | number> = {},
+      ) =>
+        JSON.parse(
+          JSON.stringify(
+            handleDemoRequest({
+              path,
+              params: { ...ANALYTICS_PARAMS, limit: 2, ...params },
+            }),
+          ),
+        ) as Record<string, any>;
+
+      const collectionRequests = [
+        ["/api/private/overview-page-path", {}],
+        ["/api/private/overview-source-domain", {}],
+        ["/api/private/overview-client-browser", {}],
+        ["/api/private/filter-values", { filterKey: "page.path" }],
+        ["/api/private/pages", {}],
+        ["/api/private/referrers", {}],
+        ["/api/private/page-hash", {}],
+        ["/api/private/page-query", {}],
+        ["/api/private/event-types", {}],
+      ] as const;
+
+      for (const [path, params] of collectionRequests) {
+        const response = serialize(path, params);
+        expect(response).toMatchObject({
+          ok: true,
+          data: {
+            items: expect.any(Array),
+            pagination: {
+              limit: 2,
+              returned: expect.any(Number),
+              hasMore: expect.any(Boolean),
+            },
+          },
+        });
+        expect(
+          response.data.pagination.nextCursor === null ||
+            typeof response.data.pagination.nextCursor === "string",
+        ).toBe(true);
+        expect(response.data.items).toHaveLength(
+          response.data.pagination.returned,
+        );
+      }
+    });
+
+    it("serializes split journey collections and event payload details", () => {
+      const visitor = dataRows(
+        handleDemoRequest({
+          path: "/api/private/visitors",
+          params: ANALYTICS_PARAMS,
+        }),
+      )[0];
+      const session = dataRows(
+        handleDemoRequest({
+          path: "/api/private/sessions",
+          params: ANALYTICS_PARAMS,
+        }),
+      )[0];
+      expect(visitor?.visitorId).toEqual(expect.any(String));
+      expect(session?.sessionId).toEqual(expect.any(String));
+
+      const serialize = (
+        path: string,
+        params: Record<string, string | number>,
+      ) =>
+        JSON.parse(
+          JSON.stringify(handleDemoRequest({ path, params })),
+        ) as Record<string, any>;
+      const assertCollection = (response: Record<string, any>) => {
+        expect(response).toMatchObject({
+          ok: true,
+          data: {
+            items: expect.any(Array),
+            pagination: {
+              limit: 2,
+              returned: expect.any(Number),
+              hasMore: expect.any(Boolean),
+            },
+          },
+        });
+      };
+
+      assertCollection(
+        serialize("/api/private/visitor-events", {
+          ...ANALYTICS_PARAMS,
+          visitorId: String(visitor?.visitorId ?? ""),
+          limit: 2,
+        }),
+      );
+      assertCollection(
+        serialize("/api/private/visitor-sessions", {
+          ...ANALYTICS_PARAMS,
+          visitorId: String(visitor?.visitorId ?? ""),
+          limit: 2,
+        }),
+      );
+      assertCollection(
+        serialize("/api/private/session-events", {
+          ...ANALYTICS_PARAMS,
+          sessionId: String(session?.sessionId ?? ""),
+          limit: 2,
+        }),
+      );
+
+      const event = dataRows(
+        handleDemoRequest({
+          path: "/api/private/events-records",
+          params: { ...ANALYTICS_PARAMS, pageSize: 1 },
+        }),
+      )[0];
+      const detail = serialize("/api/private/event-record-detail", {
+        ...ANALYTICS_PARAMS,
+        eventId: String(event?.eventId ?? ""),
+      });
+      expect(detail.data.eventData).toMatchObject({
+        plan: expect.any(String),
+        page: expect.any(Object),
+        items: expect.any(Array),
+      });
+    });
+
     it("client-cross-breakdown handles missing dimensions gracefully", () => {
       const res = handleDemoRequest({
         path: "/api/private/client-cross-breakdown",

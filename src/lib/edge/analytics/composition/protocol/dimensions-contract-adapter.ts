@@ -43,15 +43,22 @@ export async function handleSimpleDimensionContract(
   );
   const filters =
     dimension === "country" ? withoutGeoFilter(rawFilters) : rawFilters;
+  const limit = parseLimit(url, 20, 200);
+  const cursor = url.searchParams.get("cursor");
   const query = {
     context: queryContext,
     time: toQueryTime(window),
     filters,
     dimension,
-    limit: parseLimit(url, 20, 200),
+    limit,
+    page: { limit, ...(cursor ? { cursor } : {}) },
   } satisfies DimensionQuery;
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<
-    ReturnType<typeof mapDimensionRows>
+    | ReturnType<typeof mapDimensionRows>
+    | {
+        readonly items: ReturnType<typeof mapDimensionRows>;
+        readonly pagination: unknown;
+      }
   >("dimension", query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });

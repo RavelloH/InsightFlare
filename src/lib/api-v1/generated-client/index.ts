@@ -122,7 +122,7 @@ import {
   TeamComparisonQueryDtoSchema,
   type TeamOverviewQueryDto,
   TeamOverviewQueryDtoSchema,
-  type TeamSitesQueryDto,
+  type TeamSitesQueryDtoInput,
   TeamSitesQueryDtoSchema,
   type TeamTimeseriesQueryDto,
   TeamTimeseriesQueryDtoSchema,
@@ -722,7 +722,7 @@ export interface ApiV1GeneratedClient {
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<AnalyticsTimeseriesData>>;
   teamAnalyticsSites(
-    input: TeamSitesQueryDto,
+    input: TeamSitesQueryDtoInput,
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<TeamAnalyticsSitesData>>;
   teamAnalyticsBreakdown(

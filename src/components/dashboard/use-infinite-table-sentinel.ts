@@ -4,12 +4,14 @@ interface UseInfiniteTableSentinelOptions {
   enabled: boolean;
   onReachEnd: () => void;
   rootMargin?: string;
+  triggerDistance?: number;
 }
 
 export function useInfiniteTableSentinel({
   enabled,
   onReachEnd,
   rootMargin = "360px 0px",
+  triggerDistance = 480,
 }: UseInfiniteTableSentinelOptions) {
   const [sentinelNodes, setSentinelNodes] = useState<HTMLElement[]>([]);
 
@@ -55,7 +57,10 @@ export function useInfiniteTableSentinel({
     const frameId = window.requestAnimationFrame(() => {
       const isInTriggerRange = connectedSentinelNodes.some((node) => {
         const rect = node.getBoundingClientRect();
-        return rect.top <= window.innerHeight + 480 && rect.bottom >= -480;
+        return (
+          rect.top <= window.innerHeight + triggerDistance &&
+          rect.bottom >= -triggerDistance
+        );
       });
       if (isInTriggerRange) {
         onReachEnd();
@@ -65,7 +70,7 @@ export function useInfiniteTableSentinel({
       window.cancelAnimationFrame(frameId);
       observer.disconnect();
     };
-  }, [enabled, onReachEnd, rootMargin, sentinelNodes]);
+  }, [enabled, onReachEnd, rootMargin, sentinelNodes, triggerDistance]);
 
   return setSentinelNode;
 }

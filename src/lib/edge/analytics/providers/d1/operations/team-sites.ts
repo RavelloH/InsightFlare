@@ -1,13 +1,25 @@
 import "@tanstack/react-start/server-only";
 
-import type {
-  FilterDocument,
-  OverviewMetrics,
-  QuerySource,
-  TrendResult,
+import {
+  analyticsFilterRegistry,
+  type FilterDocument,
+  filterFingerprint,
+  type OverviewMetrics,
+  type QueryAudience,
+  type QuerySource,
+  type TrendResult,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+import {
+  decodePageCursor,
+  encodePageCursor,
+  paginationBinding,
+} from "@/lib/edge/analytics/providers/d1/internal/pagination";
+import {
+  listTeamSites,
+  queryTeamSitesPageFromD1,
+  type TeamSiteListPage,
+} from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
   createOverviewReader,
   readLatestSiteActivity,
@@ -22,6 +34,8 @@ export interface ReadTeamSitesInput {
   readonly interval?: TrendResult["interval"];
   readonly filters: FilterDocument;
   readonly allowedSiteIds?: readonly string[];
+  readonly page?: { readonly limit: number; readonly cursor?: string | null };
+  readonly audience?: QueryAudience;
 }
 
 export interface TeamSiteAnalyticsResult {
@@ -38,9 +52,65 @@ export interface TeamSiteAnalyticsResult {
 }
 
 export interface TeamSitesQueryResult {
-  readonly data: { readonly sites: readonly TeamSiteAnalyticsResult[] };
+  readonly data: {
+    readonly sites: readonly TeamSiteAnalyticsResult[];
+    readonly pagination?: {
+      readonly limit: number;
+      readonly returned: number;
+      readonly hasMore: boolean;
+      readonly nextCursor: string | null;
+    };
+  };
   readonly source: QuerySource;
   readonly approximateVisitors: boolean;
+}
+
+function allowedSiteBinding(
+  allowedSiteIds?: readonly string[],
+): readonly string[] {
+  return [...(allowedSiteIds ?? [])].sort();
+}
+
+async function teamSitesCursorBinding(
+  input: ReadTeamSitesInput,
+): Promise<string> {
+  return paginationBinding([
+    "analytics-team-sites-v1",
+    input.audience ?? "private-dashboard",
+    input.teamId,
+    input.window.startMs,
+    input.window.endExclusiveMs,
+    input.window.timeZone,
+    filterFingerprint(input.filters, analyticsFilterRegistry),
+    input.interval ?? null,
+    allowedSiteBinding(input.allowedSiteIds),
+    "createdAt:desc,id:asc",
+  ]);
+}
+
+async function readTeamSitesPage(
+  input: ReadTeamSitesInput,
+  page: NonNullable<ReadTeamSitesInput["page"]>,
+): Promise<{ rows: TeamSiteListPage["rows"]; nextCursor: string | null }> {
+  const binding = await teamSitesCursorBinding(input);
+  const cursor = await decodePageCursor<{
+    readonly createdAt: number;
+    readonly id: string;
+  }>(input.env, binding, page.cursor);
+  if (page.cursor && !cursor) throw new Error("invalid-cursor");
+  const result = await queryTeamSitesPageFromD1(
+    input.env,
+    input.teamId,
+    page.limit,
+    cursor,
+    input.allowedSiteIds,
+  );
+  return {
+    rows: result.rows,
+    nextCursor: result.nextCursor
+      ? await encodePageCursor(input.env, binding, result.nextCursor)
+      : null,
+  };
 }
 
 function source(values: readonly QuerySource[]): QuerySource {
@@ -57,9 +127,12 @@ export async function readTeamSites(
   input: ReadTeamSitesInput,
 ): Promise<TeamSitesQueryResult> {
   const allowed = input.allowedSiteIds ? new Set(input.allowedSiteIds) : null;
-  const sites = (await listTeamSites(input.env, input.teamId)).filter(
-    (site) => !allowed || allowed.has(site.id),
-  );
+  const page = input.page ? await readTeamSitesPage(input, input.page) : null;
+  const sites = page
+    ? page.rows
+    : (await listTeamSites(input.env, input.teamId)).filter(
+        (site) => !allowed || allowed.has(site.id),
+      );
   const time = toQueryTime(input.window);
   const values = await Promise.all(
     sites.map(async (site) => {
@@ -101,7 +174,19 @@ export async function readTeamSites(
     }),
   );
   return {
-    data: { sites: values.map((value) => value.site) },
+    data: {
+      sites: values.map((value) => value.site),
+      ...(page
+        ? {
+            pagination: {
+              limit: input.page!.limit,
+              returned: values.length,
+              hasMore: page.nextCursor !== null,
+              nextCursor: page.nextCursor,
+            },
+          }
+        : {}),
+    },
     source: source(values.flatMap((value) => value.sources)),
     approximateVisitors: values.some((value) => value.approximateVisitors),
   };

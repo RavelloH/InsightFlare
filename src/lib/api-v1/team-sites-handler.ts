@@ -26,6 +26,7 @@ export interface TeamSitesReaderInput {
   readonly endExclusiveMs: number;
   readonly timeZone: string;
   readonly interval?: TeamSitesQueryDto["interval"];
+  readonly page: TeamSitesQueryDto["page"];
   readonly filters: FilterDocument;
   readonly signal?: AbortSignal;
 }
@@ -189,6 +190,7 @@ export async function handlePlannedTeamSites(
       endExclusiveMs,
       timeZone,
       interval: input.interval,
+      page: input.page,
       filters,
       scopePreference: input.scope ?? "auto",
     };
@@ -289,6 +291,7 @@ export async function handlePlannedTeamSites(
                 ? null
                 : new Date(site.lastEventAtMs).toISOString(),
           })),
+          pagination: result.data.pagination,
         },
         meta: {
           requestId,

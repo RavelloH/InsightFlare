@@ -1,3 +1,8 @@
+import {
+  analyticsFilterRegistry,
+  filterFingerprint,
+  type QueryAudience,
+} from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -10,6 +15,7 @@ import type {
   PageRow,
   QueryWindow,
   ReferrerRow,
+  ReferrerSummaryRow,
 } from "./core";
 import {
   appendSqlConditions,
@@ -31,7 +37,51 @@ import {
   queryReferrersFromD1,
   queryVisitDimensionFromD1,
 } from "./dimensions";
+import {
+  decodePageCursor,
+  encodePageCursor,
+  type PageResult,
+  pageResult,
+  paginationBinding,
+} from "./pagination";
 import { scopedDatasetFor } from "./scoped-dataset";
+
+export interface PageAggregateCursor {
+  readonly views: number;
+  readonly sessions: number;
+  readonly pathname: string;
+  readonly query: string;
+  readonly hash: string;
+}
+
+export interface ReferrerAggregateCursor {
+  readonly views: number;
+  readonly sessions: number;
+  readonly visitors?: number;
+  readonly referrer: string;
+}
+
+export type ReferrerPageSortKey = "views" | "visitors";
+
+function pageCursorBinding(
+  operation: string,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  extra: readonly unknown[] = [],
+  audience: QueryAudience = "private-dashboard",
+): Promise<string> {
+  return paginationBinding([
+    `analytics-${operation}-v1`,
+    audience,
+    siteId,
+    window.startMs,
+    window.endExclusiveMs,
+    window.timeZone,
+    filterFingerprint(filters, analyticsFilterRegistry),
+    ...extra,
+  ]);
+}
 
 export async function queryTopPagesFromD1(
   env: Env,
@@ -110,6 +160,137 @@ export async function queryPagesAggregate(
   includeDetails: boolean,
 ): Promise<PageRow[]> {
   return queryPagesFromD1(env, siteId, window, filters, limit, includeDetails);
+}
+
+/** Keyset-paginated page aggregate. The legacy aggregate reader above remains
+ * intentionally bounded for cards, reports, and other Top-N consumers. */
+export async function queryPagesPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  includeDetails: boolean,
+  cursor?: PageAggregateCursor | null,
+  audience: QueryAudience = "private-dashboard",
+): Promise<PageResult<PageRow>> {
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const queryExpr = includeDetails ? "query_string" : "''";
+  const hashExpr = includeDetails ? "hash_fragment" : "''";
+  const cursorClause = cursor
+    ? `
+WHERE views < ?
+   OR (views = ? AND sessions < ?)
+   OR (views = ? AND sessions = ? AND pathname > ?)
+   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue > ?)
+   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue = ? AND hashValue > ?)`
+    : "";
+  const sql = `
+WITH
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT *
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
+),
+rollup AS (
+  SELECT
+    pathname,
+    ${queryExpr} AS queryValue,
+    ${hashExpr} AS hashValue,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
+  FROM filtered_visits
+  GROUP BY pathname, queryValue, hashValue
+)
+SELECT pathname, queryValue, hashValue, views, sessions
+FROM rollup
+${cursorClause}
+ORDER BY views DESC, sessions DESC, pathname ASC, queryValue ASC, hashValue ASC
+LIMIT ?
+`;
+  const cursorBindings = cursor
+    ? [
+        cursor.views,
+        cursor.views,
+        cursor.sessions,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.query,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.query,
+        cursor.hash,
+      ]
+    : [];
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...(scopedDataset
+      ? scopedDataset.bindings.map((binding) => binding.value)
+      : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])]),
+    ...cursorBindings,
+    limit + 1,
+  ]);
+  const mapped = rows.map((row) => ({
+    pathname: String(row.pathname ?? ""),
+    query: String(row.queryValue ?? ""),
+    hash: String(row.hashValue ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  }));
+  const page = pageResult(mapped, limit);
+  const binding = await pageCursorBinding(
+    "pages",
+    siteId,
+    window,
+    filters,
+    [includeDetails],
+    audience,
+  );
+  const nextCursor =
+    page.hasMore && page.last
+      ? await encodePageCursor(env, binding, {
+          views: page.last.views,
+          sessions: page.last.sessions,
+          pathname: page.last.pathname,
+          query: page.last.query,
+          hash: page.last.hash,
+        })
+      : null;
+  return {
+    items: page.rows,
+    pagination: {
+      limit,
+      returned: page.rows.length,
+      hasMore: page.hasMore,
+      nextCursor,
+    },
+  };
+}
+
+export async function decodePagesCursor(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  includeDetails: boolean,
+  cursor?: string | null,
+  audience: QueryAudience = "private-dashboard",
+): Promise<PageAggregateCursor | null> {
+  const binding = await pageCursorBinding(
+    "pages",
+    siteId,
+    window,
+    filters,
+    [includeDetails],
+    audience,
+  );
+  return decodePageCursor<PageAggregateCursor>(env, binding, cursor);
 }
 
 export async function queryPageTabsAggregate(
@@ -508,6 +689,252 @@ export async function queryReferrerAggregate(
     diagnostics,
     search,
   );
+}
+
+/** Explicit Top-N reader for reports/cards. It intentionally has no cursor. */
+export async function queryTopReferrersFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  includeFullUrl: boolean,
+  diagnostics?: D1ReadDiagnostics,
+  search?: string,
+): Promise<ReferrerRow[]> {
+  return queryReferrersFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+    includeFullUrl,
+    diagnostics,
+    search,
+  );
+}
+
+/** Explicit aggregate for referrer summary cards. It is intentionally
+ * independent from the paginated referrer collection. */
+export async function queryReferrerSummaryFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  topN: number,
+  diagnostics?: D1ReadDiagnostics,
+): Promise<ReferrerSummaryRow> {
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const source = scopedDataset?.visitRelation ?? "visit_source";
+  const ctes = scopedDataset?.ctes ?? buildVisitSourceCte();
+  const bindings = scopedDataset
+    ? scopedDataset.bindings.map((binding) => binding.value)
+    : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])];
+  const summaryRows = await queryD1All<Record<string, unknown>>(
+    env,
+    `
+WITH
+${ctes},
+filtered_visits AS (
+  SELECT *
+  FROM ${source}
+  ${filter?.clause ?? ""}
+)
+SELECT
+  count(*) AS totalViews,
+  SUM(CASE WHEN TRIM(COALESCE(referrer_host, '')) = '' THEN 1 ELSE 0 END) AS directViews,
+  SUM(CASE WHEN TRIM(COALESCE(referrer_host, '')) != '' THEN 1 ELSE 0 END) AS externalViews,
+  count(DISTINCT NULLIF(TRIM(COALESCE(referrer_host, '')), '')) AS uniqueDomains,
+  count(DISTINCT NULLIF(TRIM(COALESCE(referrer_url, '')), '')) AS uniqueLinks
+FROM filtered_visits
+`,
+    bindings,
+    diagnostics,
+  );
+  const topRows = await queryD1All<Record<string, unknown>>(
+    env,
+    `
+WITH
+${ctes},
+filtered_visits AS (
+  SELECT *
+  FROM ${source}
+  ${filter?.clause ?? ""}
+)
+SELECT
+  TRIM(COALESCE(referrer_host, '')) AS referrer,
+  count(*) AS views
+FROM filtered_visits
+WHERE TRIM(COALESCE(referrer_host, '')) != ''
+GROUP BY referrer
+ORDER BY views DESC, referrer ASC
+    LIMIT ?
+`,
+    [...bindings, topN + 1],
+    diagnostics,
+  );
+  const summary = summaryRows[0] ?? {};
+  return {
+    totalViews: Number(summary.totalViews ?? 0),
+    directViews: Number(summary.directViews ?? 0),
+    externalViews: Number(summary.externalViews ?? 0),
+    uniqueDomains: Number(summary.uniqueDomains ?? 0),
+    uniqueLinks: Number(summary.uniqueLinks ?? 0),
+    truncated: topRows.length > topN,
+    topSources: topRows.slice(0, topN).map((row) => ({
+      referrer: String(row.referrer ?? ""),
+      views: Number(row.views ?? 0),
+    })),
+  };
+}
+
+/** Keyset-paginated referrer aggregate. */
+export async function queryReferrersPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  includeFullUrl: boolean,
+  search?: string,
+  cursor?: ReferrerAggregateCursor | null,
+  diagnostics?: D1ReadDiagnostics,
+  audience: QueryAudience = "private-dashboard",
+  sortBy: ReferrerPageSortKey = "views",
+  sortDirection: "asc" | "desc" = "desc",
+): Promise<PageResult<ReferrerRow>> {
+  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
+  const primary = sortBy === "visitors" ? "visitors" : "views";
+  const secondary = sortBy === "visitors" ? "views" : "sessions";
+  const operator = sortDirection === "asc" ? ">" : "<";
+  const cursorClause = cursor
+    ? `
+WHERE ${primary} ${operator} ?
+   OR (${primary} = ? AND ${secondary} ${operator} ?)
+   OR (${primary} = ? AND ${secondary} = ? AND referrer > ?)`
+    : "";
+  const sql = `
+WITH
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT *
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
+),
+rollup AS (
+  SELECT
+    COALESCE(${keyExpr}, '') AS referrer,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM filtered_visits
+  GROUP BY referrer
+  ${search ? "HAVING LOWER(referrer) LIKE ? ESCAPE '\\'" : ""}
+)
+SELECT referrer, views, sessions, visitors
+FROM rollup
+${cursorClause}
+ORDER BY views DESC, sessions DESC, referrer ASC
+LIMIT ?
+`;
+  const orderedSql = sql.replace(
+    "ORDER BY views DESC, sessions DESC, referrer ASC",
+    `ORDER BY ${primary} ${sortDirection}, ${secondary} ${sortDirection}, referrer ASC`,
+  );
+  const cursorBindings = cursor
+    ? [
+        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
+        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
+        sortBy === "visitors" ? cursor.views : cursor.sessions,
+        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
+        sortBy === "visitors" ? cursor.views : cursor.sessions,
+        cursor.referrer,
+      ]
+    : [];
+  const rows = await queryD1All<Record<string, unknown>>(
+    env,
+    orderedSql,
+    [
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(siteId, window),
+            ...(filter?.bindings ?? []),
+          ]),
+      ...(search
+        ? [
+            `%${search
+              .trim()
+              .toLowerCase()
+              .replaceAll("\\", "\\\\")
+              .replaceAll("%", "\\%")
+              .replaceAll("_", "\\_")}%`,
+          ]
+        : []),
+      ...cursorBindings,
+      limit + 1,
+    ],
+    diagnostics,
+  );
+  const mapped = rows.map((row) => ({
+    referrer: String(row.referrer ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
+  const page = pageResult(mapped, limit);
+  const binding = await pageCursorBinding(
+    "referrers",
+    siteId,
+    window,
+    filters,
+    [includeFullUrl, search?.trim().toLowerCase() ?? "", sortBy, sortDirection],
+    audience,
+  );
+  const nextCursor =
+    page.hasMore && page.last
+      ? await encodePageCursor(env, binding, {
+          views: page.last.views,
+          sessions: page.last.sessions,
+          visitors: page.last.visitors,
+          referrer: page.last.referrer,
+        })
+      : null;
+  return {
+    items: page.rows,
+    pagination: {
+      limit,
+      returned: page.rows.length,
+      hasMore: page.hasMore,
+      nextCursor,
+    },
+  };
+}
+
+export async function decodeReferrersCursor(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  includeFullUrl: boolean,
+  search?: string,
+  cursor?: string | null,
+  audience: QueryAudience = "private-dashboard",
+  sortBy: ReferrerPageSortKey = "views",
+  sortDirection: "asc" | "desc" = "desc",
+): Promise<ReferrerAggregateCursor | null> {
+  const binding = await pageCursorBinding(
+    "referrers",
+    siteId,
+    window,
+    filters,
+    [includeFullUrl, search?.trim().toLowerCase() ?? "", sortBy, sortDirection],
+    audience,
+  );
+  return decodePageCursor<ReferrerAggregateCursor>(env, binding, cursor);
 }
 
 export async function queryDimensionAggregate(

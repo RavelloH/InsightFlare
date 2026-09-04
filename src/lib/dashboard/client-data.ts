@@ -32,14 +32,18 @@ export {
   fetchPerformance,
   fetchRetention,
   fetchSessionDetail,
+  fetchSessionEvents,
   fetchSessions,
   fetchTrend,
   fetchVisitorDetail,
+  fetchVisitorEvents,
   fetchVisitors,
+  fetchVisitorSessions,
 } from "./client-core-data";
 export type {
   DashboardFilterOptionData,
   DashboardFilterOptionKey,
+  DashboardListRequestOptions,
   EventRecordSortKey,
   FetchPrivateJsonOptions,
   OverviewClientDimensionTab,
@@ -49,6 +53,7 @@ export type {
   OverviewGeoTabRows,
   OverviewPageCardTab,
   OverviewSourceCardTab,
+  OverviewTabCollection,
   OverviewTabRows,
   PageCardTabsData,
   PagesDashboardRow,
@@ -72,6 +77,7 @@ export {
 export {
   fetchReferrerRadar,
   fetchReferrers,
+  fetchReferrerSummary,
   fetchReferrerTrend,
   fetchUtmDimension,
   fetchUtmTrend,
@@ -91,6 +97,7 @@ export {
   normalizeOverviewRows,
   toQueryString,
   withFilters,
+  withPagination,
 } from "./client-utils";
 export {
   createSavedFilter,

@@ -251,7 +251,7 @@ paths:
                     requested: auto
                     resolved: event
         "400":
-          description: "API v1 error: validation_failed."
+          description: "API v1 error: validation_failed, invalid_cursor."
           headers:
             X-Request-Id:
               required: true
@@ -568,7 +568,7 @@ paths:
                     requested: auto
                     resolved: event
         "400":
-          description: "API v1 error: validation_failed."
+          description: "API v1 error: validation_failed, invalid_cursor."
           headers:
             X-Request-Id:
               required: true
@@ -4747,8 +4747,28 @@ paths:
                     - day
                     - week
                     - month
+                page:
+                  default: &a18
+                    limit: 20
+                  type: object
+                  properties:
+                    limit:
+                      default: 20
+                      type: integer
+                      minimum: 1
+                      maximum: 100
+                    cursor:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                          maxLength: 12288
+                        - type: "null"
+                  required:
+                    - limit
+                  additionalProperties: false
               required:
                 - timeRange
+                - page
               additionalProperties: false
               $defs:
                 __schema0:
@@ -4815,6 +4835,7 @@ paths:
                   value: example
               scope: auto
               interval: minute
+              page: *a18
       responses:
         "200":
           description: Successful response.
@@ -4937,8 +4958,11 @@ paths:
                             - metrics
                             - lastEventAt
                           additionalProperties: false
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
                       - sites
+                      - pagination
                     additionalProperties: false
                   meta:
                     $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -4975,6 +4999,11 @@ paths:
                           avgDurationMs: 0
                           bounceRate: 0
                       lastEventAt: 2026-01-01T00:00:00Z
+                  pagination:
+                    limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
                 meta:
                   requestId: example
                   generatedAt: 2026-01-01T00:00:00Z
@@ -5140,9 +5169,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a18
+      x-api-v1-scopes: &a19
         - analytics:read
-      x-required-scopes: *a18
+      x-required-scopes: *a19
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/breakdowns/{dimension}:
     post:
@@ -5492,9 +5521,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a19
+      x-api-v1-scopes: &a20
         - analytics:read
-      x-required-scopes: *a19
+      x-required-scopes: *a20
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -5829,9 +5858,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a20
+      x-api-v1-scopes: &a21
         - analytics:read
-      x-required-scopes: *a20
+      x-required-scopes: *a21
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/cross-breakdowns:
     post:
@@ -6288,9 +6317,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a21
+      x-api-v1-scopes: &a22
         - analytics:read
-      x-required-scopes: *a21
+      x-required-scopes: *a22
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -6373,17 +6402,14 @@ paths:
                     - event
                     - session
                     - visitor
-                limit:
-                  default: 20
-                  type: integer
-                  minimum: 1
-                  maximum: 200
+                page:
+                  $ref: "#/components/schemas/SharedSchema_70ada349f9c7"
                 includeDetails:
                   default: false
                   type: boolean
               required:
                 - timeRange
-                - limit
+                - page
                 - includeDetails
               additionalProperties: false
               $defs:
@@ -6450,7 +6476,8 @@ paths:
                   operator: example
                   value: example
               scope: auto
-              limit: 20
+              page: &a24
+                limit: 20
               includeDetails: false
       responses:
         "200":
@@ -6491,8 +6518,11 @@ paths:
                             - views
                             - sessions
                           additionalProperties: false
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
                       - items
+                      - pagination
                     additionalProperties: false
                   meta:
                     $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -6508,390 +6538,11 @@ paths:
                       hash: example
                       views: 0
                       sessions: 0
-                meta:
-                  requestId: example
-                  generatedAt: 2026-01-01T00:00:00Z
-                  timeRange:
-                    from: 2026-01-01T00:00:00Z
-                    to: 2026-01-01T00:00:00Z
-                    timeZone: example
-                  source: raw
-                  accuracy: exact
-                  filterScope:
-                    requested: auto
-                    resolved: event
-        "400":
-          description: "API v1 error: validation_failed."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: validation_failed
-                  message: Request validation failed.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "403":
-          description: "API v1 error: missing_scope."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: missing_scope
-                  message: The API key lacks the required scope.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "404":
-          description: "API v1 error: resource_not_found."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: resource_not_found
-                  message: Resource not found.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "405":
-          description: "API v1 error: method_not_allowed."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: method_not_allowed
-                  message: The HTTP method is not allowed for this route.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "406":
-          description: "API v1 error: not_acceptable."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: not_acceptable
-                  message: The requested response media type is not acceptable.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "415":
-          description: "API v1 error: unsupported_media_type."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: unsupported_media_type
-                  message: The request media type is unsupported.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "500":
-          description: "API v1 error: internal_error."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: internal_error
-                  message: An internal error occurred.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "504":
-          description: "API v1 error: deadline_exceeded."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: deadline_exceeded
-                  message: The analytics query exceeded its deadline.
-                  retryable: true
-                meta:
-                  requestId: req_01J7EXAMPLE
-      x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a22
-        - analytics:read
-      x-required-scopes: *a22
-      x-api-v1-batch-eligible: true
-      x-api-v1-conditional-scopes:
-        - when: filter.type=saved
-          scopes:
-            - analytics:read
-            - analysis:read
-  /api/v1/sites/{siteId}/analytics/referrers:
-    post:
-      operationId: site.analytics.referrers
-      summary: API v1 site analytics referrers operation
-      description: Typed API v1 operation. Authenticate with an API key through the
-        BearerAuth security scheme.
-      tags:
-        - Analytics
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: siteId
-          in: path
-          required: true
-          schema:
-            type: string
-            minLength: 1
-          description: siteId path parameter.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
-                filter:
-                  anyOf:
-                    - oneOf:
-                        - type: object
-                          properties:
-                            type:
-                              type: string
-                              const: inline
-                            expression:
-                              $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1referrers/post/requestBod\
-                                y/content/application~1json/schema/$defs/__sche\
-                                ma0"
-                          required:
-                            - type
-                            - expression
-                          additionalProperties: false
-                        - type: object
-                          properties:
-                            type:
-                              type: string
-                              const: dsl
-                            expression:
-                              type: string
-                              minLength: 1
-                              maxLength: 65536
-                          required:
-                            - type
-                            - expression
-                          additionalProperties: false
-                        - type: object
-                          properties:
-                            type:
-                              type: string
-                              const: saved
-                            id:
-                              type: string
-                              minLength: 1
-                              maxLength: 256
-                          required:
-                            - type
-                            - id
-                          additionalProperties: false
-                    - type: "null"
-                scope:
-                  type: string
-                  enum:
-                    - auto
-                    - event
-                    - session
-                    - visitor
-                limit:
-                  default: 20
-                  type: integer
-                  minimum: 1
-                  maximum: 200
-                includeFullUrl:
-                  default: false
-                  type: boolean
-              required:
-                - timeRange
-                - limit
-                - includeFullUrl
-              additionalProperties: false
-              $defs:
-                __schema0:
-                  oneOf:
-                    - $ref: "#/components/schemas/SharedSchema_75b932d026c1"
-                    - type: object
-                      properties:
-                        kind:
-                          type: string
-                          const: and
-                        children:
-                          minItems: 1
-                          maxItems: 128
-                          type: array
-                          items:
-                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1referrers/post/requestBod\
-                              y/content/application~1json/schema/$defs/__schema\
-                              0"
-                      required:
-                        - kind
-                        - children
-                      additionalProperties: false
-                    - type: object
-                      properties:
-                        kind:
-                          type: string
-                          const: or
-                        children:
-                          minItems: 1
-                          maxItems: 128
-                          type: array
-                          items:
-                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1referrers/post/requestBod\
-                              y/content/application~1json/schema/$defs/__schema\
-                              0"
-                      required:
-                        - kind
-                        - children
-                      additionalProperties: false
-                    - type: object
-                      properties:
-                        kind:
-                          type: string
-                          const: not
-                        child:
-                          $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1referrers/post/requestBod\
-                            y/content/application~1json/schema/$defs/__schema0"
-                      required:
-                        - kind
-                        - child
-                      additionalProperties: false
-            example:
-              timeRange:
-                kind: absolute
-                from: 2026-01-01T00:00:00Z
-                to: 2026-01-01T00:00:00Z
-                timeZone: example
-              filter:
-                type: inline
-                expression:
-                  kind: condition
-                  target:
-                    kind: field
-                    field: example
-                  operator: example
-                  value: example
-              scope: auto
-              limit: 20
-              includeFullUrl: false
-      responses:
-        "200":
-          description: Successful response.
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            referrer:
-                              type: string
-                            views:
-                              type: number
-                            sessions:
-                              type: number
-                            visitors:
-                              type: number
-                          required:
-                            - referrer
-                            - views
-                            - sessions
-                            - visitors
-                          additionalProperties: false
-                    required:
-                      - items
-                    additionalProperties: false
-                  meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
-                required:
-                  - data
-                  - meta
-                additionalProperties: false
-              example:
-                data:
-                  items:
-                    - referrer: example
-                      views: 0
-                      sessions: 0
-                      visitors: 0
+                  pagination:
+                    limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
                 meta:
                   requestId: example
                   generatedAt: 2026-01-01T00:00:00Z
@@ -7060,6 +6711,416 @@ paths:
       x-api-v1-scopes: &a23
         - analytics:read
       x-required-scopes: *a23
+      x-api-v1-batch-eligible: true
+      x-api-v1-conditional-scopes:
+        - when: filter.type=saved
+          scopes:
+            - analytics:read
+            - analysis:read
+  /api/v1/sites/{siteId}/analytics/referrers:
+    post:
+      operationId: site.analytics.referrers
+      summary: API v1 site analytics referrers operation
+      description: Typed API v1 operation. Authenticate with an API key through the
+        BearerAuth security scheme.
+      tags:
+        - Analytics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: siteId path parameter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeRange:
+                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                filter:
+                  anyOf:
+                    - oneOf:
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: inline
+                            expression:
+                              $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1referrers/post/requestBod\
+                                y/content/application~1json/schema/$defs/__sche\
+                                ma0"
+                          required:
+                            - type
+                            - expression
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: dsl
+                            expression:
+                              type: string
+                              minLength: 1
+                              maxLength: 65536
+                          required:
+                            - type
+                            - expression
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: saved
+                            id:
+                              type: string
+                              minLength: 1
+                              maxLength: 256
+                          required:
+                            - type
+                            - id
+                          additionalProperties: false
+                    - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
+                sort:
+                  default: views
+                  type: string
+                  enum:
+                    - views
+                    - visitors
+                direction:
+                  default: desc
+                  type: string
+                  enum:
+                    - asc
+                    - desc
+                page:
+                  $ref: "#/components/schemas/SharedSchema_70ada349f9c7"
+                includeFullUrl:
+                  default: false
+                  type: boolean
+                search:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+              required:
+                - timeRange
+                - sort
+                - direction
+                - page
+                - includeFullUrl
+              additionalProperties: false
+              $defs:
+                __schema0:
+                  oneOf:
+                    - $ref: "#/components/schemas/SharedSchema_75b932d026c1"
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: and
+                        children:
+                          minItems: 1
+                          maxItems: 128
+                          type: array
+                          items:
+                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1referrers/post/requestBod\
+                              y/content/application~1json/schema/$defs/__schema\
+                              0"
+                      required:
+                        - kind
+                        - children
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: or
+                        children:
+                          minItems: 1
+                          maxItems: 128
+                          type: array
+                          items:
+                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1referrers/post/requestBod\
+                              y/content/application~1json/schema/$defs/__schema\
+                              0"
+                      required:
+                        - kind
+                        - children
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: not
+                        child:
+                          $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1referrers/post/requestBod\
+                            y/content/application~1json/schema/$defs/__schema0"
+                      required:
+                        - kind
+                        - child
+                      additionalProperties: false
+            example:
+              timeRange:
+                kind: absolute
+                from: 2026-01-01T00:00:00Z
+                to: 2026-01-01T00:00:00Z
+                timeZone: example
+              filter:
+                type: inline
+                expression:
+                  kind: condition
+                  target:
+                    kind: field
+                    field: example
+                  operator: example
+                  value: example
+              scope: auto
+              sort: views
+              direction: asc
+              page: *a24
+              includeFullUrl: false
+              search: example
+      responses:
+        "200":
+          description: Successful response.
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            referrer:
+                              type: string
+                            views:
+                              type: number
+                            sessions:
+                              type: number
+                            visitors:
+                              type: number
+                          required:
+                            - referrer
+                            - views
+                            - sessions
+                            - visitors
+                          additionalProperties: false
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                    required:
+                      - items
+                      - pagination
+                    additionalProperties: false
+                  meta:
+                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
+              example:
+                data:
+                  items:
+                    - referrer: example
+                      views: 0
+                      sessions: 0
+                      visitors: 0
+                  pagination:
+                    limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
+                meta:
+                  requestId: example
+                  generatedAt: 2026-01-01T00:00:00Z
+                  timeRange:
+                    from: 2026-01-01T00:00:00Z
+                    to: 2026-01-01T00:00:00Z
+                    timeZone: example
+                  source: raw
+                  accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
+        "400":
+          description: "API v1 error: validation_failed."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: validation_failed
+                  message: Request validation failed.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "403":
+          description: "API v1 error: missing_scope."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: missing_scope
+                  message: The API key lacks the required scope.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "404":
+          description: "API v1 error: resource_not_found."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: resource_not_found
+                  message: Resource not found.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "405":
+          description: "API v1 error: method_not_allowed."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: method_not_allowed
+                  message: The HTTP method is not allowed for this route.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "406":
+          description: "API v1 error: not_acceptable."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: not_acceptable
+                  message: The requested response media type is not acceptable.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "415":
+          description: "API v1 error: unsupported_media_type."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: unsupported_media_type
+                  message: The request media type is unsupported.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "500":
+          description: "API v1 error: internal_error."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: internal_error
+                  message: An internal error occurred.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "504":
+          description: "API v1 error: deadline_exceeded."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: deadline_exceeded
+                  message: The analytics query exceeded its deadline.
+                  retryable: true
+                meta:
+                  requestId: req_01J7EXAMPLE
+      x-api-v1-lifecycle: exposed
+      x-api-v1-scopes: &a25
+        - analytics:read
+      x-required-scopes: *a25
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -7446,9 +7507,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a24
+      x-api-v1-scopes: &a26
         - analytics:read
-      x-required-scopes: *a24
+      x-required-scopes: *a26
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -7540,7 +7601,7 @@ paths:
                   type: string
                   maxLength: 256
                 page:
-                  default: &a25
+                  default: &a27
                     limit: 50
                   type: object
                   properties:
@@ -7549,6 +7610,12 @@ paths:
                       type: integer
                       minimum: 1
                       maximum: 200
+                    cursor:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                          maxLength: 12288
+                        - type: "null"
                   required:
                     - limit
                   additionalProperties: false
@@ -7626,7 +7693,7 @@ paths:
               scope: auto
               field: example
               search: example
-              page: *a25
+              page: *a27
       responses:
         "200":
           description: Successful response.
@@ -7663,27 +7730,12 @@ paths:
                             - label
                             - occurrences
                           additionalProperties: false
-                      page:
-                        type: object
-                        properties:
-                          limit:
-                            type: integer
-                            exclusiveMinimum: 0
-                            maximum: 9007199254740991
-                          hasMore:
-                            type: boolean
-                            const: false
-                          nextCursor:
-                            type: "null"
-                        required:
-                          - limit
-                          - hasMore
-                          - nextCursor
-                        additionalProperties: false
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
                       - field
                       - items
-                      - page
+                      - pagination
                     additionalProperties: false
                   meta:
                     $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -7698,10 +7750,11 @@ paths:
                     - value: example
                       label: example
                       occurrences: 0
-                  page:
+                  pagination:
                     limit: 1
+                    returned: 0
                     hasMore: false
-                    nextCursor: null
+                    nextCursor: example
                 meta:
                   requestId: example
                   generatedAt: 2026-01-01T00:00:00Z
@@ -7867,9 +7920,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a26
+      x-api-v1-scopes: &a28
         - analytics:read
-      x-required-scopes: *a26
+      x-required-scopes: *a28
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -8277,9 +8330,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a27
+      x-api-v1-scopes: &a29
         - analytics:read
-      x-required-scopes: *a27
+      x-required-scopes: *a29
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -8793,9 +8846,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a28
+      x-api-v1-scopes: &a30
         - analytics:read
-      x-required-scopes: *a28
+      x-required-scopes: *a30
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -9193,9 +9246,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a29
+      x-api-v1-scopes: &a31
         - analytics:read
-      x-required-scopes: *a29
+      x-required-scopes: *a31
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -9618,9 +9671,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a30
+      x-api-v1-scopes: &a32
         - analytics:read
-      x-required-scopes: *a30
+      x-required-scopes: *a32
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -10059,9 +10112,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a31
+      x-api-v1-scopes: &a33
         - analytics:read
-      x-required-scopes: *a31
+      x-required-scopes: *a33
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -10555,9 +10608,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a32
+      x-api-v1-scopes: &a34
         - analytics:read
-      x-required-scopes: *a32
+      x-required-scopes: *a34
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -11001,9 +11054,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a33
+      x-api-v1-scopes: &a35
         - analytics:read
-      x-required-scopes: *a33
+      x-required-scopes: *a35
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -11097,7 +11150,7 @@ paths:
                   minLength: 1
                   maxLength: 120
                 sort:
-                  default: &a34
+                  default: &a36
                     field: occurredAt
                     direction: desc
                   type: object
@@ -11193,8 +11246,8 @@ paths:
               scope: auto
               search: example
               eventName: example
-              sort: *a34
-              page: &a48
+              sort: *a36
+              page: &a49
                 limit: 80
       responses:
         "200":
@@ -11496,9 +11549,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a35
+      x-api-v1-scopes: &a37
         - analytics:read
-      x-required-scopes: *a35
+      x-required-scopes: *a37
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -11903,9 +11956,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a36
+      x-api-v1-scopes: &a38
         - analytics:read
-      x-required-scopes: *a36
+      x-required-scopes: *a38
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/event-types:
     post:
@@ -11989,18 +12042,7 @@ paths:
                   minLength: 1
                   maxLength: 160
                 page:
-                  default: &a37
-                    limit: 20
-                  type: object
-                  properties:
-                    limit:
-                      default: 20
-                      type: integer
-                      minimum: 1
-                      maximum: 200
-                  required:
-                    - limit
-                  additionalProperties: false
+                  $ref: "#/components/schemas/SharedSchema_70ada349f9c7"
               required:
                 - timeRange
                 - page
@@ -12073,7 +12115,7 @@ paths:
                   value: example
               scope: auto
               search: example
-              page: *a37
+              page: *a24
       responses:
         "200":
           description: Successful response.
@@ -12113,19 +12155,11 @@ paths:
                             - sessions
                             - visitors
                           additionalProperties: false
-                      page:
-                        type: object
-                        properties:
-                          limit:
-                            type: integer
-                            exclusiveMinimum: 0
-                            maximum: 9007199254740991
-                        required:
-                          - limit
-                        additionalProperties: false
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
                       - items
-                      - page
+                      - pagination
                     additionalProperties: false
                   meta:
                     $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -12141,8 +12175,11 @@ paths:
                       events: 0
                       sessions: 0
                       visitors: 0
-                  page:
+                  pagination:
                     limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
                 meta:
                   requestId: example
                   generatedAt: 2026-01-01T00:00:00Z
@@ -12308,9 +12345,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a38
+      x-api-v1-scopes: &a39
         - analytics:read
-      x-required-scopes: *a38
+      x-required-scopes: *a39
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -13276,9 +13313,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a39
+      x-api-v1-scopes: &a40
         - analytics:read
-      x-required-scopes: *a39
+      x-required-scopes: *a40
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -13367,7 +13404,7 @@ paths:
                   minLength: 1
                   maxLength: 120
                 page:
-                  default: &a40
+                  default: &a41
                     limit: 100
                   type: object
                   properties:
@@ -13376,6 +13413,12 @@ paths:
                       type: integer
                       minimum: 1
                       maximum: 200
+                    cursor:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                          maxLength: 12288
+                        - type: "null"
                   required:
                     - limit
                   additionalProperties: false
@@ -13452,7 +13495,7 @@ paths:
                   value: example
               scope: auto
               eventName: example
-              page: *a40
+              page: *a41
       responses:
         "200":
           description: Successful response.
@@ -13472,22 +13515,14 @@ paths:
                     properties:
                       eventName:
                         type: string
-                      fields:
+                      items:
                         $ref: "#/components/schemas/SharedSchema_05f52499a24a"
-                      page:
-                        type: object
-                        properties:
-                          limit:
-                            type: integer
-                            exclusiveMinimum: 0
-                            maximum: 9007199254740991
-                        required:
-                          - limit
-                        additionalProperties: false
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
                       - eventName
-                      - fields
-                      - page
+                      - items
+                      - pagination
                     additionalProperties: false
                   meta:
                     $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -13498,7 +13533,7 @@ paths:
               example:
                 data:
                   eventName: example
-                  fields:
+                  items:
                     - path: example
                       valueType: string
                       events: 0
@@ -13506,8 +13541,11 @@ paths:
                       firstSeenAt: 0
                       lastSeenAt: 0
                       exampleValue: example
-                  page:
+                  pagination:
                     limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
                 meta:
                   requestId: example
                   generatedAt: 2026-01-01T00:00:00Z
@@ -13673,9 +13711,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a41
+      x-api-v1-scopes: &a42
         - analytics:read
-      x-required-scopes: *a41
+      x-required-scopes: *a42
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -13780,7 +13818,7 @@ paths:
                   type: string
                   maxLength: 256
                 page:
-                  default: &a42
+                  default: &a43
                     limit: 25
                   type: object
                   properties:
@@ -13789,6 +13827,12 @@ paths:
                       type: integer
                       minimum: 1
                       maximum: 100
+                    cursor:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                          maxLength: 12288
+                        - type: "null"
                   required:
                     - limit
                   additionalProperties: false
@@ -13870,7 +13914,7 @@ paths:
               fieldPath: example
               fieldValueType: string
               search: example
-              page: *a42
+              page: *a43
       responses:
         "200":
           description: Successful response.
@@ -13927,22 +13971,14 @@ paths:
                             - firstSeenAt
                             - lastSeenAt
                           additionalProperties: false
-                      page:
-                        type: object
-                        properties:
-                          limit:
-                            type: integer
-                            exclusiveMinimum: 0
-                            maximum: 9007199254740991
-                        required:
-                          - limit
-                        additionalProperties: false
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
                       - eventName
                       - fieldPath
                       - fieldValueType
                       - items
-                      - page
+                      - pagination
                     additionalProperties: false
                   meta:
                     $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -13961,8 +13997,11 @@ paths:
                       occurrences: 0
                       firstSeenAt: 0
                       lastSeenAt: 0
-                  page:
+                  pagination:
                     limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
                 meta:
                   requestId: example
                   generatedAt: 2026-01-01T00:00:00Z
@@ -14128,9 +14167,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a43
+      x-api-v1-scopes: &a44
         - analytics:read
-      x-required-scopes: *a43
+      x-required-scopes: *a44
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -14306,10 +14345,6 @@ paths:
                           - conversionEvents
                           - avgTimeBetweenSessionsMs
                         additionalProperties: false
-                      sessions:
-                        $ref: "#/components/schemas/SharedSchema_ffd4d8b33e22"
-                      events:
-                        $ref: "#/components/schemas/SharedSchema_3a8f76151019"
                       visitedPages:
                         type: array
                         items:
@@ -14354,8 +14389,6 @@ paths:
                     required:
                       - visitor
                       - metrics
-                      - sessions
-                      - events
                       - visitedPages
                       - eventDistribution
                       - activity
@@ -14403,70 +14436,6 @@ paths:
                     daysActive: 0
                     conversionEvents: 0
                     avgTimeBetweenSessionsMs: 0
-                  sessions:
-                    - sessionId: example
-                      visitorId: example
-                      startedAt: 0
-                      endedAt: 0
-                      durationMs: 0
-                      active: false
-                      views: 0
-                      events: 0
-                      bounce: false
-                      entryPath: example
-                      exitPath: example
-                      referrerHost: example
-                      referrerUrl: example
-                      country: example
-                      region: example
-                      regionCode: example
-                      city: example
-                      latitude: 0
-                      longitude: 0
-                      browser: example
-                      browserVersion: example
-                      os: example
-                      osVersion: example
-                      deviceType: example
-                      screenWidth: 0
-                      screenHeight: 0
-                      performance:
-                        ttfb: 0
-                        fcp: 0
-                        lcp: 0
-                        cls: 0
-                        inp: 0
-                  events:
-                    - id: example
-                      kind: session_start
-                      eventType: example
-                      occurredAt: 0
-                      visitId: example
-                      sessionId: example
-                      visitorId: example
-                      pathname: example
-                      hash: example
-                      title: example
-                      hostname: example
-                      referrerHost: example
-                      referrerUrl: example
-                      country: example
-                      region: example
-                      city: example
-                      browser: example
-                      browserVersion: example
-                      os: example
-                      osVersion: example
-                      deviceType: example
-                      screenWidth: 0
-                      screenHeight: 0
-                      durationMs: 0
-                      performance:
-                        ttfb: 0
-                        fcp: 0
-                        lcp: 0
-                        cls: 0
-                        inp: 0
                   visitedPages:
                     - pathname: example
                       views: 0
@@ -14672,9 +14641,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a44
+      x-api-v1-scopes: &a45
         - analytics:read
-      x-required-scopes: *a44
+      x-required-scopes: *a45
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/sessions/detail:
     post:
@@ -14860,8 +14829,6 @@ paths:
                             - city
                             - pointCount
                           additionalProperties: false
-                      events:
-                        $ref: "#/components/schemas/SharedSchema_3a8f76151019"
                       visitedPages:
                         type: array
                         items:
@@ -14893,7 +14860,6 @@ paths:
                     required:
                       - session
                       - locationPoints
-                      - events
                       - visitedPages
                       - eventDistribution
                       - performance
@@ -14948,37 +14914,6 @@ paths:
                       regionCode: example
                       city: example
                       pointCount: 0
-                  events:
-                    - id: example
-                      kind: session_start
-                      eventType: example
-                      occurredAt: 0
-                      visitId: example
-                      sessionId: example
-                      visitorId: example
-                      pathname: example
-                      hash: example
-                      title: example
-                      hostname: example
-                      referrerHost: example
-                      referrerUrl: example
-                      country: example
-                      region: example
-                      city: example
-                      browser: example
-                      browserVersion: example
-                      os: example
-                      osVersion: example
-                      deviceType: example
-                      screenWidth: 0
-                      screenHeight: 0
-                      durationMs: 0
-                      performance:
-                        ttfb: 0
-                        fcp: 0
-                        lcp: 0
-                        cls: 0
-                        inp: 0
                   visitedPages:
                     - pathname: example
                       views: 0
@@ -15181,9 +15116,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a45
+      x-api-v1-scopes: &a46
         - analytics:read
-      x-required-scopes: *a45
+      x-required-scopes: *a46
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/journey-events/detail:
     post:
@@ -15587,9 +15522,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a46
+      x-api-v1-scopes: &a47
         - analytics:read
-      x-required-scopes: *a46
+      x-required-scopes: *a47
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/visitors/search:
     post:
@@ -15673,7 +15608,7 @@ paths:
                   minLength: 1
                   maxLength: 160
                 sort:
-                  default: &a47
+                  default: &a48
                     field: lastSeenAt
                     direction: desc
                   type: object
@@ -15769,8 +15704,8 @@ paths:
                   value: example
               scope: auto
               search: example
-              sort: *a47
-              page: *a48
+              sort: *a48
+              page: *a49
       responses:
         "200":
           description: Successful response.
@@ -16063,9 +15998,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a49
+      x-api-v1-scopes: &a50
         - analytics:read
-      x-required-scopes: *a49
+      x-required-scopes: *a50
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -16154,7 +16089,7 @@ paths:
                   minLength: 1
                   maxLength: 160
                 sort:
-                  default: &a50
+                  default: &a51
                     field: startedAt
                     direction: desc
                   type: object
@@ -16249,8 +16184,8 @@ paths:
                   value: example
               scope: auto
               search: example
-              sort: *a50
-              page: *a48
+              sort: *a51
+              page: *a49
       responses:
         "200":
           description: Successful response.
@@ -16486,9 +16421,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a51
+      x-api-v1-scopes: &a52
         - analytics:read
-      x-required-scopes: *a51
+      x-required-scopes: *a52
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -16576,15 +16511,12 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 512
-                limit:
-                  default: 100
-                  type: integer
-                  minimum: 1
-                  maximum: 500
+                page:
+                  $ref: "#/components/schemas/SharedSchema_64d3297ebf12"
               required:
                 - timeRange
                 - visitorId
-                - limit
+                - page
               additionalProperties: false
               $defs:
                 __schema0:
@@ -16654,7 +16586,8 @@ paths:
                   value: example
               scope: auto
               visitorId: example
-              limit: 100
+              page: &a54
+                limit: 100
       responses:
         "200":
           description: Successful response.
@@ -16667,7 +16600,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_0db83bd64226"
+                $ref: "#/components/schemas/SharedSchema_fea62b48b995"
               example:
                 data:
                   items:
@@ -16701,6 +16634,11 @@ paths:
                         lcp: 0
                         cls: 0
                         inp: 0
+                  pagination:
+                    limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
                 meta:
                   requestId: example
                   generatedAt: 2026-01-01T00:00:00Z
@@ -16714,404 +16652,7 @@ paths:
                     requested: auto
                     resolved: event
         "400":
-          description: "API v1 error: validation_failed."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: validation_failed
-                  message: Request validation failed.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "403":
-          description: "API v1 error: missing_scope."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: missing_scope
-                  message: The API key lacks the required scope.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "404":
-          description: "API v1 error: resource_not_found."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: resource_not_found
-                  message: Resource not found.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "405":
-          description: "API v1 error: method_not_allowed."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: method_not_allowed
-                  message: The HTTP method is not allowed for this route.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "406":
-          description: "API v1 error: not_acceptable."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: not_acceptable
-                  message: The requested response media type is not acceptable.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "415":
-          description: "API v1 error: unsupported_media_type."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: unsupported_media_type
-                  message: The request media type is unsupported.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "500":
-          description: "API v1 error: internal_error."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: internal_error
-                  message: An internal error occurred.
-                  retryable: false
-                meta:
-                  requestId: req_01J7EXAMPLE
-        "504":
-          description: "API v1 error: deadline_exceeded."
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
-              example:
-                error:
-                  code: deadline_exceeded
-                  message: The analytics query exceeded its deadline.
-                  retryable: true
-                meta:
-                  requestId: req_01J7EXAMPLE
-      x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a52
-        - analytics:read
-      x-required-scopes: *a52
-      x-api-v1-batch-eligible: true
-      x-api-v1-conditional-scopes:
-        - when: filter.type=saved
-          scopes:
-            - analytics:read
-            - analysis:read
-  /api/v1/sites/{siteId}/analytics/visitors/sessions:
-    post:
-      operationId: site.analytics.visitorSessions
-      summary: API v1 site analytics visitorSessions operation
-      description: Typed API v1 operation. Authenticate with an API key through the
-        BearerAuth security scheme.
-      tags:
-        - Visitors
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: siteId
-          in: path
-          required: true
-          schema:
-            type: string
-            minLength: 1
-          description: siteId path parameter.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
-                filter:
-                  anyOf:
-                    - oneOf:
-                        - type: object
-                          properties:
-                            type:
-                              type: string
-                              const: inline
-                            expression:
-                              $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1visitors~1sessions/post/r\
-                                equestBody/content/application~1json/schema/$de\
-                                fs/__schema0"
-                          required:
-                            - type
-                            - expression
-                          additionalProperties: false
-                        - type: object
-                          properties:
-                            type:
-                              type: string
-                              const: dsl
-                            expression:
-                              type: string
-                              minLength: 1
-                              maxLength: 65536
-                          required:
-                            - type
-                            - expression
-                          additionalProperties: false
-                        - type: object
-                          properties:
-                            type:
-                              type: string
-                              const: saved
-                            id:
-                              type: string
-                              minLength: 1
-                              maxLength: 256
-                          required:
-                            - type
-                            - id
-                          additionalProperties: false
-                    - type: "null"
-                scope:
-                  type: string
-                  enum:
-                    - auto
-                    - event
-                    - session
-                    - visitor
-                visitorId:
-                  type: string
-                  minLength: 1
-                  maxLength: 512
-                limit:
-                  default: 100
-                  type: integer
-                  minimum: 1
-                  maximum: 500
-              required:
-                - timeRange
-                - visitorId
-                - limit
-              additionalProperties: false
-              $defs:
-                __schema0:
-                  oneOf:
-                    - $ref: "#/components/schemas/SharedSchema_75b932d026c1"
-                    - type: object
-                      properties:
-                        kind:
-                          type: string
-                          const: and
-                        children:
-                          minItems: 1
-                          maxItems: 128
-                          type: array
-                          items:
-                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1visitors~1sessions/post/r\
-                              equestBody/content/application~1json/schema/$defs\
-                              /__schema0"
-                      required:
-                        - kind
-                        - children
-                      additionalProperties: false
-                    - type: object
-                      properties:
-                        kind:
-                          type: string
-                          const: or
-                        children:
-                          minItems: 1
-                          maxItems: 128
-                          type: array
-                          items:
-                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1visitors~1sessions/post/r\
-                              equestBody/content/application~1json/schema/$defs\
-                              /__schema0"
-                      required:
-                        - kind
-                        - children
-                      additionalProperties: false
-                    - type: object
-                      properties:
-                        kind:
-                          type: string
-                          const: not
-                        child:
-                          $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1visitors~1sessions/post/r\
-                            equestBody/content/application~1json/schema/$defs/_\
-                            _schema0"
-                      required:
-                        - kind
-                        - child
-                      additionalProperties: false
-            example:
-              timeRange:
-                kind: absolute
-                from: 2026-01-01T00:00:00Z
-                to: 2026-01-01T00:00:00Z
-                timeZone: example
-              filter:
-                type: inline
-                expression:
-                  kind: condition
-                  target:
-                    kind: field
-                    field: example
-                  operator: example
-                  value: example
-              scope: auto
-              visitorId: example
-              limit: 100
-      responses:
-        "200":
-          description: Successful response.
-          headers:
-            X-Request-Id:
-              required: true
-              schema:
-                type: string
-                minLength: 1
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      items:
-                        $ref: "#/components/schemas/SharedSchema_ffd4d8b33e22"
-                    required:
-                      - items
-                    additionalProperties: false
-                  meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
-                required:
-                  - data
-                  - meta
-                additionalProperties: false
-              example:
-                data:
-                  items:
-                    - sessionId: example
-                      visitorId: example
-                      startedAt: 0
-                      endedAt: 0
-                      durationMs: 0
-                      active: false
-                      views: 0
-                      events: 0
-                      bounce: false
-                      entryPath: example
-                      exitPath: example
-                      referrerHost: example
-                      referrerUrl: example
-                      country: example
-                      region: example
-                      regionCode: example
-                      city: example
-                      latitude: 0
-                      longitude: 0
-                      browser: example
-                      browserVersion: example
-                      os: example
-                      osVersion: example
-                      deviceType: example
-                      screenWidth: 0
-                      screenHeight: 0
-                      performance:
-                        ttfb: 0
-                        fcp: 0
-                        lcp: 0
-                        cls: 0
-                        inp: 0
-                meta:
-                  requestId: example
-                  generatedAt: 2026-01-01T00:00:00Z
-                  timeRange:
-                    from: 2026-01-01T00:00:00Z
-                    to: 2026-01-01T00:00:00Z
-                    timeZone: example
-                  source: raw
-                  accuracy: exact
-                  filterScope:
-                    requested: auto
-                    resolved: event
-        "400":
-          description: "API v1 error: validation_failed."
+          description: "API v1 error: validation_failed, invalid_cursor."
           headers:
             X-Request-Id:
               required: true
@@ -17272,14 +16813,14 @@ paths:
           scopes:
             - analytics:read
             - analysis:read
-  /api/v1/sites/{siteId}/analytics/sessions/events:
+  /api/v1/sites/{siteId}/analytics/visitors/sessions:
     post:
-      operationId: site.analytics.sessionEvents
-      summary: API v1 site analytics sessionEvents operation
+      operationId: site.analytics.visitorSessions
+      summary: API v1 site analytics visitorSessions operation
       description: Typed API v1 operation. Authenticate with an API key through the
         BearerAuth security scheme.
       tags:
-        - Sessions
+        - Visitors
       security:
         - BearerAuth: []
       parameters:
@@ -17308,9 +16849,9 @@ paths:
                               type: string
                               const: inline
                             expression:
-                              $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1sessions~1events/post/req\
-                                uestBody/content/application~1json/schema/$defs\
-                                /__schema0"
+                              $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1visitors~1sessions/post/r\
+                                equestBody/content/application~1json/schema/$de\
+                                fs/__schema0"
                           required:
                             - type
                             - expression
@@ -17349,19 +16890,16 @@ paths:
                     - event
                     - session
                     - visitor
-                sessionId:
+                visitorId:
                   type: string
                   minLength: 1
                   maxLength: 512
-                limit:
-                  default: 100
-                  type: integer
-                  minimum: 1
-                  maximum: 500
+                page:
+                  $ref: "#/components/schemas/SharedSchema_64d3297ebf12"
               required:
                 - timeRange
-                - sessionId
-                - limit
+                - visitorId
+                - page
               additionalProperties: false
               $defs:
                 __schema0:
@@ -17377,9 +16915,9 @@ paths:
                           maxItems: 128
                           type: array
                           items:
-                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1sessions~1events/post/req\
-                              uestBody/content/application~1json/schema/$defs/_\
-                              _schema0"
+                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1visitors~1sessions/post/r\
+                              equestBody/content/application~1json/schema/$defs\
+                              /__schema0"
                       required:
                         - kind
                         - children
@@ -17394,9 +16932,9 @@ paths:
                           maxItems: 128
                           type: array
                           items:
-                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1sessions~1events/post/req\
-                              uestBody/content/application~1json/schema/$defs/_\
-                              _schema0"
+                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1visitors~1sessions/post/r\
+                              equestBody/content/application~1json/schema/$defs\
+                              /__schema0"
                       required:
                         - kind
                         - children
@@ -17407,9 +16945,9 @@ paths:
                           type: string
                           const: not
                         child:
-                          $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1sessions~1events/post/req\
-                            uestBody/content/application~1json/schema/$defs/__s\
-                            chema0"
+                          $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1visitors~1sessions/post/r\
+                            equestBody/content/application~1json/schema/$defs/_\
+                            _schema0"
                       required:
                         - kind
                         - child
@@ -17430,8 +16968,8 @@ paths:
                   operator: example
                   value: example
               scope: auto
-              sessionId: example
-              limit: 100
+              visitorId: example
+              page: *a54
       responses:
         "200":
           description: Successful response.
@@ -17444,26 +16982,47 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_0db83bd64226"
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        $ref: "#/components/schemas/SharedSchema_ffd4d8b33e22"
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                    required:
+                      - items
+                      - pagination
+                    additionalProperties: false
+                  meta:
+                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                required:
+                  - data
+                  - meta
+                additionalProperties: false
               example:
                 data:
                   items:
-                    - id: example
-                      kind: session_start
-                      eventType: example
-                      occurredAt: 0
-                      visitId: example
-                      sessionId: example
+                    - sessionId: example
                       visitorId: example
-                      pathname: example
-                      hash: example
-                      title: example
-                      hostname: example
+                      startedAt: 0
+                      endedAt: 0
+                      durationMs: 0
+                      active: false
+                      views: 0
+                      events: 0
+                      bounce: false
+                      entryPath: example
+                      exitPath: example
                       referrerHost: example
                       referrerUrl: example
                       country: example
                       region: example
+                      regionCode: example
                       city: example
+                      latitude: 0
+                      longitude: 0
                       browser: example
                       browserVersion: example
                       os: example
@@ -17471,13 +17030,17 @@ paths:
                       deviceType: example
                       screenWidth: 0
                       screenHeight: 0
-                      durationMs: 0
                       performance:
                         ttfb: 0
                         fcp: 0
                         lcp: 0
                         cls: 0
                         inp: 0
+                  pagination:
+                    limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
                 meta:
                   requestId: example
                   generatedAt: 2026-01-01T00:00:00Z
@@ -17491,7 +17054,7 @@ paths:
                     requested: auto
                     resolved: event
         "400":
-          description: "API v1 error: validation_failed."
+          description: "API v1 error: validation_failed, invalid_cursor."
           headers:
             X-Request-Id:
               required: true
@@ -17643,9 +17206,391 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a54
+      x-api-v1-scopes: &a55
         - analytics:read
-      x-required-scopes: *a54
+      x-required-scopes: *a55
+      x-api-v1-batch-eligible: true
+      x-api-v1-conditional-scopes:
+        - when: filter.type=saved
+          scopes:
+            - analytics:read
+            - analysis:read
+  /api/v1/sites/{siteId}/analytics/sessions/events:
+    post:
+      operationId: site.analytics.sessionEvents
+      summary: API v1 site analytics sessionEvents operation
+      description: Typed API v1 operation. Authenticate with an API key through the
+        BearerAuth security scheme.
+      tags:
+        - Sessions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: siteId path parameter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeRange:
+                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                filter:
+                  anyOf:
+                    - oneOf:
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: inline
+                            expression:
+                              $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1sessions~1events/post/req\
+                                uestBody/content/application~1json/schema/$defs\
+                                /__schema0"
+                          required:
+                            - type
+                            - expression
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: dsl
+                            expression:
+                              type: string
+                              minLength: 1
+                              maxLength: 65536
+                          required:
+                            - type
+                            - expression
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: saved
+                            id:
+                              type: string
+                              minLength: 1
+                              maxLength: 256
+                          required:
+                            - type
+                            - id
+                          additionalProperties: false
+                    - type: "null"
+                scope:
+                  type: string
+                  enum:
+                    - auto
+                    - event
+                    - session
+                    - visitor
+                sessionId:
+                  type: string
+                  minLength: 1
+                  maxLength: 512
+                page:
+                  $ref: "#/components/schemas/SharedSchema_64d3297ebf12"
+              required:
+                - timeRange
+                - sessionId
+                - page
+              additionalProperties: false
+              $defs:
+                __schema0:
+                  oneOf:
+                    - $ref: "#/components/schemas/SharedSchema_75b932d026c1"
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: and
+                        children:
+                          minItems: 1
+                          maxItems: 128
+                          type: array
+                          items:
+                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1sessions~1events/post/req\
+                              uestBody/content/application~1json/schema/$defs/_\
+                              _schema0"
+                      required:
+                        - kind
+                        - children
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: or
+                        children:
+                          minItems: 1
+                          maxItems: 128
+                          type: array
+                          items:
+                            $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1sessions~1events/post/req\
+                              uestBody/content/application~1json/schema/$defs/_\
+                              _schema0"
+                      required:
+                        - kind
+                        - children
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        kind:
+                          type: string
+                          const: not
+                        child:
+                          $ref: "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1sessions~1events/post/req\
+                            uestBody/content/application~1json/schema/$defs/__s\
+                            chema0"
+                      required:
+                        - kind
+                        - child
+                      additionalProperties: false
+            example:
+              timeRange:
+                kind: absolute
+                from: 2026-01-01T00:00:00Z
+                to: 2026-01-01T00:00:00Z
+                timeZone: example
+              filter:
+                type: inline
+                expression:
+                  kind: condition
+                  target:
+                    kind: field
+                    field: example
+                  operator: example
+                  value: example
+              scope: auto
+              sessionId: example
+              page: *a54
+      responses:
+        "200":
+          description: Successful response.
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharedSchema_fea62b48b995"
+              example:
+                data:
+                  items:
+                    - id: example
+                      kind: session_start
+                      eventType: example
+                      occurredAt: 0
+                      visitId: example
+                      sessionId: example
+                      visitorId: example
+                      pathname: example
+                      hash: example
+                      title: example
+                      hostname: example
+                      referrerHost: example
+                      referrerUrl: example
+                      country: example
+                      region: example
+                      city: example
+                      browser: example
+                      browserVersion: example
+                      os: example
+                      osVersion: example
+                      deviceType: example
+                      screenWidth: 0
+                      screenHeight: 0
+                      durationMs: 0
+                      performance:
+                        ttfb: 0
+                        fcp: 0
+                        lcp: 0
+                        cls: 0
+                        inp: 0
+                  pagination:
+                    limit: 1
+                    returned: 0
+                    hasMore: false
+                    nextCursor: example
+                meta:
+                  requestId: example
+                  generatedAt: 2026-01-01T00:00:00Z
+                  timeRange:
+                    from: 2026-01-01T00:00:00Z
+                    to: 2026-01-01T00:00:00Z
+                    timeZone: example
+                  source: raw
+                  accuracy: exact
+                  filterScope:
+                    requested: auto
+                    resolved: event
+        "400":
+          description: "API v1 error: validation_failed, invalid_cursor."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: validation_failed
+                  message: Request validation failed.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "403":
+          description: "API v1 error: missing_scope."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: missing_scope
+                  message: The API key lacks the required scope.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "404":
+          description: "API v1 error: resource_not_found."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: resource_not_found
+                  message: Resource not found.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "405":
+          description: "API v1 error: method_not_allowed."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: method_not_allowed
+                  message: The HTTP method is not allowed for this route.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "406":
+          description: "API v1 error: not_acceptable."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: not_acceptable
+                  message: The requested response media type is not acceptable.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "415":
+          description: "API v1 error: unsupported_media_type."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: unsupported_media_type
+                  message: The request media type is unsupported.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "500":
+          description: "API v1 error: internal_error."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: internal_error
+                  message: An internal error occurred.
+                  retryable: false
+                meta:
+                  requestId: req_01J7EXAMPLE
+        "504":
+          description: "API v1 error: deadline_exceeded."
+          headers:
+            X-Request-Id:
+              required: true
+              schema:
+                type: string
+                minLength: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiV1ErrorEnvelope"
+              example:
+                error:
+                  code: deadline_exceeded
+                  message: The analytics query exceeded its deadline.
+                  retryable: true
+                meta:
+                  requestId: req_01J7EXAMPLE
+      x-api-v1-lifecycle: exposed
+      x-api-v1-scopes: &a56
+        - analytics:read
+      x-required-scopes: *a56
       x-api-v1-batch-eligible: true
       x-api-v1-conditional-scopes:
         - when: filter.type=saved
@@ -18005,9 +17950,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a55
+      x-api-v1-scopes: &a57
         - analytics:read
-      x-required-scopes: *a55
+      x-required-scopes: *a57
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/active-visitors:
     post:
@@ -18244,9 +18189,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a56
+      x-api-v1-scopes: &a58
         - analytics:read
-      x-required-scopes: *a56
+      x-required-scopes: *a58
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/events:
     post:
@@ -18539,9 +18484,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a57
+      x-api-v1-scopes: &a59
         - analytics:read
-      x-required-scopes: *a57
+      x-required-scopes: *a59
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/analytics/realtime/sessions:
     post:
@@ -18820,9 +18765,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a58
+      x-api-v1-scopes: &a60
         - analytics:read
-      x-required-scopes: *a58
+      x-required-scopes: *a60
       x-api-v1-batch-eligible: true
   /api/v1/sites:
     get:
@@ -18966,9 +18911,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a59
+      x-api-v1-scopes: &a61
         - site:read
-      x-required-scopes: *a59
+      x-required-scopes: *a61
       x-api-v1-batch-eligible: false
     post:
       operationId: sites.create
@@ -19186,9 +19131,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a60
+      x-api-v1-scopes: &a62
         - site:write
-      x-required-scopes: *a60
+      x-required-scopes: *a62
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}:
     get:
@@ -19309,9 +19254,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a61
+      x-api-v1-scopes: &a63
         - site:read
-      x-required-scopes: *a61
+      x-required-scopes: *a63
       x-api-v1-batch-eligible: false
     patch:
       operationId: sites.update
@@ -19552,9 +19497,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a62
+      x-api-v1-scopes: &a64
         - site:write
-      x-required-scopes: *a62
+      x-required-scopes: *a64
       x-api-v1-batch-eligible: false
     delete:
       operationId: sites.delete
@@ -19654,9 +19599,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a63
+      x-api-v1-scopes: &a65
         - site:write
-      x-required-scopes: *a63
+      x-required-scopes: *a65
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/tracking:
     get:
@@ -19780,9 +19725,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a64
+      x-api-v1-scopes: &a66
         - site_config:read
-      x-required-scopes: *a64
+      x-required-scopes: *a66
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.tracking.update
@@ -20021,9 +19966,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a65
+      x-api-v1-scopes: &a67
         - site_config:write
-      x-required-scopes: *a65
+      x-required-scopes: *a67
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/privacy:
     get:
@@ -20140,9 +20085,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a66
+      x-api-v1-scopes: &a68
         - site_config:read
-      x-required-scopes: *a66
+      x-required-scopes: *a68
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.privacy.update
@@ -20349,9 +20294,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a67
+      x-api-v1-scopes: &a69
         - site_config:write
-      x-required-scopes: *a67
+      x-required-scopes: *a69
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/sharing:
     get:
@@ -20476,9 +20421,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a68
+      x-api-v1-scopes: &a70
         - site_config:read
-      x-required-scopes: *a68
+      x-required-scopes: *a70
       x-api-v1-batch-eligible: false
     patch:
       operationId: settings.sharing.update
@@ -20714,9 +20659,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a69
+      x-api-v1-scopes: &a71
         - site_config:write
-      x-required-scopes: *a69
+      x-required-scopes: *a71
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/settings/tracking-script:
     get:
@@ -20846,9 +20791,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a70
+      x-api-v1-scopes: &a72
         - site_config:read
-      x-required-scopes: *a70
+      x-required-scopes: *a72
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/funnels:
     get:
@@ -21028,9 +20973,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a71
+      x-api-v1-scopes: &a73
         - analysis:read
-      x-required-scopes: *a71
+      x-required-scopes: *a73
       x-api-v1-batch-eligible: false
     post:
       operationId: funnels.create
@@ -21252,9 +21197,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a72
+      x-api-v1-scopes: &a74
         - analysis:write
-      x-required-scopes: *a72
+      x-required-scopes: *a74
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/funnels/{funnelId}:
     get:
@@ -21385,9 +21330,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a73
+      x-api-v1-scopes: &a75
         - analysis:read
-      x-required-scopes: *a73
+      x-required-scopes: *a75
       x-api-v1-batch-eligible: false
     patch:
       operationId: funnels.update
@@ -21614,9 +21559,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a74
+      x-api-v1-scopes: &a76
         - analysis:write
-      x-required-scopes: *a74
+      x-required-scopes: *a76
       x-api-v1-batch-eligible: false
     delete:
       operationId: funnels.delete
@@ -21724,9 +21669,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a75
+      x-api-v1-scopes: &a77
         - analysis:write
-      x-required-scopes: *a75
+      x-required-scopes: *a77
       x-api-v1-batch-eligible: false
   /api/v1/sites/{siteId}/saved-filters:
     get:
@@ -22019,9 +21964,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a76
+      x-api-v1-scopes: &a78
         - analysis:read
-      x-required-scopes: *a76
+      x-required-scopes: *a78
       x-api-v1-batch-eligible: true
   /api/v1/sites/{siteId}/saved-filters/{savedFilterId}:
     get:
@@ -22269,9 +22214,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a77
+      x-api-v1-scopes: &a79
         - analysis:read
-      x-required-scopes: *a77
+      x-required-scopes: *a79
       x-api-v1-batch-eligible: true
   /api/v1/batch:
     post:
@@ -22531,9 +22476,9 @@ paths:
                 meta:
                   requestId: req_01J7EXAMPLE
       x-api-v1-lifecycle: exposed
-      x-api-v1-scopes: &a78
+      x-api-v1-scopes: &a80
         - analytics:read
-      x-required-scopes: *a78
+      x-required-scopes: *a80
       x-api-v1-batch-eligible: false
   /collect:
     post:
@@ -22543,7 +22488,7 @@ paths:
       tags:
         - Ingestion
       x-required-scopes: []
-      security: &a79 []
+      security: &a81 []
       requestBody:
         description: Tracker event payload. The tracker SDK is the authoritative
           producer for this ingestion protocol.
@@ -22554,7 +22499,7 @@ paths:
               additionalProperties: true
             example: {}
       responses:
-        "200": &a80
+        "200": &a82
           description: JSON response. The response shape is owned by the dashboard
             protocol and is not part of the public API v1 contract.
           content:
@@ -22562,7 +22507,7 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-        "400": &a81
+        "400": &a83
           description: Error response.
           content:
             application/json:
@@ -22576,7 +22521,7 @@ paths:
       tags:
         - Ingestion
       x-required-scopes: []
-      security: *a79
+      security: *a81
       parameters:
         - name: siteId
           in: query
@@ -22624,10 +22569,10 @@ paths:
       tags:
         - Discovery
       x-required-scopes: []
-      security: *a79
+      security: *a81
       responses:
-        "200": *a80
-        "400": *a81
+        "200": *a82
+        "400": *a83
   /.well-known/skills.json:
     get:
       operationId: wellKnown.skills
@@ -22636,10 +22581,10 @@ paths:
       tags:
         - Discovery
       x-required-scopes: []
-      security: *a79
+      security: *a81
       responses:
-        "200": *a80
-        "400": *a81
+        "200": *a82
+        "400": *a83
   /.well-known/health:
     get:
       operationId: wellKnown.health
@@ -22648,10 +22593,10 @@ paths:
       tags:
         - Health
       x-required-scopes: []
-      security: *a79
+      security: *a81
       responses:
-        "200": *a80
-        "400": *a81
+        "200": *a82
+        "400": *a83
 components:
   schemas:
     Meta:
@@ -22770,8 +22715,44 @@ components:
         - by
         - direction
       additionalProperties: false
+    SharedSchema_64d3297ebf12:
+      default: *a54
+      type: object
+      properties:
+        limit:
+          default: 100
+          type: integer
+          minimum: 1
+          maximum: 500
+        cursor:
+          anyOf:
+            - type: string
+              minLength: 1
+              maxLength: 12288
+            - type: "null"
+      required:
+        - limit
+      additionalProperties: false
+    SharedSchema_70ada349f9c7:
+      default: *a24
+      type: object
+      properties:
+        limit:
+          default: 20
+          type: integer
+          minimum: 1
+          maximum: 200
+        cursor:
+          anyOf:
+            - type: string
+              minLength: 1
+              maxLength: 12288
+            - type: "null"
+      required:
+        - limit
+      additionalProperties: false
     SharedSchema_368ccef822b3:
-      default: *a48
+      default: *a49
       type: object
       properties:
         limit:
@@ -23713,11 +23694,11 @@ components:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_0db83bd64226:
+    SharedSchema_fea62b48b995:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_07e4fcb61561"
+          $ref: "#/components/schemas/SharedSchema_dec1b9541133"
         meta:
           $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
       required:
@@ -23952,6 +23933,29 @@ components:
         - to
         - timeZone
       additionalProperties: false
+    SharedSchema_84bd4e13bfb1:
+      type: object
+      properties:
+        limit:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        returned:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        hasMore:
+          type: boolean
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - limit
+        - returned
+        - hasMore
+        - nextCursor
+      additionalProperties: false
     SharedSchema_96182d97894c:
       type: object
       properties:
@@ -24019,13 +24023,16 @@ components:
         - interval
         - points
       additionalProperties: false
-    SharedSchema_07e4fcb61561:
+    SharedSchema_dec1b9541133:
       type: object
       properties:
         items:
           $ref: "#/components/schemas/SharedSchema_3a8f76151019"
+        pagination:
+          $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
       required:
         - items
+        - pagination
       additionalProperties: false
     SharedSchema_75b932d026c1:
       type: object

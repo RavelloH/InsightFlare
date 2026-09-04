@@ -1,3 +1,8 @@
+import {
+  analyticsFilterRegistry,
+  filterFingerprint,
+  type QueryAudience,
+} from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -8,6 +13,45 @@ import type {
   QueryWindow,
 } from "./core";
 import { buildEventFilteredSourceCte, queryD1All } from "./core";
+import {
+  decodePageCursor,
+  encodePageCursor,
+  type PageResult,
+  pageResult,
+  paginationBinding,
+} from "./pagination";
+
+export interface EventTypeAggregateCursor {
+  readonly views: number;
+  readonly sessions: number;
+  readonly value: string;
+}
+
+function eventTypeCursorBinding(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  search?: string,
+  audience: QueryAudience = "private-dashboard",
+): Promise<string> {
+  return paginationBinding([
+    "analytics-event-types-v1",
+    audience,
+    siteId,
+    window.startMs,
+    window.endExclusiveMs,
+    window.timeZone,
+    filterFingerprint(filters, analyticsFilterRegistry),
+    search?.trim().toLowerCase() ?? "",
+  ]);
+}
+
+function searchPattern(search?: string): string | null {
+  const normalized = search?.trim().toLowerCase();
+  return normalized
+    ? `%${normalized.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
+    : null;
+}
 
 async function queryCustomEventNamesFromD1(
   env: Env,
@@ -75,6 +119,110 @@ export async function queryEventTypeAggregate(
     filters,
     limit,
     search,
+  );
+}
+
+export async function queryEventTypePageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  search?: string,
+  cursor?: EventTypeAggregateCursor | null,
+  audience: QueryAudience = "private-dashboard",
+): Promise<PageResult<DimensionRow>> {
+  const source = buildEventFilteredSourceCte(siteId, window, filters);
+  const pattern = searchPattern(search);
+  const cursorClause = cursor
+    ? `
+AND (
+  views < ?
+  OR (views = ? AND sessions < ?)
+  OR (views = ? AND sessions = ? AND value > ?)
+)`
+    : "";
+  const sql = `
+${source.cte},
+event_rollup AS (
+  SELECT
+    COALESCE(event_name, '') AS value,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM filtered_events
+  GROUP BY value
+)
+SELECT value, views, sessions, visitors
+FROM event_rollup
+WHERE TRIM(value) != ''
+${pattern ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
+${cursorClause}
+ORDER BY views DESC, sessions DESC, value ASC
+LIMIT ?
+`;
+  const cursorBindings = cursor
+    ? [
+        cursor.views,
+        cursor.views,
+        cursor.sessions,
+        cursor.views,
+        cursor.sessions,
+        cursor.value,
+      ]
+    : [];
+  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...source.bindings,
+    ...(pattern ? [pattern] : []),
+    ...cursorBindings,
+    limit + 1,
+  ]);
+  const mapped = rows.map((row) => ({
+    value: String(row.value ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
+  const page = pageResult(mapped, limit);
+  const binding = await eventTypeCursorBinding(
+    siteId,
+    window,
+    filters,
+    search,
+    audience,
+  );
+  const nextCursor =
+    page.hasMore && page.last
+      ? await encodePageCursor(env, binding, {
+          views: page.last.views,
+          sessions: page.last.sessions,
+          value: page.last.value,
+        })
+      : null;
+  return {
+    items: page.rows,
+    pagination: {
+      limit,
+      returned: page.rows.length,
+      hasMore: page.hasMore,
+      nextCursor,
+    },
+  };
+}
+
+export async function decodeEventTypeCursor(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  search?: string,
+  cursor?: string | null,
+  audience: QueryAudience = "private-dashboard",
+): Promise<EventTypeAggregateCursor | null> {
+  return decodePageCursor<EventTypeAggregateCursor>(
+    env,
+    await eventTypeCursorBinding(siteId, window, filters, search, audience),
+    cursor,
   );
 }
 

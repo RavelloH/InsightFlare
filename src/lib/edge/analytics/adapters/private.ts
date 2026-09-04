@@ -195,6 +195,18 @@ export function executePrivateQuery(
         ),
     );
   }
+  if (input.pathname === "referrer-summary") {
+    return import("../composition/protocol/pages-contract-adapter").then(
+      ({ handleReferrerSummaryContract }) =>
+        handleReferrerSummaryContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
   if (input.pathname === "pages-dashboard") {
     return import("../composition/protocol/pages-contract-adapter").then(
       ({ handlePagesDashboardContract }) =>
@@ -404,6 +416,26 @@ export function executePrivateQuery(
           input.env,
           input.siteId,
           input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (
+    input.pathname === "visitor-events" ||
+    input.pathname === "visitor-sessions" ||
+    input.pathname === "session-events"
+  ) {
+    return import("../composition/protocol/journeys-contract-adapter").then(
+      ({ handleJourneyCollectionContract }) =>
+        handleJourneyCollectionContract(
+          input.env,
+          input.siteId,
+          input.url,
+          input.pathname as
+            | "visitor-events"
+            | "visitor-sessions"
+            | "session-events",
           ctx,
           queryContext,
         ),

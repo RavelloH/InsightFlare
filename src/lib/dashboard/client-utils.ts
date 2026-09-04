@@ -1,5 +1,12 @@
-import type { PrivateRequestParams } from "@/lib/dashboard/client-data-types";
-import type { OverviewTabData } from "@/lib/edge-client";
+import type {
+  DashboardListRequestOptions,
+  PrivateRequestParams,
+} from "@/lib/dashboard/client-data-types";
+import type {
+  OverviewTabData,
+  PaginatedCollection,
+  PaginationMeta,
+} from "@/lib/edge-client";
 import {
   analyticsFilterRegistry,
   type FilterDocument,
@@ -11,8 +18,63 @@ import {
 
 import type { OverviewTabRows } from "./client-data-types";
 
+function normalizedPagination(
+  value: unknown,
+  fallbackLimit: number,
+  itemCount: number,
+): PaginationMeta {
+  const record =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const limit =
+    typeof record.limit === "number" && Number.isFinite(record.limit)
+      ? record.limit
+      : fallbackLimit;
+  const returned =
+    typeof record.returned === "number" && Number.isFinite(record.returned)
+      ? record.returned
+      : itemCount;
+  return {
+    limit,
+    returned,
+    hasMore: record.hasMore === true,
+    nextCursor:
+      typeof record.nextCursor === "string" ? record.nextCursor : null,
+  };
+}
+
+/** Normalize collection responses at the HTTP boundary before pagination code reads them. */
+export function normalizePaginatedCollection<T>(
+  value: unknown,
+  fallbackLimit = 0,
+): PaginatedCollection<T> {
+  if (Array.isArray(value)) {
+    return {
+      items: value as T[],
+      pagination: normalizedPagination(undefined, fallbackLimit, value.length),
+    };
+  }
+  const record =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const items = Array.isArray(record.items) ? (record.items as T[]) : [];
+  return {
+    items,
+    pagination: normalizedPagination(
+      record.pagination,
+      fallbackLimit,
+      items.length,
+    ),
+  };
+}
+
 export function normalizeOverviewRows(
-  rows: OverviewTabData["data"] | Array<Record<string, unknown>> | undefined,
+  rows:
+    | OverviewTabData["data"]["items"]
+    | Array<Record<string, unknown>>
+    | undefined,
 ): OverviewTabRows {
   if (!Array.isArray(rows)) return [];
   return rows.map((row) => ({
@@ -81,6 +143,22 @@ export function withFilters(
     next[key] = value;
   }
   return next;
+}
+
+export function withPagination(
+  params: PrivateRequestParams,
+  options?: DashboardListRequestOptions,
+  defaultLimit?: number,
+): PrivateRequestParams {
+  return {
+    ...params,
+    ...(options?.limit !== undefined
+      ? { limit: options.limit }
+      : defaultLimit !== undefined
+        ? { limit: defaultLimit }
+        : {}),
+    ...(options?.cursor ? { cursor: options.cursor } : {}),
+  };
 }
 
 export function toQueryString(params?: PrivateRequestParams): string {

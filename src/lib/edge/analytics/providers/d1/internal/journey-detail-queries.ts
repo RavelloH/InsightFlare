@@ -906,3 +906,20 @@ export async function querySessionDetailFromD1(
     performance: summarizeJourneyPerformance(events),
   };
 }
+
+export function stripVisitorDetailCollections<
+  T extends {
+    readonly sessions: readonly unknown[];
+    readonly events: readonly unknown[];
+  },
+>(detail: T) {
+  const { sessions: _sessions, events: _events, ...summary } = detail;
+  return summary;
+}
+
+export function stripSessionDetailCollections<
+  T extends { readonly events: readonly unknown[] },
+>(detail: T) {
+  const { events: _events, ...summary } = detail;
+  return summary;
+}

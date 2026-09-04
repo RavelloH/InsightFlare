@@ -8,6 +8,7 @@ import type { OverviewTabRows } from "@/lib/dashboard/client-data";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 
 export type ReferrerTab = "domain" | "link" | "channel";
+export type ReferrerSortKey = "views" | "visitors";
 
 export interface ReferrerBreakdownRow {
   key: string;

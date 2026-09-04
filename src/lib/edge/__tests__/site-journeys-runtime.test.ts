@@ -5,6 +5,8 @@ vi.mock(
   () => ({
     queryVisitorDetailFromD1: vi.fn(),
     querySessionDetailFromD1: vi.fn(),
+    stripVisitorDetailCollections: vi.fn((detail) => detail),
+    stripSessionDetailCollections: vi.fn((detail) => detail),
   }),
 );
 vi.mock(
@@ -14,6 +16,7 @@ vi.mock(
     parseVisitorListCursor: vi.fn(),
     querySessionListPageFromD1: vi.fn(),
     queryJourneyEventsFromD1: vi.fn(),
+    queryJourneyEventsPageFromD1: vi.fn(),
     queryJourneyTargetExistsFromD1: vi.fn(),
     querySessionsFromD1: vi.fn(),
     queryVisitorListPageFromD1: vi.fn(),
@@ -30,6 +33,7 @@ import {
   parseSessionListCursor,
   parseVisitorListCursor,
   queryJourneyEventsFromD1,
+  queryJourneyEventsPageFromD1,
   queryJourneyTargetExistsFromD1,
   querySessionListPageFromD1,
   querySessionsFromD1,
@@ -289,8 +293,19 @@ describe("site journey detail runtime", () => {
 
   it("reads all journey trajectories with the requested target and limit", async () => {
     vi.mocked(queryJourneyTargetExistsFromD1).mockResolvedValue(true);
-    vi.mocked(queryJourneyEventsFromD1).mockResolvedValue([]);
-    vi.mocked(querySessionsFromD1).mockResolvedValue([]);
+    vi.mocked(queryJourneyEventsPageFromD1).mockResolvedValue({
+      items: [],
+      pagination: {
+        limit: 50,
+        returned: 0,
+        hasMore: false,
+        nextCursor: null,
+      },
+    });
+    vi.mocked(querySessionListPageFromD1).mockResolvedValue({
+      rows: [],
+      nextCursor: null,
+    });
     const common = {
       ...base,
       filters: { version: 1 as const, root: null },
@@ -300,13 +315,22 @@ describe("site journey detail runtime", () => {
 
     await expect(
       readSiteVisitorEvents({ ...common, visitorId: "visitor-1" }),
-    ).resolves.toEqual({ items: [] });
+    ).resolves.toMatchObject({
+      items: [],
+      pagination: { limit: 50, returned: 0, hasMore: false, nextCursor: null },
+    });
     await expect(
       readSiteSessionEvents({ ...common, sessionId: "session-1" }),
-    ).resolves.toEqual({ items: [] });
+    ).resolves.toMatchObject({
+      items: [],
+      pagination: { limit: 50, returned: 0, hasMore: false, nextCursor: null },
+    });
     await expect(
       readSiteVisitorSessions({ ...common, visitorId: "visitor-1" }),
-    ).resolves.toEqual({ items: [] });
+    ).resolves.toMatchObject({
+      items: [],
+      pagination: { limit: 50, returned: 0, hasMore: false, nextCursor: null },
+    });
 
     expect(queryJourneyTargetExistsFromD1).toHaveBeenCalledWith(
       base.env,
@@ -320,29 +344,33 @@ describe("site journey detail runtime", () => {
       { type: "session", value: "session-1" },
       base.window,
     );
-    expect(queryJourneyEventsFromD1).toHaveBeenCalledWith(
+    expect(queryJourneyEventsPageFromD1).toHaveBeenCalledWith(
       base.env,
       "site-1",
       base.window,
       { version: 1, root: null },
       { type: "visitor", value: "visitor-1" },
       50,
+      null,
     );
-    expect(queryJourneyEventsFromD1).toHaveBeenCalledWith(
+    expect(queryJourneyEventsPageFromD1).toHaveBeenCalledWith(
       base.env,
       "site-1",
       base.window,
       { version: 1, root: null },
       { type: "session", value: "session-1" },
       50,
+      null,
     );
-    expect(querySessionsFromD1).toHaveBeenCalledWith(
+    expect(querySessionListPageFromD1).toHaveBeenCalledWith(
       base.env,
       "site-1",
       base.window,
       { version: 1, root: null },
-      50,
-      { type: "visitor", value: "visitor-1" },
+      expect.objectContaining({
+        pageSize: 50,
+        target: { type: "visitor", value: "visitor-1" },
+      }),
     );
   });
 });

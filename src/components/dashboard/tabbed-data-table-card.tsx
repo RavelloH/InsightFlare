@@ -24,6 +24,7 @@ import {
   TabbedScrollMaskCard,
   type TabbedScrollMaskCardTab,
 } from "@/components/dashboard/tabbed-scroll-mask-card";
+import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { Button } from "@/components/ui/button";
 import { Clickable } from "@/components/ui/clickable";
 import {
@@ -49,6 +50,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -58,6 +61,19 @@ type NonEmptyArray<T> = readonly [T, ...T[]];
 const EMPTY_ROWS_BY_TAB = {};
 
 export type TabbedDataTableSortDirection = "asc" | "desc";
+
+export interface TabbedDataTableExportPage<
+  TRow extends TabbedDataTableRowBase,
+> {
+  items: readonly TRow[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+export interface TabbedDataTableExportPageOptions {
+  cursor: string | null;
+  signal: AbortSignal;
+}
 
 export interface TabbedDataTableSortState<TKey extends string = string> {
   key: TKey;
@@ -156,7 +172,6 @@ export interface TabbedDataTableExportLabels {
   fileNameLabel?: string;
   download?: string;
   empty?: string;
-  allTabsUnavailable?: string;
 }
 
 export interface TabbedDataTableExportConfig<
@@ -194,6 +209,14 @@ export interface TabbedDataTableCardProps<
   ) => ReactNode;
   rowsByTab?: Partial<Record<TTab, readonly TRow[] | null>>;
   loadingByTab?: Partial<Record<TTab, boolean>>;
+  loadingMoreByTab?: Partial<Record<TTab, boolean>>;
+  hasMoreByTab?: Partial<Record<TTab, boolean>>;
+  nextCursorByTab?: Partial<Record<TTab, string | null>>;
+  onLoadMore?: (tab: TTab) => void;
+  loadPageForExport?: (
+    tab: TTab,
+    options: TabbedDataTableExportPageOptions,
+  ) => Promise<TabbedDataTableExportPage<TRow>>;
   loadRows?: (tab: TTab, signal: AbortSignal) => Promise<readonly TRow[]>;
   normalizeRows?: (rows: readonly TRow[], tab: TTab) => TRow[];
   filterRows?: (rows: readonly TRow[], tab: TTab) => TRow[];
@@ -213,6 +236,8 @@ export interface TabbedDataTableCardProps<
   defaultSort?: TabbedDataTableSortState<TKey>;
   sortByTab?: Partial<Record<TTab, TabbedDataTableSortState<TKey>>>;
   onSortChange?: (tab: TTab, sort: TabbedDataTableSortState<TKey>) => void;
+  searchValue?: string | ((tab: TTab) => string);
+  onSearchTermChange?: (value: string, tab: TTab) => void;
   sortActionLabel?: (columnLabel: string) => string;
   labelColumnLabel?: string | ((tab: TabbedDataTableTab<TTab>) => string);
   loadingLabel: string;
@@ -356,7 +381,6 @@ const DEFAULT_EXPORT_LABELS = {
   fileNameLabel: "File name",
   download: "Export CSV",
   empty: "No rows available to export.",
-  allTabsUnavailable: "All tabs are available after their data has loaded.",
 } satisfies Required<TabbedDataTableExportLabels>;
 
 function TabbedDataTableCardImpl<
@@ -370,6 +394,11 @@ function TabbedDataTableCardImpl<
   renderLabel,
   rowsByTab,
   loadingByTab,
+  loadingMoreByTab,
+  hasMoreByTab,
+  nextCursorByTab,
+  onLoadMore,
+  loadPageForExport,
   loadRows,
   normalizeRows = defaultNormalizeRows,
   filterRows,
@@ -381,6 +410,8 @@ function TabbedDataTableCardImpl<
   defaultSort,
   sortByTab: controlledSortByTab,
   onSortChange,
+  searchValue,
+  onSearchTermChange,
   sortActionLabel,
   labelColumnLabel,
   loadingLabel,
@@ -444,12 +475,26 @@ function TabbedDataTableCardImpl<
   const [searchTab, setSearchTab] = useState<TTab | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [exportScope, setExportScope] =
     useState<TabbedDataTableExportScope>("currentTab");
   const [exportRows, setExportRows] =
     useState<TabbedDataTableExportRows>("currentView");
   const [exportFilename, setExportFilename] = useState("");
-  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const exportAbortControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => exportAbortControllerRef.current?.abort(), []);
+  const resolvedSearchTerm =
+    typeof searchValue === "function"
+      ? searchValue(searchTab ?? activeTab)
+      : (searchValue ?? searchTerm);
+  const deferredSearchTerm = useDeferredValue(resolvedSearchTerm);
+  const updateSearchTerm = useCallback(
+    (value: string) => {
+      setSearchTerm(value);
+      onSearchTermChange?.(value, searchTab ?? activeTab);
+    },
+    [activeTab, onSearchTermChange, searchTab],
+  );
   const latestTabsRef = useRef(tabs);
   const latestColumnsRef = useRef(columns);
   const externalRowsByTab = (rowsByTab ?? EMPTY_ROWS_BY_TAB) as Partial<
@@ -529,8 +574,8 @@ function TabbedDataTableCardImpl<
 
   useEffect(() => {
     if (searchTab !== null) return;
-    setSearchTerm("");
-  }, [searchTab]);
+    updateSearchTerm("");
+  }, [searchTab, updateSearchTerm]);
 
   const effectiveSortByTab = useMemo(
     () =>
@@ -598,8 +643,8 @@ function TabbedDataTableCardImpl<
   );
 
   const sortRowsForTab = useCallback(
-    (tabValue: TTab): TRow[] => {
-      const tabRows = resolvedRowsByTab[tabValue] ?? [];
+    (tabValue: TTab, sourceRows?: readonly TRow[]): TRow[] => {
+      const tabRows = sourceRows ?? resolvedRowsByTab[tabValue] ?? [];
       const tabColumns = getColumnsForTab(columns, tabValue);
       const sort = effectiveSortByTab[tabValue];
       const sortColumn =
@@ -696,10 +741,29 @@ function TabbedDataTableCardImpl<
   const activeSearchColumns = getColumnsForTab(columns, activeSearchTab);
   const colSpan = 1 + activeColumns.length;
   const searchColSpan = 1 + activeSearchColumns.length;
-  const allExportTabsLoaded = tabs.every(
-    (tab) =>
-      resolvedRowsByTab[tab.value] !== null && !resolvedLoadingByTab[tab.value],
-  );
+  const activeHasMore = Boolean(hasMoreByTab?.[activeTab]);
+  const activeLoadingMore = Boolean(loadingMoreByTab?.[activeTab]);
+  const loadMoreInFlightRef = useRef(false);
+  useEffect(() => {
+    if (!activeLoadingMore) loadMoreInFlightRef.current = false;
+  }, [activeLoadingMore, activeHasMore, activeRows.length, activeTab]);
+  const loadMore = useCallback(() => {
+    if (!activeHasMore || activeLoadingMore || loadMoreInFlightRef.current) {
+      return;
+    }
+    loadMoreInFlightRef.current = true;
+    onLoadMore?.(activeTab);
+  }, [activeHasMore, activeLoadingMore, activeTab, onLoadMore]);
+  const loadMoreSentinelRef = useInfiniteTableSentinel({
+    enabled:
+      Boolean(onLoadMore) &&
+      !activeLoading &&
+      !activeLoadingMore &&
+      activeHasMore,
+    onReachEnd: loadMore,
+    rootMargin: "0px",
+    triggerDistance: 0,
+  });
 
   const activeSearchTitle =
     searchConfig?.title?.(activeSearchTabMeta) ??
@@ -719,15 +783,10 @@ function TabbedDataTableCardImpl<
 
   useEffect(() => {
     if (!exportOpen) return;
-    setExportScope(
-      exportConfig?.defaultScope === "allTabs" && allExportTabsLoaded
-        ? "allTabs"
-        : "currentTab",
-    );
+    setExportScope(exportConfig?.defaultScope ?? "currentTab");
     setExportRows(exportConfig?.defaultRows ?? "currentView");
     setExportFilename(defaultExportFilename);
   }, [
-    allExportTabsLoaded,
     defaultExportFilename,
     exportConfig?.defaultRows,
     exportConfig?.defaultScope,
@@ -960,6 +1019,44 @@ function TabbedDataTableCardImpl<
     );
   }
 
+  function renderLoadMoreRows(
+    tab: TTab,
+    metricColumns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[],
+  ) {
+    return Array.from({ length: 3 }, (_, rowIndex) => (
+      <TableRow
+        key={`load-more-skeleton-${tab}-${rowIndex}`}
+        aria-hidden="true"
+        className="pointer-events-none hover:bg-transparent"
+      >
+        <TableCell className="whitespace-normal p-0 align-top">
+          <div className="px-4 py-2">
+            <Skeleton
+              className={cn("h-4", rowIndex === 1 ? "w-[72%]" : "w-[58%]")}
+            />
+          </div>
+        </TableCell>
+        {metricColumns.map((column, columnIndex) => (
+          <TableCell key={column.key} className="p-0">
+            <div
+              ref={
+                columnIndex === metricColumns.length - 1
+                  ? loadMoreSentinelRef
+                  : undefined
+              }
+              className={cn(
+                "flex justify-end px-2 py-2",
+                columnIndex === metricColumns.length - 1 && "px-4",
+              )}
+            >
+              <Skeleton className="h-4 w-14" />
+            </div>
+          </TableCell>
+        ))}
+      </TableRow>
+    ));
+  }
+
   function rowLabel(row: TRow, tab: TTab) {
     return (
       exportConfig?.getRowLabel?.(row, tab) ??
@@ -981,18 +1078,25 @@ function TabbedDataTableCardImpl<
     );
   }
 
-  function exportRowsForTab(tab: TTab) {
-    if (exportRows === "rawRows") {
-      return rawRowsByTab[tab] ?? [];
-    }
-    return tab === activeTab ? activeRows : sortRowsForTab(tab);
+  function exportRowsForTab(
+    tab: TTab,
+    rowsByTabOverride?: ReadonlyMap<TTab, readonly TRow[]>,
+  ) {
+    const sourceRows = rowsByTabOverride?.has(tab)
+      ? (rowsByTabOverride.get(tab) ?? [])
+      : exportRows === "rawRows"
+        ? (rawRowsByTab[tab] ?? [])
+        : (resolvedRowsByTab[tab] ?? []);
+    return exportRows === "rawRows"
+      ? sourceRows
+      : sortRowsForTab(tab, sourceRows);
   }
 
-  function buildExportCsv() {
+  function buildExportCsv(
+    rowsByTabOverride?: ReadonlyMap<TTab, readonly TRow[]>,
+  ) {
     const selectedTabs =
-      exportScope === "allTabs" && allExportTabsLoaded
-        ? [...tabs]
-        : [activeTabMeta];
+      exportScope === "allTabs" ? [...tabs] : [activeTabMeta];
     const rows: (string | number | null | undefined)[][] = [];
     selectedTabs.forEach((tabMeta, tabIndex) => {
       const tabColumns = getColumnsForTab(columns, tabMeta.value).filter(
@@ -1010,7 +1114,7 @@ function TabbedDataTableCardImpl<
         firstColumnLabel,
         ...tabColumns.map((column) => column.exportLabel ?? column.label),
       ]);
-      exportRowsForTab(tabMeta.value).forEach((row) => {
+      exportRowsForTab(tabMeta.value, rowsByTabOverride).forEach((row) => {
         rows.push([
           rowLabel(row, tabMeta.value),
           ...tabColumns.map((column) =>
@@ -1022,29 +1126,100 @@ function TabbedDataTableCardImpl<
     return buildCsv(rows);
   }
 
-  function countExportRows() {
+  function countExportRows(
+    rowsByTabOverride?: ReadonlyMap<TTab, readonly TRow[]>,
+  ) {
     const selectedTabs =
-      exportScope === "allTabs" && allExportTabsLoaded
-        ? [...tabs]
-        : [activeTabMeta];
+      exportScope === "allTabs" ? [...tabs] : [activeTabMeta];
     return selectedTabs.reduce(
-      (sum, tab) => sum + exportRowsForTab(tab.value).length,
+      (sum, tab) => sum + exportRowsForTab(tab.value, rowsByTabOverride).length,
       0,
     );
   }
 
-  function handleExport() {
-    const csv = buildExportCsv();
-    downloadCsv(exportFilename || defaultExportFilename, csv);
-    setExportOpen(false);
+  async function collectRowsForExport(signal: AbortSignal) {
+    const selectedTabs =
+      exportScope === "allTabs" ? [...tabs] : [activeTabMeta];
+    const rowsByTabForExport = new Map<TTab, readonly TRow[]>();
+
+    for (const tabMeta of selectedTabs) {
+      const tab = tabMeta.value;
+      const loadedRows = resolvedRowsByTab[tab];
+      const tabWasLoaded =
+        loadedRows !== null &&
+        !(resolvedLoadingByTab[tab] && loadedRows.length === 0);
+      let rows = [
+        ...(exportRows === "rawRows"
+          ? (rawRowsByTab[tab] ?? [])
+          : (resolvedRowsByTab[tab] ?? [])),
+      ];
+      let hasMore = Boolean(hasMoreByTab?.[tab]);
+      let cursor = nextCursorByTab?.[tab] ?? null;
+
+      if (!tabWasLoaded && loadPageForExport) {
+        hasMore = true;
+        cursor = null;
+      } else if (!tabWasLoaded && loadRows) {
+        rows = [...(await loadRows(tab, signal))];
+        hasMore = false;
+      }
+
+      const seenCursors = new Set<string>();
+      while (hasMore) {
+        if (!loadPageForExport) {
+          throw new Error("This table cannot export all paginated rows.");
+        }
+        if (cursor !== null) {
+          if (seenCursors.has(cursor)) {
+            throw new Error("The export cursor did not advance.");
+          }
+          seenCursors.add(cursor);
+        }
+
+        const page = await loadPageForExport(tab, { cursor, signal });
+        rows = [...rows, ...page.items];
+        hasMore = page.hasMore;
+        cursor = page.nextCursor;
+        if (hasMore && cursor === null) {
+          throw new Error("The export page did not provide a next cursor.");
+        }
+      }
+
+      rowsByTabForExport.set(tab, rows);
+    }
+
+    return rowsByTabForExport;
+  }
+
+  async function handleExport() {
+    if (exporting) return;
+    const controller = new AbortController();
+    exportAbortControllerRef.current = controller;
+    setExporting(true);
+    try {
+      const rowsByTabForExport = await collectRowsForExport(controller.signal);
+      if (countExportRows(rowsByTabForExport) === 0) return;
+      const csv = buildExportCsv(rowsByTabForExport);
+      downloadCsv(exportFilename || defaultExportFilename, csv);
+      setExportOpen(false);
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) {
+        console.error("Failed to export table data", error);
+      }
+    } finally {
+      if (exportAbortControllerRef.current === controller) {
+        exportAbortControllerRef.current = null;
+      }
+      setExporting(false);
+    }
   }
 
   const searchContent =
     searchEnabled && searchTab !== null ? (
       <div className="space-y-3">
         <Input
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
+          value={resolvedSearchTerm}
+          onChange={(event) => updateSearchTerm(event.target.value)}
           placeholder={activeSearchPlaceholder}
         />
         <VerticalScrollMask className="max-h-[60vh]" contentClassName="pr-1">
@@ -1127,9 +1302,21 @@ function TabbedDataTableCardImpl<
 
   const exportRowCount =
     exportEnabled && !headerHidden && exportOpen ? countExportRows() : 0;
+  const exportCanLoadRows =
+    Boolean(loadPageForExport || loadRows) &&
+    (exportScope === "allTabs" ||
+      resolvedRowsByTab[activeTab] === null ||
+      Boolean(hasMoreByTab?.[activeTab]));
+  const anyTabLoadingMore = Object.values(loadingMoreByTab ?? {}).some(Boolean);
   const exportPanel =
     exportEnabled && !headerHidden && exportOpen ? (
-      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+      <Dialog
+        open={exportOpen}
+        onOpenChange={(open) => {
+          setExportOpen(open);
+          if (!open) exportAbortControllerRef.current?.abort();
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle icon={RiDownloadLine}>
@@ -1158,16 +1345,11 @@ function TabbedDataTableCardImpl<
                   <SelectItem value="currentTab">
                     {exportLabels.currentTab}
                   </SelectItem>
-                  <SelectItem value="allTabs" disabled={!allExportTabsLoaded}>
+                  <SelectItem value="allTabs">
                     {exportLabels.allTabs}
                   </SelectItem>
                 </SelectContent>
               </Select>
-              {!allExportTabsLoaded ? (
-                <p className="text-xs text-muted-foreground">
-                  {exportLabels.allTabsUnavailable}
-                </p>
-              ) : null}
             </div>
             <div className="grid gap-2">
               <label
@@ -1215,9 +1397,17 @@ function TabbedDataTableCardImpl<
             ) : null}
           </div>
           <DialogFooter>
-            <Button onClick={handleExport} disabled={exportRowCount === 0}>
-              <RiDownloadLine />
-              {exportLabels.download}
+            <Button
+              onClick={handleExport}
+              disabled={
+                exporting ||
+                anyTabLoadingMore ||
+                (exportRowCount === 0 && !exportCanLoadRows)
+              }
+              aria-busy={exporting}
+            >
+              {exporting ? <Spinner className="size-4" /> : <RiDownloadLine />}
+              {exporting ? loadingLabel : exportLabels.download}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1263,7 +1453,12 @@ function TabbedDataTableCardImpl<
           colSpan={colSpan}
           header={renderTableHeader(activeTab, activeColumns)}
           rows={renderRows(activeTab, activeRows, activeColumns, "card")}
-          contentKey={`card-${requestKey ?? ""}-${activeTab}-${activeRows.length}`}
+          footer={
+            activeHasMore && onLoadMore
+              ? renderLoadMoreRows(activeTab, activeColumns)
+              : null
+          }
+          contentKey={`card-${requestKey ?? ""}-${activeTab}`}
         />
       </TabbedScrollMaskCard>
       {searchPanel}

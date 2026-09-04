@@ -52,6 +52,7 @@ import {
   generateDemoPagesDashboard,
   generateDemoPerformance,
   generateDemoReferrers,
+  generateDemoReferrerSummary,
   generateDemoRetention,
   generateDemoTrend,
 } from "@/lib/realtime/mock/analytics";
@@ -79,7 +80,11 @@ import {
   generateDemoEventTypeDetail,
   generateDemoEventTypeFieldValues,
 } from "@/lib/realtime/mock/events";
-import { parseDemoInterval } from "@/lib/realtime/mock/filters";
+import {
+  parseDemoInterval,
+  parseDemoLimit,
+  parseDemoNumber,
+} from "@/lib/realtime/mock/filters";
 import {
   createDemoFunnel,
   deleteDemoFunnel,
@@ -135,6 +140,145 @@ const demoNotificationPreferences: NotificationPreferencesData = {
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+type DemoPagination = {
+  limit: number;
+  returned: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+};
+
+/**
+ * Keep the in-process demo fixture convenient for legacy generator tests while
+ * making JSON serialization match the paginated dashboard contract. Arrays
+ * deliberately expose the old numeric shape in memory; their toJSON method
+ * emits `{ items, pagination }` at the HTTP boundary.
+ */
+type DemoPaginatedArray<T> = T[] & {
+  items: T[];
+  pagination: DemoPagination;
+  toJSON: () => { items: T[]; pagination: DemoPagination };
+};
+
+function demoPaginationLimit(
+  params: Record<string, string | number>,
+  fallback: number,
+): number {
+  return parseDemoLimit(params.limit ?? params.pageSize, fallback, 1, 500);
+}
+
+function demoPaginationOffset(params: Record<string, string | number>): number {
+  return Math.max(0, Math.floor(parseDemoNumber(params.cursor, 0)));
+}
+
+function demoUnboundedCollectionParams(
+  params: Record<string, string | number>,
+): Record<string, string | number> {
+  return {
+    ...params,
+    limit: 500,
+    pageSize: 500,
+    cursor: undefined as never,
+  };
+}
+
+function createDemoPaginatedArray<T>(
+  rows: T[],
+  pagination: DemoPagination,
+): DemoPaginatedArray<T> {
+  const pageRows = rows.slice() as DemoPaginatedArray<T>;
+  Object.defineProperties(pageRows, {
+    items: {
+      configurable: false,
+      enumerable: false,
+      value: pageRows,
+      writable: false,
+    },
+    pagination: {
+      configurable: false,
+      enumerable: false,
+      value: pagination,
+      writable: false,
+    },
+    toJSON: {
+      configurable: false,
+      enumerable: false,
+      value: () => ({ items: pageRows.slice(), pagination }),
+      writable: false,
+    },
+  });
+  return pageRows;
+}
+
+function paginateDemoRows<T>(
+  rows: T[],
+  params: Record<string, string | number>,
+  fallbackLimit: number,
+): DemoPaginatedArray<T> {
+  const limit = demoPaginationLimit(params, fallbackLimit);
+  const offset = demoPaginationOffset(params);
+  const pageRows = rows.slice(offset, offset + limit);
+  const hasMore = offset + pageRows.length < rows.length;
+  return createDemoPaginatedArray(pageRows, {
+    limit,
+    returned: pageRows.length,
+    hasMore,
+    nextCursor: hasMore ? String(offset + pageRows.length) : null,
+  });
+}
+
+function paginateDemoEnvelope(
+  result: unknown,
+  params: Record<string, string | number>,
+  fallbackLimit: number,
+): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  const record = result as Record<string, unknown>;
+  if (!Array.isArray(record.data)) return result;
+  return {
+    ...record,
+    data: paginateDemoRows(record.data, params, fallbackLimit),
+  };
+}
+
+function paginateDemoFieldsEnvelope(
+  result: unknown,
+  params: Record<string, string | number>,
+): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  const record = result as Record<string, unknown>;
+  if (record.ok !== true || !Array.isArray(record.fields)) return result;
+  return {
+    ...record,
+    data: paginateDemoRows(record.fields, params, 100),
+  };
+}
+
+function paginateDemoDetailCollection(
+  result: unknown,
+  collectionKey: "events" | "sessions",
+  params: Record<string, string | number>,
+): { ok: boolean; data: DemoPaginatedArray<unknown> } {
+  const record =
+    result && typeof result === "object"
+      ? (result as Record<string, unknown>)
+      : {};
+  const detail =
+    record.data && typeof record.data === "object"
+      ? (record.data as Record<string, unknown>)
+      : {};
+  const rows = Array.isArray(detail[collectionKey])
+    ? detail[collectionKey]
+    : [];
+  return {
+    ok: record.ok !== false,
+    data: paginateDemoRows(rows, params, 100),
+  };
 }
 
 function requestRuleId(body: unknown): string {
@@ -1033,54 +1177,165 @@ function handleDemoRequestInner(options: {
 
   // Analytics query routes
   if (path.includes("/filter-values")) {
-    return generateDemoFilterValues(
-      siteId,
+    return paginateDemoEnvelope(
+      generateDemoFilterValues(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        path.includes("/api/public/")
+          ? "public-share"
+          : path.includes("/api/v1/")
+            ? "api-v1"
+            : "private-dashboard",
+      ),
       params,
-      path.includes("/api/public/")
-        ? "public-share"
-        : path.includes("/api/v1/")
-          ? "api-v1"
-          : "private-dashboard",
+      50,
     );
   }
   if (path.includes("/overview-page-path")) {
-    return generateDemoOverviewPageTab(siteId, params, "path");
+    return paginateDemoEnvelope(
+      generateDemoOverviewPageTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "path",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-page-title")) {
-    return generateDemoOverviewPageTab(siteId, params, "title");
+    return paginateDemoEnvelope(
+      generateDemoOverviewPageTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "title",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-page-hostname")) {
-    return generateDemoOverviewPageTab(siteId, params, "hostname");
+    return paginateDemoEnvelope(
+      generateDemoOverviewPageTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "hostname",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-page-entry")) {
-    return generateDemoOverviewPageTab(siteId, params, "entry");
+    return paginateDemoEnvelope(
+      generateDemoOverviewPageTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "entry",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-page-exit")) {
-    return generateDemoOverviewPageTab(siteId, params, "exit");
+    return paginateDemoEnvelope(
+      generateDemoOverviewPageTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "exit",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-source-channel")) {
-    return generateDemoOverviewSourceTab(siteId, params, "channel");
+    return paginateDemoEnvelope(
+      generateDemoOverviewSourceTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "channel",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-source-domain")) {
-    return generateDemoOverviewSourceTab(siteId, params, "domain");
+    return paginateDemoEnvelope(
+      generateDemoOverviewSourceTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "domain",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-source-link")) {
-    return generateDemoOverviewSourceTab(siteId, params, "link");
+    return paginateDemoEnvelope(
+      generateDemoOverviewSourceTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "link",
+      ),
+      params,
+      100,
+    );
+  }
+  if (path.includes("/referrer-summary")) {
+    return generateDemoReferrerSummary(siteId, params);
   }
   if (path.includes("/overview-client-browser")) {
-    return generateDemoOverviewClientTab(siteId, params, "browser");
+    return paginateDemoEnvelope(
+      generateDemoOverviewClientTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "browser",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-client-os-version")) {
-    return generateDemoOverviewClientTab(siteId, params, "osVersion");
+    return paginateDemoEnvelope(
+      generateDemoOverviewClientTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "osVersion",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-client-device-type")) {
-    return generateDemoOverviewClientTab(siteId, params, "deviceType");
+    return paginateDemoEnvelope(
+      generateDemoOverviewClientTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "deviceType",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-client-language")) {
-    return generateDemoOverviewClientTab(siteId, params, "language");
+    return paginateDemoEnvelope(
+      generateDemoOverviewClientTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "language",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-client-screen-size")) {
-    return generateDemoOverviewClientTab(siteId, params, "screenSize");
+    return paginateDemoEnvelope(
+      generateDemoOverviewClientTab(
+        siteId,
+        demoUnboundedCollectionParams(params),
+        "screenSize",
+      ),
+      params,
+      100,
+    );
   }
   if (path.includes("/overview-geo-country")) {
     return generateDemoOverviewGeoTab(siteId, params, "country");
@@ -1109,6 +1364,27 @@ function handleDemoRequestInner(options: {
   ) {
     return generateDemoJourneyEventDetail(siteId, params);
   }
+  if (path.includes("/visitor-events")) {
+    return paginateDemoDetailCollection(
+      generateDemoVisitorDetail(siteId, params),
+      "events",
+      params,
+    );
+  }
+  if (path.includes("/visitor-sessions")) {
+    return paginateDemoDetailCollection(
+      generateDemoVisitorDetail(siteId, params),
+      "sessions",
+      params,
+    );
+  }
+  if (path.includes("/session-events")) {
+    return paginateDemoDetailCollection(
+      generateDemoSessionDetail(siteId, params),
+      "events",
+      params,
+    );
+  }
   if (path.includes("/event-record-detail")) {
     return generateDemoEventRecordDetail(siteId, params);
   }
@@ -1117,13 +1393,23 @@ function handleDemoRequestInner(options: {
     (path.includes("/event-type-field-values") ||
       path.includes("/event-fields/values"))
   ) {
-    return generateDemoEventTypeFieldValues(siteId, params);
+    return paginateDemoEnvelope(
+      generateDemoEventTypeFieldValues(
+        siteId,
+        demoUnboundedCollectionParams(params),
+      ),
+      params,
+      25,
+    );
   }
   if (
     (path.includes("/api/private/") || path.includes("/api/v1/")) &&
     (path.includes("/event-type-fields") || path.endsWith("/event-fields"))
   ) {
-    return generateDemoEventFields(siteId, params);
+    return paginateDemoFieldsEnvelope(
+      generateDemoEventFields(siteId, demoUnboundedCollectionParams(params)),
+      params,
+    );
   }
   if (path.includes("/event-type-context")) {
     return generateDemoEventTypeContext(siteId, params);
@@ -1210,10 +1496,18 @@ function handleDemoRequestInner(options: {
     return generateDemoSessions(siteId, params);
   }
   if (path.includes("/pages")) {
-    return generateDemoPages(siteId, params);
+    return paginateDemoEnvelope(
+      generateDemoPages(siteId, demoUnboundedCollectionParams(params)),
+      params,
+      100,
+    );
   }
   if (path.includes("/referrers")) {
-    return generateDemoReferrers(siteId, params);
+    return paginateDemoEnvelope(
+      generateDemoReferrers(siteId, demoUnboundedCollectionParams(params)),
+      params,
+      100,
+    );
   }
   if (path.includes("/utm-source")) {
     return generateDemoUtmDimension(siteId, "source", params);
@@ -1240,13 +1534,37 @@ function handleDemoRequestInner(options: {
     return generateDemoDimension(siteId, "devices", params);
   }
   if (path.includes("/page-hash")) {
-    return generateDemoDimension(siteId, "page-hash", params);
+    return paginateDemoEnvelope(
+      generateDemoDimension(
+        siteId,
+        "page-hash",
+        demoUnboundedCollectionParams(params),
+      ),
+      params,
+      20,
+    );
   }
   if (path.includes("/page-query")) {
-    return generateDemoDimension(siteId, "page-query", params);
+    return paginateDemoEnvelope(
+      generateDemoDimension(
+        siteId,
+        "page-query",
+        demoUnboundedCollectionParams(params),
+      ),
+      params,
+      20,
+    );
   }
   if (path.includes("/event-types")) {
-    return generateDemoDimension(siteId, "event-types", params);
+    return paginateDemoEnvelope(
+      generateDemoDimension(
+        siteId,
+        "event-types",
+        demoUnboundedCollectionParams(params),
+      ),
+      params,
+      20,
+    );
   }
 
   // Public routes — delegate to same generators
@@ -1258,6 +1576,8 @@ function handleDemoRequestInner(options: {
     if (subPath === "trend") return generateDemoTrend(siteId, params);
     if (subPath === "pages") return generateDemoPages(siteId, params);
     if (subPath === "referrers") return generateDemoReferrers(siteId, params);
+    if (subPath === "referrer-summary")
+      return generateDemoReferrerSummary(siteId, params);
     if (subPath === "performance")
       return generateDemoPerformance(siteId, params);
     if (subPath === "countries")

@@ -259,13 +259,19 @@ export function buildDemoFactDataset(
   const referrerPool = buildReferrerPool(
     rng,
     profile.topReferrers,
-    Math.min(36, Math.max(16, profile.topReferrers.length + 12)),
+    // Demo dashboard tables request up to 100 rows on their first page. Keep
+    // a substantial deterministic long tail so the pagination controls are
+    // visible in demo mode without changing production query limits.
+    Math.min(160, Math.max(140, profile.topReferrers.length + 120)),
   );
 
   const expandedPaths = expandPathLabels(
     rng,
     profile.paths,
-    Math.max(28, Math.min(180, profile.paths.length * 6)),
+    // The overview/page-detail tables also request up to 100 rows initially.
+    // Generate enough distinct paths for those tables to expose a second
+    // cursor page while retaining the profile's real paths at the front.
+    Math.max(180, Math.min(240, profile.paths.length * 18)),
   );
   const pathWeights = expandedPaths.map((_, index) => 1 / (1 + index * 0.85));
   const pathTitleMap = buildDemoPathTitleMap(profile, expandedPaths);

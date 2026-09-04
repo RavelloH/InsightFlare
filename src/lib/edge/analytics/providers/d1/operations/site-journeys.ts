@@ -4,6 +4,7 @@ import {
   analyticsFilterRegistry,
   type FilterDocument,
   filterFingerprint,
+  type QueryAudience,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
@@ -11,18 +12,25 @@ import {
   queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
   queryVisitorDetailFromD1,
+  stripSessionDetailCollections,
+  stripVisitorDetailCollections,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries";
 import {
   parseSessionListCursor,
   parseVisitorListCursor,
-  queryJourneyEventsFromD1,
+  queryJourneyEventsPageFromD1,
   queryJourneyTargetExistsFromD1,
   querySessionListPageFromD1,
-  querySessionsFromD1,
   queryVisitorListPageFromD1,
   serializeSessionListCursor,
   serializeVisitorListCursor,
+  type SessionListCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import {
+  decodePageCursor,
+  encodePageCursor,
+  paginationBinding,
+} from "@/lib/edge/analytics/providers/d1/internal/pagination";
 import type { Env } from "@/lib/edge/types";
 import { sha256Hex } from "@/lib/edge/utils";
 import { rootSecret } from "@/lib/secrets";
@@ -37,6 +45,7 @@ interface JourneySearchInput extends JourneyDetailInput {
   readonly filters: FilterDocument;
   readonly search?: string;
   readonly page: { readonly limit: number; readonly cursor?: string | null };
+  readonly audience?: QueryAudience;
 }
 
 function base64Url(value: Uint8Array): string {
@@ -71,6 +80,7 @@ async function cursorBinding(
   return sha256Hex(
     JSON.stringify([
       `journey-${operation}-v1`,
+      input.audience ?? "private-dashboard",
       input.siteId,
       input.window.startMs,
       input.window.endExclusiveMs,
@@ -147,7 +157,7 @@ export async function readSiteVisitorDetail(
     input.window,
   );
   if (!result) throw new Error("resource-not-found");
-  return result;
+  return stripVisitorDetailCollections(result);
 }
 
 export async function readSiteSessionDetail(
@@ -160,7 +170,7 @@ export async function readSiteSessionDetail(
     input.window,
   );
   if (!result) throw new Error("resource-not-found");
-  return result;
+  return stripSessionDetailCollections(result);
 }
 
 export async function readSiteJourneyEventDetail(input: {
@@ -262,7 +272,57 @@ export async function readSiteSessions(
 }
 
 interface JourneyTrajectoryInput extends JourneySearchInput {
-  readonly limit: number;
+  readonly limit?: number;
+}
+
+function trajectoryBinding(
+  input: JourneyTrajectoryInput,
+  operation: "visitor-events" | "visitor-sessions" | "session-events",
+  target: string,
+): Promise<string> {
+  return paginationBinding([
+    `analytics-${operation}-v1`,
+    input.audience ?? "private-dashboard",
+    input.siteId,
+    target,
+    input.window.startMs,
+    input.window.endExclusiveMs,
+    input.window.timeZone,
+    filterFingerprint(input.filters, analyticsFilterRegistry),
+    input.search ?? "",
+  ]);
+}
+
+interface TrajectoryCursor {
+  readonly occurredAt: number;
+  readonly id: string;
+}
+
+async function readTrajectoryCursor<T>(
+  input: JourneyTrajectoryInput,
+  operation: "visitor-events" | "visitor-sessions" | "session-events",
+  target: string,
+): Promise<T | null> {
+  return decodePageCursor<T>(
+    input.env,
+    await trajectoryBinding(input, operation, target),
+    input.page.cursor,
+  );
+}
+
+async function writeTrajectoryCursor(
+  input: JourneyTrajectoryInput,
+  operation: "visitor-events" | "visitor-sessions" | "session-events",
+  target: string,
+  cursor: unknown,
+): Promise<string | null> {
+  return cursor
+    ? encodePageCursor(
+        input.env,
+        await trajectoryBinding(input, operation, target),
+        cursor,
+      )
+    : null;
 }
 
 async function assertJourneyTargetInWindow(
@@ -286,15 +346,35 @@ async function readJourneyEvents(
   target: { readonly type: "visitor" | "session"; readonly value: string },
 ) {
   await assertJourneyTargetInWindow(input, target);
-  const items = await queryJourneyEventsFromD1(
+  const operation =
+    target.type === "visitor" ? "visitor-events" : "session-events";
+  const cursor = await readTrajectoryCursor<TrajectoryCursor>(
+    input,
+    operation,
+    target.value,
+  );
+  if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
+  const page = await queryJourneyEventsPageFromD1(
     input.env,
     input.siteId,
     input.window,
     input.filters,
     target,
-    input.limit,
+    input.page.limit,
+    cursor,
   );
-  return { items };
+  return {
+    items: page.items,
+    pagination: {
+      ...page.pagination,
+      nextCursor: await writeTrajectoryCursor(
+        input,
+        operation,
+        target.value,
+        page.pagination.nextCursor,
+      ),
+    },
+  };
 }
 
 export function readSiteVisitorEvents(
@@ -314,13 +394,37 @@ export async function readSiteVisitorSessions(
 ) {
   const target = { type: "visitor" as const, value: input.visitorId };
   await assertJourneyTargetInWindow(input, target);
-  const items = await querySessionsFromD1(
+  const sort = { key: "startedAt", direction: "desc" } as const;
+  const rawCursor = await readTrajectoryCursor<SessionListCursor>(
+    input,
+    "visitor-sessions",
+    target.value,
+  );
+  const cursor = rawCursor
+    ? parseSessionListCursor(serializeSessionListCursor(rawCursor), sort)
+    : null;
+  if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
+  const page = await querySessionListPageFromD1(
     input.env,
     input.siteId,
     input.window,
     input.filters,
-    input.limit,
-    target,
+    { pageSize: input.page.limit, sort, cursor, target },
   );
-  return { items };
+  return {
+    items: page.rows,
+    pagination: {
+      limit: input.page.limit,
+      returned: page.rows.length,
+      hasMore: page.nextCursor !== null,
+      nextCursor: page.nextCursor
+        ? await writeTrajectoryCursor(
+            input,
+            "visitor-sessions",
+            target.value,
+            page.nextCursor,
+          )
+        : null,
+    },
+  };
 }

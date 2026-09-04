@@ -24,6 +24,12 @@ import {
   type ResponseContext,
   visitSourceBindings,
 } from "./core";
+import {
+  decodePageCursor,
+  encodePageCursor,
+  pageResult,
+  paginationBinding,
+} from "./pagination";
 import { scopedDatasetFor } from "./scoped-dataset";
 
 const FUNNEL_ANALYSIS_KIND = "funnel";
@@ -102,6 +108,71 @@ export async function queryFunnelDefinitions(
     [siteId, FUNNEL_ANALYSIS_KIND],
   );
   return rows.map(mapFunnelDefinition);
+}
+
+interface FunnelDefinitionCursor {
+  readonly createdAt: number;
+  readonly id: string;
+}
+
+async function funnelCursorBinding(siteId: string): Promise<string> {
+  return paginationBinding(["funnels-v1", siteId, "createdAt:desc,id:desc"]);
+}
+
+export async function queryFunnelDefinitionsPage(
+  env: Env,
+  siteId: string,
+  limit: number,
+  cursor?: FunnelDefinitionCursor | null,
+) {
+  const cursorClause = cursor
+    ? "AND (created_at < ? OR (created_at = ? AND id < ?))"
+    : "";
+  const rows = await queryD1All<Record<string, unknown>>(
+    env,
+    `SELECT id, site_id, kind, name, config_json, created_at, updated_at
+     FROM analysis_definitions
+     WHERE site_id = ? AND kind = ? AND archived_at IS NULL
+     ${cursorClause}
+     ORDER BY created_at DESC, id DESC
+     LIMIT ?`,
+    [
+      siteId,
+      FUNNEL_ANALYSIS_KIND,
+      ...(cursor ? [cursor.createdAt, cursor.createdAt, cursor.id] : []),
+      limit + 1,
+    ],
+  );
+  const mapped = rows.map(mapFunnelDefinition);
+  const page = pageResult(mapped, limit);
+  const nextCursor =
+    page.hasMore && page.last
+      ? await encodePageCursor(env, await funnelCursorBinding(siteId), {
+          createdAt: page.last.createdAt,
+          id: page.last.id,
+        })
+      : null;
+  return {
+    items: page.rows,
+    pagination: {
+      limit,
+      returned: page.rows.length,
+      hasMore: page.hasMore,
+      nextCursor,
+    },
+  };
+}
+
+export async function decodeFunnelDefinitionCursor(
+  env: Env,
+  siteId: string,
+  cursor?: string | null,
+): Promise<FunnelDefinitionCursor | null> {
+  return decodePageCursor<FunnelDefinitionCursor>(
+    env,
+    await funnelCursorBinding(siteId),
+    cursor,
+  );
 }
 
 export async function queryFunnelDefinition(
@@ -489,11 +560,20 @@ export async function queryFunnelAnalysis(
 async function handleFunnelList(
   env: Env,
   siteId: string,
+  url: URL,
   ctx?: ResponseContext,
 ): Promise<Response> {
+  const limitParam = Number.parseInt(url.searchParams.get("limit") ?? "50", 10);
+  const limit = Number.isFinite(limitParam)
+    ? Math.min(200, Math.max(1, limitParam))
+    : 50;
+  const cursorText = url.searchParams.get("cursor");
+  const cursor = await decodeFunnelDefinitionCursor(env, siteId, cursorText);
+  if (cursorText && !cursor) return badRequest("Invalid cursor");
+  const page = await queryFunnelDefinitionsPage(env, siteId, limit, cursor);
   return jsonResponseWith(ctx!, {
     ok: true,
-    data: { funnels: await queryFunnelDefinitions(env, siteId) },
+    data: page,
   });
 }
 
@@ -504,7 +584,7 @@ async function handleFunnelDetail(
   ctx?: ResponseContext,
 ): Promise<Response> {
   const funnelId = url.searchParams.get("id")?.trim();
-  if (!funnelId) return handleFunnelList(env, siteId, ctx);
+  if (!funnelId) return handleFunnelList(env, siteId, url, ctx);
 
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");

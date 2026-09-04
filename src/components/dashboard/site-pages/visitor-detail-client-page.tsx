@@ -17,7 +17,7 @@ import {
   RiPulseLine,
   RiTimeLine,
 } from "@remixicon/react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import {
   AsyncDimensionBreakdownCard,
@@ -77,6 +77,8 @@ import {
   fetchEventRecordDetail,
   fetchJourneyEventDetail,
   fetchVisitorDetail,
+  fetchVisitorEvents,
+  fetchVisitorSessions,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
@@ -1819,6 +1821,9 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
   messages,
   labels,
   events,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   siteBasePath,
   timeZone,
   onOpenSession,
@@ -1829,6 +1834,9 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
   messages: AppMessages;
   labels: Labels;
   events: JourneyEvent[];
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   siteBasePath: string;
   timeZone: string;
   onOpenSession?: (sessionId: string) => void;
@@ -1903,6 +1911,16 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
                     }
                   />
                 ))}
+                {hasMore ? (
+                  <button
+                    type="button"
+                    className="w-full py-2 text-center text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+                    disabled={loadingMore}
+                    onClick={onLoadMore}
+                  >
+                    {loadingMore ? "Loading…" : "Load more"}
+                  </button>
+                ) : null}
               </div>
             )}
           </AutoTransition>
@@ -1942,6 +1960,9 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
   siteBasePath,
   timeZone,
   onOpenSession,
+  hasMoreSessions = false,
+  loadingMoreSessions = false,
+  onLoadMoreSessions,
   loading = false,
 }: {
   locale: Locale;
@@ -1951,6 +1972,9 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
   siteBasePath: string;
   timeZone: string;
   onOpenSession?: (sessionId: string) => void;
+  hasMoreSessions?: boolean;
+  loadingMoreSessions?: boolean;
+  onLoadMoreSessions?: () => void;
   loading?: boolean;
 }) {
   const [sessionSort, setSessionSort] =
@@ -2036,7 +2060,9 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
           onOpenSession={openSessionDetail}
           sort={sessionSort}
           onSort={toggleSessionSort}
-          hasMore={false}
+          hasMore={hasMoreSessions}
+          loadingMore={loadingMoreSessions}
+          onLoadMore={onLoadMoreSessions}
           loadingRows={loading}
           skeletonRows={5}
         />
@@ -2296,6 +2322,12 @@ function DetailContent({
   timeZone,
   timeWindow,
   onOpenSession,
+  hasMoreSessions = false,
+  loadingMoreSessions = false,
+  onLoadMoreSessions,
+  hasMoreEvents = false,
+  loadingMoreEvents = false,
+  onLoadMoreEvents,
   loading = false,
 }: {
   locale: Locale;
@@ -2307,6 +2339,12 @@ function DetailContent({
   timeZone: string;
   timeWindow: TimeWindow;
   onOpenSession?: (sessionId: string) => void;
+  hasMoreSessions?: boolean;
+  loadingMoreSessions?: boolean;
+  onLoadMoreSessions?: () => void;
+  hasMoreEvents?: boolean;
+  loadingMoreEvents?: boolean;
+  onLoadMoreEvents?: () => void;
   loading?: boolean;
 }) {
   const modalClose = useDetailDrawerClose();
@@ -2393,6 +2431,9 @@ function DetailContent({
           siteBasePath={siteBasePath}
           timeZone={timeZone}
           onOpenSession={onOpenSession}
+          hasMoreSessions={hasMoreSessions}
+          loadingMoreSessions={loadingMoreSessions}
+          onLoadMoreSessions={onLoadMoreSessions}
           loading={loading}
         />
 
@@ -2401,6 +2442,9 @@ function DetailContent({
           messages={messages}
           labels={labels}
           events={displayEvents}
+          hasMore={hasMoreEvents}
+          loadingMore={loadingMoreEvents}
+          onLoadMore={onLoadMoreEvents}
           siteBasePath={siteBasePath}
           timeZone={timeZone}
           onOpenSession={onOpenSession}
@@ -2478,8 +2522,65 @@ export const VisitorDetailClientPage = memo(function VisitorDetailClientPage({
       fetchVisitorDetail(siteId, visitorId, timeZone, window, { signal }),
     enabled: typeof window !== "undefined" && Boolean(visitorId),
   });
-  const detail = detailQuery.data?.data ?? null;
-  const loading = detailQuery.isPending && !detail;
+  const summary = detailQuery.data?.data ?? null;
+  const sessionsQuery = useInfiniteQuery({
+    queryKey: [
+      "dashboard",
+      "visitor-detail-sessions",
+      siteId,
+      visitorId,
+      timeZone,
+      window.from,
+      window.to,
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      fetchVisitorSessions(siteId, visitorId, window, {
+        cursor: pageParam,
+        signal,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.data?.pagination?.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
+    enabled: Boolean(summary && visitorId),
+  });
+  const eventsQuery = useInfiniteQuery({
+    queryKey: [
+      "dashboard",
+      "visitor-detail-events",
+      siteId,
+      visitorId,
+      timeZone,
+      window.from,
+      window.to,
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      fetchVisitorEvents(siteId, visitorId, window, {
+        cursor: pageParam,
+        signal,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.data?.pagination?.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
+    enabled: Boolean(summary && visitorId),
+  });
+  const loadedSessions = sessionsQuery.data
+    ? sessionsQuery.data.pages.flatMap((page) => page.data.items)
+    : (summary?.sessions ?? []);
+  const loadedEvents = eventsQuery.data
+    ? eventsQuery.data.pages.flatMap((page) => page.data.items)
+    : (summary?.events ?? []);
+  const detail = summary
+    ? {
+        ...summary,
+        sessions: loadedSessions,
+        events: loadedEvents,
+      }
+    : null;
+  const loading = detailQuery.isPending && !summary;
   const error = detailQuery.isError;
 
   if (!visitorId) {
@@ -2529,6 +2630,20 @@ export const VisitorDetailClientPage = memo(function VisitorDetailClientPage({
       timeZone={timeZone}
       timeWindow={window}
       onOpenSession={onOpenSession}
+      hasMoreSessions={Boolean(sessionsQuery.hasNextPage)}
+      loadingMoreSessions={sessionsQuery.isFetchingNextPage}
+      onLoadMoreSessions={() => {
+        if (sessionsQuery.hasNextPage && !sessionsQuery.isFetchingNextPage) {
+          void sessionsQuery.fetchNextPage();
+        }
+      }}
+      hasMoreEvents={Boolean(eventsQuery.hasNextPage)}
+      loadingMoreEvents={eventsQuery.isFetchingNextPage}
+      onLoadMoreEvents={() => {
+        if (eventsQuery.hasNextPage && !eventsQuery.isFetchingNextPage) {
+          void eventsQuery.fetchNextPage();
+        }
+      }}
       loading={loading}
     />
   );

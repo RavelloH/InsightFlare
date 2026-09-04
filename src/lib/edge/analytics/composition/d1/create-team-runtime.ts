@@ -104,6 +104,22 @@ export function createD1TeamQueryRuntime(options: D1TeamQueryRuntimeOptions) {
       "team-sites",
       typedQueryProvider<TeamSitesQueryResult>(async (input) => {
         const request = query(input!);
+        const rawPage = request.page;
+        const pageValue =
+          rawPage && typeof rawPage === "object"
+            ? (rawPage as { limit?: unknown; cursor?: unknown })
+            : null;
+        const page = pageValue
+          ? {
+              limit:
+                typeof pageValue.limit === "number" &&
+                Number.isFinite(pageValue.limit)
+                  ? pageValue.limit
+                  : 20,
+              cursor:
+                typeof pageValue.cursor === "string" ? pageValue.cursor : null,
+            }
+          : undefined;
         return {
           value: await readTeamSites({
             env: options.env,
@@ -115,6 +131,8 @@ export function createD1TeamQueryRuntime(options: D1TeamQueryRuntimeOptions) {
                 : undefined,
             window: timeWindow(request.time),
             filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+            page,
+            audience: request.context.policy.audience,
           }),
         };
       }),

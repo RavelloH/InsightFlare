@@ -3,16 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 
 const queryOverviewAggregate = vi.hoisted(() => vi.fn());
-const queryPagesAggregate = vi.hoisted(() => vi.fn());
-const queryReferrerAggregate = vi.hoisted(() => vi.fn());
+const queryTopPagesFromD1 = vi.hoisted(() => vi.fn());
+const queryTopReferrersFromD1 = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/edge/analytics/providers/d1/internal/overview", () => ({
   queryOverviewAggregate,
 }));
 
 vi.mock("@/lib/edge/analytics/providers/d1/internal/pages", () => ({
-  queryPagesAggregate,
-  queryReferrerAggregate,
+  queryTopPagesFromD1,
+  queryTopReferrersFromD1,
 }));
 
 import {
@@ -122,11 +122,11 @@ describe("notification report data", () => {
     queryOverviewAggregate.mockResolvedValue({
       value: { views: 100, visitors: 40, sessions: 55 },
     });
-    queryPagesAggregate.mockResolvedValue([
+    queryTopPagesFromD1.mockResolvedValue([
       { pathname: "/pricing", views: 20 },
       { pathname: "", views: 10 },
     ]);
-    queryReferrerAggregate.mockResolvedValue([
+    queryTopReferrersFromD1.mockResolvedValue([
       { referrer: "example.com", sessions: 8 },
       { referrer: "", sessions: 4 },
     ]);
@@ -162,13 +162,13 @@ describe("notification report data", () => {
         { referrer: "Direct", visits: 4 },
       ],
     });
-    expect(queryPagesAggregate).toHaveBeenCalledWith(
+    expect(queryTopPagesFromD1).toHaveBeenCalledWith(
       env,
       "site-1",
       expect.objectContaining({ label: "2026-06-29" }),
-      EMPTY_FILTER_DOCUMENT,
       5,
       false,
+      EMPTY_FILTER_DOCUMENT,
     );
   });
 
@@ -263,8 +263,8 @@ describe("notification report data", () => {
     queryOverviewAggregate.mockResolvedValue({
       value: { views: 100, visitors: 40, sessions: 55 },
     });
-    queryPagesAggregate.mockResolvedValue([]);
-    queryReferrerAggregate.mockResolvedValue([]);
+    queryTopPagesFromD1.mockResolvedValue([]);
+    queryTopReferrersFromD1.mockResolvedValue([]);
     const prepare = vi.fn(() => ({
       bind: vi.fn(() => ({
         first: vi.fn(() =>
@@ -286,8 +286,8 @@ describe("notification report data", () => {
       loadDailyReportData(env as never, reportInput),
     ]);
     expect(prepare).toHaveBeenCalledTimes(1);
-    expect(queryPagesAggregate).toHaveBeenCalledTimes(1);
-    expect(queryReferrerAggregate).toHaveBeenCalledTimes(1);
+    expect(queryTopPagesFromD1).toHaveBeenCalledTimes(1);
+    expect(queryTopReferrersFromD1).toHaveBeenCalledTimes(1);
 
     await Promise.all([
       loadPreviousMetricValue({} as never, {

@@ -1331,7 +1331,7 @@ describe("edge query handlers", () => {
     const dimensionPayload: any = await dimension.json();
     const optionsPayload: any = await options.json();
     expect(dimensionPayload).toMatchObject({ ok: true });
-    expect(dimensionPayload.data).toEqual(
+    expect(dimensionPayload.data.items).toEqual(
       expect.arrayContaining([
         {
           value: "/pricing",
@@ -1342,15 +1342,26 @@ describe("edge query handlers", () => {
         },
       ]),
     );
+    expect(dimensionPayload.data.pagination).toMatchObject({
+      limit: 200,
+      returned: expect.any(Number),
+      hasMore: expect.any(Boolean),
+    });
+    expect(
+      dimensionPayload.data.pagination.nextCursor === null ||
+        typeof dimensionPayload.data.pagination.nextCursor === "string",
+    ).toBe(true);
     expect(optionsPayload).toMatchObject({ ok: true, field: "referrer.url" });
     expect(optionsPayload.data).toEqual(
-      expect.arrayContaining([
-        {
-          value: "https://news.example/post",
-          label: "https://news.example/post",
-          occurrences: 6,
-        },
-      ]),
+      expect.objectContaining({
+        items: expect.arrayContaining([
+          {
+            value: "https://news.example/post",
+            label: "https://news.example/post",
+            occurrences: 6,
+          },
+        ]),
+      }),
     );
     expect(invalidOptions.status).toBe(400);
     expect(await invalidOptions.json()).toMatchObject({
@@ -1360,7 +1371,7 @@ describe("edge query handlers", () => {
     const dimensionStatement = statements.find((statement) =>
       statement.sql.includes("dimension_rollup AS"),
     );
-    expect(dimensionStatement?.bindings.at(-1)).toBe(200);
+    expect(dimensionStatement?.bindings.at(-1)).toBe(201);
   });
 
   it("shapes events summary, trend, records, type detail, fields, field values, and record detail", async () => {
@@ -1475,25 +1486,29 @@ describe("edge query handlers", () => {
     expect(await fields.json()).toMatchObject({
       ok: true,
       eventName: "Signup",
-      fields: [
-        {
-          path: "/plan",
-          valueType: "string",
-          exampleValue: "pro",
-        },
-      ],
+      data: {
+        items: [
+          {
+            path: "/plan",
+            valueType: "string",
+            exampleValue: "pro",
+          },
+        ],
+      },
     });
     expect(await values.json()).toMatchObject({
       ok: true,
       fieldPath: "/plan",
       fieldValueType: "string",
-      data: [
-        {
-          value: "pro",
-          events: 2,
-          occurrences: 3,
-        },
-      ],
+      data: {
+        items: [
+          {
+            value: "pro",
+            events: 2,
+            occurrences: 3,
+          },
+        ],
+      },
     });
     expect(await recordDetail.json()).toMatchObject({
       ok: true,
@@ -1642,17 +1657,17 @@ describe("edge query handlers", () => {
     expect(await numberValues.json()).toMatchObject({
       ok: true,
       fieldValueType: "number",
-      data: [{ value: 42.5 }],
+      data: { items: [{ value: 42.5 }], pagination: expect.any(Object) },
     });
     expect(await booleanValues.json()).toMatchObject({
       ok: true,
       fieldValueType: "boolean",
-      data: [{ value: true }],
+      data: { items: [{ value: true }], pagination: expect.any(Object) },
     });
     expect(await nullValues.json()).toMatchObject({
       ok: true,
       fieldValueType: "null",
-      data: [{ value: null }],
+      data: { items: [{ value: null }], pagination: expect.any(Object) },
     });
     expect(invalidType.status).toBe(400);
     expect(await invalidType.json()).toMatchObject({
@@ -2053,7 +2068,10 @@ describe("edge query handlers", () => {
     expect(await geoOptions.json()).toMatchObject({
       ok: true,
       field: "geo.country",
-      data: expect.any(Array),
+      data: {
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      },
     });
 
     const emptyTrend = await privateQuery(
@@ -2094,31 +2112,41 @@ describe("edge query handlers", () => {
     const sourceTabPayload: any = await sourceTab.json();
     expect(pageTabPayload).toMatchObject({ ok: true });
     expect(pageTabPayload.data).toEqual(
-      expect.arrayContaining([
-        { label: "/pricing", views: 1, sessions: 1, visitors: 1 },
-      ]),
+      expect.objectContaining({
+        items: expect.arrayContaining([
+          { label: "/pricing", views: 1, sessions: 1, visitors: 1 },
+        ]),
+      }),
     );
     expect(sourceTabPayload).toMatchObject({ ok: true });
     expect(sourceTabPayload.data).toEqual(
-      expect.arrayContaining([
-        { label: "news.example", views: 6, sessions: 4, visitors: 3 },
-      ]),
+      expect.objectContaining({
+        items: expect.arrayContaining([
+          { label: "news.example", views: 6, sessions: 4, visitors: 3 },
+        ]),
+      }),
     );
     expect(await clientTab.json()).toMatchObject({
       ok: true,
-      data: [{ label: "Chrome", views: 1, sessions: 1, visitors: 0 }],
+      data: {
+        items: [{ label: "Chrome", views: 1, sessions: 1, visitors: 0 }],
+        pagination: expect.any(Object),
+      },
     });
     expect(await geoTab.json()).toMatchObject({
       ok: true,
-      data: [
-        {
-          value: "US",
-          label: "US",
-          views: 1,
-          sessions: 1,
-          visitors: 1,
-        },
-      ],
+      data: {
+        items: [
+          {
+            value: "US",
+            label: "US",
+            views: 1,
+            sessions: 1,
+            visitors: 1,
+          },
+        ],
+        pagination: expect.any(Object),
+      },
     });
     expect(await geoPoints.json()).toMatchObject({
       ok: true,
@@ -2472,12 +2500,18 @@ describe("edge query handlers", () => {
     expect(pages.status).toBe(200);
     expect(await pages.json()).toMatchObject({
       ok: true,
-      data: expect.any(Array),
+      data: {
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      },
     });
     expect(referrers.status).toBe(200);
     expect(await referrers.json()).toMatchObject({
       ok: true,
-      data: expect.any(Array),
+      data: {
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      },
     });
   });
 

@@ -371,6 +371,13 @@ export const TeamBreakdownQueryDtoSchema =
 /** A team-site composite is deliberately distinct from a generic breakdown. */
 export const TeamSitesQueryDtoSchema = TeamAnalyticsQueryBaseDtoSchema.extend({
   interval: z.enum(["minute", "hour", "day", "week", "month"]).optional(),
+  page: z
+    .object({
+      limit: z.number().int().min(1).max(100).default(20),
+      cursor: z.string().min(1).max(12_288).nullable().optional(),
+    })
+    .strict()
+    .default({ limit: 20 }),
 }).strict();
 
 export const SiteBreakdownQueryDtoSchema =
@@ -387,14 +394,29 @@ export const SiteCrossBreakdownQueryDtoSchema =
   }).strict();
 
 export const SitePagesQueryDtoSchema = SiteAnalyticsQueryBaseDtoSchema.extend({
-  limit: z.number().int().min(1).max(200).default(20),
+  page: z
+    .object({
+      limit: z.number().int().min(1).max(200).default(20),
+      cursor: z.string().min(1).max(12_288).nullable().optional(),
+    })
+    .strict()
+    .default({ limit: 20 }),
   includeDetails: z.boolean().default(false),
 }).strict();
 
 export const SiteReferrersQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
-    limit: z.number().int().min(1).max(200).default(20),
+    sort: z.enum(["views", "visitors"]).default("views"),
+    direction: z.enum(["asc", "desc"]).default("desc"),
+    page: z
+      .object({
+        limit: z.number().int().min(1).max(200).default(20),
+        cursor: z.string().min(1).max(12_288).nullable().optional(),
+      })
+      .strict()
+      .default({ limit: 20 }),
     includeFullUrl: z.boolean().default(false),
+    search: z.string().trim().min(1).max(256).optional(),
   }).strict();
 
 export const SiteChannelsQueryDtoSchema =
@@ -416,7 +438,10 @@ export const SiteFilterValuesQueryDtoSchema =
     field: filterValueField,
     search: z.string().max(256).optional(),
     page: z
-      .object({ limit: z.number().int().min(1).max(200).default(50) })
+      .object({
+        limit: z.number().int().min(1).max(200).default(50),
+        cursor: z.string().min(1).max(12_288).nullable().optional(),
+      })
       .strict()
       .default({ limit: 50 }),
   }).strict();
@@ -496,7 +521,10 @@ export const SiteEventTypesQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
     search: z.string().min(1).max(160).optional(),
     page: z
-      .object({ limit: z.number().int().min(1).max(200).default(20) })
+      .object({
+        limit: z.number().int().min(1).max(200).default(20),
+        cursor: z.string().min(1).max(12_288).nullable().optional(),
+      })
       .strict()
       .default({ limit: 20 }),
   }).strict();
@@ -511,7 +539,10 @@ export const SiteEventFieldsQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
     eventName: z.string().min(1).max(120),
     page: z
-      .object({ limit: z.number().int().min(1).max(200).default(100) })
+      .object({
+        limit: z.number().int().min(1).max(200).default(100),
+        cursor: z.string().min(1).max(12_288).nullable().optional(),
+      })
       .strict()
       .default({ limit: 100 }),
   }).strict();
@@ -530,7 +561,10 @@ export const SiteEventFieldValuesQueryDtoSchema =
     ]),
     search: z.string().max(256).optional(),
     page: z
-      .object({ limit: z.number().int().min(1).max(100).default(25) })
+      .object({
+        limit: z.number().int().min(1).max(100).default(25),
+        cursor: z.string().min(1).max(12_288).nullable().optional(),
+      })
       .strict()
       .default({ limit: 25 }),
   }).strict();
@@ -588,24 +622,30 @@ export const SiteSessionsSearchQueryDtoSchema =
       .default({ limit: 80 }),
   }).strict();
 
-const trajectoryLimit = z.number().int().min(1).max(500).default(100);
+const trajectoryPage = z
+  .object({
+    limit: z.number().int().min(1).max(500).default(100),
+    cursor: z.string().min(1).max(12_288).nullable().optional(),
+  })
+  .strict()
+  .default({ limit: 100 });
 
 export const SiteVisitorEventsQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
     visitorId: z.string().min(1).max(512),
-    limit: trajectoryLimit,
+    page: trajectoryPage,
   }).strict();
 
 export const SiteVisitorSessionsQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
     visitorId: z.string().min(1).max(512),
-    limit: trajectoryLimit,
+    page: trajectoryPage,
   }).strict();
 
 export const SiteSessionEventsQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
     sessionId: z.string().min(1).max(512),
-    limit: trajectoryLimit,
+    page: trajectoryPage,
   }).strict();
 
 const SiteRealtimeQueryBaseDtoSchema = SiteAnalyticsQueryBaseDtoSchema.omit({
@@ -682,6 +722,7 @@ export type TeamTimeseriesQueryDto = z.infer<
 >;
 export type TeamBreakdownQueryDto = z.infer<typeof TeamBreakdownQueryDtoSchema>;
 export type TeamSitesQueryDto = z.infer<typeof TeamSitesQueryDtoSchema>;
+export type TeamSitesQueryDtoInput = z.input<typeof TeamSitesQueryDtoSchema>;
 export type SiteBreakdownQueryDto = z.infer<typeof SiteBreakdownQueryDtoSchema>;
 export type SiteBreakdownQueryDtoInput = z.input<
   typeof SiteBreakdownQueryDtoSchema

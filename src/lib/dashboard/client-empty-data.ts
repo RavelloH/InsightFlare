@@ -28,6 +28,15 @@ import type {
   VisitorsData,
 } from "@/lib/edge-client";
 
+function emptyPagination(limit = 0) {
+  return {
+    limit,
+    returned: 0,
+    hasMore: false,
+    nextCursor: null,
+  } as const;
+}
+
 type PageCardTabsData = NonNullable<PagesData["tabs"]>;
 type OverviewClientDimensionTabsData =
   OverviewClientDimensionTabsResponse["tabs"];
@@ -58,7 +67,7 @@ export function emptyTrend(interval: TimeWindow["interval"]): TrendData {
 }
 
 export function emptyPages(): PagesData {
-  return { ok: true, data: [] };
+  return { ok: true, data: { items: [], pagination: emptyPagination() } };
 }
 
 export function emptyPageCardTabs(): PageCardTabsData {
@@ -103,7 +112,7 @@ export function emptyOverviewGeoPoints(): OverviewGeoPointsData {
 }
 
 export function emptyReferrers(): ReferrersData {
-  return { ok: true, data: [] };
+  return { ok: true, data: { items: [], pagination: emptyPagination() } };
 }
 
 export function emptyDimension(): DimensionData {
@@ -229,7 +238,7 @@ export function emptyEventFieldValues(
     ok: true,
     fieldPath,
     fieldValueType,
-    data: [],
+    data: { items: [], pagination: emptyPagination() },
   };
 }
 
@@ -307,7 +316,7 @@ export function emptyPerformance(
 }
 
 export function emptyOverviewTab(): OverviewTabData {
-  return { ok: true, data: [] };
+  return { ok: true, data: { items: [], pagination: emptyPagination() } };
 }
 
 export function emptyOverviewGeoTab(): OverviewGeoTabData {
@@ -315,5 +324,8 @@ export function emptyOverviewGeoTab(): OverviewGeoTabData {
 }
 
 export function emptyDashboardFilterOptions(): DashboardFilterOptionsData {
-  return { ok: true, data: [] };
+  return {
+    ok: true,
+    data: { items: [], pagination: emptyPagination() },
+  };
 }

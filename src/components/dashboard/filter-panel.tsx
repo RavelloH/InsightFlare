@@ -21,7 +21,12 @@ import {
   RiSearchLine,
   RiUserLine,
 } from "@remixicon/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { Popover } from "radix-ui";
 
@@ -129,6 +134,15 @@ type ValueSuggestion = {
   readonly value: string | number | boolean | null;
   readonly occurrences?: number;
   readonly label?: string;
+};
+type ValueSuggestionPage = {
+  readonly items: readonly ValueSuggestion[];
+  readonly pagination: {
+    readonly limit: number;
+    readonly returned: number;
+    readonly hasMore: boolean;
+    readonly nextCursor: string | null;
+  };
 };
 
 function filterDocumentWithRoot(
@@ -1097,7 +1111,7 @@ function SearchablePayloadPathInput({
       stripSuggestionFacet(document, condition.field, condition.payloadPath),
     [condition.field, condition.payloadPath, document],
   );
-  const fieldsQuery = useQuery<{ fields: EventField[] }>({
+  const fieldsQuery = useInfiniteQuery({
     queryKey: [
       "dashboard",
       "event-field-paths",
@@ -1110,14 +1124,22 @@ function SearchablePayloadPathInput({
       suggestionFilters,
       needsValue,
     ],
-    queryFn: ({ signal }) =>
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) =>
       fetchEventTypeFields(siteId!, window!, eventName, suggestionFilters, {
+        limit: 100,
+        cursor: pageParam,
         signal,
         resolvedScope,
       }),
     enabled: open && canSearch,
+    getNextPageParam: (lastPage) =>
+      lastPage.data?.pagination?.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
   });
-  const fields = fieldsQuery.data?.fields ?? [];
+  const fields =
+    fieldsQuery.data?.pages.flatMap((page) => page.data.items) ?? [];
   const suggestions = useMemo(() => {
     const search = deferredSearchToken.trim().toLocaleLowerCase();
     return fields
@@ -1264,7 +1286,7 @@ function SearchableValueInput({
       ? condition.payloadPath.trim()
       : condition.field !== "event.payload"),
   );
-  const suggestionsQuery = useQuery<ValueSuggestion[]>({
+  const suggestionsQuery = useInfiniteQuery<ValueSuggestionPage>({
     queryKey: [
       "dashboard",
       isPayload ? "event-field-values" : "filter-values",
@@ -1279,7 +1301,8 @@ function SearchableValueInput({
       resolvedScope ?? "unresolved",
       suggestionFilters,
     ],
-    queryFn: ({ signal }) => {
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) => {
       if (isPayload) {
         return fetchEventTypeFieldValues(
           siteId!,
@@ -1290,11 +1313,19 @@ function SearchableValueInput({
           suggestionFilters,
           {
             limit: 12,
+            cursor: pageParam as string | null,
             search: deferredSearchToken,
             signal,
             resolvedScope,
           },
-        ).then((result) => result.data);
+        ).then((result) => ({
+          items: result.data.items.map((item) => ({
+            value: item.value,
+            occurrences: item.occurrences,
+            label: String(item.value ?? ""),
+          })),
+          pagination: result.data.pagination,
+        }));
       }
       return fetchFilterValues(
         siteId!,
@@ -1303,15 +1334,22 @@ function SearchableValueInput({
         suggestionFilters,
         {
           limit: 12,
+          cursor: pageParam as string | null,
           search: deferredSearchToken,
           signal,
           resolvedScope,
         },
-      );
+      ).then((result) => ({
+        items: result.items,
+        pagination: result.pagination,
+      }));
     },
     enabled: open && canSearch && !disabled,
+    getNextPageParam: (lastPage) =>
+      lastPage.pagination?.hasMore ? lastPage.pagination.nextCursor : undefined,
   });
-  const suggestions = suggestionsQuery.data ?? [];
+  const suggestions =
+    suggestionsQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const inputMode =
     valueKind === "number" || condition.scalarKind === "number"
       ? "decimal"

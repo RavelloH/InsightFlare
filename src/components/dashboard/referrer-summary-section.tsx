@@ -2,17 +2,17 @@ import { memo, useMemo } from "react";
 import { RiShareForwardLine } from "@remixicon/react";
 
 import { ContentSwitch } from "@/components/dashboard/content-switch";
-import type { ReferrerRowsByTab } from "@/components/dashboard/referrer-utils";
 import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
+import type { ReferrerSummaryData } from "@/lib/edge-client";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
 interface ReferrerSummarySectionProps {
   locale: Locale;
   messages: AppMessages;
-  rowsByTab: ReferrerRowsByTab;
+  summary: ReferrerSummaryData["data"] | null;
   loading: boolean;
   hideSummaryCard?: boolean;
 }
@@ -31,53 +31,34 @@ function SummaryMetric({ label, value }: { label: string; value: string }) {
 export const ReferrerSummarySection = memo(function ReferrerSummarySection({
   locale,
   messages,
-  rowsByTab,
+  summary,
   loading,
   hideSummaryCard = false,
 }: ReferrerSummarySectionProps) {
-  const sortedDomainRows = useMemo(
-    () => [...rowsByTab.domain].sort((left, right) => right.views - left.views),
-    [rowsByTab.domain],
+  const sortedTopSources = useMemo(
+    () =>
+      [...(summary?.topSources ?? [])].sort(
+        (left, right) => right.views - left.views,
+      ),
+    [summary?.topSources],
   );
-  const hasContent = rowsByTab.domain.length > 0 || rowsByTab.link.length > 0;
+  const totalViews = summary?.totalViews ?? 0;
+  const directViews = summary?.directViews ?? 0;
+  const externalViews = summary?.externalViews ?? 0;
+  const uniqueDomains = summary?.uniqueDomains ?? 0;
+  const uniqueLinks = summary?.uniqueLinks ?? 0;
+  const hasContent = summary !== null && totalViews > 0;
   const showInitialLoading = loading && !hasContent;
-  const totalViews = useMemo(
-    () => rowsByTab.domain.reduce((sum, row) => sum + row.views, 0),
-    [rowsByTab.domain],
-  );
-  const directViews = useMemo(
-    () => rowsByTab.domain.find((row) => row.isDirect)?.views ?? 0,
-    [rowsByTab.domain],
-  );
-  const uniqueDomains = useMemo(
-    () => rowsByTab.domain.filter((row) => !row.isDirect).length,
-    [rowsByTab.domain],
-  );
-  const uniqueLinks = useMemo(
-    () => rowsByTab.link.filter((row) => !row.isDirect).length,
-    [rowsByTab.link],
-  );
-  const topSource = useMemo(
-    () => sortedDomainRows.find((row) => !row.isDirect) ?? null,
-    [sortedDomainRows],
-  );
-  const externalRows = useMemo(
-    () => sortedDomainRows.filter((row) => !row.isDirect),
-    [sortedDomainRows],
-  );
-  const externalViews = useMemo(
-    () => externalRows.reduce((sum, row) => sum + row.views, 0),
-    [externalRows],
-  );
+  const topSource = sortedTopSources[0] ?? null;
   const topSourceShare =
     totalViews > 0 && topSource ? topSource.views / totalViews : 0;
   const nextFourViews = useMemo(
-    () => externalRows.slice(1, 5).reduce((sum, row) => sum + row.views, 0),
-    [externalRows],
+    () => sortedTopSources.slice(1, 5).reduce((sum, row) => sum + row.views, 0),
+    [sortedTopSources],
   );
   const longTailViews = Math.max(
     0,
-    externalViews - (topSource?.views ?? 0) - nextFourViews,
+    externalViews - sortedTopSources.reduce((sum, row) => sum + row.views, 0),
   );
   const splitItems = useMemo(
     () => [
@@ -105,7 +86,7 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
     () => [
       {
         key: "top",
-        label: topSource?.label ?? messages.referrers.topSource,
+        label: topSource?.referrer ?? messages.referrers.topSource,
         value: topSource?.views ?? 0,
         color: "var(--color-chart-1)",
       },
@@ -129,7 +110,7 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
       messages.referrers.nextSources,
       messages.referrers.topSource,
       nextFourViews,
-      topSource?.label,
+      topSource?.referrer,
       topSource?.views,
     ],
   );
@@ -177,7 +158,7 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
                     {messages.referrers.topSource}
                   </p>
                   <p className="mt-2 break-words text-lg font-medium tracking-tight">
-                    {topSource?.label ?? messages.referrers.noExternalSource}
+                    {topSource?.referrer ?? messages.referrers.noExternalSource}
                   </p>
                   {topSource ? (
                     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">

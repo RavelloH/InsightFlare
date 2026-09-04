@@ -42,12 +42,48 @@ vi.mock("@/lib/dashboard/client-request", () => ({
 }));
 
 vi.mock("@/lib/dashboard/client-utils", () => ({
+  normalizePaginatedCollection: vi.fn((value: unknown, fallbackLimit = 0) => {
+    const items = Array.isArray(value)
+      ? value
+      : value &&
+          typeof value === "object" &&
+          Array.isArray((value as { items?: unknown }).items)
+        ? (value as { items: unknown[] }).items
+        : [];
+    const pagination =
+      value &&
+      typeof value === "object" &&
+      (value as { pagination?: unknown }).pagination
+        ? (value as { pagination: unknown }).pagination
+        : {
+            limit: fallbackLimit,
+            returned: items.length,
+            hasMore: false,
+            nextCursor: null,
+          };
+    return { items, pagination };
+  }),
   withFilters: vi.fn(
     (
       params: Record<string, unknown>,
       _filters: unknown,
       resolvedScope?: string,
     ) => (resolvedScope ? { ...params, scope: resolvedScope } : params),
+  ),
+  withPagination: vi.fn(
+    (
+      params: Record<string, unknown>,
+      options?: { limit?: number; cursor?: string | null },
+      defaultLimit?: number,
+    ) => ({
+      ...params,
+      ...(options?.limit !== undefined
+        ? { limit: options.limit }
+        : defaultLimit !== undefined
+          ? { limit: defaultLimit }
+          : {}),
+      ...(options?.cursor ? { cursor: options.cursor } : {}),
+    }),
   ),
 }));
 
@@ -244,6 +280,7 @@ describe("fetchFunnelDetail", () => {
 
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith("/api/private/funnels", {
       siteId: "site-1",
+      limit: 100,
     });
   });
 
@@ -354,7 +391,17 @@ describe("fetchEventTypeFields", () => {
     await expect(
       fetchEventTypeFields("site-1", window, "click"),
     ).resolves.toEqual({
-      fields: [],
+      ok: true,
+      eventName: "click",
+      data: {
+        items: [],
+        pagination: {
+          limit: 100,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
   });
 });

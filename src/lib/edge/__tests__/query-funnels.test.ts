@@ -99,7 +99,7 @@ describe("funnel query handler", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       data: {
-        funnels: [
+        items: [
           {
             id: "funnel-1",
             siteId: "site-1",
@@ -117,11 +117,17 @@ describe("funnel query handler", () => {
             updatedAt: 40,
           },
         ],
+        pagination: {
+          limit: 50,
+          returned: 2,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
     });
     expect(calls[0]?.sql).toContain("FROM analysis_definitions");
     expect(calls[0]?.sql).not.toContain("widgets");
-    expect(calls[0]?.bindings).toEqual(["site-1", "funnel"]);
+    expect(calls[0]?.bindings).toEqual(["site-1", "funnel", 51]);
   });
 
   it("creates funnel definitions with normalized step input", async () => {

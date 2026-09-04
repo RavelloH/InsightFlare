@@ -26,7 +26,17 @@ beforeEach(() => {
 
 describe("fetchFilterValues", () => {
   it("passes a trimmed search term through to the filter-values payload", async () => {
-    fetchPrivateJsonMock.mockResolvedValue({ data: [] } as any);
+    fetchPrivateJsonMock.mockResolvedValue({
+      data: {
+        items: [],
+        pagination: {
+          limit: 100,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    } as any);
 
     const result = await fetchFilterValues(
       "site-1",
@@ -36,7 +46,7 @@ describe("fetchFilterValues", () => {
       { search: "  Home  ", limit: 100 },
     );
 
-    expect(result).toEqual([]);
+    expect(result.items).toEqual([]);
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
       "/api/private/filter-values",
       expect.objectContaining({ search: "Home", limit: 100 }),
@@ -45,7 +55,17 @@ describe("fetchFilterValues", () => {
   });
 
   it("passes the resolved scope with the inherited filter document", async () => {
-    fetchPrivateJsonMock.mockResolvedValue({ data: [] } as any);
+    fetchPrivateJsonMock.mockResolvedValue({
+      data: {
+        items: [],
+        pagination: {
+          limit: 200,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    } as any);
     const filters = attachFilterScopePreference(
       dashboardFilterDocumentFromPresentation({ path: "/pricing" }),
       "visitor",
@@ -65,8 +85,18 @@ describe("fetchFilterValues", () => {
     );
   });
 
-  it("omits search and falls back to an empty list when payload.data is not an array", async () => {
-    fetchPrivateJsonMock.mockResolvedValue({ data: { dangling: true } } as any);
+  it("omits search when no search term is provided", async () => {
+    fetchPrivateJsonMock.mockResolvedValue({
+      data: {
+        items: [],
+        pagination: {
+          limit: 200,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    } as any);
 
     const result = await fetchFilterValues(
       "site-1",
@@ -76,7 +106,7 @@ describe("fetchFilterValues", () => {
       { signal: new AbortController().signal },
     );
 
-    expect(result).toEqual([]);
+    expect(result.items).toEqual([]);
     expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
       "/api/private/filter-values",
       expect.not.objectContaining({ search: expect.anything() }),
@@ -89,6 +119,14 @@ describe("fetchFilterValues", () => {
 
     const result = await fetchFilterValues("site-1", window, "page.path");
 
-    expect(result).toEqual([]);
+    expect(result).toEqual({
+      items: [],
+      pagination: {
+        limit: 0,
+        returned: 0,
+        hasMore: false,
+        nextCursor: null,
+      },
+    });
   });
 });

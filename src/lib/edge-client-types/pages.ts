@@ -1,12 +1,16 @@
+import type { PaginatedCollection } from "./pagination";
+
+export interface PageItem {
+  pathname: string;
+  query?: string;
+  hash?: string;
+  views: number;
+  sessions: number;
+}
+
 export interface PagesData {
   ok: boolean;
-  data: Array<{
-    pathname: string;
-    query?: string;
-    hash?: string;
-    views: number;
-    sessions: number;
-  }>;
+  data: PaginatedCollection<PageItem>;
   tabs?: {
     path: Array<{
       label: string;

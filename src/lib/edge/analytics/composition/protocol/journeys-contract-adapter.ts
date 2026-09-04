@@ -23,6 +23,11 @@ import {
 import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
+type JourneyCollectionPath =
+  | "visitor-events"
+  | "visitor-sessions"
+  | "session-events";
+
 export async function handleVisitorsContract(
   env: Env,
   siteId: string,
@@ -149,6 +154,42 @@ export async function handleSessionDetailContract(
     time: toQueryTime(window),
     filters: { version: 1, root: null },
     sessionId,
+  });
+  if (!result.ok) return queryErrorResponse(result.error);
+  return jsonResponseWith(ctx!, { ok: true, data: result.data });
+}
+
+export async function handleJourneyCollectionContract(
+  env: Env,
+  siteId: string,
+  url: URL,
+  path: JourneyCollectionPath,
+  ctx?: ResponseContext,
+  queryContext = siteQueryContext(siteId, "private-dashboard"),
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const pageSizeKey = url.searchParams.has("limit") ? "limit" : "pageSize";
+  const pageSize = parseQueryLimit(url, pageSizeKey, 100, 1, 500);
+  const rawCursor = url.searchParams.get("cursor");
+  const targetKey =
+    path === "visitor-events" || path === "visitor-sessions"
+      ? "visitorId"
+      : "sessionId";
+  const targetId = url.searchParams.get(targetKey)?.trim();
+  if (!targetId) return badRequest(`Missing ${targetKey}`);
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
+  const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
+    readonly items: readonly unknown[];
+    readonly pagination: unknown;
+  }>(path, {
+    context: queryContext,
+    time: toQueryTime(window),
+    filters,
+    page: { limit: pageSize, cursor: rawCursor },
+    ...(path === "visitor-events" || path === "visitor-sessions"
+      ? { visitorId: targetId }
+      : { sessionId: targetId }),
   });
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });

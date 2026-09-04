@@ -1,6 +1,9 @@
 import "@tanstack/react-start/server-only";
 
-import type { FilterDocument } from "@/lib/edge/analytics/contract";
+import type {
+  FilterDocument,
+  QueryAudience,
+} from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   mapEventAnalyticsContextCards,
@@ -11,13 +14,19 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import {
+  decodeEventFieldCursor,
+  decodeEventFieldValueCursor,
   queryEventFieldsFromD1,
+  queryEventFieldsPageFromD1,
   queryEventFieldValuesFromD1,
+  queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import {
+  decodeEventTypeCursor,
   queryEventsSummaryFromD1,
   queryEventTypeAggregate,
+  queryEventTypePageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import {
   queryEventsTrendFromD1,
@@ -30,6 +39,7 @@ export interface ReadSiteEventsInput {
   readonly siteId: string;
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
+  readonly audience?: QueryAudience;
 }
 
 export interface ReadSiteEventsTimeseriesInput extends ReadSiteEventsInput {
@@ -39,7 +49,8 @@ export interface ReadSiteEventsTimeseriesInput extends ReadSiteEventsInput {
 
 export interface ReadSiteEventTypesInput extends ReadSiteEventsInput {
   readonly search?: string;
-  readonly limit: number;
+  readonly page?: { readonly limit: number; readonly cursor?: string | null };
+  readonly limit?: number;
 }
 
 export interface ReadSiteEventTypeDetailInput extends ReadSiteEventsInput {
@@ -49,14 +60,16 @@ export interface ReadSiteEventTypeDetailInput extends ReadSiteEventsInput {
 
 export interface ReadSiteEventFieldsInput extends ReadSiteEventsInput {
   readonly eventName?: string;
-  readonly limit: number;
+  readonly page?: { readonly limit: number; readonly cursor?: string | null };
+  readonly limit?: number;
 }
 
 export interface ReadSiteEventFieldValuesInput extends ReadSiteEventsInput {
   readonly eventName?: string;
   readonly fieldPath: string;
   readonly fieldValueType: string;
-  readonly limit: number;
+  readonly page?: { readonly limit: number; readonly cursor?: string | null };
+  readonly limit?: number;
   readonly search?: string;
 }
 
@@ -105,65 +118,162 @@ export async function readSiteEventsTimeseries(
 }
 
 export async function readSiteEventTypes(input: ReadSiteEventTypesInput) {
+  if (!input.page) {
+    return {
+      items: (
+        await queryEventTypeAggregate(
+          input.env,
+          input.siteId,
+          input.window,
+          input.filters,
+          input.limit ?? 20,
+          input.search,
+        )
+      ).map((row) => ({
+        key: row.value,
+        label: row.value,
+        events: row.views,
+        sessions: row.sessions,
+        visitors: row.visitors,
+      })),
+      page: { limit: input.limit ?? 20 },
+    };
+  }
+  const requestedPage = input.page;
+  const cursor = await decodeEventTypeCursor(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    input.search,
+    requestedPage.cursor,
+    input.audience,
+  );
+  if (requestedPage.cursor && !cursor) throw new Error("invalid-cursor");
+  const result = await queryEventTypePageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    requestedPage.limit,
+    input.search,
+    cursor,
+    input.audience,
+  );
   return {
-    items: (
-      await queryEventTypeAggregate(
-        input.env,
-        input.siteId,
-        input.window,
-        input.filters,
-        input.limit,
-        input.search,
-      )
-    ).map((row) => ({
+    items: result.items.map((row) => ({
       key: row.value,
       label: row.value,
       events: row.views,
       sessions: row.sessions,
       visitors: row.visitors,
     })),
-    page: { limit: input.limit },
+    pagination: result.pagination,
   };
 }
 
 export async function readSiteEventFields(input: ReadSiteEventFieldsInput) {
+  if (!input.page) {
+    return {
+      eventName: input.eventName ?? "",
+      items: (
+        await queryEventFieldsFromD1(
+          input.env,
+          input.siteId,
+          input.window,
+          input.filters,
+          input.eventName,
+          input.limit ?? 100,
+        )
+      ).map(mapEventField),
+      page: { limit: input.limit ?? 100 },
+    };
+  }
+  const requestedPage = input.page;
+  const cursor = await decodeEventFieldCursor(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    input.eventName,
+    requestedPage.cursor,
+    input.audience,
+  );
+  if (requestedPage.cursor && !cursor) throw new Error("invalid-cursor");
+  const result = await queryEventFieldsPageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    input.eventName,
+    requestedPage.limit,
+    cursor,
+    input.audience,
+  );
   return {
     eventName: input.eventName ?? "",
-    fields: (
-      await queryEventFieldsFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        input.filters,
-        input.eventName,
-        input.limit,
-      )
-    ).map(mapEventField),
-    page: { limit: input.limit },
+    items: result.items.map(mapEventField),
+    pagination: result.pagination,
   };
 }
 
 export async function readSiteEventFieldValues(
   input: ReadSiteEventFieldValuesInput,
 ) {
+  if (!input.page) {
+    return {
+      eventName: input.eventName ?? "",
+      fieldPath: input.fieldPath,
+      fieldValueType: input.fieldValueType,
+      items: (
+        await queryEventFieldValuesFromD1(
+          input.env,
+          input.siteId,
+          input.window,
+          input.filters,
+          input.eventName,
+          input.fieldPath,
+          input.fieldValueType,
+          input.limit ?? 25,
+          input.search,
+        )
+      ).map(mapEventFieldValue),
+      page: { limit: input.limit ?? 25 },
+    };
+  }
+  const requestedPage = input.page;
+  const cursor = await decodeEventFieldValueCursor(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    input.eventName,
+    input.fieldPath,
+    input.fieldValueType,
+    input.search,
+    requestedPage.cursor,
+    input.audience,
+  );
+  if (requestedPage.cursor && !cursor) throw new Error("invalid-cursor");
+  const result = await queryEventFieldValuesPageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    input.filters,
+    input.eventName,
+    input.fieldPath,
+    input.fieldValueType,
+    requestedPage.limit,
+    input.search,
+    cursor,
+    input.audience,
+  );
   return {
     eventName: input.eventName ?? "",
     fieldPath: input.fieldPath,
     fieldValueType: input.fieldValueType,
-    items: (
-      await queryEventFieldValuesFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        input.filters,
-        input.eventName,
-        input.fieldPath,
-        input.fieldValueType,
-        input.limit,
-        input.search,
-      )
-    ).map(mapEventFieldValue),
-    page: { limit: input.limit },
+    items: result.items.map(mapEventFieldValue),
+    pagination: result.pagination,
   };
 }
 

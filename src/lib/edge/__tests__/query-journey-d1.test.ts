@@ -1448,7 +1448,7 @@ describe("edge journey list D1 queries", () => {
       ...eventBindings(window),
       "session-1",
       "/pricing",
-      20,
+      21,
     ]);
   });
 });

@@ -15,7 +15,12 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import {
   queryEventFieldsFromD1,
-  queryEventFieldValuesFromD1,
+  queryEventFieldsPageFromD1,
+  queryEventFieldValuesPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/events-fields";
+import {
+  decodeEventFieldCursor,
+  decodeEventFieldValueCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import {
@@ -24,8 +29,9 @@ import {
   serializeEventRecordCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import {
+  decodeEventTypeCursor,
   queryEventsSummaryFromD1,
-  queryEventTypeAggregate,
+  queryEventTypePageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import {
   queryEventsTrendFromD1,
@@ -52,17 +58,36 @@ export function registerEventProviders(
       "event-types",
       typedQueryProvider(async (input) => {
         const request = query(input!);
+        const limit = numberField(request, "limit", 20);
+        const search = stringField(request, "search") || undefined;
+        const cursorText = stringField(request, "cursor") || null;
+        const window = timeWindow(request.time);
+        const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        const cursor = await decodeEventTypeCursor(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          search,
+          cursorText,
+          request.context.policy.audience,
+        );
+        if (cursorText && !cursor) throw new Error("invalid-cursor");
+        const page = await queryEventTypePageFromD1(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          limit,
+          search,
+          cursor,
+          request.context.policy.audience,
+        );
         return {
-          value: mapTabs(
-            await queryEventTypeAggregate(
-              options.env,
-              options.siteId,
-              timeWindow(request.time),
-              request.filters ?? EMPTY_FILTER_DOCUMENT,
-              numberField(request, "limit", 20),
-              stringField(request, "search") || undefined,
-            ),
-          ),
+          value: {
+            items: mapTabs([...page.items]),
+            pagination: page.pagination,
+          },
         };
       }),
     )
@@ -152,23 +177,45 @@ export function registerEventProviders(
         const eventName = stringField(request, "eventName") || undefined;
         const fieldPath = stringField(request, "fieldPath");
         const fieldValueType = stringField(request, "fieldValueType");
+        const limit = numberField(request, "limit", 25);
+        const search = stringField(request, "search") || undefined;
+        const window = timeWindow(request.time);
+        const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        const cursorText = stringField(request, "cursor") || null;
+        const cursor = await decodeEventFieldValueCursor(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          eventName,
+          fieldPath,
+          fieldValueType,
+          search,
+          cursorText,
+          request.context.policy.audience,
+        );
+        if (cursorText && !cursor) throw new Error("invalid-cursor");
+        const page = await queryEventFieldValuesPageFromD1(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          eventName,
+          fieldPath,
+          fieldValueType,
+          limit,
+          search,
+          cursor,
+          request.context.policy.audience,
+        );
         return {
           value: {
             fieldPath,
             fieldValueType,
-            data: (
-              await queryEventFieldValuesFromD1(
-                options.env,
-                options.siteId,
-                timeWindow(request.time),
-                request.filters ?? EMPTY_FILTER_DOCUMENT,
-                eventName,
-                fieldPath,
-                fieldValueType,
-                numberField(request, "limit", 25),
-                stringField(request, "search") || undefined,
-              )
-            ).map(mapEventFieldValue),
+            data: {
+              items: page.items.map(mapEventFieldValue),
+              pagination: page.pagination,
+            },
           },
         };
       }),
@@ -178,21 +225,37 @@ export function registerEventProviders(
       typedQueryProvider(async (input) => {
         const request = query(input!);
         const eventName = stringField(request, "eventName") || undefined;
+        const limit = numberField(request, "limit", 100);
+        const window = timeWindow(request.time);
+        const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        const cursorText = stringField(request, "cursor") || null;
+        const cursor = await decodeEventFieldCursor(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          eventName,
+          cursorText,
+          request.context.policy.audience,
+        );
+        if (cursorText && !cursor) throw new Error("invalid-cursor");
+        const page = await queryEventFieldsPageFromD1(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          eventName,
+          limit,
+          cursor,
+          request.context.policy.audience,
+        );
         return {
           value: {
             eventName,
-            fields: (
-              await measured("event_type_fields", () =>
-                queryEventFieldsFromD1(
-                  options.env,
-                  options.siteId,
-                  timeWindow(request.time),
-                  request.filters ?? EMPTY_FILTER_DOCUMENT,
-                  eventName,
-                  numberField(request, "limit", 100),
-                ),
-              )
-            ).map(mapEventField),
+            data: {
+              items: page.items.map(mapEventField),
+              pagination: page.pagination,
+            },
           },
         };
       }),

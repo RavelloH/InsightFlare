@@ -6,6 +6,7 @@ import {
   type PagesResult,
   type ReferrersQuery,
   type ReferrersResult,
+  type ReferrerSummaryResult,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import {
@@ -18,6 +19,7 @@ import {
   parseBooleanFlag,
   parseInterval,
   parseLimit,
+  parseListSearch,
   parseQueryLimit,
   parseWindow,
   queryErrorResponse,
@@ -43,6 +45,7 @@ export async function handlePagesContract(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const limit = parseLimit(url, 20, 200);
+  const cursor = url.searchParams.get("cursor");
   const time = toQueryTime(window);
   const includeDetails = parseBooleanFlag(url, "details");
   const query = {
@@ -51,6 +54,7 @@ export async function handlePagesContract(
     filters,
     limit,
     includeDetails,
+    page: { limit, ...(cursor ? { cursor } : {}) },
   } satisfies PagesQuery;
   const result = await createD1SiteQueryRuntime({
     env,
@@ -59,7 +63,10 @@ export async function handlePagesContract(
   if (!result.ok) return queryErrorResponse(result.error);
   const payload: Record<string, unknown> = {
     ok: true,
-    data: mapPages([...result.data.items]),
+    data: {
+      items: mapPages([...result.data.items]),
+      pagination: result.data.pagination,
+    },
   };
   if (includeTabs) {
     const tabsResult = await createD1SiteQueryRuntime({
@@ -101,6 +108,12 @@ export async function handleReferrersContract(
   const time = toQueryTime(window);
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const limit = parseLimit(url, fallbackLimit, 200);
+  const cursor = url.searchParams.get("cursor");
+  const search = parseListSearch(url) ?? undefined;
+  const sort =
+    url.searchParams.get("sort") === "visitors" ? "visitors" : "views";
+  const direction =
+    url.searchParams.get("direction") === "asc" ? "asc" : "desc";
   const includeFullUrl = allowFullUrlParam && parseBooleanFlag(url, "fullUrl");
   const query = {
     context: queryContext,
@@ -108,6 +121,10 @@ export async function handleReferrersContract(
     filters,
     limit,
     includeFullUrl,
+    search,
+    sort,
+    direction,
+    page: { limit, ...(cursor ? { cursor } : {}) },
   } satisfies ReferrersQuery;
   const result = await createD1SiteQueryRuntime({
     env,
@@ -116,8 +133,38 @@ export async function handleReferrersContract(
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, {
     ok: true,
-    data: mapReferrers([...result.data.items]),
+    data: {
+      items: mapReferrers([...result.data.items]),
+      pagination: result.data.pagination,
+    },
   });
+}
+
+export async function handleReferrerSummaryContract(
+  env: Env,
+  siteId: string,
+  url: URL,
+  ctx?: ResponseContext,
+  queryContext = siteQueryContext(siteId, "private-dashboard"),
+): Promise<Response> {
+  const window = parseWindow(url);
+  if (!window) return badRequest("Invalid time window");
+  const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
+  const topN = parseQueryLimit(url, "topN", 5, 1, 20);
+  const result = await createD1SiteQueryRuntime({
+    env,
+    siteId,
+  }).execute<ReferrerSummaryResult>("referrers", {
+    context: queryContext,
+    time: toQueryTime(window),
+    filters,
+    limit: topN,
+    includeFullUrl: false,
+    variant: "summary",
+    topN,
+  });
+  if (!result.ok) return queryErrorResponse(result.error);
+  return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
 
 export async function handlePagesDashboardContract(

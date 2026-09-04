@@ -1,4 +1,5 @@
 import type {
+  DashboardListRequestOptions,
   PageCardTabsData,
   PrivateRequestParams,
 } from "@/lib/dashboard/client-data-types";
@@ -186,6 +187,7 @@ export async function fetchPageCardTabs(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
+  options?: DashboardListRequestOptions,
 ): Promise<PageCardTabsData> {
   const payload = await fetchPrivateJson<PagesData>(
     "/api/private/pages",
@@ -195,10 +197,12 @@ export async function fetchPageCardTabs(
         from: window.from,
         to: window.to,
         timeZone: window.timeZone,
-        limit: 100,
+        limit: options?.limit ?? 100,
+        ...(options?.cursor ? { cursor: options.cursor } : {}),
       },
       filters,
     ) satisfies PrivateRequestParams,
+    { signal: options?.signal },
   );
   return payload.tabs ?? emptyPageCardTabs();
 }

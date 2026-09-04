@@ -1,3 +1,5 @@
+import type { PaginatedCollection } from "./pagination";
+
 export interface EventDimensionRow {
   label: string;
   views: number;
@@ -185,7 +187,13 @@ export interface EventFieldValuesData {
   ok: boolean;
   fieldPath: string;
   fieldValueType: EventField["valueType"] | "";
-  data: EventFieldValueStat[];
+  data: PaginatedCollection<EventFieldValueStat>;
+}
+
+export interface EventTypeFieldsData {
+  ok: boolean;
+  eventName: string;
+  data: PaginatedCollection<EventField>;
 }
 
 export interface EventRecordDetailData {

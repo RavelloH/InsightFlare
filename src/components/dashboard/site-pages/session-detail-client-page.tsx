@@ -9,7 +9,7 @@ import {
   RiPulseLine,
   RiTimeLine,
 } from "@remixicon/react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import {
   AsyncDimensionBreakdownCard,
@@ -64,6 +64,7 @@ import {
   fetchEventRecordDetail,
   fetchJourneyEventDetail,
   fetchSessionDetail,
+  fetchSessionEvents,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
@@ -1380,6 +1381,9 @@ const VisitDetailsTab = memo(function VisitDetailsTab({
   messages,
   labels,
   events,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   timeZone,
   onOpenEvent,
   loading = false,
@@ -1388,6 +1392,9 @@ const VisitDetailsTab = memo(function VisitDetailsTab({
   messages: AppMessages;
   labels: Labels;
   events: JourneyEvent[];
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   timeZone: string;
   onOpenEvent: (event: JourneyEvent) => void;
   loading?: boolean;
@@ -1454,6 +1461,16 @@ const VisitDetailsTab = memo(function VisitDetailsTab({
                     }
                   />
                 ))}
+                {hasMore ? (
+                  <button
+                    type="button"
+                    className="w-full py-2 text-center text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+                    disabled={loadingMore}
+                    onClick={onLoadMore}
+                  >
+                    {loadingMore ? "Loading…" : "Load more"}
+                  </button>
+                ) : null}
               </div>
             )}
           </AutoTransition>
@@ -1693,6 +1710,9 @@ function DetailContent({
   timeZone,
   timeWindow,
   onOpenVisitor,
+  hasMoreEvents = false,
+  loadingMoreEvents = false,
+  onLoadMoreEvents,
   loading = false,
 }: {
   locale: Locale;
@@ -1704,6 +1724,9 @@ function DetailContent({
   timeZone: string;
   timeWindow: TimeWindow;
   onOpenVisitor?: (visitorId: string) => void;
+  hasMoreEvents?: boolean;
+  loadingMoreEvents?: boolean;
+  onLoadMoreEvents?: () => void;
   loading?: boolean;
 }) {
   const modalClose = useDetailDrawerClose();
@@ -1794,6 +1817,9 @@ function DetailContent({
             messages={messages}
             labels={labels}
             events={detail.events}
+            hasMore={hasMoreEvents}
+            loadingMore={loadingMoreEvents}
+            onLoadMore={onLoadMoreEvents}
             timeZone={timeZone}
             onOpenEvent={setSelectedEvent}
             loading={loading}
@@ -1870,8 +1896,34 @@ export const SessionDetailClientPage = memo(function SessionDetailClientPage({
       fetchSessionDetail(siteId, sessionId, timeZone, window, { signal }),
     enabled: typeof window !== "undefined" && Boolean(sessionId),
   });
-  const detail = detailQuery.data?.data ?? null;
-  const loading = detailQuery.isPending && !detail;
+  const summary = detailQuery.data?.data ?? null;
+  const eventsQuery = useInfiniteQuery({
+    queryKey: [
+      "dashboard",
+      "session-detail-events",
+      siteId,
+      sessionId,
+      timeZone,
+      window.from,
+      window.to,
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      fetchSessionEvents(siteId, sessionId, window, {
+        cursor: pageParam,
+        signal,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.data?.pagination?.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
+    enabled: Boolean(summary && sessionId),
+  });
+  const loadedEvents = eventsQuery.data
+    ? eventsQuery.data.pages.flatMap((page) => page.data.items)
+    : (summary?.events ?? []);
+  const detail = summary ? { ...summary, events: loadedEvents } : null;
+  const loading = detailQuery.isPending && !summary;
   const error = detailQuery.isError;
 
   if (!sessionId) {
@@ -1921,6 +1973,13 @@ export const SessionDetailClientPage = memo(function SessionDetailClientPage({
       timeZone={timeZone}
       timeWindow={window}
       onOpenVisitor={onOpenVisitor}
+      hasMoreEvents={Boolean(eventsQuery.hasNextPage)}
+      loadingMoreEvents={eventsQuery.isFetchingNextPage}
+      onLoadMoreEvents={() => {
+        if (eventsQuery.hasNextPage && !eventsQuery.isFetchingNextPage) {
+          void eventsQuery.fetchNextPage();
+        }
+      }}
       loading={loading}
     />
   );

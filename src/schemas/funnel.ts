@@ -81,7 +81,15 @@ export const FunnelUpdateInputSchema = z
 
 export const FunnelListResponseSchema = createEnvelopeSchema(
   z.object({
-    funnels: z.array(FunnelDefinitionSchema),
+    items: z.array(FunnelDefinitionSchema),
+    pagination: z
+      .object({
+        limit: z.number().int().positive(),
+        returned: z.number().int().nonnegative(),
+        hasMore: z.boolean(),
+        nextCursor: z.string().nullable(),
+      })
+      .strict(),
   }),
 );
 
