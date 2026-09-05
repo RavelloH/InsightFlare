@@ -117,7 +117,6 @@ describe("D1 journey list low-level query coverage", () => {
       filterFixture({ country: "US" }),
       3,
       "visitor-1",
-      2,
       { key: "sessions", direction: "asc" },
       "Chrome%",
     );
@@ -132,7 +131,6 @@ describe("D1 journey list low-level query coverage", () => {
       scopedFilters(),
       3,
       "visitor-1",
-      0,
       { key: "lastSeenAt", direction: "desc" },
     );
     expect(scoped.calls[0].sql).toContain("scope_final_visits");
@@ -195,7 +193,6 @@ describe("D1 journey list low-level query coverage", () => {
       EMPTY_FILTER_DOCUMENT,
       3,
       { type: "visitor", value: "visitor-1" },
-      0,
       { key: "startedAt", direction: "asc" },
     );
     expect(visitorTarget.calls[0].sql).toContain("visitor_id = ?");
@@ -208,7 +205,6 @@ describe("D1 journey list low-level query coverage", () => {
       filterFixture({ browser: "Chrome" }),
       3,
       { type: "session", value: "session-1" },
-      1,
       { key: "durationMs", direction: "desc" },
       "Chrome",
     );
@@ -223,7 +219,6 @@ describe("D1 journey list low-level query coverage", () => {
       scopedFilters(),
       3,
       undefined,
-      0,
       { key: "views", direction: "desc" },
     );
     expect(scoped.calls[0].sql).toContain("scope_final_visits");

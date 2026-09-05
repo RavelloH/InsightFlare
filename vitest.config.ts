@@ -31,6 +31,14 @@ export default defineConfig({
   },
   test: {
     environment: "happy-dom",
+    environmentOptions: {
+      happyDOM: {
+        // Keep URL parsing deterministic across local and Linux CI runs. Without
+        // an explicit origin, happy-dom may start at about:blank, whose pathname
+        // is "blank" and makes history.replaceState-based browser tests flaky.
+        url: "http://localhost:3000/",
+      },
+    },
     globals: true,
     pool: "threads",
     maxWorkers: VITEST_MAX_WORKERS,

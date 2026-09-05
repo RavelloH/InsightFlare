@@ -162,7 +162,7 @@ describe("D1 pagination cursor helpers", () => {
     );
     await expect(
       decodePageCursor({} as Env, binding, "a.b", "pages", () => "key"),
-    ).rejects.toBeInstanceOf(InvalidCursorError);
+    ).rejects.toThrow("data-unavailable");
   });
 
   it("splits an extra row into a page and preserves the final row", () => {

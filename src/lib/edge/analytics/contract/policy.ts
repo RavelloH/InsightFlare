@@ -19,7 +19,6 @@ const DEFAULT_LIMITS: QueryLimits = {
   maxCursorBytes: 12_288,
   maxFilterClauses: 96,
   maxLimit: 500,
-  maxOffset: 20_000,
 };
 
 const ALL_OPERATIONS: readonly QueryOperation[] = [

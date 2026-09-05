@@ -308,6 +308,7 @@ export async function queryEventRecordPageFromD1(
     cursor?: EventRecordCursor | null;
   },
 ): Promise<EventRecordPage> {
+  const eventName = options.eventName?.trim() || undefined;
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
   const filter = buildEventFilterSql(
     scopedDataset ? EMPTY_FILTER_DOCUMENT : filters,
@@ -317,7 +318,7 @@ export async function queryEventRecordPageFromD1(
     },
   );
   const eventNameClause =
-    scopedDataset && options.eventName
+    scopedDataset && eventName
       ? `${filter.clause ? " AND" : "WHERE"} TRIM(COALESCE(es.event_name, '')) = ?`
       : "";
   const cursor = options.cursor
@@ -330,7 +331,7 @@ export async function queryEventRecordPageFromD1(
       cursor.clause,
       options.sort,
       eventRecordSourceColumns(filters),
-      options.eventName,
+      eventName,
       scopedDataset,
     ),
     [
@@ -338,10 +339,10 @@ export async function queryEventRecordPageFromD1(
         ? scopedDataset.bindings.map((binding) => binding.value)
         : [
             ...visitSourceBindings(siteId, window),
-            ...eventSourceBindings(siteId, window, options.eventName),
+            ...eventSourceBindings(siteId, window, eventName),
           ]),
       ...filter.bindings,
-      ...(scopedDataset && options.eventName ? [options.eventName] : []),
+      ...(scopedDataset && eventName ? [eventName] : []),
       ...cursor.bindings,
       options.limit + 1,
     ],
@@ -356,54 +357,6 @@ export async function queryEventRecordPageFromD1(
         ? eventRecordCursorFromRow(lastRow, options.sort)
         : null,
   };
-}
-
-/**
- */
-export async function queryEventRecordsFromD1(
-  env: Env,
-  siteId: string,
-  window: QueryWindow,
-  filters: FilterDocument,
-  options: {
-    limit: number;
-    offset: number;
-    sort: ListSort<EventRecordSortKey>;
-    search?: string;
-    eventName?: string;
-  },
-): Promise<EventRecordRow[]> {
-  const limit = Math.max(0, Math.trunc(options.limit));
-  if (limit === 0) return [];
-
-  let remainingOffset = Math.max(0, Math.trunc(options.offset));
-  let cursor: EventRecordCursor | null = null;
-  const rows: EventRecordRow[] = [];
-  const batchLimit = Math.max(1, Math.min(200, limit));
-
-  while (rows.length < limit) {
-    const page = await queryEventRecordPageFromD1(
-      env,
-      siteId,
-      window,
-      filters,
-      {
-        limit: batchLimit,
-        sort: options.sort,
-        search: options.search,
-        eventName: options.eventName,
-        cursor,
-      },
-    );
-    const pageRows =
-      remainingOffset > 0 ? page.rows.slice(remainingOffset) : page.rows;
-    remainingOffset = Math.max(0, remainingOffset - page.rows.length);
-    rows.push(...pageRows.slice(0, limit - rows.length));
-    if (rows.length >= limit || !page.nextCursor) break;
-    cursor = page.nextCursor;
-  }
-
-  return rows;
 }
 
 export async function queryEventRecordDetailFromD1(

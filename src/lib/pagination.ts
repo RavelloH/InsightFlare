@@ -149,7 +149,7 @@ export async function decodePageCursor<T>(
     throw new InvalidCursorError(cursorKind);
   }
   const secret = rootSecret(env);
-  if (!secret) throw new InvalidCursorError(cursorKind);
+  if (!secret) throw new Error("data-unavailable");
   const [payload, signature, extra] = cursor.split(".");
   if (!payload || !signature || extra) {
     throw new InvalidCursorError(cursorKind);

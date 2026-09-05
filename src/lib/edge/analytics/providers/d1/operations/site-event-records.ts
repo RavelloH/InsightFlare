@@ -41,6 +41,7 @@ export interface ReadSiteEventRecordsInput {
 async function cursorBinding(
   input: ReadSiteEventRecordsInput,
 ): Promise<string> {
+  const eventName = input.eventName?.trim() || null;
   return paginationBinding([
     "event-records-v1",
     input.audience ?? "private-dashboard",
@@ -51,7 +52,7 @@ async function cursorBinding(
     filterFingerprint(input.filters, analyticsFilterRegistry),
     effectiveScopeForPagination(input.filters),
     input.search?.trim().toLowerCase() ?? null,
-    input.eventName?.trim() ?? null,
+    eventName,
     input.sort,
   ]);
 }
@@ -103,6 +104,7 @@ async function decodeCursor(
 }
 
 export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
+  const eventName = input.eventName?.trim() || undefined;
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
@@ -117,7 +119,7 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
       limit: input.page.limit,
       sort,
       search: input.search,
-      eventName: input.eventName,
+      eventName,
       cursor,
     },
   );

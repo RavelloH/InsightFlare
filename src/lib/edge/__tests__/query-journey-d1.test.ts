@@ -32,7 +32,6 @@ import {
   querySessionDetailFromD1,
   querySessionLocationPointsFromD1,
   querySessionsForDetailFromD1,
-  queryVisitorAggregate,
   queryVisitorDetailFromD1,
   queryVisitorForDetailFromD1,
   queryVisitorsFromD1,
@@ -1343,14 +1342,14 @@ describe("edge journey detail D1 queries", () => {
 });
 
 describe("edge journey list D1 queries", () => {
-  it("passes default aggregate arguments through to the visitor list query", async () => {
+  it("uses the canonical visitor list query with default sorting", async () => {
     const window = queryWindow();
     const { env, calls } = createD1Env([
       [visitorRow({ visitorId: "visitor-2" })],
     ]);
 
     await expect(
-      queryVisitorAggregate(env, siteId, window, EMPTY_FILTER_DOCUMENT, 6),
+      queryVisitorsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 6),
     ).resolves.toMatchObject([{ visitorId: "visitor-2" }]);
 
     expect(calls[0].sql).toContain("ORDER BY lastSeenAt DESC");
@@ -1370,7 +1369,6 @@ describe("edge journey list D1 queries", () => {
         filterFixture({ country: "US" }),
         5,
         "123",
-        0,
         { key: "views", direction: "asc" },
         "Chrome",
       ),
@@ -1400,7 +1398,6 @@ describe("edge journey list D1 queries", () => {
         filterFixture({ device: "desktop" }),
         7,
         { type: "session", value: "session-1" },
-        0,
         { key: "durationMs", direction: "asc" },
         "pricing",
       ),

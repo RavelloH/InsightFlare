@@ -84,34 +84,6 @@ export function jsonList(
   return jsonSuccess(data, options);
 }
 
-export function jsonPaginated(
-  data: unknown[],
-  pagination: { limit: number; nextCursor: string | null; hasMore: boolean },
-  options: {
-    request?: Request;
-    status?: number;
-    meta?: Record<string, unknown>;
-    links?: Record<string, string>;
-    headers?: Record<string, string>;
-  } = {},
-): Response {
-  const requestId = serverRequestId(options.request);
-  return jsonResponse(
-    {
-      data,
-      pagination,
-      ...(options.links ? { links: options.links } : {}),
-      meta: {
-        ...(options.meta ?? {}),
-        generatedAt: generatedAt(),
-        requestId,
-      },
-    },
-    options.status ?? 200,
-    apiV1Headers(requestId, options.headers),
-  );
-}
-
 export function jsonError(
   code: string,
   message: string,

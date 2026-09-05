@@ -114,7 +114,6 @@ export interface QueryLimits {
   readonly maxRangeMs?: number;
   readonly maxBuckets?: number;
   readonly maxLimit?: number;
-  readonly maxOffset?: number;
   readonly maxFilterClauses?: number;
   readonly maxCursorBytes?: number;
 }

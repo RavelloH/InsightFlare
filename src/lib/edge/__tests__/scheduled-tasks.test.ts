@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { handleScheduledTasksAdmin } from "@/lib/edge/admin-scheduled-tasks";
 import { runScheduledTask } from "@/lib/edge/scheduled-task-runner";
@@ -201,85 +201,97 @@ describe("scheduled task runner and admin API", () => {
   });
 
   it("paginates runs and selects run details outside the current page", async () => {
+    vi.useFakeTimers();
     const { env, d1 } = createEnv();
-    const now = Date.now();
-    const expiresAt = Math.floor((now + 30 * 24 * 60 * 60 * 1000) / 1000);
+    try {
+      const beforeMinuteBoundary = Date.UTC(2026, 5, 15, 4, 1, 0) - 1;
+      vi.setSystemTime(beforeMinuteBoundary);
+      const now = Date.now();
+      const expiresAt = Math.floor((now + 30 * 24 * 60 * 60 * 1000) / 1000);
 
-    for (let index = 0; index < 12; index += 1) {
-      d1.db
-        .prepare(
-          `
-            INSERT INTO scheduled_task_runs (
-              id,
-              invocation_id,
-              task_key,
-              task_name,
-              trigger_type,
-              status,
-              scheduled_at_ms,
-              started_at_ms,
-              finished_at_ms,
-              duration_ms,
-              summary_json,
-              created_at,
-              expires_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `,
-        )
-        .run(
-          `run-${index}`,
-          `invocation-${index}`,
-          "visit_hourly_rollup",
-          "Hourly visit aggregation",
-          "cron",
-          "success",
-          now - index * 60_000,
-          now - index * 60_000,
-          now - index * 60_000 + 250,
-          250,
-          JSON.stringify({ rollupRowsWritten: index }),
-          Math.floor(now / 1000),
-          expiresAt,
-        );
+      for (let index = 0; index < 12; index += 1) {
+        d1.db
+          .prepare(
+            `
+              INSERT INTO scheduled_task_runs (
+                id,
+                invocation_id,
+                task_key,
+                task_name,
+                trigger_type,
+                status,
+                scheduled_at_ms,
+                started_at_ms,
+                finished_at_ms,
+                duration_ms,
+                summary_json,
+                created_at,
+                expires_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+          )
+          .run(
+            `run-${index}`,
+            `invocation-${index}`,
+            "visit_hourly_rollup",
+            "Hourly visit aggregation",
+            "cron",
+            "success",
+            now - index * 60_000,
+            now - index * 60_000,
+            now - index * 60_000 + 250,
+            250,
+            JSON.stringify({ rollupRowsWritten: index }),
+            Math.floor(now / 1000),
+            expiresAt,
+          );
+      }
+
+      const firstUrl = new URL(
+        "https://edge.test/api/private/admin/scheduled-tasks?limit=5",
+      );
+      const firstResponse = await handleScheduledTasksAdmin(
+        new Request(firstUrl),
+        env,
+        firstUrl,
+        async () => ({ isAdmin: true }),
+      );
+      const firstPayload = (await firstResponse.json()) as ScheduledTasksData;
+      const cursor = firstPayload.runs.pagination.nextCursor;
+      expect(cursor).toEqual(expect.any(String));
+
+      // The rolling stats window crosses a minute boundary between requests.
+      // The cursor binding must remain valid because that window is not part
+      // of the grouped run-list identity.
+      vi.setSystemTime(beforeMinuteBoundary + 2_000);
+      const url = new URL(
+        `https://edge.test/api/private/admin/scheduled-tasks?limit=5&cursor=${encodeURIComponent(cursor!)}&runId=run-10`,
+      );
+      const response = await handleScheduledTasksAdmin(
+        new Request(url),
+        env,
+        url,
+        async () => ({ isAdmin: true }),
+      );
+      const payload = (await response.json()) as ScheduledTasksData;
+
+      expect(response.status).toBe(200);
+      expect(payload.runs.items.map((run) => run.id)).toEqual(
+        [5, 6, 7, 8, 9].map((index) => scheduledGroupId(now - index * 60_000)),
+      );
+      expect(payload.runs.pagination).toEqual({
+        limit: 5,
+        returned: 5,
+        hasMore: true,
+        nextCursor: expect.any(String),
+      });
+      expect(payload.selectedRun?.id).toBe(scheduledGroupId(now - 10 * 60_000));
+      expect(payload.selectedRun?.runs[0]?.id).toBe("run-10");
+    } finally {
+      vi.useRealTimers();
+      d1.close();
     }
-
-    const firstUrl = new URL(
-      "https://edge.test/api/private/admin/scheduled-tasks?limit=5",
-    );
-    const firstResponse = await handleScheduledTasksAdmin(
-      new Request(firstUrl),
-      env,
-      firstUrl,
-      async () => ({ isAdmin: true }),
-    );
-    const firstPayload = (await firstResponse.json()) as ScheduledTasksData;
-    const cursor = firstPayload.runs.pagination.nextCursor;
-    expect(cursor).toEqual(expect.any(String));
-    const url = new URL(
-      `https://edge.test/api/private/admin/scheduled-tasks?limit=5&cursor=${encodeURIComponent(cursor!)}&runId=run-10`,
-    );
-    const response = await handleScheduledTasksAdmin(
-      new Request(url),
-      env,
-      url,
-      async () => ({ isAdmin: true }),
-    );
-    const payload = (await response.json()) as ScheduledTasksData;
-
-    expect(response.status).toBe(200);
-    expect(payload.runs.items.map((run) => run.id)).toEqual(
-      [5, 6, 7, 8, 9].map((index) => scheduledGroupId(now - index * 60_000)),
-    );
-    expect(payload.runs.pagination).toEqual({
-      limit: 5,
-      returned: 5,
-      hasMore: true,
-      nextCursor: expect.any(String),
-    });
-    expect(payload.selectedRun?.id).toBe(scheduledGroupId(now - 10 * 60_000));
-    expect(payload.selectedRun?.runs[0]?.id).toBe("run-10");
-    d1.close();
   });
 
   it("counts skipped runs independently in run groups", async () => {

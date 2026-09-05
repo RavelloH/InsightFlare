@@ -110,24 +110,21 @@ function schemaContainsPagination(schema, seen = new Set()) {
   if (schema.$ref) {
     if (seen.has(schema.$ref)) return false;
     seen.add(schema.$ref);
-    return (
-      schema.$ref.endsWith("/PaginatedEnvelope") ||
-      schemaContainsPagination(resolvePointer(schema.$ref), seen)
-    );
+    return schemaContainsPagination(resolvePointer(schema.$ref), seen);
   }
-  if (schema.properties?.pagination) return true;
-  const page = schema.properties?.page;
-  if (page && typeof page === "object") {
-    const resolvedPage = page.$ref ? resolvePointer(page.$ref) : page;
-    const pageProperties = resolvedPage?.properties;
-    if (
-      pageProperties?.nextCursor &&
-      pageProperties?.hasMore &&
-      (pageProperties?.kind?.const === "keyset" ||
-        pageProperties?.kind?.enum?.includes("keyset"))
-    ) {
-      return true;
-    }
+  const data = schema.properties?.data;
+  const dataSchema = dereference(data);
+  const pagination = dataSchema?.properties?.pagination;
+  const paginationSchema = dereference(pagination);
+  const paginationProperties = paginationSchema?.properties;
+  if (
+    dataSchema?.properties?.items &&
+    paginationProperties?.limit &&
+    paginationProperties?.returned &&
+    paginationProperties?.hasMore &&
+    paginationProperties?.nextCursor
+  ) {
+    return true;
   }
   if (schema.properties) {
     return Object.values(schema.properties).some((value) =>
@@ -144,6 +141,42 @@ function schemaContainsPagination(schema, seen = new Set()) {
     return schema.anyOf.some((item) => schemaContainsPagination(item, seen));
   }
   return false;
+}
+
+let legacyPaginationShapeFound = false;
+walk(openapi, (value) => {
+  if (legacyPaginationShapeFound || !value || typeof value !== "object") {
+    return;
+  }
+  if (
+    typeof value.$ref === "string" &&
+    (value.$ref.endsWith("/PaginatedEnvelope") ||
+      value.$ref.endsWith("/Pagination"))
+  ) {
+    legacyPaginationShapeFound = true;
+    return;
+  }
+  const properties = value.properties;
+  if (
+    properties?.data?.type === "array" &&
+    Object.prototype.hasOwnProperty.call(properties, "pagination")
+  ) {
+    legacyPaginationShapeFound = true;
+    return;
+  }
+  const page = dereference(properties?.page);
+  const pageProperties = page?.properties;
+  if (
+    pageProperties?.nextCursor &&
+    pageProperties?.hasMore &&
+    (pageProperties?.kind?.const === "keyset" ||
+      pageProperties?.kind?.enum?.includes("keyset"))
+  ) {
+    legacyPaginationShapeFound = true;
+  }
+});
+if (legacyPaginationShapeFound) {
+  issues.push("OpenAPI contains a legacy pagination response shape");
 }
 
 const operationIds = new Map();

@@ -691,7 +691,7 @@ describe("request observation admin reader", () => {
         )
           ? analyticsResponse([blockedAnalyticsRow()])
           : analyticsResponse([
-              normalAnalyticsRow({ pathname: "/first" }),
+              normalAnalyticsRow({ pathname: "/first", rayId: "" }),
               normalAnalyticsRow({ pathname: "/second" }),
             ]);
       }

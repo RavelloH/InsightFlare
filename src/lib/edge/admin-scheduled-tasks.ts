@@ -618,13 +618,9 @@ function parseLogLimit(url: URL): number {
   return Math.min(MAX_LOG_PAGE_SIZE, Math.max(1, value));
 }
 
-function scheduledRunsBinding(
-  sinceMs: number,
-  status: string,
-): Promise<string> {
+function scheduledRunsBinding(status: string): Promise<string> {
   return paginationBinding([
     "admin-scheduled-runs-v1",
-    sinceMs,
     status,
     "startedAt:desc,groupId:asc",
   ]);
@@ -692,9 +688,9 @@ export async function handleScheduledTasksAdmin(
   }
 
   const generatedAt = Date.now();
-  // Keep the cursor binding stable for the lifetime of a short-lived admin
-  // browsing session. The SQL window is concrete, but minute normalization
-  // avoids invalidating the next request merely because Date.now() advanced.
+  // The rolling stats window is concrete for each request, but intentionally
+  // does not participate in the grouped run-list cursor identity. This keeps
+  // a cursor usable when the request crosses a minute boundary.
   const since30d = Math.floor(generatedAt / 60_000) * 60_000 - STATS_WINDOW_MS;
   const since24h = generatedAt - 24 * 60 * 60 * 1000;
   const staleBefore = generatedAt - STALE_RUNNING_MS;
@@ -711,7 +707,7 @@ export async function handleScheduledTasksAdmin(
     ? status
     : "";
   const rawCursor = url.searchParams.get("cursor");
-  const runsBinding = await scheduledRunsBinding(since30d, statusFilter);
+  const runsBinding = await scheduledRunsBinding(statusFilter);
   let cursor: { readonly startedAt: number; readonly groupId: string } | null;
   try {
     cursor = await decodePageCursor(

@@ -18,7 +18,6 @@ import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/
 import {
   type EventRecordCursor,
   queryEventRecordPageFromD1,
-  queryEventRecordsFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import { queryEventSummaryMetricsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import {
@@ -376,9 +375,8 @@ describe("event detail D1 SQL", () => {
 
     try {
       const [records, overview, trend, fields, cards] = await Promise.all([
-        queryEventRecordsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, {
+        queryEventRecordPageFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, {
           limit: 25,
-          offset: 0,
           sort: { key: "occurredAt", direction: "desc" },
           eventName,
         }),
@@ -415,7 +413,7 @@ describe("event detail D1 SQL", () => {
         ),
       ]);
 
-      expect(records).toHaveLength(1);
+      expect(records.rows).toHaveLength(1);
       expect(overview.summary.events).toBe(1);
       expect(overview.summary.shareOfAllEvents).toBe(0.5);
       expect(trend.data.some((point) => point.events === 1)).toBe(true);
@@ -525,19 +523,6 @@ describe("event detail D1 SQL", () => {
           );
       }
 
-      const legacyOffsetRows = await queryEventRecordsFromD1(
-        env,
-        siteId,
-        window,
-        EMPTY_FILTER_DOCUMENT,
-        {
-          limit: 2,
-          offset: 1,
-          sort: { key: "occurredAt", direction: "desc" },
-        },
-      );
-      expect(legacyOffsetRows).toHaveLength(2);
-
       for (const sort of [
         { key: "occurredAt", direction: "asc" },
         { key: "occurredAt", direction: "desc" },
@@ -546,14 +531,13 @@ describe("event detail D1 SQL", () => {
         { key: "pathname", direction: "asc" },
         { key: "pathname", direction: "desc" },
       ] as const) {
-        const expected = await queryEventRecordsFromD1(
+        const expected = await queryEventRecordPageFromD1(
           env,
           siteId,
           window,
           EMPTY_FILTER_DOCUMENT,
           {
             limit: 20,
-            offset: 0,
             sort,
           },
         );
@@ -576,7 +560,7 @@ describe("event detail D1 SQL", () => {
         } while (cursor);
 
         expect(received.map((row) => row.eventId)).toEqual(
-          expected.map((row) => row.eventId),
+          expected.rows.map((row) => row.eventId),
         );
       }
 
@@ -598,7 +582,7 @@ describe("event detail D1 SQL", () => {
     const { env, d1 } = createSqliteEventEnv();
 
     try {
-      const records = await queryEventRecordsFromD1(
+      const records = await queryEventRecordPageFromD1(
         env,
         siteId,
         window,
@@ -613,13 +597,12 @@ describe("event detail D1 SQL", () => {
         }),
         {
           limit: 25,
-          offset: 0,
           sort: { key: "occurredAt", direction: "desc" },
-          eventName,
+          eventName: ` ${eventName} `,
         },
       );
 
-      expect(records.map((record) => record.eventId)).toEqual(["event-1"]);
+      expect(records.rows.map((record) => record.eventId)).toEqual(["event-1"]);
       const query = d1.calls.at(-1);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
@@ -1264,7 +1247,6 @@ describe("event detail D1 SQL", () => {
           EMPTY_FILTER_DOCUMENT,
           20,
           undefined,
-          0,
           sort,
         );
         const received = [];
@@ -1300,7 +1282,6 @@ describe("event detail D1 SQL", () => {
           EMPTY_FILTER_DOCUMENT,
           20,
           undefined,
-          0,
           sort,
         );
         const received = [];

@@ -140,14 +140,23 @@ function paginatedEnvelope(
   return {
     description,
     allOf: [
-      ref("PaginatedEnvelope"),
+      ref("SuccessEnvelope"),
       {
         type: "object",
         description,
+        required: ["data"],
         properties: {
           data: {
-            type: "array",
-            items: itemSchema,
+            type: "object",
+            required: ["items", "pagination"],
+            properties: {
+              items: {
+                type: "array",
+                items: itemSchema,
+              },
+              pagination: ref("PaginationMeta"),
+            },
+            additionalProperties: false,
           },
         },
       },
@@ -646,11 +655,14 @@ function list(data: unknown[], extraMeta: Record<string, unknown> = {}) {
 
 function paginated(data: unknown[]) {
   return {
-    data,
-    pagination: {
-      limit: 100,
-      nextCursor: "cur_next_abc",
-      hasMore: true,
+    data: {
+      items: data,
+      pagination: {
+        limit: 100,
+        returned: data.length,
+        hasMore: true,
+        nextCursor: "cur_next_abc",
+      },
     },
     meta: meta(),
   };
@@ -829,25 +841,15 @@ function buildSchemas(): Record<string, unknown> {
       },
       additionalProperties: false,
     },
-    Pagination: {
+    PaginationMeta: {
       type: "object",
       description: "Cursor pagination state.",
-      required: ["limit", "nextCursor", "hasMore"],
+      required: ["limit", "returned", "hasMore", "nextCursor"],
       properties: {
         limit: { type: "integer", minimum: 1, maximum: 1000 },
-        nextCursor: { type: ["string", "null"], maxLength: MAX_CURSOR_LENGTH },
+        returned: { type: "integer", minimum: 0, maximum: 1000 },
         hasMore: { type: "boolean" },
-      },
-    },
-    PaginatedEnvelope: {
-      type: "object",
-      description: "Standard cursor-paginated list response envelope.",
-      required: ["data", "pagination", "meta"],
-      properties: {
-        data: { type: "array", items: {} },
-        pagination: ref("Pagination"),
-        links: ref("LinkMap"),
-        meta: ref("Meta"),
+        nextCursor: { type: ["string", "null"], maxLength: MAX_CURSOR_LENGTH },
       },
       additionalProperties: false,
     },
@@ -2130,7 +2132,6 @@ function buildSchemas(): Record<string, unknown> {
                 oneOf: [
                   ref("SuccessEnvelope"),
                   ref("ListEnvelope"),
-                  ref("PaginatedEnvelope"),
                   ref("ErrorResponse"),
                   { type: "null" },
                 ],

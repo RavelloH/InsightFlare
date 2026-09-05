@@ -486,7 +486,7 @@ export const SiteEventsTimeseriesQueryDtoSchema =
 export const SiteEventsSearchQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
     search: z.string().min(1).max(160).optional(),
-    eventName: z.string().min(1).max(120).optional(),
+    eventName: z.string().trim().min(1).max(120).optional(),
     sort: z
       .object({
         field: z.enum(["occurredAt", "eventName", "pathname"]),
@@ -531,13 +531,13 @@ export const SiteEventTypesQueryDtoSchema =
 
 export const SiteEventTypeDetailQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
-    eventName: z.string().min(1).max(120),
+    eventName: z.string().trim().min(1).max(120),
     interval: z.enum(["minute", "hour", "day", "week", "month"]).default("day"),
   }).strict();
 
 export const SiteEventFieldsQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
-    eventName: z.string().min(1).max(120),
+    eventName: z.string().trim().min(1).max(120),
     page: z
       .object({
         limit: z.number().int().min(1).max(200).default(100),
@@ -549,7 +549,7 @@ export const SiteEventFieldsQueryDtoSchema =
 
 export const SiteEventFieldValuesQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema.extend({
-    eventName: z.string().min(1).max(120),
+    eventName: z.string().trim().min(1).max(120),
     fieldPath: z.string().min(1).max(240),
     fieldValueType: z.enum([
       "string",

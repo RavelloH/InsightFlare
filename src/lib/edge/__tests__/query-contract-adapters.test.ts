@@ -48,7 +48,10 @@ function emptyEnv(): Env {
     all: async () => ({ results: [] }),
     first: async () => null,
   };
-  return { DB: { prepare: () => statement } } as unknown as Env;
+  return {
+    DB: { prepare: () => statement },
+    DAILY_SALT_SECRET: "contract-test-secret",
+  } as unknown as Env;
 }
 
 const env = emptyEnv();

@@ -328,14 +328,12 @@ export async function queryVisitorsFromD1(
   filters: FilterDocument,
   limit: number,
   targetVisitorId?: string,
-  offset = 0,
   sort: ListSort<VisitorListSortKey> = DEFAULT_VISITOR_LIST_SORT,
   search?: string,
 ): Promise<VisitorRow[]> {
   const rows: VisitorRow[] = [];
   let cursor: VisitorListCursor | null = null;
-  let remaining = Math.max(0, Math.trunc(offset));
-  const pageLimit = Math.max(1, Math.min(200, limit + remaining));
+  const pageLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
   while (rows.length < limit) {
     const page = await queryVisitorListPageFromD1(
       env,
@@ -352,14 +350,7 @@ export async function queryVisitorsFromD1(
     const candidates = targetVisitorId
       ? page.rows.filter((row) => row.visitorId === targetVisitorId)
       : page.rows;
-    if (remaining >= candidates.length) {
-      remaining -= candidates.length;
-    } else {
-      rows.push(
-        ...candidates.slice(remaining, remaining + limit - rows.length),
-      );
-      remaining = 0;
-    }
+    rows.push(...candidates.slice(0, limit - rows.length));
     if (rows.length >= limit || !page.nextCursor) break;
     cursor = page.nextCursor;
   }
@@ -454,14 +445,12 @@ export async function querySessionsFromD1(
   filters: FilterDocument,
   limit: number,
   target?: { type: "visitor" | "session"; value: string },
-  offset = 0,
   sort: ListSort<SessionListSortKey> = DEFAULT_SESSION_LIST_SORT,
   search?: string,
 ): Promise<SessionRow[]> {
   const rows: SessionRow[] = [];
   let cursor: SessionListCursor | null = null;
-  let remaining = Math.max(0, Math.trunc(offset));
-  const pageLimit = Math.max(1, Math.min(200, limit + remaining));
+  const pageLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
   while (rows.length < limit) {
     const page = await querySessionListPageFromD1(
       env,
@@ -476,12 +465,7 @@ export async function querySessionsFromD1(
         target,
       },
     );
-    if (remaining >= page.rows.length) {
-      remaining -= page.rows.length;
-    } else {
-      rows.push(...page.rows.slice(remaining, remaining + limit - rows.length));
-      remaining = 0;
-    }
+    rows.push(...page.rows.slice(0, limit - rows.length));
     if (rows.length >= limit || !page.nextCursor) break;
     cursor = page.nextCursor;
   }

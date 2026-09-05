@@ -1,14 +1,6 @@
 import type { Env } from "@/lib/edge/types";
 
-import type {
-  FilterDocument,
-  GeoPointAggregate,
-  ListSort,
-  QueryWindow,
-  VisitorListSortKey,
-  VisitorRow,
-} from "./core";
-import { DEFAULT_VISITOR_LIST_SORT } from "./core";
+import type { FilterDocument, GeoPointAggregate, QueryWindow } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryGeoPointsFromD1 } from "./journey-geo-queries";
 
@@ -58,31 +50,6 @@ export {
   querySessionsFromD1,
   queryVisitorsFromD1,
 } from "./journey-list-queries";
-
-/** Non-HTTP aggregate callers now walk the canonical keyset reader. */
-export async function queryVisitorAggregate(
-  env: Env,
-  siteId: string,
-  window: QueryWindow,
-  filters: FilterDocument,
-  limit: number,
-  offset = 0,
-  sort: ListSort<VisitorListSortKey> = DEFAULT_VISITOR_LIST_SORT,
-  search?: string,
-): Promise<VisitorRow[]> {
-  const { queryVisitorsFromD1 } = await import("./journey-list-queries");
-  return queryVisitorsFromD1(
-    env,
-    siteId,
-    window,
-    filters,
-    limit,
-    undefined,
-    offset,
-    sort,
-    search,
-  );
-}
 
 export async function queryGeoPointAggregate(
   env: Env,

@@ -228,7 +228,7 @@ describe("D1 event provider routing", () => {
       .execute(input({ interval: "day", limit: 2, eventName: "signup" }));
     await value.resolve("event-records")!.execute(
       input({
-        pageSize: 1,
+        page: { limit: 1, cursor: null },
         sort: "occurredAt",
         search: "one",
         eventName: "signup",
