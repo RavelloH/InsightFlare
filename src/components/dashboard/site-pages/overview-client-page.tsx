@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { Icon } from "@iconify/react";
@@ -37,8 +36,7 @@ import { PageHeading } from "@/components/dashboard/page-heading";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
-  type TabbedDataTableExportPage,
-  type TabbedDataTableExportPageOptions,
+  type TabbedDataTableLoader,
   type TabbedDataTableRowAdapter,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
@@ -380,18 +378,6 @@ type GeoLocationTab = Extract<
   GeoDimensionCardTab,
   "country" | "region" | "city"
 >;
-type OverviewCardTabCache<T extends string> = Record<
-  T,
-  OverviewTabRows | OverviewTabData["data"] | null
->;
-
-function overviewTabRows(
-  value: OverviewTabRows | OverviewTabData["data"] | null | undefined,
-): OverviewTabRows {
-  if (!value) return [];
-  return Array.isArray(value) ? value : value.items;
-}
-
 function overviewTabData(
   value: OverviewTabRows | OverviewTabData["data"],
 ): OverviewTabData["data"] {
@@ -405,36 +391,6 @@ function overviewTabData(
       nextCursor: null,
     },
   };
-}
-
-function appendOverviewTabPage(
-  previous: OverviewTabRows | OverviewTabData["data"] | null | undefined,
-  next: OverviewTabRows | OverviewTabData["data"],
-): OverviewTabData["data"] {
-  const previousRows = overviewTabRows(previous);
-  const nextData = overviewTabData(next);
-  const items = [...previousRows, ...nextData.items];
-  return {
-    items,
-    pagination: {
-      ...nextData.pagination,
-      returned: items.length,
-    },
-  };
-}
-
-function overviewTabHasMore(
-  value: OverviewTabRows | OverviewTabData["data"] | null | undefined,
-): boolean {
-  return Boolean(value && !Array.isArray(value) && value.pagination?.hasMore);
-}
-
-function overviewTabNextCursor(
-  value: OverviewTabRows | OverviewTabData["data"] | null | undefined,
-): string | null {
-  return value && !Array.isArray(value)
-    ? (value.pagination?.nextCursor ?? null)
-    : null;
 }
 
 export interface OverviewPagesSectionCardData {
@@ -554,16 +510,18 @@ function buildPageCardExportRows(
   tab: PageCardTab,
   items: OverviewTabRows,
   messages: AppMessages,
+  fallbackLabel?: string,
 ): PageCardRow[] {
   return items.map((item, index) => {
     const rawLabel = String(item.label ?? "").trim();
     const label =
       rawLabel ||
-      (tab === "query"
-        ? messages.pages.noQuery
-        : tab === "title" || tab === "hostname"
-          ? messages.common.unknown
-          : "/");
+      (fallbackLabel ??
+        (tab === "query"
+          ? messages.pages.noQuery
+          : tab === "title" || tab === "hostname"
+            ? messages.common.unknown
+            : "/"));
     return {
       key: `${tab}-${label}-${index}`,
       label,
@@ -625,34 +583,161 @@ function buildSourceCardExportRows(
   });
 }
 
-function buildDimensionExportRows(
+function buildClientDimensionRows(
+  tab: ClientDimensionCardTab,
   items: OverviewTabRows,
-  unknownLabel: string,
-  mono = false,
+  locale: Locale,
+  messages: AppMessages,
 ): PageCardRow[] {
+  const options: {
+    mono?: boolean;
+    screenSize?: boolean;
+    transformLabel?: (value: string) => string;
+    resolveIconName?: (value: string) => string | null;
+    resolveFilterValue?: (rawValue: string, normalizedLabel: string) => string;
+  } = {
+    browser: { resolveIconName: resolveBrowserLogoIconName },
+    osVersion: { resolveIconName: resolveOsLogoIconName },
+    deviceType: {
+      transformLabel: (value: string) =>
+        resolveDeviceTypeMeta(
+          value,
+          messages.common.deviceLabels,
+          messages.common.unknown,
+        ).label,
+    },
+    language: {
+      transformLabel: (value: string) =>
+        resolveLanguageLabel(value, locale, messages.common.unknown).label,
+      resolveFilterValue: (rawValue: string, normalizedLabel: string) =>
+        rawValue.trim() || normalizedLabel,
+    },
+    screenSize: { mono: true, screenSize: true },
+  }[tab];
+
   return items.map((item, index) => {
-    const rawLabel = String(item.label ?? "").trim();
-    const label = normalizeDimensionLabel(rawLabel, unknownLabel);
+    const rawValue = String(item.label ?? "");
+    const rawLabel = normalizeDimensionLabel(
+      rawValue,
+      messages.common.unknown,
+      { screenSize: options.screenSize },
+    );
+    const label = options.transformLabel
+      ? options.transformLabel(rawLabel)
+      : rawLabel;
+    const filterValue =
+      options.resolveFilterValue?.(rawValue, rawLabel) ?? rawLabel;
     return {
       key: `${label}-${index}`,
       label,
-      rawLabel: rawLabel || label,
+      rawLabel: rawValue.trim() || rawLabel,
       views: Math.max(0, Number(item.views ?? 0)),
       visitors: Math.max(0, Number(item.visitors ?? 0)),
-      mono,
-      filterValue: rawLabel || label,
+      mono: options.mono ?? false,
+      iconName: options.resolveIconName?.(rawLabel) ?? null,
+      filterValue,
     };
   });
 }
 
-const ALL_PAGE_CARD_TABS: PageCardTab[] = [
-  "path",
-  "query",
-  "title",
-  "hostname",
-  "entry",
-  "exit",
-];
+function buildGeoDimensionRows(
+  tab: GeoDimensionCardTab,
+  items: OverviewTabRows,
+  locale: Locale,
+  messages: AppMessages,
+  timezoneReferenceTimestampMs: number,
+): PageCardRow[] {
+  if (tab === "region") {
+    return items.map((item, index) => {
+      const value = resolveGeoDimensionRowRawValue(item);
+      const regionData = resolveGeoRegionBreadcrumbData(
+        value,
+        locale,
+        messages.common.unknown,
+      );
+      return {
+        key: `${regionData.displayLabel}-${index}`,
+        label: regionData.displayLabel,
+        rawLabel: value.trim() || regionData.filterValue,
+        views: Math.max(0, Number(item.views ?? 0)),
+        visitors: Math.max(0, Number(item.visitors ?? 0)),
+        mono: false,
+        iconName: null,
+        filterValue: regionData.filterValue,
+        regionBreadcrumb: regionData.breadcrumb,
+      };
+    });
+  }
+
+  if (tab === "city") {
+    return items.map((item, index) => {
+      const value = resolveGeoDimensionRowRawValue(item);
+      const cityData = resolveGeoCityBreadcrumbData(
+        value,
+        locale,
+        messages.common.unknown,
+      );
+      return {
+        key: `${cityData.displayLabel}-${index}`,
+        label: cityData.displayLabel,
+        rawLabel: value.trim() || cityData.filterValue,
+        views: Math.max(0, Number(item.views ?? 0)),
+        visitors: Math.max(0, Number(item.visitors ?? 0)),
+        mono: false,
+        iconName: null,
+        filterValue: cityData.filterValue,
+        cityBreadcrumb: cityData.breadcrumb ?? undefined,
+      };
+    });
+  }
+
+  return items.map((item, index) => {
+    const originalValue = String(item.label ?? "");
+    const rawLabel = normalizeDimensionLabel(
+      originalValue,
+      messages.common.unknown,
+    );
+    let label = rawLabel;
+    let iconName: string | null = null;
+
+    if (tab === "country") {
+      const country = resolveCountryLabel(
+        rawLabel,
+        locale,
+        messages.common.unknown,
+      );
+      label = country.label;
+      const flagCode = resolveCountryFlagCode(country.code, locale);
+      iconName = flagCode ? `flagpack:${flagCode.toLowerCase()}` : null;
+    } else if (tab === "continent") {
+      label = resolveContinentLabel(
+        rawLabel,
+        messages.common.unknown,
+        messages.common.continentLabels,
+      );
+    } else if (tab === "timezone") {
+      label = resolveTimezoneDisplayLabel({
+        value: rawLabel,
+        locale,
+        unknownLabel: messages.common.unknown,
+        timestampMs: timezoneReferenceTimestampMs,
+        timezoneDeltaVsLocal: messages.geo.timezoneDeltaVsLocal,
+      });
+    }
+
+    return {
+      key: `${label}-${index}`,
+      label,
+      rawLabel: originalValue.trim() || rawLabel,
+      views: Math.max(0, Number(item.views ?? 0)),
+      visitors: Math.max(0, Number(item.visitors ?? 0)),
+      mono: false,
+      iconName,
+      filterValue: originalValue.trim() || rawLabel,
+    };
+  });
+}
+
 const PAGE_CARD_TABS: PageCardTab[] = [
   "path",
   "title",
@@ -727,15 +812,6 @@ const GEO_AUX_FILTER_CONTROL_BY_TAB: Record<
 };
 const DIRECT_REFERRER_FILTER_VALUE = "__direct__";
 const GEO_REGION_VALUE_SEPARATOR = "::";
-
-function createOverviewCardTabCache<T extends string>(
-  tabs: readonly T[],
-): OverviewCardTabCache<T> {
-  return tabs.reduce((acc, tab) => {
-    acc[tab] = null;
-    return acc;
-  }, {} as OverviewCardTabCache<T>);
-}
 
 function sanitizeHostname(value: string): string {
   return value
@@ -1832,7 +1908,6 @@ export function OverviewPagesSection({
   pathname,
   filters,
   resolvedScope,
-  loading = false,
   cardDataOverride,
   visibleCards,
   showSourceLinkTab = true,
@@ -1882,72 +1957,14 @@ export function OverviewPagesSection({
     (resolvedScope === undefined &&
       (filterScopePreferenceFromDocument(filters) === "session" ||
         filterScopePreferenceFromDocument(filters) === "visitor"));
-  const pageCardFetchersRef = useRef(pageCardFetchers);
-  pageCardFetchersRef.current = pageCardFetchers;
-  const sourceCardFetchersRef = useRef(sourceCardFetchers);
-  sourceCardFetchersRef.current = sourceCardFetchers;
-  const clientCardFetchersRef = useRef(clientCardFetchers);
-  clientCardFetchersRef.current = clientCardFetchers;
-  const geoCardFetchersRef = useRef(geoCardFetchers);
-  geoCardFetchersRef.current = geoCardFetchers;
-  const [pageCardTabData, setPageCardTabData] = useState<
-    OverviewCardTabCache<PageCardTab>
-  >(() => createOverviewCardTabCache(ALL_PAGE_CARD_TABS));
-  const [sourceCardTabData, setSourceCardTabData] = useState<
-    OverviewCardTabCache<SourceCardTab>
-  >(() => createOverviewCardTabCache(SOURCE_CARD_TABS));
-  const [clientDimensionCardTabData, setClientDimensionCardTabData] = useState<
-    OverviewCardTabCache<ClientDimensionCardTab>
-  >(() => createOverviewCardTabCache(CLIENT_DIMENSION_CARD_TABS));
-  const [geoDimensionCardTabData, setGeoDimensionCardTabData] = useState<
-    OverviewCardTabCache<GeoDimensionCardTab>
-  >(() => createOverviewCardTabCache(GEO_DIMENSION_CARD_TABS));
-  const [loadingMorePageTabs, setLoadingMorePageTabs] = useState<
-    Record<PageCardTab, boolean>
-  >(
-    () =>
-      Object.fromEntries(
-        ALL_PAGE_CARD_TABS.map((tab) => [tab, false]),
-      ) as Record<PageCardTab, boolean>,
-  );
-  const [loadingMoreSourceTabs, setLoadingMoreSourceTabs] = useState<
-    Record<SourceCardTab, boolean>
-  >(
-    () =>
-      Object.fromEntries(SOURCE_CARD_TABS.map((tab) => [tab, false])) as Record<
-        SourceCardTab,
-        boolean
-      >,
-  );
-  const [loadingMoreClientTabs, setLoadingMoreClientTabs] = useState<
-    Record<ClientDimensionCardTab, boolean>
-  >(
-    () =>
-      Object.fromEntries(
-        CLIENT_DIMENSION_CARD_TABS.map((tab) => [tab, false]),
-      ) as Record<ClientDimensionCardTab, boolean>,
-  );
-  const [loadingMoreGeoTabs, setLoadingMoreGeoTabs] = useState<
-    Record<GeoDimensionCardTab, boolean>
-  >(
-    () =>
-      Object.fromEntries(
-        GEO_DIMENSION_CARD_TABS.map((tab) => [tab, false]),
-      ) as Record<GeoDimensionCardTab, boolean>,
-  );
-  const [pageCardTab, setPageCardTab] = useState<PageCardTab>("path");
-  const [sourceCardTab, setSourceCardTab] = useState<SourceCardTab>("domain");
-  const [clientDimensionCardTab, setClientDimensionCardTab] =
-    useState<ClientDimensionCardTab>("browser");
-  const [geoDimensionCardTab, setGeoDimensionCardTab] =
-    useState<GeoDimensionCardTab>("country");
   const hasCardDataOverride = Boolean(cardDataOverride);
-  const resolvedPageCardTabData = cardDataOverride?.page ?? pageCardTabData;
-  const resolvedSourceCardTabData =
-    cardDataOverride?.source ?? sourceCardTabData;
+  const cardDataOverrideKey = useMemo(
+    () => (cardDataOverride ? JSON.stringify(cardDataOverride) : "remote"),
+    [cardDataOverride],
+  );
   const resolvedSourceCardTabs = useMemo(() => {
     const hasChannelData =
-      resolvedSourceCardTabData.channel !== undefined ||
+      cardDataOverride?.source.channel !== undefined ||
       Boolean(sourceCardFetchers?.channel) ||
       (!hasCardDataOverride && !sourceCardFetchers);
     const tabs = hasChannelData
@@ -1955,21 +1972,11 @@ export function OverviewPagesSection({
       : SOURCE_CARD_TABS.filter((tab) => tab !== "channel");
     return showSourceLinkTab ? tabs : tabs.filter((tab) => tab !== "link");
   }, [
+    cardDataOverride?.source.channel,
     hasCardDataOverride,
-    resolvedSourceCardTabData.channel,
     showSourceLinkTab,
     sourceCardFetchers,
   ]);
-  const resolvedClientDimensionCardTabData =
-    cardDataOverride?.client ?? clientDimensionCardTabData;
-  const resolvedGeoDimensionCardTabData =
-    cardDataOverride?.geo ?? geoDimensionCardTabData;
-  const activePageCardTabData = resolvedPageCardTabData[pageCardTab];
-  const activeSourceCardTabData = resolvedSourceCardTabData[sourceCardTab];
-  const activeClientDimensionCardTabData =
-    resolvedClientDimensionCardTabData[clientDimensionCardTab];
-  const activeGeoDimensionCardTabData =
-    resolvedGeoDimensionCardTabData[geoDimensionCardTab];
   const resolvedPageCardNavigableTabs = useMemo(
     () =>
       new Set<PageCardNavigableTab>(
@@ -1995,496 +2002,6 @@ export function OverviewPagesSection({
       ...(pageCardFilterEnabledOverride ?? {}),
     }),
     [pageCardFilterEnabledOverride],
-  );
-
-  useEffect(() => {
-    if (resolvedPageCardTabs.includes(pageCardTab)) return;
-    setPageCardTab(resolvedPageCardTabs[0] ?? "path");
-  }, [pageCardTab, resolvedPageCardTabs]);
-
-  useEffect(() => {
-    if (resolvedSourceCardTabs.includes(sourceCardTab)) return;
-    setSourceCardTab(resolvedSourceCardTabs[0] ?? "domain");
-  }, [resolvedSourceCardTabs, sourceCardTab]);
-
-  useEffect(() => {
-    if (hasCardDataOverride) return;
-    setPageCardTabData(createOverviewCardTabCache(ALL_PAGE_CARD_TABS));
-    setSourceCardTabData(createOverviewCardTabCache(SOURCE_CARD_TABS));
-    setClientDimensionCardTabData(
-      createOverviewCardTabCache(CLIENT_DIMENSION_CARD_TABS),
-    );
-    setGeoDimensionCardTabData(
-      createOverviewCardTabCache(GEO_DIMENSION_CARD_TABS),
-    );
-    setLoadingMorePageTabs(
-      Object.fromEntries(
-        ALL_PAGE_CARD_TABS.map((tab) => [tab, false]),
-      ) as Record<PageCardTab, boolean>,
-    );
-    setLoadingMoreSourceTabs(
-      Object.fromEntries(SOURCE_CARD_TABS.map((tab) => [tab, false])) as Record<
-        SourceCardTab,
-        boolean
-      >,
-    );
-    setLoadingMoreClientTabs(
-      Object.fromEntries(
-        CLIENT_DIMENSION_CARD_TABS.map((tab) => [tab, false]),
-      ) as Record<ClientDimensionCardTab, boolean>,
-    );
-    setLoadingMoreGeoTabs(
-      Object.fromEntries(
-        GEO_DIMENSION_CARD_TABS.map((tab) => [tab, false]),
-      ) as Record<GeoDimensionCardTab, boolean>,
-    );
-  }, [
-    filtersKey,
-    siteId,
-    window.from,
-    window.to,
-    window.interval,
-    window.timeZone,
-    hasCardDataOverride,
-  ]);
-
-  useEffect(() => {
-    if (hasCardDataOverride) return;
-    if (activePageCardTabData !== null) return;
-    let active = true;
-
-    const loadPageCardTab =
-      pageCardFetchersRef.current?.[pageCardTab] ??
-      ((
-        requestedSiteId: string,
-        requestedWindow: TimeWindow,
-        requestedFilters: FilterDocument,
-      ) =>
-        fetchOverviewPageCardTab(
-          requestedSiteId,
-          requestedWindow,
-          pageCardTab,
-          requestedFilters,
-          {
-            limit: 100,
-            resolvedScope,
-          },
-        ));
-
-    loadPageCardTab(siteId, window, filters, resolvedScope)
-      .then((data) => {
-        if (!active) return;
-        setPageCardTabData((prev) => ({
-          ...prev,
-          [pageCardTab]: data,
-        }));
-      })
-      .catch(() => {
-        if (!active) return;
-        setPageCardTabData((prev) => ({
-          ...prev,
-          [pageCardTab]: [],
-        }));
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [
-    activePageCardTabData,
-    filtersKey,
-    pageCardTab,
-    siteId,
-    window.from,
-    window.interval,
-    window.to,
-    window.timeZone,
-    resolvedScope,
-    hasCardDataOverride,
-  ]);
-
-  useEffect(() => {
-    if (hasCardDataOverride) return;
-    if (!resolvedSourceCardTabs.includes(sourceCardTab)) return;
-    if (activeSourceCardTabData !== null) return;
-    let active = true;
-
-    const loadSourceCardTab =
-      sourceCardFetchersRef.current?.[sourceCardTab] ??
-      ((
-        requestedSiteId: string,
-        requestedWindow: TimeWindow,
-        requestedFilters: FilterDocument,
-      ) =>
-        fetchOverviewSourceCardTab(
-          requestedSiteId,
-          requestedWindow,
-          sourceCardTab,
-          requestedFilters,
-          { limit: 100, resolvedScope },
-        ));
-
-    loadSourceCardTab(siteId, window, filters, resolvedScope)
-      .then((data) => {
-        if (!active) return;
-        setSourceCardTabData((prev) => ({
-          ...prev,
-          [sourceCardTab]: data,
-        }));
-      })
-      .catch(() => {
-        if (!active) return;
-        setSourceCardTabData((prev) => ({
-          ...prev,
-          [sourceCardTab]: [],
-        }));
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [
-    activeSourceCardTabData,
-    filtersKey,
-    siteId,
-    sourceCardTab,
-    resolvedSourceCardTabs,
-    window.from,
-    window.interval,
-    window.to,
-    window.timeZone,
-    resolvedScope,
-    hasCardDataOverride,
-  ]);
-
-  useEffect(() => {
-    if (hasCardDataOverride) return;
-    if (activeClientDimensionCardTabData !== null) return;
-    let active = true;
-
-    const loadClientCardTab =
-      clientCardFetchersRef.current?.[clientDimensionCardTab] ??
-      ((
-        requestedSiteId: string,
-        requestedWindow: TimeWindow,
-        requestedFilters: FilterDocument,
-      ) =>
-        fetchOverviewClientDimensionTab(
-          requestedSiteId,
-          requestedWindow,
-          clientDimensionCardTab,
-          requestedFilters,
-          { limit: 100, resolvedScope },
-        ));
-
-    loadClientCardTab(siteId, window, filters, resolvedScope)
-      .then((data) => {
-        if (!active) return;
-        setClientDimensionCardTabData((prev) => ({
-          ...prev,
-          [clientDimensionCardTab]: data,
-        }));
-      })
-      .catch(() => {
-        if (!active) return;
-        setClientDimensionCardTabData((prev) => ({
-          ...prev,
-          [clientDimensionCardTab]: [],
-        }));
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [
-    activeClientDimensionCardTabData,
-    clientDimensionCardTab,
-    filtersKey,
-    siteId,
-    window.from,
-    window.interval,
-    window.to,
-    window.timeZone,
-    resolvedScope,
-    hasCardDataOverride,
-  ]);
-
-  useEffect(() => {
-    if (hasCardDataOverride) return;
-    if (activeGeoDimensionCardTabData !== null) return;
-    let active = true;
-
-    const loadGeoCardTab =
-      geoCardFetchersRef.current?.[geoDimensionCardTab] ??
-      ((
-        requestedSiteId: string,
-        requestedWindow: TimeWindow,
-        requestedFilters: FilterDocument,
-      ) =>
-        fetchOverviewGeoDimensionTab(
-          requestedSiteId,
-          requestedWindow,
-          geoDimensionCardTab,
-          requestedFilters,
-          { limit: 100, resolvedScope },
-        ));
-
-    loadGeoCardTab(siteId, window, filters, resolvedScope)
-      .then((data) => {
-        if (!active) return;
-        setGeoDimensionCardTabData((prev) => ({
-          ...prev,
-          [geoDimensionCardTab]: data,
-        }));
-      })
-      .catch(() => {
-        if (!active) return;
-        setGeoDimensionCardTabData((prev) => ({
-          ...prev,
-          [geoDimensionCardTab]: [],
-        }));
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [
-    activeGeoDimensionCardTabData,
-    filtersKey,
-    geoDimensionCardTab,
-    siteId,
-    window.from,
-    window.interval,
-    window.to,
-    window.timeZone,
-    resolvedScope,
-    hasCardDataOverride,
-  ]);
-
-  const loadMorePageCardTab = useCallback(
-    (tab: PageCardTab) => {
-      if (hasCardDataOverride) return;
-      const current = pageCardTabData[tab];
-      if (!current || !overviewTabHasMore(current) || Array.isArray(current)) {
-        return;
-      }
-      const loader =
-        pageCardFetchersRef.current?.[tab] ??
-        ((
-          requestedSiteId: string,
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-          scope?: FilterScope,
-          options?: {
-            limit?: number;
-            cursor?: string | null;
-            signal?: AbortSignal;
-          },
-        ) =>
-          fetchOverviewPageCardTab(
-            requestedSiteId,
-            requestedWindow,
-            tab,
-            requestedFilters,
-            {
-              ...options,
-              resolvedScope: scope,
-            },
-          ));
-      setLoadingMorePageTabs((previous) => ({ ...previous, [tab]: true }));
-      void loader(siteId, window, filters, resolvedScope, {
-        limit: 100,
-        cursor: current.pagination.nextCursor,
-      })
-        .then((next) => {
-          setPageCardTabData((previous) => ({
-            ...previous,
-            [tab]: appendOverviewTabPage(previous[tab], next),
-          }));
-        })
-        .finally(() => {
-          setLoadingMorePageTabs((previous) => ({ ...previous, [tab]: false }));
-        });
-    },
-    [
-      filters,
-      hasCardDataOverride,
-      pageCardTabData,
-      resolvedScope,
-      siteId,
-      window,
-    ],
-  );
-
-  const loadMoreSourceCardTab = useCallback(
-    (tab: SourceCardTab) => {
-      if (hasCardDataOverride) return;
-      const current = sourceCardTabData[tab];
-      if (!current || !overviewTabHasMore(current) || Array.isArray(current)) {
-        return;
-      }
-      const loader =
-        sourceCardFetchersRef.current?.[tab] ??
-        ((
-          requestedSiteId: string,
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-          scope?: FilterScope,
-          options?: {
-            limit?: number;
-            cursor?: string | null;
-            signal?: AbortSignal;
-          },
-        ) =>
-          fetchOverviewSourceCardTab(
-            requestedSiteId,
-            requestedWindow,
-            tab,
-            requestedFilters,
-            {
-              ...options,
-              resolvedScope: scope,
-            },
-          ));
-      setLoadingMoreSourceTabs((previous) => ({ ...previous, [tab]: true }));
-      void loader(siteId, window, filters, resolvedScope, {
-        limit: 100,
-        cursor: current.pagination.nextCursor,
-      })
-        .then((next) => {
-          setSourceCardTabData((previous) => ({
-            ...previous,
-            [tab]: appendOverviewTabPage(previous[tab], next),
-          }));
-        })
-        .finally(() => {
-          setLoadingMoreSourceTabs((previous) => ({
-            ...previous,
-            [tab]: false,
-          }));
-        });
-    },
-    [
-      filters,
-      hasCardDataOverride,
-      resolvedScope,
-      siteId,
-      sourceCardTabData,
-      window,
-    ],
-  );
-
-  const loadMoreClientDimensionTab = useCallback(
-    (tab: ClientDimensionCardTab) => {
-      if (hasCardDataOverride) return;
-      const current = clientDimensionCardTabData[tab];
-      if (!current || !overviewTabHasMore(current) || Array.isArray(current)) {
-        return;
-      }
-      const loader =
-        clientCardFetchersRef.current?.[tab] ??
-        ((
-          requestedSiteId: string,
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-          scope?: FilterScope,
-          options?: {
-            limit?: number;
-            cursor?: string | null;
-            signal?: AbortSignal;
-          },
-        ) =>
-          fetchOverviewClientDimensionTab(
-            requestedSiteId,
-            requestedWindow,
-            tab,
-            requestedFilters,
-            {
-              ...options,
-              resolvedScope: scope,
-            },
-          ));
-      setLoadingMoreClientTabs((previous) => ({ ...previous, [tab]: true }));
-      void loader(siteId, window, filters, resolvedScope, {
-        limit: 100,
-        cursor: current.pagination.nextCursor,
-      })
-        .then((next) => {
-          setClientDimensionCardTabData((previous) => ({
-            ...previous,
-            [tab]: appendOverviewTabPage(previous[tab], next),
-          }));
-        })
-        .finally(() => {
-          setLoadingMoreClientTabs((previous) => ({
-            ...previous,
-            [tab]: false,
-          }));
-        });
-    },
-    [
-      clientDimensionCardTabData,
-      filters,
-      hasCardDataOverride,
-      resolvedScope,
-      siteId,
-      window,
-    ],
-  );
-
-  const loadMoreGeoDimensionTab = useCallback(
-    (tab: GeoDimensionCardTab) => {
-      if (hasCardDataOverride) return;
-      const current = geoDimensionCardTabData[tab];
-      if (!current || !overviewTabHasMore(current) || Array.isArray(current)) {
-        return;
-      }
-      const loader =
-        geoCardFetchersRef.current?.[tab] ??
-        ((
-          requestedSiteId: string,
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-          scope?: FilterScope,
-          options?: {
-            limit?: number;
-            cursor?: string | null;
-            signal?: AbortSignal;
-          },
-        ) =>
-          fetchOverviewGeoDimensionTab(
-            requestedSiteId,
-            requestedWindow,
-            tab,
-            requestedFilters,
-            {
-              ...options,
-              resolvedScope: scope,
-            },
-          ));
-      setLoadingMoreGeoTabs((previous) => ({ ...previous, [tab]: true }));
-      void loader(siteId, window, filters, resolvedScope, {
-        limit: 100,
-        cursor: current.pagination.nextCursor,
-      })
-        .then((next) => {
-          setGeoDimensionCardTabData((previous) => ({
-            ...previous,
-            [tab]: appendOverviewTabPage(previous[tab], next),
-          }));
-        })
-        .finally(() => {
-          setLoadingMoreGeoTabs((previous) => ({ ...previous, [tab]: false }));
-        });
-    },
-    [
-      filters,
-      geoDimensionCardTabData,
-      hasCardDataOverride,
-      resolvedScope,
-      siteId,
-      window,
-    ],
   );
 
   const noDataText = messages.common.noData;
@@ -2544,133 +2061,11 @@ export function OverviewPagesSection({
       pageCardTabMetaOverride,
     ],
   );
-  const pathRows = useMemo<PageCardRow[]>(
-    () =>
-      overviewTabRows(resolvedPageCardTabData.path).map((item, index) => {
-        const rawLabel = String(item.label || "").trim();
-        const fallbackLabel =
-          pageCardTabMeta.path.label === messages.pages.hashTab
-            ? messages.pages.noHash
-            : "/";
-        const label = rawLabel || fallbackLabel;
-        return {
-          key: `${label || fallbackLabel}-${index}`,
-          label,
-          displayLabel: decodeUrlDisplayValue(label),
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: pageCardTabMeta.path.mono,
-        };
-      }),
-    [
-      messages.pages.hashTab,
-      messages.pages.noHash,
-      pageCardTabMeta.path.label,
-      pageCardTabMeta.path.mono,
-      resolvedPageCardTabData.path,
-    ],
-  );
-  const queryRows = useMemo<PageCardRow[]>(
-    () =>
-      overviewTabRows(resolvedPageCardTabData.query).map((item, index) => {
-        const label = String(item.label || "").trim();
-        const fallbackLabel = messages.pages.noQuery;
-        const resolvedLabel = label || fallbackLabel;
-        return {
-          key: `query-${label || fallbackLabel}-${index}`,
-          label: resolvedLabel,
-          displayLabel: decodeUrlDisplayValue(resolvedLabel),
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: pageCardTabMeta.query.mono,
-        };
-      }),
-    [
-      messages.pages.noQuery,
-      pageCardTabMeta.query.mono,
-      resolvedPageCardTabData.query,
-    ],
-  );
-  const titleRows = useMemo<PageCardRow[]>(
-    () =>
-      overviewTabRows(resolvedPageCardTabData.title).map((item) => {
-        const normalized = String(item.label || "").trim();
-        const label =
-          normalized.length > 0 ? normalized : messages.common.unknown;
-        return {
-          key: label,
-          label,
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: false,
-        };
-      }),
-    [messages.common.unknown, resolvedPageCardTabData.title],
-  );
-  const hostnameRows = useMemo<PageCardRow[]>(
-    () =>
-      overviewTabRows(resolvedPageCardTabData.hostname).map((item) => {
-        const normalized = String(item.label || "").trim();
-        const label =
-          normalized.length > 0 ? normalized : messages.common.unknown;
-        return {
-          key: label,
-          label,
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: true,
-        };
-      }),
-    [messages.common.unknown, resolvedPageCardTabData.hostname],
-  );
-  const entryRows = useMemo<PageCardRow[]>(
-    () =>
-      overviewTabRows(resolvedPageCardTabData.entry).map((item) => {
-        const label = String(item.label || "").trim() || "/";
-        return {
-          key: label,
-          label,
-          displayLabel: decodeUrlDisplayValue(label),
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: true,
-        };
-      }),
-    [resolvedPageCardTabData.entry],
-  );
-  const exitRows = useMemo<PageCardRow[]>(
-    () =>
-      overviewTabRows(resolvedPageCardTabData.exit).map((item) => {
-        const label = String(item.label || "").trim() || "/";
-        return {
-          key: label,
-          label,
-          displayLabel: decodeUrlDisplayValue(label),
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: true,
-        };
-      }),
-    [resolvedPageCardTabData.exit],
-  );
-  const pageCardRows = useMemo<Record<PageCardTab, PageCardRow[]>>(
-    () => ({
-      path: pathRows,
-      query: queryRows,
-      title: titleRows,
-      hostname: hostnameRows,
-      entry: entryRows,
-      exit: exitRows,
-    }),
-    [pathRows, queryRows, titleRows, hostnameRows, entryRows, exitRows],
-  );
-  const activePageCardFilterValue = useMemo(
-    () =>
-      dashboardFilterValue(
-        filters,
-        PAGE_CARD_FILTER_CONTROL_BY_TAB[pageCardTab],
-      ) ?? null,
-    [filters, pageCardTab],
+  const pageCardFilterValue = useCallback(
+    (tab: PageCardTab) =>
+      dashboardFilterValue(filters, PAGE_CARD_FILTER_CONTROL_BY_TAB[tab]) ??
+      null,
+    [filters],
   );
   const pageCardDefaultHostname = useMemo(() => {
     const filteredHostname = sanitizeHostname(
@@ -2681,12 +2076,8 @@ export function OverviewPagesSection({
     const configuredHostname = sanitizeHostname(siteDomain);
     if (configuredHostname.length > 0) return configuredHostname;
 
-    for (const row of hostnameRows) {
-      const hostname = sanitizeHostname(row.label);
-      if (hostname.length > 0) return hostname;
-    }
     return "";
-  }, [filters, hostnameRows, siteDomain]);
+  }, [filters, siteDomain]);
   const pageDetailBasePath = useMemo(
     () => buildPagesPagePath(pathname),
     [pathname],
@@ -2726,83 +2117,12 @@ export function OverviewPagesSection({
       messages.overview.sourceTab,
     ],
   );
-  const sourceCardDirectLabel = messages.overview.direct;
-  const sourceDomainRows = useMemo<SourceCardRow[]>(() => {
-    return overviewTabRows(resolvedSourceCardTabData.domain).map(
-      (item, index) => {
-        const raw = String(item.label || "").trim();
-        const domain = raw.length > 0 ? sanitizeHostname(raw) : "";
-        const filterValue = domain || DIRECT_REFERRER_FILTER_VALUE;
-        const label = domain || sourceCardDirectLabel;
-        return {
-          key: `domain-${filterValue}-${index}`,
-          label,
-          filterValue,
-          targetUrl: domain ? toAbsoluteHttpsUrl(domain) : null,
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: true,
-        };
-      },
-    );
-  }, [sourceCardDirectLabel, resolvedSourceCardTabData.domain]);
-  const sourceLinkRows = useMemo<SourceCardRow[]>(() => {
-    return overviewTabRows(resolvedSourceCardTabData.link).map(
-      (item, index) => {
-        const raw = String(item.label || "").trim();
-        const targetUrl = raw.length > 0 ? toAbsoluteHttpsUrl(raw) : null;
-        const filterValue = raw.length > 0 ? raw : DIRECT_REFERRER_FILTER_VALUE;
-        const label =
-          raw.length > 0 ? (targetUrl ?? raw) : sourceCardDirectLabel;
-        return {
-          key: `link-${filterValue}-${index}`,
-          label,
-          displayLabel: decodeUrlDisplayValue(label),
-          filterValue,
-          targetUrl,
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: true,
-        };
-      },
-    );
-  }, [sourceCardDirectLabel, resolvedSourceCardTabData.link]);
-  const sourceChannelRows = useMemo<SourceCardRow[]>(() => {
-    return overviewTabRows(resolvedSourceCardTabData.channel).map(
-      (item, index) => {
-        const raw = String(item.label || "").trim();
-        const channelId = TRAFFIC_CHANNEL_IDS.includes(raw as TrafficChannelId)
-          ? (raw as TrafficChannelId)
-          : "other";
-        return {
-          key: `channel-${channelId}-${index}`,
-          label: messages.overview.channelLabels[channelId],
-          filterValue: channelId,
-          targetUrl: null,
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: false,
-          channelId,
-        };
-      },
-    );
-  }, [messages.overview.channelLabels, resolvedSourceCardTabData.channel]);
-  const sourceCardRows = useMemo<Record<SourceCardTab, SourceCardRow[]>>(
-    () => ({
-      domain: sourceDomainRows,
-      link: sourceLinkRows,
-      channel: sourceChannelRows,
-    }),
-    [sourceChannelRows, sourceDomainRows, sourceLinkRows],
+  const sourceCardFilterValue = useCallback(
+    (tab: SourceCardTab) =>
+      dashboardFilterValue(filters, SOURCE_CARD_FILTER_CONTROL_BY_TAB[tab]) ??
+      null,
+    [filters],
   );
-  const activeSourceCardFilterValue = useMemo(() => {
-    return (
-      dashboardFilterValue(
-        filters,
-        SOURCE_CARD_FILTER_CONTROL_BY_TAB[sourceCardTab],
-      ) ?? null
-    );
-  }, [filters, sourceCardTab]);
   const clientDimensionCardTabMeta = useMemo<
     Record<
       ClientDimensionCardTab,
@@ -2891,252 +2211,36 @@ export function OverviewPagesSection({
       messages.geo.regionLabel,
     ],
   );
-  const clientDimensionCardRows = useMemo<
-    Record<ClientDimensionCardTab, PageCardRow[]>
-  >(() => {
-    const toRows = (
-      rows: Array<{ label: string; views: number; visitors: number }>,
-      options?: {
-        mono?: boolean;
-        screenSize?: boolean;
-        transformLabel?: (value: string) => string;
-        resolveIconName?: (value: string) => string | null;
-        resolveFilterValue?: (
-          rawValue: string,
-          normalizedLabel: string,
-        ) => string;
-      },
-    ): PageCardRow[] =>
-      rows.map((item, index) => {
-        const rawValue = String(item.label || "");
-        const rawLabel = normalizeDimensionLabel(
-          rawValue,
-          messages.common.unknown,
-          { screenSize: options?.screenSize },
-        );
-        const label = options?.transformLabel
-          ? options.transformLabel(rawLabel)
-          : rawLabel;
-        const filterValue =
-          options?.resolveFilterValue?.(rawValue, rawLabel) ?? rawLabel;
-        return {
-          key: `${label}-${index}`,
-          label,
-          rawLabel: rawValue.trim() || rawLabel,
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: options?.mono ?? false,
-          iconName: options?.resolveIconName?.(rawLabel) ?? null,
-          filterValue,
-        };
-      });
-
-    return {
-      browser: toRows(
-        overviewTabRows(resolvedClientDimensionCardTabData.browser),
-        {
-          resolveIconName: resolveBrowserLogoIconName,
-        },
-      ),
-      osVersion: toRows(
-        overviewTabRows(resolvedClientDimensionCardTabData.osVersion),
-        {
-          resolveIconName: resolveOsLogoIconName,
-        },
-      ),
-      deviceType: toRows(
-        overviewTabRows(resolvedClientDimensionCardTabData.deviceType),
-        {
-          transformLabel: (value) =>
-            resolveDeviceTypeMeta(
-              value,
-              messages.common.deviceLabels,
-              messages.common.unknown,
-            ).label,
-        },
-      ),
-      language: toRows(
-        overviewTabRows(resolvedClientDimensionCardTabData.language),
-        {
-          transformLabel: (value) =>
-            resolveLanguageLabel(value, locale, messages.common.unknown).label,
-          resolveFilterValue: (rawValue, normalizedLabel) =>
-            rawValue.trim() || normalizedLabel,
-        },
-      ),
-      screenSize: toRows(
-        overviewTabRows(resolvedClientDimensionCardTabData.screenSize),
-        {
-          mono: true,
-          screenSize: true,
-        },
-      ),
-    };
-  }, [resolvedClientDimensionCardTabData, locale, messages.common.unknown]);
-  const geoDimensionCardRows = useMemo<
-    Record<GeoDimensionCardTab, PageCardRow[]>
-  >(() => {
-    const toRows = (
-      rows: Array<{ label: string; views: number; visitors: number }>,
-      options?: {
-        transformLabel?: (value: string) => string;
-        resolveIconName?: (value: string) => string | null;
-        resolveFilterValue?: (value: string) => string;
-      },
-    ): PageCardRow[] =>
-      rows.map((item, index) => {
-        const originalValue = String(item.label || "");
-        const rawLabel = normalizeDimensionLabel(
-          originalValue,
-          messages.common.unknown,
-        );
-        const label = options?.transformLabel
-          ? options.transformLabel(rawLabel)
-          : rawLabel;
-        return {
-          key: `${label}-${index}`,
-          label,
-          rawLabel: originalValue.trim() || rawLabel,
-          views: Math.max(0, Number(item.views || 0)),
-          visitors: Math.max(0, Number(item.visitors || 0)),
-          mono: false,
-          iconName: options?.resolveIconName?.(rawLabel) ?? null,
-          filterValue: options?.resolveFilterValue?.(originalValue) ?? rawLabel,
-        };
-      });
-
-    const regionRows: PageCardRow[] = overviewTabRows(
-      resolvedGeoDimensionCardTabData.region,
-    ).map((item, index) => {
-      const value = resolveGeoDimensionRowRawValue(item);
-      const regionData = resolveGeoRegionBreadcrumbData(
-        value,
-        locale,
-        messages.common.unknown,
-      );
-
-      return {
-        key: `${regionData.displayLabel}-${index}`,
-        label: regionData.displayLabel,
-        rawLabel: value.trim() || regionData.filterValue,
-        views: Math.max(0, Number(item.views || 0)),
-        visitors: Math.max(0, Number(item.visitors || 0)),
-        mono: false,
-        iconName: null,
-        filterValue: regionData.filterValue,
-        regionBreadcrumb: regionData.breadcrumb,
-      };
-    });
-    const cityRows: PageCardRow[] = overviewTabRows(
-      resolvedGeoDimensionCardTabData.city,
-    ).map((item, index) => {
-      const value = resolveGeoDimensionRowRawValue(item);
-      const cityData = resolveGeoCityBreadcrumbData(
-        value,
-        locale,
-        messages.common.unknown,
-      );
-
-      return {
-        key: `${cityData.displayLabel}-${index}`,
-        label: cityData.displayLabel,
-        rawLabel: value.trim() || cityData.filterValue,
-        views: Math.max(0, Number(item.views || 0)),
-        visitors: Math.max(0, Number(item.visitors || 0)),
-        mono: false,
-        iconName: null,
-        filterValue: cityData.filterValue,
-        cityBreadcrumb: cityData.breadcrumb ?? undefined,
-      };
-    });
-
-    return {
-      country: toRows(
-        overviewTabRows(resolvedGeoDimensionCardTabData.country),
-        {
-          transformLabel: (value) =>
-            resolveCountryLabel(value, locale, messages.common.unknown).label,
-          resolveIconName: (value) => {
-            const { code } = resolveCountryLabel(
-              value,
-              locale,
-              messages.common.unknown,
-            );
-            const flagCode = resolveCountryFlagCode(code, locale);
-            return flagCode ? `flagpack:${flagCode.toLowerCase()}` : null;
-          },
-        },
-      ),
-      region: regionRows,
-      city: cityRows,
-      continent: toRows(
-        overviewTabRows(resolvedGeoDimensionCardTabData.continent),
-        {
-          transformLabel: (value) =>
-            resolveContinentLabel(
-              value,
-              messages.common.unknown,
-              messages.common.continentLabels,
-            ),
-        },
-      ),
-      timezone: toRows(
-        overviewTabRows(resolvedGeoDimensionCardTabData.timezone),
-        {
-          transformLabel: (value) =>
-            resolveTimezoneDisplayLabel({
-              value,
-              locale,
-              unknownLabel: messages.common.unknown,
-              timestampMs: timezoneReferenceTimestampMs,
-              timezoneDeltaVsLocal: messages.geo.timezoneDeltaVsLocal,
-            }),
-        },
-      ),
-      organization: toRows(
-        overviewTabRows(resolvedGeoDimensionCardTabData.organization),
-      ),
-    };
-  }, [
-    resolvedGeoDimensionCardTabData,
-    locale,
-    messages.common.continentLabels,
-    messages.common.unknown,
-    messages.geo.timezoneDeltaVsLocal,
-    timezoneReferenceTimestampMs,
-  ]);
   const resolvedPrimaryMetricLabel =
     primaryMetricLabel ?? messages.common.views;
-  const activeClientDimensionCardFilterValue = useMemo(() => {
-    return (
+  const clientDimensionCardFilterValue = useCallback(
+    (tab: ClientDimensionCardTab) =>
       dashboardFilterValue(
         filters,
-        CLIENT_DIMENSION_CARD_FILTER_CONTROL_BY_TAB[clientDimensionCardTab],
-      ) ?? null
-    );
-  }, [clientDimensionCardTab, filters]);
-  const activeGeoDimensionCardFilterValue = useMemo(() => {
-    if (isGeoLocationTab(geoDimensionCardTab)) {
+        CLIENT_DIMENSION_CARD_FILTER_CONTROL_BY_TAB[tab],
+      ) ?? null,
+    [filters],
+  );
+  const geoDimensionCardFilterValue = useCallback(
+    (tab: GeoDimensionCardTab) => {
+      if (isGeoLocationTab(tab)) {
+        return canonicalizeGeoFilterValue(dashboardFilterValue(filters, "geo"));
+      }
       return (
-        canonicalizeGeoFilterValue(dashboardFilterValue(filters, "geo")) ?? null
+        dashboardFilterValue(filters, GEO_AUX_FILTER_CONTROL_BY_TAB[tab]) ??
+        null
       );
-    }
-    return (
-      dashboardFilterValue(
-        filters,
-        GEO_AUX_FILTER_CONTROL_BY_TAB[geoDimensionCardTab],
-      ) ?? null
-    );
-  }, [filters, geoDimensionCardTab]);
+    },
+    [filters],
+  );
 
   const setPageCardFilter = useCallback(
-    (next: { tab: PageCardTab; value: string } | null) => {
-      const activeTab = next?.tab ?? pageCardTab;
-      if (!pageCardFilterEnabledByTab[activeTab]) return;
+    (tab: PageCardTab, value: string | null) => {
+      if (!pageCardFilterEnabledByTab[tab]) return;
       const nextFilters = setDashboardFilterValue(
         filters,
-        PAGE_CARD_FILTER_CONTROL_BY_TAB[activeTab],
-        next?.value,
+        PAGE_CARD_FILTER_CONTROL_BY_TAB[tab],
+        value,
       );
       const params = withDashboardFilterSearchParams(searchParams, nextFilters);
       const current = serializeDashboardSearchParams(searchParams);
@@ -3145,21 +2249,14 @@ export function OverviewPagesSection({
       const target = updated ? `${livePathname}?${updated}` : livePathname;
       replaceUrlWithoutNavigation(target);
     },
-    [
-      filters,
-      livePathname,
-      pageCardFilterEnabledByTab,
-      pageCardTab,
-      searchParams,
-    ],
+    [filters, livePathname, pageCardFilterEnabledByTab, searchParams],
   );
   const setSourceCardFilter = useCallback(
-    (next: { tab: SourceCardTab; value: string } | null) => {
-      const activeTab = next?.tab ?? sourceCardTab;
+    (tab: SourceCardTab, value: string | null) => {
       const nextFilters = setDashboardFilterValue(
         filters,
-        SOURCE_CARD_FILTER_CONTROL_BY_TAB[activeTab],
-        next?.value,
+        SOURCE_CARD_FILTER_CONTROL_BY_TAB[tab],
+        value,
       );
       const params = withDashboardFilterSearchParams(searchParams, nextFilters);
       const current = serializeDashboardSearchParams(searchParams);
@@ -3168,15 +2265,14 @@ export function OverviewPagesSection({
       const target = updated ? `${livePathname}?${updated}` : livePathname;
       replaceUrlWithoutNavigation(target);
     },
-    [filters, livePathname, searchParams, sourceCardTab],
+    [filters, livePathname, searchParams],
   );
   const setClientDimensionCardFilter = useCallback(
-    (next: { tab: ClientDimensionCardTab; value: string } | null) => {
-      const activeTab = next?.tab ?? clientDimensionCardTab;
+    (tab: ClientDimensionCardTab, value: string | null) => {
       const nextFilters = setDashboardFilterValue(
         filters,
-        CLIENT_DIMENSION_CARD_FILTER_CONTROL_BY_TAB[activeTab],
-        next?.value,
+        CLIENT_DIMENSION_CARD_FILTER_CONTROL_BY_TAB[tab],
+        value,
       );
       const params = withDashboardFilterSearchParams(searchParams, nextFilters);
       const current = serializeDashboardSearchParams(searchParams);
@@ -3185,18 +2281,17 @@ export function OverviewPagesSection({
       const target = updated ? `${livePathname}?${updated}` : livePathname;
       replaceUrlWithoutNavigation(target);
     },
-    [clientDimensionCardTab, filters, livePathname, searchParams],
+    [filters, livePathname, searchParams],
   );
   const setGeoDimensionCardFilter = useCallback(
-    (next: { tab: GeoDimensionCardTab; value: string } | null) => {
-      const activeTab = next?.tab ?? geoDimensionCardTab;
-      const filterControl = isGeoLocationTab(activeTab)
+    (tab: GeoDimensionCardTab, value: string | null) => {
+      const filterControl = isGeoLocationTab(tab)
         ? "geo"
-        : GEO_AUX_FILTER_CONTROL_BY_TAB[activeTab];
+        : GEO_AUX_FILTER_CONTROL_BY_TAB[tab];
       const filterValue =
-        next && isGeoLocationTab(next.tab)
-          ? canonicalizeGeoFilterValue(next.value)
-          : next?.value;
+        value !== null && isGeoLocationTab(tab)
+          ? canonicalizeGeoFilterValue(value)
+          : value;
       const nextFilters = setDashboardFilterValue(
         filters,
         filterControl,
@@ -3209,30 +2304,7 @@ export function OverviewPagesSection({
       const target = updated ? `${livePathname}?${updated}` : livePathname;
       replaceUrlWithoutNavigation(target);
     },
-    [filters, geoDimensionCardTab, livePathname, searchParams],
-  );
-  const handlePageCardTabChange = useCallback(
-    (tab: PageCardTab) => {
-      if (tab !== pageCardTab) {
-        setPageCardTab(tab);
-      }
-    },
-    [pageCardTab],
-  );
-  const handleSourceCardTabChange = useCallback((tab: SourceCardTab) => {
-    setSourceCardTab(tab);
-  }, []);
-  const handleClientDimensionCardTabChange = useCallback(
-    (tab: ClientDimensionCardTab) => {
-      setClientDimensionCardTab(tab);
-    },
-    [],
-  );
-  const handleGeoDimensionCardTabChange = useCallback(
-    (tab: GeoDimensionCardTab) => {
-      setGeoDimensionCardTab(tab);
-    },
-    [],
+    [filters, livePathname, searchParams],
   );
   const openPageCardRowTarget = useCallback(
     (targetUrl: string, event: MouseEvent<HTMLElement>) => {
@@ -3265,99 +2337,6 @@ export function OverviewPagesSection({
       router.push(targetUrl);
     },
     [router],
-  );
-  const pageCardRowsForTable = useMemo<
-    Record<PageCardTab, PageCardRow[] | null>
-  >(
-    () => ({
-      path: resolvedPageCardTabData.path === null ? null : pageCardRows.path,
-      query: resolvedPageCardTabData.query === null ? null : pageCardRows.query,
-      title: resolvedPageCardTabData.title === null ? null : pageCardRows.title,
-      hostname:
-        resolvedPageCardTabData.hostname === null
-          ? null
-          : pageCardRows.hostname,
-      entry: resolvedPageCardTabData.entry === null ? null : pageCardRows.entry,
-      exit: resolvedPageCardTabData.exit === null ? null : pageCardRows.exit,
-    }),
-    [pageCardRows, resolvedPageCardTabData],
-  );
-  const sourceCardRowsForTable = useMemo<
-    Record<SourceCardTab, SourceCardRow[] | null>
-  >(
-    () => ({
-      domain:
-        resolvedSourceCardTabData.domain === null
-          ? null
-          : sourceCardRows.domain,
-      link:
-        resolvedSourceCardTabData.link === null ? null : sourceCardRows.link,
-      channel:
-        resolvedSourceCardTabData.channel === undefined
-          ? null
-          : resolvedSourceCardTabData.channel === null
-            ? null
-            : sourceCardRows.channel,
-    }),
-    [resolvedSourceCardTabData, sourceCardRows],
-  );
-  const clientDimensionCardRowsForTable = useMemo<
-    Record<ClientDimensionCardTab, PageCardRow[] | null>
-  >(
-    () => ({
-      browser:
-        resolvedClientDimensionCardTabData.browser === null
-          ? null
-          : clientDimensionCardRows.browser,
-      osVersion:
-        resolvedClientDimensionCardTabData.osVersion === null
-          ? null
-          : clientDimensionCardRows.osVersion,
-      deviceType:
-        resolvedClientDimensionCardTabData.deviceType === null
-          ? null
-          : clientDimensionCardRows.deviceType,
-      language:
-        resolvedClientDimensionCardTabData.language === null
-          ? null
-          : clientDimensionCardRows.language,
-      screenSize:
-        resolvedClientDimensionCardTabData.screenSize === null
-          ? null
-          : clientDimensionCardRows.screenSize,
-    }),
-    [clientDimensionCardRows, resolvedClientDimensionCardTabData],
-  );
-  const geoDimensionCardRowsForTable = useMemo<
-    Record<GeoDimensionCardTab, PageCardRow[] | null>
-  >(
-    () => ({
-      country:
-        resolvedGeoDimensionCardTabData.country === null
-          ? null
-          : geoDimensionCardRows.country,
-      region:
-        resolvedGeoDimensionCardTabData.region === null
-          ? null
-          : geoDimensionCardRows.region,
-      city:
-        resolvedGeoDimensionCardTabData.city === null
-          ? null
-          : geoDimensionCardRows.city,
-      continent:
-        resolvedGeoDimensionCardTabData.continent === null
-          ? null
-          : geoDimensionCardRows.continent,
-      timezone:
-        resolvedGeoDimensionCardTabData.timezone === null
-          ? null
-          : geoDimensionCardRows.timezone,
-      organization:
-        resolvedGeoDimensionCardTabData.organization === null
-          ? null
-          : geoDimensionCardRows.organization,
-    }),
-    [geoDimensionCardRows, resolvedGeoDimensionCardTabData],
   );
   const overviewMetricColumns = useMemo<
     readonly TabbedDataTableColumn<PageCardRow, PageCardSortKey, string>[]
@@ -3465,56 +2444,219 @@ export function OverviewPagesSection({
       ],
     [geoDimensionCardTabMeta],
   );
-  const loadingByPageCardTab = useMemo(
-    () =>
-      Object.fromEntries(
-        ALL_PAGE_CARD_TABS.map((tab) => [
+  const sourceCardDirectLabel = messages.overview.direct;
+  const pageCardLoader = useCallback<
+    TabbedDataTableLoader<PageCardTab, PageCardRow, PageCardSortKey>
+  >(
+    async ({ tab, cursor, limit, signal }) => {
+      const rawPage = cardDataOverride
+        ? cardDataOverride.page[tab]
+        : await (
+            pageCardFetchers?.[tab] ??
+            ((
+              requestedSiteId: string,
+              requestedWindow: TimeWindow,
+              requestedFilters: FilterDocument,
+              scope?: FilterScope,
+              options?: {
+                limit?: number;
+                cursor?: string | null;
+                signal?: AbortSignal;
+              },
+            ) =>
+              fetchOverviewPageCardTab(
+                requestedSiteId,
+                requestedWindow,
+                tab,
+                requestedFilters,
+                { ...options, resolvedScope: scope },
+              ))
+          )(siteId, window, filters, resolvedScope, {
+            limit,
+            cursor,
+            signal,
+          });
+      const page = overviewTabData(rawPage);
+      const fallbackLabel =
+        pageCardTabMeta[tab].label === messages.pages.hashTab
+          ? messages.pages.noHash
+          : undefined;
+      return {
+        items: buildPageCardExportRows(
           tab,
-          loading ||
-            (!hasCardDataOverride && resolvedPageCardTabData[tab] === null),
-        ]),
-      ) as Record<PageCardTab, boolean>,
-    [hasCardDataOverride, loading, resolvedPageCardTabData],
-  );
-  const loadingBySourceCardTab = useMemo(
-    () =>
-      Object.fromEntries(
-        resolvedSourceCardTabs.map((tab) => [
-          tab,
-          loading ||
-            (!hasCardDataOverride && resolvedSourceCardTabData[tab] === null),
-        ]),
-      ) as Record<SourceCardTab, boolean>,
+          page.items,
+          messages,
+          fallbackLabel,
+        ),
+        pagination: page.pagination,
+      };
+    },
     [
-      hasCardDataOverride,
-      loading,
-      resolvedSourceCardTabData,
-      resolvedSourceCardTabs,
+      cardDataOverride,
+      filters,
+      messages,
+      pageCardFetchers,
+      pageCardTabMeta,
+      resolvedScope,
+      siteId,
+      window,
     ],
   );
-  const loadingByClientDimensionCardTab = useMemo(
-    () =>
-      Object.fromEntries(
-        CLIENT_DIMENSION_CARD_TABS.map((tab) => [
+  const sourceCardLoader = useCallback<
+    TabbedDataTableLoader<SourceCardTab, SourceCardRow, PageCardSortKey>
+  >(
+    async ({ tab, cursor, limit, signal }) => {
+      const rawPage = cardDataOverride
+        ? (cardDataOverride.source[tab] ?? [])
+        : await (
+            sourceCardFetchers?.[tab] ??
+            ((
+              requestedSiteId: string,
+              requestedWindow: TimeWindow,
+              requestedFilters: FilterDocument,
+              scope?: FilterScope,
+              options?: {
+                limit?: number;
+                cursor?: string | null;
+                signal?: AbortSignal;
+              },
+            ) =>
+              fetchOverviewSourceCardTab(
+                requestedSiteId,
+                requestedWindow,
+                tab,
+                requestedFilters,
+                { ...options, resolvedScope: scope },
+              ))
+          )(siteId, window, filters, resolvedScope, {
+            limit,
+            cursor,
+            signal,
+          });
+      const page = overviewTabData(rawPage);
+      return {
+        items: buildSourceCardExportRows(
           tab,
-          loading ||
-            (!hasCardDataOverride &&
-              resolvedClientDimensionCardTabData[tab] === null),
-        ]),
-      ) as Record<ClientDimensionCardTab, boolean>,
-    [hasCardDataOverride, loading, resolvedClientDimensionCardTabData],
+          page.items,
+          sourceCardDirectLabel,
+          messages.overview.channelLabels,
+        ),
+        pagination: page.pagination,
+      };
+    },
+    [
+      cardDataOverride,
+      filters,
+      messages.overview.channelLabels,
+      resolvedScope,
+      siteId,
+      sourceCardDirectLabel,
+      sourceCardFetchers,
+      window,
+    ],
   );
-  const loadingByGeoDimensionCardTab = useMemo(
-    () =>
-      Object.fromEntries(
-        GEO_DIMENSION_CARD_TABS.map((tab) => [
+  const clientDimensionCardLoader = useCallback<
+    TabbedDataTableLoader<ClientDimensionCardTab, PageCardRow, PageCardSortKey>
+  >(
+    async ({ tab, cursor, limit, signal }) => {
+      const rawPage = cardDataOverride
+        ? cardDataOverride.client[tab]
+        : await (
+            clientCardFetchers?.[tab] ??
+            ((
+              requestedSiteId: string,
+              requestedWindow: TimeWindow,
+              requestedFilters: FilterDocument,
+              scope?: FilterScope,
+              options?: {
+                limit?: number;
+                cursor?: string | null;
+                signal?: AbortSignal;
+              },
+            ) =>
+              fetchOverviewClientDimensionTab(
+                requestedSiteId,
+                requestedWindow,
+                tab,
+                requestedFilters,
+                { ...options, resolvedScope: scope },
+              ))
+          )(siteId, window, filters, resolvedScope, {
+            limit,
+            cursor,
+            signal,
+          });
+      const page = overviewTabData(rawPage);
+      return {
+        items: buildClientDimensionRows(tab, page.items, locale, messages),
+        pagination: page.pagination,
+      };
+    },
+    [
+      cardDataOverride,
+      clientCardFetchers,
+      filters,
+      locale,
+      messages,
+      resolvedScope,
+      siteId,
+      window,
+    ],
+  );
+  const geoDimensionCardLoader = useCallback<
+    TabbedDataTableLoader<GeoDimensionCardTab, PageCardRow, PageCardSortKey>
+  >(
+    async ({ tab, cursor, limit, signal }) => {
+      const rawPage = cardDataOverride
+        ? cardDataOverride.geo[tab]
+        : await (
+            geoCardFetchers?.[tab] ??
+            ((
+              requestedSiteId: string,
+              requestedWindow: TimeWindow,
+              requestedFilters: FilterDocument,
+              scope?: FilterScope,
+              options?: {
+                limit?: number;
+                cursor?: string | null;
+                signal?: AbortSignal;
+              },
+            ) =>
+              fetchOverviewGeoDimensionTab(
+                requestedSiteId,
+                requestedWindow,
+                tab,
+                requestedFilters,
+                { ...options, resolvedScope: scope },
+              ))
+          )(siteId, window, filters, resolvedScope, {
+            limit,
+            cursor,
+            signal,
+          });
+      const page = overviewTabData(rawPage);
+      return {
+        items: buildGeoDimensionRows(
           tab,
-          loading ||
-            (!hasCardDataOverride &&
-              resolvedGeoDimensionCardTabData[tab] === null),
-        ]),
-      ) as Record<GeoDimensionCardTab, boolean>,
-    [hasCardDataOverride, loading, resolvedGeoDimensionCardTabData],
+          page.items,
+          locale,
+          messages,
+          timezoneReferenceTimestampMs,
+        ),
+        pagination: page.pagination,
+      };
+    },
+    [
+      cardDataOverride,
+      filters,
+      geoCardFetchers,
+      locale,
+      messages,
+      resolvedScope,
+      siteId,
+      timezoneReferenceTimestampMs,
+      window,
+    ],
   );
   const searchConfig = useMemo(
     () => ({
@@ -3661,269 +2803,49 @@ export function OverviewPagesSection({
     [geoPageBasePathname, livePathname, messages.common.unknown],
   );
   const filterPageCardRows = useCallback(
-    (rows: readonly PageCardRow[]) =>
-      !entityScopedOutput &&
-      pageCardFilterEnabledByTab[pageCardTab] &&
-      activePageCardFilterValue
-        ? rows.filter(
-            (row) =>
-              (row.filterValue ?? row.label) === activePageCardFilterValue,
-          )
-        : [...rows],
-    [
-      activePageCardFilterValue,
-      entityScopedOutput,
-      pageCardFilterEnabledByTab,
-      pageCardTab,
-    ],
+    (rows: readonly PageCardRow[], tab: PageCardTab) => {
+      const filterValue = pageCardFilterValue(tab);
+      return !entityScopedOutput &&
+        pageCardFilterEnabledByTab[tab] &&
+        filterValue
+        ? rows.filter((row) => (row.filterValue ?? row.label) === filterValue)
+        : [...rows];
+    },
+    [entityScopedOutput, pageCardFilterEnabledByTab, pageCardFilterValue],
   );
   const filterSourceCardRows = useCallback(
-    (rows: readonly SourceCardRow[]) =>
-      !entityScopedOutput && activeSourceCardFilterValue
-        ? rows.filter((row) => row.filterValue === activeSourceCardFilterValue)
-        : [...rows],
-    [activeSourceCardFilterValue, entityScopedOutput],
+    (rows: readonly SourceCardRow[], tab: SourceCardTab) => {
+      const filterValue = sourceCardFilterValue(tab);
+      return !entityScopedOutput && filterValue
+        ? rows.filter((row) => row.filterValue === filterValue)
+        : [...rows];
+    },
+    [entityScopedOutput, sourceCardFilterValue],
   );
   const filterClientDimensionCardRows = useCallback(
-    (rows: readonly PageCardRow[]) =>
-      !entityScopedOutput && activeClientDimensionCardFilterValue
-        ? rows.filter(
-            (row) =>
-              (row.filterValue ?? row.label) ===
-              activeClientDimensionCardFilterValue,
-          )
-        : [...rows],
-    [activeClientDimensionCardFilterValue, entityScopedOutput],
+    (rows: readonly PageCardRow[], tab: ClientDimensionCardTab) => {
+      const filterValue = clientDimensionCardFilterValue(tab);
+      return !entityScopedOutput && filterValue
+        ? rows.filter((row) => (row.filterValue ?? row.label) === filterValue)
+        : [...rows];
+    },
+    [clientDimensionCardFilterValue, entityScopedOutput],
   );
   const filterGeoDimensionCardRows = useCallback(
     (rows: readonly PageCardRow[], tab: GeoDimensionCardTab) => {
-      if (entityScopedOutput || !activeGeoDimensionCardFilterValue) {
+      const filterValue = geoDimensionCardFilterValue(tab);
+      if (entityScopedOutput || !filterValue) {
         return [...rows];
       }
       const activeGeoFilterValue = isGeoLocationTab(tab)
-        ? resolveGeoLocationHighlightValue(
-            tab,
-            activeGeoDimensionCardFilterValue,
-          )
-        : activeGeoDimensionCardFilterValue;
+        ? resolveGeoLocationHighlightValue(tab, filterValue)
+        : filterValue;
       if (!activeGeoFilterValue) return [...rows];
       return rows.filter(
         (row) => (row.filterValue ?? row.label) === activeGeoFilterValue,
       );
     },
-    [activeGeoDimensionCardFilterValue, entityScopedOutput],
-  );
-  const pageCardNextCursorByTab = useMemo(
-    () =>
-      Object.fromEntries(
-        ALL_PAGE_CARD_TABS.map((tab) => [
-          tab,
-          overviewTabNextCursor(resolvedPageCardTabData[tab]),
-        ]),
-      ) as Record<PageCardTab, string | null>,
-    [resolvedPageCardTabData],
-  );
-  const sourceCardNextCursorByTab = useMemo(
-    () =>
-      Object.fromEntries(
-        SOURCE_CARD_TABS.map((tab) => [
-          tab,
-          overviewTabNextCursor(resolvedSourceCardTabData[tab]),
-        ]),
-      ) as Record<SourceCardTab, string | null>,
-    [resolvedSourceCardTabData],
-  );
-  const clientDimensionCardNextCursorByTab = useMemo(
-    () =>
-      Object.fromEntries(
-        CLIENT_DIMENSION_CARD_TABS.map((tab) => [
-          tab,
-          overviewTabNextCursor(resolvedClientDimensionCardTabData[tab]),
-        ]),
-      ) as Record<ClientDimensionCardTab, string | null>,
-    [resolvedClientDimensionCardTabData],
-  );
-  const geoDimensionCardNextCursorByTab = useMemo(
-    () =>
-      Object.fromEntries(
-        GEO_DIMENSION_CARD_TABS.map((tab) => [
-          tab,
-          overviewTabNextCursor(resolvedGeoDimensionCardTabData[tab]),
-        ]),
-      ) as Record<GeoDimensionCardTab, string | null>,
-    [resolvedGeoDimensionCardTabData],
-  );
-  const loadPageCardForExport = useCallback(
-    async (
-      tab: PageCardTab,
-      options: TabbedDataTableExportPageOptions,
-    ): Promise<TabbedDataTableExportPage<PageCardRow>> => {
-      const loader =
-        pageCardFetchersRef.current?.[tab] ??
-        ((
-          requestedSiteId: string,
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-          scope?: FilterScope,
-          fetchOptions?: {
-            limit?: number;
-            cursor?: string | null;
-            signal?: AbortSignal;
-          },
-        ) =>
-          fetchOverviewPageCardTab(
-            requestedSiteId,
-            requestedWindow,
-            tab,
-            requestedFilters,
-            { ...fetchOptions, resolvedScope: scope },
-          ));
-      const page = overviewTabData(
-        await loader(siteId, window, filters, resolvedScope, {
-          limit: 100,
-          cursor: options.cursor,
-          signal: options.signal,
-        }),
-      );
-      return {
-        items: buildPageCardExportRows(tab, page.items, messages),
-        hasMore: page.pagination.hasMore,
-        nextCursor: page.pagination.nextCursor,
-      };
-    },
-    [filters, messages, resolvedScope, siteId, window],
-  );
-  const loadSourceCardForExport = useCallback(
-    async (
-      tab: SourceCardTab,
-      options: TabbedDataTableExportPageOptions,
-    ): Promise<TabbedDataTableExportPage<SourceCardRow>> => {
-      const loader =
-        sourceCardFetchersRef.current?.[tab] ??
-        ((
-          requestedSiteId: string,
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-          scope?: FilterScope,
-          fetchOptions?: {
-            limit?: number;
-            cursor?: string | null;
-            signal?: AbortSignal;
-          },
-        ) =>
-          fetchOverviewSourceCardTab(
-            requestedSiteId,
-            requestedWindow,
-            tab,
-            requestedFilters,
-            { ...fetchOptions, resolvedScope: scope },
-          ));
-      const page = overviewTabData(
-        await loader(siteId, window, filters, resolvedScope, {
-          limit: 100,
-          cursor: options.cursor,
-          signal: options.signal,
-        }),
-      );
-      return {
-        items: buildSourceCardExportRows(
-          tab,
-          page.items,
-          messages.overview.direct,
-          messages.overview.channelLabels,
-        ),
-        hasMore: page.pagination.hasMore,
-        nextCursor: page.pagination.nextCursor,
-      };
-    },
-    [
-      filters,
-      messages.overview.channelLabels,
-      messages.overview.direct,
-      resolvedScope,
-      siteId,
-      window,
-    ],
-  );
-  const loadClientDimensionCardForExport = useCallback(
-    async (
-      tab: ClientDimensionCardTab,
-      options: TabbedDataTableExportPageOptions,
-    ): Promise<TabbedDataTableExportPage<PageCardRow>> => {
-      const loader =
-        clientCardFetchersRef.current?.[tab] ??
-        ((
-          requestedSiteId: string,
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-          scope?: FilterScope,
-          fetchOptions?: {
-            limit?: number;
-            cursor?: string | null;
-            signal?: AbortSignal;
-          },
-        ) =>
-          fetchOverviewClientDimensionTab(
-            requestedSiteId,
-            requestedWindow,
-            tab,
-            requestedFilters,
-            { ...fetchOptions, resolvedScope: scope },
-          ));
-      const page = overviewTabData(
-        await loader(siteId, window, filters, resolvedScope, {
-          limit: 100,
-          cursor: options.cursor,
-          signal: options.signal,
-        }),
-      );
-      return {
-        items: buildDimensionExportRows(page.items, messages.common.unknown),
-        hasMore: page.pagination.hasMore,
-        nextCursor: page.pagination.nextCursor,
-      };
-    },
-    [filters, messages.common.unknown, resolvedScope, siteId, window],
-  );
-  const loadGeoDimensionCardForExport = useCallback(
-    async (
-      tab: GeoDimensionCardTab,
-      options: TabbedDataTableExportPageOptions,
-    ): Promise<TabbedDataTableExportPage<PageCardRow>> => {
-      const loader =
-        geoCardFetchersRef.current?.[tab] ??
-        ((
-          requestedSiteId: string,
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-          scope?: FilterScope,
-          fetchOptions?: {
-            limit?: number;
-            cursor?: string | null;
-            signal?: AbortSignal;
-          },
-        ) =>
-          fetchOverviewGeoDimensionTab(
-            requestedSiteId,
-            requestedWindow,
-            tab,
-            requestedFilters,
-            { ...fetchOptions, resolvedScope: scope },
-          ));
-      const page = overviewTabData(
-        await loader(siteId, window, filters, resolvedScope, {
-          limit: 100,
-          cursor: options.cursor,
-          signal: options.signal,
-        }),
-      );
-      return {
-        items: buildDimensionExportRows(page.items, messages.common.unknown),
-        hasMore: page.pagination.hasMore,
-        nextCursor: page.pagination.nextCursor,
-      };
-    },
-    [filters, messages.common.unknown, resolvedScope, siteId, window],
+    [entityScopedOutput, geoDimensionCardFilterValue],
   );
   const tableExport = useMemo(
     () => ({ labels: messages.common.tableExport }),
@@ -3952,8 +2874,8 @@ export function OverviewPagesSection({
         ),
       getSearchText: (row) => row.label,
       getExportLabel: (row) => row.label,
-      getActive: (row) =>
-        activePageCardFilterValue === (row.filterValue ?? row.label),
+      getActive: (row, tab) =>
+        pageCardFilterValue(tab) === (row.filterValue ?? row.label),
       getInteractive: (row, tab) =>
         pageCardFilterEnabledByTab[tab] ||
         Boolean(
@@ -3972,9 +2894,8 @@ export function OverviewPagesSection({
         if (pageCardFilterEnabledByTab[tab]) {
           const normalized = rowFilterValue.trim();
           setPageCardFilter(
-            activePageCardFilterValue === normalized
-              ? null
-              : { tab, value: normalized },
+            tab,
+            pageCardFilterValue(tab) === normalized ? null : normalized,
           );
           return;
         }
@@ -4023,7 +2944,6 @@ export function OverviewPagesSection({
       },
     }),
     [
-      activePageCardFilterValue,
       messages.common.unknown,
       pageCardDefaultHostname,
       pageCardDetailClickResolvers,
@@ -4033,6 +2953,7 @@ export function OverviewPagesSection({
       pageCardTabMeta,
       pageCardTargetUrlResolvers,
       pageDetailBasePath,
+      pageCardFilterValue,
       resolvedPageCardDetailTabs,
       resolvedPageCardNavigableTabs,
       router,
@@ -4083,23 +3004,22 @@ export function OverviewPagesSection({
       },
       getSearchText: (row) => row.label,
       getExportLabel: (row) => row.label,
-      getActive: (row) =>
-        activeSourceCardFilterValue !== null &&
-        activeSourceCardFilterValue === row.filterValue,
+      getActive: (row, tab) =>
+        sourceCardFilterValue(tab) !== null &&
+        sourceCardFilterValue(tab) === row.filterValue,
       getInteractive: () => true,
       onClick: (row, { tab }) => {
         const normalized = row.filterValue.trim();
         setSourceCardFilter(
-          activeSourceCardFilterValue === normalized
-            ? null
-            : { tab, value: normalized },
+          tab,
+          sourceCardFilterValue(tab) === normalized ? null : normalized,
         );
       },
     }),
     [
-      activeSourceCardFilterValue,
       openPageCardRowTarget,
       setSourceCardFilter,
+      sourceCardFilterValue,
       sourceCardDirectLabel,
       sourceCardTabMeta,
     ],
@@ -4133,20 +3053,21 @@ export function OverviewPagesSection({
         ),
       getSearchText: (row) => row.rawLabel?.trim() || row.label,
       getExportLabel: (row) => row.rawLabel?.trim() || row.label,
-      getActive: (row) =>
-        activeClientDimensionCardFilterValue === (row.filterValue ?? row.label),
+      getActive: (row, tab) =>
+        clientDimensionCardFilterValue(tab) === (row.filterValue ?? row.label),
       getInteractive: () => true,
       onClick: (row, { tab }) => {
         const normalized = (row.filterValue ?? row.label).trim();
         setClientDimensionCardFilter(
-          activeClientDimensionCardFilterValue === normalized
+          tab,
+          clientDimensionCardFilterValue(tab) === normalized
             ? null
-            : { tab, value: normalized },
+            : normalized,
         );
       },
     }),
     [
-      activeClientDimensionCardFilterValue,
+      clientDimensionCardFilterValue,
       messages.common.deviceLabels,
       messages.common.unknown,
       setClientDimensionCardFilter,
@@ -4215,27 +3136,24 @@ export function OverviewPagesSection({
       getSearchText: (row) => row.rawLabel?.trim() || row.label,
       getExportLabel: (row) => row.rawLabel?.trim() || row.label,
       getActive: (row, tab) => {
+        const filterValue = geoDimensionCardFilterValue(tab);
         const activeGeoHighlightValue = isGeoLocationTab(tab)
-          ? resolveGeoLocationHighlightValue(
-              tab,
-              activeGeoDimensionCardFilterValue,
-            )
-          : activeGeoDimensionCardFilterValue;
+          ? resolveGeoLocationHighlightValue(tab, filterValue)
+          : filterValue;
         return activeGeoHighlightValue === (row.filterValue ?? row.label);
       },
       getInteractive: () => true,
       onClick: (row, { tab }) => {
         const normalized = (row.filterValue ?? row.label).trim();
         setGeoDimensionCardFilter(
-          activeGeoDimensionCardFilterValue === normalized
-            ? null
-            : { tab, value: normalized },
+          tab,
+          geoDimensionCardFilterValue(tab) === normalized ? null : normalized,
         );
       },
     }),
     [
-      activeGeoDimensionCardFilterValue,
       geoDimensionRowLocationTarget,
+      geoDimensionCardFilterValue,
       locale,
       messages.common.search,
       openGeoDimensionLocationTarget,
@@ -4253,21 +3171,9 @@ export function OverviewPagesSection({
         {resolvedVisibleCards.has("page") ? (
           <div className="min-w-0">
             <TabbedDataTableCard<PageCardTab, PageCardRow, PageCardSortKey>
-              value={pageCardTab}
-              onValueChange={handlePageCardTabChange}
               tabs={pageCardTableTabs}
-              rowsByTab={pageCardRowsForTable}
-              loadingByTab={loadingByPageCardTab}
-              hasMoreByTab={Object.fromEntries(
-                ALL_PAGE_CARD_TABS.map((tab) => [
-                  tab,
-                  overviewTabHasMore(resolvedPageCardTabData[tab]),
-                ]),
-              )}
-              nextCursorByTab={pageCardNextCursorByTab}
-              loadingMoreByTab={loadingMorePageTabs}
-              onLoadMore={loadMorePageCardTab}
-              loadPageForExport={loadPageCardForExport}
+              loader={pageCardLoader}
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${locale}:page:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
               columns={pageCardMetricColumns}
               rowAdapter={pageCardRowAdapter}
               filterRows={filterPageCardRows}
@@ -4287,21 +3193,9 @@ export function OverviewPagesSection({
         {resolvedVisibleCards.has("source") ? (
           <div className="min-w-0">
             <TabbedDataTableCard<SourceCardTab, SourceCardRow, PageCardSortKey>
-              value={sourceCardTab}
-              onValueChange={handleSourceCardTabChange}
               tabs={sourceCardTableTabs}
-              rowsByTab={sourceCardRowsForTable}
-              loadingByTab={loadingBySourceCardTab}
-              hasMoreByTab={Object.fromEntries(
-                SOURCE_CARD_TABS.map((tab) => [
-                  tab,
-                  overviewTabHasMore(resolvedSourceCardTabData[tab]),
-                ]),
-              )}
-              nextCursorByTab={sourceCardNextCursorByTab}
-              loadingMoreByTab={loadingMoreSourceTabs}
-              onLoadMore={loadMoreSourceCardTab}
-              loadPageForExport={loadSourceCardForExport}
+              loader={sourceCardLoader}
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${locale}:source:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
               columns={overviewMetricColumns}
               rowAdapter={sourceCardRowAdapter}
               filterRows={filterSourceCardRows}
@@ -4325,21 +3219,9 @@ export function OverviewPagesSection({
               PageCardRow,
               PageCardSortKey
             >
-              value={clientDimensionCardTab}
-              onValueChange={handleClientDimensionCardTabChange}
               tabs={clientDimensionCardTableTabs}
-              rowsByTab={clientDimensionCardRowsForTable}
-              loadingByTab={loadingByClientDimensionCardTab}
-              hasMoreByTab={Object.fromEntries(
-                CLIENT_DIMENSION_CARD_TABS.map((tab) => [
-                  tab,
-                  overviewTabHasMore(resolvedClientDimensionCardTabData[tab]),
-                ]),
-              )}
-              nextCursorByTab={clientDimensionCardNextCursorByTab}
-              loadingMoreByTab={loadingMoreClientTabs}
-              onLoadMore={loadMoreClientDimensionTab}
-              loadPageForExport={loadClientDimensionCardForExport}
+              loader={clientDimensionCardLoader}
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${locale}:client:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
               columns={overviewMetricColumns}
               rowAdapter={clientDimensionCardRowAdapter}
               filterRows={filterClientDimensionCardRows}
@@ -4363,21 +3245,9 @@ export function OverviewPagesSection({
               PageCardRow,
               PageCardSortKey
             >
-              value={geoDimensionCardTab}
-              onValueChange={handleGeoDimensionCardTabChange}
               tabs={geoDimensionCardTableTabs}
-              rowsByTab={geoDimensionCardRowsForTable}
-              loadingByTab={loadingByGeoDimensionCardTab}
-              hasMoreByTab={Object.fromEntries(
-                GEO_DIMENSION_CARD_TABS.map((tab) => [
-                  tab,
-                  overviewTabHasMore(resolvedGeoDimensionCardTabData[tab]),
-                ]),
-              )}
-              nextCursorByTab={geoDimensionCardNextCursorByTab}
-              loadingMoreByTab={loadingMoreGeoTabs}
-              onLoadMore={loadMoreGeoDimensionTab}
-              loadPageForExport={loadGeoDimensionCardForExport}
+              loader={geoDimensionCardLoader}
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${locale}:geo:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
               columns={overviewMetricColumns}
               rowAdapter={geoDimensionCardRowAdapter}
               filterRows={filterGeoDimensionCardRows}

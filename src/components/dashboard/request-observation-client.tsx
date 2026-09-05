@@ -36,6 +36,7 @@ import {
 import {
   AsyncDimensionBreakdownCard,
   type AsyncDimensionBreakdownLabelAppearance,
+  type AsyncDimensionBreakdownLoader,
   type AsyncDimensionBreakdownRow,
   type AsyncDimensionBreakdownTab,
 } from "@/components/dashboard/async-dimension-breakdown-card";
@@ -49,6 +50,7 @@ import {
 } from "@/components/dashboard/journey-display";
 import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
 import { EVENT_RECORD_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
+import type { TabbedDataTablePage } from "@/components/dashboard/tabbed-data-table-card";
 import { AppOverlay, overlayZIndexFor } from "@/components/ui/app-overlay";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -1290,18 +1292,6 @@ export function RequestObservationClient({
   const [loadingMore, setLoadingMore] = useState<"blocked" | "included" | null>(
     null,
   );
-  const [blockedDetectionTab, setBlockedDetectionTab] =
-    useState<DetectionDimensionTab>("reason");
-  const [blockedTargetTab, setBlockedTargetTab] =
-    useState<TargetDimensionTab>("site");
-  const [blockedNetworkTab, setBlockedNetworkTab] =
-    useState<NetworkDimensionTab>("asOrganization");
-  const [blockedClientTab, setBlockedClientTab] =
-    useState<ClientDimensionTab>("ip");
-  const [includedTargetTab, setIncludedTargetTab] =
-    useState<IncludedTargetDimensionTab>("site");
-  const [includedNetworkTab, setIncludedNetworkTab] =
-    useState<NetworkDimensionTab>("asOrganization");
   const ui = useMemo(
     () => requestObservationUiLabels(locale, copy),
     [copy, locale],
@@ -1760,6 +1750,7 @@ export function RequestObservationClient({
       async (
         group: "detection" | "target" | "network" | "client",
         tab: string,
+        signal?: AbortSignal,
       ) =>
         toAsyncAggregatedDimensionRows(
           await fetchRequestObservationDimension(
@@ -1767,6 +1758,7 @@ export function RequestObservationClient({
             "blocked",
             group,
             tab,
+            signal,
           ),
           group === "network"
             ? {
@@ -1786,57 +1778,89 @@ export function RequestObservationClient({
     [copy.emptyValue, locale, timeWindow],
   );
   const loadIncludedDimensionRows = useMemo(
-    () => async (group: "target" | "network", tab: string) =>
-      toAsyncAggregatedDimensionRows(
-        await fetchRequestObservationDimension(
-          timeWindow,
-          "included",
-          group,
-          tab,
+    () =>
+      async (group: "target" | "network", tab: string, signal?: AbortSignal) =>
+        toAsyncAggregatedDimensionRows(
+          await fetchRequestObservationDimension(
+            timeWindow,
+            "included",
+            group,
+            tab,
+            signal,
+          ),
+          group === "network"
+            ? {
+                networkTab: tab as NetworkDimensionTab,
+                locale,
+                unknownLabel: copy.emptyValue,
+              }
+            : tab === "category"
+              ? { detectionTab: "category", copy }
+              : { targetTab: tab as TargetDimensionTab },
         ),
-        group === "network"
-          ? {
-              networkTab: tab as NetworkDimensionTab,
-              locale,
-              unknownLabel: copy.emptyValue,
-            }
-          : tab === "category"
-            ? { detectionTab: "category", copy }
-            : { targetTab: tab as TargetDimensionTab },
-      ),
     [copy, locale, timeWindow],
   );
-  const loadBlockedDetectionRows = useCallback(
-    (tab: DetectionDimensionTab, _signal?: AbortSignal) =>
-      loadBlockedDimensionRows("detection", tab),
+  const loadBlockedDetection = useCallback<
+    AsyncDimensionBreakdownLoader<DetectionDimensionTab>
+  >(
+    async ({ tab, limit, signal }) =>
+      asyncDimensionPage(
+        await loadBlockedDimensionRows("detection", tab, signal),
+        limit,
+      ),
     [loadBlockedDimensionRows],
   );
-  const loadBlockedTargetRows = useCallback(
-    (tab: TargetDimensionTab, _signal?: AbortSignal) =>
-      loadBlockedDimensionRows("target", tab),
+  const loadBlockedTarget = useCallback<
+    AsyncDimensionBreakdownLoader<TargetDimensionTab>
+  >(
+    async ({ tab, limit, signal }) =>
+      asyncDimensionPage(
+        await loadBlockedDimensionRows("target", tab, signal),
+        limit,
+      ),
     [loadBlockedDimensionRows],
   );
-  const loadBlockedNetworkRows = useCallback(
-    (tab: NetworkDimensionTab, _signal?: AbortSignal) =>
-      loadBlockedDimensionRows("network", tab),
+  const loadBlockedNetwork = useCallback<
+    AsyncDimensionBreakdownLoader<NetworkDimensionTab>
+  >(
+    async ({ tab, limit, signal }) =>
+      asyncDimensionPage(
+        await loadBlockedDimensionRows("network", tab, signal),
+        limit,
+      ),
     [loadBlockedDimensionRows],
   );
-  const loadBlockedClientRows = useCallback(
-    (tab: ClientDimensionTab, _signal?: AbortSignal) =>
-      loadBlockedDimensionRows("client", tab),
+  const loadBlockedClient = useCallback<
+    AsyncDimensionBreakdownLoader<ClientDimensionTab>
+  >(
+    async ({ tab, limit, signal }) =>
+      asyncDimensionPage(
+        await loadBlockedDimensionRows("client", tab, signal),
+        limit,
+      ),
     [loadBlockedDimensionRows],
   );
-  const loadIncludedTargetRows = useCallback(
-    (tab: IncludedTargetDimensionTab, _signal?: AbortSignal) =>
-      loadIncludedDimensionRows("target", tab),
+  const loadIncludedTarget = useCallback<
+    AsyncDimensionBreakdownLoader<IncludedTargetDimensionTab>
+  >(
+    async ({ tab, limit, signal }) =>
+      asyncDimensionPage(
+        await loadIncludedDimensionRows("target", tab, signal),
+        limit,
+      ),
     [loadIncludedDimensionRows],
   );
-  const loadIncludedNetworkRows = useCallback(
-    (tab: NetworkDimensionTab, _signal?: AbortSignal) =>
-      loadIncludedDimensionRows("network", tab),
+  const loadIncludedNetwork = useCallback<
+    AsyncDimensionBreakdownLoader<NetworkDimensionTab>
+  >(
+    async ({ tab, limit, signal }) =>
+      asyncDimensionPage(
+        await loadIncludedDimensionRows("network", tab, signal),
+        limit,
+      ),
     [loadIncludedDimensionRows],
   );
-  const requestKey = `${timeWindow.from}:${timeWindow.to}:${timeWindow.interval}:${timeWindow.timeZone}`;
+  const requestKey = `${timeWindow.from}:${timeWindow.to}:${timeWindow.interval}:${timeWindow.timeZone}:${locale}`;
   const overview = data?.overview;
   const blockedSummary = data?.blocked?.summary;
   const includedSummary = data?.included?.summary;
@@ -2166,9 +2190,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={detectionTabs}
-                          value={blockedDetectionTab}
-                          onValueChange={setBlockedDetectionTab}
-                          loadRows={loadBlockedDetectionRows}
+                          loader={loadBlockedDetection}
                           requestKey={`${requestKey}:detection`}
                           className="h-full"
                           secondaryMetricLabel={ui.botRequests}
@@ -2178,9 +2200,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={targetTabs}
-                          value={blockedTargetTab}
-                          onValueChange={setBlockedTargetTab}
-                          loadRows={loadBlockedTargetRows}
+                          loader={loadBlockedTarget}
                           requestKey={`${requestKey}:target`}
                           className="h-full"
                           secondaryMetricLabel={ui.botRequests}
@@ -2190,9 +2210,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={networkTabs}
-                          value={blockedNetworkTab}
-                          onValueChange={setBlockedNetworkTab}
-                          loadRows={loadBlockedNetworkRows}
+                          loader={loadBlockedNetwork}
                           requestKey={`${requestKey}:network`}
                           className="h-full"
                           secondaryMetricLabel={ui.botRequests}
@@ -2202,9 +2220,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={clientTabs}
-                          value={blockedClientTab}
-                          onValueChange={setBlockedClientTab}
-                          loadRows={loadBlockedClientRows}
+                          loader={loadBlockedClient}
                           requestKey={`${requestKey}:client`}
                           className="h-full"
                           secondaryMetricLabel={ui.botRequests}
@@ -2317,9 +2333,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={includedTargetTabs}
-                          value={includedTargetTab}
-                          onValueChange={setIncludedTargetTab}
-                          loadRows={loadIncludedTargetRows}
+                          loader={loadIncludedTarget}
                           requestKey={`${requestKey}:included-target`}
                           className="h-full"
                           showVisitors={false}
@@ -2329,9 +2343,7 @@ export function RequestObservationClient({
                           locale={locale}
                           messages={messages}
                           tabs={networkTabs}
-                          value={includedNetworkTab}
-                          onValueChange={setIncludedNetworkTab}
-                          loadRows={loadIncludedNetworkRows}
+                          loader={loadIncludedNetwork}
                           requestKey={`${requestKey}:included-network`}
                           className="h-full"
                           showVisitors={false}
@@ -2431,6 +2443,7 @@ async function fetchRequestObservationDimension(
   source: "blocked" | "included",
   group: "detection" | "target" | "network" | "client",
   tab: string,
+  signal?: AbortSignal,
 ): Promise<RequestNetworkDimensionRow[]> {
   const payload = await requestAdminService<RequestObservationDimensionData>(
     "request-observation",
@@ -2444,6 +2457,7 @@ async function fetchRequestObservationDimension(
         dimensionGroup: group,
         dimensionTab: tab,
       },
+      signal,
     },
   );
   if (!payload.dimension) {
@@ -2920,6 +2934,21 @@ function toAsyncAggregatedDimensionRows(
     })),
     options,
   ).map((row, index) => ({ ...row, key: rows[index]?.key || row.key }));
+}
+
+function asyncDimensionPage(
+  items: AsyncDimensionBreakdownRow[],
+  limit: number,
+): TabbedDataTablePage<AsyncDimensionBreakdownRow> {
+  return {
+    items,
+    pagination: {
+      limit,
+      returned: items.length,
+      hasMore: false,
+      nextCursor: null,
+    },
+  };
 }
 
 function displayValue(

@@ -33,11 +33,21 @@ import {
   queryTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import {
+  decodePagesCursor,
+  decodeReferrersCursor,
   queryDimensionAggregate,
   queryPageCardMetricsFromD1,
   queryPageCardTitlesFromD1,
   queryPageCardTrendFromD1,
+  queryPagesAggregate,
+  queryPagesDashboard,
+  queryPagesFromD1,
+  queryPagesPageFromD1,
+  queryReferrerAggregate,
+  queryReferrersPageFromD1,
+  queryReferrerSummaryFromD1,
   queryTopPagesFromD1,
+  queryTopReferrersFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
 import type { Env } from "@/lib/edge/types";
 
@@ -640,6 +650,384 @@ describe("edge pages D1 queries", () => {
     expect(calls[1]?.bindings.length).toBeGreaterThan(3);
     expect(calls[0]?.sql).toContain("scope_final_visits");
     expect(calls[1]?.sql).toContain("scope_final_visits");
+  });
+});
+
+describe("edge paginated page and referrer readers", () => {
+  it("returns a signed page cursor and accepts it on the next request", async () => {
+    const filters = EMPTY_FILTER_DOCUMENT;
+    const first = createD1Env([
+      [
+        { pathname: "/", queryValue: "", hashValue: "", views: 8, sessions: 5 },
+        {
+          pathname: "/docs",
+          queryValue: "lang=en",
+          hashValue: "intro",
+          views: 6,
+          sessions: 4,
+        },
+        {
+          pathname: "/pricing",
+          queryValue: "",
+          hashValue: "",
+          views: 4,
+          sessions: 3,
+        },
+      ],
+    ]);
+    const firstPage = await queryPagesPageFromD1(
+      first.env,
+      siteId,
+      window,
+      filters,
+      2,
+      true,
+    );
+
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.pagination).toMatchObject({
+      limit: 2,
+      returned: 2,
+      hasMore: true,
+      nextCursor: expect.any(String),
+    });
+    expect(first.calls[0].bindings.at(-1)).toBe(3);
+
+    const decoded = await decodePagesCursor(
+      first.env,
+      siteId,
+      window,
+      filters,
+      true,
+      firstPage.pagination.nextCursor,
+    );
+    expect(decoded).toEqual({
+      views: 6,
+      sessions: 4,
+      pathname: "/docs",
+      query: "lang=en",
+      hash: "intro",
+    });
+
+    const second = createD1Env([
+      [
+        {
+          pathname: "/pricing",
+          queryValue: "",
+          hashValue: "",
+          views: 4,
+          sessions: 3,
+        },
+      ],
+    ]);
+    await expect(
+      queryPagesPageFromD1(
+        second.env,
+        siteId,
+        window,
+        filters,
+        2,
+        true,
+        decoded,
+        "public-share",
+      ),
+    ).resolves.toMatchObject({
+      items: [{ pathname: "/pricing", views: 4 }],
+      pagination: { hasMore: false, nextCursor: null },
+    });
+    expect(second.calls[0].sql).toContain("query_string AS queryValue");
+    expect(second.calls[0].bindings).toContain(6);
+  });
+
+  it("paginates referrers with search, alternate sorting, and full URLs", async () => {
+    const filters = EMPTY_FILTER_DOCUMENT;
+    const first = createD1Env([
+      [
+        { referrer: "google.com", views: 10, sessions: 7, visitors: 6 },
+        { referrer: "news.example", views: 8, sessions: 5, visitors: 4 },
+      ],
+    ]);
+    const firstPage = await queryReferrersPageFromD1(
+      first.env,
+      siteId,
+      window,
+      filters,
+      1,
+      true,
+      " News ",
+      null,
+      undefined,
+      "public-share",
+      "visitors",
+      "asc",
+    );
+
+    expect(firstPage.items).toEqual([
+      { referrer: "google.com", views: 10, sessions: 7, visitors: 6 },
+    ]);
+    expect(firstPage.pagination).toMatchObject({
+      hasMore: true,
+      nextCursor: expect.any(String),
+    });
+    expect(first.calls[0].sql).toContain("referrer_url");
+    expect(first.calls[0].sql).toContain("HAVING LOWER(referrer) LIKE");
+
+    const cursor = await decodeReferrersCursor(
+      first.env,
+      siteId,
+      window,
+      filters,
+      true,
+      " News ",
+      firstPage.pagination.nextCursor,
+      "public-share",
+      "visitors",
+      "asc",
+    );
+    expect(cursor).toEqual({
+      views: 10,
+      sessions: 7,
+      visitors: 6,
+      referrer: "google.com",
+    });
+
+    const second = createD1Env([
+      [{ referrer: "news.example", views: 8, sessions: 5, visitors: 4 }],
+    ]);
+    await expect(
+      queryReferrersPageFromD1(
+        second.env,
+        siteId,
+        window,
+        filters,
+        2,
+        false,
+        undefined,
+        cursor,
+        undefined,
+        "private-dashboard",
+        "views",
+        "desc",
+      ),
+    ).resolves.toMatchObject({
+      items: [{ referrer: "news.example" }],
+      pagination: { hasMore: false },
+    });
+    expect(second.calls[0].sql).toContain("referrer_host");
+    expect(second.calls[0].bindings).toContain(10);
+  });
+
+  it("keeps referrer totals independent from the top-N source list", async () => {
+    const { env, calls } = createD1Env([
+      [
+        {
+          totalViews: 20,
+          directViews: 5,
+          externalViews: 15,
+          uniqueDomains: 3,
+          uniqueLinks: 4,
+        },
+      ],
+      [
+        { referrer: "google.com", views: 10 },
+        { referrer: "news.example", views: 8 },
+      ],
+    ]);
+
+    await expect(
+      queryReferrerSummaryFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 1),
+    ).resolves.toEqual({
+      totalViews: 20,
+      directViews: 5,
+      externalViews: 15,
+      uniqueDomains: 3,
+      uniqueLinks: 4,
+      truncated: true,
+      topSources: [{ referrer: "google.com", views: 10 }],
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].bindings.at(-1)).toBe(2);
+
+    const empty = createD1Env([[], []]);
+    await expect(
+      queryReferrerSummaryFromD1(
+        empty.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        5,
+      ),
+    ).resolves.toMatchObject({
+      totalViews: 0,
+      topSources: [],
+      truncated: false,
+    });
+  });
+
+  it("returns an empty dashboard page without loading comparison details", async () => {
+    const { env, calls } = createD1Env([[]]);
+    await expect(
+      queryPagesDashboard(env, siteId, {
+        window,
+        filters: EMPTY_FILTER_DOCUMENT,
+        interval: "day",
+        page: 1,
+        pageSize: 3,
+        offset: 0,
+      }),
+    ).resolves.toMatchObject({
+      data: [],
+      meta: { returned: 0, hasMore: false, nextPage: null },
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps the legacy aggregate wrappers and enriches non-empty dashboard pages", async () => {
+    const pageRow = {
+      pathname: "/docs",
+      queryValue: "",
+      hashValue: "",
+      views: 4,
+      sessions: 3,
+    };
+    await expect(
+      queryPagesFromD1(
+        createD1Env([[pageRow]]).env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+        false,
+      ),
+    ).resolves.toEqual([
+      { pathname: "/docs", query: "", hash: "", views: 4, sessions: 3 },
+    ]);
+    await expect(
+      queryPagesAggregate(
+        createD1Env([[pageRow]]).env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+        false,
+      ),
+    ).resolves.toHaveLength(1);
+    await expect(
+      queryReferrerAggregate(
+        createD1Env([[{ referrer: "google.com", views: 4, sessions: 2 }]]).env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+        false,
+      ),
+    ).resolves.toEqual([
+      { referrer: "google.com", views: 4, sessions: 2, visitors: 0 },
+    ]);
+    await expect(
+      queryTopReferrersFromD1(
+        createD1Env([[{ referrer: "news.example", views: 3, sessions: 2 }]])
+          .env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+        false,
+      ),
+    ).resolves.toEqual([
+      { referrer: "news.example", views: 3, sessions: 2, visitors: 0 },
+    ]);
+
+    const dashboard = createD1Env([
+      [
+        {
+          pathname: "/docs",
+          views: 10,
+          sessions: 5,
+          visitors: 4,
+          bounces: 1,
+          totalDuration: 5_000,
+          durationViews: 4,
+        },
+      ],
+      [
+        {
+          pathname: "/docs",
+          views: 8,
+          sessions: 4,
+          visitors: 3,
+          bounces: 2,
+          totalDuration: 4_000,
+          durationViews: 3,
+        },
+      ],
+      [
+        {
+          rowKind: "title",
+          pathname: "/docs",
+          title: "Docs",
+          views: 5,
+          rowOrder: 1,
+        },
+        {
+          rowKind: "title",
+          pathname: "/docs",
+          title: "Docs",
+          views: 4,
+          rowOrder: 2,
+        },
+        {
+          rowKind: "title",
+          pathname: "/docs",
+          title: "Reference",
+          views: 3,
+          rowOrder: 3,
+        },
+        {
+          rowKind: "title",
+          pathname: "/docs",
+          title: "",
+          views: 2,
+          rowOrder: 4,
+        },
+        {
+          rowKind: "trend",
+          pathname: "/docs",
+          bucket: 0,
+          views: 5,
+          visitors: 3,
+          rowOrder: 0,
+        },
+        {
+          rowKind: "other",
+          pathname: "/docs",
+          bucket: 1,
+          views: 1,
+          visitors: 1,
+          rowOrder: 1,
+        },
+      ],
+    ]);
+    await expect(
+      queryPagesDashboard(dashboard.env, siteId, {
+        window,
+        filters: EMPTY_FILTER_DOCUMENT,
+        interval: "day",
+        page: 1,
+        pageSize: 3,
+        offset: 0,
+      }),
+    ).resolves.toMatchObject({
+      data: [
+        {
+          pathname: "/docs",
+          titles: ["Docs", "Reference"],
+          trend: [{ views: 5, visitors: 3 }],
+        },
+      ],
+      meta: { returned: 1, hasMore: false, nextPage: null },
+    });
+    expect(dashboard.calls).toHaveLength(3);
   });
 });
 

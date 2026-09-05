@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { queryFilterValuesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
+import {
+  queryFilterValuesFromD1,
+  queryFilterValuesPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import type { Env } from "@/lib/edge/types";
 
 const window: QueryWindow = {
@@ -184,5 +187,84 @@ describe("canonical filter value reader", () => {
         "organic",
       ),
     ).resolves.toEqual([{ value: "organic_search", occurrences: 7 }]);
+  });
+
+  it("routes paginated candidates through every registered source", async () => {
+    const fields = [
+      "event.name",
+      "referrer.domain",
+      "referrer.url",
+      "session.entryPath",
+      "session.exitPath",
+      "traffic.channel",
+      "page.path",
+    ];
+    for (const field of fields) {
+      await expect(
+        queryFilterValuesPageFromD1(
+          envWithRows(),
+          "site-1",
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          field,
+          10,
+          null,
+          "doc",
+          "public-share",
+        ),
+      ).resolves.toMatchObject({
+        items: expect.any(Array),
+        pagination: {
+          limit: 10,
+          returned: expect.any(Number),
+          hasMore: false,
+          nextCursor: null,
+        },
+      });
+    }
+    await expect(
+      queryFilterValuesPageFromD1(
+        envWithRows(),
+        "site-1",
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "event.payload",
+        10,
+      ),
+    ).resolves.toMatchObject({
+      items: [],
+      pagination: { hasMore: false, nextCursor: null },
+    });
+    await expect(
+      queryFilterValuesPageFromD1(
+        envWithRows(),
+        "site-1",
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "missing.field",
+        10,
+      ),
+    ).resolves.toMatchObject({ items: [], pagination: { returned: 0 } });
+  });
+
+  it("rejects a cursor before querying each paginated candidate source", async () => {
+    for (const field of [
+      "event.name",
+      "referrer.domain",
+      "session.entryPath",
+      "traffic.channel",
+    ]) {
+      await expect(
+        queryFilterValuesPageFromD1(
+          envWithRows(),
+          "site-1",
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          field,
+          10,
+          "invalid-cursor",
+        ),
+      ).rejects.toThrow("invalid-cursor");
+    }
   });
 });

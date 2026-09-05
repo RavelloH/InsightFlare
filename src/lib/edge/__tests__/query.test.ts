@@ -2515,6 +2515,70 @@ describe("edge query handlers", () => {
     });
   });
 
+  it("routes every public shared-query collection through its contract adapter", async () => {
+    const { env } = createEnv();
+    const paths = [
+      "overview",
+      "trend",
+      "pages",
+      "referrers",
+      "referrer-summary",
+      "pages-dashboard",
+      "retention",
+      "performance",
+      "event-types",
+      "filter-values",
+      "overview-geo-points",
+      "countries",
+      "utm-source",
+      "utm-medium",
+      "utm-campaign",
+      "utm-term",
+      "utm-content",
+      "browser-trend",
+      "browser-engine-trend",
+      "browser-version-breakdown",
+      "browser-cross-breakdown",
+      "browser-radar",
+      "referrer-radar",
+      "referrer-dimension-trend",
+      "referrer-channel-dimension-trend",
+      "client-dimension-trend",
+      "utm-dimension-trend",
+      "client-cross-breakdown",
+      "overview-page-path",
+      "overview-page-title",
+      "overview-page-hostname",
+      "overview-page-entry",
+      "overview-page-exit",
+      "overview-source-domain",
+      "overview-source-channel",
+      "overview-client-browser",
+      "overview-client-os-version",
+      "overview-client-device-type",
+      "overview-client-language",
+      "overview-client-screen-size",
+      "overview-geo-country",
+      "overview-geo-region",
+      "overview-geo-city",
+      "overview-geo-continent",
+      "overview-geo-timezone",
+      "overview-geo-organization",
+    ];
+    for (const pathname of paths) {
+      const url = new URL(
+        `https://edge.test/api/public-sites/public-slug/${pathname}?${windowParams}&filterKey=geo.country`,
+      );
+      const response = await executePublicQuery({
+        env,
+        siteId: "site-1",
+        pathname,
+        url,
+      });
+      expect(response).toBeInstanceOf(Response);
+    }
+  });
+
   it("returns not found for unknown private paths after authorization", async () => {
     const { env } = createEnv({ matches: authMatches() });
 

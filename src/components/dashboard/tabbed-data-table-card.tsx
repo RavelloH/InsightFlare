@@ -15,7 +15,7 @@ import {
   RiDownloadLine,
   RiSearchLine,
 } from "@remixicon/react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
 import { AnimatedDataTableRow } from "@/components/dashboard/animated-data-table-row";
@@ -58,22 +58,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 type NonEmptyArray<T> = readonly [T, ...T[]];
-const EMPTY_ROWS_BY_TAB = {};
 
 export type TabbedDataTableSortDirection = "asc" | "desc";
-
-export interface TabbedDataTableExportPage<
-  TRow extends TabbedDataTableRowBase,
-> {
-  items: readonly TRow[];
-  hasMore: boolean;
-  nextCursor: string | null;
-}
-
-export interface TabbedDataTableExportPageOptions {
-  cursor: string | null;
-  signal: AbortSignal;
-}
 
 export interface TabbedDataTableSortState<TKey extends string = string> {
   key: TKey;
@@ -83,6 +69,36 @@ export interface TabbedDataTableSortState<TKey extends string = string> {
 export interface TabbedDataTableRowBase {
   key?: string;
 }
+
+export interface TabbedDataTableLoaderOptions<
+  TTab extends string,
+  TKey extends string,
+> {
+  tab: TTab;
+  cursor: string | null;
+  limit: number;
+  search: string;
+  sort: TabbedDataTableSortState<TKey>;
+  signal: AbortSignal;
+}
+
+export interface TabbedDataTablePage<TRow extends TabbedDataTableRowBase> {
+  items: readonly TRow[];
+  pagination: {
+    limit: number;
+    returned: number;
+    hasMore: boolean;
+    nextCursor: string | null;
+  };
+}
+
+export type TabbedDataTableLoader<
+  TTab extends string,
+  TRow extends TabbedDataTableRowBase,
+  TKey extends string,
+> = (
+  options: TabbedDataTableLoaderOptions<TTab, TKey>,
+) => Promise<TabbedDataTablePage<TRow>>;
 
 export interface TabbedDataTableTab<
   TTab extends string = string,
@@ -207,17 +223,8 @@ export interface TabbedDataTableCardProps<
     row: TRow,
     context: TabbedDataTableRowContext<TRow, TTab, TKey>,
   ) => ReactNode;
-  rowsByTab?: Partial<Record<TTab, readonly TRow[] | null>>;
-  loadingByTab?: Partial<Record<TTab, boolean>>;
-  loadingMoreByTab?: Partial<Record<TTab, boolean>>;
-  hasMoreByTab?: Partial<Record<TTab, boolean>>;
-  nextCursorByTab?: Partial<Record<TTab, string | null>>;
-  onLoadMore?: (tab: TTab) => void;
-  loadPageForExport?: (
-    tab: TTab,
-    options: TabbedDataTableExportPageOptions,
-  ) => Promise<TabbedDataTableExportPage<TRow>>;
-  loadRows?: (tab: TTab, signal: AbortSignal) => Promise<readonly TRow[]>;
+  loader: TabbedDataTableLoader<TTab, TRow, TKey>;
+  pageSize?: number;
   normalizeRows?: (rows: readonly TRow[], tab: TTab) => TRow[];
   filterRows?: (rows: readonly TRow[], tab: TTab) => TRow[];
   compareRows?: (
@@ -236,8 +243,6 @@ export interface TabbedDataTableCardProps<
   defaultSort?: TabbedDataTableSortState<TKey>;
   sortByTab?: Partial<Record<TTab, TabbedDataTableSortState<TKey>>>;
   onSortChange?: (tab: TTab, sort: TabbedDataTableSortState<TKey>) => void;
-  searchValue?: string | ((tab: TTab) => string);
-  onSearchTermChange?: (value: string, tab: TTab) => void;
   sortActionLabel?: (columnLabel: string) => string;
   labelColumnLabel?: string | ((tab: TabbedDataTableTab<TTab>) => string);
   loadingLabel: string;
@@ -392,14 +397,8 @@ function TabbedDataTableCardImpl<
   columns,
   rowAdapter,
   renderLabel,
-  rowsByTab,
-  loadingByTab,
-  loadingMoreByTab,
-  hasMoreByTab,
-  nextCursorByTab,
-  onLoadMore,
-  loadPageForExport,
-  loadRows,
+  loader,
+  pageSize = 100,
   normalizeRows = defaultNormalizeRows,
   filterRows,
   compareRows,
@@ -410,8 +409,6 @@ function TabbedDataTableCardImpl<
   defaultSort,
   sortByTab: controlledSortByTab,
   onSortChange,
-  searchValue,
-  onSearchTermChange,
   sortActionLabel,
   labelColumnLabel,
   loadingLabel,
@@ -450,13 +447,11 @@ function TabbedDataTableCardImpl<
   const [internalTab, setInternalTab] = useState<TTab>(
     defaultValue ?? tabs[0].value,
   );
-  const activeTab = controlled ? value : internalTab;
-  const [loadedRowsByTab, setLoadedRowsByTab] = useState<
-    Record<TTab, TRow[] | null>
-  >(() => createTabRecord(tabs, () => null));
-  const [rawLoadedRowsByTab, setRawLoadedRowsByTab] = useState<
-    Record<TTab, readonly TRow[] | null>
-  >(() => createTabRecord(tabs, () => null));
+  const selectedTab = controlled ? value : internalTab;
+  const activeTab: TTab =
+    selectedTab !== undefined && tabs.some((tab) => tab.value === selectedTab)
+      ? selectedTab
+      : tabs[0].value;
   const [sortByTab, setSortByTab] = useState<
     Record<TTab, TabbedDataTableSortState<TKey>>
   >(() =>
@@ -473,7 +468,9 @@ function TabbedDataTableCardImpl<
     }),
   );
   const [searchTab, setSearchTab] = useState<TTab | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTermsByTab, setSearchTermsByTab] = useState<
+    Record<TTab, string>
+  >(() => createTabRecord(tabs, () => ""));
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportScope, setExportScope] =
@@ -483,108 +480,33 @@ function TabbedDataTableCardImpl<
   const [exportFilename, setExportFilename] = useState("");
   const exportAbortControllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => exportAbortControllerRef.current?.abort(), []);
-  const resolvedSearchTerm =
-    typeof searchValue === "function"
-      ? searchValue(searchTab ?? activeTab)
-      : (searchValue ?? searchTerm);
+  const activeSearchTab =
+    searchTab !== null && tabs.some((tab) => tab.value === searchTab)
+      ? searchTab
+      : activeTab;
+  const resolvedSearchTerm = searchTermsByTab[activeSearchTab] ?? "";
   const deferredSearchTerm = useDeferredValue(resolvedSearchTerm);
   const updateSearchTerm = useCallback(
     (value: string) => {
-      setSearchTerm(value);
-      onSearchTermChange?.(value, searchTab ?? activeTab);
+      const tab = searchTab ?? activeTab;
+      setSearchTermsByTab((previous) => ({ ...previous, [tab]: value }));
     },
-    [activeTab, onSearchTermChange, searchTab],
+    [activeTab, searchTab],
   );
   const latestTabsRef = useRef(tabs);
-  const latestColumnsRef = useRef(columns);
-  const externalRowsByTab = (rowsByTab ?? EMPTY_ROWS_BY_TAB) as Partial<
-    Record<TTab, readonly TRow[] | null>
-  >;
-  const activeExternalRows = externalRowsByTab[activeTab];
-  const dataQuery = useQuery({
-    queryKey: [
-      "dashboard",
-      "tabbed-data",
-      requestKey ?? "",
-      tabsKey,
-      activeTab,
-    ],
-    queryFn: async ({ signal }) => {
-      if (!loadRows) return [] as readonly TRow[];
-      try {
-        return await loadRows(activeTab, signal);
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") throw error;
-        return [] as readonly TRow[];
-      }
-    },
-    enabled:
-      typeof window !== "undefined" &&
-      Boolean(loadRows) &&
-      activeExternalRows === undefined,
-  });
 
   useEffect(() => {
     latestTabsRef.current = tabs;
-    latestColumnsRef.current = columns;
-  }, [columns, tabs]);
+  }, [tabs]);
 
   useEffect(() => {
     const nextTabs = latestTabsRef.current;
-    if (nextTabs.some((tab) => tab.value === activeTab)) return;
+    if (nextTabs.some((tab) => tab.value === selectedTab)) return;
     const next = nextTabs[0].value;
     if (!controlled) setInternalTab(next);
     onValueChange?.(next);
-  }, [activeTab, controlled, onValueChange, tabsKey]);
+  }, [controlled, onValueChange, selectedTab, tabsKey]);
 
-  useEffect(() => {
-    const nextTabs = latestTabsRef.current;
-    const nextColumns = latestColumnsRef.current;
-    setLoadedRowsByTab(createTabRecord(nextTabs, () => null));
-    setRawLoadedRowsByTab(createTabRecord(nextTabs, () => null));
-    setSortByTab(
-      createTabRecord(nextTabs, (tab) => {
-        const tabColumns = getColumnsForTab(nextColumns, tab.value);
-        return {
-          key:
-            (tab.defaultSort?.key as TKey | undefined) ??
-            defaultSort?.key ??
-            firstSortableColumnKey(tabColumns),
-          direction:
-            tab.defaultSort?.direction ?? defaultSort?.direction ?? "desc",
-        };
-      }),
-    );
-    setSearchTab(null);
-    setSearchTerm("");
-  }, [defaultSort?.direction, defaultSort?.key, requestKey, tabsKey]);
-
-  useEffect(() => {
-    if (activeExternalRows !== undefined || dataQuery.data === undefined)
-      return;
-    setRawLoadedRowsByTab((previous) => ({
-      ...previous,
-      [activeTab]: dataQuery.data,
-    }));
-    setLoadedRowsByTab((previous) => ({
-      ...previous,
-      [activeTab]: normalizeRows(dataQuery.data, activeTab),
-    }));
-  }, [activeExternalRows, activeTab, dataQuery.data, normalizeRows]);
-
-  useEffect(() => {
-    if (searchTab !== null) return;
-    updateSearchTerm("");
-  }, [searchTab, updateSearchTerm]);
-
-  const effectiveSortByTab = useMemo(
-    () =>
-      createTabRecord(
-        tabs,
-        (tab) => controlledSortByTab?.[tab.value] ?? sortByTab[tab.value],
-      ),
-    [controlledSortByTab, sortByTab, tabs],
-  );
   const searchConfig = search === false ? null : (search ?? {});
   const searchEnabled = searchConfig?.enabled ?? true;
   const exportConfig =
@@ -594,52 +516,77 @@ function TabbedDataTableCardImpl<
     ...DEFAULT_EXPORT_LABELS,
     ...exportConfig?.labels,
   };
-  const activeSearchTab = searchTab ?? activeTab;
+  const effectiveSortByTab = useMemo(
+    () =>
+      createTabRecord(tabs, (tab) => {
+        const configured =
+          controlledSortByTab?.[tab.value] ?? sortByTab[tab.value];
+        if (configured) return configured;
 
-  const rawRowsByTab = useMemo(() => {
-    return createTabRecord(tabs, (tab) => {
-      const externalRows = externalRowsByTab[tab.value];
-      if (externalRows !== undefined) return externalRows;
-      if (tab.value === activeTab && dataQuery.data !== undefined) {
-        return dataQuery.data;
-      }
-      return rawLoadedRowsByTab[tab.value];
-    });
-  }, [activeTab, dataQuery.data, externalRowsByTab, rawLoadedRowsByTab, tabs]);
+        const tabColumns = getColumnsForTab(columns, tab.value);
+        return {
+          key:
+            (tab.defaultSort?.key as TKey | undefined) ??
+            defaultSort?.key ??
+            firstSortableColumnKey(tabColumns),
+          direction:
+            tab.defaultSort?.direction ?? defaultSort?.direction ?? "desc",
+        };
+      }),
+    [columns, controlledSortByTab, defaultSort, sortByTab, tabs],
+  );
+  const activeSort = effectiveSortByTab[activeTab];
+  const dataQuery = useInfiniteQuery({
+    queryKey: [
+      "dashboard",
+      "tabbed-data",
+      requestKey ?? "",
+      tabsKey,
+      activeTab,
+      activeSort.key,
+      activeSort.direction,
+      deferredSearchTerm,
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      loader({
+        tab: activeTab,
+        cursor: pageParam,
+        limit: pageSize,
+        search: deferredSearchTerm,
+        sort: activeSort,
+        signal,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.pagination.hasMore
+        ? (lastPage.pagination.nextCursor ?? undefined)
+        : undefined,
+    enabled: typeof window !== "undefined",
+  });
+  const { fetchNextPage, hasNextPage, isFetchingNextPage, isPending } =
+    dataQuery;
 
-  const resolvedRowsByTab = useMemo(() => {
-    return createTabRecord(tabs, (tab) => {
-      const externalRows = externalRowsByTab[tab.value];
-      if (externalRows !== undefined) {
-        return externalRows === null
-          ? null
-          : normalizeRows(externalRows, tab.value);
-      }
-      if (tab.value === activeTab && dataQuery.data !== undefined) {
-        return normalizeRows(dataQuery.data, tab.value);
-      }
-      return loadedRowsByTab[tab.value];
-    });
-  }, [
-    activeTab,
-    dataQuery.data,
-    externalRowsByTab,
-    loadedRowsByTab,
-    normalizeRows,
-    tabs,
-  ]);
-
-  const resolvedLoadingByTab = useMemo(
+  const rawActiveRows = useMemo(
+    () =>
+      dataQuery.data?.pages.flatMap((page) => page.items) ??
+      (null as readonly TRow[] | null),
+    [dataQuery.data],
+  );
+  const rawRowsByTab = useMemo(
     () =>
       createTabRecord(tabs, (tab) =>
-        Boolean(
-          loadingByTab?.[tab.value] ??
-          (tab.value === activeTab &&
-            dataQuery.isFetching &&
-            dataQuery.data === undefined),
-        ),
+        tab.value === activeTab ? rawActiveRows : null,
       ),
-    [activeTab, dataQuery.data, dataQuery.isFetching, loadingByTab, tabs],
+    [activeTab, rawActiveRows, tabs],
+  );
+  const resolvedRowsByTab = useMemo(
+    () =>
+      createTabRecord(tabs, (tab) =>
+        tab.value === activeTab && rawActiveRows !== null
+          ? normalizeRows(rawActiveRows, tab.value)
+          : null,
+      ),
+    [activeTab, normalizeRows, rawActiveRows, tabs],
   );
 
   const sortRowsForTab = useCallback(
@@ -732,17 +679,14 @@ function TabbedDataTableCardImpl<
   );
   const activeTabMeta = tabByValue.get(activeTab) ?? tabs[0];
   const activeSearchTabMeta = tabByValue.get(activeSearchTab) ?? activeTabMeta;
-  const activeLoading =
-    resolvedLoadingByTab[activeTab] || resolvedRowsByTab[activeTab] === null;
-  const searchLoading =
-    resolvedLoadingByTab[activeSearchTab] ||
-    resolvedRowsByTab[activeSearchTab] === null;
+  const activeLoading = isPending;
+  const searchLoading = activeSearchTab === activeTab ? isPending : false;
   const activeColumns = getColumnsForTab(columns, activeTab);
   const activeSearchColumns = getColumnsForTab(columns, activeSearchTab);
   const colSpan = 1 + activeColumns.length;
   const searchColSpan = 1 + activeSearchColumns.length;
-  const activeHasMore = Boolean(hasMoreByTab?.[activeTab]);
-  const activeLoadingMore = Boolean(loadingMoreByTab?.[activeTab]);
+  const activeHasMore = Boolean(hasNextPage);
+  const activeLoadingMore = isFetchingNextPage;
   const loadMoreInFlightRef = useRef(false);
   useEffect(() => {
     if (!activeLoadingMore) loadMoreInFlightRef.current = false;
@@ -752,14 +696,10 @@ function TabbedDataTableCardImpl<
       return;
     }
     loadMoreInFlightRef.current = true;
-    onLoadMore?.(activeTab);
-  }, [activeHasMore, activeLoadingMore, activeTab, onLoadMore]);
+    void fetchNextPage();
+  }, [activeHasMore, activeLoadingMore, fetchNextPage]);
   const loadMoreSentinelRef = useInfiniteTableSentinel({
-    enabled:
-      Boolean(onLoadMore) &&
-      !activeLoading &&
-      !activeLoadingMore &&
-      activeHasMore,
+    enabled: !activeLoading && !activeLoadingMore && activeHasMore,
     onReachEnd: loadMore,
     rootMargin: "0px",
     triggerDistance: 0,
@@ -1144,31 +1084,22 @@ function TabbedDataTableCardImpl<
 
     for (const tabMeta of selectedTabs) {
       const tab = tabMeta.value;
-      const loadedRows = resolvedRowsByTab[tab];
-      const tabWasLoaded =
-        loadedRows !== null &&
-        !(resolvedLoadingByTab[tab] && loadedRows.length === 0);
-      let rows = [
-        ...(exportRows === "rawRows"
-          ? (rawRowsByTab[tab] ?? [])
-          : (resolvedRowsByTab[tab] ?? [])),
-      ];
-      let hasMore = Boolean(hasMoreByTab?.[tab]);
-      let cursor = nextCursorByTab?.[tab] ?? null;
-
-      if (!tabWasLoaded && loadPageForExport) {
-        hasMore = true;
-        cursor = null;
-      } else if (!tabWasLoaded && loadRows) {
-        rows = [...(await loadRows(tab, signal))];
-        hasMore = false;
-      }
+      const tabPageData = tab === activeTab ? dataQuery.data : undefined;
+      const loadedRawRows =
+        tabPageData?.pages.flatMap((page) => page.items) ?? [];
+      const lastPage = tabPageData?.pages.at(-1);
+      let rows =
+        exportRows === "rawRows"
+          ? [...loadedRawRows]
+          : [...normalizeRows(loadedRawRows, tab)];
+      let hasMore =
+        tabPageData === undefined || Boolean(lastPage?.pagination.hasMore);
+      let cursor = lastPage?.pagination.nextCursor ?? null;
+      const tabSearchTerm =
+        tab === activeTab ? deferredSearchTerm : (searchTermsByTab[tab] ?? "");
 
       const seenCursors = new Set<string>();
       while (hasMore) {
-        if (!loadPageForExport) {
-          throw new Error("This table cannot export all paginated rows.");
-        }
         if (cursor !== null) {
           if (seenCursors.has(cursor)) {
             throw new Error("The export cursor did not advance.");
@@ -1176,10 +1107,21 @@ function TabbedDataTableCardImpl<
           seenCursors.add(cursor);
         }
 
-        const page = await loadPageForExport(tab, { cursor, signal });
-        rows = [...rows, ...page.items];
-        hasMore = page.hasMore;
-        cursor = page.nextCursor;
+        const page = await loader({
+          tab,
+          cursor,
+          limit: pageSize,
+          search: tabSearchTerm,
+          sort: effectiveSortByTab[tab],
+          signal,
+        });
+        const pageRows =
+          exportRows === "rawRows"
+            ? [...page.items]
+            : normalizeRows(page.items, tab);
+        rows = [...rows, ...pageRows];
+        hasMore = page.pagination.hasMore;
+        cursor = page.pagination.nextCursor;
         if (hasMore && cursor === null) {
           throw new Error("The export page did not provide a next cursor.");
         }
@@ -1302,12 +1244,7 @@ function TabbedDataTableCardImpl<
 
   const exportRowCount =
     exportEnabled && !headerHidden && exportOpen ? countExportRows() : 0;
-  const exportCanLoadRows =
-    Boolean(loadPageForExport || loadRows) &&
-    (exportScope === "allTabs" ||
-      resolvedRowsByTab[activeTab] === null ||
-      Boolean(hasMoreByTab?.[activeTab]));
-  const anyTabLoadingMore = Object.values(loadingMoreByTab ?? {}).some(Boolean);
+  const exportCanLoadRows = Boolean(loader);
   const exportPanel =
     exportEnabled && !headerHidden && exportOpen ? (
       <Dialog
@@ -1390,7 +1327,7 @@ function TabbedDataTableCardImpl<
                 onChange={(event) => setExportFilename(event.target.value)}
               />
             </div>
-            {exportRowCount === 0 ? (
+            {exportRowCount === 0 && !exportCanLoadRows ? (
               <p className="text-xs text-muted-foreground">
                 {exportLabels.empty}
               </p>
@@ -1400,9 +1337,7 @@ function TabbedDataTableCardImpl<
             <Button
               onClick={handleExport}
               disabled={
-                exporting ||
-                anyTabLoadingMore ||
-                (exportRowCount === 0 && !exportCanLoadRows)
+                exporting || (exportRowCount === 0 && !exportCanLoadRows)
               }
               aria-busy={exporting}
             >
@@ -1454,9 +1389,7 @@ function TabbedDataTableCardImpl<
           header={renderTableHeader(activeTab, activeColumns)}
           rows={renderRows(activeTab, activeRows, activeColumns, "card")}
           footer={
-            activeHasMore && onLoadMore
-              ? renderLoadMoreRows(activeTab, activeColumns)
-              : null
+            activeHasMore ? renderLoadMoreRows(activeTab, activeColumns) : null
           }
           contentKey={`card-${requestKey ?? ""}-${activeTab}`}
         />

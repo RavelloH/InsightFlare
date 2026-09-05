@@ -9,6 +9,7 @@ import { LabelWithOptionalIcon } from "@/components/dashboard/referrer-utils";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
+  type TabbedDataTableLoader,
   type TabbedDataTableRowAdapter,
   type TabbedDataTableRowBase,
   type TabbedDataTableSortState,
@@ -62,6 +63,9 @@ export interface AsyncDimensionBreakdownRow extends TabbedDataTableRowBase {
   labelAppearance?: AsyncDimensionBreakdownLabelAppearance;
 }
 
+export type AsyncDimensionBreakdownLoader<T extends string> =
+  TabbedDataTableLoader<T, AsyncDimensionBreakdownRow, string>;
+
 export interface AsyncDimensionBreakdownTab<
   T extends string = string,
 > extends TabbedDataTableTab<T> {
@@ -74,12 +78,7 @@ interface AsyncDimensionBreakdownCardProps<T extends string> {
   tabs: NonEmptyArray<AsyncDimensionBreakdownTab<T>>;
   value?: T;
   onValueChange?: (value: T) => void;
-  loadRows?: (
-    tab: T,
-    signal?: AbortSignal,
-  ) => Promise<AsyncDimensionBreakdownRow[]>;
-  rowsByTab?: Partial<Record<T, readonly AsyncDimensionBreakdownRow[] | null>>;
-  loadingByTab?: Partial<Record<T, boolean>>;
+  loader: TabbedDataTableLoader<T, AsyncDimensionBreakdownRow, SortKey>;
   requestKey: string;
   className?: string;
   showVisitors?: boolean;
@@ -214,9 +213,7 @@ export const AsyncDimensionBreakdownCard = memo(
     tabs,
     value,
     onValueChange,
-    loadRows,
-    rowsByTab,
-    loadingByTab,
+    loader,
     requestKey,
     className,
     showVisitors = true,
@@ -326,9 +323,7 @@ export const AsyncDimensionBreakdownCard = memo(
         onValueChange={onValueChange}
         columns={columns}
         requestKey={requestKey}
-        rowsByTab={rowsByTab}
-        loadingByTab={loadingByTab}
-        loadRows={loadRows}
+        loader={loader}
         normalizeRows={normalizeRows}
         rowAdapter={rowAdapter}
         compareRows={compareRows}

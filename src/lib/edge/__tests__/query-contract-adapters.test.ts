@@ -25,6 +25,7 @@ import {
   handlePagesContract,
   handlePagesDashboardContract,
   handleReferrersContract,
+  handleReferrerSummaryContract,
 } from "@/lib/edge/analytics/composition/protocol/pages-contract-adapter";
 import {
   handleBrowserVersionBreakdownContract,
@@ -217,6 +218,49 @@ describe("typed query adapter validation branches", () => {
       true,
     );
     expect(responses.some((response) => response.status === 400)).toBe(true);
+  });
+
+  it("covers paginated pages/referrers, summaries, and dashboard depth guards", async () => {
+    const base = "https://edge.test/query?from=1767225600000&to=1767312000000";
+    const [pages, publicReferrers, summary, deepDashboard, invalidDashboard] =
+      await Promise.all([
+        handlePagesContract(
+          env,
+          siteId,
+          new URL(`${base}&details=false&cursor=opaque`),
+          true,
+        ),
+        handleReferrersContract(
+          env,
+          siteId,
+          new URL(
+            `${base}&fullUrl=true&search=google&sort=visitors&direction=asc`,
+          ),
+          8,
+          false,
+        ),
+        handleReferrerSummaryContract(env, siteId, new URL(`${base}&topN=20`)),
+        handlePagesDashboardContract(
+          env,
+          siteId,
+          new URL(`${base}&page=834&pageSize=24`),
+        ),
+        handlePagesDashboardContract(
+          env,
+          siteId,
+          new URL(`${base}&page=835&pageSize=24`),
+        ),
+      ]);
+
+    expect(pages.status).toBe(500);
+    expect(publicReferrers.status).toBe(200);
+    expect(summary.status).toBe(200);
+    expect(deepDashboard.status).toBe(200);
+    expect(invalidDashboard.status).toBe(400);
+    await expect(invalidDashboard.json()).resolves.toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining("Pagination depth") },
+    });
   });
 
   it("does not expose private canonical fields from public filter-values", async () => {

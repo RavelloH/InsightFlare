@@ -11,6 +11,7 @@ import { ContentSwitch } from "@/components/dashboard/content-switch";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
+  type TabbedDataTableLoader,
   type TabbedDataTableSortState,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import {
   parseScreenSizeLabel,
   type ScreenBucketKey,
 } from "@/lib/dashboard/device-insights";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData, BrowserTrendSeries } from "@/lib/edge-client";
@@ -164,12 +166,12 @@ function ScreenValueListCard({
   locale,
   messages,
   items,
-  loading,
+  requestKey,
 }: {
   locale: Locale;
   messages: AppMessages;
   items: ScreenListItem[];
-  loading: boolean;
+  requestKey: string;
 }) {
   const columns = useMemo<
     readonly TabbedDataTableColumn<
@@ -205,8 +207,6 @@ function ScreenValueListCard({
       messages.common.visitors,
     ],
   );
-  const rowsByTab = useMemo(() => ({ screenSize: items }), [items]);
-  const loadingByTab = useMemo(() => ({ screenSize: loading }), [loading]);
   const tabs = useMemo(
     () =>
       [
@@ -250,12 +250,26 @@ function ScreenValueListCard({
     },
     [],
   );
+  const loader = useCallback<
+    TabbedDataTableLoader<ScreenListTab, ScreenListItem, ScreenSortKey>
+  >(
+    async ({ limit }) => ({
+      items,
+      pagination: {
+        limit,
+        returned: items.length,
+        hasMore: false,
+        nextCursor: null,
+      },
+    }),
+    [items],
+  );
 
   return (
     <TabbedDataTableCard<ScreenListTab, ScreenListItem, ScreenSortKey>
       tabs={tabs}
-      rowsByTab={rowsByTab}
-      loadingByTab={loadingByTab}
+      loader={loader}
+      requestKey={requestKey}
       columns={columns}
       rowAdapter={rowAdapter}
       compareRows={compareRows}
@@ -490,7 +504,6 @@ export const DeviceScreenBreakdownCard = memo(
     });
     const screenTrend = screenTrendQuery.data ?? EMPTY_TREND;
     const loading = screenTrendQuery.isPending;
-
     const totalVisitors = useMemo(
       () => screenTrend.series.reduce((sum, item) => sum + item.visitors, 0),
       [screenTrend.series],
@@ -515,6 +528,20 @@ export const DeviceScreenBreakdownCard = memo(
     const explicitItems = useMemo(
       () => listItems.filter((item) => item.parsed && !item.isOther),
       [listItems],
+    );
+    const requestKey = useMemo(
+      () =>
+        `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${locale}:${filterQueryKey(filters)}:${JSON.stringify(explicitItems)}`,
+      [
+        explicitItems,
+        filters,
+        locale,
+        siteId,
+        window.from,
+        window.interval,
+        window.timeZone,
+        window.to,
+      ],
     );
     const bucketSummary = useMemo(() => {
       const buckets = [...aggregateScreenBuckets(screenTrend.series).buckets];
@@ -556,7 +583,7 @@ export const DeviceScreenBreakdownCard = memo(
                 locale={locale}
                 messages={messages}
                 items={explicitItems}
-                loading={loading}
+                requestKey={requestKey}
               />
             </div>
 

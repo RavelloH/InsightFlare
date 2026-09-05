@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock(
   "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries",
   () => ({
+    queryJourneyEventDetailFromD1: vi.fn(),
     queryVisitorDetailFromD1: vi.fn(),
     querySessionDetailFromD1: vi.fn(),
     stripVisitorDetailCollections: vi.fn((detail) => detail),
@@ -26,6 +27,7 @@ vi.mock(
 );
 
 import {
+  queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
   queryVisitorDetailFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries";
@@ -42,6 +44,7 @@ import {
   serializeVisitorListCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
+  readSiteJourneyEventDetail,
   readSiteSessionDetail,
   readSiteSessionEvents,
   readSiteSessions,
@@ -96,6 +99,38 @@ describe("site journey detail runtime", () => {
     ).rejects.toThrow("resource-not-found");
     await expect(
       readSiteSessionDetail({ ...base, sessionId: "session-outside" }),
+    ).rejects.toThrow("resource-not-found");
+  });
+
+  it("reads journey event details with the optional event kind", async () => {
+    vi.mocked(queryJourneyEventDetailFromD1).mockResolvedValue({
+      eventId: "event-1",
+      eventKind: "pageview",
+      eventName: "Signup",
+    } as never);
+
+    await expect(
+      readSiteJourneyEventDetail({
+        ...base,
+        eventId: "event-1",
+        eventKind: "pageview",
+      }),
+    ).resolves.toEqual({
+      eventId: "event-1",
+      eventKind: "pageview",
+      eventName: "Signup",
+    });
+    expect(queryJourneyEventDetailFromD1).toHaveBeenCalledWith(
+      base.env,
+      base.siteId,
+      "event-1",
+      base.window,
+      "pageview",
+    );
+
+    vi.mocked(queryJourneyEventDetailFromD1).mockResolvedValueOnce(null);
+    await expect(
+      readSiteJourneyEventDetail({ ...base, eventId: "missing" }),
     ).rejects.toThrow("resource-not-found");
   });
 

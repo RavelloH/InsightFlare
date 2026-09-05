@@ -13,6 +13,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import {
   AsyncDimensionBreakdownCard,
+  type AsyncDimensionBreakdownLoader,
   type AsyncDimensionBreakdownRow,
 } from "@/components/dashboard/async-dimension-breakdown-card";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
@@ -1663,7 +1664,19 @@ const SessionDetailBottomCards = memo(function SessionDetailBottomCards({
       ] as const,
     [labels.events],
   );
-  const loadEventRows = useMemo(() => async () => eventRows, [eventRows]);
+  const eventLoader = useMemo<AsyncDimensionBreakdownLoader<"event">>(
+    () =>
+      async ({ limit }) => ({
+        items: eventRows,
+        pagination: {
+          limit,
+          returned: eventRows.length,
+          hasMore: false,
+          nextCursor: null,
+        },
+      }),
+    [eventRows],
+  );
 
   return (
     <section className="grid items-stretch gap-6 xl:grid-cols-2">
@@ -1688,12 +1701,11 @@ const SessionDetailBottomCards = memo(function SessionDetailBottomCards({
           locale={locale}
           messages={messages}
           tabs={eventTabs}
-          loadRows={loadEventRows}
-          requestKey={`session-detail-events:${detail.session.sessionId}:${locale}`}
+          loader={eventLoader}
+          requestKey={`session-detail-events:${detail.session.sessionId}:${locale}:${JSON.stringify(eventRows)}`}
           className="h-full"
           showVisitors={false}
           emptyLabel={labels.emptyCustomEvents}
-          loadingByTab={{ event: loading }}
         />
       </div>
     </section>

@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { ReferrerBreakdownCard } from "@/components/dashboard/referrer-breakdown-card";
@@ -12,10 +12,10 @@ import {
   type ReferrerTab,
 } from "@/components/dashboard/referrer-utils";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import type { TabbedDataTableLoader } from "@/components/dashboard/tabbed-data-table-card";
 import {
   fetchOverviewSourceCardTab,
   fetchReferrerSummary,
-  type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -30,8 +30,6 @@ interface ReferrersClientPageProps {
   pathname: string;
   showSourceLinkTab?: boolean;
 }
-
-const EMPTY_ROWS: OverviewTabRows = [];
 
 export function ReferrersClientPage({
   locale,
@@ -56,32 +54,7 @@ export function ReferrersClientPage({
     }),
     [window.from, window.interval, window.preset, window.timeZone, window.to],
   );
-  const [sortByTab, setSortByTab] = useState<
-    Record<ReferrerTab, { key: ReferrerSortKey; direction: "asc" | "desc" }>
-  >({
-    domain: { key: "views", direction: "desc" },
-    link: { key: "views", direction: "desc" },
-    channel: { key: "views", direction: "desc" },
-  });
-  const [searchByTab, setSearchByTab] = useState<
-    Partial<Record<ReferrerTab, string>>
-  >({});
-  const handleSortChange = useCallback(
-    (
-      tab: ReferrerTab,
-      sort: { key: ReferrerSortKey; direction: "asc" | "desc" },
-    ) => {
-      setSortByTab((previous) => ({ ...previous, [tab]: sort }));
-    },
-    [],
-  );
-  const handleSearchChange = useCallback((tab: ReferrerTab, value: string) => {
-    setSearchByTab((previous) => ({ ...previous, [tab]: value }));
-  }, []);
-
-  const queryOptions = {
-    limit: 100,
-  } as const;
+  const requestKey = `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${locale}:${filtersKey}`;
   const summaryQuery = useQuery({
     queryKey: [
       "dashboard",
@@ -100,166 +73,26 @@ export function ReferrersClientPage({
       }),
     enabled: typeof window !== "undefined",
   });
-  const domainQuery = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "referrer-breakdown",
-      "domain",
-      siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-      filtersKey,
-      searchByTab.domain,
-      sortByTab.domain.key,
-      sortByTab.domain.direction,
-    ],
-    initialPageParam: null as string | null,
-    queryFn: ({ signal, pageParam }) =>
-      fetchOverviewSourceCardTab(
-        siteId,
-        requestWindow,
-        "domain",
-        requestFilters,
-        {
-          limit: 100,
-          search: searchByTab.domain,
-          sort: sortByTab.domain.key,
-          direction: sortByTab.domain.direction,
-          cursor: pageParam,
-          signal,
-        },
-      ),
-    getNextPageParam: (lastPage) =>
-      lastPage.pagination?.hasMore ? lastPage.pagination.nextCursor : undefined,
-    enabled: typeof window !== "undefined",
-  });
-  const linkQuery = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "referrer-breakdown",
-      "link",
-      siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-      filtersKey,
-      searchByTab.link,
-      sortByTab.link.key,
-      sortByTab.link.direction,
-    ],
-    initialPageParam: null as string | null,
-    queryFn: ({ signal, pageParam }) =>
-      fetchOverviewSourceCardTab(
-        siteId,
-        requestWindow,
-        "link",
-        requestFilters,
-        {
-          ...queryOptions,
-          search: searchByTab.link,
-          sort: sortByTab.link.key,
-          direction: sortByTab.link.direction,
-          cursor: pageParam,
-          signal,
-        },
-      ),
-    getNextPageParam: (lastPage) =>
-      lastPage.pagination?.hasMore ? lastPage.pagination.nextCursor : undefined,
-    enabled: typeof window !== "undefined" && showSourceLinkTab,
-  });
-  const channelQuery = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "referrer-breakdown",
-      "channel",
-      siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-      filtersKey,
-      searchByTab.channel,
-      sortByTab.channel.key,
-      sortByTab.channel.direction,
-    ],
-    initialPageParam: null as string | null,
-    queryFn: ({ signal, pageParam }) =>
-      fetchOverviewSourceCardTab(
-        siteId,
-        requestWindow,
-        "channel",
-        requestFilters,
-        {
-          ...queryOptions,
-          search: searchByTab.channel,
-          sort: sortByTab.channel.key,
-          direction: sortByTab.channel.direction,
-          cursor: pageParam,
-          signal,
-        },
-      ),
-    getNextPageParam: (lastPage) =>
-      lastPage.pagination?.hasMore ? lastPage.pagination.nextCursor : undefined,
-    enabled: typeof window !== "undefined",
-  });
-  const loading =
-    domainQuery.isFetching ||
-    channelQuery.isFetching ||
-    (showSourceLinkTab && linkQuery.isFetching);
-  const resolvedRowsByTab = useMemo(
-    () => ({
-      domain:
-        domainQuery.data?.pages.flatMap((page) => page.items) ?? EMPTY_ROWS,
-      link: showSourceLinkTab
-        ? (linkQuery.data?.pages.flatMap((page) => page.items) ?? EMPTY_ROWS)
-        : EMPTY_ROWS,
-      channel:
-        channelQuery.data?.pages.flatMap((page) => page.items) ?? EMPTY_ROWS,
-    }),
-    [channelQuery.data, domainQuery.data, linkQuery.data, showSourceLinkTab],
-  );
-
-  const normalizedRowsByTab = useMemo(
-    () =>
-      buildReferrerRowsByTab(
-        resolvedRowsByTab,
-        messages.overview.direct,
-        messages.overview.channelLabels,
-      ),
-    [
-      messages.overview.channelLabels,
-      messages.overview.direct,
-      resolvedRowsByTab,
-    ],
-  );
-  const nextCursorByTab = useMemo(
-    () => ({
-      domain: domainQuery.data?.pages.at(-1)?.pagination.nextCursor ?? null,
-      link: linkQuery.data?.pages.at(-1)?.pagination.nextCursor ?? null,
-      channel: channelQuery.data?.pages.at(-1)?.pagination.nextCursor ?? null,
-    }),
-    [channelQuery.data, domainQuery.data, linkQuery.data],
-  );
-  const loadPageForExport = useCallback(
-    async (
-      tab: ReferrerTab,
-      options: { cursor: string | null; signal: AbortSignal },
-    ) => {
+  const loader = useCallback<
+    TabbedDataTableLoader<
+      ReferrerTab,
+      ReturnType<typeof buildReferrerRowsByTab>["domain"][number],
+      ReferrerSortKey
+    >
+  >(
+    async ({ tab, cursor, limit, search, sort, signal }) => {
       const page = await fetchOverviewSourceCardTab(
         siteId,
         requestWindow,
         tab,
         requestFilters,
         {
-          limit: 100,
-          search: searchByTab[tab],
-          sort: sortByTab[tab].key,
-          direction: sortByTab[tab].direction,
-          cursor: options.cursor,
-          signal: options.signal,
+          limit,
+          search,
+          sort: sort.key,
+          direction: sort.direction,
+          cursor,
+          signal,
         },
       );
       const normalized = buildReferrerRowsByTab(
@@ -273,8 +106,7 @@ export function ReferrersClientPage({
       );
       return {
         items: normalized[tab],
-        hasMore: page.pagination.hasMore,
-        nextCursor: page.pagination.nextCursor,
+        pagination: page.pagination,
       };
     },
     [
@@ -282,9 +114,7 @@ export function ReferrersClientPage({
       messages.overview.direct,
       requestFilters,
       requestWindow,
-      searchByTab,
       siteId,
-      sortByTab,
     ],
   );
 
@@ -324,29 +154,8 @@ export function ReferrersClientPage({
         messages={messages}
         pathname={pathname}
         filters={requestFilters}
-        rowsByTab={normalizedRowsByTab}
-        loading={loading}
-        sortByTab={sortByTab}
-        onSortChange={handleSortChange}
-        searchByTab={searchByTab}
-        onSearchChange={handleSearchChange}
-        hasMoreByTab={{
-          domain: domainQuery.hasNextPage,
-          link: linkQuery.hasNextPage,
-          channel: channelQuery.hasNextPage,
-        }}
-        nextCursorByTab={nextCursorByTab}
-        loadingMoreByTab={{
-          domain: domainQuery.isFetchingNextPage,
-          link: linkQuery.isFetchingNextPage,
-          channel: channelQuery.isFetchingNextPage,
-        }}
-        onLoadMore={(tab) => {
-          if (tab === "domain") void domainQuery.fetchNextPage();
-          if (tab === "link") void linkQuery.fetchNextPage();
-          if (tab === "channel") void channelQuery.fetchNextPage();
-        }}
-        loadPageForExport={loadPageForExport}
+        requestKey={requestKey}
+        loader={loader}
         showSourceLinkTab={showSourceLinkTab}
       />
     </div>

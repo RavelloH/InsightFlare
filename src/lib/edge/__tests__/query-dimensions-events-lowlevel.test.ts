@@ -26,17 +26,26 @@ import type {
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
+  decodeDimensionCursor,
+  decodeSessionPathDimensionCursor,
+  queryDimensionFromD1,
+  queryDimensionPageFromD1,
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
   queryPageTabsFromD1,
   queryReferrersFromD1,
   querySessionBoundaryDimensionFromD1,
   querySessionPathDimensionFromD1,
+  querySessionPathDimensionPageFromD1,
   queryVisitDimensionFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
 import {
+  decodeEventFieldCursor,
+  decodeEventFieldValueCursor,
   queryEventFieldsFromD1,
+  queryEventFieldsPageFromD1,
   queryEventFieldValuesFromD1,
+  queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import {
@@ -44,6 +53,11 @@ import {
   queryEventRecordDetailFromD1,
   serializeEventRecordCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import {
+  decodeEventTypeCursor,
+  queryEventTypePageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import { queryJourneyTargetExistsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
 import {
   createInvocationLogger,
@@ -651,6 +665,97 @@ describe("edge query dimensions low-level coverage", () => {
       true,
     );
     expect(calls.every((call) => call.bindings.length > 3)).toBe(true);
+  });
+
+  it("covers scoped, searched, unlimited, and empty legacy dimension readers", async () => {
+    const { env, calls } = createD1Env([
+      [{ value: "pricing", views: 4, sessions: 2, visitors: 1 }],
+      [{ value: "/pricing", views: 3, sessions: 2, visitors: 1 }],
+      [{ referrer: "google.com", views: 2, sessions: 1, visitors: 1 }],
+    ]);
+    const prepared = prepareScopedQuery("overview", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: filterFixture({ path: "/pricing" }),
+      scopePreference: "visitor",
+    } as never);
+
+    await expect(
+      queryDimensionFromD1(
+        env,
+        siteId,
+        window,
+        prepared.filters!,
+        0,
+        "pathname",
+        { excludeEmpty: true, search: " Price% " },
+      ),
+    ).resolves.toEqual([
+      { value: "pricing", views: 4, sessions: 2, visitors: 1 },
+    ]);
+    await expect(
+      querySessionPathDimensionFromD1(
+        env,
+        siteId,
+        window,
+        prepared.filters!,
+        0,
+        "entry",
+      ),
+    ).resolves.toEqual([
+      { value: "/pricing", views: 3, sessions: 2, visitors: 1 },
+    ]);
+    await expect(
+      queryReferrersFromD1(
+        env,
+        siteId,
+        window,
+        prepared.filters!,
+        2,
+        true,
+        undefined,
+        "GOOGLE",
+      ),
+    ).resolves.toEqual([
+      { referrer: "google.com", views: 2, sessions: 1, visitors: 1 },
+    ]);
+
+    expect(calls).toHaveLength(3);
+    expect(calls[0].sql).toContain("scope_final_visits");
+    expect(calls[0].sql).toContain("LOWER(value) LIKE");
+    expect(calls[0].sql).not.toContain("LIMIT ?");
+    expect(calls[1].sql).toContain("scope_final_visits");
+    expect(calls[2].sql).toContain("scope_final_visits");
+    expect(calls[2].sql).toContain("LOWER(referrer) LIKE");
+  });
+
+  it("reports whether a visitor or session exists in the observation universe", async () => {
+    const missing = createD1Env([[]]);
+    await expect(
+      queryJourneyTargetExistsFromD1(
+        missing.env,
+        siteId,
+        { type: "visitor", value: "missing" },
+        window,
+      ),
+    ).resolves.toBe(false);
+
+    const present = createD1Env([[{ present: 1 }]]);
+    await expect(
+      queryJourneyTargetExistsFromD1(
+        present.env,
+        siteId,
+        { type: "session", value: "session-1" },
+        window,
+      ),
+    ).resolves.toBe(true);
+    expect(missing.calls[0].sql).toContain("visitor_id");
+    expect(present.calls[0].sql).toContain("session_id");
   });
 });
 
@@ -1365,5 +1470,387 @@ describe("edge query event type overview low-level coverage", () => {
     });
 
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("edge paginated event types low-level coverage", () => {
+  it("paginates searched event types and validates the next cursor", async () => {
+    const first = createD1Env([
+      [
+        { value: "signup", views: 7, sessions: 5, visitors: 4 },
+        { value: "purchase", views: 3, sessions: 2, visitors: 2 },
+      ],
+    ]);
+    const page = await queryEventTypePageFromD1(
+      first.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      1,
+      " Sign% ",
+      null,
+      "public-share",
+    );
+    expect(page).toMatchObject({
+      items: [{ value: "signup" }],
+      pagination: { hasMore: true, nextCursor: expect.any(String) },
+    });
+    expect(first.calls[0].sql).toContain("LOWER(value) LIKE");
+    expect(first.calls[0].bindings).toContain("%sign\\%%");
+
+    const cursor = await decodeEventTypeCursor(
+      first.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      " Sign% ",
+      page.pagination.nextCursor,
+      "public-share",
+    );
+    expect(cursor).toEqual({ views: 7, sessions: 5, value: "signup" });
+
+    const last = createD1Env([[]]);
+    await expect(
+      queryEventTypePageFromD1(
+        last.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        5,
+        undefined,
+        cursor,
+      ),
+    ).resolves.toMatchObject({
+      items: [],
+      pagination: { returned: 0, hasMore: false, nextCursor: null },
+    });
+    expect(last.calls[0].bindings).toContain(7);
+  });
+});
+
+describe("edge paginated event fields low-level coverage", () => {
+  it("paginates event fields and preserves the typed cursor binding", async () => {
+    const first = createD1Env([
+      [
+        {
+          path: "plan",
+          valueType: 1,
+          events: 4,
+          occurrences: 6,
+          firstSeenAt: baseMs,
+          lastSeenAt: baseMs + 10,
+          stringValue: "pro",
+          numberValue: null,
+          booleanValue: null,
+        },
+        {
+          path: "amount",
+          valueType: 2,
+          events: 2,
+          occurrences: 2,
+          firstSeenAt: baseMs,
+          lastSeenAt: baseMs + 5,
+          stringValue: null,
+          numberValue: 20,
+          booleanValue: null,
+        },
+      ],
+    ]);
+    const page = await queryEventFieldsPageFromD1(
+      first.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      "Signup",
+      1,
+      null,
+      "public-share",
+    );
+    expect(page).toMatchObject({
+      items: [{ path: "plan", valueType: 1 }],
+      pagination: { hasMore: true, nextCursor: expect.any(String) },
+    });
+    const cursor = await decodeEventFieldCursor(
+      first.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      "Signup",
+      page.pagination.nextCursor,
+      "public-share",
+    );
+    expect(cursor).toEqual({
+      events: 4,
+      occurrences: 6,
+      path: "plan",
+      valueType: 1,
+    });
+
+    const second = createD1Env([[]]);
+    await expect(
+      queryEventFieldsPageFromD1(
+        second.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "Signup",
+        1,
+        cursor,
+      ),
+    ).resolves.toMatchObject({
+      items: [],
+      pagination: { returned: 0, hasMore: false, nextCursor: null },
+    });
+    expect(second.calls[0].bindings).toContain(4);
+  });
+
+  it("handles typed value searches, boolean values, invalid types, and cursors", async () => {
+    const invalid = createD1Env([]);
+    await expect(
+      queryEventFieldValuesPageFromD1(
+        invalid.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "payload.value",
+        "unsupported",
+        10,
+      ),
+    ).resolves.toEqual({
+      items: [],
+      pagination: { limit: 10, returned: 0, hasMore: false, nextCursor: null },
+    });
+    expect(invalid.calls).toHaveLength(0);
+
+    const numeric = createD1Env([
+      [
+        {
+          valueType: 2,
+          events: 3,
+          occurrences: 3,
+          firstSeenAt: baseMs,
+          lastSeenAt: baseMs + 1,
+          stringValue: null,
+          numberValue: 42,
+          booleanValue: null,
+        },
+        {
+          valueType: 2,
+          events: 1,
+          occurrences: 1,
+          firstSeenAt: baseMs,
+          lastSeenAt: baseMs + 1,
+          stringValue: null,
+          numberValue: 7,
+          booleanValue: null,
+        },
+      ],
+    ]);
+    const numericPage = await queryEventFieldValuesPageFromD1(
+      numeric.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      "Signup",
+      "amount",
+      "number",
+      1,
+      " 42_% ",
+      null,
+      "public-share",
+    );
+    expect(numericPage).toMatchObject({
+      items: [{ numberValue: 42 }],
+      pagination: { hasMore: true, nextCursor: expect.any(String) },
+    });
+    expect(numeric.calls[0].sql).toContain("CAST(v.number_value AS TEXT)");
+    expect(numeric.calls[0].bindings).toContain("%42\\_\\%%");
+
+    const valueCursor = await decodeEventFieldValueCursor(
+      numeric.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      "Signup",
+      "amount",
+      "number",
+      " 42_% ",
+      numericPage.pagination.nextCursor,
+      "public-share",
+    );
+    expect(valueCursor).toMatchObject({
+      occurrences: 3,
+      events: 3,
+      numberValue: 42,
+    });
+
+    const boolean = createD1Env([
+      [
+        {
+          valueType: 3,
+          events: 1,
+          occurrences: 1,
+          firstSeenAt: baseMs,
+          lastSeenAt: baseMs + 1,
+          stringValue: null,
+          numberValue: null,
+          booleanValue: 1,
+        },
+      ],
+    ]);
+    await expect(
+      queryEventFieldValuesPageFromD1(
+        boolean.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        "Signup",
+        "paid",
+        "boolean",
+        5,
+        "true",
+      ),
+    ).resolves.toMatchObject({
+      items: [{ booleanValue: 1 }],
+      pagination: { hasMore: false },
+    });
+    expect(boolean.calls[0].sql).toContain("CASE v.boolean_value");
+  });
+});
+
+describe("edge paginated dimensions low-level coverage", () => {
+  it("paginates dimensions with search, empty filtering, visitor sorting, and cursors", async () => {
+    const first = createD1Env([
+      [
+        { value: "docs", views: 4, sessions: 3, visitors: 2 },
+        { value: "news", views: 3, sessions: 2, visitors: 1 },
+      ],
+    ]);
+    const options = {
+      excludeEmpty: true,
+      search: " Doc% ",
+      sortBy: "visitors" as const,
+      sortDirection: "asc" as const,
+    };
+    const firstPage = await queryDimensionPageFromD1(
+      first.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      1,
+      "country",
+      options,
+      null,
+      undefined,
+      "public-share",
+    );
+
+    expect(firstPage.items).toEqual([
+      { value: "docs", views: 4, sessions: 3, visitors: 2 },
+    ]);
+    expect(firstPage.pagination).toMatchObject({
+      hasMore: true,
+      nextCursor: expect.any(String),
+    });
+    expect(first.calls[0].sql).toContain("TRIM(value) != ''");
+    expect(first.calls[0].sql).toContain("LOWER(value) LIKE");
+    expect(first.calls[0].sql).toContain("ORDER BY visitors asc");
+
+    const cursor = await decodeDimensionCursor(
+      first.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      "country",
+      options.search,
+      firstPage.pagination.nextCursor,
+      "public-share",
+      "visitors",
+      "asc",
+    );
+    expect(cursor).toEqual({
+      value: "docs",
+      views: 4,
+      sessions: 3,
+      visitors: 2,
+    });
+
+    const second = createD1Env([
+      [{ value: "news", views: 3, sessions: 2, visitors: 1 }],
+    ]);
+    await expect(
+      queryDimensionPageFromD1(
+        second.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        "country",
+        options,
+        cursor,
+        undefined,
+        "public-share",
+      ),
+    ).resolves.toMatchObject({
+      items: [{ value: "news" }],
+      pagination: { hasMore: false, nextCursor: null },
+    });
+    expect(second.calls[0].bindings).toContain(2);
+  });
+
+  it("paginates entry and exit session paths and handles empty result pages", async () => {
+    const first = createD1Env([
+      [
+        { value: "/landing", views: 5, sessions: 5, visitors: 4 },
+        { value: "/docs", views: 2, sessions: 2, visitors: 2 },
+      ],
+    ]);
+    const page = await querySessionPathDimensionPageFromD1(
+      first.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      1,
+      "entry",
+      undefined,
+      " land ",
+      null,
+      "private-dashboard",
+    );
+    expect(page).toMatchObject({
+      items: [{ value: "/landing" }],
+      pagination: { hasMore: true, nextCursor: expect.any(String) },
+    });
+    expect(first.calls[0].sql).toContain("first_rank");
+    expect(first.calls[0].sql).toContain("LOWER(value) LIKE");
+
+    const cursor = await decodeSessionPathDimensionCursor(
+      first.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      "entry",
+      " land ",
+      page.pagination.nextCursor,
+      "private-dashboard",
+    );
+    expect(cursor).toMatchObject({ views: 5, value: "/landing" });
+
+    const exit = createD1Env([[]]);
+    await expect(
+      querySessionPathDimensionPageFromD1(
+        exit.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        5,
+        "exit",
+      ),
+    ).resolves.toMatchObject({
+      items: [],
+      pagination: { returned: 0, hasMore: false, nextCursor: null },
+    });
+    expect(exit.calls[0].sql).toContain("latest_rank");
   });
 });
