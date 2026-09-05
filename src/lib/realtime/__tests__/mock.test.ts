@@ -996,13 +996,30 @@ describe("mock — handleDemoRequest", () => {
           limit: 2,
         }),
       );
-      assertCollection(
-        serialize("/api/private/session-events", {
+      const sessionEventPage = serialize("/api/private/session-events", {
+        ...ANALYTICS_PARAMS,
+        sessionId: String(session?.sessionId ?? ""),
+        limit: 2,
+      });
+      assertCollection(sessionEventPage);
+
+      const firstSessionEvent =
+        sessionEventPage.data.items.find(
+          (item: Record<string, unknown>) => item.kind === "pageview",
+        ) ?? sessionEventPage.data.items[0];
+      const journeyEventDetail = serialize(
+        "/api/private/journey-event-detail",
+        {
           ...ANALYTICS_PARAMS,
-          sessionId: String(session?.sessionId ?? ""),
-          limit: 2,
-        }),
+          eventId: String(firstSessionEvent?.id ?? ""),
+          eventKind: String(firstSessionEvent?.kind ?? ""),
+          sessionId: String(firstSessionEvent?.sessionId ?? ""),
+          visitId: String(firstSessionEvent?.visitId ?? ""),
+        },
       );
+      expect(journeyEventDetail.data.event).toMatchObject({
+        eventId: String(firstSessionEvent?.id ?? ""),
+      });
 
       const event = dataRows(
         handleDemoRequest({

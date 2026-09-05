@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   memo,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -19,6 +20,10 @@ import {
 } from "@remixicon/react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
+import {
+  AnalyticsTableColumnSettings,
+  useAnalyticsTableColumns,
+} from "@/components/dashboard/analytics-table-column-settings";
 import {
   AsyncDimensionBreakdownCard,
   type AsyncDimensionBreakdownLoader,
@@ -44,9 +49,12 @@ import {
 } from "@/components/dashboard/journey-geo-location-card";
 import { LazyGeoCityBreadcrumbLabel } from "@/components/dashboard/lazy-geo-location-label";
 import {
+  createSessionTableColumnDefinitions,
+  SESSION_TABLE_COLUMNS_STORAGE_KEY,
   type SessionSortKey,
   type SessionSortState,
   SessionsTableCard,
+  type SessionsTableLabels,
 } from "@/components/dashboard/sessions-table-card";
 import {
   useDetailDrawerClose,
@@ -62,6 +70,7 @@ import type {
   VisitorDetailMapTheme,
   VisitorLocationPoint,
 } from "@/components/dashboard/site-pages/visitor-detail-map-stage";
+import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { useTheme } from "@/components/theme-provider";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -1855,6 +1864,27 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
       }),
     [events],
   );
+  const eventContentKey = loading ? "loading" : "content";
+  const loadMoreInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!loadingMore || !hasMore) loadMoreInFlightRef.current = false;
+  }, [hasMore, loadingMore]);
+
+  const loadMore = useCallback(() => {
+    if (!hasMore || loadingMore || loadMoreInFlightRef.current || !onLoadMore) {
+      return;
+    }
+    loadMoreInFlightRef.current = true;
+    onLoadMore();
+  }, [hasMore, loadingMore, onLoadMore]);
+
+  const loadMoreSentinelRef = useInfiniteTableSentinel({
+    enabled: Boolean(onLoadMore) && !loading && !loadingMore && hasMore,
+    onReachEnd: loadMore,
+    rootMargin: "0px",
+    triggerDistance: 0,
+  });
 
   return (
     <Card>
@@ -1869,13 +1899,7 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
         <AutoResizer duration={0.24}>
           <AutoTransition
             initial={false}
-            transitionKey={
-              loading
-                ? "loading"
-                : chronologicalEvents.length > 0
-                  ? chronologicalEvents.map((event) => event.id).join(":")
-                  : "empty"
-            }
+            transitionKey={eventContentKey}
             duration={0.18}
             type="fade"
             presenceMode="wait"
@@ -1886,13 +1910,10 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
                   <VisitorEventSkeletonCard key={`event-skeleton-${index}`} />
                 ))}
               </div>
-            ) : chronologicalEvents.length === 0 ? (
+            ) : chronologicalEvents.length === 0 && !hasMore ? (
               <EmptyState key="empty">{labels.emptyEvents}</EmptyState>
             ) : (
-              <div
-                key={chronologicalEvents.map((event) => event.id).join(":")}
-                className="space-y-1.5"
-              >
+              <div key={eventContentKey} className="space-y-1.5">
                 {chronologicalEvents.map((event, index) => (
                   <VisitorEventCard
                     key={event.id}
@@ -1913,14 +1934,13 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
                   />
                 ))}
                 {hasMore ? (
-                  <button
-                    type="button"
-                    className="w-full py-2 text-center text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-                    disabled={loadingMore}
-                    onClick={onLoadMore}
+                  <div
+                    ref={loadMoreSentinelRef}
+                    aria-hidden="true"
+                    className="min-h-[58px]"
                   >
-                    {loadingMore ? "Loading…" : "Load more"}
-                  </button>
+                    <VisitorEventSkeletonCard />
+                  </div>
                 ) : null}
               </div>
             )}
@@ -1980,11 +2000,45 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
 }) {
   const [sessionSort, setSessionSort] =
     useState<SessionSortState>(VISITOR_SESSION_SORT);
+  const sessionTableLabels = useMemo<SessionsTableLabels>(
+    () => ({
+      title: "",
+      subtitle: "",
+      search: "",
+      started: labels.started,
+      sessionId: labels.sessionId,
+      visitor: labels.visitor,
+      anonymous: labels.anonymous,
+      entryPage: labels.entryPath,
+      exitPage: labels.exitPath,
+      duration: labels.duration,
+      referrer: labels.referrer,
+      location: labels.location,
+      os: labels.os,
+      browser: labels.browser,
+      device: labels.device,
+      pageViews: labels.pageViews,
+      customEvents: labels.customEvents,
+      screenSize: messages.sessions.screenSize,
+      exitTime: messages.sessions.exitTime,
+      loadError: labels.loadError,
+      empty: labels.emptySessions,
+    }),
+    [labels, messages.sessions.screenSize, messages.sessions.exitTime],
+  );
+  const sessionColumnDefinitions = useMemo(
+    () => createSessionTableColumnDefinitions(sessionTableLabels),
+    [sessionTableLabels],
+  );
+  const sessionColumns = useAnalyticsTableColumns({
+    storageKey: SESSION_TABLE_COLUMNS_STORAGE_KEY,
+    columns: sessionColumnDefinitions,
+  });
   const sortedSessions = useMemo(
     () => sortVisitorSessions(detail.sessions, sessionSort),
     [detail.sessions, sessionSort],
   );
-  const toggleSessionSort = (key: SessionSortKey) => {
+  const toggleSessionSort = useCallback((key: SessionSortKey) => {
     setSessionSort((current) =>
       current.key === key
         ? {
@@ -1996,17 +2050,20 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
             direction: "desc",
           },
     );
-  };
-  const openSessionDetail = (sessionId: string) => {
-    if (onOpenSession) {
-      onOpenSession(sessionId);
-      return;
-    }
+  }, []);
+  const openSessionDetail = useCallback(
+    (sessionId: string) => {
+      if (onOpenSession) {
+        onOpenSession(sessionId);
+        return;
+      }
 
-    window.location.assign(
-      `${siteBasePath}/sessions?detail=${encodeURIComponent(sessionId)}`,
-    );
-  };
+      window.location.assign(
+        `${siteBasePath}/sessions?detail=${encodeURIComponent(sessionId)}`,
+      );
+    },
+    [onOpenSession, siteBasePath],
+  );
 
   return (
     <section className="space-y-6">
@@ -2028,35 +2085,24 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
       </Card>
 
       <section className="space-y-3">
-        <h2 className="text-base font-semibold tracking-tight">
-          {labels.sessionRecords}
-        </h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold tracking-tight">
+            {labels.sessionRecords}
+          </h2>
+          <AnalyticsTableColumnSettings
+            columns={sessionColumnDefinitions}
+            orderedIds={sessionColumns.orderedIds}
+            visibleIds={sessionColumns.visibleIds}
+            onOrderChange={sessionColumns.setOrder}
+            onVisibilityChange={sessionColumns.setVisible}
+            onReset={sessionColumns.reset}
+            labels={messages.common.tableColumns}
+          />
+        </div>
         <SessionsTableCard
           locale={locale}
           messages={messages}
-          labels={{
-            title: "",
-            subtitle: "",
-            search: "",
-            started: labels.started,
-            sessionId: labels.sessionId,
-            visitor: labels.visitor,
-            anonymous: labels.anonymous,
-            entryPage: labels.entryPath,
-            exitPage: labels.exitPath,
-            duration: labels.duration,
-            referrer: labels.referrer,
-            location: labels.location,
-            os: labels.os,
-            browser: labels.browser,
-            device: labels.device,
-            pageViews: labels.pageViews,
-            customEvents: labels.customEvents,
-            screenSize: messages.sessions.screenSize,
-            exitTime: messages.sessions.exitTime,
-            loadError: labels.loadError,
-            empty: labels.emptySessions,
-          }}
+          labels={sessionTableLabels}
           rows={sortedSessions}
           onOpenSession={openSessionDetail}
           sort={sessionSort}
@@ -2066,6 +2112,7 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
           onLoadMore={onLoadMoreSessions}
           loadingRows={loading}
           skeletonRows={5}
+          visibleColumnIds={sessionColumns.visibleIds}
         />
       </section>
     </section>

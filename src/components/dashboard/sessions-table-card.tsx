@@ -10,6 +10,7 @@ import {
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 
 import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
+import type { AnalyticsTableColumnDefinition } from "@/components/dashboard/analytics-table-column-settings";
 import {
   AnalyticsDetailsTooltipTarget,
   AnalyticsTimeTooltipTarget,
@@ -65,6 +66,31 @@ export const SESSION_TABLE_COLUMN_IDS = [
 export type SessionTableColumnId = (typeof SESSION_TABLE_COLUMN_IDS)[number];
 
 export type SessionsTableLabels = AppMessages["sessions"];
+
+export const SESSION_TABLE_COLUMNS_STORAGE_KEY =
+  "insightflare:analytics-table-columns:sessions";
+
+export function createSessionTableColumnDefinitions(
+  labels: SessionsTableLabels,
+): readonly AnalyticsTableColumnDefinition<SessionTableColumnId>[] {
+  return [
+    { id: "visitor", label: labels.visitor, required: true },
+    { id: "sessionId", label: labels.sessionId, required: true },
+    { id: "started", label: labels.started },
+    { id: "duration", label: labels.duration },
+    { id: "pageViews", label: labels.pageViews },
+    { id: "customEvents", label: labels.customEvents },
+    { id: "referrer", label: labels.referrer },
+    { id: "location", label: labels.location },
+    { id: "os", label: labels.os },
+    { id: "browser", label: labels.browser },
+    { id: "device", label: labels.device },
+    { id: "entryPage", label: labels.entryPage },
+    { id: "exitPage", label: labels.exitPage },
+    { id: "screenSize", label: labels.screenSize },
+    { id: "exitTime", label: labels.exitTime },
+  ];
+}
 
 interface SessionsTableCardProps {
   locale: Locale;

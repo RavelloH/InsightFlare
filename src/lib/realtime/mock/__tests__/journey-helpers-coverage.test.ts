@@ -307,6 +307,44 @@ describe("mock/journey-helpers coverage", () => {
     expect(events.map((event) => event.id)).toEqual(["omega", "alpha"]);
   });
 
+  it("handles tied and invalid session boundary events", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(20 * 60 * 1000);
+
+    const tiedEvents = createDemoJourneyEvents(
+      [
+        makeVisit({ visitId: "first", startedAt: 50_000, durationMs: 1_000 }),
+        makeVisit({ visitId: "last", startedAt: 50_000, durationMs: 2_000 }),
+      ],
+      { includeSessionEnd: true },
+    );
+    expect(tiedEvents.some((event) => event.kind === "leave")).toBe(true);
+
+    const invalidEvents = createDemoJourneyEvents(
+      [makeVisit({ startedAt: undefined as unknown as number })],
+      { includeSessionEnd: true },
+    );
+    expect(invalidEvents.some((event) => event.kind === "leave")).toBe(false);
+
+    const activeEvents = createDemoJourneyEvents(
+      [makeVisit({ startedAt: Date.now() - 1_000 })],
+      { includeSessionEnd: true },
+    );
+    expect(activeEvents.some((event) => event.kind === "leave")).toBe(false);
+
+    const incompleteEvents = createDemoJourneyEvents([
+      makeVisit({
+        visitId: undefined as unknown as string,
+        startedAt: undefined as unknown as number,
+      }),
+      makeVisit({
+        visitId: undefined as unknown as string,
+        startedAt: undefined as unknown as number,
+      }),
+    ]);
+    expect(incompleteEvents).toHaveLength(2);
+  });
+
   it("summarizes pages, event types, and activity with invalid events ignored", () => {
     const events = [
       { kind: "pageview", pathname: "/pricing", occurredAt: 1000 },

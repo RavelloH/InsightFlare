@@ -1,4 +1,12 @@
-import { memo, type ReactNode, useMemo, useState } from "react";
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   RiArrowLeftLine,
   RiCalendarEventLine,
@@ -49,6 +57,7 @@ import type {
   SessionDetailMapTheme,
   SessionLocationPoint,
 } from "@/components/dashboard/site-pages/session-detail-map-stage";
+import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { useTheme } from "@/components/theme-provider";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -1411,11 +1420,27 @@ const VisitDetailsTab = memo(function VisitDetailsTab({
       }),
     [events],
   );
-  const eventContentKey = loading
-    ? "loading"
-    : chronologicalEvents.length > 0
-      ? chronologicalEvents.map((event) => event.id).join(":")
-      : "empty";
+  const eventContentKey = loading ? "loading" : "content";
+  const loadMoreInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!loadingMore || !hasMore) loadMoreInFlightRef.current = false;
+  }, [hasMore, loadingMore]);
+
+  const loadMore = useCallback(() => {
+    if (!hasMore || loadingMore || loadMoreInFlightRef.current || !onLoadMore) {
+      return;
+    }
+    loadMoreInFlightRef.current = true;
+    onLoadMore();
+  }, [hasMore, loadingMore, onLoadMore]);
+
+  const loadMoreSentinelRef = useInfiniteTableSentinel({
+    enabled: Boolean(onLoadMore) && !loading && !loadingMore && hasMore,
+    onReachEnd: loadMore,
+    rootMargin: "0px",
+    triggerDistance: 0,
+  });
 
   return (
     <Card>
@@ -1441,7 +1466,7 @@ const VisitDetailsTab = memo(function VisitDetailsTab({
                   <SessionEventSkeletonCard key={`event-skeleton-${index}`} />
                 ))}
               </div>
-            ) : chronologicalEvents.length === 0 ? (
+            ) : chronologicalEvents.length === 0 && !hasMore ? (
               <EmptyState key="empty">{labels.emptyEvents}</EmptyState>
             ) : (
               <div key={eventContentKey} className="space-y-1.5">
@@ -1463,14 +1488,13 @@ const VisitDetailsTab = memo(function VisitDetailsTab({
                   />
                 ))}
                 {hasMore ? (
-                  <button
-                    type="button"
-                    className="w-full py-2 text-center text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-                    disabled={loadingMore}
-                    onClick={onLoadMore}
+                  <div
+                    ref={loadMoreSentinelRef}
+                    aria-hidden="true"
+                    className="min-h-[58px]"
                   >
-                    {loadingMore ? "Loading…" : "Load more"}
-                  </button>
+                    <SessionEventSkeletonCard />
+                  </div>
                 ) : null}
               </div>
             )}

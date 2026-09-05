@@ -56,6 +56,7 @@ import {
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/event-detail-drawer";
 import { EVENT_FILTER_DIALOG_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
+import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -1690,7 +1691,46 @@ export const EventFieldsCard = memo(function EventFieldsCard({
   const fieldValues =
     fieldValuesQuery.data?.pages.flatMap((page) => page.data.items) ?? [];
   const fieldValuesLoading = fieldValuesQuery.isPending;
+  const fieldValuesLoadingMore = fieldValuesQuery.isFetchingNextPage;
   const fieldValuesError = fieldValuesQuery.isError;
+  const fieldValuesAppendError = fieldValuesQuery.isFetchNextPageError;
+  const fieldValuesHasMore = fieldValuesQuery.hasNextPage ?? false;
+  const fieldValuesLoadMoreInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!fieldValuesLoadingMore || !fieldValuesHasMore) {
+      fieldValuesLoadMoreInFlightRef.current = false;
+    }
+  }, [fieldValuesHasMore, fieldValuesLoadingMore]);
+
+  const loadMoreFieldValues = useCallback(() => {
+    if (
+      !fieldValuesHasMore ||
+      fieldValuesLoadingMore ||
+      fieldValuesLoadMoreInFlightRef.current
+    ) {
+      return;
+    }
+    fieldValuesLoadMoreInFlightRef.current = true;
+    void fieldValuesQuery.fetchNextPage();
+  }, [
+    fieldValuesHasMore,
+    fieldValuesLoadingMore,
+    fieldValuesQuery.fetchNextPage,
+  ]);
+
+  const fieldValuesSentinelRef = useInfiniteTableSentinel({
+    enabled:
+      Boolean(selectedField) &&
+      !fieldValuesLoading &&
+      !fieldValuesLoadingMore &&
+      !fieldValuesError &&
+      !fieldValuesAppendError &&
+      fieldValuesHasMore,
+    onReachEnd: loadMoreFieldValues,
+    rootMargin: "0px",
+    triggerDistance: 0,
+  });
 
   const fieldValueTotal = useMemo(
     () =>
@@ -1979,6 +2019,40 @@ export const EventFieldsCard = memo(function EventFieldsCard({
     </AnimatePresence>
   );
 
+  const fieldValueLoadMoreRows = fieldValuesAppendError ? (
+    <TableRow>
+      <TableCell colSpan={2} className="h-16 text-center text-muted-foreground">
+        {labels.loadError}
+      </TableCell>
+    </TableRow>
+  ) : fieldValuesHasMore ? (
+    <>
+      {Array.from({ length: 3 }, (_, rowIndex) => (
+        <TableRow
+          key={`field-values-skeleton-${rowIndex}`}
+          aria-hidden="true"
+          className="pointer-events-none hover:bg-transparent"
+        >
+          <TableCell className="whitespace-normal p-0 align-top">
+            <div className="px-4 py-2">
+              <Skeleton
+                className={cn("h-4", rowIndex === 1 ? "w-[72%]" : "w-[58%]")}
+              />
+            </div>
+          </TableCell>
+          <TableCell className="p-0">
+            <div
+              ref={rowIndex === 2 ? fieldValuesSentinelRef : undefined}
+              className="flex justify-end px-4 py-2"
+            >
+              <Skeleton className="h-4 w-14" />
+            </div>
+          </TableCell>
+        </TableRow>
+      ))}
+    </>
+  ) : null;
+
   return (
     <>
       <section ref={fieldsSectionRef} className="space-y-3">
@@ -2083,7 +2157,7 @@ export const EventFieldsCard = memo(function EventFieldsCard({
                 hasContent={
                   Boolean(selectedField) &&
                   !fieldValuesError &&
-                  fieldValues.length > 0
+                  (fieldValues.length > 0 || fieldValuesHasMore)
                 }
                 loadingLabel={labels.loading}
                 emptyLabel={
@@ -2092,7 +2166,8 @@ export const EventFieldsCard = memo(function EventFieldsCard({
                 colSpan={2}
                 header={fieldValueTableHeader}
                 rows={fieldValueRows}
-                contentKey={`${selectedFieldResolvedKey}-${fieldValues.length}-${fieldValueTotal}`}
+                footer={fieldValueLoadMoreRows}
+                contentKey={selectedFieldResolvedKey || "field-values"}
               />
             </CardContent>
           </Card>
