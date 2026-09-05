@@ -241,9 +241,6 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
             aria-label={formatI18nTemplate(messages.common.sortBy, {
               label: messages.common.visitors,
             })}
-            title={formatI18nTemplate(messages.common.sortBy, {
-              label: messages.common.visitors,
-            })}
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
               sort.key === "visitors"
@@ -271,9 +268,6 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
           <button
             type="button"
             aria-label={formatI18nTemplate(messages.common.sortBy, {
-              label: messages.common.views,
-            })}
-            title={formatI18nTemplate(messages.common.sortBy, {
               label: messages.common.views,
             })}
             className={cn(

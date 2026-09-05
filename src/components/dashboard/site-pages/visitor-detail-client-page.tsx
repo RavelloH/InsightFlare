@@ -84,6 +84,11 @@ import {
 import { Clickable } from "@/components/ui/clickable";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   fetchEventRecordDetail,
   fetchJourneyEventDetail,
   fetchVisitorDetail,
@@ -1146,7 +1151,6 @@ const VisitorMapHero = memo(function VisitorMapHero({
             enableHoverScale={false}
             tapScale={0.98}
             aria-label={labels.back}
-            title={labels.back}
             onClick={onBack}
           >
             <RiArrowLeftLine className="size-3.5" />
@@ -1157,7 +1161,6 @@ const VisitorMapHero = memo(function VisitorMapHero({
             href={backHref}
             className="inline-flex items-center gap-1 text-xs text-foreground/80 outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60"
             aria-label={labels.back}
-            title={labels.back}
           >
             <RiArrowLeftLine className="size-3.5" />
             {labels.back}
@@ -1590,24 +1593,27 @@ const ActivityGrid = memo(function ActivityGrid({
           className={cn(cellClassName, "rounded-[2px] ring-1 ring-border/70")}
         />
       ) : (
-        <span
-          key={cell.key}
-          title={cell.title}
-          className={cn(
-            cellClassName,
-            "rounded-[2px] ring-1 ring-border/70",
-            cell.count === 0 && "bg-muted",
-          )}
-          style={
-            cell.count > 0
-              ? {
-                  backgroundColor: `rgba(16, 185, 129, ${
-                    0.28 + intensity * 0.72
-                  })`,
-                }
-              : undefined
-          }
-        />
+        <Tooltip key={cell.key}>
+          <TooltipTrigger asChild>
+            <span
+              className={cn(
+                cellClassName,
+                "rounded-[2px] ring-1 ring-border/70",
+                cell.count === 0 && "bg-muted",
+              )}
+              style={
+                cell.count > 0
+                  ? {
+                      backgroundColor: `rgba(16, 185, 129, ${
+                        0.28 + intensity * 0.72
+                      })`,
+                    }
+                  : undefined
+              }
+            />
+          </TooltipTrigger>
+          <TooltipContent>{cell.title}</TooltipContent>
+        </Tooltip>
       );
     });
   const renderActivityMonthLabels = (
@@ -1731,7 +1737,6 @@ const VisitorEventCard = memo(function VisitorEventCard({
       tapScale={0.985}
       duration={0.14}
       aria-label={eventDisplayTitle(labels, event)}
-      title={eventDisplayTitle(labels, event)}
     >
       <Card size="sm" className="border border-foreground/10 py-0 ring-0">
         <CardContent className="p-0">

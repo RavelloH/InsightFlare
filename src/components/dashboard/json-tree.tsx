@@ -85,17 +85,21 @@ function ScalarValue({
 
   if (value === null) {
     return (
-      <button
-        type="button"
-        className="inline-flex cursor-copy rounded-none px-0.5 text-muted-foreground transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
-        onClick={() => {
-          void copyValue();
-        }}
-        title={labels.copyValue}
-        aria-label={labels.copyValue}
-      >
-        {displayValue}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex cursor-copy rounded-none px-0.5 text-muted-foreground transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+            onClick={() => {
+              void copyValue();
+            }}
+            aria-label={labels.copyValue}
+          >
+            {displayValue}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{labels.copyValue}</TooltipContent>
+      </Tooltip>
     );
   }
   if (
@@ -104,17 +108,21 @@ function ScalarValue({
     typeof value === "boolean"
   ) {
     return (
-      <button
-        type="button"
-        className="inline-flex cursor-copy rounded-none px-0.5 font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
-        onClick={() => {
-          void copyValue();
-        }}
-        title={labels.copyValue}
-        aria-label={labels.copyValue}
-      >
-        {displayValue}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex cursor-copy rounded-none px-0.5 font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+            onClick={() => {
+              void copyValue();
+            }}
+            aria-label={labels.copyValue}
+          >
+            {displayValue}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{labels.copyValue}</TooltipContent>
+      </Tooltip>
     );
   }
   return null;
@@ -174,20 +182,26 @@ export function JsonTree({ value, depth = 0, labels, label }: JsonTreeProps) {
         <span className="text-muted-foreground">{openToken}</span>
         <span className="font-medium text-primary">{itemCount}</span>
         <span className="text-muted-foreground">{closeToken}</span>
-        <button
-          type="button"
-          className="group inline-flex size-4 shrink-0 items-center justify-center rounded-none text-left transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
-          onClick={toggle}
-          aria-label={expanded ? labels.collapseField : labels.expandField}
-          title={expanded ? labels.collapseField : labels.expandField}
-        >
-          <RiArrowDownSLine
-            className={cn(
-              "size-3.5 text-primary transition-transform duration-200 ease-out",
-              expanded ? "rotate-0" : "-rotate-90",
-            )}
-          />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="group inline-flex size-4 shrink-0 items-center justify-center rounded-none text-left transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+              onClick={toggle}
+              aria-label={expanded ? labels.collapseField : labels.expandField}
+            >
+              <RiArrowDownSLine
+                className={cn(
+                  "size-3.5 text-primary transition-transform duration-200 ease-out",
+                  expanded ? "rotate-0" : "-rotate-90",
+                )}
+              />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {expanded ? labels.collapseField : labels.expandField}
+          </TooltipContent>
+        </Tooltip>
       </div>
       <AutoResizer duration={0.2} ease={[0.22, 1, 0.36, 1]}>
         <AutoTransition

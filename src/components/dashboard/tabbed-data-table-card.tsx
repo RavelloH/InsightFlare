@@ -53,6 +53,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { PaginationMeta } from "@/lib/pagination";
@@ -818,7 +823,6 @@ function TabbedDataTableCardImpl<
                   aria-label={
                     sortable ? sortActionLabel?.(column.label) : undefined
                   }
-                  title={sortable ? sortActionLabel?.(column.label) : undefined}
                   className={cn(
                     "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
                     active ? "text-foreground" : "text-muted-foreground",
@@ -1256,26 +1260,34 @@ function TabbedDataTableCardImpl<
 
   const searchAction =
     searchEnabled && !headerHidden ? (
-      <Clickable
-        className="size-6 text-muted-foreground hover:text-foreground"
-        onClick={() => setSearchTab(activeTab)}
-        aria-label={searchActionLabel}
-        title={searchActionLabel}
-      >
-        <RiSearchLine className="size-4" />
-      </Clickable>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Clickable
+            className="size-6 text-muted-foreground hover:text-foreground"
+            onClick={() => setSearchTab(activeTab)}
+            aria-label={searchActionLabel}
+          >
+            <RiSearchLine className="size-4" />
+          </Clickable>
+        </TooltipTrigger>
+        <TooltipContent>{searchActionLabel}</TooltipContent>
+      </Tooltip>
     ) : null;
 
   const exportAction =
     exportEnabled && !headerHidden ? (
-      <Clickable
-        className="size-6 text-muted-foreground hover:text-foreground"
-        onClick={() => setExportOpen(true)}
-        aria-label={exportLabels.action}
-        title={exportLabels.action}
-      >
-        <RiDownloadLine className="size-4" />
-      </Clickable>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Clickable
+            className="size-6 text-muted-foreground hover:text-foreground"
+            onClick={() => setExportOpen(true)}
+            aria-label={exportLabels.action}
+          >
+            <RiDownloadLine className="size-4" />
+          </Clickable>
+        </TooltipTrigger>
+        <TooltipContent>{exportLabels.action}</TooltipContent>
+      </Tooltip>
     ) : null;
 
   const exportRowCount =

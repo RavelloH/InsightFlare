@@ -73,10 +73,7 @@ export const DonutChart = memo(function DonutChart({
                         className="h-2.5 w-2.5 shrink-0 rounded-none"
                         style={{ backgroundColor: item.color }}
                       />
-                      <span
-                        className="truncate text-muted-foreground"
-                        title={item.label}
-                      >
+                      <span className="truncate text-muted-foreground">
                         {item.label}
                       </span>
                     </span>

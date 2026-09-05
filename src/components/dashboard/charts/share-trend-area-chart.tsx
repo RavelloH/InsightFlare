@@ -325,10 +325,7 @@ export const ShareTrendAreaChart = memo(function ShareTrendAreaChart({
                             }}
                           />
                         )}
-                        <span
-                          className="truncate text-muted-foreground"
-                          title={currentSeries?.label ?? seriesKey}
-                        >
+                        <span className="truncate text-muted-foreground">
                           {currentSeries?.label ?? seriesKey}
                         </span>
                       </span>

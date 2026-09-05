@@ -263,7 +263,6 @@ function SortHeader({
         <button
           type="button"
           aria-label={ariaLabel ?? label}
-          title={ariaLabel ?? label}
           className={cn(
             "inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
             active ? "text-foreground" : "text-muted-foreground",

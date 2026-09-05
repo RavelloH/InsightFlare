@@ -76,6 +76,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   fetchEventRecordDetail,
   fetchEventsRecords,
   fetchEventTypeFields,
@@ -748,7 +753,6 @@ function SortHeader({
         <button
           type="button"
           aria-label={ariaLabel ?? label}
-          title={ariaLabel ?? label}
           className={cn(
             "inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
             active ? "text-foreground" : "text-muted-foreground",
@@ -1874,26 +1878,34 @@ export const EventFieldsCard = memo(function EventFieldsCard({
         style={indentStyle}
       >
         {hasChildren ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6 shrink-0 rounded-none text-primary shadow-none transition-colors hover:bg-primary/10 hover:text-primary"
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleFieldExpansion(nodeKey);
-            }}
-            disabled={fieldListLoading}
-            aria-label={isExpanded ? labels.collapseField : labels.expandField}
-            title={isExpanded ? labels.collapseField : labels.expandField}
-          >
-            <RiArrowDownSLine
-              className={cn(
-                "size-3.5 transition-transform duration-200 ease-out",
-                isExpanded ? "rotate-0" : "-rotate-90",
-              )}
-            />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-6 shrink-0 rounded-none text-primary shadow-none transition-colors hover:bg-primary/10 hover:text-primary"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleFieldExpansion(nodeKey);
+                }}
+                disabled={fieldListLoading}
+                aria-label={
+                  isExpanded ? labels.collapseField : labels.expandField
+                }
+              >
+                <RiArrowDownSLine
+                  className={cn(
+                    "size-3.5 transition-transform duration-200 ease-out",
+                    isExpanded ? "rotate-0" : "-rotate-90",
+                  )}
+                />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {isExpanded ? labels.collapseField : labels.expandField}
+            </TooltipContent>
+          </Tooltip>
         ) : (
           <span className="size-6 shrink-0" />
         )}
@@ -1910,21 +1922,25 @@ export const EventFieldsCard = memo(function EventFieldsCard({
         </div>
 
         {selectableField ? (
-          <button
-            type="button"
-            className={cn(
-              "inline-flex size-6 shrink-0 items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50",
-            )}
-            onClick={(event) => {
-              event.stopPropagation();
-              selectField();
-            }}
-            disabled={fieldListLoading}
-            aria-label={`${labels.fieldValuesTitle}: ${fieldLabel}`}
-            title={labels.fieldValuesTitle}
-          >
-            <RiSearchLine className="size-3.5" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex size-6 shrink-0 items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50",
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  selectField();
+                }}
+                disabled={fieldListLoading}
+                aria-label={`${labels.fieldValuesTitle}: ${fieldLabel}`}
+              >
+                <RiSearchLine className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{labels.fieldValuesTitle}</TooltipContent>
+          </Tooltip>
         ) : null}
       </div>
     );
@@ -2006,10 +2022,7 @@ export const EventFieldsCard = memo(function EventFieldsCard({
             }}
           >
             <TableCell className="whitespace-normal p-0 align-top">
-              <div
-                className="px-4 py-2 font-mono leading-5 break-words whitespace-normal"
-                title={valueLabel}
-              >
+              <div className="px-4 py-2 font-mono leading-5 break-words whitespace-normal">
                 {valueLabel}
               </div>
             </TableCell>

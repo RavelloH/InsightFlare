@@ -101,7 +101,6 @@ function SheetContent({
               variant="ghost"
               className="absolute top-3 right-3"
               size="icon-sm"
-              title="Close"
             >
               <RiCloseLine />
               <span className="sr-only">Close</span>

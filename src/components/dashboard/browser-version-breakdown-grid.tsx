@@ -13,6 +13,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client-data";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
@@ -112,9 +117,12 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
   return (
     <Card size="sm" className="overflow-visible">
       <CardHeader>
-        <CardTitle className="truncate" title={browser.browser}>
-          {browser.browser}
-        </CardTitle>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <CardTitle className="truncate">{browser.browser}</CardTitle>
+          </TooltipTrigger>
+          <TooltipContent>{browser.browser}</TooltipContent>
+        </Tooltip>
         <CardDescription>
           {numberFormat(locale, browser.visitors)} {messages.common.visitors}
         </CardDescription>
@@ -149,12 +157,14 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
                     className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
                     style={{ backgroundColor: version.color }}
                   />
-                  <span
-                    className="truncate text-muted-foreground"
-                    title={version.displayLabel}
-                  >
-                    {version.displayLabel}
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="truncate text-muted-foreground">
+                        {version.displayLabel}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{version.displayLabel}</TooltipContent>
+                  </Tooltip>
                 </div>
                 <span className="text-right font-mono text-foreground tabular-nums">
                   {numberFormat(locale, version.visitors)}

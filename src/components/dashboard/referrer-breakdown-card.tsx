@@ -22,6 +22,11 @@ import {
 import { TrafficChannelIcon } from "@/components/dashboard/traffic-channel-icon";
 import { Clickable } from "@/components/ui/clickable";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/client-history";
@@ -203,18 +208,24 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
             unknownLabel={messages.overview.direct}
           />
           {row.targetUrl ? (
-            <Clickable
-              className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
-              onClick={(event) => openTarget(row.targetUrl!, event)}
-              aria-label={`${messages.common.open}: ${displayLabel}`}
-              title={`${messages.common.open}: ${displayLabel}`}
-            >
-              {activeTab === "link" ? (
-                <RiArrowRightUpLine size="1.4em" />
-              ) : (
-                <RiSearchLine size="1.2em" />
-              )}
-            </Clickable>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Clickable
+                  className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                  onClick={(event) => openTarget(row.targetUrl!, event)}
+                  aria-label={`${messages.common.open}: ${displayLabel}`}
+                >
+                  {activeTab === "link" ? (
+                    <RiArrowRightUpLine size="1.4em" />
+                  ) : (
+                    <RiSearchLine size="1.2em" />
+                  )}
+                </Clickable>
+              </TooltipTrigger>
+              <TooltipContent>
+                {`${messages.common.open}: ${displayLabel}`}
+              </TooltipContent>
+            </Tooltip>
           ) : null}
         </span>
       );

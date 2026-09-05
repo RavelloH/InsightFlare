@@ -666,7 +666,6 @@ function DoDiagnosticSiteRow({
           "text-right font-mono text-xs",
           alarmIsLate && "text-destructive",
         )}
-        title={nextDueKindLabel ?? undefined}
       >
         <div>{alarmText}</div>
         <div className="text-[10px] text-muted-foreground">

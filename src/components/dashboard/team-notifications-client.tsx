@@ -2009,7 +2009,6 @@ export function TeamNotificationsClient({
               type="button"
               onClick={() => openCreate()}
               disabled={!canCreateRule}
-              title={copy.createRule}
             >
               <RiAddLine />
               <span>{copy.createRule}</span>

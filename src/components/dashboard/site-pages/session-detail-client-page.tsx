@@ -1016,7 +1016,6 @@ const SessionMapHero = memo(function SessionMapHero({
             enableHoverScale={false}
             tapScale={0.98}
             aria-label={labels.back}
-            title={labels.back}
             onClick={onBack}
           >
             <RiArrowLeftLine className="size-3.5" />
@@ -1027,7 +1026,6 @@ const SessionMapHero = memo(function SessionMapHero({
             href={backHref}
             className="inline-flex items-center gap-1 text-xs text-foreground/80 outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/60"
             aria-label={labels.back}
-            title={labels.back}
           >
             <RiArrowLeftLine className="size-3.5" />
             {labels.back}
@@ -1322,7 +1320,6 @@ const SessionEventCard = memo(function SessionEventCard({
       tapScale={0.985}
       duration={0.14}
       aria-label={eventDisplayTitle(labels, event)}
-      title={eventDisplayTitle(labels, event)}
     >
       <Card size="sm" className="border border-foreground/10 py-0 ring-0">
         <CardContent className="p-0">

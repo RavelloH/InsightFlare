@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 interface ClickableProps extends Omit<
   HTMLMotionProps<"div">,
-  "children" | "onClick" | "onKeyDown"
+  "children" | "onClick" | "onKeyDown" | "title"
 > {
   children: ReactNode;
   onClick?: (event: MouseEvent<HTMLDivElement>) => void;
@@ -16,7 +16,6 @@ interface ClickableProps extends Omit<
   hoverScale?: number;
   tapScale?: number;
   duration?: number;
-  title?: string;
   "aria-label"?: string;
 }
 
@@ -31,7 +30,6 @@ export const Clickable = forwardRef<HTMLDivElement, ClickableProps>(
       hoverScale = 1.16,
       tapScale = 0.94,
       duration = 0.16,
-      title,
       "aria-label": ariaLabel,
       ...props
     },
@@ -55,7 +53,6 @@ export const Clickable = forwardRef<HTMLDivElement, ClickableProps>(
         ref={ref}
         role="button"
         tabIndex={disabled ? -1 : 0}
-        title={title}
         aria-label={ariaLabel}
         aria-disabled={disabled}
         className={cn(

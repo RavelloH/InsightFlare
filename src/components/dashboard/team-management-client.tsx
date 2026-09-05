@@ -80,6 +80,11 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   type AdminServiceHttpMethod,
   requestAdminService,
 } from "@/lib/admin-service-client";
@@ -1105,18 +1110,27 @@ export function TeamManagementClient({
               <TableCell>{invite.email || copy.members.anyEmail}</TableCell>
               <TableCell>
                 {invite.code ? (
-                  <button
-                    type="button"
-                    className="font-mono text-xs text-primary underline-offset-4 hover:underline disabled:pointer-events-none disabled:text-muted-foreground"
-                    disabled={!invite.url}
-                    aria-label={copy.members.copyInvite}
-                    title={copy.members.copyInvite}
-                    onClick={() => {
-                      void handleCopyInviteUrl(invite);
-                    }}
-                  >
-                    {invite.code}
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="inline-flex"
+                        tabIndex={!invite.url ? 0 : undefined}
+                      >
+                        <button
+                          type="button"
+                          className="font-mono text-xs text-primary underline-offset-4 hover:underline disabled:pointer-events-none disabled:text-muted-foreground"
+                          disabled={!invite.url}
+                          aria-label={copy.members.copyInvite}
+                          onClick={() => {
+                            void handleCopyInviteUrl(invite);
+                          }}
+                        >
+                          {invite.code}
+                        </button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{copy.members.copyInvite}</TooltipContent>
+                  </Tooltip>
                 ) : (
                   "-"
                 )}
@@ -1830,7 +1844,6 @@ export function TeamManagementClient({
                       href={buildSitePath(locale, activeTeam.slug, site.slug)}
                       className="group block h-full cursor-pointer outline-none transition-transform hover:-translate-y-0.5 active:translate-y-0 focus-visible:ring-1 focus-visible:ring-ring/60"
                       aria-label={`${copy.sites.openAnalytics}: ${site.name}`}
-                      title={copy.sites.openAnalytics}
                     >
                       <Card className="h-full transition-colors group-hover:bg-accent/20">
                         <CardHeader className="space-y-2">

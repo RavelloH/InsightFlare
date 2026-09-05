@@ -123,7 +123,6 @@ const PageTrafficCard = memo(function PageTrafficCard({
       href={href}
       className="group block h-full outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
       aria-label={`${messages.pages.viewDetails}: ${displayPathname}`}
-      title={messages.pages.viewDetails}
     >
       <motion.div
         className="h-full"

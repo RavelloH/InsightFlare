@@ -70,6 +70,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
@@ -308,16 +313,22 @@ function FunnelList({
                 <RiArrowRightLine />
                 {labels.conversion}
               </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                size="icon-sm"
-                aria-label={`${labels.deleteTitle}: ${funnel.name}`}
-                title={`${labels.deleteTitle}: ${funnel.name}`}
-                onClick={() => onDelete(funnel)}
-              >
-                <RiDeleteBinLine />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon-sm"
+                    aria-label={`${labels.deleteTitle}: ${funnel.name}`}
+                    onClick={() => onDelete(funnel)}
+                  >
+                    <RiDeleteBinLine />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {`${labels.deleteTitle}: ${funnel.name}`}
+                </TooltipContent>
+              </Tooltip>
             </div>
           </div>
         ))}
@@ -470,17 +481,26 @@ function CreateFunnelDialog({
                             : labels.eventPlaceholder
                         }
                       />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={labels.removeStep}
-                        title={labels.removeStep}
-                        disabled={steps.length <= 2}
-                        onClick={() => removeStep(index)}
-                      >
-                        <RiDeleteBinLine />
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="inline-flex"
+                            tabIndex={steps.length <= 2 ? 0 : undefined}
+                          >
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={labels.removeStep}
+                              disabled={steps.length <= 2}
+                              onClick={() => removeStep(index)}
+                            >
+                              <RiDeleteBinLine />
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{labels.removeStep}</TooltipContent>
+                      </Tooltip>
                     </div>
                   );
                 })}

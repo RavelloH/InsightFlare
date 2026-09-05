@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 interface TableActionButtonProps extends Omit<
   HTMLMotionProps<"div">,
-  "children" | "onClick"
+  "children" | "onClick" | "title"
 > {
   label: string;
   children: ReactNode;

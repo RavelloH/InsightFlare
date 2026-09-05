@@ -47,6 +47,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   TRAFFIC_CHANNEL_IDS,
   type TrafficChannelId,
 } from "@/lib/analytics/traffic-channel-rules";
@@ -2728,39 +2733,57 @@ export function OverviewPagesSection({
             unknownLabel={messages.common.unknown}
           />
           {rowTargetUrl ? (
-            <Clickable
-              className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
-              onClick={(event) => openPageCardRowTarget(rowTargetUrl, event)}
-              aria-label={`${messages.common.open}: ${displayLabel}`}
-              title={`${messages.common.open}: ${displayLabel}`}
-            >
-              <RiArrowRightUpLine size="1.4em" />
-            </Clickable>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Clickable
+                  className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                  onClick={(event) =>
+                    openPageCardRowTarget(rowTargetUrl, event)
+                  }
+                  aria-label={`${messages.common.open}: ${displayLabel}`}
+                >
+                  <RiArrowRightUpLine size="1.4em" />
+                </Clickable>
+              </TooltipTrigger>
+              <TooltipContent>
+                {`${messages.common.open}: ${displayLabel}`}
+              </TooltipContent>
+            </Tooltip>
           ) : null}
           {rowDetailAction && rowDetailParams ? (
-            <Clickable
-              className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
-              onClick={(event) =>
-                openPageCardRowDetailAction(
-                  rowDetailAction,
-                  rowDetailParams,
-                  event,
-                )
-              }
-              aria-label={messages.common.search}
-              title={messages.common.search}
-            >
-              <RiSearchLine size="1.2em" />
-            </Clickable>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Clickable
+                  className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                  onClick={(event) =>
+                    openPageCardRowDetailAction(
+                      rowDetailAction,
+                      rowDetailParams,
+                      event,
+                    )
+                  }
+                  aria-label={messages.common.search}
+                >
+                  <RiSearchLine size="1.2em" />
+                </Clickable>
+              </TooltipTrigger>
+              <TooltipContent>{messages.common.search}</TooltipContent>
+            </Tooltip>
           ) : rowDetailHref ? (
-            <Clickable
-              className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
-              onClick={(event) => openPageCardRowDetail(rowDetailHref, event)}
-              aria-label={messages.common.search}
-              title={messages.common.search}
-            >
-              <RiSearchLine size="1.2em" />
-            </Clickable>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Clickable
+                  className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                  onClick={(event) =>
+                    openPageCardRowDetail(rowDetailHref, event)
+                  }
+                  aria-label={messages.common.search}
+                >
+                  <RiSearchLine size="1.2em" />
+                </Clickable>
+              </TooltipTrigger>
+              <TooltipContent>{messages.common.search}</TooltipContent>
+            </Tooltip>
           ) : null}
         </span>
       );
@@ -2985,7 +3008,6 @@ export function OverviewPagesSection({
                   openPageCardRowTarget(row.targetUrl!, event)
                 }
                 aria-label={`${messages.common.open}: ${displayLabel}`}
-                title={`${messages.common.open}: ${displayLabel}`}
               >
                 <RiArrowRightUpLine size="1.4em" />
               </Clickable>
@@ -3110,16 +3132,20 @@ export function OverviewPagesSection({
               <LabelWithLeadingIcon label={row.label} iconName={row.iconName} />
             )}
             {rowLocationTarget ? (
-              <Clickable
-                className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
-                onClick={(event) =>
-                  openGeoDimensionLocationTarget(rowLocationTarget, event)
-                }
-                aria-label={messages.common.search}
-                title={messages.common.search}
-              >
-                <RiSearchLine size="1.2em" />
-              </Clickable>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Clickable
+                    className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+                    onClick={(event) =>
+                      openGeoDimensionLocationTarget(rowLocationTarget, event)
+                    }
+                    aria-label={messages.common.search}
+                  >
+                    <RiSearchLine size="1.2em" />
+                  </Clickable>
+                </TooltipTrigger>
+                <TooltipContent>{messages.common.search}</TooltipContent>
+              </Tooltip>
             ) : null}
           </span>
         );

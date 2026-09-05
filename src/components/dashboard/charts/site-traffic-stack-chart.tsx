@@ -975,7 +975,6 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
                         ? "text-foreground"
                         : "text-muted-foreground",
                     )}
-                    title={item.siteName}
                   >
                     {item.siteName}
                   </span>

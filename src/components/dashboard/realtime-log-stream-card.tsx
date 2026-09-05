@@ -50,6 +50,11 @@ import {
 import { prepareNativeScrollbarHost } from "@/components/ui/overlay-scrollbar";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
@@ -429,11 +434,10 @@ function MetaItem({
   label: string;
   hideLabelOnMobile?: boolean;
 }) {
-  return (
+  const metaItem = (
     <span
       className="inline-flex max-w-full items-center gap-1.5 text-[11px] text-muted-foreground"
       aria-label={hideLabelOnMobile ? label : undefined}
-      title={hideLabelOnMobile ? label : undefined}
     >
       <span className="inline-flex size-4 shrink-0 items-center justify-center">
         {icon}
@@ -446,6 +450,15 @@ function MetaItem({
         {label}
       </span>
     </span>
+  );
+
+  return hideLabelOnMobile ? (
+    <Tooltip>
+      <TooltipTrigger asChild>{metaItem}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  ) : (
+    metaItem
   );
 }
 
@@ -1077,7 +1090,6 @@ const RealtimeLogStreamItem = memo(function RealtimeLogStreamItem({
         tapScale={0.985}
         duration={0.14}
         aria-label={title}
-        title={title}
       >
         <RealtimeLogStreamItemCard
           event={event}
@@ -1236,7 +1248,6 @@ function RealtimeVisitorHistorySection({
                     tapScale={0.985}
                     duration={0.14}
                     aria-label={timelineEventTitle}
-                    title={timelineEventTitle}
                   >
                     {timelineEventContent}
                   </Clickable>

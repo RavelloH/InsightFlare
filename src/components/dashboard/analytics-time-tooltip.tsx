@@ -337,7 +337,6 @@ function AnalyticsDetailsTooltipContent({
                     className="shrink-0 text-background/70 transition-colors hover:text-background"
                     onClick={item.action.onClick}
                     aria-label={item.action.label}
-                    title={item.action.label}
                   >
                     <RiSearchLine size="1.2em" />
                   </Clickable>

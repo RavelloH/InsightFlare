@@ -62,6 +62,11 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { requestAdminService } from "@/lib/admin-service-client";
 import { canManageTeam } from "@/lib/dashboard/permissions";
@@ -936,17 +941,23 @@ export function DashboardShell({
                               <SidebarMenuItem key={team.id}>
                                 <SidebarMenuButton asChild>
                                   <Link href={`/${locale}/app/${team.slug}`}>
-                                    <span
-                                      aria-label={roleLabel}
-                                      title={roleLabel}
-                                      className={
-                                        team.membershipRole === "owner"
-                                          ? "text-primary"
-                                          : undefined
-                                      }
-                                    >
-                                      <RoleIcon aria-hidden="true" />
-                                    </span>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span
+                                          aria-label={roleLabel}
+                                          className={
+                                            team.membershipRole === "owner"
+                                              ? "text-primary"
+                                              : undefined
+                                          }
+                                        >
+                                          <RoleIcon aria-hidden="true" />
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="right">
+                                        {roleLabel}
+                                      </TooltipContent>
+                                    </Tooltip>
                                     <span>{team.name}</span>
                                   </Link>
                                 </SidebarMenuButton>

@@ -68,6 +68,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import type { DashboardFilterOptionKey } from "@/lib/dashboard/client-data";
 import {
@@ -1409,31 +1414,36 @@ function SearchableValueInput({
         >
           {isList && selectedValues.length > 0 ? (
             <div className="flex flex-wrap gap-1 border-b border-border px-2 py-1.5">
-              {selectedValues.map((value) => (
-                <button
-                  key={filterValueKey(value)}
-                  type="button"
-                  className="max-w-full truncate bg-muted px-1.5 py-0.5 text-xs hover:bg-accent"
-                  aria-label={formatI18nTemplate(
-                    messages.filterBuilder.removeValue,
-                    { value: filterValueText(value) },
-                  )}
-                  title={formatI18nTemplate(
-                    messages.filterBuilder.removeValue,
-                    { value: filterValueText(value) },
-                  )}
-                  onClick={() =>
-                    onListChange(
-                      selectedValues.filter(
-                        (selected) =>
-                          filterValueKey(selected) !== filterValueKey(value),
-                      ),
-                    )
-                  }
-                >
-                  {filterValueText(value)}
-                </button>
-              ))}
+              {selectedValues.map((value) => {
+                const removeValueLabel = formatI18nTemplate(
+                  messages.filterBuilder.removeValue,
+                  { value: filterValueText(value) },
+                );
+
+                return (
+                  <Tooltip key={filterValueKey(value)}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="max-w-full truncate bg-muted px-1.5 py-0.5 text-xs hover:bg-accent"
+                        aria-label={removeValueLabel}
+                        onClick={() =>
+                          onListChange(
+                            selectedValues.filter(
+                              (selected) =>
+                                filterValueKey(selected) !==
+                                filterValueKey(value),
+                            ),
+                          )
+                        }
+                      >
+                        {filterValueText(value)}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{removeValueLabel}</TooltipContent>
+                  </Tooltip>
+                );
+              })}
             </div>
           ) : null}
           <div className="relative">
@@ -2777,7 +2787,6 @@ export function FilterPanel({
                 <div
                   aria-label={messages.filterBuilder.naturalLanguageDescription}
                   className="min-h-8 px-4 py-2 text-xs leading-4 text-muted-foreground"
-                  title={messages.filterBuilder.naturalLanguageDescription}
                 >
                   <RiChatQuoteLine
                     className="mr-2 inline-block size-4 align-text-bottom"

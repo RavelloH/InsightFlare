@@ -162,10 +162,7 @@ export const StackedBreakdownBarChart = memo(function StackedBreakdownBarChart({
                               style={{ backgroundColor: item.color }}
                             />
                           )}
-                          <span
-                            className="truncate text-muted-foreground"
-                            title={item.label}
-                          >
+                          <span className="truncate text-muted-foreground">
                             {item.label}
                           </span>
                         </span>

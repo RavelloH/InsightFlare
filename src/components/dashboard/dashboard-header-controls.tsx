@@ -906,9 +906,11 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                   <div className="grid grid-cols-3 gap-2">
                     {INTERVAL_ORDER.map((item) => {
                       const enabled = orderedAllowedIntervals.includes(item);
-                      return (
+                      const disabledReason = enabled
+                        ? undefined
+                        : intervalDisabledReason(messages, item);
+                      const intervalButton = (
                         <Button
-                          key={item}
                           type="button"
                           size="sm"
                           variant={
@@ -916,11 +918,6 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                           }
                           className="justify-start px-2"
                           disabled={!enabled}
-                          title={
-                            enabled
-                              ? undefined
-                              : intervalDisabledReason(messages, item)
-                          }
                           onClick={() => {
                             handleIntervalValueChange(item);
                           }}
@@ -928,6 +925,23 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                           <RiTimeLine className="size-3.5" />
                           <span>{intervalLabel(messages, item)}</span>
                         </Button>
+                      );
+
+                      return disabledReason ? (
+                        <Tooltip key={item}>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex" tabIndex={0}>
+                              {intervalButton}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            {disabledReason}
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <span key={item} className="inline-flex">
+                          {intervalButton}
+                        </span>
                       );
                     })}
                   </div>
