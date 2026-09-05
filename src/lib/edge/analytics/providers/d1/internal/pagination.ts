@@ -15,4 +15,5 @@ export {
   pageResponse,
   pageResult,
   paginationBinding,
+  paginationBindingForWindow,
 } from "@/lib/pagination";

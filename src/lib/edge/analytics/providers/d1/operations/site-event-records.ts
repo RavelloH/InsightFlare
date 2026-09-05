@@ -20,7 +20,7 @@ import {
   encodePageCursor,
   hasExactKeys,
   type PageResult,
-  paginationBinding,
+  paginationBindingForWindow,
 } from "@/lib/pagination";
 
 export interface ReadSiteEventRecordsInput {
@@ -42,7 +42,7 @@ async function cursorBinding(
   input: ReadSiteEventRecordsInput,
 ): Promise<string> {
   const eventName = input.eventName?.trim() || null;
-  return paginationBinding([
+  return paginationBindingForWindow(input.window, [
     "event-records-v1",
     input.audience ?? "private-dashboard",
     input.siteId,
@@ -104,12 +104,14 @@ async function decodeCursor(
 }
 
 export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
+  const search = input.search?.trim() || undefined;
   const eventName = input.eventName?.trim() || undefined;
+  const normalizedInput = { ...input, search, eventName };
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
   } as const;
-  const cursor = await decodeCursor(input);
+  const cursor = await decodeCursor(normalizedInput);
   const page = await queryEventRecordPageFromD1(
     input.env,
     input.siteId,
@@ -118,7 +120,7 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
     {
       limit: input.page.limit,
       sort,
-      search: input.search,
+      search,
       eventName,
       cursor,
     },

@@ -292,6 +292,7 @@ describe("request observation admin reader", () => {
     expect(includedListSql).not.toContain("blob4 AS ip");
     expect(includedListSql).not.toContain("blob5 AS userAgent");
     expect(includedListSql).not.toContain("blob20 AS metadataJson");
+    expect(includedListSql).toContain("AND (blob17 != '' OR blob16 != '')");
   });
 
   it("reads tokens encrypted with the legacy bot analytics purpose", async () => {

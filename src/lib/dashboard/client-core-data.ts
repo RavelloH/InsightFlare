@@ -72,6 +72,12 @@ function emptyVisitorsUnlessAborted(error: unknown): VisitorsData {
 
 function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   if (error instanceof Error && error.name === "AbortError") throw error;
+  if (
+    error instanceof Error &&
+    error.message === "pagination_contract_violation"
+  ) {
+    throw error;
+  }
   return fallback();
 }
 
@@ -566,10 +572,6 @@ export async function fetchEventsRecords(
       );
   return request
     .then((value) => {
-      // Keep the pagination consumer safe when a rolling deployment briefly
-      // returns the collection without the standard envelope. The API
-      // contract is still strict; this boundary merely prevents a malformed
-      // successful payload from turning into a client-side TypeError.
       const payload =
         value && typeof value === "object"
           ? (value as unknown as Record<string, unknown>)
@@ -577,7 +579,7 @@ export async function fetchEventsRecords(
       const collection = "data" in payload ? payload.data : payload;
       return {
         ok: payload.ok !== false,
-        data: normalizePaginatedCollection<EventRecord>(collection, limit),
+        data: normalizePaginatedCollection<EventRecord>(collection),
       } satisfies EventsRecordsData;
     })
     .catch((error) =>
@@ -680,7 +682,6 @@ export async function fetchEventTypeFields(
     ...rawPayload,
     data: normalizePaginatedCollection<EventField>(
       rawPayload.data ?? rawPayload.fields,
-      options?.limit ?? 100,
     ),
   };
 }
@@ -764,10 +765,7 @@ export async function fetchEventTypeFieldValues(
   );
   return {
     ...payload,
-    data: normalizePaginatedCollection<EventFieldValueStat>(
-      payload.data,
-      options?.limit ?? 25,
-    ),
+    data: normalizePaginatedCollection<EventFieldValueStat>(payload.data),
   };
 }
 

@@ -32,7 +32,7 @@ import {
   hasExactKeys,
   type PageResult,
   pageResult,
-  paginationBinding,
+  paginationBindingForWindow,
 } from "./pagination";
 import { scopedDatasetFor } from "./scoped-dataset";
 
@@ -89,7 +89,7 @@ function dimensionCursorBinding(
   sortBy: DimensionPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
 ): Promise<string> {
-  return paginationBinding([
+  return paginationBindingForWindow(window, [
     `analytics-${operation}-v1`,
     audience,
     siteId,
@@ -572,7 +572,7 @@ LIMIT ?
     visitors: Number(row.visitors ?? 0),
   }));
   const page = pageResult(mapped, limit);
-  const binding = await paginationBinding([
+  const binding = await paginationBindingForWindow(window, [
     `analytics-session-${kind}-v1`,
     siteId,
     window.startMs,
@@ -613,7 +613,7 @@ export async function decodeSessionPathDimensionCursor(
 ): Promise<SessionPathDimensionCursor | null> {
   return decodePageCursor<SessionPathDimensionCursor>(
     env,
-    await paginationBinding([
+    await paginationBindingForWindow(window, [
       `analytics-session-${kind}-v1`,
       siteId,
       window.startMs,

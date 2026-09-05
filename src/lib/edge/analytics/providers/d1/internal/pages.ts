@@ -44,7 +44,7 @@ import {
   hasExactKeys,
   type PageResult,
   pageResult,
-  paginationBinding,
+  paginationBindingForWindow,
 } from "./pagination";
 import { scopedDatasetFor } from "./scoped-dataset";
 
@@ -109,7 +109,7 @@ function pageCursorBinding(
   extra: readonly unknown[] = [],
   audience: QueryAudience = "private-dashboard",
 ): Promise<string> {
-  return paginationBinding([
+  return paginationBindingForWindow(window, [
     `analytics-${operation}-v1`,
     audience,
     siteId,

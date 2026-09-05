@@ -30,6 +30,8 @@ export interface QueryTime {
   readonly range: TimeRange;
   readonly reportingTimeZone: ReportingTimeZone;
   readonly capturedAtMs: EpochMs;
+  /** API v1 raw-request identity used to keep preset cursors stable. */
+  readonly paginationBinding?: string;
 }
 
 export interface CalendarBucket {

@@ -75,7 +75,7 @@ export async function fetchOverviewPageCardTab(
   ).catch(emptyOverviewTabUnlessAborted);
   const data = normalizePaginatedCollection<
     OverviewTabData["data"]["items"][number]
-  >(payload.data, options?.limit ?? 100);
+  >(payload.data);
   const items = normalizeOverviewRows(data.items);
   return {
     ...data,
@@ -114,7 +114,7 @@ export async function fetchPageHashTab(
   ).catch(emptyOverviewTabUnlessAborted);
   const data = normalizePaginatedCollection<
     OverviewTabData["data"]["items"][number]
-  >(payload.data, options?.limit ?? 100);
+  >(payload.data);
   return {
     ...data,
     items: normalizeOverviewRows(data.items).map((row) => ({
@@ -176,7 +176,7 @@ export async function fetchOverviewSourceCardTab(
   ).catch(emptyOverviewTabUnlessAborted);
   const data = normalizePaginatedCollection<
     OverviewTabData["data"]["items"][number]
-  >(payload.data, options?.limit ?? 100);
+  >(payload.data);
   return { ...data, items: normalizeOverviewRows(data.items) };
 }
 
@@ -209,7 +209,7 @@ export async function fetchEventTypesTab(
   ).catch(emptyOverviewTabUnlessAborted);
   const data = normalizePaginatedCollection<
     OverviewTabData["data"]["items"][number]
-  >(payload.data, options?.limit ?? 100);
+  >(payload.data);
   return { ...data, items: normalizeOverviewRows(data.items) };
 }
 
@@ -245,7 +245,7 @@ export async function fetchOverviewClientDimensionTab(
   ).catch(emptyOverviewTabUnlessAborted);
   const data = normalizePaginatedCollection<
     OverviewTabData["data"]["items"][number]
-  >(payload.data, options?.limit ?? 100);
+  >(payload.data);
   return { ...data, items: normalizeOverviewRows(data.items) };
 }
 
@@ -284,5 +284,5 @@ export async function fetchFilterValues(
   ).catch(() => emptyDashboardFilterOptions());
   return normalizePaginatedCollection<
     DashboardFilterOptionsData["data"]["items"][number]
-  >(payload.data, options?.limit ?? 200);
+  >(payload.data);
 }

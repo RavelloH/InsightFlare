@@ -20,53 +20,61 @@ import type { OverviewTabRows } from "./client-data-types";
 
 function normalizedPagination(
   value: unknown,
-  fallbackLimit: number,
   itemCount: number,
 ): PaginationMeta {
-  const record =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-  const limit =
-    typeof record.limit === "number" && Number.isFinite(record.limit)
-      ? record.limit
-      : fallbackLimit;
-  const returned =
-    typeof record.returned === "number" && Number.isFinite(record.returned)
-      ? record.returned
-      : itemCount;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("pagination_contract_violation");
+  }
+  const record = value as Record<string, unknown>;
+  const expectedKeys = ["limit", "returned", "hasMore", "nextCursor"];
+  if (
+    Object.keys(record).length !== expectedKeys.length ||
+    expectedKeys.some((key) => !(key in record))
+  ) {
+    throw new Error("pagination_contract_violation");
+  }
+  if (
+    typeof record.limit !== "number" ||
+    !Number.isSafeInteger(record.limit) ||
+    record.limit < 1 ||
+    typeof record.returned !== "number" ||
+    !Number.isSafeInteger(record.returned) ||
+    record.returned < 0 ||
+    record.returned !== itemCount ||
+    typeof record.hasMore !== "boolean" ||
+    (record.nextCursor !== null && typeof record.nextCursor !== "string") ||
+    record.hasMore !== (record.nextCursor !== null)
+  ) {
+    throw new Error("pagination_contract_violation");
+  }
   return {
-    limit,
-    returned,
-    hasMore: record.hasMore === true,
-    nextCursor:
-      typeof record.nextCursor === "string" ? record.nextCursor : null,
+    limit: record.limit,
+    returned: record.returned,
+    hasMore: record.hasMore,
+    nextCursor: record.nextCursor,
   };
 }
 
 /** Normalize collection responses at the HTTP boundary before pagination code reads them. */
 export function normalizePaginatedCollection<T>(
   value: unknown,
-  fallbackLimit = 0,
 ): PaginatedCollection<T> {
-  if (Array.isArray(value)) {
-    return {
-      items: value as T[],
-      pagination: normalizedPagination(undefined, fallbackLimit, value.length),
-    };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("pagination_contract_violation");
   }
-  const record =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-  const items = Array.isArray(record.items) ? (record.items as T[]) : [];
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 2 ||
+    !("items" in record) ||
+    !("pagination" in record) ||
+    !Array.isArray(record.items)
+  ) {
+    throw new Error("pagination_contract_violation");
+  }
+  const items = record.items as T[];
   return {
     items,
-    pagination: normalizedPagination(
-      record.pagination,
-      fallbackLimit,
-      items.length,
-    ),
+    pagination: normalizedPagination(record.pagination, items.length),
   };
 }
 

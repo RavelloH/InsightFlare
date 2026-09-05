@@ -424,6 +424,7 @@ function buildRequestAnalyticsSql(input: {
     FROM ${REQUEST_ANALYTICS_DATASET}
     WHERE ${requestTimeFilter(input)}
       AND ${requestDispositionFilter(input.source)}
+      AND (blob17 != '' OR blob16 != '')
       ${requestCursorFilter(input.cursor)}
     ORDER BY timestamp DESC, receivedAt DESC, traceId DESC, rayId DESC
     LIMIT ${input.limit}

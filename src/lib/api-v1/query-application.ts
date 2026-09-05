@@ -14,11 +14,14 @@ import type {
   QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import { paginationBinding } from "@/lib/pagination";
 
 export interface ApiV1QueryInvocation<Query, Result> {
   readonly operation: AnalyticsOperationId;
   readonly context: QueryInput["context"];
   readonly query: Query;
+  /** Canonical request DTO, before it is expanded into a provider query. */
+  readonly rawRequest?: unknown;
   readonly providerRegistry: AnalyticsProviderRegistry;
   readonly cache?: {
     readonly key: string;
@@ -67,6 +70,42 @@ function queryTime(
     }
   }
   return undefined;
+}
+
+function rawRequestWithoutCursor(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  const page = record.page;
+  if (!page || typeof page !== "object" || Array.isArray(page)) {
+    return value;
+  }
+  const pageRecord = page as Record<string, unknown>;
+  const { cursor: _cursor, ...pageWithoutCursor } = pageRecord;
+  return { ...record, page: pageWithoutCursor };
+}
+
+async function apiV1RequestPaginationBinding(
+  operation: AnalyticsOperationId,
+  query: unknown,
+  context: QueryInput["context"],
+): Promise<string> {
+  const subject = context.subject;
+  const canonicalSubject =
+    subject.kind === "site"
+      ? subject
+      : {
+          ...subject,
+          authorizedSiteIds: [...subject.authorizedSiteIds].sort(),
+        };
+  return paginationBinding([
+    "api-v1-request-pagination-v1",
+    operation,
+    context.policy.audience,
+    canonicalSubject,
+    rawRequestWithoutCursor(query),
+  ]);
 }
 
 function serviceError<Result>(
@@ -137,10 +176,16 @@ export async function executeApiV1Query<Query, Result>(
       },
     };
   }
+  const rawRequest = invocation.rawRequest ?? invocation.query;
+  const requestBinding = await apiV1RequestPaginationBinding(
+    invocation.operation,
+    rawRequest,
+    invocation.context,
+  );
   const query = {
     ...invocation.query,
     context: invocation.context,
-    time,
+    time: { ...time, paginationBinding: requestBinding },
   } as QueryInput;
   let providerError: unknown;
   const result = await new TypedQueryApplicationService(cache).execute(

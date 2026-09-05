@@ -8,6 +8,7 @@ import {
   pageResponse,
   pageResult,
   paginationBinding,
+  paginationBindingForWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/pagination";
 import type { Env } from "@/lib/edge/types";
 
@@ -153,6 +154,21 @@ describe("D1 pagination cursor helpers", () => {
       items: [1, 2],
       pagination: { limit: 2, returned: 2, hasMore: false, nextCursor: null },
     });
+  });
+
+  it("uses an API request binding override without changing semantic bindings", async () => {
+    await expect(
+      paginationBindingForWindow({ paginationBinding: "request-binding" }, [
+        "ignored",
+        Date.now(),
+      ]),
+    ).resolves.toBe("request-binding");
+
+    const semanticBinding = await paginationBindingForWindow({}, [
+      "pages",
+      "site-1",
+    ]);
+    expect(semanticBinding).toMatch(/^[0-9a-f]{64}$/u);
   });
 
   it("fails closed when signing material is unavailable", async () => {

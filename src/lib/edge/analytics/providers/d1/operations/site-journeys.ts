@@ -28,7 +28,7 @@ import {
   decodePageCursor,
   encodePageCursor,
   hasExactKeys,
-  paginationBinding,
+  paginationBindingForWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/pagination";
 import type { Env } from "@/lib/edge/types";
 
@@ -60,7 +60,7 @@ async function cursorBinding(
   operation: "visitors" | "sessions",
   sort: unknown,
 ): Promise<string> {
-  return paginationBinding([
+  return paginationBindingForWindow(input.window, [
     `journey-${operation}-v1`,
     input.audience ?? "private-dashboard",
     input.siteId,
@@ -279,7 +279,7 @@ function trajectoryBinding(
   operation: "visitor-events" | "visitor-sessions" | "session-events",
   target: string,
 ): Promise<string> {
-  return paginationBinding([
+  return paginationBindingForWindow(input.window, [
     `analytics-${operation}-v1`,
     input.audience ?? "private-dashboard",
     input.siteId,

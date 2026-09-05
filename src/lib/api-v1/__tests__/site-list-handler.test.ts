@@ -141,6 +141,51 @@ function request(
 }
 
 describe("planned site list analytics adapters", () => {
+  it("keeps API v1 preset cursors stable across captured times", async () => {
+    const pages = vi.fn<SitePagesReader>().mockResolvedValue({
+      items: [],
+      pagination: {
+        limit: 20,
+        returned: 0,
+        hasMore: false,
+        nextCursor: null,
+      },
+    });
+    const providerRegistry = createTestProviderRegistry(pages);
+    const first = await handlePlannedSitePages(
+      request("pages", {
+        timeRange: { kind: "preset", preset: "today", timeZone: "UTC" },
+      }),
+      principal,
+      "site-1",
+      providerRegistry,
+      { capturedAtMs: Date.parse("2026-09-06T12:00:00.000Z") },
+    );
+    const second = await handlePlannedSitePages(
+      request("pages", {
+        timeRange: { kind: "preset", preset: "today", timeZone: "UTC" },
+        page: { limit: 20, cursor: "opaque-cursor" },
+      }),
+      principal,
+      "site-1",
+      providerRegistry,
+      { capturedAtMs: Date.parse("2026-09-06T12:01:00.000Z") },
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(pages).toHaveBeenCalledTimes(2);
+    const firstQuery = pages.mock.calls[0]?.[0] as unknown as {
+      time: { paginationBinding?: string };
+    };
+    const secondQuery = pages.mock.calls[1]?.[0] as unknown as {
+      time: { paginationBinding?: string };
+    };
+    expect(firstQuery.time.paginationBinding).toBe(
+      secondQuery.time.paginationBinding,
+    );
+  });
+
   it("serves strict page and referrer envelopes with DTO defaults", async () => {
     const pages = vi.fn<SitePagesReader>().mockResolvedValue({
       items: [

@@ -518,6 +518,7 @@ async function handlePlannedSiteList<
         operation,
         context: siteQueryContext(siteId, "api-v1"),
         query,
+        rawRequest: input,
         providerRegistry,
       },
       {

@@ -113,6 +113,20 @@ export async function paginationBinding(
   return sha256Hex(JSON.stringify(canonicalize(parts)));
 }
 
+/**
+ * API v1 may bind cursors to the original request shape so rolling presets do
+ * not change identity between page requests. Non-API callers continue to use
+ * their parsed semantic binding.
+ */
+export function paginationBindingForWindow(
+  window: { readonly paginationBinding?: string },
+  parts: readonly unknown[],
+): Promise<string> {
+  return window.paginationBinding
+    ? Promise.resolve(window.paginationBinding)
+    : paginationBinding(parts);
+}
+
 export async function encodePageCursor<T>(
   env: SecretSource,
   binding: string,

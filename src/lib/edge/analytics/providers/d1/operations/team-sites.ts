@@ -15,7 +15,7 @@ import {
   decodePageCursor,
   encodePageCursor,
   hasExactKeys,
-  paginationBinding,
+  paginationBindingForWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/pagination";
 import {
   queryTeamSitesPageFromD1,
@@ -81,7 +81,7 @@ function teamSiteCursor(value: unknown): {
 async function teamSitesCursorBinding(
   input: ReadTeamSitesInput,
 ): Promise<string> {
-  return paginationBinding([
+  return paginationBindingForWindow(input.window, [
     "analytics-team-sites-v1",
     input.audience ?? "private-dashboard",
     input.teamId,

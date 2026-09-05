@@ -474,9 +474,16 @@ export function generateDemoVisitorDetail(
       (left, right) =>
         Number(right.startedAt ?? 0) - Number(left.startedAt ?? 0),
     );
-  const events = createDemoJourneyEvents(detailVisits, {
+  const allEvents = createDemoJourneyEvents(detailVisits, {
     includeSessionStart: true,
   });
+  const events =
+    "from" in params || "to" in params
+      ? allEvents.filter((event) => {
+          const occurredAt = Number(event.occurredAt ?? 0);
+          return occurredAt >= from && occurredAt < to;
+        })
+      : allEvents;
   const customEventCount = events.filter(
     (event) => event.kind === "custom",
   ).length;
@@ -590,10 +597,17 @@ export function generateDemoSessionDetail(
         : [];
   const session = createDemoJourneySession(sessionId, detailVisits);
   if (!session) return { ok: true, data: null };
-  const events = createDemoJourneyEvents(detailVisits, {
+  const allEvents = createDemoJourneyEvents(detailVisits, {
     includeSessionStart: true,
     includeSessionEnd: true,
   });
+  const events =
+    "from" in params || "to" in params
+      ? allEvents.filter((event) => {
+          const occurredAt = Number(event.occurredAt ?? 0);
+          return occurredAt >= from && occurredAt < to;
+        })
+      : allEvents;
   const locationPoints = createDemoJourneyLocationPoints(detailVisits);
 
   return {

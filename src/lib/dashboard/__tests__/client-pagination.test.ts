@@ -14,6 +14,7 @@ import {
   fetchFilterValues,
   fetchOverviewSourceCardTab,
 } from "@/lib/dashboard/client-tab-data";
+import { normalizePaginatedCollection } from "@/lib/dashboard/client-utils";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 
 describe("paginated dashboard client requests", () => {
@@ -34,7 +35,7 @@ describe("paginated dashboard client requests", () => {
     return {
       items,
       pagination: {
-        limit: items.length,
+        limit: Math.max(1, items.length),
         returned: items.length,
         hasMore: false,
         nextCursor: null,
@@ -257,7 +258,7 @@ describe("paginated dashboard client requests", () => {
     });
   });
 
-  it("normalizes legacy array collections before pagination consumers read metadata", async () => {
+  it("rejects legacy array collections at the pagination boundary", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -274,33 +275,44 @@ describe("paginated dashboard client requests", () => {
       );
     globalThis.fetch = fetchMock;
 
-    const referrers = await fetchOverviewSourceCardTab(
-      "site-1",
-      window,
-      "domain",
-    );
-    const filterValues = await fetchFilterValues(
-      "site-1",
-      window,
-      "geo.country",
-    );
+    await expect(
+      fetchOverviewSourceCardTab("site-1", window, "domain"),
+    ).rejects.toThrow("pagination_contract_violation");
+  });
 
-    expect(referrers.items).toEqual([
-      { label: "google.com", views: 4, sessions: 2, visitors: 1 },
-    ]);
-    expect(referrers.pagination).toEqual({
-      limit: 100,
-      returned: 1,
-      hasMore: false,
-      nextCursor: null,
-    });
-    expect(filterValues.items).toEqual([{ value: "US", label: "US" }]);
-    expect(filterValues.pagination).toEqual({
-      limit: 200,
-      returned: 1,
-      hasMore: false,
-      nextCursor: null,
-    });
+  it("rejects every malformed canonical collection shape", () => {
+    expect(() =>
+      normalizePaginatedCollection({ items: [], pagination: null }),
+    ).toThrow("pagination_contract_violation");
+    expect(() =>
+      normalizePaginatedCollection({
+        items: [],
+        pagination: {
+          limit: 1,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+          extra: true,
+        },
+      }),
+    ).toThrow("pagination_contract_violation");
+    expect(() =>
+      normalizePaginatedCollection({
+        items: [],
+        pagination: {
+          limit: 0,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      }),
+    ).toThrow("pagination_contract_violation");
+    expect(() => normalizePaginatedCollection([])).toThrow(
+      "pagination_contract_violation",
+    );
+    expect(() =>
+      normalizePaginatedCollection({ items: "not-an-array", pagination: {} }),
+    ).toThrow("pagination_contract_violation");
   });
 
   it("passes pagination options through page card tab requests", async () => {

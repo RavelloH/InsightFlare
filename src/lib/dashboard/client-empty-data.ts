@@ -28,7 +28,7 @@ import type {
   VisitorsData,
 } from "@/lib/edge-client";
 
-function emptyPagination(limit = 0) {
+function emptyPagination(limit = 1) {
   return {
     limit,
     returned: 0,
@@ -184,7 +184,7 @@ export function emptyEventsTrend(
   };
 }
 
-export function emptyEventsRecords(limit = 0): EventsRecordsData {
+export function emptyEventsRecords(limit = 1): EventsRecordsData {
   return {
     ok: true,
     data: {

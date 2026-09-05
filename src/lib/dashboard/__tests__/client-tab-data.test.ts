@@ -122,7 +122,7 @@ describe("fetchFilterValues", () => {
     expect(result).toEqual({
       items: [],
       pagination: {
-        limit: 0,
+        limit: 1,
         returned: 0,
         hasMore: false,
         nextCursor: null,

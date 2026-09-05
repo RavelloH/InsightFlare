@@ -206,6 +206,7 @@ export async function handlePlannedTeamSites(
           principal.siteIds,
         ),
         query,
+        rawRequest: input,
         providerRegistry,
       },
       {

@@ -34,6 +34,9 @@ export function toQueryTime(window: QueryWindow): QueryTime {
     },
     reportingTimeZone: window.timeZone as QueryTime["reportingTimeZone"],
     capturedAtMs: window.nowMs as QueryTime["capturedAtMs"],
+    ...(window.paginationBinding
+      ? { paginationBinding: window.paginationBinding }
+      : {}),
   };
 }
 

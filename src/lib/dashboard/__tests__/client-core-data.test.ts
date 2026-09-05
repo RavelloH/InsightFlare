@@ -42,26 +42,34 @@ vi.mock("@/lib/dashboard/client-request", () => ({
 }));
 
 vi.mock("@/lib/dashboard/client-utils", () => ({
-  normalizePaginatedCollection: vi.fn((value: unknown, fallbackLimit = 0) => {
-    const items = Array.isArray(value)
-      ? value
-      : value &&
-          typeof value === "object" &&
-          Array.isArray((value as { items?: unknown }).items)
-        ? (value as { items: unknown[] }).items
-        : [];
-    const pagination =
-      value &&
-      typeof value === "object" &&
-      (value as { pagination?: unknown }).pagination
-        ? (value as { pagination: unknown }).pagination
-        : {
-            limit: fallbackLimit,
-            returned: items.length,
-            hasMore: false,
-            nextCursor: null,
-          };
-    return { items, pagination };
+  normalizePaginatedCollection: vi.fn((value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("pagination_contract_violation");
+    }
+    const record = value as Record<string, unknown>;
+    if (
+      Object.keys(record).length !== 2 ||
+      !Array.isArray(record.items) ||
+      !record.pagination ||
+      typeof record.pagination !== "object" ||
+      Array.isArray(record.pagination)
+    ) {
+      throw new Error("pagination_contract_violation");
+    }
+    const pagination = record.pagination as Record<string, unknown>;
+    if (
+      Object.keys(pagination).length !== 4 ||
+      typeof pagination.limit !== "number" ||
+      pagination.limit < 1 ||
+      pagination.returned !== record.items.length ||
+      typeof pagination.hasMore !== "boolean" ||
+      (pagination.nextCursor !== null &&
+        typeof pagination.nextCursor !== "string") ||
+      pagination.hasMore !== (pagination.nextCursor !== null)
+    ) {
+      throw new Error("pagination_contract_violation");
+    }
+    return { items: record.items, pagination };
   }),
   withFilters: vi.fn(
     (
@@ -106,7 +114,18 @@ const window = {
 beforeEach(() => {
   fetchPrivateJsonMock.mockReset();
   fetchPrivateJsonMutateMock.mockReset();
-  fetchPrivateJsonMock.mockResolvedValue({ ok: true } as any);
+  fetchPrivateJsonMock.mockResolvedValue({
+    ok: true,
+    data: {
+      items: [],
+      pagination: {
+        limit: 1,
+        returned: 0,
+        hasMore: false,
+        nextCursor: null,
+      },
+    },
+  } as any);
 });
 
 describe("fetchVisitors", () => {
@@ -687,7 +706,18 @@ describe("fetchEventsTrend", () => {
 
 describe("fetchEventsRecords", () => {
   it("assembles search and eventName parameters", async () => {
-    fetchPrivateJsonMock.mockResolvedValueOnce({ ok: true } as any);
+    fetchPrivateJsonMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        items: [],
+        pagination: {
+          limit: 20,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    } as any);
 
     await fetchEventsRecords("site-1", window, undefined, {
       search: "test",
@@ -711,7 +741,7 @@ describe("fetchEventsRecords", () => {
     );
   });
 
-  it("normalizes a successful legacy collection before pagination consumers read it", async () => {
+  it("rejects a legacy collection before pagination consumers read it", async () => {
     const event = { eventId: "event-1" };
     fetchPrivateJsonMock.mockResolvedValueOnce({
       ok: true,
@@ -720,18 +750,7 @@ describe("fetchEventsRecords", () => {
 
     await expect(
       fetchEventsRecords("site-1", window, undefined, { limit: 20 }),
-    ).resolves.toMatchObject({
-      ok: true,
-      data: {
-        items: [event],
-        pagination: {
-          limit: 20,
-          returned: 1,
-          hasMore: false,
-          nextCursor: null,
-        },
-      },
-    });
+    ).rejects.toThrow("pagination_contract_violation");
   });
 
   it("falls back on error", async () => {

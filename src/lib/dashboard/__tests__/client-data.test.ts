@@ -60,7 +60,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
   const emptyPaginatedCollection = {
     items: [],
     pagination: {
-      limit: 0,
+      limit: 1,
       returned: 0,
       hasMore: false,
       nextCursor: null,
@@ -615,7 +615,8 @@ describe("Dashboard Client Data Processing Utilities", () => {
         .mockImplementation((url: string) =>
           Promise.resolve(
             freshJsonResponse(
-              url.includes("/api/private/pages-dashboard")
+              url.includes("/api/private/pages-dashboard") ||
+                url.includes("/api/private/event-types")
                 ? { ok: true, data: emptyPaginatedCollection }
                 : { ok: true, data: [] },
             ),
@@ -650,7 +651,8 @@ describe("Dashboard Client Data Processing Utilities", () => {
         .mockImplementation((url: string) =>
           Promise.resolve(
             freshJsonResponse(
-              url.includes("/api/private/pages-dashboard")
+              url.includes("/api/private/pages-dashboard") ||
+                url.includes("/api/private/event-types")
                 ? { ok: true, data: emptyPaginatedCollection }
                 : { ok: true, data: [] },
             ),
@@ -770,8 +772,14 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("should serialize optional request params for overview, lists, events, and details", async () => {
       const fetchMock = vi
         .fn()
-        .mockImplementation(() =>
-          Promise.resolve(freshJsonResponse({ ok: true, data: [] })),
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            freshJsonResponse(
+              url.includes("/api/private/events-records")
+                ? { ok: true, data: emptyPaginatedCollection }
+                : { ok: true, data: [] },
+            ),
+          ),
         );
       globalThis.fetch = fetchMock as any;
 
@@ -889,8 +897,14 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("should apply list and event defaults while omitting blank optional params", async () => {
       const fetchMock = vi
         .fn()
-        .mockImplementation(() =>
-          Promise.resolve(freshJsonResponse({ ok: true, data: [] })),
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            freshJsonResponse(
+              url.includes("/api/private/events-records")
+                ? { ok: true, data: emptyPaginatedCollection }
+                : { ok: true, data: [] },
+            ),
+          ),
         );
       globalThis.fetch = fetchMock as any;
 
@@ -1130,7 +1144,9 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards cancellation signals for overview source tabs", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(freshJsonResponse({ ok: true, data: [] }));
+        .mockResolvedValue(
+          freshJsonResponse({ ok: true, data: emptyPaginatedCollection }),
+        );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
 
@@ -1331,7 +1347,9 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards cancellation signals for event field values", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(freshJsonResponse({ ok: true, data: [] }));
+        .mockResolvedValue(
+          freshJsonResponse({ ok: true, data: emptyPaginatedCollection }),
+        );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
 
@@ -1611,7 +1629,9 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards cancellation signals for overview page tab requests", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(freshJsonResponse({ ok: true, data: [] }));
+        .mockResolvedValue(
+          freshJsonResponse({ ok: true, data: emptyPaginatedCollection }),
+        );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
 
@@ -1666,7 +1686,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         data: {
           items: [],
           pagination: {
-            limit: 0,
+            limit: 1,
             returned: 0,
             hasMore: false,
             nextCursor: null,
@@ -1680,7 +1700,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         data: {
           items: [],
           pagination: {
-            limit: 0,
+            limit: 1,
             returned: 0,
             hasMore: false,
             nextCursor: null,
@@ -1738,7 +1758,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         data: {
           items: [],
           pagination: {
-            limit: 0,
+            limit: 1,
             returned: 0,
             hasMore: false,
             nextCursor: null,
@@ -2187,7 +2207,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         data: {
           items: [],
           pagination: {
-            limit: 0,
+            limit: 1,
             returned: 0,
             hasMore: false,
             nextCursor: null,

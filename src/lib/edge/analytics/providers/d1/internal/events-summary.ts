@@ -20,7 +20,7 @@ import {
   hasExactKeys,
   type PageResult,
   pageResult,
-  paginationBinding,
+  paginationBindingForWindow,
 } from "./pagination";
 
 export interface EventTypeAggregateCursor {
@@ -49,7 +49,7 @@ function eventTypeCursorBinding(
   search?: string,
   audience: QueryAudience = "private-dashboard",
 ): Promise<string> {
-  return paginationBinding([
+  return paginationBindingForWindow(window, [
     "analytics-event-types-v1",
     audience,
     siteId,

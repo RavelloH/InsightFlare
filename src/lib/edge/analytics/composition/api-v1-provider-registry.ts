@@ -96,6 +96,9 @@ function timeWindow(time: QueryTime): QueryWindow {
     endExclusiveMs: time.range.endExclusiveMs,
     nowMs: time.capturedAtMs,
     timeZone: time.reportingTimeZone,
+    ...(time.paginationBinding
+      ? { paginationBinding: time.paginationBinding }
+      : {}),
   };
 }
 

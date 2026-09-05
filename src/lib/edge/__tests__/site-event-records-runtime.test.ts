@@ -81,7 +81,37 @@ describe("site event-record runtime", () => {
     expect(queryEventRecordPageFromD1).not.toHaveBeenCalled();
   });
 
+  it("uses the same trimmed search for cursor binding and SQL", async () => {
+    vi.mocked(queryEventRecordPageFromD1).mockResolvedValue({
+      rows: [],
+      nextCursor: null,
+    });
+
+    await readSiteEventRecords({
+      ...base,
+      search: "  checkout  ",
+      sort: { field: "occurredAt", direction: "desc" },
+      page: { limit: 20 },
+    });
+
+    expect(queryEventRecordPageFromD1).toHaveBeenCalledWith(
+      base.env,
+      "site-1",
+      base.window,
+      base.filters,
+      expect.objectContaining({ search: "checkout" }),
+    );
+  });
+
   it("requires a signing root and makes detail window-scoped", async () => {
+    vi.mocked(queryEventRecordPageFromD1).mockResolvedValue({
+      rows: [],
+      nextCursor: {
+        occurredAt: 1,
+        eventId: "evt",
+        eventPk: 1,
+      },
+    });
     await expect(
       readSiteEventRecords({
         ...base,

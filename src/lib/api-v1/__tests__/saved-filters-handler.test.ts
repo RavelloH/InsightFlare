@@ -138,7 +138,12 @@ describe("planned saved-filter HTTP adapter", () => {
       ok: true,
       value: {
         items: [],
-        page: { kind: "keyset", limit: 100, nextCursor: null, hasMore: false },
+        pagination: {
+          limit: 100,
+          returned: 0,
+          nextCursor: null,
+          hasMore: false,
+        },
       },
     });
     const response = await handlePlannedSavedFilters(
@@ -152,7 +157,15 @@ describe("planned saved-filter HTTP adapter", () => {
     expect(response.status).toBe(200);
     expect(execute).toHaveBeenCalledOnce();
     await expect(response.json()).resolves.toMatchObject({
-      data: { page: { kind: "keyset" } },
+      data: {
+        items: [],
+        pagination: {
+          limit: 100,
+          returned: 0,
+          nextCursor: null,
+          hasMore: false,
+        },
+      },
     });
   });
 

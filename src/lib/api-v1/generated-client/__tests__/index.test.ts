@@ -1585,9 +1585,9 @@ describe("API v1 generated client", () => {
         response({
           data: {
             items: [],
-            page: {
-              kind: "keyset",
+            pagination: {
               limit: 100,
+              returned: 0,
               nextCursor: null,
               hasMore: false,
             },

@@ -24,6 +24,8 @@ export interface QueryWindow {
   endExclusiveMs: number;
   nowMs: number;
   timeZone: string;
+  /** Optional API v1 request binding; private/public use parsed semantics. */
+  paginationBinding?: string;
 }
 
 export interface SiteRow {
