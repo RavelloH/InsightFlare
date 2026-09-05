@@ -92,6 +92,12 @@ function serviceError<Result>(
       error: { kind: "invalid-input", issues: result.error.issues },
     };
   }
+  if (result.error.kind === "invalid-cursor") {
+    return {
+      ok: false,
+      error: { kind: "invalid-cursor", cursorKind: result.error.cursorKind },
+    };
+  }
   if (result.error.kind === "internal") {
     return null;
   }

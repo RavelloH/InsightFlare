@@ -528,21 +528,37 @@ describe("query contract time helpers", () => {
         approximateVisitors: true,
       }),
       readPages: vi.fn().mockResolvedValue({
-        value: [
-          {
-            pathname: "/docs",
-            query: "",
-            hash: "",
-            views: 3,
-            sessions: 2,
+        value: {
+          items: [
+            {
+              pathname: "/docs",
+              query: "",
+              hash: "",
+              views: 3,
+              sessions: 2,
+            },
+          ],
+          pagination: {
+            limit: 20,
+            returned: 1,
+            hasMore: false,
+            nextCursor: null,
           },
-        ],
+        },
         source: "raw",
       }),
       readReferrers: vi.fn().mockResolvedValue({
-        value: [
-          { referrer: "example.com", views: 3, sessions: 2, visitors: 2 },
-        ],
+        value: {
+          items: [
+            { referrer: "example.com", views: 3, sessions: 2, visitors: 2 },
+          ],
+          pagination: {
+            limit: 20,
+            returned: 1,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
         source: "raw",
       }),
     };

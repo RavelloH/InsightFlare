@@ -577,7 +577,7 @@ describe("edge pages D1 queries", () => {
         {
           pathnames: [" /pricing ", "/pricing", "", "/docs"],
           limit: 10,
-          offset: -5,
+          cursor: null,
         },
       ),
     ).resolves.toEqual([
@@ -594,14 +594,14 @@ describe("edge pages D1 queries", () => {
 
     expect(calls[0].sql).toContain("path_bounce_rollup AS");
     expect(calls[0].sql).toContain("TRIM(COALESCE(pathname, '')) IN (?, ?)");
-    expect(calls[0].sql).toContain("LIMIT ? OFFSET ?");
+    expect(calls[0].sql).toContain("LIMIT ?");
+    expect(calls[0].sql).not.toContain("OFFSET");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
       "Chrome",
       "/pricing",
       "/docs",
       10,
-      0,
     ]);
   });
 
@@ -1089,9 +1089,8 @@ describe("edge paginated page and referrer readers", () => {
       "asc",
     );
     expect(cursor).toEqual({
-      views: 10,
-      sessions: 7,
-      visitors: 6,
+      primary: 6,
+      secondary: 10,
       referrer: "google.com",
     });
 
@@ -1175,13 +1174,11 @@ describe("edge paginated page and referrer readers", () => {
         window,
         filters: EMPTY_FILTER_DOCUMENT,
         interval: "day",
-        page: 1,
-        pageSize: 3,
-        offset: 0,
+        page: { limit: 3, cursor: null },
       }),
     ).resolves.toMatchObject({
-      data: [],
-      meta: { returned: 0, hasMore: false, nextPage: null },
+      items: [],
+      pagination: { limit: 3, returned: 0, hasMore: false, nextCursor: null },
     });
     expect(calls).toHaveLength(1);
   });
@@ -1330,21 +1327,57 @@ describe("edge paginated page and referrer readers", () => {
         window,
         filters: EMPTY_FILTER_DOCUMENT,
         interval: "day",
-        page: 1,
-        pageSize: 3,
-        offset: 0,
+        page: { limit: 3, cursor: null },
       }),
     ).resolves.toMatchObject({
-      data: [
+      items: [
         {
           pathname: "/docs",
           titles: ["Docs", "Reference"],
           trend: [{ views: 5, visitors: 3 }],
         },
       ],
-      meta: { returned: 1, hasMore: false, nextPage: null },
+      pagination: { limit: 3, returned: 1, hasMore: false, nextCursor: null },
     });
     expect(dashboard.calls).toHaveLength(3);
+  });
+
+  it("decodes a dashboard cursor before loading the next page", async () => {
+    const rows = (pathname: string, views: number, sessions: number) => ({
+      pathname,
+      views,
+      sessions,
+      visitors: views,
+      bounces: 0,
+      totalDuration: 1_000,
+      durationViews: 1,
+    });
+    const first = createD1Env([
+      [rows("/first", 10, 5), rows("/second", 8, 4)],
+      [],
+      [],
+    ]);
+    const firstPage = await queryPagesDashboard(first.env, siteId, {
+      window,
+      filters: EMPTY_FILTER_DOCUMENT,
+      interval: "day",
+      page: { limit: 1, cursor: null },
+    });
+    expect(firstPage.pagination.nextCursor).toEqual(expect.any(String));
+
+    const second = createD1Env([[rows("/second", 8, 4)], [], []]);
+    await expect(
+      queryPagesDashboard(second.env, siteId, {
+        window,
+        filters: EMPTY_FILTER_DOCUMENT,
+        interval: "day",
+        page: { limit: 1, cursor: firstPage.pagination.nextCursor },
+      }),
+    ).resolves.toMatchObject({
+      items: [{ pathname: "/second" }],
+      pagination: { hasMore: false, nextCursor: null },
+    });
+    expect(second.calls[0].sql).toContain("pathname > ?");
   });
 });
 
@@ -1582,8 +1615,7 @@ describe("edge pages handlers", () => {
       url("/pages/dashboard", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        page: 2,
-        pageSize: 4,
+        limit: 4,
         interval: "hour",
       }),
     );
@@ -1591,17 +1623,18 @@ describe("edge pages handlers", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       interval: "hour",
-      data: [],
-      meta: {
-        page: 2,
-        pageSize: 4,
-        returned: 0,
-        hasMore: false,
-        nextPage: null,
+      data: {
+        items: [],
+        pagination: {
+          limit: 4,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0].bindings.slice(-2)).toEqual([5, 4]);
+    expect(calls[0].bindings.at(-1)).toBe(5);
   });
 
   it("compiles URL visitor scope before invoking the page dashboard provider", async () => {
@@ -1624,7 +1657,7 @@ describe("edge pages handlers", () => {
     expect(calls[0].bindings.length).toBeGreaterThan(4);
   });
 
-  it("rejects deep dashboard pages before querying D1", async () => {
+  it("rejects invalid dashboard cursors before querying D1", async () => {
     const { env, calls } = createD1Env([]);
 
     const response = await handlePagesDashboard(
@@ -1633,8 +1666,8 @@ describe("edge pages handlers", () => {
       url("/pages/dashboard", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        page: 10_000,
-        pageSize: 24,
+        limit: 24,
+        cursor: "invalid-cursor",
       }),
     );
 
@@ -1718,8 +1751,7 @@ describe("edge pages handlers", () => {
       url("/pages/dashboard", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        page: 1,
-        pageSize: 2,
+        limit: 2,
         interval: "hour",
       }),
     );
@@ -1728,72 +1760,73 @@ describe("edge pages handlers", () => {
     expect(payload).toMatchObject({
       ok: true,
       interval: "hour",
-      meta: {
-        page: 1,
-        pageSize: 2,
-        returned: 2,
-        hasMore: true,
-        nextPage: 2,
-      },
-      data: [
-        {
-          pathname: "/pricing",
-          titles: ["Pricing"],
-          metrics: {
-            views: 10,
-            visitors: 4,
-            sessions: 5,
-            bounceRate: 0.2,
-            pagesPerSession: 2,
-            avgDurationMs: 10000,
-          },
-          changeRates: {
-            views: 100,
-            visitors: 100,
-            sessions: 0,
-            bounceRate: -50,
-            pagesPerSession: 100,
-            avgDurationMs: 100,
-          },
-          trend: [
-            {
-              timestampMs: Date.UTC(2026, 0, 2, 1),
-              views: 6,
-              visitors: 3,
+      data: {
+        items: [
+          {
+            pathname: "/pricing",
+            titles: ["Pricing"],
+            metrics: {
+              views: 10,
+              visitors: 4,
+              sessions: 5,
+              bounceRate: 0.2,
+              pagesPerSession: 2,
+              avgDurationMs: 10000,
             },
-          ],
-        },
-        {
-          pathname: "/docs",
-          titles: ["Docs"],
-          metrics: {
-            views: 4,
-            visitors: 2,
-            sessions: 2,
-            bounceRate: 1,
-            pagesPerSession: 2,
-            avgDurationMs: 10000,
+            changeRates: {
+              views: 100,
+              visitors: 100,
+              sessions: 0,
+              bounceRate: -50,
+              pagesPerSession: 100,
+              avgDurationMs: 100,
+            },
+            trend: [
+              {
+                timestampMs: Date.UTC(2026, 0, 2, 1),
+                views: 6,
+                visitors: 3,
+              },
+            ],
           },
-          changeRates: {
-            views: null,
-            visitors: null,
-            sessions: null,
-            bounceRate: null,
-            pagesPerSession: null,
-            avgDurationMs: null,
-          },
-          trend: [
-            {
-              timestampMs: Date.UTC(2026, 0, 2, 2),
+          {
+            pathname: "/docs",
+            titles: ["Docs"],
+            metrics: {
               views: 4,
               visitors: 2,
+              sessions: 2,
+              bounceRate: 1,
+              pagesPerSession: 2,
+              avgDurationMs: 10000,
             },
-          ],
+            changeRates: {
+              views: null,
+              visitors: null,
+              sessions: null,
+              bounceRate: null,
+              pagesPerSession: null,
+              avgDurationMs: null,
+            },
+            trend: [
+              {
+                timestampMs: Date.UTC(2026, 0, 2, 2),
+                views: 4,
+                visitors: 2,
+              },
+            ],
+          },
+        ],
+        pagination: {
+          limit: 2,
+          returned: 2,
+          hasMore: true,
+          nextCursor: expect.any(String),
         },
-      ],
+      },
     });
     expect(calls).toHaveLength(3);
-    expect(calls[0].bindings.slice(-2)).toEqual([3, 0]);
+    expect(calls[0].bindings.slice(-2)).toEqual([window.endExclusiveMs, 3]);
     expect(calls[1].bindings.slice(-2)).toEqual(["/pricing", "/docs"]);
     expect(calls[2].bindings.slice(-3)).toEqual(["/pricing", "/docs", 3]);
     expect(calls[2].sql).toContain("filtered_visits AS MATERIALIZED");

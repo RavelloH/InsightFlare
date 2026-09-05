@@ -14,6 +14,13 @@ import {
   startOfZonedInterval,
   timeZoneOffsetMinutes,
 } from "@/lib/dashboard/time-zone";
+import {
+  decodePageCursor,
+  encodePageCursor,
+  hasExactKeys,
+  InvalidCursorError,
+  paginationBinding,
+} from "@/lib/pagination";
 
 import type {
   RequestAnalyticsCategory,
@@ -73,6 +80,8 @@ type DimensionGroup = "detection" | "target" | "network" | "client";
 interface DetailCursor {
   timestamp: string;
   receivedAt: number;
+  traceId: string;
+  rayId: string;
 }
 
 const DIMENSION_TABS: Record<DimensionGroup, readonly string[]> = {
@@ -250,20 +259,43 @@ function parseLimit(url: URL): number {
   return Math.max(1, Math.min(MAX_DETAIL_PAGE_SIZE, Math.trunc(value)));
 }
 
-function parseDetailCursor(url: URL): DetailCursor | null {
-  const raw = url.searchParams.get("cursor");
-  if (!raw) return null;
-  try {
-    const value = JSON.parse(raw) as Partial<DetailCursor>;
-    const timestamp = clampString(String(value.timestamp || ""), 64);
-    if (!timestamp) return null;
-    return {
-      timestamp,
-      receivedAt: Math.max(0, toFiniteNumber(value.receivedAt)),
-    };
-  } catch {
+function detailCursor(value: unknown): DetailCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    !hasExactKeys(candidate, ["timestamp", "receivedAt", "traceId", "rayId"])
+  ) {
     return null;
   }
+  const timestamp = clampString(String(candidate.timestamp || ""), 64);
+  const traceId = clampString(String(candidate.traceId || ""), 128);
+  const rayId = clampString(String(candidate.rayId || ""), 120);
+  if (!timestamp || !traceId || !rayId) return null;
+  return {
+    timestamp,
+    receivedAt: Math.max(0, toFiniteNumber(candidate.receivedAt)),
+    traceId,
+    rayId,
+  };
+}
+
+function requestObservationBinding(input: {
+  from: number;
+  to: number;
+  interval: RequestObservationInterval;
+  timeZone: string;
+  source: DetailSource;
+}): Promise<string> {
+  return paginationBinding([
+    "admin-request-observation-v1",
+    "admin",
+    input.source,
+    input.from,
+    input.to,
+    input.interval,
+    input.timeZone,
+    "timestamp:desc,receivedAt:desc,traceId:desc,rayId:desc",
+  ]);
 }
 
 function analyticsSqlString(value: string): string {
@@ -301,7 +333,7 @@ function requestDispositionFilter(source: DetailSource): string {
 
 function requestCursorFilter(cursor?: DetailCursor | null): string {
   if (!cursor) return "";
-  return `AND (timestamp < toDateTime(${analyticsSqlString(cursor.timestamp)}) OR (timestamp = toDateTime(${analyticsSqlString(cursor.timestamp)}) AND double1 < ${cursor.receivedAt}))`;
+  return `AND (timestamp < toDateTime(${analyticsSqlString(cursor.timestamp)}) OR (timestamp = toDateTime(${analyticsSqlString(cursor.timestamp)}) AND (double1 < ${cursor.receivedAt} OR (double1 = ${cursor.receivedAt} AND (blob17 < ${analyticsSqlString(cursor.traceId)} OR (blob17 = ${analyticsSqlString(cursor.traceId)} AND blob16 < ${analyticsSqlString(cursor.rayId)}))))))`;
 }
 
 function requestRowSelect(): string {
@@ -394,7 +426,7 @@ function buildRequestAnalyticsSql(input: {
     WHERE ${requestTimeFilter(input)}
       AND ${requestDispositionFilter(input.source)}
       ${requestCursorFilter(input.cursor)}
-    ORDER BY timestamp DESC, receivedAt DESC
+    ORDER BY timestamp DESC, receivedAt DESC, traceId DESC, rayId DESC
     LIMIT ${input.limit}
     FORMAT JSONEachRow
   `;
@@ -724,8 +756,12 @@ function emptyRequestObservationResponse(
     },
     mapPoints: [],
     events: [],
-    hasMore: false,
-    nextCursor: null,
+    pagination: {
+      limit: DETAIL_PAGE_SIZE,
+      returned: 0,
+      hasMore: false,
+      nextCursor: null,
+    },
     dimensions: { network: {} },
   };
   return {
@@ -929,6 +965,8 @@ function detailCursorForEvent(event: RequestObservationEvent): DetailCursor {
   return {
     timestamp: event.timestamp,
     receivedAt: event.receivedAt,
+    traceId: event.traceId,
+    rayId: event.rayId,
   };
 }
 
@@ -1516,18 +1554,36 @@ export async function handleRequestObservationAdmin(
     });
   }
 
-  const pageSource = url.searchParams.get("page");
+  const pageSource = url.searchParams.get("source");
   if (pageSource === "blocked" || pageSource === "included") {
     const source: DetailSource = pageSource;
-    const cursor = parseDetailCursor(url);
-    if (url.searchParams.has("cursor") && !cursor) {
-      return bad(
-        "Invalid request observation page cursor",
-        "request_observation_invalid_cursor",
-        req,
-      );
-    }
     const pageLimit = parseLimit(url);
+    const binding = await requestObservationBinding({
+      from,
+      to,
+      interval,
+      timeZone,
+      source,
+    });
+    let cursor: DetailCursor | null = null;
+    try {
+      cursor = await decodePageCursor(
+        env,
+        binding,
+        url.searchParams.get("cursor"),
+        "request-observation",
+        detailCursor,
+      );
+    } catch (error) {
+      if (error instanceof InvalidCursorError) {
+        return bad(
+          "Invalid request observation page cursor",
+          "request_observation_invalid_cursor",
+          req,
+        );
+      }
+      throw error;
+    }
     const pageResult = await queryCloudflareAnalyticsEngine({
       apiUrl: analyticsApiUrl,
       accountId: config.accountId,
@@ -1577,12 +1633,22 @@ export async function handleRequestObservationAdmin(
         detailsAreSampled: true,
         distinctAreApproximate: false,
       }),
-      page: {
-        source,
-        events,
-        hasMore,
-        nextCursor:
-          hasMore && lastEvent ? detailCursorForEvent(lastEvent) : null,
+      source,
+      data: {
+        items: events,
+        pagination: {
+          limit: pageLimit,
+          returned: events.length,
+          hasMore,
+          nextCursor:
+            hasMore && lastEvent
+              ? await encodePageCursor(
+                  env,
+                  binding,
+                  detailCursorForEvent(lastEvent),
+                )
+              : null,
+        },
       },
     });
   }
@@ -1752,11 +1818,33 @@ export async function handleRequestObservationAdmin(
   const includedEvents = includedRawRows.map((row) =>
     normalizeRequestRow(row, sites),
   );
+  const blockedBinding = await requestObservationBinding({
+    from,
+    to,
+    interval,
+    timeZone,
+    source: "blocked",
+  });
+  const includedBinding = await requestObservationBinding({
+    from,
+    to,
+    interval,
+    timeZone,
+    source: "included",
+  });
   const blockedNextCursor = blockedHasMore
-    ? detailCursorForEvent(blockedEvents[blockedEvents.length - 1])
+    ? await encodePageCursor(
+        env,
+        blockedBinding,
+        detailCursorForEvent(blockedEvents[blockedEvents.length - 1]!),
+      )
     : null;
   const includedNextCursor = includedHasMore
-    ? detailCursorForEvent(includedEvents[includedEvents.length - 1])
+    ? await encodePageCursor(
+        env,
+        includedBinding,
+        detailCursorForEvent(includedEvents[includedEvents.length - 1]!),
+      )
     : null;
   const blockedTrendResult = await queryAnalyticsRows({
     apiUrl: analyticsApiUrl,
@@ -2227,8 +2315,12 @@ export async function handleRequestObservationAdmin(
       events: blockedEvents.map((event) =>
         serializeListEvent(event, "blocked"),
       ),
-      hasMore: blockedHasMore,
-      nextCursor: blockedNextCursor,
+      pagination: {
+        limit,
+        returned: blockedEvents.length,
+        hasMore: blockedHasMore,
+        nextCursor: blockedNextCursor,
+      },
       reasons: aggregates.reasons,
       countries: aggregates.countries,
       asns: aggregates.asns,
@@ -2242,8 +2334,12 @@ export async function handleRequestObservationAdmin(
       events: includedEvents.map((event) =>
         serializeListEvent(event, "included"),
       ),
-      hasMore: includedHasMore,
-      nextCursor: includedNextCursor,
+      pagination: {
+        limit,
+        returned: includedEvents.length,
+        hasMore: includedHasMore,
+        nextCursor: includedNextCursor,
+      },
       dimensions: {
         network: includedNetworkDimensions,
       },

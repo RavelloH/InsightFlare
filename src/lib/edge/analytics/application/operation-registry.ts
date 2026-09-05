@@ -310,7 +310,10 @@ export const analyticsOperationRegistry = [
     operationRevision: "1",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
     result: (
-      _result: AnalyticsResult<{ items: readonly unknown[]; page: unknown }>,
+      _result: AnalyticsResult<{
+        items: readonly unknown[];
+        pagination: unknown;
+      }>,
     ) => undefined,
   }),
   operation({
@@ -350,7 +353,10 @@ export const analyticsOperationRegistry = [
     operationRevision: "1",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
     result: (
-      _result: AnalyticsResult<{ items: readonly unknown[]; page: unknown }>,
+      _result: AnalyticsResult<{
+        items: readonly unknown[];
+        pagination: unknown;
+      }>,
     ) => undefined,
   }),
   operation({
@@ -382,7 +388,7 @@ export const analyticsOperationRegistry = [
       _result: AnalyticsResult<{
         eventName: string;
         fields: readonly unknown[];
-        page: unknown;
+        pagination: unknown;
       }>,
     ) => undefined,
   }),
@@ -399,7 +405,7 @@ export const analyticsOperationRegistry = [
         fieldPath: string;
         fieldValueType: string;
         items: readonly unknown[];
-        page: unknown;
+        pagination: unknown;
       }>,
     ) => undefined,
   }),
@@ -442,7 +448,10 @@ export const analyticsOperationRegistry = [
     operationRevision: "1",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
     result: (
-      _result: AnalyticsResult<{ items: readonly unknown[]; page: unknown }>,
+      _result: AnalyticsResult<{
+        items: readonly unknown[];
+        pagination: unknown;
+      }>,
     ) => undefined,
   }),
   operation({
@@ -453,7 +462,10 @@ export const analyticsOperationRegistry = [
     operationRevision: "1",
     schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
     result: (
-      _result: AnalyticsResult<{ items: readonly unknown[]; page: unknown }>,
+      _result: AnalyticsResult<{
+        items: readonly unknown[];
+        pagination: unknown;
+      }>,
     ) => undefined,
   }),
   operation({

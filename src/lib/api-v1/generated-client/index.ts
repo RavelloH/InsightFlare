@@ -1496,8 +1496,9 @@ export function createApiV1GeneratedClient(
         ...(input ?? {}),
       });
       const query = new URLSearchParams();
-      if (parsed.limit !== 100) query.set("limit", String(parsed.limit));
-      if (parsed.cursor) query.set("cursor", parsed.cursor);
+      if (parsed.page.limit !== 100)
+        query.set("limit", String(parsed.page.limit));
+      if (parsed.page.cursor) query.set("cursor", parsed.page.cursor);
       const suffix = query.toString() ? `?${query.toString()}` : "";
       return request(transport, {
         path:

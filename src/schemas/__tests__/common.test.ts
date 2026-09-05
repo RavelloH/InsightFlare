@@ -82,33 +82,30 @@ describe("ErrorEnvelopeSchema", () => {
 describe("PaginationMetaSchema", () => {
   it("accepts valid pagination meta", () => {
     const result = PaginationMetaSchema.safeParse({
-      page: 1,
-      pageSize: 20,
+      limit: 20,
       returned: 20,
       hasMore: true,
-      nextPage: 2,
+      nextCursor: "cursor-2",
     });
     expect(result.success).toBe(true);
   });
 
-  it("accepts null nextPage", () => {
+  it("accepts null nextCursor", () => {
     const result = PaginationMetaSchema.safeParse({
-      page: 3,
-      pageSize: 10,
+      limit: 10,
       returned: 5,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     });
     expect(result.success).toBe(true);
   });
 
-  it("rejects non-integer page", () => {
+  it("rejects non-integer limit", () => {
     const result = PaginationMetaSchema.safeParse({
-      page: 1.5,
-      pageSize: 20,
+      limit: 1.5,
       returned: 20,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     });
     expect(result.success).toBe(false);
   });
@@ -140,29 +137,26 @@ describe("createEnvelopeSchema", () => {
 
 describe("createPaginatedEnvelopeSchema", () => {
   it("wraps data and meta inside the envelope", () => {
-    const schema = createPaginatedEnvelopeSchema(
-      z.object({ items: z.array(z.string()) }),
-    );
+    const schema = createPaginatedEnvelopeSchema(z.string());
     const result = schema.safeParse({
       ok: true,
       requestId: "r",
       timestamp: "t",
-      data: { items: ["a", "b"] },
-      meta: {
-        page: 1,
-        pageSize: 20,
-        returned: 2,
-        hasMore: false,
-        nextPage: null,
+      data: {
+        items: ["a", "b"],
+        pagination: {
+          limit: 20,
+          returned: 2,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
     });
     expect(result.success).toBe(true);
   });
 
   it("rejects missing meta", () => {
-    const schema = createPaginatedEnvelopeSchema(
-      z.object({ items: z.array(z.string()) }),
-    );
+    const schema = createPaginatedEnvelopeSchema(z.string());
     const result = schema.safeParse({
       ok: true,
       requestId: "r",

@@ -76,12 +76,14 @@ function parseListInput(url: URL, siteId: string) {
   }
   const raw = {
     siteId,
-    ...(url.searchParams.has("limit")
-      ? { limit: Number(url.searchParams.get("limit")) }
-      : {}),
-    ...(url.searchParams.has("cursor")
-      ? { cursor: url.searchParams.get("cursor") }
-      : {}),
+    page: {
+      ...(url.searchParams.has("limit")
+        ? { limit: Number(url.searchParams.get("limit")) }
+        : {}),
+      ...(url.searchParams.has("cursor")
+        ? { cursor: url.searchParams.get("cursor") }
+        : {}),
+    },
   };
   return ListTeamVisibleSavedFiltersInputSchema.safeParse(raw);
 }

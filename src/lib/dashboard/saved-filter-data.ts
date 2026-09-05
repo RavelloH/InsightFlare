@@ -9,11 +9,16 @@ import { fetchPrivateJson, fetchPrivateJsonMutate } from "./client-request";
 
 export function fetchSavedFilters(
   siteId: string,
-  options?: { signal?: AbortSignal },
+  options?: { limit?: number; cursor?: string | null; signal?: AbortSignal },
 ): Promise<SavedFilterListResponse> {
+  const params: Record<string, string | number> = {
+    siteId,
+    limit: options?.limit ?? 100,
+  };
+  if (options?.cursor) params.cursor = options.cursor;
   return fetchPrivateJson<SavedFilterListResponse>(
     "/api/private/saved-filters",
-    { siteId },
+    params,
     { signal: options?.signal },
   );
 }

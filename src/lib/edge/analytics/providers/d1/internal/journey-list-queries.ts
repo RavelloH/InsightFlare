@@ -1,6 +1,7 @@
 import type { ScopedDatasetSql } from "@/lib/edge/analytics/contract";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
+import { pageResult } from "@/lib/pagination";
 
 import type {
   FilterDocument,
@@ -36,24 +37,17 @@ import {
   visitorListOrderBy,
   whereClauseWithTarget,
 } from "./journey-helpers";
-import { pageResult } from "./pagination";
 import { scopedDatasetFor } from "./scoped-dataset";
 
-const JOURNEY_LIST_CURSOR_MAX_LENGTH = 12_288;
-
 export interface VisitorListCursor {
-  sortKey: VisitorListSortKey;
-  sortDirection: "asc" | "desc";
   sortValue: number;
-  lastSeenAt: number;
+  lastSeenAt?: number;
   visitorId: string;
 }
 
 export interface SessionListCursor {
-  sortKey: SessionListSortKey;
-  sortDirection: "asc" | "desc";
   sortValue: number;
-  startedAt: number;
+  startedAt?: number;
   sessionId: string;
 }
 
@@ -236,129 +230,30 @@ LIMIT 1
   return rows.length > 0;
 }
 
-function toBase64Url(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/u, "");
-}
-
-function fromBase64Url(value: string): string | null {
-  try {
-    const padded = value.replaceAll("-", "+").replaceAll("_", "/");
-    const binary = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, "="));
-    const bytes = Uint8Array.from(binary, (character) =>
-      character.charCodeAt(0),
-    );
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return null;
-  }
-}
-
-function parseCursorValue(raw: string): Record<string, unknown> | null {
-  if (raw.length === 0 || raw.length > JOURNEY_LIST_CURSOR_MAX_LENGTH) {
-    return null;
-  }
-  const decoded = fromBase64Url(raw);
-  if (!decoded) return null;
-  try {
-    const value: unknown = JSON.parse(decoded);
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-export function serializeVisitorListCursor(cursor: VisitorListCursor): string {
-  return toBase64Url(JSON.stringify(cursor));
-}
-
-export function parseVisitorListCursor(
-  raw: string,
-  sort: ListSort<VisitorListSortKey>,
-): VisitorListCursor | null {
-  const cursor = parseCursorValue(raw);
-  if (
-    !cursor ||
-    cursor.sortKey !== sort.key ||
-    cursor.sortDirection !== sort.direction ||
-    typeof cursor.sortValue !== "number" ||
-    !Number.isFinite(cursor.sortValue) ||
-    typeof cursor.lastSeenAt !== "number" ||
-    !Number.isFinite(cursor.lastSeenAt) ||
-    typeof cursor.visitorId !== "string"
-  ) {
-    return null;
-  }
-  return {
-    sortKey: sort.key,
-    sortDirection: sort.direction,
-    sortValue: cursor.sortValue,
-    lastSeenAt: cursor.lastSeenAt,
-    visitorId: cursor.visitorId,
-  };
-}
-
-export function serializeSessionListCursor(cursor: SessionListCursor): string {
-  return toBase64Url(JSON.stringify(cursor));
-}
-
-export function parseSessionListCursor(
-  raw: string,
-  sort: ListSort<SessionListSortKey>,
-): SessionListCursor | null {
-  const cursor = parseCursorValue(raw);
-  if (
-    !cursor ||
-    cursor.sortKey !== sort.key ||
-    cursor.sortDirection !== sort.direction ||
-    typeof cursor.sortValue !== "number" ||
-    !Number.isFinite(cursor.sortValue) ||
-    typeof cursor.startedAt !== "number" ||
-    !Number.isFinite(cursor.startedAt) ||
-    typeof cursor.sessionId !== "string"
-  ) {
-    return null;
-  }
-  return {
-    sortKey: sort.key,
-    sortDirection: sort.direction,
-    sortValue: cursor.sortValue,
-    startedAt: cursor.startedAt,
-    sessionId: cursor.sessionId,
-  };
-}
-
 function visitorCursorFromRow(
   row: VisitorRow,
   sort: ListSort<VisitorListSortKey>,
 ): VisitorListCursor {
-  return {
-    sortKey: sort.key,
-    sortDirection: sort.direction,
-    sortValue: row[sort.key],
-    lastSeenAt: row.lastSeenAt,
-    visitorId: row.visitorId,
-  };
+  return sort.key === "lastSeenAt"
+    ? { sortValue: row.lastSeenAt, visitorId: row.visitorId }
+    : {
+        sortValue: row[sort.key],
+        lastSeenAt: row.lastSeenAt,
+        visitorId: row.visitorId,
+      };
 }
 
 function sessionCursorFromRow(
   row: SessionRow,
   sort: ListSort<SessionListSortKey>,
 ): SessionListCursor {
-  return {
-    sortKey: sort.key,
-    sortDirection: sort.direction,
-    sortValue: sort.key === "durationMs" ? row.durationMs : row[sort.key],
-    startedAt: row.startedAt,
-    sessionId: row.sessionId,
-  };
+  return sort.key === "startedAt"
+    ? { sortValue: row.startedAt, sessionId: row.sessionId }
+    : {
+        sortValue: sort.key === "durationMs" ? row.durationMs : row[sort.key],
+        startedAt: row.startedAt,
+        sessionId: row.sessionId,
+      };
 }
 
 function visitorCursorFilter(
@@ -387,8 +282,8 @@ function visitorCursorFilter(
     bindings: [
       cursor.sortValue,
       cursor.sortValue,
-      cursor.lastSeenAt,
-      cursor.lastSeenAt,
+      cursor.lastSeenAt!,
+      cursor.lastSeenAt!,
       cursor.visitorId,
     ],
   };
@@ -419,8 +314,8 @@ function sessionCursorFilter(
     bindings: [
       cursor.sortValue,
       cursor.sortValue,
-      cursor.startedAt,
-      cursor.startedAt,
+      cursor.startedAt!,
+      cursor.startedAt!,
       cursor.sessionId,
     ],
   };
@@ -437,67 +332,38 @@ export async function queryVisitorsFromD1(
   sort: ListSort<VisitorListSortKey> = DEFAULT_VISITOR_LIST_SORT,
   search?: string,
 ): Promise<VisitorRow[]> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
-  const searchSql = buildJourneySearchSql(search);
-  const hasFilters = !scopedDataset && hasJourneyFilters(filters);
-  const expandEntities = hasFilters;
-  const searchCte = searchSql
-    ? `,
-matched_visitors AS (
-  SELECT DISTINCT visitor_id
-  FROM filtered_visits
-  WHERE visitor_id != '' AND ${searchSql.condition}
-)`
-    : "";
-  const searchWhere = searchSql
-    ? "AND fv.visitor_id IN (SELECT visitor_id FROM matched_visitors)"
-    : "";
-  const targetClause = targetVisitorId
-    ? scopedDataset
-      ? `WHERE visitor_id = ?`
-      : whereClauseWithTarget(filter?.clause ?? "", {
-          column: "visitor_id",
-          value: targetVisitorId,
-        })
-    : (filter?.clause ?? "");
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? `${buildVisitSourceCte()},\n${buildCustomEventSourceCte()}`},
-${scopedDataset ? `event_source AS (SELECT * FROM ${scopedDataset.eventRelation}),` : ""}
-${
-  scopedDataset
-    ? scopedAggregationFilteredVisitsCte(scopedDataset, "visitor", targetClause)
-    : expandEntities
-      ? fullEntityFilterCtes("visitor", targetClause, searchSql?.condition)
-      : `filtered_visits AS (
-  SELECT visit_source.*, 1 AS is_visit_observation
-  FROM visit_source
-  ${targetClause}
-  )`
-}
-${expandEntities ? "" : searchCte},
-${buildVisitorAggregationSql({
-  searchWhere: expandEntities ? "" : searchWhere,
-  browserVersionExpression: browserMajorVersionExpr(),
-  orderBy: visitorListOrderBy(sort),
-  limitOffset: "LIMIT ? OFFSET ?",
-})}`;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...eventSourceBindings(siteId, window),
-          ]),
-      ...(targetVisitorId ? [targetVisitorId] : []),
-      ...(filter?.bindings ?? []),
-      ...(searchSql?.bindings ?? []),
-      limit,
-      offset,
-    ])
-  ).map(mapVisitorRow);
+  const rows: VisitorRow[] = [];
+  let cursor: VisitorListCursor | null = null;
+  let remaining = Math.max(0, Math.trunc(offset));
+  const pageLimit = Math.max(1, Math.min(200, limit + remaining));
+  while (rows.length < limit) {
+    const page = await queryVisitorListPageFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      {
+        limit: pageLimit,
+        sort,
+        search,
+        cursor,
+      },
+    );
+    const candidates = targetVisitorId
+      ? page.rows.filter((row) => row.visitorId === targetVisitorId)
+      : page.rows;
+    if (remaining >= candidates.length) {
+      remaining -= candidates.length;
+    } else {
+      rows.push(
+        ...candidates.slice(remaining, remaining + limit - rows.length),
+      );
+      remaining = 0;
+    }
+    if (rows.length >= limit || !page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+  return rows;
 }
 
 export async function queryVisitorListPageFromD1(
@@ -506,7 +372,7 @@ export async function queryVisitorListPageFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   options: {
-    pageSize: number;
+    limit: number;
     sort: ListSort<VisitorListSortKey>;
     search?: string;
     cursor?: VisitorListCursor | null;
@@ -568,10 +434,10 @@ ${buildVisitorAggregationSql({
     ...(filter?.bindings ?? []),
     ...(searchSql?.bindings ?? []),
     ...cursor.bindings,
-    options.pageSize + 1,
+    options.limit + 1,
   ]);
-  const hasMore = records.length > options.pageSize;
-  const pageRecords = hasMore ? records.slice(0, options.pageSize) : records;
+  const hasMore = records.length > options.limit;
+  const pageRecords = hasMore ? records.slice(0, options.limit) : records;
   const rows = pageRecords.map(mapVisitorRow);
   const lastRow = rows.at(-1);
   return {
@@ -592,73 +458,34 @@ export async function querySessionsFromD1(
   sort: ListSort<SessionListSortKey> = DEFAULT_SESSION_LIST_SORT,
   search?: string,
 ): Promise<SessionRow[]> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
-  const searchSql = buildJourneySearchSql(search);
-  const hasFilters = !scopedDataset && hasJourneyFilters(filters);
-  const expandEntities = hasFilters;
-  const searchCte = searchSql
-    ? `,
-matched_sessions AS (
-  SELECT DISTINCT session_id
-  FROM filtered_visits
-  WHERE session_id != '' AND ${searchSql.condition}
-)`
-    : "";
-  const searchWhere = searchSql
-    ? "AND fv.session_id IN (SELECT session_id FROM matched_sessions)"
-    : "";
-  const targetColumn =
-    target?.type === "visitor"
-      ? "visitor_id"
-      : target?.type === "session"
-        ? "session_id"
-        : "";
-  const targetClause = target
-    ? scopedDataset
-      ? `WHERE ${targetColumn} = ?`
-      : whereClauseWithTarget(filter?.clause ?? "", {
-          column: targetColumn,
-          value: target.value,
-        })
-    : (filter?.clause ?? "");
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? `${buildVisitSourceCte()},\n${buildCustomEventSourceCte()}`},
-${scopedDataset ? `event_source AS (SELECT * FROM ${scopedDataset.eventRelation}),` : ""}
-${
-  scopedDataset
-    ? scopedAggregationFilteredVisitsCte(scopedDataset, "session", targetClause)
-    : expandEntities
-      ? fullEntityFilterCtes("session", targetClause, searchSql?.condition)
-      : `filtered_visits AS (
-  SELECT visit_source.*, 1 AS is_visit_observation
-  FROM visit_source
-  ${targetClause}
-  )`
-}
-${expandEntities ? "" : searchCte},
-${buildSessionAggregationSql({
-  searchWhere: expandEntities ? "" : searchWhere,
-  browserVersionExpression: browserMajorVersionExpr(),
-  orderBy: sessionListOrderBy(sort),
-  limitOffset: "LIMIT ? OFFSET ?",
-})}`;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...eventSourceBindings(siteId, window),
-          ]),
-      ...(target ? [target.value] : []),
-      ...(filter?.bindings ?? []),
-      ...(searchSql?.bindings ?? []),
-      limit,
-      offset,
-    ])
-  ).map(mapSessionRow);
+  const rows: SessionRow[] = [];
+  let cursor: SessionListCursor | null = null;
+  let remaining = Math.max(0, Math.trunc(offset));
+  const pageLimit = Math.max(1, Math.min(200, limit + remaining));
+  while (rows.length < limit) {
+    const page = await querySessionListPageFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      {
+        limit: pageLimit,
+        sort,
+        search,
+        cursor,
+        target,
+      },
+    );
+    if (remaining >= page.rows.length) {
+      remaining -= page.rows.length;
+    } else {
+      rows.push(...page.rows.slice(remaining, remaining + limit - rows.length));
+      remaining = 0;
+    }
+    if (rows.length >= limit || !page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+  return rows;
 }
 
 export async function querySessionListPageFromD1(
@@ -667,7 +494,7 @@ export async function querySessionListPageFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   options: {
-    pageSize: number;
+    limit: number;
     sort: ListSort<SessionListSortKey>;
     search?: string;
     cursor?: SessionListCursor | null;
@@ -745,10 +572,10 @@ ${buildSessionAggregationSql({
     ...(filter?.bindings ?? []),
     ...(searchSql?.bindings ?? []),
     ...cursor.bindings,
-    options.pageSize + 1,
+    options.limit + 1,
   ]);
-  const hasMore = records.length > options.pageSize;
-  const pageRecords = hasMore ? records.slice(0, options.pageSize) : records;
+  const hasMore = records.length > options.limit;
+  const pageRecords = hasMore ? records.slice(0, options.limit) : records;
   const rows = pageRecords.map(mapSessionRow);
   const lastRow = rows.at(-1);
   return {

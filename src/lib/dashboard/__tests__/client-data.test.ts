@@ -612,8 +612,14 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards query cancellation signals for overview and trend requests", async () => {
       const fetchMock = vi
         .fn()
-        .mockImplementation(() =>
-          Promise.resolve(freshJsonResponse({ ok: true, data: [] })),
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            freshJsonResponse(
+              url.includes("/api/private/pages-dashboard")
+                ? { ok: true, data: emptyPaginatedCollection }
+                : { ok: true, data: [] },
+            ),
+          ),
         );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
@@ -641,8 +647,14 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards query cancellation signals for share trend data sources", async () => {
       const fetchMock = vi
         .fn()
-        .mockImplementation(() =>
-          Promise.resolve(freshJsonResponse({ ok: true, data: [] })),
+        .mockImplementation((url: string) =>
+          Promise.resolve(
+            freshJsonResponse(
+              url.includes("/api/private/pages-dashboard")
+                ? { ok: true, data: emptyPaginatedCollection }
+                : { ok: true, data: [] },
+            ),
+          ),
         );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
@@ -774,7 +786,6 @@ describe("Dashboard Client Data Processing Utilities", () => {
 
       await fetchVisitors("option-visitors", mockWindow, undefined, {
         cursor: "visitor-cursor",
-        pageSize: 25,
         limit: 7,
         sortBy: "lastSeenAt",
         sortDir: "asc",
@@ -782,23 +793,21 @@ describe("Dashboard Client Data Processing Utilities", () => {
       });
       params = paramsFromCall(fetchMock, 1);
       expect(params.get("cursor")).toBe("visitor-cursor");
-      expect(params.get("pageSize")).toBe("25");
       expect(params.get("limit")).toBe("7");
       expect(params.get("sortBy")).toBe("lastSeenAt");
       expect(params.get("sortDir")).toBe("asc");
       expect(params.get("search")).toBe("alice");
 
       await fetchVisitors("option-visitors-pagesize", mockWindow, undefined, {
-        pageSize: 25,
+        limit: 25,
         search: "   ",
       });
       params = paramsFromCall(fetchMock, 2);
-      expect(params.has("limit")).toBe(false);
+      expect(params.get("limit")).toBe("25");
       expect(params.has("search")).toBe(false);
 
       await fetchSessions("option-sessions", mockWindow, undefined, {
         cursor: "session-cursor",
-        pageSize: 30,
         limit: 9,
         sortBy: "durationMs",
         sortDir: "desc",
@@ -806,18 +815,17 @@ describe("Dashboard Client Data Processing Utilities", () => {
       });
       params = paramsFromCall(fetchMock, 3);
       expect(params.get("cursor")).toBe("session-cursor");
-      expect(params.get("pageSize")).toBe("30");
       expect(params.get("limit")).toBe("9");
       expect(params.get("sortBy")).toBe("durationMs");
       expect(params.get("sortDir")).toBe("desc");
       expect(params.get("search")).toBe("session");
 
       await fetchSessions("option-sessions-pagesize", mockWindow, undefined, {
-        pageSize: 30,
+        limit: 30,
         search: "   ",
       });
       params = paramsFromCall(fetchMock, 4);
-      expect(params.has("limit")).toBe(false);
+      expect(params.get("limit")).toBe("30");
       expect(params.has("search")).toBe(false);
 
       await fetchEventsTrend("option-events-trend", mockWindow, undefined, {
@@ -830,7 +838,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
 
       await fetchEventsRecords("option-events-records", mockWindow, undefined, {
         cursor: "event-cursor",
-        pageSize: 15,
+        limit: 15,
         sortBy: "pathname",
         sortDir: "desc",
         search: "  /pricing  ",
@@ -839,7 +847,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
       params = paramsFromCall(fetchMock, 6);
       expect(params.get("cursor")).toBe("event-cursor");
       expect(params.has("page")).toBe(false);
-      expect(params.get("pageSize")).toBe("15");
+      expect(params.get("limit")).toBe("15");
       expect(params.get("sortBy")).toBe("pathname");
       expect(params.get("sortDir")).toBe("desc");
       expect(params.get("search")).toBe("/pricing");
@@ -915,7 +923,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         },
       );
       params = paramsFromCall(fetchMock, 3);
-      expect(params.get("pageSize")).toBe("80");
+      expect(params.get("limit")).toBe("80");
       expect(params.has("cursor")).toBe(false);
       expect(params.has("search")).toBe(false);
       expect(params.has("eventName")).toBe(false);
@@ -1087,13 +1095,13 @@ describe("Dashboard Client Data Processing Utilities", () => {
         mockWindow,
         undefined,
         {
-          page: 5,
-          pageSize: 14,
+          limit: 14,
+          cursor: "pages-cursor",
         },
       );
       params = paramsFromCall(fetchMock, 10);
-      expect(params.get("page")).toBe("5");
-      expect(params.get("pageSize")).toBe("14");
+      expect(params.get("limit")).toBe("14");
+      expect(params.get("cursor")).toBe("pages-cursor");
 
       await fetchRetention("option-retention", mockWindow, undefined, {
         granularity: "day",
@@ -1158,7 +1166,9 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards cancellation signals for session list requests", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(freshJsonResponse({ ok: true, data: [], meta: {} }));
+        .mockResolvedValue(
+          freshJsonResponse({ ok: true, data: emptyPaginatedCollection }),
+        );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
 
@@ -1186,7 +1196,9 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards cancellation signals for visitor list requests", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(freshJsonResponse({ ok: true, data: [], meta: {} }));
+        .mockResolvedValue(
+          freshJsonResponse({ ok: true, data: emptyPaginatedCollection }),
+        );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
 
@@ -1253,7 +1265,9 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards cancellation signals for event record requests", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(freshJsonResponse({ ok: true, data: [], meta: {} }));
+        .mockResolvedValue(
+          freshJsonResponse({ ok: true, data: emptyPaginatedCollection }),
+        );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
 
@@ -1649,24 +1663,28 @@ describe("Dashboard Client Data Processing Utilities", () => {
         fetchVisitors("fallback-visitors", mockWindow),
       ).resolves.toEqual({
         ok: true,
-        data: [],
-        meta: {
-          pageSize: 0,
-          returned: 0,
-          hasMore: false,
-          nextCursor: null,
+        data: {
+          items: [],
+          pagination: {
+            limit: 0,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
         },
       });
       await expect(
         fetchSessions("fallback-sessions", mockWindow),
       ).resolves.toEqual({
         ok: true,
-        data: [],
-        meta: {
-          pageSize: 0,
-          returned: 0,
-          hasMore: false,
-          nextCursor: null,
+        data: {
+          items: [],
+          pagination: {
+            limit: 0,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
         },
       });
 
@@ -1692,10 +1710,10 @@ describe("Dashboard Client Data Processing Utilities", () => {
         "fallback-events-records",
         mockWindow,
         undefined,
-        { pageSize: 33 },
+        { limit: 33 },
       );
-      expect(eventsRecords.meta.pageSize).toBe(33);
-      expect(eventsRecords.data).toEqual([]);
+      expect(eventsRecords.data.pagination.limit).toBe(33);
+      expect(eventsRecords.data.items).toEqual([]);
 
       const eventTypeDetail = await fetchEventTypeDetail(
         "fallback-event-type",
@@ -2032,24 +2050,25 @@ describe("Dashboard Client Data Processing Utilities", () => {
             freshJsonResponse({
               ok: true,
               interval: "hour",
-              data: [
-                {
-                  pathname: "/docs",
-                  metrics: { views: 8, sessions: 2 },
-                  trend: [{ timestampMs: 2000, views: 8 }, { views: null }],
+              data: {
+                items: [
+                  {
+                    pathname: "/docs",
+                    metrics: { views: 8, sessions: 2 },
+                    trend: [{ timestampMs: 2000, views: 8 }, { views: null }],
+                  },
+                  {
+                    pathname: "/blog",
+                    metrics: { views: 3, sessions: 1 },
+                    trend: [{ timestampMs: 1000, views: 3 }],
+                  },
+                ],
+                pagination: {
+                  limit: 12,
+                  returned: 2,
+                  hasMore: false,
+                  nextCursor: null,
                 },
-                {
-                  pathname: "/blog",
-                  metrics: { views: 3, sessions: 1 },
-                  trend: [{ timestampMs: 1000, views: 3 }],
-                },
-              ],
-              meta: {
-                page: 1,
-                pageSize: 12,
-                returned: 2,
-                hasMore: false,
-                nextPage: null,
               },
             }),
           );
@@ -2075,7 +2094,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
         { limit: 20 },
       );
 
-      expect(paramsFromCall(fetchMock, 0).get("pageSize")).toBe("12");
+      expect(paramsFromCall(fetchMock, 0).get("limit")).toBe("12");
       expect(trend.series).toEqual([
         {
           key: "page_0",

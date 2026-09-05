@@ -15,7 +15,6 @@ import {
   mapPages,
   mapReferrers,
   mapTabs,
-  paginationOffset,
   parseBooleanFlag,
   parseInterval,
   parseLimit,
@@ -172,14 +171,8 @@ export async function handlePagesDashboardContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const page = parseQueryLimit(url, "page", 1, 1, 10_000);
-  const pageSize = parseQueryLimit(url, "pageSize", 12, 1, 24);
-  const offset = paginationOffset(page, pageSize);
-  if (offset === null) {
-    return badRequest(
-      "Pagination depth exceeds 20,000 rows; narrow the time range or filters",
-    );
-  }
+  const limit = parseQueryLimit(url, "limit", 12, 1, 24);
+  const cursor = url.searchParams.get("cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<
     Awaited<ReturnType<typeof queryPagesDashboard>>
@@ -188,15 +181,20 @@ export async function handlePagesDashboardContract(
     time: toQueryTime(window),
     filters,
     interval: parseInterval(url),
-    page,
-    pageSize,
-    offset,
+    page: { limit, cursor },
+    audience: queryContext.policy.audience,
   } as BaseQuery & {
     readonly interval: ReturnType<typeof parseInterval>;
-    readonly page: number;
-    readonly pageSize: number;
-    readonly offset: number;
+    readonly page: { readonly limit: number; readonly cursor: string | null };
+    readonly audience: "private-dashboard" | "public-share" | "api-v1";
   });
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...result.data });
+  return jsonResponseWith(ctx!, {
+    ok: true,
+    data: {
+      items: result.data.items,
+      pagination: result.data.pagination,
+    },
+    interval: result.data.interval,
+  });
 }

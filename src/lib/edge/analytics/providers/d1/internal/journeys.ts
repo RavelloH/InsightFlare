@@ -11,7 +11,6 @@ import type {
 import { DEFAULT_VISITOR_LIST_SORT } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryGeoPointsFromD1 } from "./journey-geo-queries";
-import { queryVisitorsFromD1 } from "./journey-list-queries";
 
 export {
   queryJourneyEventDetailFromD1,
@@ -54,12 +53,13 @@ export {
   visitorListOrderBy,
   whereClauseWithTarget,
 } from "./journey-helpers";
+export { queryJourneyEventsFromD1 } from "./journey-list-queries";
 export {
-  queryJourneyEventsFromD1,
   querySessionsFromD1,
   queryVisitorsFromD1,
 } from "./journey-list-queries";
 
+/** Non-HTTP aggregate callers now walk the canonical keyset reader. */
 export async function queryVisitorAggregate(
   env: Env,
   siteId: string,
@@ -70,6 +70,7 @@ export async function queryVisitorAggregate(
   sort: ListSort<VisitorListSortKey> = DEFAULT_VISITOR_LIST_SORT,
   search?: string,
 ): Promise<VisitorRow[]> {
+  const { queryVisitorsFromD1 } = await import("./journey-list-queries");
   return queryVisitorsFromD1(
     env,
     siteId,

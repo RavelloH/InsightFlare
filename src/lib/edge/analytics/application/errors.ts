@@ -13,6 +13,7 @@ export type AnalyticsServiceError =
         readonly code: string;
       }[];
     }
+  | { readonly kind: "invalid-cursor"; readonly cursorKind: string }
   | {
       readonly kind: "operation-not-allowed";
       readonly operation: AnalyticsOperationId;

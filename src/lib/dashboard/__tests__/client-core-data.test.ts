@@ -118,7 +118,7 @@ describe("fetchVisitors", () => {
 
     await fetchVisitors("site-1", window, undefined, {
       cursor: "visitor-cursor",
-      pageSize: 25,
+      limit: 25,
       sortBy: "lastSeenAt",
       sortDir: "desc",
       search: "test",
@@ -128,7 +128,7 @@ describe("fetchVisitors", () => {
       "/api/private/visitors",
       expect.objectContaining({
         cursor: "visitor-cursor",
-        pageSize: 25,
+        limit: 25,
         sortBy: "lastSeenAt",
         sortDir: "desc",
         search: "test",
@@ -136,7 +136,7 @@ describe("fetchVisitors", () => {
     );
   });
 
-  it("uses default limit=100 when no pageSize or limit specified", async () => {
+  it("uses default limit=100 when no limit is specified", async () => {
     fetchPrivateJsonMock.mockResolvedValueOnce({ ok: true } as any);
 
     await fetchVisitors("site-1", window);
@@ -158,16 +158,16 @@ describe("fetchVisitors", () => {
     );
   });
 
-  it("omits limit when pageSize is provided without explicit limit", async () => {
+  it("uses the explicit limit", async () => {
     fetchPrivateJsonMock.mockResolvedValueOnce({ ok: true } as any);
 
-    await fetchVisitors("site-1", window, undefined, { pageSize: 25 });
+    await fetchVisitors("site-1", window, undefined, { limit: 25 });
 
     const params = fetchPrivateJsonMock.mock.calls[0][1] as Record<
       string,
       unknown
     >;
-    expect(params.limit).toBeUndefined();
+    expect(params.limit).toBe(25);
   });
 
   it("falls back to emptyVisitors on error", async () => {
@@ -210,7 +210,7 @@ describe("fetchSessions", () => {
 
     await fetchSessions("site-1", window, undefined, {
       cursor: "session-cursor",
-      pageSize: 10,
+      limit: 10,
       sortBy: "startedAt",
       sortDir: "asc",
       search: "abc",
@@ -220,7 +220,7 @@ describe("fetchSessions", () => {
       "/api/private/sessions",
       expect.objectContaining({
         cursor: "session-cursor",
-        pageSize: 10,
+        limit: 10,
         sortBy: "startedAt",
         sortDir: "asc",
         search: "abc",
@@ -659,7 +659,7 @@ describe("fetchEventsRecords", () => {
       search: "test",
       eventName: "click",
       cursor: "event-cursor",
-      pageSize: 20,
+      limit: 20,
       sortBy: "occurredAt",
       sortDir: "desc",
     });
@@ -670,7 +670,7 @@ describe("fetchEventsRecords", () => {
         search: "test",
         eventName: "click",
         cursor: "event-cursor",
-        pageSize: 20,
+        limit: 20,
         sortBy: "occurredAt",
         sortDir: "desc",
       }),

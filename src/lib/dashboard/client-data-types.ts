@@ -25,8 +25,8 @@ export type OverviewGeoTabRows = Array<{
   sessions: number;
   visitors: number;
 }>;
-export type PagesDashboardRows = PagesDashboardData["data"];
-export type PagesDashboardRow = PagesDashboardData["data"][number];
+export type PagesDashboardRows = PagesDashboardData["data"]["items"];
+export type PagesDashboardRow = PagesDashboardRows[number];
 
 export type SortDirection = "asc" | "desc";
 export type VisitorListSortKey =

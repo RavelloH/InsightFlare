@@ -275,9 +275,11 @@ interface RequestNetworkDimensionRow {
   iconLabel?: string;
 }
 
-interface RequestDetailCursor {
-  timestamp: string;
-  receivedAt: number;
+interface RequestObservationPagination {
+  limit: number;
+  returned: number;
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 interface RequestObservationPageData {
@@ -285,11 +287,10 @@ interface RequestObservationPageData {
   configured: boolean;
   generatedAt: number;
   sampling?: RequestObservationSampling;
-  page: {
-    source: "blocked" | "included" | "abnormal" | "normal";
-    events: BotEvent[] | NormalRequestEvent[];
-    hasMore: boolean;
-    nextCursor: RequestDetailCursor | null;
+  source: "blocked" | "included";
+  data: {
+    items: BotEvent[] | NormalRequestEvent[];
+    pagination: RequestObservationPagination;
   };
 }
 
@@ -306,8 +307,7 @@ interface LegacyRequestObservationPartition {
   reasons?: Array<{ reason: string; count: number }>;
   countries?: Array<{ country: string; count: number }>;
   asns?: Array<{ asn: number; asOrganization: string; count: number }>;
-  hasMore?: boolean;
-  nextCursor?: RequestDetailCursor | null;
+  pagination?: RequestObservationPagination;
 }
 
 interface RequestObservationData {
@@ -398,8 +398,7 @@ interface RequestObservationData {
     reasons?: Array<{ reason: string; count: number }>;
     countries?: Array<{ country: string; count: number }>;
     asns?: Array<{ asn: number; asOrganization: string; count: number }>;
-    hasMore?: boolean;
-    nextCursor?: RequestDetailCursor | null;
+    pagination?: RequestObservationPagination;
     dimensions?: {
       network?: Partial<
         Record<NetworkDimensionTab, RequestNetworkDimensionRow[]>
@@ -433,8 +432,7 @@ interface RequestObservationData {
     };
     mapPoints: RequestMapPoint[];
     events: NormalRequestEvent[];
-    hasMore?: boolean;
-    nextCursor?: RequestDetailCursor | null;
+    pagination?: RequestObservationPagination;
     dimensions?: {
       network?: Partial<
         Record<NetworkDimensionTab, RequestNetworkDimensionRow[]>
@@ -1236,9 +1234,13 @@ function withRequestObservabilityDefaults(
         legacyData.abnormal?.countries ??
         data.countries,
       asns: data.blocked?.asns ?? legacyData.abnormal?.asns ?? data.asns,
-      hasMore: data.blocked?.hasMore ?? legacyData.abnormal?.hasMore ?? false,
-      nextCursor:
-        data.blocked?.nextCursor ?? legacyData.abnormal?.nextCursor ?? null,
+      pagination: data.blocked?.pagination ??
+        legacyData.abnormal?.pagination ?? {
+          limit: BOT_EVENT_FETCH_LIMIT,
+          returned: normalizedBlockedEvents.length,
+          hasMore: false,
+          nextCursor: null,
+        },
     },
     included: {
       summary: {
@@ -1271,9 +1273,13 @@ function withRequestObservabilityDefaults(
       },
       mapPoints: includedMapPoints,
       events: normalizedIncludedEvents,
-      hasMore: data.included?.hasMore ?? legacyData.normal?.hasMore ?? false,
-      nextCursor:
-        data.included?.nextCursor ?? legacyData.normal?.nextCursor ?? null,
+      pagination: data.included?.pagination ??
+        legacyData.normal?.pagination ?? {
+          limit: BOT_EVENT_FETCH_LIMIT,
+          returned: normalizedIncludedEvents.length,
+          hasMore: false,
+          nextCursor: null,
+        },
     },
   };
 }
@@ -1372,7 +1378,8 @@ export function RequestObservationClient({
           observationQueryKey,
         );
       const section = currentData?.[source];
-      if (!section?.hasMore || !section.nextCursor) return;
+      if (!section?.pagination?.hasMore || !section.pagination.nextCursor)
+        return;
 
       loadingMoreRef.current = source;
       setLoadingMore(source);
@@ -1380,18 +1387,18 @@ export function RequestObservationClient({
         const page = await fetchRequestObservationPage(
           timeWindow,
           source,
-          section.nextCursor,
+          section.pagination.nextCursor,
         );
         queryClient.setQueryData<RequestObservationData | null>(
           observationQueryKey,
           (current) => {
             if (
               !current ||
-              normalizeRequestObservationTab(page.page.source) !== source
+              normalizeRequestObservationTab(page.source) !== source
             ) {
               return current;
             }
-            const pageEvents = page.page.events.map((event) =>
+            const pageEvents = page.data.items.map((event) =>
               normalizeRequestObservationEvent(
                 event as BotEvent & NormalRequestEvent,
                 source,
@@ -1407,8 +1414,7 @@ export function RequestObservationClient({
                     ...current.blocked!.events,
                     ...(pageEvents as BotEvent[]),
                   ],
-                  hasMore: page.page.hasMore,
-                  nextCursor: page.page.nextCursor,
+                  pagination: page.data.pagination,
                 },
               };
             }
@@ -1424,8 +1430,7 @@ export function RequestObservationClient({
                   ...current.included!.events,
                   ...(pageEvents as NormalRequestEvent[]),
                 ],
-                hasMore: page.page.hasMore,
-                nextCursor: page.page.nextCursor,
+                pagination: page.data.pagination,
               },
             };
           },
@@ -2234,7 +2239,7 @@ export function RequestObservationClient({
                         copy={copy}
                         events={blockedEvents}
                         loading={loading}
-                        hasMore={data?.blocked?.hasMore ?? false}
+                        hasMore={data?.blocked?.pagination?.hasMore ?? false}
                         loadingMore={loadingMore === "blocked"}
                         onLoadMore={loadMoreBlockedEvents}
                         timeWindow={timeWindow}
@@ -2357,7 +2362,7 @@ export function RequestObservationClient({
                         copy={copy}
                         events={includedEvents}
                         loading={loading}
-                        hasMore={data?.included?.hasMore ?? false}
+                        hasMore={data?.included?.pagination?.hasMore ?? false}
                         loadingMore={loadingMore === "included"}
                         onLoadMore={loadMoreIncludedEvents}
                         timeWindow={timeWindow}
@@ -2420,7 +2425,7 @@ async function fetchRequestObservation(
 async function fetchRequestObservationPage(
   timeWindow: TimeWindow,
   source: "blocked" | "included",
-  cursor: RequestDetailCursor,
+  cursor: string,
 ): Promise<RequestObservationPageData> {
   return requestAdminService<RequestObservationPageData>(
     "request-observation",
@@ -2430,9 +2435,9 @@ async function fetchRequestObservationPage(
         to: String(Math.floor(timeWindow.to)),
         interval: timeWindow.interval,
         timeZone: timeWindow.timeZone,
-        page: source,
+        source,
         limit: String(BOT_EVENT_FETCH_LIMIT),
-        cursor: JSON.stringify(cursor),
+        cursor,
       },
     },
   );

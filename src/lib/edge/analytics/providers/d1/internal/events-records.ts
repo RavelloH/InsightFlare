@@ -26,8 +26,6 @@ import {
 import { mapVisitPerformanceMetrics } from "./core-performance";
 import { scopedDatasetFor } from "./scoped-dataset";
 
-const EVENT_RECORD_CURSOR_MAX_LENGTH = 12_288;
-
 // Event-record lists only need this projection for their output, filters, and
 // cursor predicates. Keeping it explicit prevents the shared analytics source
 // from carrying unrelated visit columns through every page query.
@@ -109,9 +107,7 @@ function eventRecordSourceColumns(filters: FilterDocument): string {
 }
 
 export interface EventRecordCursor {
-  sortKey: EventRecordSortKey;
-  sortDirection: "asc" | "desc";
-  sortValue: string | number;
+  readonly sortValue?: string | number;
   occurredAt: number;
   eventId: string;
   eventPk: number;
@@ -168,105 +164,22 @@ export interface EventRecordPage {
   nextCursor: EventRecordCursor | null;
 }
 
-function toBase64Url(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/u, "");
-}
-
-function fromBase64Url(value: string): string | null {
-  try {
-    const padded = value.replaceAll("-", "+").replaceAll("_", "/");
-    const binary = atob(padded.padEnd(Math.ceil(padded.length / 4) * 4, "="));
-    const bytes = Uint8Array.from(binary, (character) =>
-      character.charCodeAt(0),
-    );
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return null;
-  }
-}
-
-export function serializeEventRecordCursor(cursor: EventRecordCursor): string {
-  return toBase64Url(JSON.stringify(cursor));
-}
-
-export function parseEventRecordCursor(
-  raw: string,
-  sort: ListSort<EventRecordSortKey>,
-): EventRecordCursor | null {
-  if (raw.length === 0 || raw.length > EVENT_RECORD_CURSOR_MAX_LENGTH) {
-    return null;
-  }
-  const decoded = fromBase64Url(raw);
-  if (!decoded) return null;
-
-  try {
-    const value: unknown = JSON.parse(decoded);
-    if (!value || typeof value !== "object" || Array.isArray(value))
-      return null;
-    const cursor = value as Record<string, unknown>;
-    const sortKey = cursor.sortKey;
-    const sortDirection = cursor.sortDirection;
-    const sortValue = cursor.sortValue;
-    const occurredAt = cursor.occurredAt;
-    const eventId = cursor.eventId;
-    const eventPk = cursor.eventPk;
-    if (
-      sortKey !== sort.key ||
-      sortDirection !== sort.direction ||
-      (typeof sortValue !== "string" && typeof sortValue !== "number") ||
-      typeof occurredAt !== "number" ||
-      !Number.isFinite(occurredAt) ||
-      typeof eventId !== "string" ||
-      typeof eventPk !== "number" ||
-      !Number.isSafeInteger(eventPk) ||
-      eventPk < 0
-    ) {
-      return null;
-    }
-    if (
-      (sort.key === "occurredAt" &&
-        (typeof sortValue !== "number" || sortValue !== occurredAt)) ||
-      ((sort.key === "eventName" || sort.key === "pathname") &&
-        typeof sortValue !== "string")
-    ) {
-      return null;
-    }
-    return {
-      sortKey: sort.key,
-      sortDirection: sort.direction,
-      sortValue,
-      occurredAt,
-      eventId,
-      eventPk,
-    };
-  } catch {
-    return null;
-  }
-}
-
 function eventRecordCursorFromRow(
   row: EventRecordCursorRow,
   sort: ListSort<EventRecordSortKey>,
 ): EventRecordCursor {
-  return {
-    sortKey: sort.key,
-    sortDirection: sort.direction,
-    sortValue:
-      sort.key === "eventName"
-        ? row.eventName
-        : sort.key === "pathname"
-          ? row.pathname
-          : row.occurredAt,
-    occurredAt: row.occurredAt,
-    eventId: row.eventId,
-    eventPk: row.eventPk,
-  };
+  return sort.key === "occurredAt"
+    ? {
+        occurredAt: row.occurredAt,
+        eventId: row.eventId,
+        eventPk: row.eventPk,
+      }
+    : {
+        sortValue: sort.key === "eventName" ? row.eventName : row.pathname,
+        occurredAt: row.occurredAt,
+        eventId: row.eventId,
+        eventPk: row.eventPk,
+      };
 }
 
 function eventRecordCursorFilter(
@@ -315,8 +228,8 @@ function eventRecordCursorFilter(
         )
       )`,
     bindings: [
-      cursor.sortValue,
-      cursor.sortValue,
+      cursor.sortValue!,
+      cursor.sortValue!,
       cursor.occurredAt,
       cursor.occurredAt,
       cursor.eventId,
@@ -388,7 +301,7 @@ export async function queryEventRecordPageFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   options: {
-    pageSize: number;
+    limit: number;
     sort: ListSort<EventRecordSortKey>;
     search?: string;
     eventName?: string;
@@ -430,11 +343,11 @@ export async function queryEventRecordPageFromD1(
       ...filter.bindings,
       ...(scopedDataset && options.eventName ? [options.eventName] : []),
       ...cursor.bindings,
-      options.pageSize + 1,
+      options.limit + 1,
     ],
   );
-  const hasMore = rows.length > options.pageSize;
-  const pageRows = hasMore ? rows.slice(0, options.pageSize) : rows;
+  const hasMore = rows.length > options.limit;
+  const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
   const lastRow = pageRows.at(-1);
   return {
     rows: pageRows.map(withoutEventPk),
@@ -446,8 +359,6 @@ export async function queryEventRecordPageFromD1(
 }
 
 /**
- * @deprecated Use queryEventRecordPageFromD1 so callers can carry a keyset
- * cursor instead of asking D1 to scan and discard OFFSET rows.
  */
 export async function queryEventRecordsFromD1(
   env: Env,
@@ -468,7 +379,7 @@ export async function queryEventRecordsFromD1(
   let remainingOffset = Math.max(0, Math.trunc(options.offset));
   let cursor: EventRecordCursor | null = null;
   const rows: EventRecordRow[] = [];
-  const pageSize = Math.max(1, Math.min(200, limit));
+  const batchLimit = Math.max(1, Math.min(200, limit));
 
   while (rows.length < limit) {
     const page = await queryEventRecordPageFromD1(
@@ -477,7 +388,7 @@ export async function queryEventRecordsFromD1(
       window,
       filters,
       {
-        pageSize,
+        limit: batchLimit,
         sort: options.sort,
         search: options.search,
         eventName: options.eventName,

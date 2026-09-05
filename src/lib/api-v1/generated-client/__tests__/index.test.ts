@@ -116,11 +116,11 @@ describe("API v1 generated client", () => {
       response({
         data: {
           items: [],
-          page: {
-            kind: "keyset",
+          pagination: {
             limit: 100,
             nextCursor: null,
             hasMore: false,
+            returned: 0,
           },
         },
         meta: { requestId: "req-1" },
@@ -132,7 +132,9 @@ describe("API v1 generated client", () => {
       bearer: () => "secret-token",
     });
 
-    await client.listSavedFilters("site/a", { cursor: "cursor with/slash" });
+    await client.listSavedFilters("site/a", {
+      page: { limit: 100, cursor: "cursor with/slash" },
+    });
 
     expect(fetcher).toHaveBeenCalledOnce();
     const [url, init] = fetcher.mock.calls[0];
@@ -151,7 +153,12 @@ describe("API v1 generated client", () => {
       response({
         data: {
           items: [],
-          page: { kind: "keyset", limit: 20, nextCursor: null, hasMore: false },
+          pagination: {
+            limit: 20,
+            nextCursor: null,
+            hasMore: false,
+            returned: 0,
+          },
         },
         meta: { requestId: "req-page" },
       }),
@@ -161,7 +168,7 @@ describe("API v1 generated client", () => {
       fetch: fetcher,
     });
 
-    await client.listSavedFilters("site-1", { limit: 20 });
+    await client.listSavedFilters("site-1", { page: { limit: 20 } });
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       "https://api.test/api/v1/sites/site-1/saved-filters?limit=20",
     );
@@ -360,7 +367,7 @@ describe("API v1 generated client", () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       response({
         data: {
-          sites: [
+          items: [
             {
               siteId: "site-1",
               name: "Example",
@@ -401,7 +408,7 @@ describe("API v1 generated client", () => {
       client.teamAnalyticsSites({ timeRange: overviewInput.timeRange }),
     ).resolves.toMatchObject({
       ok: true,
-      data: { sites: [{ siteId: "site-1" }] },
+      data: { items: [{ siteId: "site-1" }] },
     });
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       "https://api.test/api/v1/team/analytics/sites",
@@ -924,7 +931,12 @@ describe("API v1 generated client", () => {
       response({
         data: {
           items: [],
-          page: { limit: 80, hasMore: false, nextCursor: null },
+          pagination: {
+            limit: 80,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
         },
         meta,
       }),
@@ -1286,7 +1298,12 @@ describe("API v1 generated client", () => {
       response({
         data: {
           items: [],
-          page: { limit: 80, hasMore: false, nextCursor: null },
+          pagination: {
+            limit: 80,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
         },
         meta,
       }),
@@ -1308,7 +1325,12 @@ describe("API v1 generated client", () => {
       response({
         data: {
           items: [],
-          page: { limit: 80, hasMore: false, nextCursor: null },
+          pagination: {
+            limit: 80,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
         },
         meta,
       }),
@@ -1597,9 +1619,9 @@ describe("API v1 generated client", () => {
           {
             data: {
               items: [],
-              page: {
-                kind: "keyset",
+              pagination: {
                 limit: 100,
+                returned: 0,
                 nextCursor: null,
                 hasMore: false,
               },

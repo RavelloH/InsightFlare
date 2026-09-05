@@ -320,7 +320,7 @@ export const loadSystemSettingsInitialData = createServerFn({
       readDashboardAdmin("analytics-engine-config"),
       readDashboardAdmin("login-turnstile"),
       readDashboardAdmin("notification-email"),
-      readDashboardAdmin("scheduled-tasks", { page: 1, pageSize: 1 }),
+      readDashboardAdmin("scheduled-tasks", { limit: 1 }),
     ]);
   if (!analyticsEngine || !loginTurnstile || !notificationEmail) return null;
   return {
@@ -337,8 +337,7 @@ export const loadScheduledTasksInitialData = createServerFn({
   method: "GET",
 }).handler(async (): Promise<ScheduledTasksInitialData | null> => {
   const data = await readDashboardAdmin("scheduled-tasks", {
-    page: 1,
-    pageSize: 50,
+    limit: 50,
   });
   return data
     ? {

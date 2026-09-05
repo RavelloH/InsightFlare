@@ -130,7 +130,7 @@ describe("saved filters", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      filters: [
+      items: [
         {
           id: "team-shared",
           isOwner: false,
@@ -144,6 +144,12 @@ describe("saved filters", () => {
           scopePreference: "auto",
         },
       ],
+      pagination: {
+        limit: 100,
+        returned: 2,
+        hasMore: false,
+        nextCursor: null,
+      },
     });
   });
 

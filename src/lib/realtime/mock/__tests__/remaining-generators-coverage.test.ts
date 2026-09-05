@@ -1604,32 +1604,41 @@ describe("mock remaining generator coverage", () => {
     dataset.visitors.get("u1")!.weight = 3;
 
     const visitors = generateDemoVisitors(SITE_ID, {
-      pageSize: 1,
+      limit: 1,
       search: "checkout",
       sortBy: "views",
       sortDir: "asc",
     });
     expect(visitors).toMatchObject({
       ok: true,
-      data: [
-        expect.objectContaining({
-          visitorId: "u1",
-          views: 2,
-          sessions: 2,
-          events: 1,
-        }),
-      ],
-      meta: { pageSize: 1, returned: 1, hasMore: false, nextCursor: null },
+      data: {
+        items: [
+          expect.objectContaining({
+            visitorId: "u1",
+            views: 2,
+            sessions: 2,
+            events: 1,
+          }),
+        ],
+        pagination: {
+          limit: 1,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
 
     const sessions = generateDemoSessions(SITE_ID, {
-      pageSize: 1,
+      limit: 1,
       search: "pricing",
       sortBy: "durationMs",
     });
     expect(sessions).toMatchObject({
       ok: true,
-      data: [expect.objectContaining({ sessionId: "s2", views: 1 })],
+      data: {
+        items: [expect.objectContaining({ sessionId: "s2", views: 1 })],
+      },
     });
 
     expect(generateDemoVisitorDetail(SITE_ID, { visitorId: "" })).toEqual({

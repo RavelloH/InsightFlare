@@ -302,7 +302,7 @@ describe("event detail D1 SQL", () => {
         window,
         prepared.filters!,
         {
-          pageSize: 50,
+          limit: 50,
           sort: { key: "occurredAt", direction: "desc" },
         },
       );
@@ -566,7 +566,7 @@ describe("event detail D1 SQL", () => {
             window,
             EMPTY_FILTER_DOCUMENT,
             {
-              pageSize: 2,
+              limit: 2,
               sort,
               cursor,
             },
@@ -1121,7 +1121,7 @@ describe("event detail D1 SQL", () => {
         window,
         filter,
         {
-          pageSize: 10,
+          limit: 10,
           sort: { key: "startedAt", direction: "asc" },
         },
       );
@@ -1131,7 +1131,7 @@ describe("event detail D1 SQL", () => {
         window,
         filter,
         {
-          pageSize: 10,
+          limit: 10,
           sort: { key: "firstSeenAt", direction: "asc" },
         },
       );
@@ -1275,7 +1275,7 @@ describe("event detail D1 SQL", () => {
             siteId,
             window,
             EMPTY_FILTER_DOCUMENT,
-            { pageSize: 2, sort, cursor },
+            { limit: 2, sort, cursor },
           );
           received.push(...page.rows);
           cursor = page.nextCursor;
@@ -1311,7 +1311,7 @@ describe("event detail D1 SQL", () => {
             siteId,
             window,
             EMPTY_FILTER_DOCUMENT,
-            { pageSize: 2, sort, cursor },
+            { limit: 2, sort, cursor },
           );
           received.push(...page.rows);
           cursor = page.nextCursor;

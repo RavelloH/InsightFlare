@@ -227,6 +227,8 @@ export async function handlePlannedTeamSites(
         return cancelledResponse();
       if (serviceResult.error.kind === "deadline-exceeded")
         return errorResponse("deadline_exceeded");
+      if (serviceResult.error.kind === "invalid-cursor")
+        return errorResponse("invalid_cursor");
       return errorResponse("unsupported_query");
     }
     const result = serviceResult.value;
@@ -242,7 +244,7 @@ export async function handlePlannedTeamSites(
       200,
       {
         data: {
-          sites: result.data.sites.map((site) => ({
+          items: result.data.items.map((site) => ({
             siteId: site.siteId,
             name: site.name,
             domain: site.domain,

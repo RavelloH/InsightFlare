@@ -5,6 +5,7 @@ import {
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
+import { InvalidCursorError } from "@/lib/pagination";
 
 import type { DimensionRow, QueryWindow } from "./core";
 import { DIRECT_REFERRER_FILTER_VALUE } from "./core";
@@ -166,7 +167,7 @@ export async function queryFilterValuesPageFromD1(
       cursor,
       audience,
     );
-    if (cursor && !eventCursor) throw new Error("invalid-cursor");
+    if (cursor && !eventCursor) throw new InvalidCursorError("filter-values");
     const page = await queryEventTypePageFromD1(
       env,
       siteId,
@@ -197,7 +198,8 @@ export async function queryFilterValuesPageFromD1(
       cursor,
       audience,
     );
-    if (cursor && !referrerCursor) throw new Error("invalid-cursor");
+    if (cursor && !referrerCursor)
+      throw new InvalidCursorError("filter-values");
     const page = await queryReferrersPageFromD1(
       env,
       siteId,
@@ -231,8 +233,10 @@ export async function queryFilterValuesPageFromD1(
       kind,
       search,
       cursor,
+      audience,
     );
-    if (cursor && !boundaryCursor) throw new Error("invalid-cursor");
+    if (cursor && !boundaryCursor)
+      throw new InvalidCursorError("filter-values");
     const page = await querySessionPathDimensionPageFromD1(
       env,
       siteId,
@@ -277,7 +281,7 @@ export async function queryFilterValuesPageFromD1(
     cursor,
     audience,
   );
-  if (cursor && !dimensionCursor) throw new Error("invalid-cursor");
+  if (cursor && !dimensionCursor) throw new InvalidCursorError("filter-values");
   const page = await queryDimensionPageFromD1(
     env,
     siteId,

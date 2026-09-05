@@ -1,4 +1,5 @@
 import { FILTER_DSL_VERSION } from "@/lib/filter-contract";
+import type { PageResult } from "@/lib/pagination";
 
 /** Saved filters currently persist the shared Filter DSL v1 source. */
 export const SAVED_FILTER_DSL_VERSION = FILTER_DSL_VERSION;
@@ -33,7 +34,8 @@ export interface SavedFilter {
 }
 
 export interface SavedFilterListResponse {
-  readonly filters: readonly SavedFilter[];
+  readonly items: readonly SavedFilter[];
+  readonly pagination: PageResult<SavedFilter>["pagination"];
 }
 
 export interface SavedFilterInput {

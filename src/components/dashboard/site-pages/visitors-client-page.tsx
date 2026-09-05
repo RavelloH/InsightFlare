@@ -71,7 +71,7 @@ interface VisitorsClientPageProps {
   pathname: string;
 }
 
-type VisitorRow = VisitorsData["data"][number];
+type VisitorRow = VisitorsData["data"]["items"][number];
 
 const VISITOR_PAGE_SIZE = 50;
 const VISITOR_SKELETON_ROWS = 25;
@@ -798,7 +798,7 @@ export function VisitorsClientPage({
     queryFn: ({ pageParam, signal }) =>
       fetchVisitors(siteId, timeWindow, filters, {
         cursor: pageParam,
-        pageSize: VISITOR_PAGE_SIZE,
+        limit: VISITOR_PAGE_SIZE,
         sortBy: sort.key,
         sortDir: sort.direction,
         search: debouncedQuery,
@@ -806,13 +806,15 @@ export function VisitorsClientPage({
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
-      lastPage.meta.hasMore ? lastPage.meta.nextCursor : undefined,
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
     enabled: typeof window !== "undefined",
   });
   const rows = useMemo(
     () =>
       data?.pages.reduce<VisitorRow[]>(
-        (current, page) => appendUniqueVisitors(current, page.data),
+        (current, page) => appendUniqueVisitors(current, page.data.items),
         [],
       ) ?? [],
     [data?.pages],

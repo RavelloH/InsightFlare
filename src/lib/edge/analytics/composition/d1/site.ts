@@ -3,9 +3,7 @@ import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application
 import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
 import type {
   FilterValuesResult,
-  PageItem,
   PagesResult,
-  ReferrerItem,
   ReferrersResult,
   ReferrerSummaryResult,
 } from "@/lib/edge/analytics/contract";
@@ -29,10 +27,7 @@ import {
   queryDimensionPageFromD1,
   querySessionPathDimensionPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
-import {
-  queryFilterValuesFromD1,
-  queryFilterValuesPageFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/filter-values";
+import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import {
   parseRetentionGranularity,
   queryRetentionFromD1,
@@ -40,13 +35,10 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import { queryGeoPointAggregate } from "@/lib/edge/analytics/providers/d1/internal/journeys";
 import {
-  queryDimensionAggregate,
-  queryPagesAggregate,
   queryPagesDashboard,
   queryPagesPageFromD1,
   queryPagesWithTabsFromD1,
   queryPageTabsAggregate,
-  queryReferrerAggregate,
   queryReferrersPageFromD1,
   queryReferrerSummaryFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
@@ -55,6 +47,7 @@ import {
   decodeReferrersCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
 import { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
+import { InvalidCursorError } from "@/lib/pagination";
 
 import {
   type D1SiteQueryRuntimeOptions,
@@ -97,7 +90,7 @@ export async function overviewTabData(
       sortBy,
       sortDirection,
     );
-    if (cursorText && !cursor) throw new Error("invalid-cursor");
+    if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
     const page = await queryDimensionPageFromD1(
       options.env,
       options.siteId,
@@ -136,7 +129,7 @@ export async function overviewTabData(
       sortBy,
       sortDirection,
     );
-    if (cursorText && !cursor) throw new Error("invalid-cursor");
+    if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
     const page = await queryReferrersPageFromD1(
       options.env,
       options.siteId,
@@ -182,7 +175,7 @@ export async function overviewTabData(
         cursorText,
         audience,
       );
-      if (cursorText && !cursor) throw new Error("invalid-cursor");
+      if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
       const page = await querySessionPathDimensionPageFromD1(
         options.env,
         options.siteId,
@@ -217,7 +210,7 @@ export async function overviewTabData(
       cursorText,
       audience,
     );
-    if (cursorText && !cursor) throw new Error("invalid-cursor");
+    if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
     const page = await queryDimensionPageFromD1(
       options.env,
       options.siteId,
@@ -252,7 +245,7 @@ export async function overviewTabData(
       cursorText,
       audience,
     );
-    if (cursorText && !cursor) throw new Error("invalid-cursor");
+    if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
     const page = await queryDimensionPageFromD1(
       options.env,
       options.siteId,
@@ -297,7 +290,7 @@ export async function overviewTabData(
     cursorText,
     audience,
   );
-  if (cursorText && !cursor) throw new Error("invalid-cursor");
+  if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
   const page = await queryDimensionPageFromD1(
     options.env,
     options.siteId,
@@ -360,12 +353,9 @@ export function registerSiteContractProviders(
         }
         const pageRequest =
           request.page && typeof request.page === "object"
-            ? (request.page as {
-                limit?: unknown;
-                cursor?: unknown;
-              })
-            : null;
-        if (pageRequest) {
+            ? (request.page as { limit?: unknown; cursor?: unknown })
+            : {};
+        {
           const window = timeWindow(request.time);
           const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
           const limit =
@@ -388,7 +378,7 @@ export function registerSiteContractProviders(
             cursorText,
             request.context.policy.audience,
           );
-          if (cursorText && !cursor) throw new Error("invalid-cursor");
+          if (cursorText && !cursor) throw new InvalidCursorError("dimension");
           const page = await queryDimensionPageFromD1(
             options.env,
             options.siteId,
@@ -408,15 +398,6 @@ export function registerSiteContractProviders(
             },
           };
         }
-        const rows = await queryDimensionAggregate(
-          options.env,
-          options.siteId,
-          timeWindow(request.time),
-          request.filters ?? EMPTY_FILTER_DOCUMENT,
-          numberField(request, "limit", 20),
-          dimensionExpression(stringField(request, "dimension")),
-        );
-        return { value: mapDimensionRows(rows) };
       }),
     )
     .register(
@@ -460,7 +441,7 @@ export function registerSiteContractProviders(
             cursorText,
             request.context.policy.audience,
           );
-          if (cursorText && !cursor) throw new Error("invalid-cursor");
+          if (cursorText && !cursor) throw new InvalidCursorError("channels");
           const page = await queryDimensionPageFromD1(
             options.env,
             options.siteId,
@@ -510,7 +491,7 @@ export function registerSiteContractProviders(
         const page =
           pageValue && typeof pageValue === "object"
             ? (pageValue as { limit?: unknown; cursor?: unknown })
-            : null;
+            : {};
         const limit = page
           ? typeof page.limit === "number" && Number.isFinite(page.limit)
             ? page.limit
@@ -518,45 +499,27 @@ export function registerSiteContractProviders(
           : numberField(request, "limit", 50);
         const cursor =
           page && typeof page.cursor === "string" ? page.cursor : null;
-        const rows = page
-          ? await queryFilterValuesPageFromD1(
-              options.env,
-              options.siteId,
-              timeWindow(request.time),
-              request.filters ?? EMPTY_FILTER_DOCUMENT,
-              field,
-              limit,
-              cursor,
-              typeof request.search === "string" ? request.search : undefined,
-              request.context.policy.audience,
-            )
-          : null;
-        const aggregateRows = rows
-          ? rows.items
-          : await queryFilterValuesFromD1(
-              options.env,
-              options.siteId,
-              timeWindow(request.time),
-              request.filters ?? EMPTY_FILTER_DOCUMENT,
-              field,
-              limit,
-              typeof request.search === "string" ? request.search : undefined,
-            );
+        const rows = await queryFilterValuesPageFromD1(
+          options.env,
+          options.siteId,
+          timeWindow(request.time),
+          request.filters ?? EMPTY_FILTER_DOCUMENT,
+          field,
+          limit,
+          cursor,
+          typeof request.search === "string" ? request.search : undefined,
+          request.context.policy.audience,
+        );
         return {
           value: {
             field,
             data: {
-              items: aggregateRows.map((row) => ({
+              items: rows.items.map((row) => ({
                 value: row.value,
                 label: row.value,
                 occurrences: row.occurrences,
               })),
-              pagination: rows?.pagination ?? {
-                limit,
-                returned: aggregateRows.length,
-                hasMore: false,
-                nextCursor: null,
-              },
+              pagination: rows.pagination,
             },
           },
         };
@@ -620,7 +583,7 @@ export function registerSiteContractProviders(
           const page =
             rawPage && typeof rawPage === "object"
               ? (rawPage as { limit?: unknown; cursor?: unknown })
-              : null;
+              : {};
           const limit =
             page &&
             typeof page.limit === "number" &&
@@ -638,7 +601,7 @@ export function registerSiteContractProviders(
             cursorText,
             request.context.policy.audience,
           );
-          if (cursorText && !cursor) throw new Error("invalid-cursor");
+          if (cursorText && !cursor) throw new InvalidCursorError("pages");
           return {
             value: await queryPagesWithTabsFromD1(
               options.env,
@@ -657,12 +620,12 @@ export function registerSiteContractProviders(
         const page =
           rawPage && typeof rawPage === "object"
             ? (rawPage as { limit?: unknown; cursor?: unknown })
-            : null;
-        if (page) {
+            : {};
+        {
           const limit =
             typeof page.limit === "number" && Number.isFinite(page.limit)
               ? page.limit
-              : 20;
+              : numberField(request, "limit", 20);
           const cursorText =
             typeof page.cursor === "string" ? page.cursor : null;
           const cursor = await decodePagesCursor(
@@ -674,7 +637,7 @@ export function registerSiteContractProviders(
             cursorText,
             request.context.policy.audience,
           );
-          if (cursorText && !cursor) throw new Error("invalid-cursor");
+          if (cursorText && !cursor) throw new InvalidCursorError("pages");
           return {
             value: await queryPagesPageFromD1(
               options.env,
@@ -689,28 +652,6 @@ export function registerSiteContractProviders(
             source: "raw",
           };
         }
-        const rows = await queryPagesAggregate(
-          options.env,
-          options.siteId,
-          timeWindow(request.time),
-          filters,
-          numberField(request, "limit", 20),
-          request.includeDetails === true,
-        );
-        return {
-          value: {
-            items: rows.map(
-              (row): PageItem => ({
-                pathname: row.pathname,
-                query: row.query,
-                hash: row.hash,
-                views: row.views,
-                sessions: row.sessions,
-              }),
-            ),
-          },
-          source: "raw",
-        };
       }),
     )
     .register(
@@ -739,12 +680,12 @@ export function registerSiteContractProviders(
           const page =
             rawPage && typeof rawPage === "object"
               ? (rawPage as { limit?: unknown; cursor?: unknown })
-              : null;
-          if (page) {
+              : {};
+          {
             const limit =
               typeof page.limit === "number" && Number.isFinite(page.limit)
                 ? page.limit
-                : 20;
+                : numberField(request, "limit", 20);
             const cursorText =
               typeof page.cursor === "string" ? page.cursor : null;
             const sortBy =
@@ -767,7 +708,8 @@ export function registerSiteContractProviders(
               sortBy,
               sortDirection,
             );
-            if (cursorText && !cursor) throw new Error("invalid-cursor");
+            if (cursorText && !cursor)
+              throw new InvalidCursorError("referrers");
             return {
               value: await queryReferrersPageFromD1(
                 options.env,
@@ -786,27 +728,6 @@ export function registerSiteContractProviders(
               source: "raw",
             };
           }
-          const rows = await queryReferrerAggregate(
-            options.env,
-            options.siteId,
-            timeWindow(request.time),
-            request.filters ?? EMPTY_FILTER_DOCUMENT,
-            numberField(request, "limit", 20),
-            request.includeFullUrl === true,
-          );
-          return {
-            value: {
-              items: rows.map(
-                (row): ReferrerItem => ({
-                  referrer: row.referrer,
-                  views: row.views,
-                  sessions: row.sessions,
-                  visitors: row.visitors,
-                }),
-              ),
-            },
-            source: "raw",
-          };
         },
       ),
     )
@@ -819,9 +740,17 @@ export function registerSiteContractProviders(
             window: timeWindow(request.time),
             filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
             interval: request.interval as never,
-            page: numberField(request, "page", 1),
-            pageSize: numberField(request, "pageSize", 12),
-            offset: numberField(request, "offset", 0),
+            page:
+              request.page && typeof request.page === "object"
+                ? (request.page as { limit: number; cursor?: string | null })
+                : {
+                    limit: numberField(request, "limit", 12),
+                    cursor:
+                      typeof request.cursor === "string"
+                        ? request.cursor
+                        : null,
+                  },
+            audience: request.context.policy.audience,
           }),
         };
       }),

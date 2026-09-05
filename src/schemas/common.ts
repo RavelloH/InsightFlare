@@ -50,11 +50,13 @@ export const ErrorEnvelopeSchema = z
 
 export const PaginationMetaSchema = z
   .object({
-    page: z.number().int().describe("Current page number (1-indexed)"),
-    pageSize: z.number().int().describe("Results per page"),
+    limit: z.number().int().positive().describe("Maximum results requested"),
     returned: z.number().int().describe("Number of results in this page"),
     hasMore: z.boolean().describe("Whether more pages exist"),
-    nextPage: z.number().int().nullable().describe("Next page number, or null"),
+    nextCursor: z
+      .string()
+      .nullable()
+      .describe("Opaque cursor for the next page"),
   })
   .describe("Pagination metadata for list endpoints");
 
@@ -70,8 +72,10 @@ export function createPaginatedEnvelopeSchema<T extends z.ZodTypeAny>(
   dataSchema: T,
 ) {
   return EnvelopeSchema.extend({
-    data: dataSchema,
-    meta: PaginationMetaSchema,
+    data: z.object({
+      items: z.array(dataSchema),
+      pagination: PaginationMetaSchema,
+    }),
   });
 }
 

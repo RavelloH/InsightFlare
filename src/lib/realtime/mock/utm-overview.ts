@@ -434,13 +434,18 @@ export function generateDemoOverviewPageTab(
   params: Record<string, string | number>,
   tab: "path" | "title" | "hostname" | "entry" | "exit",
 ): Record<string, unknown> {
-  const payload = generateDemoPages(siteId, params) as {
-    ok: boolean;
-    tabs?: Record<string, unknown>;
-  };
-  const data = Array.isArray(payload.tabs?.[tab]) ? payload.tabs?.[tab] : [];
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, parseDemoFilters(params));
+  const tabs = collectPageDataAndTabs(
+    dataset,
+    filtered,
+    Math.max(1, filtered.visits.length),
+  ).tabs;
+  const data = tabs[tab] ?? [];
   return {
-    ok: payload.ok,
+    ok: true,
     data,
   };
 }
@@ -457,7 +462,11 @@ export function generateDemoOverviewSourceTab(
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
   if (tab === "channel") {
-    const rows = collectTrafficChannelRows(dataset, filtered, limit);
+    const rows = collectTrafficChannelRows(
+      dataset,
+      filtered,
+      Math.max(1, filtered.visits.length),
+    );
     return {
       ok: true,
       data: rows.map((item) => ({
@@ -468,10 +477,15 @@ export function generateDemoOverviewSourceTab(
       })),
     };
   }
-  const rows = collectReferrerRows(dataset, filtered, limit, {
-    includeFullUrl: tab === "link",
-    directValue: "",
-  });
+  const rows = collectReferrerRows(
+    dataset,
+    filtered,
+    Math.max(1, filtered.visits.length),
+    {
+      includeFullUrl: tab === "link",
+      directValue: "",
+    },
+  );
   return {
     ok: true,
     data: rows.map((item) => ({
@@ -488,13 +502,18 @@ export function generateDemoOverviewClientTab(
   params: Record<string, string | number>,
   tab: "browser" | "osVersion" | "deviceType" | "language" | "screenSize",
 ): Record<string, unknown> {
-  const payload = generateDemoClientDimensionTabs(siteId, params) as {
-    ok: boolean;
-    tabs?: Record<string, unknown>;
-  };
-  const data = Array.isArray(payload.tabs?.[tab]) ? payload.tabs?.[tab] : [];
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const filtered = applyDemoFilters(dataset, parseDemoFilters(params));
+  const tabs = collectClientTabs(
+    dataset,
+    filtered,
+    Math.max(1, filtered.visits.length),
+  );
+  const data = tabs[tab] ?? [];
   return {
-    ok: payload.ok,
+    ok: true,
     data,
   };
 }
@@ -510,15 +529,20 @@ export function generateDemoOverviewGeoTab(
     | "timezone"
     | "organization",
 ): Record<string, unknown> {
-  const payload = generateDemoGeoDimensionTabs(siteId, params, {
-    ignoreGeo: tab === "country",
-  }) as {
-    ok: boolean;
-    tabs?: Record<string, unknown>;
-  };
-  const data = Array.isArray(payload.tabs?.[tab]) ? payload.tabs?.[tab] : [];
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const dataset = buildDemoFactDataset(siteId, from, to);
+  const rawFilters = parseDemoFilters(params);
+  const filters =
+    tab === "country" ? withoutDemoGeoFilter(rawFilters) : rawFilters;
+  const tabs = collectGeoTabs(
+    dataset,
+    applyDemoFilters(dataset, filters),
+    Math.max(1, dataset.visits.length),
+  );
+  const data = tabs[tab] ?? [];
   return {
-    ok: payload.ok,
+    ok: true,
     data,
   };
 }

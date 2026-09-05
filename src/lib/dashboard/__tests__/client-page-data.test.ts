@@ -35,6 +35,18 @@ describe("dashboard client page data helpers", () => {
     });
   }
 
+  function pageData<T>(items: T[], limit = items.length, hasMore = false) {
+    return {
+      items,
+      pagination: {
+        limit,
+        returned: items.length,
+        hasMore,
+        nextCursor: hasMore ? "next-cursor" : null,
+      },
+    };
+  }
+
   function paramsFromCall(fetchMock: ReturnType<typeof vi.fn>, index = 0) {
     const url = String(fetchMock.mock.calls[index][0]);
     return new URLSearchParams(url.split("?")[1] ?? "");
@@ -45,7 +57,7 @@ describe("dashboard client page data helpers", () => {
     const fetchMock = vi
       .fn()
       .mockImplementation(() =>
-        Promise.resolve(jsonResponse({ ok: true, data: [], meta: {} })),
+        Promise.resolve(jsonResponse({ ok: true, data: pageData([], 12) })),
       );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
@@ -58,8 +70,8 @@ describe("dashboard client page data helpers", () => {
       }),
     );
     await fetchPagesDashboard("pages-site", window, undefined, {
-      page: 3,
-      pageSize: 40,
+      limit: 40,
+      cursor: "pages-cursor",
     });
 
     expect(paramsFromCall(fetchMock, 0)).toMatchObject(
@@ -69,14 +81,13 @@ describe("dashboard client page data helpers", () => {
         to: "2000",
         timeZone: "UTC",
         interval: "day",
-        page: "1",
-        pageSize: "12",
+        limit: "12",
         "filter[page.path]": "/docs",
         "filter[referrer.domain]": "example.com",
       }),
     );
-    expect(paramsFromCall(fetchMock, 1).get("page")).toBe("3");
-    expect(paramsFromCall(fetchMock, 1).get("pageSize")).toBe("40");
+    expect(paramsFromCall(fetchMock, 1).get("limit")).toBe("40");
+    expect(paramsFromCall(fetchMock, 1).get("cursor")).toBe("pages-cursor");
   });
 
   it("builds page share trend with an Other series when totals exceed top pages", async () => {
@@ -87,23 +98,19 @@ describe("dashboard client page data helpers", () => {
           jsonResponse({
             ok: true,
             interval: "day",
-            data: [
-              {
-                pathname: "/docs",
-                metrics: { views: "4", sessions: "2" },
-                trend: [
-                  { timestampMs: 1000, views: "4" },
-                  { timestampMs: 2000, views: "-3" },
-                ],
-              },
-            ],
-            meta: {
-              page: 1,
-              pageSize: 1,
-              returned: 1,
-              hasMore: false,
-              nextPage: null,
-            },
+            data: pageData(
+              [
+                {
+                  pathname: "/docs",
+                  metrics: { views: "4", sessions: "2" },
+                  trend: [
+                    { timestampMs: 1000, views: "4" },
+                    { timestampMs: 2000, views: "-3" },
+                  ],
+                },
+              ],
+              1,
+            ),
           }),
         );
       }
@@ -124,7 +131,7 @@ describe("dashboard client page data helpers", () => {
       limit: -10,
     });
 
-    expect(paramsFromCall(fetchMock, 0).get("pageSize")).toBe("1");
+    expect(paramsFromCall(fetchMock, 0).get("limit")).toBe("1");
     expect(trend.series).toEqual([
       {
         key: "page_0",
@@ -166,25 +173,21 @@ describe("dashboard client page data helpers", () => {
           jsonResponse({
             ok: true,
             interval: "day",
-            data: [
-              {
-                pathname: "/docs",
-                metrics: { views: 7, sessions: 3 },
-                trend: [{ timestampMs: 3000, views: 7 }],
-              },
-              {
-                pathname: "/pricing",
-                metrics: { views: 2, sessions: 1 },
-                trend: [],
-              },
-            ],
-            meta: {
-              page: 1,
-              pageSize: 5,
-              returned: 2,
-              hasMore: false,
-              nextPage: null,
-            },
+            data: pageData(
+              [
+                {
+                  pathname: "/docs",
+                  metrics: { views: 7, sessions: 3 },
+                  trend: [{ timestampMs: 3000, views: 7 }],
+                },
+                {
+                  pathname: "/pricing",
+                  metrics: { views: 2, sessions: 1 },
+                  trend: [],
+                },
+              ],
+              5,
+            ),
           }),
         );
       }
@@ -200,7 +203,7 @@ describe("dashboard client page data helpers", () => {
 
     const trend = await fetchPagesShareTrend("share-covered", window);
 
-    expect(paramsFromCall(fetchMock, 0).get("pageSize")).toBe("5");
+    expect(paramsFromCall(fetchMock, 0).get("limit")).toBe("5");
     expect(trend.series).toEqual([
       {
         key: "page_0",
@@ -235,28 +238,24 @@ describe("dashboard client page data helpers", () => {
           jsonResponse({
             ok: false,
             interval: "day",
-            data: [
-              {
-                pathname: "/docs",
-                metrics: { views: 2, sessions: 1 },
-                trend: [{ views: "2" }, { timestampMs: 5000, views: null }],
-              },
-              {
-                pathname: "/blog",
-                metrics: { views: 7, sessions: 4 },
-                trend: [
-                  { timestampMs: null, views: 3 },
-                  { timestampMs: 6000, views: 4 },
-                ],
-              },
-            ],
-            meta: {
-              page: 1,
-              pageSize: 2,
-              returned: 2,
-              hasMore: false,
-              nextPage: null,
-            },
+            data: pageData(
+              [
+                {
+                  pathname: "/docs",
+                  metrics: { views: 2, sessions: 1 },
+                  trend: [{ views: "2" }, { timestampMs: 5000, views: null }],
+                },
+                {
+                  pathname: "/blog",
+                  metrics: { views: 7, sessions: 4 },
+                  trend: [
+                    { timestampMs: null, views: 3 },
+                    { timestampMs: 6000, views: 4 },
+                  ],
+                },
+              ],
+              2,
+            ),
           }),
         );
       }
@@ -358,7 +357,7 @@ describe("dashboard client page data helpers", () => {
       dashboardFilterDocumentFromPresentation({ path: "/docs" }),
     );
 
-    expect(paramsFromCall(fetchMock, 0).get("pageSize")).toBe("5");
+    expect(paramsFromCall(fetchMock, 0).get("limit")).toBe("5");
     expect(paramsFromCall(fetchMock, 1).get("filter[page.path]")).toBe("/docs");
     expect(trend.series).toEqual([
       {
@@ -394,20 +393,16 @@ describe("dashboard client page data helpers", () => {
           jsonResponse({
             ok: true,
             interval: "day",
-            data: [
-              {
-                pathname: "/docs",
-                metrics: { views: 3, sessions: 1 },
-                trend: [{ timestampMs: 1000, views: 3 }],
-              },
-            ],
-            meta: {
-              page: 1,
-              pageSize: 12,
-              returned: 1,
-              hasMore: false,
-              nextPage: null,
-            },
+            data: pageData(
+              [
+                {
+                  pathname: "/docs",
+                  metrics: { views: 3, sessions: 1 },
+                  trend: [{ timestampMs: 1000, views: 3 }],
+                },
+              ],
+              12,
+            ),
           }),
         );
       }
@@ -424,7 +419,7 @@ describe("dashboard client page data helpers", () => {
       },
     );
 
-    expect(paramsFromCall(fetchMock, 0).get("pageSize")).toBe("12");
+    expect(paramsFromCall(fetchMock, 0).get("limit")).toBe("12");
     expect(trend.series).toEqual([
       {
         key: "page_0",

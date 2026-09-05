@@ -70,12 +70,12 @@ export const SavedFilterDefinitionSchema = z
 export const SavedFilterPageSchema = z
   .object({
     items: z.array(SavedFilterDefinitionSchema),
-    page: z
+    pagination: z
       .object({
-        kind: z.literal("keyset"),
         limit: z.number().int().min(1).max(1000),
         nextCursor: z.string().max(12_288).nullable(),
         hasMore: z.boolean(),
+        returned: z.number().int().min(0).max(1000),
       })
       .strict(),
   })
@@ -84,8 +84,13 @@ export const SavedFilterPageSchema = z
 export const ListTeamVisibleSavedFiltersInputSchema = z
   .object({
     siteId: z.string().min(1).max(256),
-    limit: z.number().int().min(1).max(1000).default(100),
-    cursor: z.string().min(1).max(12_288).nullable().default(null),
+    page: z
+      .object({
+        limit: z.number().int().min(1).max(1000).default(100),
+        cursor: z.string().min(1).max(12_288).nullable().optional(),
+      })
+      .strict()
+      .default({ limit: 100 }),
   })
   .strict();
 

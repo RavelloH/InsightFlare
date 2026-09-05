@@ -258,10 +258,12 @@ describe("mock/analytics-pages branch coverage", () => {
 
     expect(generateDemoPages(SITE_ID, { limit: 10 })).toMatchObject({
       ok: true,
-      data: expect.arrayContaining([
-        { pathname: "/", views: 1, sessions: 1 },
-        { pathname: "/pricing", views: 1, sessions: 1 },
-      ]),
+      data: {
+        items: expect.arrayContaining([
+          { pathname: "/", views: 1, sessions: 1 },
+          { pathname: "/pricing", views: 1, sessions: 1 },
+        ]),
+      },
       tabs: {
         path: expect.any(Array),
         title: expect.any(Array),
@@ -272,48 +274,76 @@ describe("mock/analytics-pages branch coverage", () => {
     });
     expect(generateDemoReferrers(SITE_ID, { limit: 10 })).toEqual({
       ok: true,
-      data: [
-        { referrer: "(direct)", views: 1, sessions: 1, visitors: 1 },
-        { referrer: "search.example", views: 1, sessions: 1, visitors: 1 },
-      ],
+      data: {
+        items: [
+          { referrer: "(direct)", views: 1, sessions: 1, visitors: 1 },
+          { referrer: "search.example", views: 1, sessions: 1, visitors: 1 },
+        ],
+        pagination: {
+          limit: 10,
+          returned: 2,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
     expect(
       generateDemoDimension(SITE_ID, "countries", { geo: "US" }),
     ).toMatchObject({
       ok: true,
-      data: expect.arrayContaining([
-        { value: "US", views: 1, sessions: 1, visitors: 1 },
-        { value: "DE", views: 1, sessions: 1, visitors: 1 },
-      ]),
+      data: {
+        items: expect.arrayContaining([
+          { value: "US", views: 1, sessions: 1, visitors: 1 },
+          { value: "DE", views: 1, sessions: 1, visitors: 1 },
+        ]),
+      },
     });
     expect(generateDemoDimension(SITE_ID, "devices", {})).toMatchObject({
       ok: true,
-      data: expect.arrayContaining([
-        { value: "Desktop", views: 1, sessions: 1, visitors: 1 },
-        { value: "Mobile", views: 1, sessions: 1, visitors: 1 },
-      ]),
+      data: {
+        items: expect.arrayContaining([
+          { value: "Desktop", views: 1, sessions: 1, visitors: 1 },
+          { value: "Mobile", views: 1, sessions: 1, visitors: 1 },
+        ]),
+      },
     });
     expect(generateDemoDimension(SITE_ID, "event-types", {})).toEqual({
       ok: true,
-      data: [{ value: "signup", views: 1, sessions: 1, visitors: 1 }],
+      data: {
+        items: [{ value: "signup", views: 1, sessions: 1, visitors: 1 }],
+        pagination: {
+          limit: 20,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
 
     const queryDimension = generateDemoDimension(SITE_ID, "page-query", {}) as {
-      data: Array<{ value: string }>;
+      data: { items: Array<{ value: string }> };
     };
-    expect(queryDimension.data).toContainEqual(
+    expect(queryDimension.data.items).toContainEqual(
       expect.objectContaining({ value: "" }),
     );
 
     const hashDimension = generateDemoDimension(SITE_ID, "page-hash", {}) as {
-      data: Array<{ value: string }>;
+      data: { items: Array<{ value: string }> };
     };
-    expect(hashDimension.data).toContainEqual(
+    expect(hashDimension.data.items).toContainEqual(
       expect.objectContaining({ value: "" }),
     );
     expect(generateDemoDimension(SITE_ID, "unknown", {})).toEqual({
       ok: true,
-      data: [],
+      data: {
+        items: [],
+        pagination: {
+          limit: 20,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
     });
   });
 
@@ -376,42 +406,42 @@ describe("mock/analytics-pages branch coverage", () => {
       from: BASE_TIME,
       to: BASE_TIME + 3_600_000,
       interval: "hour",
-      page: 1,
-      pageSize: 1,
+      limit: 1,
       timeZone: "UTC",
     });
 
     expect(result).toMatchObject({
       ok: true,
       interval: "hour",
-      data: [
-        expect.objectContaining({
-          pathname: "/home",
-          titles: ["Home", "Homepage"],
-          trend: expect.arrayContaining([
-            { timestampMs: BASE_TIME, views: 2, visitors: 1 },
-          ]),
-          metrics: expect.objectContaining({
-            views: 2,
-            visitors: 1,
-            sessions: 1,
-            pagesPerSession: 2,
-            avgDurationMs: 4000,
+      data: {
+        items: [
+          expect.objectContaining({
+            pathname: "/home",
+            titles: ["Home", "Homepage"],
+            trend: expect.arrayContaining([
+              { timestampMs: BASE_TIME, views: 2, visitors: 1 },
+            ]),
+            metrics: expect.objectContaining({
+              views: 2,
+              visitors: 1,
+              sessions: 1,
+              pagesPerSession: 2,
+              avgDurationMs: 4000,
+            }),
+            changeRates: expect.objectContaining({
+              views: 100,
+              visitors: 0,
+              sessions: 0,
+              pagesPerSession: 100,
+            }),
           }),
-          changeRates: expect.objectContaining({
-            views: 100,
-            visitors: 0,
-            sessions: 0,
-            pagesPerSession: 100,
-          }),
-        }),
-      ],
-      meta: {
-        page: 1,
-        pageSize: 1,
-        returned: 1,
-        hasMore: true,
-        nextPage: 2,
+        ],
+        pagination: {
+          limit: 1,
+          returned: 1,
+          hasMore: true,
+          nextCursor: expect.any(String),
+        },
       },
     });
   });
@@ -440,22 +470,23 @@ describe("mock/analytics-pages branch coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME,
         interval: "hour",
-        page: 1,
-        pageSize: 12,
+        limit: 12,
         timeZone: "UTC",
       }),
     ).toMatchObject({
       ok: true,
-      data: [
-        expect.objectContaining({
-          pathname: "/zero",
-          metrics: expect.objectContaining({
-            views: 1,
-            sessions: 0,
-            pagesPerSession: 0,
+      data: {
+        items: [
+          expect.objectContaining({
+            pathname: "/zero",
+            metrics: expect.objectContaining({
+              views: 1,
+              sessions: 0,
+              pagesPerSession: 0,
+            }),
           }),
-        }),
-      ],
+        ],
+      },
     });
   });
 
@@ -485,18 +516,20 @@ describe("mock/analytics-pages branch coverage", () => {
       }),
     ).toMatchObject({
       ok: true,
-      data: [
-        {
-          changeRates: {
-            views: null,
-            visitors: null,
-            sessions: null,
-            bounceRate: null,
-            pagesPerSession: null,
-            avgDurationMs: null,
+      data: {
+        items: [
+          {
+            changeRates: {
+              views: null,
+              visitors: null,
+              sessions: null,
+              bounceRate: null,
+              pagesPerSession: null,
+              avgDurationMs: null,
+            },
           },
-        },
-      ],
+        ],
+      },
     });
   });
 });

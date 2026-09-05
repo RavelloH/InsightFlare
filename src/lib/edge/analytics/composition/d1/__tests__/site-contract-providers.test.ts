@@ -175,13 +175,12 @@ describe("D1 site contract provider pagination routing", () => {
     });
     vi.mocked(queryPagesDashboard).mockResolvedValue({
       interval: "day",
-      data: [],
-      meta: {
-        page: 1,
-        pageSize: 12,
+      items: [],
+      pagination: {
+        limit: 12,
         returned: 0,
         hasMore: false,
-        nextPage: null,
+        nextCursor: null,
       },
     });
     vi.mocked(queryGeoPointAggregate).mockResolvedValue({
@@ -211,7 +210,7 @@ describe("D1 site contract provider pagination routing", () => {
     expect(queryReferrersPageFromD1).toHaveBeenCalled();
   });
 
-  it("keeps aggregate and page requests on their explicit paths", async () => {
+  it("keeps bounded list and summary requests on their explicit paths", async () => {
     const registry = providers();
     await registry
       .resolve("dimension")!
@@ -250,15 +249,12 @@ describe("D1 site contract provider pagination routing", () => {
     );
     await registry
       .resolve("pages-dashboard")!
-      .execute(input({ page: 2, pageSize: 3 }));
+      .execute(input({ page: { limit: 3 } }));
 
-    expect(queryDimensionAggregate).toHaveBeenCalled();
     expect(queryDimensionPageFromD1).toHaveBeenCalled();
     expect(queryChannelAggregate).toHaveBeenCalled();
-    expect(queryFilterValuesFromD1).toHaveBeenCalled();
     expect(queryFilterValuesPageFromD1).toHaveBeenCalled();
     expect(queryPageTabsAggregate).toHaveBeenCalled();
-    expect(queryPagesAggregate).toHaveBeenCalled();
     expect(queryPagesPageFromD1).toHaveBeenCalled();
     expect(queryReferrerSummaryFromD1).toHaveBeenCalledWith(
       env,
@@ -267,7 +263,6 @@ describe("D1 site contract provider pagination routing", () => {
       EMPTY_FILTER_DOCUMENT,
       2,
     );
-    expect(queryReferrerAggregate).toHaveBeenCalled();
     expect(queryReferrersPageFromD1).toHaveBeenCalled();
     expect(queryPagesDashboard).toHaveBeenCalled();
   });

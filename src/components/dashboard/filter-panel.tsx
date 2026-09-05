@@ -2130,7 +2130,7 @@ export function FilterPanel({
     enabled: savedFiltersEnabled,
     staleTime: 60_000,
   });
-  const savedFilters = savedFiltersQuery.data?.filters ?? [];
+  const savedFilters = savedFiltersQuery.data?.items ?? [];
   const currentFilterFingerprint = useMemo(() => {
     try {
       return filterFingerprint(

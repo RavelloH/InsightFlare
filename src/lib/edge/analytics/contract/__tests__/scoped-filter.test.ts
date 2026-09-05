@@ -32,7 +32,7 @@ const context = {
     allowedFilters: new Set(),
     allowedDetails: new Set(),
     limits: {},
-    allowedPagination: new Set(),
+    cursorPagination: false,
   },
 } as unknown as QueryInput["context"];
 

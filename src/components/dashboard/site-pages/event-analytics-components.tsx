@@ -1309,7 +1309,7 @@ export const EventRecordsSection = memo(function EventRecordsSection({
     queryFn: ({ pageParam, signal }) =>
       fetchEventsRecords(siteId, timeWindow, filters, {
         cursor: pageParam,
-        pageSize: EVENT_PAGE_SIZE,
+        limit: EVENT_PAGE_SIZE,
         sortBy: sort.key,
         sortDir: sort.direction,
         search: debouncedQuery,
@@ -1318,13 +1318,15 @@ export const EventRecordsSection = memo(function EventRecordsSection({
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
-      lastPage.meta.hasMore ? lastPage.meta.nextCursor : undefined,
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
     enabled: typeof window !== "undefined",
   });
   const rows = useMemo(
     () =>
       data?.pages.reduce<EventRecord[]>(
-        (current, page) => appendUniqueEvents(current, page.data),
+        (current, page) => appendUniqueEvents(current, page.data.items),
         [],
       ) ?? [],
     [data?.pages],

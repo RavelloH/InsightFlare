@@ -55,6 +55,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { useIsMobile } from "@/hooks/use-mobile";
+import type { PaginationMeta } from "@/lib/pagination";
 import { cn } from "@/lib/utils";
 
 type NonEmptyArray<T> = readonly [T, ...T[]];
@@ -84,12 +85,7 @@ export interface TabbedDataTableLoaderOptions<
 
 export interface TabbedDataTablePage<TRow extends TabbedDataTableRowBase> {
   items: readonly TRow[];
-  pagination: {
-    limit: number;
-    returned: number;
-    hasMore: boolean;
-    nextCursor: string | null;
-  };
+  pagination: PaginationMeta;
 }
 
 export type TabbedDataTableLoader<
@@ -175,6 +171,9 @@ export interface TabbedDataTableRowAdapter<
 export type TabbedDataTableExportScope = "currentTab" | "allTabs";
 export type TabbedDataTableExportRows = "currentView" | "rawRows";
 
+export const MAX_EXPORT_ROWS = 50_000;
+export const MAX_EXPORT_PAGES = 500;
+
 export interface TabbedDataTableExportLabels {
   action?: string;
   title?: string;
@@ -188,6 +187,7 @@ export interface TabbedDataTableExportLabels {
   fileNameLabel?: string;
   download?: string;
   empty?: string;
+  budgetExceeded?: string;
 }
 
 export interface TabbedDataTableExportConfig<
@@ -224,7 +224,7 @@ export interface TabbedDataTableCardProps<
     context: TabbedDataTableRowContext<TRow, TTab, TKey>,
   ) => ReactNode;
   loader: TabbedDataTableLoader<TTab, TRow, TKey>;
-  pageSize?: number;
+  limit?: number;
   normalizeRows?: (rows: readonly TRow[], tab: TTab) => TRow[];
   filterRows?: (rows: readonly TRow[], tab: TTab) => TRow[];
   compareRows?: (
@@ -386,6 +386,8 @@ const DEFAULT_EXPORT_LABELS = {
   fileNameLabel: "File name",
   download: "Export CSV",
   empty: "No rows available to export.",
+  budgetExceeded:
+    "Export limit reached. Narrow the time range or add filters and try again.",
 } satisfies Required<TabbedDataTableExportLabels>;
 
 function TabbedDataTableCardImpl<
@@ -398,7 +400,7 @@ function TabbedDataTableCardImpl<
   rowAdapter,
   renderLabel,
   loader,
-  pageSize = 100,
+  limit = 100,
   normalizeRows = defaultNormalizeRows,
   filterRows,
   compareRows,
@@ -478,6 +480,7 @@ function TabbedDataTableCardImpl<
   const [exportRows, setExportRows] =
     useState<TabbedDataTableExportRows>("currentView");
   const [exportFilename, setExportFilename] = useState("");
+  const [exportError, setExportError] = useState<string | null>(null);
   const exportAbortControllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => exportAbortControllerRef.current?.abort(), []);
   const activeSearchTab =
@@ -551,7 +554,7 @@ function TabbedDataTableCardImpl<
       loader({
         tab: activeTab,
         cursor: pageParam,
-        limit: pageSize,
+        limit,
         search: deferredSearchTerm,
         sort: activeSort,
         signal,
@@ -723,6 +726,7 @@ function TabbedDataTableCardImpl<
 
   useEffect(() => {
     if (!exportOpen) return;
+    setExportError(null);
     setExportScope(exportConfig?.defaultScope ?? "currentTab");
     setExportRows(exportConfig?.defaultRows ?? "currentView");
     setExportFilename(defaultExportFilename);
@@ -1081,6 +1085,8 @@ function TabbedDataTableCardImpl<
     const selectedTabs =
       exportScope === "allTabs" ? [...tabs] : [activeTabMeta];
     const rowsByTabForExport = new Map<TTab, readonly TRow[]>();
+    let exportRowCount = 0;
+    let exportPageCount = 0;
 
     for (const tabMeta of selectedTabs) {
       const tab = tabMeta.value;
@@ -1092,6 +1098,14 @@ function TabbedDataTableCardImpl<
         exportRows === "rawRows"
           ? [...loadedRawRows]
           : [...normalizeRows(loadedRawRows, tab)];
+      exportRowCount += rows.length;
+      exportPageCount += tabPageData?.pages.length ?? 0;
+      if (
+        exportRowCount > MAX_EXPORT_ROWS ||
+        exportPageCount > MAX_EXPORT_PAGES
+      ) {
+        throw new Error("export_budget_exceeded");
+      }
       let hasMore =
         tabPageData === undefined || Boolean(lastPage?.pagination.hasMore);
       let cursor = lastPage?.pagination.nextCursor ?? null;
@@ -1110,20 +1124,34 @@ function TabbedDataTableCardImpl<
         const page = await loader({
           tab,
           cursor,
-          limit: pageSize,
+          limit,
           search: tabSearchTerm,
           sort: effectiveSortByTab[tab],
           signal,
         });
+        exportPageCount += 1;
         const pageRows =
           exportRows === "rawRows"
             ? [...page.items]
             : normalizeRows(page.items, tab);
+        if (
+          exportPageCount > MAX_EXPORT_PAGES ||
+          exportRowCount + pageRows.length > MAX_EXPORT_ROWS
+        ) {
+          throw new Error("export_budget_exceeded");
+        }
         rows = [...rows, ...pageRows];
+        exportRowCount += pageRows.length;
         hasMore = page.pagination.hasMore;
         cursor = page.pagination.nextCursor;
         if (hasMore && cursor === null) {
           throw new Error("The export page did not provide a next cursor.");
+        }
+        if (hasMore && exportRowCount >= MAX_EXPORT_ROWS) {
+          throw new Error("export_budget_exceeded");
+        }
+        if (hasMore && exportPageCount >= MAX_EXPORT_PAGES) {
+          throw new Error("export_budget_exceeded");
         }
       }
 
@@ -1138,6 +1166,7 @@ function TabbedDataTableCardImpl<
     const controller = new AbortController();
     exportAbortControllerRef.current = controller;
     setExporting(true);
+    setExportError(null);
     try {
       const rowsByTabForExport = await collectRowsForExport(controller.signal);
       if (countExportRows(rowsByTabForExport) === 0) return;
@@ -1146,7 +1175,14 @@ function TabbedDataTableCardImpl<
       setExportOpen(false);
     } catch (error) {
       if (!(error instanceof Error && error.name === "AbortError")) {
-        console.error("Failed to export table data", error);
+        if (
+          error instanceof Error &&
+          error.message === "export_budget_exceeded"
+        ) {
+          setExportError(exportLabels.budgetExceeded);
+        } else {
+          console.error("Failed to export table data", error);
+        }
       }
     } finally {
       if (exportAbortControllerRef.current === controller) {
@@ -1330,6 +1366,11 @@ function TabbedDataTableCardImpl<
             {exportRowCount === 0 && !exportCanLoadRows ? (
               <p className="text-xs text-muted-foreground">
                 {exportLabels.empty}
+              </p>
+            ) : null}
+            {exportError ? (
+              <p className="text-xs text-destructive" role="alert">
+                {exportError}
               </p>
             ) : null}
           </div>

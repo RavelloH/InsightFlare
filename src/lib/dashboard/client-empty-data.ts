@@ -122,26 +122,14 @@ export function emptyDimension(): DimensionData {
 export function emptyVisitors(): VisitorsData {
   return {
     ok: true,
-    data: [],
-    meta: {
-      pageSize: 0,
-      returned: 0,
-      hasMore: false,
-      nextCursor: null,
-    },
+    data: { items: [], pagination: emptyPagination() },
   };
 }
 
 export function emptySessions(): SessionsData {
   return {
     ok: true,
-    data: [],
-    meta: {
-      pageSize: 0,
-      returned: 0,
-      hasMore: false,
-      nextCursor: null,
-    },
+    data: { items: [], pagination: emptyPagination() },
   };
 }
 
@@ -196,15 +184,17 @@ export function emptyEventsTrend(
   };
 }
 
-export function emptyEventsRecords(pageSize = 0): EventsRecordsData {
+export function emptyEventsRecords(limit = 0): EventsRecordsData {
   return {
     ok: true,
-    data: [],
-    meta: {
-      pageSize,
-      returned: 0,
-      hasMore: false,
-      nextCursor: null,
+    data: {
+      items: [],
+      pagination: {
+        limit,
+        returned: 0,
+        hasMore: false,
+        nextCursor: null,
+      },
     },
   };
 }

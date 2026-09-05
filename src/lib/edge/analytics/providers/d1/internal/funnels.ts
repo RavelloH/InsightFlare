@@ -27,6 +27,7 @@ import {
 import {
   decodePageCursor,
   encodePageCursor,
+  hasExactKeys,
   pageResult,
   paginationBinding,
 } from "./pagination";
@@ -98,21 +99,19 @@ function mapFunnelDefinition(row: Record<string, unknown>): FunnelDefinition {
   };
 }
 
-export async function queryFunnelDefinitions(
-  env: Env,
-  siteId: string,
-): Promise<FunnelDefinition[]> {
-  const rows = await queryD1All<Record<string, unknown>>(
-    env,
-    "SELECT id, site_id, kind, name, config_json, created_at, updated_at FROM analysis_definitions WHERE site_id = ? AND kind = ? AND archived_at IS NULL ORDER BY created_at DESC",
-    [siteId, FUNNEL_ANALYSIS_KIND],
-  );
-  return rows.map(mapFunnelDefinition);
-}
-
 interface FunnelDefinitionCursor {
   readonly createdAt: number;
   readonly id: string;
+}
+
+function funnelDefinitionCursor(value: unknown): FunnelDefinitionCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, ["createdAt", "id"]) &&
+    typeof candidate.id === "string" &&
+    Number.isSafeInteger(candidate.createdAt)
+    ? { id: candidate.id, createdAt: candidate.createdAt as number }
+    : null;
 }
 
 async function funnelCursorBinding(siteId: string): Promise<string> {
@@ -172,6 +171,8 @@ export async function decodeFunnelDefinitionCursor(
     env,
     await funnelCursorBinding(siteId),
     cursor,
+    "funnels",
+    funnelDefinitionCursor,
   );
 }
 

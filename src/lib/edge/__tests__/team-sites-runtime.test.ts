@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   listTeamSites: vi.fn(),
+  queryTeamSitesPageFromD1: vi.fn(),
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/operations/overview-reader", () => ({
   createOverviewReader: vi.fn(),
@@ -23,7 +24,10 @@ vi.mock("@/lib/edge/analytics/providers/d1/operations/overview-reader", () => ({
   ),
 }));
 
-import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+import {
+  listTeamSites,
+  queryTeamSitesPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
   createOverviewReader,
   readLatestSiteActivity,
@@ -43,26 +47,20 @@ describe("team sites runtime", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns only authorized metadata with typed metrics, trends, and activity", async () => {
-    vi.mocked(listTeamSites).mockResolvedValue([
-      {
-        id: "site-1",
-        name: "One",
-        domain: "one.test",
-        publicEnabled: 1,
-        publicSlug: "one",
-        createdAt: 1,
-        updatedAt: 2,
-      },
-      {
-        id: "site-2",
-        name: "Two",
-        domain: "two.test",
-        publicEnabled: 0,
-        publicSlug: null,
-        createdAt: 3,
-        updatedAt: 4,
-      },
-    ] as never);
+    vi.mocked(queryTeamSitesPageFromD1).mockResolvedValue({
+      rows: [
+        {
+          id: "site-1",
+          name: "One",
+          domain: "one.test",
+          publicEnabled: 1,
+          publicSlug: "one",
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+      nextCursor: null,
+    } as never);
     vi.mocked(createOverviewReader).mockReturnValue({
       readOverview: vi.fn().mockResolvedValue({
         value: {
@@ -97,7 +95,13 @@ describe("team sites runtime", () => {
 
     await expect(readTeamSites(input)).resolves.toMatchObject({
       data: {
-        sites: [{ siteId: "site-1", publicEnabled: true, lastEventAtMs: 0 }],
+        items: [{ siteId: "site-1", publicEnabled: true, lastEventAtMs: 0 }],
+        pagination: {
+          limit: 20,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
       source: "rollup",
       approximateVisitors: false,
@@ -112,7 +116,10 @@ describe("team sites runtime", () => {
   });
 
   it("allows all sites when unrestricted and preserves mixed/approximate provenance", async () => {
-    vi.mocked(listTeamSites).mockResolvedValue([{ id: "site-1" }] as never);
+    vi.mocked(queryTeamSitesPageFromD1).mockResolvedValue({
+      rows: [{ id: "site-1" }],
+      nextCursor: null,
+    } as never);
     vi.mocked(createOverviewReader).mockReturnValue({
       readOverview: vi.fn().mockResolvedValue({
         value: {
@@ -139,9 +146,12 @@ describe("team sites runtime", () => {
   });
 
   it("returns no sites without readers and passes canonical filters", async () => {
-    vi.mocked(listTeamSites).mockResolvedValue([] as never);
+    vi.mocked(queryTeamSitesPageFromD1).mockResolvedValue({
+      rows: [],
+      nextCursor: null,
+    } as never);
     await expect(readTeamSites(input)).resolves.toMatchObject({
-      data: { sites: [] },
+      data: { items: [] },
       source: "raw",
     });
     expect(createOverviewReader).not.toHaveBeenCalled();
@@ -158,11 +168,47 @@ describe("team sites runtime", () => {
           },
         },
       }),
-    ).resolves.toMatchObject({ data: { sites: [] }, source: "raw" });
+    ).rejects.toThrow("Unknown filter field");
+  });
+
+  it("decodes the signed cursor for the next team-sites page", async () => {
+    const paginatedInput = {
+      ...input,
+      env: { DAILY_SALT_SECRET: "test-pagination-secret" } as never,
+      page: { limit: 1, cursor: null },
+    };
+    vi.mocked(queryTeamSitesPageFromD1).mockResolvedValueOnce({
+      rows: [],
+      nextCursor: { createdAt: 20, id: "site-1" },
+    } as never);
+    const first = await readTeamSites(paginatedInput);
+    expect(first.data.pagination).toMatchObject({
+      hasMore: true,
+      nextCursor: expect.any(String),
+    });
+
+    vi.mocked(queryTeamSitesPageFromD1).mockResolvedValueOnce({
+      rows: [],
+      nextCursor: null,
+    } as never);
+    const second = await readTeamSites({
+      ...paginatedInput,
+      page: {
+        limit: 1,
+        cursor: first.data.pagination.nextCursor,
+      },
+    });
+    expect(second.data.pagination).toMatchObject({
+      hasMore: false,
+      nextCursor: null,
+    });
   });
 
   it("does not request trends when the composite omitted its optional interval", async () => {
-    vi.mocked(listTeamSites).mockResolvedValue([{ id: "site-1" }] as never);
+    vi.mocked(queryTeamSitesPageFromD1).mockResolvedValue({
+      rows: [{ id: "site-1" }],
+      nextCursor: null,
+    } as never);
     const readTrend = vi.fn();
     vi.mocked(createOverviewReader).mockReturnValue({
       readOverview: vi.fn().mockResolvedValue({
@@ -182,10 +228,10 @@ describe("team sites runtime", () => {
     vi.mocked(readLatestSiteActivity).mockResolvedValue(null);
     const result = await readTeamSites({ ...input, interval: undefined });
     expect(result).toMatchObject({
-      data: { sites: [{ siteId: "site-1" }] },
+      data: { items: [{ siteId: "site-1" }] },
       source: "raw",
     });
-    expect(result.data.sites[0]).not.toHaveProperty("trend");
+    expect(result.data.items[0]).not.toHaveProperty("trend");
     expect(readTrend).not.toHaveBeenCalled();
   });
 });

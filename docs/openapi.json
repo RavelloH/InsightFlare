@@ -7157,7 +7157,7 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "sites": {
+                        "items": {
                           "type": "array",
                           "items": {
                             "type": "object",
@@ -7312,7 +7312,7 @@
                         }
                       },
                       "required": [
-                        "sites",
+                        "items",
                         "pagination"
                       ],
                       "additionalProperties": false
@@ -7329,7 +7329,7 @@
                 },
                 "example": {
                   "data": {
-                    "sites": [
+                    "items": [
                       {
                         "siteId": "example",
                         "name": "example",
@@ -7390,7 +7390,7 @@
             }
           },
           "400": {
-            "description": "API v1 error: validation_failed.",
+            "description": "API v1 error: validation_failed, invalid_cursor.",
             "headers": {
               "X-Request-Id": {
                 "required": true,
@@ -16683,13 +16683,13 @@
                             "additionalProperties": false
                           }
                         },
-                        "page": {
-                          "$ref": "#/components/schemas/SharedSchema_96182d97894c"
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
                         "items",
-                        "page"
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -16732,8 +16732,9 @@
                         "valueCount": 0
                       }
                     ],
-                    "page": {
+                    "pagination": {
                       "limit": 1,
+                      "returned": 0,
                       "hasMore": false,
                       "nextCursor": "example"
                     }
@@ -23121,13 +23122,13 @@
                             "additionalProperties": false
                           }
                         },
-                        "page": {
-                          "$ref": "#/components/schemas/SharedSchema_96182d97894c"
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
                         }
                       },
                       "required": [
                         "items",
-                        "page"
+                        "pagination"
                       ],
                       "additionalProperties": false
                     },
@@ -23167,8 +23168,9 @@
                         "screenHeight": 0
                       }
                     ],
-                    "page": {
+                    "pagination": {
                       "limit": 1,
+                      "returned": 0,
                       "hasMore": false,
                       "nextCursor": "example"
                     }
@@ -23716,33 +23718,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "items": {
-                          "$ref": "#/components/schemas/SharedSchema_ffd4d8b33e22"
-                        },
-                        "page": {
-                          "$ref": "#/components/schemas/SharedSchema_96182d97894c"
-                        }
-                      },
-                      "required": [
-                        "items",
-                        "page"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "meta": {
-                      "$ref": "#/components/schemas/SharedSchema_72e5450ef6c5"
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "meta"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/SharedSchema_ba7cd480cd06"
                 },
                 "example": {
                   "data": {
@@ -23783,8 +23759,9 @@
                         }
                       }
                     ],
-                    "page": {
+                    "pagination": {
                       "limit": 1,
+                      "returned": 0,
                       "hasMore": false,
                       "nextCursor": "example"
                     }
@@ -24855,33 +24832,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "items": {
-                          "$ref": "#/components/schemas/SharedSchema_ffd4d8b33e22"
-                        },
-                        "pagination": {
-                          "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
-                        }
-                      },
-                      "required": [
-                        "items",
-                        "pagination"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "meta": {
-                      "$ref": "#/components/schemas/SharedSchema_72e5450ef6c5"
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "meta"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/SharedSchema_ba7cd480cd06"
                 },
                 "example": {
                   "data": {
@@ -31833,35 +31784,40 @@
             "description": "siteId path parameter."
           },
           {
-            "name": "limit",
+            "name": "page",
             "in": "query",
             "required": true,
             "schema": {
-              "default": 100,
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000
-            },
-            "description": "limit query parameter."
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "default": null,
-              "anyOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 12288
+              "default": {
+                "limit": 100
+              },
+              "type": "object",
+              "properties": {
+                "limit": {
+                  "default": 100,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
                 },
-                {
-                  "type": "null"
+                "cursor": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 12288
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
-              ]
+              },
+              "required": [
+                "limit"
+              ],
+              "additionalProperties": false
             },
-            "description": "cursor query parameter."
+            "description": "page query parameter."
           }
         ],
         "responses": {
@@ -31961,13 +31917,9 @@
                         "additionalProperties": false
                       }
                     },
-                    "page": {
+                    "pagination": {
                       "type": "object",
                       "properties": {
-                        "kind": {
-                          "type": "string",
-                          "const": "keyset"
-                        },
                         "limit": {
                           "type": "integer",
                           "minimum": 1,
@@ -31986,20 +31938,25 @@
                         },
                         "hasMore": {
                           "type": "boolean"
+                        },
+                        "returned": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000
                         }
                       },
                       "required": [
-                        "kind",
                         "limit",
                         "nextCursor",
-                        "hasMore"
+                        "hasMore",
+                        "returned"
                       ],
                       "additionalProperties": false
                     }
                   },
                   "required": [
                     "items",
-                    "page"
+                    "pagination"
                   ],
                   "additionalProperties": false,
                   "$defs": {
@@ -32076,11 +32033,11 @@
                       "updatedAt": "2026-01-01T00:00:00Z"
                     }
                   ],
-                  "page": {
-                    "kind": "keyset",
+                  "pagination": {
                     "limit": 1,
                     "nextCursor": "example",
-                    "hasMore": false
+                    "hasMore": false,
+                    "returned": 0
                   }
                 }
               }
@@ -34990,6 +34947,22 @@
         ],
         "additionalProperties": false
       },
+      "SharedSchema_ba7cd480cd06": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SharedSchema_0b2825516561"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/SharedSchema_72e5450ef6c5"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
       "SharedSchema_fea62b48b995": {
         "type": "object",
         "properties": {
@@ -35352,35 +35325,6 @@
         ],
         "additionalProperties": false
       },
-      "SharedSchema_96182d97894c": {
-        "type": "object",
-        "properties": {
-          "limit": {
-            "type": "integer",
-            "exclusiveMinimum": 0,
-            "maximum": 9007199254740991
-          },
-          "hasMore": {
-            "type": "boolean"
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "limit",
-          "hasMore",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
       "SharedSchema_a07487506f63": {
         "type": "object",
         "properties": {
@@ -35441,6 +35385,22 @@
         "required": [
           "interval",
           "points"
+        ],
+        "additionalProperties": false
+      },
+      "SharedSchema_0b2825516561": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "$ref": "#/components/schemas/SharedSchema_ffd4d8b33e22"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
+          }
+        },
+        "required": [
+          "items",
+          "pagination"
         ],
         "additionalProperties": false
       },

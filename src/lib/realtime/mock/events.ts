@@ -137,6 +137,7 @@ import {
   parseDemoNumber,
   withoutDemoGeoFilter,
 } from "@/lib/realtime/mock/filters";
+import { demoPage } from "@/lib/realtime/mock/pagination";
 import {
   buildPathTransitionGraph,
   nextPath,
@@ -345,7 +346,7 @@ export function generateDemoEventsRecords(
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
-  const pageSize = parseDemoLimit(params.pageSize, 80, 1, 120);
+  const limit = parseDemoLimit(params.limit, 80, 1, 120);
   const filters = parseDemoFilters(params);
   const eventName = normalizeDemoFilterValue(params.eventName);
   const search = normalizeDemoSearch(params);
@@ -368,23 +369,26 @@ export function generateDemoEventsRecords(
     ]);
   });
   const sorted = sortDemoEventRecords(events, parseDemoEventRecordSort(params));
-  const offset =
-    params.cursor !== undefined
-      ? parseDemoLimit(params.cursor, 0, 0, 1_000_000)
-      : (parseDemoLimit(params.page, 1, 1, 10_000) - 1) * pageSize;
-  const requestedRows = sorted.slice(offset, offset + pageSize + 1);
-  const hasMore = requestedRows.length > pageSize;
-  const currentRows = requestedRows.slice(0, pageSize);
+  const page = demoPage(
+    sorted.map(demoEventRecordFromFact),
+    params,
+    {
+      operation: "events-records",
+      siteId,
+      from,
+      to,
+      filters,
+      eventName,
+      search,
+      sort: parseDemoEventRecordSort(params),
+    },
+    80,
+    120,
+  );
 
   return {
     ok: true,
-    data: currentRows.map(demoEventRecordFromFact),
-    meta: {
-      pageSize,
-      returned: currentRows.length,
-      hasMore,
-      nextCursor: hasMore ? String(offset + pageSize) : null,
-    },
+    data: page,
   };
 }
 
@@ -522,13 +526,25 @@ export function generateDemoEventFields(
     createDemoCustomEventFacts(filtered.visits),
     filters,
   ).filter((event) => !eventName || event.eventName === eventName);
+  const binding = {
+    operation: "event-fields",
+    siteId,
+    from,
+    to,
+    filters,
+    eventName,
+    sort: "events:desc,occurrences:desc,path:asc,valueType:asc",
+  };
 
   return {
     ok: true,
     eventName,
-    fields: collectDemoEventFields(
-      events,
-      parseDemoLimit(params.limit, 100, 1, 200),
+    data: demoPage(
+      collectDemoEventFields(events, Math.max(1, events.length)),
+      params,
+      binding,
+      100,
+      200,
     ),
   };
 }
@@ -545,12 +561,24 @@ export function generateDemoEventTypeFieldValues(
   const filters = parseDemoFilters(params);
   const limit = parseDemoLimit(params.limit, 25, 1, 100);
   const search = normalizeDemoSearch(params);
+  const binding = {
+    operation: "event-field-values",
+    siteId,
+    from,
+    to,
+    filters,
+    eventName,
+    fieldPath,
+    fieldValueType,
+    search,
+    sort: "occurrences:desc,events:desc,value:asc",
+  };
   if (!fieldPath || !fieldValueType) {
     return {
       ok: true,
       fieldPath,
       fieldValueType,
-      data: [],
+      data: demoPage([], params, binding, 25, 100),
     };
   }
   const dataset = buildDemoFactDataset(siteId, from, to);
@@ -560,13 +588,17 @@ export function generateDemoEventTypeFieldValues(
     filters,
   ).filter((event) => !eventName || event.eventName === eventName);
 
+  const rows = collectDemoEventFieldValues(
+    events,
+    fieldPath,
+    fieldValueType,
+    Math.max(1, events.length),
+  ).filter((row) => demoValuesIncludeSearch(search, [row.value]));
   return {
     ok: true,
     fieldPath,
     fieldValueType,
-    data: collectDemoEventFieldValues(events, fieldPath, fieldValueType, limit)
-      .filter((row) => demoValuesIncludeSearch(search, [row.value]))
-      .slice(0, limit),
+    data: demoPage(rows, params, binding, 25, 100),
   };
 }
 

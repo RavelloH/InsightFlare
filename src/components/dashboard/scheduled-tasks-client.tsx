@@ -15,7 +15,7 @@ import {
   RiRefreshLine,
   RiTimeLine,
 } from "@remixicon/react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { AnalyticsDataTable } from "@/components/dashboard/analytics-data-table";
@@ -69,7 +69,6 @@ import type {
   ScheduledTaskRun,
   ScheduledTaskRunGroup,
   ScheduledTaskRunLog,
-  ScheduledTaskRunsMeta,
   ScheduledTasksData,
   ScheduledTaskStatus,
 } from "@/lib/scheduled-tasks";
@@ -91,31 +90,34 @@ const STATUS_OPTIONS: Array<ScheduledTaskStatus | "all"> = [
 ];
 const RUN_PAGE_SIZE = 50;
 const RUN_TABLE_COLUMN_COUNT = 10;
-const INITIAL_RUN_META: ScheduledTaskRunsMeta = {
-  page: 1,
-  pageSize: RUN_PAGE_SIZE,
+const INITIAL_RUN_META = {
+  limit: RUN_PAGE_SIZE,
   returned: 0,
   hasMore: false,
-  nextPage: null,
+  nextCursor: null,
 };
 
 async function fetchScheduledTasks(params: {
   status?: string;
   runId?: string;
-  page?: number;
-  pageSize?: number;
+  limit?: number;
+  cursor?: string | null;
+  logLimit?: number;
+  logCursor?: string | null;
   signal?: AbortSignal;
 }): Promise<ScheduledTasksData> {
   const query: Record<string, string | number> = {
-    page: params.page ?? 1,
-    pageSize: params.pageSize ?? RUN_PAGE_SIZE,
+    limit: params.limit ?? RUN_PAGE_SIZE,
   };
+  if (params.cursor) query.cursor = params.cursor;
   if (params.status && params.status !== "all") {
     query.status = params.status;
   }
   if (params.runId) {
     query.runId = params.runId;
   }
+  if (params.logLimit) query.logLimit = params.logLimit;
+  if (params.logCursor) query.logCursor = params.logCursor;
   return requestAdminService<ScheduledTasksData>("scheduled-tasks", {
     params: query,
     signal: params.signal,
@@ -316,9 +318,9 @@ function localizedTaskInfo(
 
 function appendUniqueRuns(
   current: ScheduledTaskRunGroup[],
-  incoming: ScheduledTaskRunGroup[],
+  incoming: readonly ScheduledTaskRunGroup[],
 ): ScheduledTaskRunGroup[] {
-  if (current.length === 0) return incoming;
+  if (current.length === 0) return [...incoming];
   const seen = new Set(current.map((run) => run.id));
   const nextRuns = incoming.filter((run) => !seen.has(run.id));
   return nextRuns.length > 0 ? [...current, ...nextRuns] : current;
@@ -575,6 +577,9 @@ function ScheduledTaskRunLogDrawer({
   run,
   logs,
   loading,
+  loadingMore,
+  hasMore,
+  onLoadMore,
   locale,
   timeZone,
   messages,
@@ -583,8 +588,11 @@ function ScheduledTaskRunLogDrawer({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   run: ScheduledTaskRunGroup | null;
-  logs: ScheduledTaskRunLog[];
+  logs: readonly ScheduledTaskRunLog[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  onLoadMore: () => void;
   locale: Locale;
   timeZone: string | undefined;
   messages: AppMessages;
@@ -833,6 +841,25 @@ function ScheduledTaskRunLogDrawer({
                               </div>
                             );
                           })}
+                          {hasMore ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="w-full"
+                              disabled={loadingMore}
+                              onClick={onLoadMore}
+                            >
+                              {loadingMore ? (
+                                <span className="inline-flex items-center gap-2">
+                                  <Spinner className="size-4" />
+                                  {messages.common.loading}
+                                </span>
+                              ) : (
+                                labels.loadMore
+                              )}
+                            </Button>
+                          ) : null}
                         </div>
                       ) : (
                         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
@@ -874,19 +901,19 @@ export function ScheduledTasksClient({
     queryFn: ({ pageParam, signal }) =>
       fetchScheduledTasks({
         status,
-        page: pageParam,
-        pageSize: RUN_PAGE_SIZE,
+        cursor: pageParam,
+        limit: RUN_PAGE_SIZE,
         signal,
       }),
-    initialPageParam: 1,
+    initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
-      lastPage.runsMeta.hasMore
-        ? (lastPage.runsMeta.nextPage ?? undefined)
+      lastPage.runs.pagination.hasMore
+        ? lastPage.runs.pagination.nextCursor
         : undefined,
     initialData: initialData
       ? {
           pages: [initialData],
-          pageParams: [1],
+          pageParams: [null],
         }
       : undefined,
     initialDataUpdatedAt: initialData?.fetchedAt,
@@ -896,13 +923,13 @@ export function ScheduledTasksClient({
   const runs = useMemo(
     () =>
       runsQuery.data?.pages.reduce<ScheduledTaskRunGroup[]>(
-        (current, page) => appendUniqueRuns(current, page.runs),
+        (current, page) => appendUniqueRuns(current, page.runs.items),
         [],
       ) ?? [],
     [runsQuery.data?.pages],
   );
   const data = runsQuery.data?.pages.at(-1) ?? null;
-  const runsMeta = data?.runsMeta ?? INITIAL_RUN_META;
+  const runsMeta = data?.runs.pagination ?? INITIAL_RUN_META;
   const loadingInitial = runsQuery.isPending;
   const loadingMore = runsQuery.isFetchingNextPage;
   const error = runsQuery.isError && runs.length === 0;
@@ -923,24 +950,38 @@ export function ScheduledTasksClient({
     void runsQuery.fetchNextPage();
   });
 
-  const detailQuery = useQuery({
+  const detailQuery = useInfiniteQuery({
     queryKey: ["dashboard", "scheduled-task-run", selectedRunId],
-    queryFn: ({ signal }) =>
+    queryFn: ({ pageParam, signal }) =>
       fetchScheduledTasks({
         runId: selectedRunId,
-        page: 1,
-        pageSize: 1,
+        limit: 1,
+        cursor: null,
+        logLimit: 200,
+        logCursor: pageParam,
         signal,
       }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.logs.pagination.hasMore
+        ? lastPage.logs.pagination.nextCursor
+        : undefined,
     enabled:
       typeof window !== "undefined" && drawerOpen && Boolean(selectedRunId),
   });
   const selectedRun =
-    detailQuery.data?.selectedRun ??
+    detailQuery.data?.pages.at(-1)?.selectedRun ??
     runs.find((run) => run.id === selectedRunId) ??
     null;
-  const selectedLogs = selectedRun ? (detailQuery.data?.logs ?? []) : [];
+  const selectedLogs = selectedRun
+    ? (detailQuery.data?.pages.flatMap((page) => page.logs.items) ?? [])
+    : [];
   const detailLoading = detailQuery.isPending;
+  const detailLoadingMore = detailQuery.isFetchingNextPage;
+  const loadMoreLogs = useEffectEvent(() => {
+    if (detailLoadingMore || !detailQuery.hasNextPage) return;
+    void detailQuery.fetchNextPage();
+  });
 
   useEffect(() => {
     if (!runsQuery.isError || runs.length > 0) return;
@@ -1249,6 +1290,9 @@ export function ScheduledTasksClient({
         run={selectedRun}
         logs={selectedLogs}
         loading={detailLoading}
+        loadingMore={detailLoadingMore}
+        hasMore={Boolean(detailQuery.hasNextPage)}
+        onLoadMore={loadMoreLogs}
         locale={locale}
         timeZone={timeZone}
         messages={messages}

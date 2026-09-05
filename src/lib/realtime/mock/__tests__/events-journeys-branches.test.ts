@@ -131,22 +131,24 @@ describe("mock events and journeys branch coverage", () => {
 
     expect(result).toMatchObject({
       ok: true,
-      data: [
-        expect.objectContaining({
-          visitorId: "visitor-1",
-          firstSeenAt: 1_000,
-          lastSeenAt: 3_000,
-          views: 2,
-          sessions: 2,
-          region: "DE::BE::Berlin",
-          city: "DE::BE::Berlin::Berlin",
-        }),
-      ],
-      meta: {
-        pageSize: 10,
-        returned: 1,
-        hasMore: false,
-        nextCursor: null,
+      data: {
+        items: [
+          expect.objectContaining({
+            visitorId: "visitor-1",
+            firstSeenAt: 1_000,
+            lastSeenAt: 3_000,
+            views: 2,
+            sessions: 2,
+            region: "DE::BE::Berlin",
+            city: "DE::BE::Berlin::Berlin",
+          }),
+        ],
+        pagination: {
+          limit: 10,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
     });
   });
@@ -172,7 +174,8 @@ describe("mock events and journeys branch coverage", () => {
       sortBy: "views",
       sortDir: "desc",
     });
-    const data = result.data as Array<Record<string, unknown>>;
+    const data = (result.data as { items: Array<Record<string, unknown>> })
+      .items;
 
     expect(data.map((row) => row.visitorId)).toEqual([
       "visitor-a",
@@ -210,27 +213,33 @@ describe("mock events and journeys branch coverage", () => {
 
     expect(
       generateDemoVisitors("site", {
-        pageSize: 2,
+        limit: 2,
       }),
     ).toMatchObject({
-      meta: {
-        pageSize: 2,
-        returned: 2,
-        hasMore: true,
-        nextCursor: "2",
+      data: {
+        pagination: {
+          limit: 2,
+          returned: 2,
+          hasMore: true,
+          nextCursor: expect.any(String),
+        },
       },
     });
 
     const searched = generateDemoVisitors("site", {
-      pageSize: 2,
+      limit: 2,
       search: "beta-docs",
     }) as {
-      data: Array<Record<string, unknown>>;
-      meta: Record<string, unknown>;
+      data: {
+        items: Array<Record<string, unknown>>;
+        pagination: Record<string, unknown>;
+      };
     };
 
-    expect(searched.data.map((row) => row.visitorId)).toEqual(["visitor-beta"]);
-    expect(searched.meta).toMatchObject({
+    expect(searched.data.items.map((row) => row.visitorId)).toEqual([
+      "visitor-beta",
+    ]);
+    expect(searched.data.pagination).toMatchObject({
       returned: 1,
       hasMore: false,
       nextCursor: null,
@@ -531,7 +540,8 @@ describe("mock events and journeys branch coverage", () => {
       sortBy: "views",
       sortDir: "desc",
     });
-    const data = result.data as Array<Record<string, unknown>>;
+    const data = (result.data as { items: Array<Record<string, unknown>> })
+      .items;
 
     expect(data.map((row) => row.sessionId)).toEqual([
       "a-session",
@@ -569,29 +579,33 @@ describe("mock events and journeys branch coverage", () => {
 
     expect(
       generateDemoSessions("site", {
-        pageSize: 2,
+        limit: 2,
       }),
     ).toMatchObject({
-      meta: {
-        pageSize: 2,
-        returned: 2,
-        hasMore: true,
-        nextCursor: "2",
+      data: {
+        pagination: {
+          limit: 2,
+          returned: 2,
+          hasMore: true,
+          nextCursor: expect.any(String),
+        },
       },
     });
 
     const searched = generateDemoSessions("site", {
-      pageSize: 2,
+      limit: 2,
       q: "gamma help",
     }) as {
-      data: Array<Record<string, unknown>>;
-      meta: Record<string, unknown>;
+      data: {
+        items: Array<Record<string, unknown>>;
+        pagination: Record<string, unknown>;
+      };
     };
 
-    expect(searched.data.map((row) => row.sessionId)).toEqual([
+    expect(searched.data.items.map((row) => row.sessionId)).toEqual([
       "session-gamma",
     ]);
-    expect(searched.meta).toMatchObject({
+    expect(searched.data.pagination).toMatchObject({
       returned: 1,
       hasMore: false,
       nextCursor: null,

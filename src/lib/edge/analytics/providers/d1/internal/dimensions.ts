@@ -1,6 +1,7 @@
 import type { ScopedDatasetSql } from "@/lib/edge/analytics/contract";
 import {
   analyticsFilterRegistry,
+  effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
@@ -28,6 +29,7 @@ import type { D1ReadDiagnostics } from "./diagnostics";
 import {
   decodePageCursor,
   encodePageCursor,
+  hasExactKeys,
   type PageResult,
   pageResult,
   paginationBinding,
@@ -35,13 +37,44 @@ import {
 import { scopedDatasetFor } from "./scoped-dataset";
 
 export interface DimensionAggregateCursor {
+  /** The first two values are the concrete ORDER BY metrics. */
+  readonly primary: number;
+  readonly secondary: number;
+  readonly value: string;
+}
+
+export interface SessionPathDimensionCursor {
   readonly views: number;
-  readonly sessions: number;
-  readonly visitors?: number;
   readonly value: string;
 }
 
 export type DimensionPageSortKey = "views" | "visitors";
+
+function dimensionCursor(value: unknown): DimensionAggregateCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, ["primary", "secondary", "value"]) &&
+    typeof candidate.primary === "number" &&
+    Number.isFinite(candidate.primary) &&
+    typeof candidate.secondary === "number" &&
+    Number.isFinite(candidate.secondary) &&
+    typeof candidate.value === "string"
+    ? (candidate as unknown as DimensionAggregateCursor)
+    : null;
+}
+
+function sessionPathDimensionCursor(
+  value: unknown,
+): SessionPathDimensionCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, ["views", "value"]) &&
+    typeof candidate.views === "number" &&
+    Number.isFinite(candidate.views) &&
+    typeof candidate.value === "string"
+    ? (candidate as unknown as SessionPathDimensionCursor)
+    : null;
+}
 
 type SessionPathKind = "entry" | "exit";
 
@@ -64,6 +97,7 @@ function dimensionCursorBinding(
     window.endExclusiveMs,
     window.timeZone,
     filterFingerprint(filters, analyticsFilterRegistry),
+    effectiveScopeForPagination(filters),
     selectExpr,
     search?.trim().toLowerCase() ?? "",
     sortBy,
@@ -219,11 +253,11 @@ LIMIT ?
   );
   const cursorBindings = cursor
     ? [
-        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
-        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
-        sortBy === "visitors" ? cursor.views : cursor.sessions,
-        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
-        sortBy === "visitors" ? cursor.views : cursor.sessions,
+        cursor.primary,
+        cursor.primary,
+        cursor.secondary,
+        cursor.primary,
+        cursor.secondary,
         cursor.value,
       ]
     : [];
@@ -273,9 +307,9 @@ LIMIT ?
   const nextCursor =
     page.hasMore && page.last
       ? await encodePageCursor(env, binding, {
-          views: page.last.views,
-          sessions: page.last.sessions,
-          visitors: page.last.visitors,
+          primary: sortBy === "visitors" ? page.last.visitors : page.last.views,
+          secondary:
+            sortBy === "visitors" ? page.last.views : page.last.sessions,
           value: page.last.value,
         })
       : null;
@@ -316,6 +350,8 @@ export async function decodeDimensionCursor(
       sortDirection,
     ),
     cursor,
+    "dimensions",
+    dimensionCursor,
   );
 }
 
@@ -434,7 +470,7 @@ export async function querySessionPathDimensionPageFromD1(
   kind: SessionPathKind,
   diagnostics?: D1ReadDiagnostics,
   search?: string,
-  cursor?: DimensionAggregateCursor | null,
+  cursor?: SessionPathDimensionCursor | null,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<DimensionRow>> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
@@ -543,6 +579,7 @@ LIMIT ?
     window.endExclusiveMs,
     window.timeZone,
     filterFingerprint(filters, analyticsFilterRegistry),
+    effectiveScopeForPagination(filters),
     search?.trim().toLowerCase() ?? "",
     audience,
   ]);
@@ -550,7 +587,6 @@ LIMIT ?
     page.hasMore && page.last
       ? await encodePageCursor(env, binding, {
           views: page.last.views,
-          sessions: page.last.sessions,
           value: page.last.value,
         })
       : null;
@@ -574,8 +610,8 @@ export async function decodeSessionPathDimensionCursor(
   search?: string,
   cursor?: string | null,
   audience: QueryAudience = "private-dashboard",
-): Promise<DimensionAggregateCursor | null> {
-  return decodePageCursor<DimensionAggregateCursor>(
+): Promise<SessionPathDimensionCursor | null> {
+  return decodePageCursor<SessionPathDimensionCursor>(
     env,
     await paginationBinding([
       `analytics-session-${kind}-v1`,
@@ -584,10 +620,13 @@ export async function decodeSessionPathDimensionCursor(
       window.endExclusiveMs,
       window.timeZone,
       filterFingerprint(filters, analyticsFilterRegistry),
+      effectiveScopeForPagination(filters),
       search?.trim().toLowerCase() ?? "",
       audience,
     ]),
     cursor,
+    "session-dimension",
+    sessionPathDimensionCursor,
   );
 }
 

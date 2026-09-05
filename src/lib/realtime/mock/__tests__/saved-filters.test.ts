@@ -14,8 +14,13 @@ function list(siteId: string): SavedFilter[] {
     method: "GET",
     siteId,
   });
-  if (result && typeof result === "object" && "filters" in result) {
-    return (result as { filters: SavedFilter[] }).filters;
+  if (
+    result &&
+    typeof result === "object" &&
+    "items" in result &&
+    Array.isArray((result as { items?: unknown }).items)
+  ) {
+    return (result as { items: SavedFilter[] }).items;
   }
   throw new Error("expected saved-filter list");
 }

@@ -140,6 +140,7 @@ import {
   summarizeDemoEventDistribution,
   summarizeDemoVisitedPages,
 } from "@/lib/realtime/mock/journey-helpers";
+import { demoPage } from "@/lib/realtime/mock/pagination";
 import {
   buildPathTransitionGraph,
   nextPath,
@@ -274,11 +275,6 @@ export function generateDemoVisitors(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const paged = params.cursor !== undefined || params.pageSize !== undefined;
-  const pageSize = paged
-    ? parseDemoLimit(params.pageSize, 80, 1, 120)
-    : parseDemoLimit(params.limit, 100, 1, 500);
-  const offset = paged ? parseDemoLimit(params.cursor, 0, 0, 1_000_000) : 0;
   const from = parseDemoNumber(params.from, Date.now() - 7 * 24 * 3600 * 1000);
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
@@ -333,7 +329,7 @@ export function generateDemoVisitors(
     buckets.set(visit.visitorId, bucket);
   }
 
-  const requestedRows = Array.from(buckets.entries())
+  const rows = Array.from(buckets.entries())
     .map(([visitorId, bucket]) => ({
       visitorId,
       sessionId: bucket.latestVisit.sessionId,
@@ -367,20 +363,26 @@ export function generateDemoVisitors(
         right.lastSeenAt - left.lastSeenAt ||
         right.views - left.views ||
         left.visitorId.localeCompare(right.visitorId),
-    )
-    .slice(offset, offset + pageSize + (paged ? 1 : 0));
-  const hasMore = paged && requestedRows.length > pageSize;
-  const rows = hasMore ? requestedRows.slice(0, pageSize) : requestedRows;
+    );
+  const page = demoPage(
+    rows,
+    params,
+    {
+      operation: "visitors",
+      siteId,
+      from,
+      to,
+      filters,
+      search,
+      sort: { key: sort.key, direction: sort.direction },
+    },
+    80,
+    120,
+  );
 
   return {
     ok: true,
-    data: rows,
-    meta: {
-      pageSize,
-      returned: rows.length,
-      hasMore,
-      nextCursor: hasMore ? String(offset + pageSize) : null,
-    },
+    data: page,
   };
 }
 
@@ -388,11 +390,6 @@ export function generateDemoSessions(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const paged = params.cursor !== undefined || params.pageSize !== undefined;
-  const pageSize = paged
-    ? parseDemoLimit(params.pageSize, 80, 1, 120)
-    : parseDemoLimit(params.limit, 100, 1, 500);
-  const offset = paged ? parseDemoLimit(params.cursor, 0, 0, 1_000_000) : 0;
   const from = parseDemoNumber(params.from, Date.now() - 7 * 24 * 3600 * 1000);
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
@@ -409,9 +406,7 @@ export function generateDemoSessions(
           .map((visit) => visit.sessionId),
       )
     : null;
-  const requestedRows = Array.from(
-    demoVisitsBySession(filtered.visits).entries(),
-  )
+  const rows = Array.from(demoVisitsBySession(filtered.visits).entries())
     .filter(([sessionId]) =>
       matchedSessionIds ? matchedSessionIds.has(sessionId) : true,
     )
@@ -424,20 +419,26 @@ export function generateDemoSessions(
         String(left.sessionId ?? "").localeCompare(
           String(right.sessionId ?? ""),
         ),
-    )
-    .slice(offset, offset + pageSize + (paged ? 1 : 0));
-  const hasMore = paged && requestedRows.length > pageSize;
-  const rows = hasMore ? requestedRows.slice(0, pageSize) : requestedRows;
+    );
+  const page = demoPage(
+    rows,
+    params,
+    {
+      operation: "sessions",
+      siteId,
+      from,
+      to,
+      filters,
+      search,
+      sort: { key: sort.key, direction: sort.direction },
+    },
+    80,
+    120,
+  );
 
   return {
     ok: true,
-    data: rows,
-    meta: {
-      pageSize,
-      returned: rows.length,
-      hasMore,
-      nextCursor: hasMore ? String(offset + pageSize) : null,
-    },
+    data: page,
   };
 }
 

@@ -7,15 +7,11 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import {
-  parseSessionListCursor,
-  parseVisitorListCursor,
   queryJourneyEventsPageFromD1,
   querySessionListPageFromD1,
   querySessionsFromD1,
   queryVisitorListPageFromD1,
   queryVisitorsFromD1,
-  serializeSessionListCursor,
-  serializeVisitorListCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import type { Env } from "@/lib/edge/types";
 
@@ -126,7 +122,7 @@ describe("D1 journey list low-level query coverage", () => {
       "Chrome%",
     );
     expect(filtered.calls[0].sql).toContain("matched_visitors AS");
-    expect(filtered.calls[0].sql).toContain("visitor_id = ?");
+    expect(filtered.calls[0].sql).toContain("visitor_id != ''");
 
     const scoped = createD1Env([[visitorRow]]);
     await queryVisitorsFromD1(
@@ -151,13 +147,10 @@ describe("D1 journey list low-level query coverage", () => {
         queryWindow,
         EMPTY_FILTER_DOCUMENT,
         {
-          pageSize: 1,
+          limit: 1,
           sort: { key: "lastSeenAt", direction: "asc" },
           cursor: {
-            sortKey: "lastSeenAt",
-            sortDirection: "asc",
             sortValue: 20,
-            lastSeenAt: 20,
             visitorId: "visitor-0",
           },
         },
@@ -175,7 +168,7 @@ describe("D1 journey list low-level query coverage", () => {
       queryWindow,
       filterFixture({ path: "/docs" }),
       {
-        pageSize: 2,
+        limit: 2,
         sort: { key: "views", direction: "desc" },
         search: "docs",
       },
@@ -188,7 +181,7 @@ describe("D1 journey list low-level query coverage", () => {
       siteId,
       queryWindow,
       scopedFilters(),
-      { pageSize: 2, sort: { key: "firstSeenAt", direction: "desc" } },
+      { limit: 2, sort: { key: "firstSeenAt", direction: "desc" } },
     );
     expect(scopedPage.calls[0].sql).toContain("scope_final_visits");
   });
@@ -245,11 +238,9 @@ describe("D1 journey list low-level query coverage", () => {
         queryWindow,
         EMPTY_FILTER_DOCUMENT,
         {
-          pageSize: 1,
+          limit: 1,
           sort: { key: "durationMs", direction: "asc" },
           cursor: {
-            sortKey: "durationMs",
-            sortDirection: "asc",
             sortValue: 10,
             startedAt: 10,
             sessionId: "session-0",
@@ -270,7 +261,7 @@ describe("D1 journey list low-level query coverage", () => {
       queryWindow,
       scopedFilters(),
       {
-        pageSize: 2,
+        limit: 2,
         sort: { key: "startedAt", direction: "desc" },
         target: { type: "visitor", value: "visitor-1" },
         search: "session",
@@ -320,45 +311,5 @@ describe("D1 journey list low-level query coverage", () => {
     });
     expect(session.calls[0].sql).toContain("scope_final_events");
     expect(session.calls[0].sql).toContain("session_id");
-  });
-
-  it("parses and rejects visitor and session cursors against their sort contracts", () => {
-    const visitor = serializeVisitorListCursor({
-      sortKey: "views",
-      sortDirection: "desc",
-      sortValue: 3,
-      lastSeenAt: 20,
-      visitorId: "visitor-1",
-    });
-    expect(
-      parseVisitorListCursor(visitor, { key: "views", direction: "desc" }),
-    ).toMatchObject({
-      sortValue: 3,
-    });
-    expect(
-      parseVisitorListCursor(visitor, { key: "views", direction: "asc" }),
-    ).toBeNull();
-    expect(
-      parseVisitorListCursor("not-base64", { key: "views", direction: "desc" }),
-    ).toBeNull();
-
-    const session = serializeSessionListCursor({
-      sortKey: "startedAt",
-      sortDirection: "asc",
-      sortValue: 10,
-      startedAt: 10,
-      sessionId: "session-1",
-    });
-    expect(
-      parseSessionListCursor(session, { key: "startedAt", direction: "asc" }),
-    ).toMatchObject({
-      sessionId: "session-1",
-    });
-    expect(
-      parseSessionListCursor(session, { key: "durationMs", direction: "asc" }),
-    ).toBeNull();
-    expect(
-      parseSessionListCursor("", { key: "startedAt", direction: "asc" }),
-    ).toBeNull();
   });
 });

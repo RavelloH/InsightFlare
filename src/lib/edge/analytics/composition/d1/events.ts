@@ -5,7 +5,6 @@ import {
   mapEventAnalyticsContextCards,
   mapEventField,
   mapEventFieldValue,
-  mapEventRecord,
   mapEventSummaryCards,
   mapTabs,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -23,11 +22,7 @@ import {
   decodeEventFieldValueCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
-import {
-  queryEventRecordDetailFromD1,
-  queryEventRecordPageFromD1,
-  serializeEventRecordCursor,
-} from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import { queryEventRecordDetailFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import {
   decodeEventTypeCursor,
   queryEventsSummaryFromD1,
@@ -37,6 +32,8 @@ import {
   queryEventsTrendFromD1,
   queryEventTypeTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
+import { readSiteEventRecords } from "@/lib/edge/analytics/providers/d1/operations/site-event-records";
+import { InvalidCursorError } from "@/lib/pagination";
 
 import {
   arrayField,
@@ -72,7 +69,7 @@ export function registerEventProviders(
           cursorText,
           request.context.policy.audience,
         );
-        if (cursorText && !cursor) throw new Error("invalid-cursor");
+        if (cursorText && !cursor) throw new InvalidCursorError("event-types");
         const page = await queryEventTypePageFromD1(
           options.env,
           options.siteId,
@@ -142,31 +139,24 @@ export function registerEventProviders(
       "event-records",
       typedQueryProvider(async (input) => {
         const request = query(input!);
-        const page = await queryEventRecordPageFromD1(
-          options.env,
-          options.siteId,
-          timeWindow(request.time),
-          request.filters ?? EMPTY_FILTER_DOCUMENT,
-          {
-            pageSize: numberField(request, "pageSize", 80),
-            sort: request.sort as never,
+        return {
+          value: await readSiteEventRecords({
+            env: options.env,
+            siteId: options.siteId,
+            window: timeWindow(request.time),
+            filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+            audience: request.context.policy.audience,
+            sort: (request.sort as never) ?? {
+              field: "occurredAt",
+              direction: "desc",
+            },
             search: stringField(request, "search") || undefined,
             eventName: stringField(request, "eventName") || undefined,
-            cursor: (request.cursor as never) ?? null,
-          },
-        );
-        return {
-          value: {
-            data: page.rows.map(mapEventRecord),
-            meta: {
-              pageSize: numberField(request, "pageSize", 80),
-              returned: page.rows.length,
-              hasMore: page.nextCursor !== null,
-              nextCursor: page.nextCursor
-                ? serializeEventRecordCursor(page.nextCursor)
-                : null,
-            },
-          },
+            page:
+              request.page && typeof request.page === "object"
+                ? (request.page as { limit: number; cursor?: string | null })
+                : { limit: numberField(request, "limit", 80), cursor: null },
+          }),
         };
       }),
     )
@@ -194,7 +184,8 @@ export function registerEventProviders(
           cursorText,
           request.context.policy.audience,
         );
-        if (cursorText && !cursor) throw new Error("invalid-cursor");
+        if (cursorText && !cursor)
+          throw new InvalidCursorError("event-field-values");
         const page = await queryEventFieldValuesPageFromD1(
           options.env,
           options.siteId,
@@ -238,7 +229,7 @@ export function registerEventProviders(
           cursorText,
           request.context.policy.audience,
         );
-        if (cursorText && !cursor) throw new Error("invalid-cursor");
+        if (cursorText && !cursor) throw new InvalidCursorError("event-fields");
         const page = await queryEventFieldsPageFromD1(
           options.env,
           options.siteId,

@@ -15,6 +15,7 @@ import {
 } from "@/lib/saved-filters";
 
 import { demoBadRequest, demoNotFound } from "./envelope";
+import { demoPage } from "./pagination";
 
 const DEMO_USER_ID = "demo-user-001";
 const MAX_NAME_LENGTH = 120;
@@ -471,13 +472,31 @@ export function handleDemoSavedFilters(input: {
   readonly path: string;
   readonly method: string;
   readonly siteId: string;
+  readonly params?: Record<string, string | number>;
   readonly body?: unknown;
 }): unknown {
-  const { path, method, siteId, body } = input;
+  const { path, method, siteId, params = {}, body } = input;
   const filterId = routeFilterId(path);
   const filters = filtersForSite(siteId);
 
-  if (method === "GET" && !filterId) return { filters: [...filters] };
+  if (method === "GET" && !filterId) {
+    const ordered = [...filters].sort(
+      (left, right) =>
+        right.updatedAt - left.updatedAt || right.id.localeCompare(left.id),
+    );
+    return demoPage(
+      ordered,
+      params,
+      {
+        operation: "saved-filters",
+        siteId,
+        owner: DEMO_USER_ID,
+        sort: "updatedAt:desc,id:desc",
+      },
+      100,
+      500,
+    );
+  }
 
   if (method === "POST" && !filterId) {
     const parsed = parseInput(body);

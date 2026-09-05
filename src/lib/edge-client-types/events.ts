@@ -129,17 +129,9 @@ export interface EventRecord {
   valueCount: number;
 }
 
-export interface EventsRecordsMeta {
-  pageSize: number;
-  returned: number;
-  hasMore: boolean;
-  nextCursor: string | null;
-}
-
 export interface EventsRecordsData {
   ok: boolean;
-  data: EventRecord[];
-  meta: EventsRecordsMeta;
+  data: PaginatedCollection<EventRecord>;
 }
 
 export interface EventTypeSummaryMetrics extends EventSummaryMetrics {

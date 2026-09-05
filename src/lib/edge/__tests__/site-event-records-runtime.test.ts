@@ -1,17 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/edge/analytics/providers/d1/internal/events-records", () => ({
-  parseEventRecordCursor: vi.fn(),
   queryEventRecordDetailFromD1: vi.fn(),
   queryEventRecordPageFromD1: vi.fn(),
-  serializeEventRecordCursor: vi.fn(),
 }));
 
 import {
-  parseEventRecordCursor,
   queryEventRecordDetailFromD1,
   queryEventRecordPageFromD1,
-  serializeEventRecordCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import {
   readSiteEventDetail,
@@ -32,42 +28,33 @@ describe("site event-record runtime", () => {
     vi.mocked(queryEventRecordPageFromD1).mockResolvedValue({
       rows: [],
       nextCursor: {
-        sortKey: "occurredAt",
-        sortDirection: "desc",
-        sortValue: 1,
         occurredAt: 1,
         eventId: "evt",
         eventPk: 1,
       },
     });
-    vi.mocked(serializeEventRecordCursor).mockReturnValue("inner-cursor");
     const result = await readSiteEventRecords({
       ...base,
       sort: { field: "occurredAt", direction: "desc" },
       page: { limit: 20 },
     });
-    expect(result.page).toMatchObject({
-      limit: 20,
-      hasMore: true,
-      nextCursor: expect.any(String),
+    expect(result).toMatchObject({
+      items: [],
+      pagination: {
+        limit: 20,
+        hasMore: true,
+        nextCursor: expect.any(String),
+      },
     });
     expect(queryEventRecordPageFromD1).toHaveBeenCalledWith(
       base.env,
       "site-1",
       base.window,
       base.filters,
-      expect.objectContaining({ pageSize: 20, cursor: null }),
+      expect.objectContaining({ limit: 20, cursor: null }),
     );
 
-    const next = result.page.nextCursor;
-    vi.mocked(parseEventRecordCursor).mockReturnValue({
-      sortKey: "occurredAt",
-      sortDirection: "desc",
-      sortValue: 1,
-      occurredAt: 1,
-      eventId: "evt",
-      eventPk: 1,
-    });
+    const next = result.pagination.nextCursor;
     vi.mocked(queryEventRecordPageFromD1).mockResolvedValueOnce({
       rows: [],
       nextCursor: null,
@@ -78,10 +65,8 @@ describe("site event-record runtime", () => {
         sort: { field: "occurredAt", direction: "desc" },
         page: { limit: 20, cursor: next },
       }),
-    ).resolves.toMatchObject({ page: { hasMore: false, nextCursor: null } });
-    expect(parseEventRecordCursor).toHaveBeenCalledWith("inner-cursor", {
-      key: "occurredAt",
-      direction: "desc",
+    ).resolves.toMatchObject({
+      pagination: { hasMore: false, nextCursor: null },
     });
   });
 
@@ -94,7 +79,6 @@ describe("site event-record runtime", () => {
       }),
     ).rejects.toThrow("invalid-cursor");
     expect(queryEventRecordPageFromD1).not.toHaveBeenCalled();
-    expect(parseEventRecordCursor).not.toHaveBeenCalled();
   });
 
   it("requires a signing root and makes detail window-scoped", async () => {
@@ -131,7 +115,9 @@ describe("site event-record runtime", () => {
         sort: { field: "occurredAt", direction: "desc" },
         page: { limit: 20 },
       }),
-    ).resolves.toMatchObject({ page: { hasMore: false, nextCursor: null } });
+    ).resolves.toMatchObject({
+      pagination: { hasMore: false, nextCursor: null },
+    });
   });
 
   it("returns window-scoped detail and maps provider failures", async () => {

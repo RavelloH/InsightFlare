@@ -1,5 +1,6 @@
 import {
   analyticsFilterRegistry,
+  effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
@@ -14,6 +15,7 @@ import type {
 import {
   decodePageCursor,
   encodePageCursor,
+  hasExactKeys,
   type PageResult,
   pageResult,
   paginationBinding,
@@ -23,7 +25,7 @@ export interface EventFieldCursor {
   readonly events: number;
   readonly occurrences: number;
   readonly path: string;
-  readonly valueType: string;
+  readonly valueType: number;
 }
 
 export interface EventFieldValueCursor {
@@ -32,6 +34,49 @@ export interface EventFieldValueCursor {
   readonly stringValue: string;
   readonly numberValue: number;
   readonly booleanValue: number;
+}
+
+function eventFieldCursor(value: unknown): EventFieldCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, [
+    "events",
+    "occurrences",
+    "path",
+    "valueType",
+  ]) &&
+    typeof candidate.events === "number" &&
+    Number.isFinite(candidate.events) &&
+    typeof candidate.occurrences === "number" &&
+    Number.isFinite(candidate.occurrences) &&
+    typeof candidate.path === "string" &&
+    typeof candidate.valueType === "number" &&
+    Number.isSafeInteger(candidate.valueType)
+    ? (candidate as unknown as EventFieldCursor)
+    : null;
+}
+
+function eventFieldValueCursor(value: unknown): EventFieldValueCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, [
+    "occurrences",
+    "events",
+    "stringValue",
+    "numberValue",
+    "booleanValue",
+  ]) &&
+    typeof candidate.occurrences === "number" &&
+    Number.isFinite(candidate.occurrences) &&
+    typeof candidate.events === "number" &&
+    Number.isFinite(candidate.events) &&
+    typeof candidate.stringValue === "string" &&
+    typeof candidate.numberValue === "number" &&
+    Number.isFinite(candidate.numberValue) &&
+    typeof candidate.booleanValue === "number" &&
+    Number.isFinite(candidate.booleanValue)
+    ? (candidate as unknown as EventFieldValueCursor)
+    : null;
 }
 
 function eventFieldBinding(
@@ -53,6 +98,7 @@ function eventFieldBinding(
     window.endExclusiveMs,
     window.timeZone,
     filterFingerprint(filters, analyticsFilterRegistry),
+    effectiveScopeForPagination(filters),
     eventName ?? "",
     fieldPath ?? "",
     fieldValueType ?? "",
@@ -247,6 +293,8 @@ export async function decodeEventFieldCursor(
       audience,
     ),
     cursor,
+    "event-fields",
+    eventFieldCursor,
   );
 }
 
@@ -496,5 +544,7 @@ export async function decodeEventFieldValueCursor(
       audience,
     ),
     cursor,
+    "event-field-values",
+    eventFieldValueCursor,
   );
 }

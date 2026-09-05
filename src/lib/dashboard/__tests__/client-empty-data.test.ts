@@ -61,8 +61,8 @@ describe("dashboard client empty data builders", () => {
   });
 
   it("preserves requested empty metadata values", () => {
-    expect(emptyEventsRecords(33).meta).toMatchObject({
-      pageSize: 33,
+    expect(emptyEventsRecords(33).data.pagination).toMatchObject({
+      limit: 33,
       returned: 0,
       hasMore: false,
       nextCursor: null,
@@ -86,9 +86,9 @@ describe("dashboard client empty data builders", () => {
   });
 
   it("builds empty dashboard dimension containers", () => {
-    expect(emptyVisitors().meta.pageSize).toBe(0);
-    expect(emptySessions().meta).toEqual({
-      pageSize: 0,
+    expect(emptyVisitors().data.pagination.limit).toBe(0);
+    expect(emptySessions().data.pagination).toEqual({
+      limit: 0,
       returned: 0,
       hasMore: false,
       nextCursor: null,

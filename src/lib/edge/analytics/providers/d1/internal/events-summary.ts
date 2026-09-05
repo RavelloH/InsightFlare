@@ -1,5 +1,6 @@
 import {
   analyticsFilterRegistry,
+  effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
@@ -16,6 +17,7 @@ import { buildEventFilteredSourceCte, queryD1All } from "./core";
 import {
   decodePageCursor,
   encodePageCursor,
+  hasExactKeys,
   type PageResult,
   pageResult,
   paginationBinding,
@@ -25,6 +27,19 @@ export interface EventTypeAggregateCursor {
   readonly views: number;
   readonly sessions: number;
   readonly value: string;
+}
+
+function eventTypeCursor(value: unknown): EventTypeAggregateCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, ["views", "sessions", "value"]) &&
+    typeof candidate.views === "number" &&
+    Number.isFinite(candidate.views) &&
+    typeof candidate.sessions === "number" &&
+    Number.isFinite(candidate.sessions) &&
+    typeof candidate.value === "string"
+    ? (candidate as unknown as EventTypeAggregateCursor)
+    : null;
 }
 
 function eventTypeCursorBinding(
@@ -42,6 +57,7 @@ function eventTypeCursorBinding(
     window.endExclusiveMs,
     window.timeZone,
     filterFingerprint(filters, analyticsFilterRegistry),
+    effectiveScopeForPagination(filters),
     search?.trim().toLowerCase() ?? "",
   ]);
 }
@@ -223,6 +239,8 @@ export async function decodeEventTypeCursor(
     env,
     await eventTypeCursorBinding(siteId, window, filters, search, audience),
     cursor,
+    "event-types",
+    eventTypeCursor,
   );
 }
 

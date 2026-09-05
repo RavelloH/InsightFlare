@@ -1,3 +1,5 @@
+import type { PageResult } from "@/lib/pagination";
+
 export const SCHEDULED_TASK_LOG_RETENTION_DAYS = 30;
 
 export type InternalSchedule =
@@ -112,23 +114,14 @@ export interface ScheduledTasksHealth {
   lastRunAt: number | null;
 }
 
-export interface ScheduledTaskRunsMeta {
-  page: number;
-  pageSize: number;
-  returned: number;
-  hasMore: boolean;
-  nextPage: number | null;
-}
-
 export interface ScheduledTasksData {
   ok: true;
   generatedAt: number;
   retentionDays: number;
   retention: ScheduledTaskRetentionConfig;
   tasks: ScheduledTaskSummary[];
-  runs: ScheduledTaskRunGroup[];
-  runsMeta: ScheduledTaskRunsMeta;
+  runs: PageResult<ScheduledTaskRunGroup>;
   selectedRun: ScheduledTaskRunGroup | null;
-  logs: ScheduledTaskRunLog[];
+  logs: PageResult<ScheduledTaskRunLog>;
   health: ScheduledTasksHealth;
 }

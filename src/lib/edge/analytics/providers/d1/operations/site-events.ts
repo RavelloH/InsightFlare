@@ -18,14 +18,12 @@ import {
   decodeEventFieldValueCursor,
   queryEventFieldsFromD1,
   queryEventFieldsPageFromD1,
-  queryEventFieldValuesFromD1,
   queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import {
   decodeEventTypeCursor,
   queryEventsSummaryFromD1,
-  queryEventTypeAggregate,
   queryEventTypePageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import {
@@ -33,6 +31,7 @@ import {
   queryEventTypeTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import type { Env } from "@/lib/edge/types";
+import { InvalidCursorError } from "@/lib/pagination";
 
 export interface ReadSiteEventsInput {
   readonly env: Env;
@@ -118,28 +117,10 @@ export async function readSiteEventsTimeseries(
 }
 
 export async function readSiteEventTypes(input: ReadSiteEventTypesInput) {
-  if (!input.page) {
-    return {
-      items: (
-        await queryEventTypeAggregate(
-          input.env,
-          input.siteId,
-          input.window,
-          input.filters,
-          input.limit ?? 20,
-          input.search,
-        )
-      ).map((row) => ({
-        key: row.value,
-        label: row.value,
-        events: row.views,
-        sessions: row.sessions,
-        visitors: row.visitors,
-      })),
-      page: { limit: input.limit ?? 20 },
-    };
-  }
-  const requestedPage = input.page;
+  const requestedPage = input.page ?? {
+    limit: input.limit ?? 20,
+    cursor: null,
+  };
   const cursor = await decodeEventTypeCursor(
     input.env,
     input.siteId,
@@ -149,7 +130,8 @@ export async function readSiteEventTypes(input: ReadSiteEventTypesInput) {
     requestedPage.cursor,
     input.audience,
   );
-  if (requestedPage.cursor && !cursor) throw new Error("invalid-cursor");
+  if (requestedPage.cursor && !cursor)
+    throw new InvalidCursorError("event-types");
   const result = await queryEventTypePageFromD1(
     input.env,
     input.siteId,
@@ -173,23 +155,10 @@ export async function readSiteEventTypes(input: ReadSiteEventTypesInput) {
 }
 
 export async function readSiteEventFields(input: ReadSiteEventFieldsInput) {
-  if (!input.page) {
-    return {
-      eventName: input.eventName ?? "",
-      items: (
-        await queryEventFieldsFromD1(
-          input.env,
-          input.siteId,
-          input.window,
-          input.filters,
-          input.eventName,
-          input.limit ?? 100,
-        )
-      ).map(mapEventField),
-      page: { limit: input.limit ?? 100 },
-    };
-  }
-  const requestedPage = input.page;
+  const requestedPage = input.page ?? {
+    limit: input.limit ?? 100,
+    cursor: null,
+  };
   const cursor = await decodeEventFieldCursor(
     input.env,
     input.siteId,
@@ -199,7 +168,8 @@ export async function readSiteEventFields(input: ReadSiteEventFieldsInput) {
     requestedPage.cursor,
     input.audience,
   );
-  if (requestedPage.cursor && !cursor) throw new Error("invalid-cursor");
+  if (requestedPage.cursor && !cursor)
+    throw new InvalidCursorError("event-fields");
   const result = await queryEventFieldsPageFromD1(
     input.env,
     input.siteId,
@@ -220,28 +190,10 @@ export async function readSiteEventFields(input: ReadSiteEventFieldsInput) {
 export async function readSiteEventFieldValues(
   input: ReadSiteEventFieldValuesInput,
 ) {
-  if (!input.page) {
-    return {
-      eventName: input.eventName ?? "",
-      fieldPath: input.fieldPath,
-      fieldValueType: input.fieldValueType,
-      items: (
-        await queryEventFieldValuesFromD1(
-          input.env,
-          input.siteId,
-          input.window,
-          input.filters,
-          input.eventName,
-          input.fieldPath,
-          input.fieldValueType,
-          input.limit ?? 25,
-          input.search,
-        )
-      ).map(mapEventFieldValue),
-      page: { limit: input.limit ?? 25 },
-    };
-  }
-  const requestedPage = input.page;
+  const requestedPage = input.page ?? {
+    limit: input.limit ?? 25,
+    cursor: null,
+  };
   const cursor = await decodeEventFieldValueCursor(
     input.env,
     input.siteId,
@@ -254,7 +206,8 @@ export async function readSiteEventFieldValues(
     requestedPage.cursor,
     input.audience,
   );
-  if (requestedPage.cursor && !cursor) throw new Error("invalid-cursor");
+  if (requestedPage.cursor && !cursor)
+    throw new InvalidCursorError("event-field-values");
   const result = await queryEventFieldValuesPageFromD1(
     input.env,
     input.siteId,

@@ -148,7 +148,7 @@ export function SessionsClientPage({
     queryFn: ({ pageParam, signal }) =>
       fetchSessions(siteId, timeWindow, filters, {
         cursor: pageParam,
-        pageSize: SESSION_PAGE_SIZE,
+        limit: SESSION_PAGE_SIZE,
         sortBy: sort.key,
         sortDir: sort.direction,
         search: debouncedQuery,
@@ -156,13 +156,15 @@ export function SessionsClientPage({
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
-      lastPage.meta.hasMore ? lastPage.meta.nextCursor : undefined,
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
     enabled: typeof window !== "undefined",
   });
   const rows = useMemo(
     () =>
       data?.pages.reduce<JourneySession[]>(
-        (current, page) => appendUniqueSessions(current, page.data),
+        (current, page) => appendUniqueSessions(current, page.data.items),
         [],
       ) ?? [],
     [data?.pages],

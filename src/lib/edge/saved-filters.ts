@@ -4,6 +4,12 @@ import {
   FILTER_DSL_MAX_LENGTH,
   parseFilterDsl,
 } from "@/lib/filter-contract";
+import {
+  decodePageCursor,
+  encodePageCursor,
+  InvalidCursorError,
+  paginationBinding,
+} from "@/lib/pagination";
 import { bad, forb, jsonResponseFor, na, nf } from "@/lib/response";
 import {
   SAVED_FILTER_DSL_VERSION,
@@ -43,6 +49,27 @@ interface SavedFilterInput {
   readonly visibility: SavedFilterVisibility;
   readonly scopePreference: SavedFilterScopePreference;
   readonly filterDsl: string;
+}
+
+interface SavedFilterCursor {
+  readonly updatedAt: number;
+  readonly id: string;
+}
+
+function savedFilterCursor(value: unknown): SavedFilterCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.id === "string" &&
+    Number.isSafeInteger(candidate.updatedAt)
+    ? { id: candidate.id, updatedAt: candidate.updatedAt as number }
+    : null;
+}
+
+function parseListLimit(url: URL): number {
+  const value = Number(url.searchParams.get("limit") ?? "100");
+  return Number.isFinite(value)
+    ? Math.max(1, Math.min(100, Math.trunc(value)))
+    : 100;
 }
 
 function asSavedFilter(row: SavedFilterRow, actorUserId: string): SavedFilter {
@@ -167,18 +194,69 @@ export async function handleSavedFilters(
   const id = filterId(input.filterId);
 
   if (request.method === "GET" && !input.filterId) {
+    const url = new URL(request.url);
+    const limit = parseListLimit(url);
+    const binding = await paginationBinding([
+      "private-saved-filters-v1",
+      "private-dashboard",
+      siteId,
+      session.userId,
+      "updatedAt:desc,id:desc",
+    ]);
+    let cursor: SavedFilterCursor | null = null;
+    try {
+      cursor = await decodePageCursor(
+        env,
+        binding,
+        url.searchParams.get("cursor"),
+        "saved-filters",
+        savedFilterCursor,
+      );
+    } catch (error) {
+      if (error instanceof InvalidCursorError) {
+        return bad("Invalid saved filter cursor", "invalid_cursor", request);
+      }
+      throw error;
+    }
+    const cursorClause = cursor
+      ? "AND (sf.updated_at < ? OR (sf.updated_at = ? AND sf.id < ?))"
+      : "";
     const rows = await env.DB.prepare(
       `SELECT ${savedFilterColumns}
        FROM saved_filters sf
        INNER JOIN users u ON u.id = sf.owner_user_id
        WHERE sf.site_id = ?
          AND (sf.owner_user_id = ? OR sf.visibility = 'team')
-       ORDER BY sf.updated_at DESC, sf.id DESC`,
+         ${cursorClause}
+       ORDER BY sf.updated_at DESC, sf.id DESC
+       LIMIT ?`,
     )
-      .bind(siteId, session.userId)
+      .bind(
+        siteId,
+        session.userId,
+        ...(cursor ? [cursor.updatedAt, cursor.updatedAt, cursor.id] : []),
+        limit + 1,
+      )
       .all<SavedFilterRow>();
+    const hasMore = rows.results.length > limit;
+    const items = (hasMore ? rows.results.slice(0, limit) : rows.results).map(
+      (row) => asSavedFilter(row, session.userId),
+    );
+    const last = rows.results[hasMore ? limit - 1 : rows.results.length - 1];
     return jsonResponseFor(request, {
-      filters: rows.results.map((row) => asSavedFilter(row, session.userId)),
+      items,
+      pagination: {
+        limit,
+        returned: items.length,
+        hasMore,
+        nextCursor:
+          hasMore && last
+            ? await encodePageCursor(env, binding, {
+                updatedAt: last.updatedAt,
+                id: last.id,
+              })
+            : null,
+      },
     });
   }
 

@@ -18,6 +18,7 @@ import {
   demoSitePublicSlug,
 } from "@/lib/realtime/demo-site-profiles";
 import { fnv1a, mulberry32, sFloat, sInt } from "@/lib/realtime/demo-utils";
+import { demoPage } from "@/lib/realtime/mock/pagination";
 import { integrateViews } from "@/lib/realtime/mock/site-curves";
 import {
   DEFAULT_RETENTION_CONFIG,
@@ -1387,17 +1388,6 @@ function demoTaskSummary(
   };
 }
 
-function parseDemoScheduledTaskLimit(
-  value: string | number | undefined,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
-  const parsed = Math.trunc(Number(value ?? fallback));
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, parsed));
-}
-
 export function generateDemoScheduledTasks(
   params: Record<string, string | number>,
 ): ScheduledTasksData {
@@ -1405,20 +1395,21 @@ export function generateDemoScheduledTasks(
   const allRuns = demoScheduledRuns(now);
   const allGroups = demoScheduledRunGroups(allRuns);
   const status = String(params.status || "");
-  const page = parseDemoScheduledTaskLimit(params.page, 1, 1, 10_000);
-  const pageSize = parseDemoScheduledTaskLimit(
-    params.pageSize ?? params.limit,
-    50,
-    1,
-    100,
-  );
   const filteredRuns = allGroups.filter(
     (run) => !status || run.status === status,
   );
-  const offset = (page - 1) * pageSize;
-  const requestedRuns = filteredRuns.slice(offset, offset + pageSize + 1);
-  const hasMore = requestedRuns.length > pageSize;
-  const runs = requestedRuns.slice(0, pageSize);
+  const runsPage = demoPage(
+    filteredRuns,
+    params,
+    {
+      operation: "scheduled-runs",
+      status,
+      sort: "startedAt:desc,groupId:asc",
+    },
+    50,
+    100,
+  );
+  const runs = runsPage.items;
   const requestedRunId = String(params.runId || "");
   const selectedRun =
     (requestedRunId
@@ -1440,18 +1431,31 @@ export function generateDemoScheduledTasks(
     tasks: DEMO_SCHEDULED_TASK_DEFINITIONS.map((task) =>
       demoTaskSummary(task, allRuns, now),
     ),
-    runs,
-    runsMeta: {
-      page,
-      pageSize,
-      returned: runs.length,
-      hasMore,
-      nextPage: hasMore ? page + 1 : null,
+    runs: {
+      items: runs,
+      pagination: runsPage.pagination,
     },
     selectedRun,
-    logs: selectedRun
-      ? selectedRun.runs.flatMap((run) => demoScheduledLogs(run))
-      : [],
+    logs: (() => {
+      const items = selectedRun
+        ? selectedRun.runs.flatMap((run) => demoScheduledLogs(run))
+        : [];
+      const logPage = demoPage(
+        items,
+        { ...params, cursor: params.logCursor ?? "" },
+        {
+          operation: "scheduled-run-logs",
+          runId: selectedRun?.id ?? null,
+          sort: "runStartedAt:asc,runId:asc,sequence:asc,logId:asc",
+        },
+        200,
+        200,
+      );
+      return {
+        items: logPage.items,
+        pagination: logPage.pagination,
+      };
+    })(),
     health: {
       totalRuns24h: runs24h.length,
       failedRuns24h: countByStatus(runs24h, "failed"),

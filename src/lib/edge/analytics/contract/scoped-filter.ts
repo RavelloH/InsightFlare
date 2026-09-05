@@ -556,3 +556,15 @@ export function scopedFilterMetadata(
   if (!filters) return undefined;
   return (filters as ScopedFilterDocument)[SCOPED_FILTER_METADATA];
 }
+
+/**
+ * Pagination binding input for an already prepared query. Pagination must
+ * consume this resolved plan instead of resolving scope independently in each
+ * provider. An unfiltered query has no scope semantics.
+ */
+export function effectiveScopeForPagination(
+  filters: FilterDocument | undefined,
+): FilterScope | "none" {
+  if (!filters?.root) return "none";
+  return scopedFilterMetadata(filters)?.resolvedScope ?? "none";
+}

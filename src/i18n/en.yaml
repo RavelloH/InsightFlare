@@ -96,7 +96,6 @@ common:
     fileNameLabel: File name
     download: Export CSV
     empty: No rows available to export.
-    allTabsUnavailable: All tabs can be exported after their data finishes loading.
   tableColumns:
     action: Columns
     title: Configure columns
@@ -2140,6 +2139,7 @@ managementPages:
     empty: No scheduled tasks yet.
     refresh: Refresh
     loadFailed: Failed to load scheduled tasks.
+    loadMore: Load more
     allStatuses: All statuses
     runs24h: Runs in 24h
     successRate24h: Success rate in 24h

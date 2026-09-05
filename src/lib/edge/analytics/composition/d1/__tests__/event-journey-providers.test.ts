@@ -26,7 +26,6 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/events-overview", () => ({
 vi.mock("@/lib/edge/analytics/providers/d1/internal/events-records", () => ({
   queryEventRecordDetailFromD1: vi.fn(),
   queryEventRecordPageFromD1: vi.fn(),
-  serializeEventRecordCursor: vi.fn(),
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/events-summary", () => ({
   decodeEventTypeCursor: vi.fn(),
@@ -41,11 +40,7 @@ vi.mock(
   "@/lib/edge/analytics/providers/d1/internal/journey-list-queries",
   () => ({
     querySessionListPageFromD1: vi.fn(),
-    querySessionsFromD1: vi.fn(),
     queryVisitorListPageFromD1: vi.fn(),
-    queryVisitorsFromD1: vi.fn(),
-    serializeSessionListCursor: vi.fn(),
-    serializeVisitorListCursor: vi.fn(),
   }),
 );
 vi.mock("@/lib/edge/analytics/providers/d1/internal/journeys", () => ({
@@ -57,7 +52,9 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/journeys", () => ({
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/operations/site-journeys", () => ({
   readSiteSessionEvents: vi.fn(),
+  readSiteSessions: vi.fn(),
   readSiteVisitorEvents: vi.fn(),
+  readSiteVisitors: vi.fn(),
   readSiteVisitorSessions: vi.fn(),
 }));
 
@@ -82,7 +79,6 @@ import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/
 import {
   queryEventRecordDetailFromD1,
   queryEventRecordPageFromD1,
-  serializeEventRecordCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import {
   decodeEventTypeCursor,
@@ -95,11 +91,7 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import {
   querySessionListPageFromD1,
-  querySessionsFromD1,
   queryVisitorListPageFromD1,
-  queryVisitorsFromD1,
-  serializeSessionListCursor,
-  serializeVisitorListCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
   queryJourneyEventDetailFromD1,
@@ -108,12 +100,14 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/journeys";
 import {
   readSiteSessionEvents,
+  readSiteSessions,
   readSiteVisitorEvents,
+  readSiteVisitors,
   readSiteVisitorSessions,
 } from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
 import type { Env } from "@/lib/edge/types";
 
-const env = {} as Env;
+const env = { MAIN_SECRET: "provider-test-secret" } as Env;
 const siteId = "provider-test";
 const time = createQueryTime(0, 100, "UTC", 100);
 const context = siteQueryContext(siteId, "public-share");
@@ -170,7 +164,6 @@ describe("D1 event provider routing", () => {
       rows: [{ id: "record-1" }],
       nextCursor: { id: "record-2" },
     } as never);
-    vi.mocked(serializeEventRecordCursor).mockReturnValue("record-next");
     vi.mocked(queryEventFieldValuesPageFromD1).mockResolvedValue({
       items: [{ value: "Chrome", occurrences: 3 }],
       pagination,
@@ -275,7 +268,7 @@ describe("D1 event provider routing", () => {
       events: 2,
       occurrences: 3,
       path: "plan",
-      valueType: "string",
+      valueType: 1,
     });
     await value
       .resolve("event-fields")!
@@ -385,14 +378,6 @@ describe("D1 journey provider routing", () => {
       rows: [{ id: "session-page" }],
       nextCursor: { id: "session-next" },
     } as never);
-    vi.mocked(queryVisitorsFromD1).mockResolvedValue([
-      { id: "visitor-legacy" },
-    ] as never);
-    vi.mocked(querySessionsFromD1).mockResolvedValue([
-      { id: "session-legacy" },
-    ] as never);
-    vi.mocked(serializeVisitorListCursor).mockReturnValue("visitor-cursor");
-    vi.mocked(serializeSessionListCursor).mockReturnValue("session-cursor");
     vi.mocked(readSiteVisitorEvents).mockResolvedValue({
       items: [],
       pagination,
@@ -402,6 +387,14 @@ describe("D1 journey provider routing", () => {
       pagination,
     });
     vi.mocked(readSiteSessionEvents).mockResolvedValue({
+      items: [],
+      pagination,
+    });
+    vi.mocked(readSiteSessions).mockResolvedValue({
+      items: [],
+      pagination,
+    });
+    vi.mocked(readSiteVisitors).mockResolvedValue({
       items: [],
       pagination,
     });
@@ -416,33 +409,39 @@ describe("D1 journey provider routing", () => {
     } as never);
   });
 
-  it("supports paged and legacy visitor/session paths plus lazy detail paths", async () => {
+  it("supports cursor visitor/session paths plus lazy detail paths", async () => {
     const value = registry(registerJourneyProviders);
 
     await value.resolve("visitors")!.execute(
       input({
-        paged: true,
-        pageSize: 1,
+        page: { limit: 1, cursor: null },
         sort: "visits",
         search: "visitor",
-        cursor: { id: "visitor" },
+        cursor: null,
       }),
     );
-    await value
-      .resolve("visitors")!
-      .execute(input({ pageSize: 1, sort: "visits", search: "visitor" }));
+    await value.resolve("visitors")!.execute(
+      input({
+        page: { limit: 1, cursor: null },
+        sort: "visits",
+        search: "visitor",
+      }),
+    );
     await value.resolve("sessions")!.execute(
       input({
-        paged: true,
-        pageSize: 1,
+        page: { limit: 1, cursor: null },
         sort: "startedAt",
         search: "session",
-        cursor: { id: "session" },
+        cursor: null,
       }),
     );
-    await value
-      .resolve("sessions")!
-      .execute(input({ pageSize: 1, sort: "startedAt", search: "session" }));
+    await value.resolve("sessions")!.execute(
+      input({
+        page: { limit: 1, cursor: null },
+        sort: "startedAt",
+        search: "session",
+      }),
+    );
 
     for (const operation of [
       "visitor-events",
@@ -499,10 +498,8 @@ describe("D1 journey provider routing", () => {
       .resolve("visitor-detail")!
       .execute(input({ filters: undefined, visitorId: "visitor-1" }));
 
-    expect(queryVisitorListPageFromD1).toHaveBeenCalled();
-    expect(queryVisitorsFromD1).toHaveBeenCalled();
-    expect(querySessionListPageFromD1).toHaveBeenCalled();
-    expect(querySessionsFromD1).toHaveBeenCalled();
+    expect(readSiteVisitors).toHaveBeenCalled();
+    expect(readSiteSessions).toHaveBeenCalled();
     expect(readSiteVisitorEvents).toHaveBeenCalled();
     expect(readSiteVisitorSessions).toHaveBeenCalled();
     expect(readSiteSessionEvents).toHaveBeenCalled();

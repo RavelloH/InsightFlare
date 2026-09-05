@@ -87,7 +87,6 @@ export interface AppMessages {
       fileNameLabel: string;
       download: string;
       empty: string;
-      allTabsUnavailable: string;
     };
     tableColumns: {
       action: string;
@@ -2089,6 +2088,7 @@ export interface AppMessages {
       logTitle: string;
       noRunSelected: string;
       noLogs: string;
+      loadMore: string;
       error: string;
       status: {
         running: string;
@@ -2675,8 +2675,6 @@ const enMessages = {
       fileNameLabel: "File name",
       download: "Export CSV",
       empty: "No rows available to export.",
-      allTabsUnavailable:
-        "All tabs can be exported after their data finishes loading.",
     },
     tableColumns: {
       action: "Columns",
@@ -4892,6 +4890,7 @@ const enMessages = {
       logTitle: "Run logs",
       noRunSelected: "Select a run to inspect logs.",
       noLogs: "No logs for this run.",
+      loadMore: "Load more",
       error: "Error",
       status: {
         running: "Running",
@@ -5541,7 +5540,6 @@ const zhMessages = {
       fileNameLabel: "文件名",
       download: "导出 CSV",
       empty: "当前没有可导出的行。",
-      allTabsUnavailable: "全部标签页需要在数据加载后才可导出。",
     },
     tableColumns: {
       action: "列设置",
@@ -7682,6 +7680,7 @@ const zhMessages = {
       logTitle: "运行日志",
       noRunSelected: "选择一条运行记录以查看日志。",
       noLogs: "暂无日志。",
+      loadMore: "加载更多",
       error: "错误",
       status: {
         running: "运行中",
@@ -8317,8 +8316,6 @@ const jaMessages = {
       fileNameLabel: "ファイル名",
       download: "CSV をエクスポート",
       empty: "エクスポートできる行がありません。",
-      allTabsUnavailable:
-        "すべてのタブは、各データの読み込み後に利用できます。",
     },
     tableColumns: {
       action: "列設定",
@@ -10535,6 +10532,7 @@ const jaMessages = {
       logTitle: "実行ログ",
       noRunSelected: "ログを確認する実行を選択してください。",
       noLogs: "この実行にログはありません。",
+      loadMore: "さらに読み込む",
       error: "エラー",
       status: {
         running: "実行中",

@@ -109,21 +109,21 @@ describe("API v1 saved-filter application service", () => {
     const first = await service.execute(
       { teamId: "team-1", siteIds: [] },
       "savedFilters.list",
-      { siteId: "site-1", limit: 1, cursor: null },
+      { siteId: "site-1", page: { limit: 1, cursor: null } },
       {},
     );
     expect(first).toMatchObject({
       ok: true,
-      value: { page: { hasMore: true, limit: 1 } },
+      value: { pagination: { hasMore: true, limit: 1 } },
     });
-    const cursor = first.ok ? first.value.page.nextCursor : null;
+    const cursor = first.ok ? first.value.pagination.nextCursor : null;
     expect(cursor).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
 
     fake.all.mockResolvedValue({ results: [row("filter-2", 10)] });
     const second = await service.execute(
       { teamId: "team-1", siteIds: [] },
       "savedFilters.list",
-      { siteId: "site-1", limit: 1, cursor },
+      { siteId: "site-1", page: { limit: 1, cursor } },
       {},
     );
     expect(second).toMatchObject({
@@ -136,7 +136,7 @@ describe("API v1 saved-filter application service", () => {
       service.execute(
         { teamId: "team-1", siteIds: [] },
         "savedFilters.list",
-        { siteId: "site-1", limit: 1, cursor: tampered },
+        { siteId: "site-1", page: { limit: 1, cursor: tampered } },
         {},
       ),
     ).resolves.toEqual({ ok: false, error: { code: "invalid_cursor" } });
@@ -172,7 +172,7 @@ describe("API v1 saved-filter application service", () => {
     const result = await service.execute(
       { teamId: "team-1", siteIds: [] },
       "savedFilters.list",
-      { siteId: "site-1", limit: 10, cursor: null },
+      { siteId: "site-1", page: { limit: 10, cursor: null } },
       {},
     );
 
@@ -200,7 +200,7 @@ describe("API v1 saved-filter application service", () => {
       service.execute(
         { teamId: "team-1", siteIds: [] },
         "savedFilters.list",
-        { siteId: "site-1", limit: 10, cursor: null },
+        { siteId: "site-1", page: { limit: 10, cursor: null } },
         { deadlineMs: 0 },
       ),
     ).resolves.toEqual({ ok: false, error: { code: "internal_error" } });
@@ -208,7 +208,7 @@ describe("API v1 saved-filter application service", () => {
       service.execute(
         { teamId: "team-1", siteIds: ["site-2"] },
         "savedFilters.list",
-        { siteId: "site-1", limit: 10, cursor: null },
+        { siteId: "site-1", page: { limit: 10, cursor: null } },
         {},
       ),
     ).resolves.toMatchObject({ ok: true, value: { items: [] } });
@@ -231,16 +231,16 @@ describe("API v1 saved-filter application service", () => {
     const first = await service.execute(
       { teamId: "team-1", siteIds: [] },
       "savedFilters.list",
-      { siteId: "site-1", limit: 1, cursor: null },
+      { siteId: "site-1", page: { limit: 1, cursor: null } },
       {},
     );
-    const cursor = first.ok ? first.value.page.nextCursor : null;
+    const cursor = first.ok ? first.value.pagination.nextCursor : null;
     expect(cursor).not.toBeNull();
     await expect(
       service.execute(
         { teamId: "team-2", siteIds: [] },
         "savedFilters.list",
-        { siteId: "site-1", limit: 1, cursor },
+        { siteId: "site-1", page: { limit: 1, cursor } },
         {},
       ),
     ).resolves.toEqual({ ok: false, error: { code: "invalid_cursor" } });
@@ -248,7 +248,7 @@ describe("API v1 saved-filter application service", () => {
       service.execute(
         { teamId: "team-1", siteIds: [] },
         "savedFilters.list",
-        { siteId: "site-2", limit: 1, cursor },
+        { siteId: "site-2", page: { limit: 1, cursor } },
         {},
       ),
     ).resolves.toEqual({ ok: false, error: { code: "invalid_cursor" } });
@@ -275,7 +275,7 @@ describe("API v1 saved-filter application service", () => {
         service.execute(
           { teamId: "team-1", siteIds: [] },
           "savedFilters.list",
-          { siteId: "site-1", limit: 1, cursor },
+          { siteId: "site-1", page: { limit: 1, cursor } },
           {},
         ),
       ).resolves.toEqual({ ok: false, error: { code: "invalid_cursor" } });
@@ -285,7 +285,7 @@ describe("API v1 saved-filter application service", () => {
       service.execute(
         { teamId: "team-1", siteIds: [] },
         "savedFilters.list",
-        { siteId: "site-1", limit: 1, cursor: null },
+        { siteId: "site-1", page: { limit: 1, cursor: null } },
         {},
       ),
     ).resolves.toEqual({ ok: false, error: { code: "internal_error" } });
@@ -317,7 +317,7 @@ describe("API v1 saved-filter application service", () => {
         service.execute(
           { teamId: "team-1", siteIds: [] },
           "savedFilters.list",
-          { siteId: "site-1", limit: 1, cursor },
+          { siteId: "site-1", page: { limit: 1, cursor } },
           {},
         ),
       ).resolves.toEqual({ ok: false, error: { code: "invalid_cursor" } });

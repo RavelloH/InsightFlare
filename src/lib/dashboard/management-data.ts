@@ -11,6 +11,7 @@ import type {
   TeamData,
 } from "@/lib/edge-client-types";
 import type { PublicNotificationEmailConfig } from "@/lib/notifications/email-config";
+import type { PageResult } from "@/lib/pagination";
 import type {
   ScheduledTaskRetentionConfig,
   ScheduledTaskRun,
@@ -84,9 +85,13 @@ export type SerializableScheduledTasksData = Omit<
   "tasks" | "runs" | "selectedRun" | "logs"
 > & {
   tasks: SerializableScheduledTaskSummary[];
-  runs: SerializableScheduledTaskRunGroup[];
+  runs: Omit<PageResult<ScheduledTaskRunGroup>, "items"> & {
+    items: SerializableScheduledTaskRunGroup[];
+  };
   selectedRun: SerializableScheduledTaskRunGroup | null;
-  logs: SerializableScheduledTaskRunLog[];
+  logs: Omit<PageResult<ScheduledTaskRunLog>, "items"> & {
+    items: SerializableScheduledTaskRunLog[];
+  };
 };
 
 export interface TeamInviteData {

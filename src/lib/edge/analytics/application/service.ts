@@ -20,6 +20,7 @@ import {
   currentInvocationLogger,
   errorLogData,
 } from "@/lib/edge/observability-logger";
+import { InvalidCursorError } from "@/lib/pagination";
 
 import type { AnalyticsProviderRegistry } from "./provider-registry";
 import type { TypedQueryProviderResult } from "./provider-registry";
@@ -250,6 +251,12 @@ export class TypedQueryApplicationService {
       const code =
         error instanceof Error ? error.message : "invalid_filter_scope";
       emit(executionContext, "failure");
+      if (error instanceof InvalidCursorError) {
+        return {
+          ok: false,
+          error: { kind: "invalid-cursor", cursorKind: error.cursorKind },
+        };
+      }
       return {
         ok: false,
         error: {
@@ -375,6 +382,12 @@ export class TypedQueryApplicationService {
         ...errorLogData(error),
       });
       emit(executionContext, "failure");
+      if (error instanceof InvalidCursorError) {
+        return {
+          ok: false,
+          error: { kind: "invalid-cursor", cursorKind: error.cursorKind },
+        };
+      }
       return {
         ok: false,
         error: { kind: "internal", operation: invocation.operation },

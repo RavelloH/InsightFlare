@@ -1,5 +1,6 @@
 import {
   analyticsFilterRegistry,
+  effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
@@ -40,6 +41,7 @@ import {
 import {
   decodePageCursor,
   encodePageCursor,
+  hasExactKeys,
   type PageResult,
   pageResult,
   paginationBinding,
@@ -55,13 +57,49 @@ export interface PageAggregateCursor {
 }
 
 export interface ReferrerAggregateCursor {
-  readonly views: number;
-  readonly sessions: number;
-  readonly visitors?: number;
+  /** The first two values are the concrete ORDER BY metrics. */
+  readonly primary: number;
+  readonly secondary: number;
   readonly referrer: string;
 }
 
 export type ReferrerPageSortKey = "views" | "visitors";
+
+function pageAggregateCursor(value: unknown): PageAggregateCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, [
+    "views",
+    "sessions",
+    "pathname",
+    "query",
+    "hash",
+  ]) &&
+    typeof candidate.views === "number" &&
+    Number.isFinite(candidate.views) &&
+    typeof candidate.sessions === "number" &&
+    Number.isFinite(candidate.sessions) &&
+    typeof candidate.pathname === "string" &&
+    typeof candidate.query === "string" &&
+    typeof candidate.hash === "string"
+    ? (candidate as unknown as PageAggregateCursor)
+    : null;
+}
+
+function referrerAggregateCursor(
+  value: unknown,
+): ReferrerAggregateCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, ["primary", "secondary", "referrer"]) &&
+    typeof candidate.primary === "number" &&
+    Number.isFinite(candidate.primary) &&
+    typeof candidate.secondary === "number" &&
+    Number.isFinite(candidate.secondary) &&
+    typeof candidate.referrer === "string"
+    ? (candidate as unknown as ReferrerAggregateCursor)
+    : null;
+}
 
 function pageCursorBinding(
   operation: string,
@@ -79,6 +117,7 @@ function pageCursorBinding(
     window.endExclusiveMs,
     window.timeZone,
     filterFingerprint(filters, analyticsFilterRegistry),
+    effectiveScopeForPagination(filters),
     ...extra,
   ]);
 }
@@ -290,7 +329,7 @@ export async function decodePagesCursor(
     [includeDetails],
     audience,
   );
-  return decodePageCursor<PageAggregateCursor>(env, binding, cursor);
+  return decodePageCursor(env, binding, cursor, "pages", pageAggregateCursor);
 }
 
 export async function queryPageTabsAggregate(
@@ -617,7 +656,7 @@ export async function queryPageCardMetricsFromD1(
   options?: {
     pathnames?: string[];
     limit?: number;
-    offset?: number;
+    cursor?: PageDashboardCursor | null;
   },
 ): Promise<PageCardAggregateRow[]> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
@@ -638,6 +677,12 @@ export async function queryPageCardMetricsFromD1(
     pathnameCondition,
   ]);
   const hasLimit = typeof options?.limit === "number";
+  const cursor = options?.cursor;
+  const cursorClause = cursor
+    ? `WHERE pr.views < ?
+   OR (pr.views = ? AND pr.sessions < ?)
+   OR (pr.views = ? AND pr.sessions = ? AND pr.pathname > ?)`
+    : "";
   const sql = `
 WITH
 ${scopedDataset?.ctes ?? buildVisitSourceCte()},
@@ -687,8 +732,9 @@ SELECT
   0 AS durationViews
 FROM path_rollup pr
 LEFT JOIN path_bounce_rollup pb ON pb.pathname = pr.pathname
+${cursorClause}
 ORDER BY pr.views DESC, pr.sessions DESC, pr.pathname ASC
-${hasLimit ? "LIMIT ? OFFSET ?" : ""}
+${hasLimit ? "LIMIT ?" : ""}
 `;
   return (
     await queryD1All<Record<string, unknown>>(env, sql, [
@@ -699,9 +745,17 @@ ${hasLimit ? "LIMIT ? OFFSET ?" : ""}
             ...(filter?.bindings ?? []),
           ]),
       ...requestedPathnames,
-      ...(hasLimit
-        ? [options?.limit ?? 0, Math.max(0, options?.offset ?? 0)]
+      ...(cursor
+        ? [
+            cursor.views,
+            cursor.views,
+            cursor.sessions,
+            cursor.views,
+            cursor.sessions,
+            cursor.pathname,
+          ]
         : []),
+      ...(hasLimit ? [options?.limit ?? 0] : []),
     ])
   ).map((row) => ({
     pathname: String(row.pathname ?? ""),
@@ -1152,7 +1206,7 @@ rollup AS (
 SELECT referrer, views, sessions, visitors
 FROM rollup
 ${cursorClause}
-ORDER BY views DESC, sessions DESC, referrer ASC
+  ORDER BY views DESC, sessions DESC, referrer ASC
 LIMIT ?
 `;
   const orderedSql = sql.replace(
@@ -1161,11 +1215,11 @@ LIMIT ?
   );
   const cursorBindings = cursor
     ? [
-        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
-        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
-        sortBy === "visitors" ? cursor.views : cursor.sessions,
-        sortBy === "visitors" ? (cursor.visitors ?? 0) : cursor.views,
-        sortBy === "visitors" ? cursor.views : cursor.sessions,
+        cursor.primary,
+        cursor.primary,
+        cursor.secondary,
+        cursor.primary,
+        cursor.secondary,
         cursor.referrer,
       ]
     : [];
@@ -1212,9 +1266,9 @@ LIMIT ?
   const nextCursor =
     page.hasMore && page.last
       ? await encodePageCursor(env, binding, {
-          views: page.last.views,
-          sessions: page.last.sessions,
-          visitors: page.last.visitors,
+          primary: sortBy === "visitors" ? page.last.visitors : page.last.views,
+          secondary:
+            sortBy === "visitors" ? page.last.views : page.last.sessions,
           referrer: page.last.referrer,
         })
       : null;
@@ -1249,7 +1303,13 @@ export async function decodeReferrersCursor(
     [includeFullUrl, search?.trim().toLowerCase() ?? "", sortBy, sortDirection],
     audience,
   );
-  return decodePageCursor<ReferrerAggregateCursor>(env, binding, cursor);
+  return decodePageCursor(
+    env,
+    binding,
+    cursor,
+    "referrers",
+    referrerAggregateCursor,
+  );
 }
 
 export async function queryDimensionAggregate(
@@ -1307,13 +1367,12 @@ export interface PageDashboardItem {
 
 export interface PagesDashboardResult {
   readonly interval: Interval;
-  readonly data: readonly PageDashboardItem[];
-  readonly meta: {
-    readonly page: number;
-    readonly pageSize: number;
+  readonly items: readonly PageDashboardItem[];
+  readonly pagination: {
+    readonly limit: number;
     readonly returned: number;
     readonly hasMore: boolean;
-    readonly nextPage: number | null;
+    readonly nextCursor: string | null;
   };
 }
 
@@ -1321,9 +1380,41 @@ export interface PagesDashboardReaderInput {
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
   readonly interval: Interval;
-  readonly page: number;
-  readonly pageSize: number;
-  readonly offset: number;
+  readonly page: { readonly limit: number; readonly cursor?: string | null };
+  readonly audience?: QueryAudience;
+}
+
+export interface PageDashboardCursor {
+  readonly views: number;
+  readonly sessions: number;
+  readonly pathname: string;
+}
+
+async function pagesDashboardCursorBinding(
+  siteId: string,
+  input: PagesDashboardReaderInput,
+): Promise<string> {
+  return pageCursorBinding(
+    "pages-dashboard",
+    siteId,
+    input.window,
+    input.filters,
+    [input.interval],
+    input.audience ?? "private-dashboard",
+  );
+}
+
+function pageDashboardCursor(value: unknown): PageDashboardCursor | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, ["views", "sessions", "pathname"]) &&
+    typeof candidate.views === "number" &&
+    Number.isFinite(candidate.views) &&
+    typeof candidate.sessions === "number" &&
+    Number.isFinite(candidate.sessions) &&
+    typeof candidate.pathname === "string"
+    ? (candidate as unknown as PageDashboardCursor)
+    : null;
 }
 
 /**
@@ -1335,31 +1426,50 @@ export async function queryPagesDashboard(
   siteId: string,
   input: PagesDashboardReaderInput,
 ): Promise<PagesDashboardResult> {
-  const { filters, interval, offset, page, pageSize, window } = input;
+  const { filters, interval, page, window } = input;
+  const cursor = await decodePageCursor<PageDashboardCursor>(
+    env,
+    await pagesDashboardCursorBinding(siteId, input),
+    page.cursor,
+    "pages-dashboard",
+    pageDashboardCursor,
+  );
   const requestedRows = await queryPageCardMetricsFromD1(
     env,
     siteId,
     window,
     filters,
     {
-      limit: pageSize + 1,
-      offset,
+      limit: page.limit + 1,
+      cursor,
     },
   );
-  const hasMore = requestedRows.length > pageSize;
+  const hasMore = requestedRows.length > page.limit;
   const currentRows = hasMore
-    ? requestedRows.slice(0, pageSize)
+    ? requestedRows.slice(0, page.limit)
     : requestedRows;
+  const lastRow = currentRows.at(-1);
+  const nextCursor =
+    hasMore && lastRow
+      ? await encodePageCursor(
+          env,
+          await pagesDashboardCursorBinding(siteId, input),
+          {
+            views: lastRow.views,
+            sessions: lastRow.sessions,
+            pathname: lastRow.pathname,
+          },
+        )
+      : null;
   if (currentRows.length === 0) {
     return {
       interval,
-      data: [],
-      meta: {
-        page,
-        pageSize,
+      items: [],
+      pagination: {
+        limit: page.limit,
         returned: 0,
         hasMore: false,
-        nextPage: null,
+        nextCursor: null,
       },
     };
   }
@@ -1426,7 +1536,7 @@ export async function queryPagesDashboard(
 
   return {
     interval,
-    data: currentRows.map((row) => {
+    items: currentRows.map((row) => {
       const previousRow =
         previousByPath.get(row.pathname) ?? emptyOverviewAggregateRow();
       const metrics = mapPageCardMetrics(row);
@@ -1455,12 +1565,11 @@ export async function queryPagesDashboard(
         },
       };
     }),
-    meta: {
-      page,
-      pageSize,
+    pagination: {
+      limit: page.limit,
       returned: currentRows.length,
       hasMore,
-      nextPage: hasMore ? page + 1 : null,
+      nextCursor,
     },
   };
 }

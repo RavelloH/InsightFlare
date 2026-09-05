@@ -4853,7 +4853,7 @@ paths:
                   data:
                     type: object
                     properties:
-                      sites:
+                      items:
                         type: array
                         items:
                           type: object
@@ -4961,7 +4961,7 @@ paths:
                       pagination:
                         $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
-                      - sites
+                      - items
                       - pagination
                     additionalProperties: false
                   meta:
@@ -4972,7 +4972,7 @@ paths:
                 additionalProperties: false
               example:
                 data:
-                  sites:
+                  items:
                     - siteId: example
                       name: example
                       domain: example
@@ -5017,7 +5017,7 @@ paths:
                     requested: auto
                     resolved: event
         "400":
-          description: "API v1 error: validation_failed."
+          description: "API v1 error: validation_failed, invalid_cursor."
           headers:
             X-Request-Id:
               required: true
@@ -11342,11 +11342,11 @@ paths:
                             - nodeCount
                             - valueCount
                           additionalProperties: false
-                      page:
-                        $ref: "#/components/schemas/SharedSchema_96182d97894c"
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
                       - items
-                      - page
+                      - pagination
                     additionalProperties: false
                   meta:
                     $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -11380,8 +11380,9 @@ paths:
                       deviceType: example
                       nodeCount: 0
                       valueCount: 0
-                  page:
+                  pagination:
                     limit: 1
+                    returned: 0
                     hasMore: false
                     nextCursor: example
                 meta:
@@ -15794,11 +15795,11 @@ paths:
                             - screenWidth
                             - screenHeight
                           additionalProperties: false
-                      page:
-                        $ref: "#/components/schemas/SharedSchema_96182d97894c"
+                      pagination:
+                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
                     required:
                       - items
-                      - page
+                      - pagination
                     additionalProperties: false
                   meta:
                     $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -15829,8 +15830,9 @@ paths:
                       deviceType: example
                       screenWidth: 0
                       screenHeight: 0
-                  page:
+                  pagination:
                     limit: 1
+                    returned: 0
                     hasMore: false
                     nextCursor: example
                 meta:
@@ -16198,25 +16200,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      items:
-                        $ref: "#/components/schemas/SharedSchema_ffd4d8b33e22"
-                      page:
-                        $ref: "#/components/schemas/SharedSchema_96182d97894c"
-                    required:
-                      - items
-                      - page
-                    additionalProperties: false
-                  meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
-                required:
-                  - data
-                  - meta
-                additionalProperties: false
+                $ref: "#/components/schemas/SharedSchema_ba7cd480cd06"
               example:
                 data:
                   items:
@@ -16252,8 +16236,9 @@ paths:
                         lcp: 0
                         cls: 0
                         inp: 0
-                  page:
+                  pagination:
                     limit: 1
+                    returned: 0
                     hasMore: false
                     nextCursor: example
                 meta:
@@ -16982,25 +16967,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      items:
-                        $ref: "#/components/schemas/SharedSchema_ffd4d8b33e22"
-                      pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
-                    required:
-                      - items
-                      - pagination
-                    additionalProperties: false
-                  meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
-                required:
-                  - data
-                  - meta
-                additionalProperties: false
+                $ref: "#/components/schemas/SharedSchema_ba7cd480cd06"
               example:
                 data:
                   items:
@@ -21692,26 +21659,29 @@ paths:
             minLength: 1
             maxLength: 256
           description: siteId path parameter.
-        - name: limit
+        - name: page
           in: query
           required: true
           schema:
-            default: 100
-            type: integer
-            minimum: 1
-            maximum: 1000
-          description: limit query parameter.
-        - name: cursor
-          in: query
-          required: true
-          schema:
-            default: null
-            anyOf:
-              - type: string
-                minLength: 1
-                maxLength: 12288
-              - type: "null"
-          description: cursor query parameter.
+            default:
+              limit: 100
+            type: object
+            properties:
+              limit:
+                default: 100
+                type: integer
+                minimum: 1
+                maximum: 1000
+              cursor:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                    maxLength: 12288
+                  - type: "null"
+            required:
+              - limit
+            additionalProperties: false
+          description: page query parameter.
       responses:
         "200":
           description: Successful response.
@@ -21786,12 +21756,9 @@ paths:
                         - createdAt
                         - updatedAt
                       additionalProperties: false
-                  page:
+                  pagination:
                     type: object
                     properties:
-                      kind:
-                        type: string
-                        const: keyset
                       limit:
                         type: integer
                         minimum: 1
@@ -21803,15 +21770,19 @@ paths:
                           - type: "null"
                       hasMore:
                         type: boolean
+                      returned:
+                        type: integer
+                        minimum: 0
+                        maximum: 1000
                     required:
-                      - kind
                       - limit
                       - nextCursor
                       - hasMore
+                      - returned
                     additionalProperties: false
                 required:
                   - items
-                  - page
+                  - pagination
                 additionalProperties: false
                 $defs:
                   __schema0:
@@ -21863,11 +21834,11 @@ paths:
                         value: example
                     createdAt: 2026-01-01T00:00:00Z
                     updatedAt: 2026-01-01T00:00:00Z
-                page:
-                  kind: keyset
+                pagination:
                   limit: 1
                   nextCursor: example
                   hasMore: false
+                  returned: 0
         "400":
           description: "API v1 error: invalid_cursor."
           headers:
@@ -23694,6 +23665,17 @@ components:
         - data
         - meta
       additionalProperties: false
+    SharedSchema_ba7cd480cd06:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/SharedSchema_0b2825516561"
+        meta:
+          $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+      required:
+        - data
+        - meta
+      additionalProperties: false
     SharedSchema_fea62b48b995:
       type: object
       properties:
@@ -23956,24 +23938,6 @@ components:
         - hasMore
         - nextCursor
       additionalProperties: false
-    SharedSchema_96182d97894c:
-      type: object
-      properties:
-        limit:
-          type: integer
-          exclusiveMinimum: 0
-          maximum: 9007199254740991
-        hasMore:
-          type: boolean
-        nextCursor:
-          anyOf:
-            - type: string
-            - type: "null"
-      required:
-        - limit
-        - hasMore
-        - nextCursor
-      additionalProperties: false
     SharedSchema_a07487506f63:
       type: object
       properties:
@@ -24022,6 +23986,17 @@ components:
       required:
         - interval
         - points
+      additionalProperties: false
+    SharedSchema_0b2825516561:
+      type: object
+      properties:
+        items:
+          $ref: "#/components/schemas/SharedSchema_ffd4d8b33e22"
+        pagination:
+          $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+      required:
+        - items
+        - pagination
       additionalProperties: false
     SharedSchema_dec1b9541133:
       type: object

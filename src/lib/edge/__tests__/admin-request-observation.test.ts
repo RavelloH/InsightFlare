@@ -703,42 +703,52 @@ describe("request observation admin reader", () => {
 
     const pageResponse = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?page=included&limit=1&cursor=" +
-          encodeURIComponent(
-            JSON.stringify({ receivedAt: 1, timestamp: "2026-09-01 00:00:00" }),
-          ),
+        "/api/private/admin/request-observation?from=0&to=3600000&source=included&limit=1",
       ),
       createEnv([config, sites]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=included&limit=1&cursor=" +
-          encodeURIComponent(
-            JSON.stringify({ receivedAt: 1, timestamp: "2026-09-01 00:00:00" }),
-          ),
+        "https://app.test/api/private/admin/request-observation?from=0&to=3600000&source=included&limit=1",
       ),
     );
     const pageBody = (await pageResponse.json()) as Record<string, any>;
     expect(pageResponse.status).toBe(200);
-    expect(pageBody.page).toMatchObject({ hasMore: true, source: "included" });
-    expect(pageBody.page.events[0]).toMatchObject({
+    expect(pageBody).toMatchObject({
+      source: "included",
+      data: { pagination: { hasMore: true, nextCursor: expect.any(String) } },
+    });
+    expect(pageBody.data.items[0]).toMatchObject({
       category: "normal",
       disposition: "included",
     });
-    expect(pageBody.page.events[0]).toMatchObject({
+    expect(pageBody.data.items[0]).toMatchObject({
       pathname: "/first",
       siteName: "Site",
       requestMethod: "POST",
     });
-    expect(pageBody.page.events[0]).not.toHaveProperty("metadataJson");
-    expect(pageBody.page.events[0]).not.toHaveProperty("userAgent");
-    expect(pageBody.page.nextCursor).toMatchObject({
-      receivedAt: 1_800_000_000_000,
+    expect(pageBody.data.items[0]).not.toHaveProperty("metadataJson");
+    expect(pageBody.data.items[0]).not.toHaveProperty("userAgent");
+
+    const nextCursor = pageBody.data.pagination.nextCursor as string;
+    const secondPageResponse = await handleRequestObservationAdmin(
+      request(
+        `/api/private/admin/request-observation?from=0&to=3600000&source=included&limit=1&cursor=${encodeURIComponent(nextCursor)}`,
+      ),
+      createEnv([statement({ first: configRow(encrypted) }), sites]),
+      new URL(
+        `https://app.test/api/private/admin/request-observation?from=0&to=3600000&source=included&limit=1&cursor=${encodeURIComponent(nextCursor)}`,
+      ),
+    );
+    expect(secondPageResponse.status).toBe(200);
+    await expect(secondPageResponse.json()).resolves.toMatchObject({
+      source: "included",
+      data: { items: [{ category: "normal", disposition: "included" }] },
     });
 
     const blockedPageResponse = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=blocked"),
+      request("/api/private/admin/request-observation?source=blocked"),
       createEnv([statement({ first: configRow(encrypted) }), sites]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=blocked",
+        "https://app.test/api/private/admin/request-observation?source=blocked",
       ),
     );
     const blockedPageBody = (await blockedPageResponse.json()) as Record<
@@ -746,8 +756,8 @@ describe("request observation admin reader", () => {
       any
     >;
     expect(blockedPageResponse.status).toBe(200);
-    expect(blockedPageBody.page).toMatchObject({ source: "blocked" });
-    expect(blockedPageBody.page.events[0]).toMatchObject({
+    expect(blockedPageBody).toMatchObject({ source: "blocked" });
+    expect(blockedPageBody.data.items[0]).toMatchObject({
       category: "bot",
       disposition: "blocked",
     });
@@ -836,11 +846,11 @@ describe("request observation admin reader", () => {
 
     const invalidCursor = await handleRequestObservationAdmin(
       request(
-        "/api/private/admin/request-observation?page=blocked&cursor=invalid",
+        "/api/private/admin/request-observation?source=blocked&cursor=invalid",
       ),
       createEnv([statement({ first: configRow(encrypted) })]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=blocked&cursor=invalid",
+        "https://app.test/api/private/admin/request-observation?source=blocked&cursor=invalid",
       ),
     );
     expect(invalidCursor.status).toBe(400);
@@ -874,48 +884,48 @@ describe("request observation admin reader", () => {
       });
 
     const normalResponse = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=included"),
+      request("/api/private/admin/request-observation?source=included"),
       createEnv([
         statement({ first: configRow(encrypted) }),
         statement({ all: [{}] }),
       ]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=included",
+        "https://app.test/api/private/admin/request-observation?source=included",
       ),
     );
     const normalBody = (await normalResponse.json()) as Record<string, any>;
     expect(normalResponse.status).toBe(200);
-    expect(normalBody.page.events[0]).toMatchObject({
+    expect(normalBody.data.items[0]).toMatchObject({
       siteName: "missing-site",
       siteDomain: "",
       edgeLatencyMs: null,
     });
-    expect(normalBody.page.events[0]).not.toHaveProperty("latitude");
-    expect(normalBody.page.events[0]).not.toHaveProperty("longitude");
-    expect(normalBody.page.events[1].siteName).toBe("Unknown site");
+    expect(normalBody.data.items[0]).not.toHaveProperty("latitude");
+    expect(normalBody.data.items[0]).not.toHaveProperty("longitude");
+    expect(normalBody.data.items[1].siteName).toBe("Unknown site");
 
     const abnormalResponse = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=blocked"),
+      request("/api/private/admin/request-observation?source=blocked"),
       createEnv([
         statement({ first: configRow(encrypted) }),
         statement({ all: [{}] }),
       ]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=blocked",
+        "https://app.test/api/private/admin/request-observation?source=blocked",
       ),
     );
     const abnormalBody = (await abnormalResponse.json()) as Record<string, any>;
     expect(abnormalResponse.status).toBe(200);
-    expect(abnormalBody.page.events[0]).toMatchObject({
+    expect(abnormalBody.data.items[0]).toMatchObject({
       category: "custom_block",
       disposition: "blocked",
       siteName: "missing-site",
       siteDomain: "",
       botScore: null,
     });
-    expect(abnormalBody.page.events[0]).not.toHaveProperty("latitude");
-    expect(abnormalBody.page.events[0]).not.toHaveProperty("longitude");
-    expect(abnormalBody.page.events[1].siteName).toBe("Unknown site");
+    expect(abnormalBody.data.items[0]).not.toHaveProperty("latitude");
+    expect(abnormalBody.data.items[0]).not.toHaveProperty("longitude");
+    expect(abnormalBody.data.items[1].siteName).toBe("Unknown site");
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -1099,10 +1109,10 @@ describe("request observation admin reader", () => {
     expect(detailFailure.status).toBe(400);
 
     const pageFailure = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=included"),
+      request("/api/private/admin/request-observation?source=included"),
       createEnv([configured()]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=included",
+        "https://app.test/api/private/admin/request-observation?source=included",
       ),
     );
     expect(pageFailure.status).toBe(400);
@@ -1254,10 +1264,10 @@ describe("request observation admin reader", () => {
       new Response("not json\n", { status: 200 }),
     );
     const invalidJsonPage = await handleRequestObservationAdmin(
-      request("/api/private/admin/request-observation?page=included"),
+      request("/api/private/admin/request-observation?source=included"),
       createEnv([configuredStatement()]),
       new URL(
-        "https://app.test/api/private/admin/request-observation?page=included",
+        "https://app.test/api/private/admin/request-observation?source=included",
       ),
     );
     expect(invalidJsonPage.status).toBe(400);

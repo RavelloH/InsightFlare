@@ -35,7 +35,7 @@ function reader() {
     source: "raw",
     approximateVisitors: false,
     data: {
-      sites: [
+      items: [
         {
           siteId: "site-1",
           name: "Example",
@@ -108,7 +108,7 @@ describe("planned team sites HTTP adapter", () => {
     expect(TeamAnalyticsSitesResponseSchema.safeParse(body).success).toBe(true);
     expect(body).toMatchObject({
       data: {
-        sites: [
+        items: [
           {
             siteId: "site-1",
             metrics: { avgDurationMs: 300, bounceRate: 0.25 },
@@ -200,7 +200,7 @@ describe("planned team sites HTTP adapter", () => {
       source: "mixed",
       approximateVisitors: true,
       data: {
-        sites: [
+        items: [
           {
             siteId: "site-1",
             name: "Example",
@@ -220,6 +220,12 @@ describe("planned team sites HTTP adapter", () => {
             lastEventAtMs: null,
           },
         ],
+        pagination: {
+          limit: 20,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
     });
     const success = await handlePlannedTeamSites(
@@ -229,7 +235,7 @@ describe("planned team sites HTTP adapter", () => {
     );
     await expect(success.json()).resolves.toMatchObject({
       data: {
-        sites: [{ lastEventAt: null, metrics: { approximateVisitors: true } }],
+        items: [{ lastEventAt: null, metrics: { approximateVisitors: true } }],
       },
       meta: { source: "mixed", accuracy: "approximate" },
     });
@@ -261,7 +267,7 @@ describe("planned team sites HTTP adapter", () => {
       source: "raw",
       approximateVisitors: false,
       data: {
-        sites: [
+        items: [
           {
             siteId: "site-1",
             name: "Example",
@@ -281,6 +287,12 @@ describe("planned team sites HTTP adapter", () => {
             lastEventAtMs: 1,
           },
         ],
+        pagination: {
+          limit: 20,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
     });
     const response = await handlePlannedTeamSites(
@@ -290,7 +302,7 @@ describe("planned team sites HTTP adapter", () => {
     );
     await expect(response.json()).resolves.toMatchObject({
       data: {
-        sites: [
+        items: [
           {
             metrics: { avgDurationMs: 0, bounceRate: 0 },
             lastEventAt: "1970-01-01T00:00:00.001Z",
@@ -303,7 +315,19 @@ describe("planned team sites HTTP adapter", () => {
     const cancelled = reader();
     cancelled.mockImplementationOnce(async () => {
       controller.abort();
-      return { source: "raw", approximateVisitors: false, data: { sites: [] } };
+      return {
+        source: "raw",
+        approximateVisitors: false,
+        data: {
+          items: [],
+          pagination: {
+            limit: 20,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      };
     });
     expect(
       (

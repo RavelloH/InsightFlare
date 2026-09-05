@@ -235,7 +235,7 @@ export type TeamAnalyticsSite = z.infer<typeof TeamAnalyticsSiteSchema>;
 
 export const TeamAnalyticsSitesDataSchema = z
   .object({
-    sites: z.array(TeamAnalyticsSiteSchema),
+    items: z.array(TeamAnalyticsSiteSchema),
     pagination: AnalyticsPaginationSchema,
   })
   .strict();
@@ -805,13 +805,7 @@ const AnalyticsEventRecordSchema = z
 export const AnalyticsEventsSearchDataSchema = z
   .object({
     items: z.array(AnalyticsEventRecordSchema),
-    page: z
-      .object({
-        limit: z.number().int().positive(),
-        hasMore: z.boolean(),
-        nextCursor: z.string().nullable(),
-      })
-      .strict(),
+    pagination: AnalyticsPaginationSchema,
   })
   .strict();
 export type AnalyticsEventsSearchData = z.infer<
@@ -1273,13 +1267,7 @@ export const AnalyticsSessionDetailResponseSchema = apiV1SuccessEnvelopeSchema(
 export const AnalyticsVisitorsSearchDataSchema = z
   .object({
     items: z.array(AnalyticsVisitorSchema),
-    page: z
-      .object({
-        limit: z.number().int().positive(),
-        hasMore: z.boolean(),
-        nextCursor: z.string().nullable(),
-      })
-      .strict(),
+    pagination: AnalyticsPaginationSchema,
   })
   .strict();
 export type AnalyticsVisitorsSearchData = z.infer<
@@ -1292,13 +1280,7 @@ export const AnalyticsVisitorsSearchResponseSchema = apiV1SuccessEnvelopeSchema(
 export const AnalyticsSessionsSearchDataSchema = z
   .object({
     items: z.array(AnalyticsSessionSchema),
-    page: z
-      .object({
-        limit: z.number().int().positive(),
-        hasMore: z.boolean(),
-        nextCursor: z.string().nullable(),
-      })
-      .strict(),
+    pagination: AnalyticsPaginationSchema,
   })
   .strict();
 export type AnalyticsSessionsSearchData = z.infer<

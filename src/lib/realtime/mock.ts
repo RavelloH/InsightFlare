@@ -80,11 +80,7 @@ import {
   generateDemoEventTypeDetail,
   generateDemoEventTypeFieldValues,
 } from "@/lib/realtime/mock/events";
-import {
-  parseDemoInterval,
-  parseDemoLimit,
-  parseDemoNumber,
-} from "@/lib/realtime/mock/filters";
+import { parseDemoInterval } from "@/lib/realtime/mock/filters";
 import {
   createDemoFunnel,
   deleteDemoFunnel,
@@ -97,6 +93,11 @@ import {
   generateDemoVisitorDetail,
   generateDemoVisitors,
 } from "@/lib/realtime/mock/journeys";
+import {
+  DemoInvalidCursorError,
+  demoPage,
+  type DemoPagination,
+} from "@/lib/realtime/mock/pagination";
 import { generateDemoRequestObservationData } from "@/lib/realtime/mock/request-observation";
 import { handleDemoSavedFilters } from "@/lib/realtime/mock/saved-filters";
 import {
@@ -142,120 +143,37 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-type DemoPagination = {
-  limit: number;
-  returned: number;
-  hasMore: boolean;
-  nextCursor: string | null;
-};
-
-/**
- * Keep the in-process demo fixture convenient for legacy generator tests while
- * making JSON serialization match the paginated dashboard contract. Arrays
- * deliberately expose the old numeric shape in memory; their toJSON method
- * emits `{ items, pagination }` at the HTTP boundary.
- */
-type DemoPaginatedArray<T> = T[] & {
-  items: T[];
-  pagination: DemoPagination;
-  toJSON: () => { items: T[]; pagination: DemoPagination };
-};
-
-function demoPaginationLimit(
-  params: Record<string, string | number>,
-  fallback: number,
-): number {
-  return parseDemoLimit(params.limit ?? params.pageSize, fallback, 1, 500);
-}
-
-function demoPaginationOffset(params: Record<string, string | number>): number {
-  return Math.max(0, Math.floor(parseDemoNumber(params.cursor, 0)));
-}
-
-function demoUnboundedCollectionParams(
-  params: Record<string, string | number>,
-): Record<string, string | number> {
-  return {
-    ...params,
-    limit: 500,
-    pageSize: 500,
-    cursor: undefined as never,
-  };
-}
-
-function createDemoPaginatedArray<T>(
-  rows: T[],
-  pagination: DemoPagination,
-): DemoPaginatedArray<T> {
-  const pageRows = rows.slice() as DemoPaginatedArray<T>;
-  Object.defineProperties(pageRows, {
-    items: {
-      configurable: false,
-      enumerable: false,
-      value: pageRows,
-      writable: false,
-    },
-    pagination: {
-      configurable: false,
-      enumerable: false,
-      value: pagination,
-      writable: false,
-    },
-    toJSON: {
-      configurable: false,
-      enumerable: false,
-      value: () => ({ items: pageRows.slice(), pagination }),
-      writable: false,
-    },
-  });
-  return pageRows;
-}
-
-function paginateDemoRows<T>(
-  rows: T[],
-  params: Record<string, string | number>,
-  fallbackLimit: number,
-): DemoPaginatedArray<T> {
-  const limit = demoPaginationLimit(params, fallbackLimit);
-  const offset = demoPaginationOffset(params);
-  const pageRows = rows.slice(offset, offset + limit);
-  const hasMore = offset + pageRows.length < rows.length;
-  return createDemoPaginatedArray(pageRows, {
-    limit,
-    returned: pageRows.length,
-    hasMore,
-    nextCursor: hasMore ? String(offset + pageRows.length) : null,
-  });
-}
-
 function paginateDemoEnvelope(
   result: unknown,
   params: Record<string, string | number>,
   fallbackLimit: number,
+  operation = "demo-collection",
 ): unknown {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     return result;
   }
   const record = result as Record<string, unknown>;
   if (!Array.isArray(record.data)) return result;
+  const page = demoPage(
+    record.data,
+    params,
+    {
+      operation,
+      siteId: params.siteId ?? null,
+      from: params.from ?? null,
+      to: params.to ?? null,
+      search: String(params.search ?? "")
+        .trim()
+        .toLowerCase(),
+      filterKey: params.filterKey ?? null,
+      tab: params.tab ?? null,
+      dimension: params.dimension ?? null,
+    },
+    fallbackLimit,
+  );
   return {
     ...record,
-    data: paginateDemoRows(record.data, params, fallbackLimit),
-  };
-}
-
-function paginateDemoFieldsEnvelope(
-  result: unknown,
-  params: Record<string, string | number>,
-): unknown {
-  if (!result || typeof result !== "object" || Array.isArray(result)) {
-    return result;
-  }
-  const record = result as Record<string, unknown>;
-  if (record.ok !== true || !Array.isArray(record.fields)) return result;
-  return {
-    ...record,
-    data: paginateDemoRows(record.fields, params, 100),
+    data: page,
   };
 }
 
@@ -263,7 +181,7 @@ function paginateDemoDetailCollection(
   result: unknown,
   collectionKey: "events" | "sessions",
   params: Record<string, string | number>,
-): { ok: boolean; data: DemoPaginatedArray<unknown> } {
+): { ok: boolean; data: { items: unknown[]; pagination: DemoPagination } } {
   const record =
     result && typeof result === "object"
       ? (result as Record<string, unknown>)
@@ -275,10 +193,25 @@ function paginateDemoDetailCollection(
   const rows = Array.isArray(detail[collectionKey])
     ? detail[collectionKey]
     : [];
-  return {
-    ok: record.ok !== false,
-    data: paginateDemoRows(rows, params, 100),
-  };
+  const collectionId =
+    collectionKey === "events"
+      ? String(params.visitorId ?? params.sessionId ?? "")
+      : String(params.visitorId ?? "");
+  const page = demoPage(
+    rows,
+    params,
+    {
+      operation:
+        collectionKey === "events" ? "detail-events" : "detail-sessions",
+      siteId: String(params.siteId ?? ""),
+      collectionKey,
+      collectionId,
+      from: params.from ?? null,
+      to: params.to ?? null,
+    },
+    100,
+  );
+  return { ok: record.ok !== false, data: page };
 }
 
 function requestRuleId(body: unknown): string {
@@ -657,7 +590,13 @@ function handleDemoRequestInner(options: {
   const locale = demoLocale(params.locale ?? bodyRecord.locale);
 
   if (path.startsWith("/api/private/saved-filters")) {
-    return handleDemoSavedFilters({ path, method, siteId, body: options.body });
+    return handleDemoSavedFilters({
+      path,
+      method,
+      siteId,
+      params,
+      body: options.body,
+    });
   }
 
   // Write operations → read-only stub
@@ -1180,7 +1119,7 @@ function handleDemoRequestInner(options: {
     return paginateDemoEnvelope(
       generateDemoFilterValues(
         siteId,
-        demoUnboundedCollectionParams(params),
+        params,
         path.includes("/api/public/")
           ? "public-share"
           : path.includes("/api/v1/")
@@ -1189,94 +1128,75 @@ function handleDemoRequestInner(options: {
       ),
       params,
       50,
+      path.includes("/api/public/")
+        ? "filter-values:public"
+        : path.includes("/api/v1/")
+          ? "filter-values:api-v1"
+          : "filter-values:private",
     );
   }
   if (path.includes("/overview-page-path")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewPageTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "path",
-      ),
+      generateDemoOverviewPageTab(siteId, params, "path"),
       params,
       100,
+      "overview-page-path",
     );
   }
   if (path.includes("/overview-page-title")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewPageTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "title",
-      ),
+      generateDemoOverviewPageTab(siteId, params, "title"),
       params,
       100,
+      "overview-page-title",
     );
   }
   if (path.includes("/overview-page-hostname")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewPageTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "hostname",
-      ),
+      generateDemoOverviewPageTab(siteId, params, "hostname"),
       params,
       100,
+      "overview-page-hostname",
     );
   }
   if (path.includes("/overview-page-entry")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewPageTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "entry",
-      ),
+      generateDemoOverviewPageTab(siteId, params, "entry"),
       params,
       100,
+      "overview-page-entry",
     );
   }
   if (path.includes("/overview-page-exit")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewPageTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "exit",
-      ),
+      generateDemoOverviewPageTab(siteId, params, "exit"),
       params,
       100,
+      "overview-page-exit",
     );
   }
   if (path.includes("/overview-source-channel")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewSourceTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "channel",
-      ),
+      generateDemoOverviewSourceTab(siteId, params, "channel"),
       params,
       100,
+      "overview-source-channel",
     );
   }
   if (path.includes("/overview-source-domain")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewSourceTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "domain",
-      ),
+      generateDemoOverviewSourceTab(siteId, params, "domain"),
       params,
       100,
+      "overview-source-domain",
     );
   }
   if (path.includes("/overview-source-link")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewSourceTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "link",
-      ),
+      generateDemoOverviewSourceTab(siteId, params, "link"),
       params,
       100,
+      "overview-source-link",
     );
   }
   if (path.includes("/referrer-summary")) {
@@ -1284,57 +1204,42 @@ function handleDemoRequestInner(options: {
   }
   if (path.includes("/overview-client-browser")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewClientTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "browser",
-      ),
+      generateDemoOverviewClientTab(siteId, params, "browser"),
       params,
       100,
+      "overview-client-browser",
     );
   }
   if (path.includes("/overview-client-os-version")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewClientTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "osVersion",
-      ),
+      generateDemoOverviewClientTab(siteId, params, "osVersion"),
       params,
       100,
+      "overview-client-os-version",
     );
   }
   if (path.includes("/overview-client-device-type")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewClientTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "deviceType",
-      ),
+      generateDemoOverviewClientTab(siteId, params, "deviceType"),
       params,
       100,
+      "overview-client-device-type",
     );
   }
   if (path.includes("/overview-client-language")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewClientTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "language",
-      ),
+      generateDemoOverviewClientTab(siteId, params, "language"),
       params,
       100,
+      "overview-client-language",
     );
   }
   if (path.includes("/overview-client-screen-size")) {
     return paginateDemoEnvelope(
-      generateDemoOverviewClientTab(
-        siteId,
-        demoUnboundedCollectionParams(params),
-        "screenSize",
-      ),
+      generateDemoOverviewClientTab(siteId, params, "screenSize"),
       params,
       100,
+      "overview-client-screen-size",
     );
   }
   if (path.includes("/overview-geo-country")) {
@@ -1393,23 +1298,13 @@ function handleDemoRequestInner(options: {
     (path.includes("/event-type-field-values") ||
       path.includes("/event-fields/values"))
   ) {
-    return paginateDemoEnvelope(
-      generateDemoEventTypeFieldValues(
-        siteId,
-        demoUnboundedCollectionParams(params),
-      ),
-      params,
-      25,
-    );
+    return generateDemoEventTypeFieldValues(siteId, params);
   }
   if (
     (path.includes("/api/private/") || path.includes("/api/v1/")) &&
     (path.includes("/event-type-fields") || path.endsWith("/event-fields"))
   ) {
-    return paginateDemoFieldsEnvelope(
-      generateDemoEventFields(siteId, demoUnboundedCollectionParams(params)),
-      params,
-    );
+    return generateDemoEventFields(siteId, params);
   }
   if (path.includes("/event-type-context")) {
     return generateDemoEventTypeContext(siteId, params);
@@ -1496,18 +1391,10 @@ function handleDemoRequestInner(options: {
     return generateDemoSessions(siteId, params);
   }
   if (path.includes("/pages")) {
-    return paginateDemoEnvelope(
-      generateDemoPages(siteId, demoUnboundedCollectionParams(params)),
-      params,
-      100,
-    );
+    return generateDemoPages(siteId, params);
   }
   if (path.includes("/referrers")) {
-    return paginateDemoEnvelope(
-      generateDemoReferrers(siteId, demoUnboundedCollectionParams(params)),
-      params,
-      100,
-    );
+    return generateDemoReferrers(siteId, params);
   }
   if (path.includes("/utm-source")) {
     return generateDemoUtmDimension(siteId, "source", params);
@@ -1534,37 +1421,13 @@ function handleDemoRequestInner(options: {
     return generateDemoDimension(siteId, "devices", params);
   }
   if (path.includes("/page-hash")) {
-    return paginateDemoEnvelope(
-      generateDemoDimension(
-        siteId,
-        "page-hash",
-        demoUnboundedCollectionParams(params),
-      ),
-      params,
-      20,
-    );
+    return generateDemoDimension(siteId, "page-hash", params);
   }
   if (path.includes("/page-query")) {
-    return paginateDemoEnvelope(
-      generateDemoDimension(
-        siteId,
-        "page-query",
-        demoUnboundedCollectionParams(params),
-      ),
-      params,
-      20,
-    );
+    return generateDemoDimension(siteId, "page-query", params);
   }
   if (path.includes("/event-types")) {
-    return paginateDemoEnvelope(
-      generateDemoDimension(
-        siteId,
-        "event-types",
-        demoUnboundedCollectionParams(params),
-      ),
-      params,
-      20,
-    );
+    return generateDemoDimension(siteId, "event-types", params);
   }
 
   // Public routes — delegate to same generators
@@ -1734,7 +1597,7 @@ function demoRequestObservationResponse(
     };
   }
 
-  const rawPage = String(params.page || "");
+  const rawPage = String(params.source || "");
   const source =
     rawPage === "abnormal"
       ? "blocked"
@@ -1743,20 +1606,29 @@ function demoRequestObservationResponse(
         : rawPage;
   const events = source === "included" ? includedEvents : blockedEvents;
   if (source === "blocked" || source === "included") {
-    const page = paginateDemoRequestEvents(
+    const page = demoPage(
       events,
+      params,
+      {
+        operation: "request-observation-events",
+        source,
+        from,
+        to,
+        interval: minutes,
+        order: "timestamp:desc,receivedAt:desc,traceId:desc,rayId:desc",
+      },
       parseRequestObservationLimit(params.limit),
-      params.cursor,
+      100,
     );
     return {
       ok: true,
       configured: data.configured,
       generatedAt: data.generatedAt,
       sampling: data.sampling,
-      page: {
-        source,
-        ...page,
-        events: page.events.map((event) => serializeListEvent(event, source)),
+      source,
+      data: {
+        items: page.items.map((event) => serializeListEvent(event, source)),
+        pagination: page.pagination,
       },
     };
   }
@@ -1822,18 +1694,38 @@ function demoRequestObservationResponse(
     };
   }
 
-  const blockedPage = paginateDemoRequestEvents(
+  const blockedPage = demoPage(
     blockedEvents,
+    params,
+    {
+      operation: "request-observation-events",
+      source: "blocked",
+      from,
+      to,
+      interval: minutes,
+      order: "timestamp:desc,receivedAt:desc,traceId:desc,rayId:desc",
+    },
     parseRequestObservationLimit(params.limit),
+    100,
   );
-  const includedPage = paginateDemoRequestEvents(
+  const includedPage = demoPage(
     includedEvents,
+    params,
+    {
+      operation: "request-observation-events",
+      source: "included",
+      from,
+      to,
+      interval: minutes,
+      order: "timestamp:desc,receivedAt:desc,traceId:desc,rayId:desc",
+    },
     parseRequestObservationLimit(params.limit),
+    100,
   );
-  const serializedBlockedEvents = blockedPage.events.map((event) =>
+  const serializedBlockedEvents = blockedPage.items.map((event) =>
     serializeListEvent(event, "blocked"),
   );
-  const serializedIncludedEvents = includedPage.events.map((event) =>
+  const serializedIncludedEvents = includedPage.items.map((event) =>
     serializeListEvent(event, "included"),
   );
 
@@ -1848,14 +1740,12 @@ function demoRequestObservationResponse(
     blocked: {
       ...data.blocked,
       events: serializedBlockedEvents,
-      hasMore: blockedPage.hasMore,
-      nextCursor: blockedPage.nextCursor,
+      pagination: blockedPage.pagination,
     },
     included: {
       ...data.included,
       events: serializedIncludedEvents,
-      hasMore: includedPage.hasMore,
-      nextCursor: includedPage.nextCursor,
+      pagination: includedPage.pagination,
     },
   };
 }
@@ -2049,58 +1939,6 @@ function parseRequestObservationLimit(value: unknown): number {
   );
 }
 
-function parseRequestObservationCursor(
-  value: unknown,
-): { timestamp: string; receivedAt: number } | null {
-  if (typeof value !== "string" || !value) return null;
-  try {
-    const parsed = JSON.parse(value) as {
-      timestamp?: unknown;
-      receivedAt?: unknown;
-    };
-    const timestamp = String(parsed.timestamp || "");
-    const receivedAt = Number(parsed.receivedAt);
-    if (!timestamp || !Number.isFinite(receivedAt)) return null;
-    return { timestamp, receivedAt };
-  } catch {
-    return null;
-  }
-}
-
-function paginateDemoRequestEvents(
-  events: Array<Record<string, unknown>>,
-  limit: number,
-  cursorValue?: unknown,
-): {
-  events: Array<Record<string, unknown>>;
-  hasMore: boolean;
-  nextCursor: { timestamp: string; receivedAt: number } | null;
-} {
-  const cursor = parseRequestObservationCursor(cursorValue);
-  const startIndex = cursor
-    ? Math.max(
-        0,
-        events.findIndex(
-          (event) =>
-            String(event.timestamp || "") === cursor.timestamp &&
-            Number(event.receivedAt) === cursor.receivedAt,
-        ) + 1,
-      )
-    : 0;
-  const pageEvents = events.slice(startIndex, startIndex + limit);
-  const hasMore = startIndex + pageEvents.length < events.length;
-  const lastEvent = pageEvents[pageEvents.length - 1];
-  const nextCursor =
-    hasMore && lastEvent
-      ? {
-          timestamp: String(lastEvent.timestamp || ""),
-          receivedAt: Number(lastEvent.receivedAt),
-        }
-      : null;
-
-  return { events: pageEvents, hasMore, nextCursor };
-}
-
 /**
  * Standalone entry point. Runs the dispatcher, then normalizes any success
  * envelope to the standard `{ ok:true, requestId, timestamp, ... }` shape so
@@ -2111,16 +1949,23 @@ function paginateDemoRequestEvents(
 export function handleDemoRequest(
   options: Parameters<typeof handleDemoRequestInner>[0],
 ): unknown {
-  const result: unknown = handleDemoRequestInner(options);
-  if (
-    result &&
-    typeof result === "object" &&
-    (result as { ok?: unknown }).ok === true &&
-    typeof (result as { requestId?: unknown }).requestId !== "string"
-  ) {
-    return demoOk({ ...(result as Record<string, unknown>) });
+  try {
+    const result: unknown = handleDemoRequestInner(options);
+    if (
+      result &&
+      typeof result === "object" &&
+      (result as { ok?: unknown }).ok === true &&
+      typeof (result as { requestId?: unknown }).requestId !== "string"
+    ) {
+      return demoOk({ ...(result as Record<string, unknown>) });
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof DemoInvalidCursorError) {
+      return demoBadRequest("Invalid cursor");
+    }
+    throw error;
   }
-  return result;
 }
 
 /**

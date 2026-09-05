@@ -48,11 +48,7 @@ import {
   queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
-import {
-  parseEventRecordCursor,
-  queryEventRecordDetailFromD1,
-  serializeEventRecordCursor,
-} from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import { queryEventRecordDetailFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import {
   decodeEventTypeCursor,
   queryEventTypePageFromD1,
@@ -1162,41 +1158,35 @@ describe("edge query event handlers low-level coverage", () => {
         { ...eventRecord({ eventId: "evt-2" }), eventPk: 10 },
       ],
     ]);
-    const cursor = serializeEventRecordCursor({
-      sortKey: "eventName",
-      sortDirection: "asc",
-      sortValue: "Register",
-      occurredAt: baseMs + 200,
-      eventId: "evt-before",
-      eventPk: 9,
-    });
-
     const response = await handleEventsRecords(
       env,
       siteId,
       url("/events-records", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        pageSize: 1,
+        limit: 1,
         sortBy: "eventName",
         sortDir: "asc",
         search: "signup",
         eventName: "Signup",
-        cursor,
       }),
     );
 
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      data: [{ eventId: "evt-1", eventName: "Signup" }],
-      meta: {
-        pageSize: 1,
-        returned: 1,
-        hasMore: true,
-        nextCursor: expect.any(String),
+      data: {
+        items: [{ eventId: "evt-1", eventName: "Signup" }],
+        pagination: {
+          limit: 1,
+          returned: 1,
+          hasMore: true,
+          nextCursor: expect.any(String),
+        },
       },
     });
-    expect(calls[0].sql).toContain("ORDER BY eventName ASC");
+    expect(calls[0].sql).toContain(
+      "ORDER BY occurredAt ASC, eventId ASC, eventPk ASC",
+    );
     expect(calls[0].sql).not.toContain("OFFSET");
     expect(calls[0].sql).toContain("FROM scope_final_events es");
     expect(calls[0].bindings).toEqual([
@@ -1204,13 +1194,6 @@ describe("edge query event handlers low-level coverage", () => {
       ...eventBindings(),
       ...Array<string>(8).fill("%signup%"),
       "Signup",
-      "Register",
-      "Register",
-      baseMs + 200,
-      baseMs + 200,
-      "evt-before",
-      "evt-before",
-      9,
       2,
     ]);
   });
@@ -1224,7 +1207,7 @@ describe("edge query event handlers low-level coverage", () => {
       url("/events-records", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        pageSize: 120,
+        limit: 120,
         cursor: "not-a-valid-cursor",
       }),
     );
@@ -1234,68 +1217,6 @@ describe("edge query event handlers low-level coverage", () => {
       error: { message: "Invalid cursor" },
     });
     expect(calls).toHaveLength(0);
-  });
-
-  it("round-trips a cursor for the longest accepted UTF-8 pathname", () => {
-    const sort = { key: "pathname", direction: "asc" } as const;
-    const cursor = {
-      sortKey: sort.key,
-      sortDirection: sort.direction,
-      sortValue: `/${"路".repeat(2_047)}`,
-      occurredAt: baseMs,
-      eventId: "evt-unicode",
-      eventPk: 1,
-    };
-
-    const encoded = serializeEventRecordCursor(cursor);
-    expect(encoded.length).toBeLessThanOrEqual(12_288);
-    expect(parseEventRecordCursor(encoded, sort)).toEqual(cursor);
-  });
-
-  it("rejects malformed event record cursor fields", () => {
-    const sort = { key: "eventName", direction: "asc" } as const;
-    const cursor = {
-      sortKey: sort.key,
-      sortDirection: sort.direction,
-      sortValue: "Signup",
-      occurredAt: baseMs,
-      eventId: "evt-valid",
-      eventPk: 1,
-    };
-    const encode = (value: Record<string, unknown>) =>
-      serializeEventRecordCursor(value as typeof cursor);
-
-    expect(parseEventRecordCursor("!", sort)).toBeNull();
-    expect(parseEventRecordCursor("a".repeat(12_289), sort)).toBeNull();
-    expect(parseEventRecordCursor(btoa("[]"), sort)).toBeNull();
-    expect(parseEventRecordCursor(btoa("null"), sort)).toBeNull();
-    expect(
-      parseEventRecordCursor(encode({ ...cursor, sortKey: "pathname" }), sort),
-    ).toBeNull();
-    expect(
-      parseEventRecordCursor(
-        encode({ ...cursor, sortDirection: "desc" }),
-        sort,
-      ),
-    ).toBeNull();
-    expect(
-      parseEventRecordCursor(encode({ ...cursor, sortValue: true }), sort),
-    ).toBeNull();
-    expect(
-      parseEventRecordCursor(encode({ ...cursor, sortValue: 1 }), sort),
-    ).toBeNull();
-    expect(
-      parseEventRecordCursor(
-        encode({ ...cursor, occurredAt: "invalid" }),
-        sort,
-      ),
-    ).toBeNull();
-    expect(
-      parseEventRecordCursor(encode({ ...cursor, eventId: 1 }), sort),
-    ).toBeNull();
-    expect(
-      parseEventRecordCursor(encode({ ...cursor, eventPk: -1 }), sort),
-    ).toBeNull();
   });
 
   it("maps event summaries and final event record pages without more rows", async () => {
@@ -1326,8 +1247,7 @@ describe("edge query event handlers low-level coverage", () => {
       url("/events-records", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        page: 1,
-        pageSize: 2,
+        limit: 2,
       }),
     );
 
@@ -1347,12 +1267,14 @@ describe("edge query event handlers low-level coverage", () => {
     });
     await expect(records.json()).resolves.toMatchObject({
       ok: true,
-      data: [{ eventId: "evt-final", eventName: "Signup" }],
-      meta: {
-        pageSize: 2,
-        returned: 1,
-        hasMore: false,
-        nextCursor: null,
+      data: {
+        items: [{ eventId: "evt-final", eventName: "Signup" }],
+        pagination: {
+          limit: 2,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
     });
   });
@@ -1770,10 +1692,9 @@ describe("edge paginated dimensions low-level coverage", () => {
       "asc",
     );
     expect(cursor).toEqual({
+      primary: 2,
+      secondary: 4,
       value: "docs",
-      views: 4,
-      sessions: 3,
-      visitors: 2,
     });
 
     const second = createD1Env([

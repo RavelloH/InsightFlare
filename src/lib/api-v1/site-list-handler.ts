@@ -163,7 +163,7 @@ export type SiteEventsTimeseriesReader = SiteListReader<
 >;
 export type SiteEventsSearchReader = SiteListReader<
   SiteEventsSearchQueryDto,
-  { readonly items: readonly unknown[]; readonly page: unknown }
+  { readonly items: readonly unknown[]; readonly pagination: unknown }
 >;
 export type SiteEventDetailReader = SiteListReader<
   SiteEventDetailQueryDto,
@@ -239,23 +239,23 @@ export type SiteSessionDetailReader = SiteListReader<
 >;
 export type SiteVisitorsSearchReader = SiteListReader<
   SiteVisitorsSearchQueryDto,
-  { readonly items: readonly unknown[]; readonly page: unknown }
+  { readonly items: readonly unknown[]; readonly pagination: unknown }
 >;
 export type SiteSessionsSearchReader = SiteListReader<
   SiteSessionsSearchQueryDto,
-  { readonly items: readonly unknown[]; readonly page: unknown }
+  { readonly items: readonly unknown[]; readonly pagination: unknown }
 >;
 export type SiteVisitorEventsReader = SiteListReader<
   SiteVisitorEventsQueryDto,
-  { readonly items: readonly unknown[]; readonly pagination?: unknown }
+  { readonly items: readonly unknown[]; readonly pagination: unknown }
 >;
 export type SiteVisitorSessionsReader = SiteListReader<
   SiteVisitorSessionsQueryDto,
-  { readonly items: readonly unknown[]; readonly pagination?: unknown }
+  { readonly items: readonly unknown[]; readonly pagination: unknown }
 >;
 export type SiteSessionEventsReader = SiteListReader<
   SiteSessionEventsQueryDto,
-  { readonly items: readonly unknown[]; readonly pagination?: unknown }
+  { readonly items: readonly unknown[]; readonly pagination: unknown }
 >;
 export type SiteRealtimeSnapshotReader = SiteListReader<
   SiteRealtimeSnapshotQueryDto,
@@ -546,6 +546,9 @@ async function handlePlannedSiteList<
       }
       if (serviceResult.error.kind === "invalid-input") {
         return errorResponse("validation_failed");
+      }
+      if (serviceResult.error.kind === "invalid-cursor") {
+        return errorResponse("invalid_cursor");
       }
       return errorResponse("unsupported_query");
     }

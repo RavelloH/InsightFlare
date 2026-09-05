@@ -26,6 +26,9 @@ export {
 } from "@/lib/response";
 
 export function queryErrorResponse(error: AnalyticsDomainError): Response {
+  if (error.kind === "invalid-cursor") {
+    return errorResponse(null, 400, "invalid-cursor", "Invalid cursor");
+  }
   if (error.kind === "internal") {
     return errorResponse(null, 500, "internal", "Internal Server Error");
   }

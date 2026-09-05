@@ -140,27 +140,26 @@ describe("scheduled task runner and admin API", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
-    expect(payload.runs[0]).toMatchObject({
+    expect(payload.runs.items[0]).toMatchObject({
       status: "success",
       taskCount: 1,
       subtaskCount: 2,
     });
-    expect(payload.runs[0]?.runs[0]).toMatchObject({
+    expect(payload.runs.items[0]?.runs[0]).toMatchObject({
       taskKey: "visit_hourly_rollup",
       status: "success",
     });
-    expect(payload.runsMeta).toMatchObject({
-      page: 1,
-      pageSize: 50,
+    expect(payload.runs.pagination).toMatchObject({
+      limit: 50,
       returned: 1,
       hasMore: false,
-      nextPage: null,
+      nextCursor: null,
     });
     expect(payload.selectedRun?.summary).toMatchObject({
       sitesProcessed: 2,
       rollupRowsWritten: 8,
     });
-    expect(payload.logs.map((log) => log.event)).toContain("unit_step");
+    expect(payload.logs.items.map((log) => log.event)).toContain("unit_step");
     const rollupTask = payload.tasks.find(
       (task) => task.key === "visit_hourly_rollup",
     );
@@ -189,15 +188,15 @@ describe("scheduled task runner and admin API", () => {
     );
     const payload = (await response.json()) as ScheduledTasksData;
 
-    expect(payload.runs[0]).toMatchObject({
+    expect(payload.runs.items[0]).toMatchObject({
       status: "skipped",
       taskCount: 1,
       successCount: 0,
       skippedCount: 1,
       logsCount: 0,
     });
-    expect(payload.logs).toEqual([]);
-    expect(payload.runs[0]?.runs[0]?.status).toBe("skipped");
+    expect(payload.logs.items).toEqual([]);
+    expect(payload.runs.items[0]?.runs[0]?.status).toBe("skipped");
     d1.close();
   });
 
@@ -245,8 +244,20 @@ describe("scheduled task runner and admin API", () => {
         );
     }
 
+    const firstUrl = new URL(
+      "https://edge.test/api/private/admin/scheduled-tasks?limit=5",
+    );
+    const firstResponse = await handleScheduledTasksAdmin(
+      new Request(firstUrl),
+      env,
+      firstUrl,
+      async () => ({ isAdmin: true }),
+    );
+    const firstPayload = (await firstResponse.json()) as ScheduledTasksData;
+    const cursor = firstPayload.runs.pagination.nextCursor;
+    expect(cursor).toEqual(expect.any(String));
     const url = new URL(
-      "https://edge.test/api/private/admin/scheduled-tasks?page=2&pageSize=5&runId=run-10",
+      `https://edge.test/api/private/admin/scheduled-tasks?limit=5&cursor=${encodeURIComponent(cursor!)}&runId=run-10`,
     );
     const response = await handleScheduledTasksAdmin(
       new Request(url),
@@ -257,15 +268,14 @@ describe("scheduled task runner and admin API", () => {
     const payload = (await response.json()) as ScheduledTasksData;
 
     expect(response.status).toBe(200);
-    expect(payload.runs.map((run) => run.id)).toEqual(
+    expect(payload.runs.items.map((run) => run.id)).toEqual(
       [5, 6, 7, 8, 9].map((index) => scheduledGroupId(now - index * 60_000)),
     );
-    expect(payload.runsMeta).toEqual({
-      page: 2,
-      pageSize: 5,
+    expect(payload.runs.pagination).toEqual({
+      limit: 5,
       returned: 5,
       hasMore: true,
-      nextPage: 3,
+      nextCursor: expect.any(String),
     });
     expect(payload.selectedRun?.id).toBe(scheduledGroupId(now - 10 * 60_000));
     expect(payload.selectedRun?.runs[0]?.id).toBe("run-10");
@@ -326,7 +336,7 @@ describe("scheduled task runner and admin API", () => {
     const payload = (await response.json()) as ScheduledTasksData;
 
     expect(response.status).toBe(200);
-    expect(payload.runs[0]).toMatchObject({
+    expect(payload.runs.items[0]).toMatchObject({
       status: "success",
       taskCount: 2,
       successCount: 1,

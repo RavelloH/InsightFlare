@@ -261,7 +261,6 @@ function registerSiteOperation(
             page: page(input),
             window: timeWindow(input.time),
             filters: filters(input),
-            audience: input.context.policy.audience,
           }),
         ),
       );
@@ -433,6 +432,7 @@ function registerSiteOperation(
             page: page(input),
             window: timeWindow(input.time),
             filters: filters(input),
+            audience: input.context.policy.audience,
           }),
         ),
       );

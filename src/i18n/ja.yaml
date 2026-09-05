@@ -96,7 +96,6 @@ common:
     fileNameLabel: ファイル名
     download: CSV をエクスポート
     empty: エクスポートできる行がありません。
-    allTabsUnavailable: すべてのタブは、各データの読み込み後に利用できます。
   tableColumns:
     action: 列設定
     title: 表の列を設定
@@ -2086,6 +2085,7 @@ managementPages:
     empty: スケジュールタスクはまだありません。
     refresh: 更新
     loadFailed: スケジュールタスクを読み込めません。
+    loadMore: さらに読み込む
     allStatuses: すべてのステータス
     runs24h: 24時間以内の実行回数
     successRate24h: 24時間以内の成功率

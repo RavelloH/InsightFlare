@@ -6,10 +6,7 @@ import {
   stripTopLevelFacet,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  queryFilterValuesFromD1,
-  queryFilterValuesPageFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/filter-values";
+import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import type { Env } from "@/lib/edge/types";
 
 export interface ReadSiteFilterValuesInput {
@@ -31,16 +28,11 @@ export interface SiteFilterValuesResult {
     readonly label: string;
     readonly occurrences: number;
   }[];
-  readonly pagination?: {
+  readonly pagination: {
     readonly limit: number;
     readonly returned: number;
     readonly hasMore: boolean;
     readonly nextCursor: string | null;
-  };
-  readonly page?: {
-    readonly limit: number;
-    readonly hasMore: false;
-    readonly nextCursor: null;
   };
 }
 
@@ -49,27 +41,10 @@ export async function readSiteFilterValues(
   input: ReadSiteFilterValuesInput,
 ): Promise<SiteFilterValuesResult> {
   const filters = stripTopLevelFacet(input.filters, input.field);
-  const requestedPage = input.page;
-  if (!requestedPage) {
-    const rows = await queryFilterValuesFromD1(
-      input.env,
-      input.siteId,
-      input.window,
-      filters,
-      input.field,
-      input.limit ?? 50,
-      input.search,
-    );
-    return {
-      field: input.field,
-      items: rows.map((row) => ({
-        value: row.value,
-        label: row.value,
-        occurrences: row.occurrences,
-      })),
-      page: { limit: input.limit ?? 50, hasMore: false, nextCursor: null },
-    };
-  }
+  const requestedPage = input.page ?? {
+    limit: input.limit ?? 50,
+    cursor: null,
+  };
   const page = await queryFilterValuesPageFromD1(
     input.env,
     input.siteId,

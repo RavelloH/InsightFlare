@@ -9,17 +9,13 @@ import {
   parseEventId,
   parseLimit,
   parseListSearch,
-  parseQueryLimit,
   parseSessionListSort,
   parseVisitorListSort,
   parseWindow,
   queryErrorResponse,
   type ResponseContext,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  parseSessionListCursor,
-  parseVisitorListCursor,
-} from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import {} from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
@@ -37,20 +33,14 @@ export async function handleVisitorsContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const paged =
-    url.searchParams.has("cursor") || url.searchParams.has("pageSize");
-  const pageSize = paged
-    ? parseQueryLimit(url, "pageSize", 80, 1, 120)
-    : parseLimit(url, 20, 200);
+  const limit = parseLimit(url, 80, 120);
   const sort = parseVisitorListSort(url);
   const rawCursor = url.searchParams.get("cursor");
-  const cursor = rawCursor ? parseVisitorListCursor(rawCursor, sort) : null;
-  if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
-    readonly data: ReturnType<typeof mapVisitors>;
-    readonly meta: {
-      readonly pageSize: number;
+    readonly items: ReturnType<typeof mapVisitors>;
+    readonly pagination: {
+      readonly limit: number;
       readonly returned: number;
       readonly hasMore: boolean;
       readonly nextCursor: string | null;
@@ -59,14 +49,12 @@ export async function handleVisitorsContract(
     context: queryContext,
     time: toQueryTime(window),
     filters,
-    paged,
-    pageSize,
+    page: { limit, cursor: rawCursor },
     sort,
     search: parseListSearch(url) ?? "",
-    cursor,
   });
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...result.data });
+  return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
 
 export async function handleSessionsContract(
@@ -78,20 +66,14 @@ export async function handleSessionsContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const paged =
-    url.searchParams.has("cursor") || url.searchParams.has("pageSize");
-  const pageSize = paged
-    ? parseQueryLimit(url, "pageSize", 80, 1, 120)
-    : parseLimit(url, 100, 500);
+  const limit = parseLimit(url, 80, 120);
   const sort = parseSessionListSort(url);
   const rawCursor = url.searchParams.get("cursor");
-  const cursor = rawCursor ? parseSessionListCursor(rawCursor, sort) : null;
-  if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
-    readonly data: readonly unknown[];
-    readonly meta: {
-      readonly pageSize: number;
+    readonly items: readonly unknown[];
+    readonly pagination: {
+      readonly limit: number;
       readonly returned: number;
       readonly hasMore: boolean;
       readonly nextCursor: string | null;
@@ -100,14 +82,12 @@ export async function handleSessionsContract(
     context: queryContext,
     time: toQueryTime(window),
     filters,
-    paged,
-    pageSize,
+    page: { limit, cursor: rawCursor },
     sort,
     search: parseListSearch(url) ?? "",
-    cursor,
   });
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...result.data });
+  return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
 
 export async function handleVisitorDetailContract(
@@ -169,8 +149,7 @@ export async function handleJourneyCollectionContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const pageSizeKey = url.searchParams.has("limit") ? "limit" : "pageSize";
-  const pageSize = parseQueryLimit(url, pageSizeKey, 100, 1, 500);
+  const limit = parseLimit(url, 100, 500);
   const rawCursor = url.searchParams.get("cursor");
   const targetKey =
     path === "visitor-events" || path === "visitor-sessions"
@@ -186,7 +165,7 @@ export async function handleJourneyCollectionContract(
     context: queryContext,
     time: toQueryTime(window),
     filters,
-    page: { limit: pageSize, cursor: rawCursor },
+    page: { limit, cursor: rawCursor },
     ...(path === "visitor-events" || path === "visitor-sessions"
       ? { visitorId: targetId }
       : { sessionId: targetId }),

@@ -80,7 +80,7 @@ describe("planned saved-filter HTTP adapter", () => {
     expect(execute).toHaveBeenCalledWith(
       { teamId: "team-1", siteIds: [] },
       "savedFilters.list",
-      { siteId: "site-1", limit: 20, cursor: "abc" },
+      { siteId: "site-1", page: { limit: 20, cursor: "abc" } },
       {},
     );
 

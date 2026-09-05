@@ -361,7 +361,7 @@ describe("planned site list analytics adapters", () => {
     };
     const search = vi.fn<SiteEventsSearchReader>().mockResolvedValue({
       items: [record],
-      page: { limit: 80, hasMore: false, nextCursor: null },
+      pagination: { limit: 80, returned: 1, hasMore: false, nextCursor: null },
     });
     const detail = vi.fn<SiteEventDetailReader>().mockResolvedValue({
       event: record,
@@ -941,21 +941,33 @@ describe("planned site list analytics adapters", () => {
     const sessionDetail = vi
       .fn<SiteSessionDetailReader>()
       .mockResolvedValue({} as never);
-    const visitors = vi
-      .fn<SiteVisitorsSearchReader>()
-      .mockResolvedValue({ items: [], page: {} });
-    const sessions = vi
-      .fn<SiteSessionsSearchReader>()
-      .mockResolvedValue({ items: [], page: {} });
-    const visitorEvents = vi
-      .fn<SiteVisitorEventsReader>()
-      .mockResolvedValue({ items: [] });
+    const visitors = vi.fn<SiteVisitorsSearchReader>().mockResolvedValue({
+      items: [],
+      pagination: { limit: 100, returned: 0, hasMore: false, nextCursor: null },
+    });
+    const sessions = vi.fn<SiteSessionsSearchReader>().mockResolvedValue({
+      items: [],
+      pagination: { limit: 100, returned: 0, hasMore: false, nextCursor: null },
+    });
+    const visitorEvents = vi.fn<SiteVisitorEventsReader>().mockResolvedValue({
+      items: [],
+      pagination: { limit: 100, returned: 0, hasMore: false, nextCursor: null },
+    });
     const visitorSessions = vi
       .fn<SiteVisitorSessionsReader>()
-      .mockResolvedValue({ items: [] });
-    const sessionEvents = vi
-      .fn<SiteSessionEventsReader>()
-      .mockResolvedValue({ items: [] });
+      .mockResolvedValue({
+        items: [],
+        pagination: {
+          limit: 100,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      });
+    const sessionEvents = vi.fn<SiteSessionEventsReader>().mockResolvedValue({
+      items: [],
+      pagination: { limit: 100, returned: 0, hasMore: false, nextCursor: null },
+    });
     const responses = await Promise.all([
       handlePlannedSiteVisitorDetail(
         request("visitors/detail", { timeRange, visitorId: "visitor-1" }),

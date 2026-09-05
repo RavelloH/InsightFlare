@@ -28,8 +28,10 @@ function asRecord(result: unknown): Record<string, unknown> {
 
 function dataRows(result: unknown): Array<Record<string, unknown>> {
   const data = asRecord(result).data;
-  expect(Array.isArray(data)).toBe(true);
-  return data as Array<Record<string, unknown>>;
+  if (Array.isArray(data)) return data as Array<Record<string, unknown>>;
+  const page = data as { items?: unknown };
+  expect(Array.isArray(page?.items)).toBe(true);
+  return page.items as Array<Record<string, unknown>>;
 }
 
 afterEach(() => {
@@ -483,8 +485,12 @@ describe("mock — handleDemoRequest", () => {
       expect(includedEvents).toHaveLength(7);
       expect(blocked.events).toEqual(blockedEvents);
       expect(included.events).toEqual(includedEvents);
-      expect(blocked.hasMore).toBe(true);
-      expect(included.hasMore).toBe(true);
+      expect((blocked.pagination as Record<string, unknown>).hasMore).toBe(
+        true,
+      );
+      expect((included.pagination as Record<string, unknown>).hasMore).toBe(
+        true,
+      );
       expect(
         [...blockedEvents, ...includedEvents].every(
           (event) => !(event as Record<string, unknown>).sampleWeight,
@@ -499,26 +505,33 @@ describe("mock — handleDemoRequest", () => {
       expect(includedEvents[0]).not.toHaveProperty("userAgent");
       expect(includedEvents[0]).not.toHaveProperty("metadataJson");
 
-      const nextPage = asRecord(
+      const nextPageResponse = asRecord(
         handleDemoRequest({
           path,
           params: {
             ...params,
-            page: "blocked",
-            cursor: JSON.stringify(blocked.nextCursor),
+            source: "blocked",
+            cursor: String(
+              (blocked.pagination as Record<string, unknown>).nextCursor ?? "",
+            ),
           },
         }),
-      ).page as Record<string, unknown>;
+      );
+      const nextPage = nextPageResponse.data as Record<string, unknown>;
 
-      const nextPageEvents = nextPage.events as unknown[];
+      const nextPageEvents = nextPage.items as unknown[];
       expect(nextPageEvents).toHaveLength(7);
       expect(nextPageEvents).not.toEqual(blockedEvents);
       expect((nextPageEvents[0] as Record<string, unknown>).traceId).not.toBe(
         (blockedEvents[0] as Record<string, unknown>).traceId,
       );
-      expect(nextPage.source).toBe("blocked");
-      expect(nextPage.hasMore).toBe(true);
-      expect(nextPage.nextCursor).toEqual(expect.any(Object));
+      expect(nextPageResponse.source).toBe("blocked");
+      expect((nextPage.pagination as Record<string, unknown>).hasMore).toBe(
+        true,
+      );
+      expect(
+        (nextPage.pagination as Record<string, unknown>).nextCursor,
+      ).toEqual(expect.any(String));
     });
 
     it("resolves demo request observation dimensions from their semantic fields", () => {
@@ -647,7 +660,9 @@ describe("mock — handleDemoRequest", () => {
         nextRunAt: Date.UTC(2026, 8, 1),
       });
 
-      const runs = response.runs as Array<Record<string, unknown>>;
+      const runs = (response.runs as Record<string, unknown>).items as Array<
+        Record<string, unknown>
+      >;
       const skippedGroup = runs.find((group) =>
         (group.runs as Array<Record<string, unknown>>).some(
           (run) => run.status === "skipped",
@@ -665,15 +680,21 @@ describe("mock — handleDemoRequest", () => {
           params: { runId: String(skippedGroup?.id) },
         }),
       );
-      expect(selectedResponse.logs).toEqual([]);
+      expect(selectedResponse.logs).toMatchObject({
+        items: [],
+        pagination: { hasMore: false, nextCursor: null },
+      });
 
       const paged = asRecord(
         handleDemoRequest({
           path: "/api/private/admin/scheduled-tasks",
-          params: { status: "success", page: 1, pageSize: 1 },
+          params: { status: "success", limit: 1 },
         }),
       );
-      expect(paged.runsMeta).toMatchObject({ hasMore: true, nextPage: 2 });
+      expect((paged.runs as Record<string, unknown>).pagination).toMatchObject({
+        hasMore: true,
+        nextCursor: expect.any(String),
+      });
 
       const firstTaskRun = ((runs[0]?.runs as Array<Record<string, unknown>>) ??
         [])[0];
@@ -769,12 +790,16 @@ describe("mock — handleDemoRequest", () => {
       const invalidPagination = asRecord(
         handleDemoRequest({
           path: "/api/private/admin/scheduled-tasks",
-          params: { page: "invalid", pageSize: "invalid" },
+          params: { limit: "invalid" },
         }),
       );
-      expect(invalidPagination.runsMeta).toMatchObject({
-        page: 1,
-        pageSize: 50,
+      expect(invalidPagination.runs as Record<string, unknown>).toMatchObject({
+        pagination: {
+          limit: 50,
+          returned: expect.any(Number),
+          hasMore: expect.any(Boolean),
+          nextCursor: expect.anything(),
+        },
       });
     });
 
@@ -892,8 +917,13 @@ describe("mock — handleDemoRequest", () => {
           params: baseParams,
         }),
       );
-      expect(res).toMatchObject({ ok: true, data: expect.any(Array) });
-      expect((res.data as unknown[]).length).toBeGreaterThan(0);
+      expect(res).toMatchObject({
+        ok: true,
+        data: { items: expect.any(Array), pagination: expect.any(Object) },
+      });
+      expect(
+        ((res.data as Record<string, unknown>).items as unknown[]).length,
+      ).toBeGreaterThan(0);
     });
 
     it("serializes dashboard collection routes with pagination metadata", () => {
@@ -1275,7 +1305,9 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
       expect(fields).toMatchObject({ ok: true, eventName });
-      expect(fields.fields).toEqual(expect.any(Array));
+      expect((fields.data as Record<string, unknown>).items).toEqual(
+        expect.any(Array),
+      );
 
       const apiV1Fields = asRecord(
         handleDemoRequest({
@@ -1297,7 +1329,9 @@ describe("mock — handleDemoRequest", () => {
           },
         }),
       );
-      expect(apiV1FieldValues.data).toEqual(expect.any(Array));
+      expect(apiV1FieldValues.data).toEqual(
+        expect.objectContaining({ items: expect.any(Array) }),
+      );
     });
 
     it("supports event payload filters for scalar and array values", () => {
@@ -1378,7 +1412,10 @@ describe("mock — handleDemoRequest", () => {
       );
 
       expect(res.ok).toBe(true);
-      expect(res.data).toEqual([]);
+      expect(res.data).toMatchObject({
+        items: [],
+        pagination: { hasMore: false },
+      });
     });
 
     it.each([
@@ -1421,10 +1458,12 @@ describe("mock — handleDemoRequest", () => {
 
       expect(res.ok).toBe(true);
       expect(asRecord(res).field).toBe(filterKey);
-      expect(Array.isArray(res.data)).toBe(true);
-      const values = (res.data as Array<{ value: string }>).map(
-        (item) => item.value,
+      expect((res.data as Record<string, unknown>).items).toEqual(
+        expect.any(Array),
       );
+      const values = (
+        (res.data as Record<string, unknown>).items as Array<{ value: string }>
+      ).map((item) => item.value);
       expect(new Set(values).size).toBe(values.length);
     });
 
@@ -1440,7 +1479,9 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
       expect(res).toMatchObject({ ok: true, field: "page.path" });
-      expect(res.data).toEqual(expect.any(Array));
+      expect(res.data).toEqual(
+        expect.objectContaining({ items: expect.any(Array) }),
+      );
     });
 
     it("removes nested NOT and OR branches for the active canonical field", () => {
@@ -1468,7 +1509,7 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
       expect(res).toMatchObject({ ok: true, eventName: "" });
-      expect(res.fields).toEqual(
+      expect((res.data as Record<string, unknown>).items).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ path: "/plan", valueType: "string" }),
           expect.objectContaining({ path: "/value", valueType: "number" }),
@@ -1483,7 +1524,10 @@ describe("mock — handleDemoRequest", () => {
           params: { ...ANALYTICS_PARAMS, filterKey: "page.query" },
         }),
       );
-      expect(denied).toMatchObject({ ok: false, data: [] });
+      expect(denied).toMatchObject({
+        ok: false,
+        data: { items: [], pagination: { hasMore: false } },
+      });
     });
 
     it("returns hierarchical geo point counts with and without region filters", () => {
@@ -1728,72 +1772,71 @@ describe("mock — handleDemoRequest", () => {
       const pages = asRecord(
         handleDemoRequest({
           path: "/api/private/pages-dashboard",
-          params: { ...ANALYTICS_PARAMS, page: 1, pageSize: 2 },
+          params: { ...ANALYTICS_PARAMS, limit: 2 },
         }),
       );
-      expect(pages.meta).toEqual(
-        expect.objectContaining({ page: 1, pageSize: 2, returned: 2 }),
-      );
+      expect(pages.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.objectContaining({ limit: 2, returned: 2 }),
+      });
 
       const visitors = asRecord(
         handleDemoRequest({
           path: "/api/private/visitors",
           params: {
             ...ANALYTICS_PARAMS,
-            pageSize: 2,
+            limit: 2,
             sortBy: "views",
             sortDir: "asc",
             search: "/",
           },
         }),
       );
-      expect(visitors.meta).toEqual(
-        expect.objectContaining({
-          pageSize: 2,
-          nextCursor: expect.any(String),
-        }),
-      );
-      expect(visitors.data).toEqual(expect.any(Array));
+      expect(visitors.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: { limit: 2, nextCursor: expect.any(String) },
+      });
 
       const sessions = asRecord(
         handleDemoRequest({
           path: "/api/private/sessions",
           params: {
             ...ANALYTICS_PARAMS,
-            pageSize: 2,
+            limit: 2,
             sortBy: "durationMs",
             sortDir: "asc",
             q: "/",
           },
         }),
       );
-      expect(sessions.meta).toEqual(
-        expect.objectContaining({
-          pageSize: 2,
-          nextCursor: expect.any(String),
-        }),
-      );
+      expect(sessions.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: { limit: 2, nextCursor: expect.any(String) },
+      });
 
       const events = asRecord(
         handleDemoRequest({
           path: "/api/private/events-records",
           params: {
             ...ANALYTICS_PARAMS,
-            pageSize: 2,
+            limit: 2,
             sortBy: "eventName",
             sortDir: "asc",
             search: "/",
           },
         }),
       );
-      expect(events.meta).toEqual(expect.objectContaining({ pageSize: 2 }));
+      expect(events.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: { limit: 2 },
+      });
     });
 
     it("builds visitor and session details from IDs returned by list routes", () => {
       const visitor = dataRows(
         handleDemoRequest({
           path: "/api/private/visitors",
-          params: { ...ANALYTICS_PARAMS, page: 1, pageSize: 1 },
+          params: { ...ANALYTICS_PARAMS, limit: 1 },
         }),
       )[0];
       expect(visitor).toBeTruthy();
@@ -1823,7 +1866,7 @@ describe("mock — handleDemoRequest", () => {
       const session = dataRows(
         handleDemoRequest({
           path: "/api/private/sessions",
-          params: { ...ANALYTICS_PARAMS, page: 1, pageSize: 1 },
+          params: { ...ANALYTICS_PARAMS, limit: 1 },
         }),
       )[0];
       expect(session).toBeTruthy();

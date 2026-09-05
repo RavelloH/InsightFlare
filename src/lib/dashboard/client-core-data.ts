@@ -162,7 +162,6 @@ export async function fetchVisitors(
   options?: {
     limit?: number;
     cursor?: string | null;
-    pageSize?: number;
     sortBy?: VisitorListSortKey;
     sortDir?: SortDirection;
     search?: string;
@@ -176,12 +175,7 @@ export async function fetchVisitors(
     timeZone: window.timeZone,
   };
   if (options?.cursor) params.cursor = options.cursor;
-  if (options?.pageSize !== undefined) params.pageSize = options.pageSize;
-  if (options?.limit !== undefined) {
-    params.limit = options.limit;
-  } else if (options?.pageSize === undefined) {
-    params.limit = 100;
-  }
+  params.limit = options?.limit ?? 100;
   if (options?.sortBy) params.sortBy = options.sortBy;
   if (options?.sortDir) params.sortDir = options.sortDir;
   const search = options?.search?.trim();
@@ -291,7 +285,6 @@ export async function fetchSessions(
   options?: {
     limit?: number;
     cursor?: string | null;
-    pageSize?: number;
     sortBy?: SessionListSortKey;
     sortDir?: SortDirection;
     search?: string;
@@ -305,12 +298,7 @@ export async function fetchSessions(
     timeZone: window.timeZone,
   };
   if (options?.cursor) params.cursor = options.cursor;
-  if (options?.pageSize !== undefined) params.pageSize = options.pageSize;
-  if (options?.limit !== undefined) {
-    params.limit = options.limit;
-  } else if (options?.pageSize === undefined) {
-    params.limit = 100;
-  }
+  params.limit = options?.limit ?? 100;
   if (options?.sortBy) params.sortBy = options.sortBy;
   if (options?.sortDir) params.sortDir = options.sortDir;
   const search = options?.search?.trim();
@@ -516,7 +504,7 @@ export async function fetchEventsRecords(
   filters?: FilterDocument,
   options?: {
     cursor?: string | null;
-    pageSize?: number;
+    limit?: number;
     sortBy?: EventRecordSortKey;
     sortDir?: SortDirection;
     search?: string;
@@ -524,13 +512,13 @@ export async function fetchEventsRecords(
     signal?: AbortSignal;
   },
 ): Promise<EventsRecordsData> {
-  const pageSize = options?.pageSize ?? 80;
+  const limit = options?.limit ?? 80;
   const params: Record<string, string | number> = {
     siteId,
     from: window.from,
     to: window.to,
     timeZone: window.timeZone,
-    pageSize,
+    limit,
   };
   if (options?.cursor) params.cursor = options.cursor;
   if (options?.sortBy) params.sortBy = options.sortBy;
@@ -551,7 +539,7 @@ export async function fetchEventsRecords(
         requestParams,
       );
   return request.catch((error) =>
-    fallbackUnlessAborted(error, () => emptyEventsRecords(pageSize)),
+    fallbackUnlessAborted(error, () => emptyEventsRecords(limit)),
   );
 }
 

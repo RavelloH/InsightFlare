@@ -680,8 +680,30 @@ describe("query contract boundary coverage", () => {
       capturedAtMs: 1,
     } as never;
     const reader = {
-      readPages: vi.fn().mockResolvedValue({ value: [], source: "raw" }),
-      readReferrers: vi.fn().mockResolvedValue({ value: [], source: "raw" }),
+      readPages: vi.fn().mockResolvedValue({
+        value: {
+          items: [],
+          pagination: {
+            limit: 10,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+        source: "raw",
+      }),
+      readReferrers: vi.fn().mockResolvedValue({
+        value: {
+          items: [],
+          pagination: {
+            limit: 10,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+        source: "raw",
+      }),
     };
     const context = siteQueryContext("site-1", "private-dashboard");
     await expect(

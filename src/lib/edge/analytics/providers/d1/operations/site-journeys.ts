@@ -2,6 +2,7 @@ import "@tanstack/react-start/server-only";
 
 import {
   analyticsFilterRegistry,
+  effectiveScopeForPagination,
   type FilterDocument,
   filterFingerprint,
   type QueryAudience,
@@ -16,24 +17,20 @@ import {
   stripVisitorDetailCollections,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries";
 import {
-  parseSessionListCursor,
-  parseVisitorListCursor,
   queryJourneyEventsPageFromD1,
   queryJourneyTargetExistsFromD1,
   querySessionListPageFromD1,
   queryVisitorListPageFromD1,
-  serializeSessionListCursor,
-  serializeVisitorListCursor,
   type SessionListCursor,
+  type VisitorListCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
   decodePageCursor,
   encodePageCursor,
+  hasExactKeys,
   paginationBinding,
 } from "@/lib/edge/analytics/providers/d1/internal/pagination";
 import type { Env } from "@/lib/edge/types";
-import { sha256Hex } from "@/lib/edge/utils";
-import { rootSecret } from "@/lib/secrets";
 
 interface JourneyDetailInput {
   readonly env: Env;
@@ -48,102 +45,102 @@ interface JourneySearchInput extends JourneyDetailInput {
   readonly audience?: QueryAudience;
 }
 
-function base64Url(value: Uint8Array): string {
-  let binary = "";
-  for (const byte of value) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/u, "");
-}
+type VisitorSort = {
+  readonly field: "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
+  readonly direction: "asc" | "desc";
+};
 
-async function sign(secret: string, value: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  return base64Url(
-    new Uint8Array(
-      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)),
-    ),
-  );
-}
+type SessionSort = {
+  readonly field: "startedAt" | "durationMs" | "views";
+  readonly direction: "asc" | "desc";
+};
 
 async function cursorBinding(
   input: JourneySearchInput,
   operation: "visitors" | "sessions",
   sort: unknown,
 ): Promise<string> {
-  return sha256Hex(
-    JSON.stringify([
-      `journey-${operation}-v1`,
-      input.audience ?? "private-dashboard",
-      input.siteId,
-      input.window.startMs,
-      input.window.endExclusiveMs,
-      input.window.timeZone,
-      filterFingerprint(input.filters, analyticsFilterRegistry),
-      input.search ?? null,
-      sort,
-    ]),
-  );
+  return paginationBinding([
+    `journey-${operation}-v1`,
+    input.audience ?? "private-dashboard",
+    input.siteId,
+    input.window.startMs,
+    input.window.endExclusiveMs,
+    input.window.timeZone,
+    filterFingerprint(input.filters, analyticsFilterRegistry),
+    effectiveScopeForPagination(input.filters),
+    input.search?.trim().toLowerCase() ?? null,
+    sort,
+  ]);
+}
+
+function cursorObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function visitorCursor(
+  value: unknown,
+  sort: VisitorSort,
+): VisitorListCursor | null {
+  const candidate = cursorObject(value);
+  const expectedKeys =
+    sort.field === "lastSeenAt"
+      ? ["sortValue", "visitorId"]
+      : ["sortValue", "lastSeenAt", "visitorId"];
+  if (
+    !candidate ||
+    !hasExactKeys(candidate, expectedKeys) ||
+    typeof candidate.sortValue !== "number" ||
+    !Number.isFinite(candidate.sortValue) ||
+    (sort.field !== "lastSeenAt" &&
+      (typeof candidate.lastSeenAt !== "number" ||
+        !Number.isFinite(candidate.lastSeenAt))) ||
+    typeof candidate.visitorId !== "string"
+  )
+    return null;
+  return candidate as unknown as VisitorListCursor;
+}
+
+function sessionCursor(
+  value: unknown,
+  sort: SessionSort,
+): SessionListCursor | null {
+  const candidate = cursorObject(value);
+  const expectedKeys =
+    sort.field === "startedAt"
+      ? ["sortValue", "sessionId"]
+      : ["sortValue", "startedAt", "sessionId"];
+  if (
+    !candidate ||
+    !hasExactKeys(candidate, expectedKeys) ||
+    typeof candidate.sortValue !== "number" ||
+    !Number.isFinite(candidate.sortValue) ||
+    (sort.field !== "startedAt" &&
+      (typeof candidate.startedAt !== "number" ||
+        !Number.isFinite(candidate.startedAt))) ||
+    typeof candidate.sessionId !== "string"
+  )
+    return null;
+  return candidate as unknown as SessionListCursor;
 }
 
 async function decodeCursor(
   input: JourneySearchInput,
   operation: "visitors" | "sessions",
   sort: unknown,
-): Promise<string | null> {
-  if (!input.page.cursor) return null;
-  const secret = rootSecret(input.env);
-  if (!secret) return null;
-  const [payload, signature, extra] = input.page.cursor.split(".");
-  if (
-    !payload ||
-    !signature ||
-    extra ||
-    (await sign(secret, payload)) !== signature
-  )
-    return null;
-  try {
-    const raw = atob(
-      payload.replaceAll("-", "+").replaceAll("_", "/") +
-        "=".repeat((4 - (payload.length % 4)) % 4),
-    );
-    const value = JSON.parse(
-      new TextDecoder().decode(
-        Uint8Array.from(raw, (character) => character.charCodeAt(0)),
-      ),
-    ) as { binding?: string; cursor?: string };
-    return value.binding === (await cursorBinding(input, operation, sort)) &&
-      typeof value.cursor === "string"
-      ? value.cursor
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-async function encodeCursor(
-  input: JourneySearchInput,
-  operation: "visitors" | "sessions",
-  sort: unknown,
-  cursor: string,
-): Promise<string> {
-  const secret = rootSecret(input.env);
-  if (!secret) throw new Error("data-unavailable");
-  const payload = base64Url(
-    new TextEncoder().encode(
-      JSON.stringify({
-        binding: await cursorBinding(input, operation, sort),
-        cursor,
-      }),
-    ),
+): Promise<VisitorListCursor | SessionListCursor | null> {
+  return decodePageCursor(
+    input.env,
+    await cursorBinding(input, operation, sort),
+    input.page.cursor,
+    `journey-${operation}`,
+    (value) =>
+      operation === "visitors"
+        ? visitorCursor(value, sort as VisitorSort)
+        : sessionCursor(value, sort as SessionSort),
   );
-  return `${payload}.${await sign(secret, payload)}`;
 }
 
 export async function readSiteVisitorDetail(
@@ -199,32 +196,33 @@ export async function readSiteVisitors(
     };
   },
 ) {
-  if (!rootSecret(input.env)) throw new Error("data-unavailable");
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
   } as const;
-  const rawCursor = await decodeCursor(input, "visitors", input.sort);
-  const cursor = rawCursor ? parseVisitorListCursor(rawCursor, sort) : null;
-  if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
+  const cursor = (await decodeCursor(
+    input,
+    "visitors",
+    input.sort,
+  )) as VisitorListCursor | null;
   const page = await queryVisitorListPageFromD1(
     input.env,
     input.siteId,
     input.window,
     input.filters,
-    { pageSize: input.page.limit, sort, search: input.search, cursor },
+    { limit: input.page.limit, sort, search: input.search, cursor },
   );
   return {
     items: mapVisitors(page.rows),
-    page: {
+    pagination: {
       limit: input.page.limit,
+      returned: page.rows.length,
       hasMore: page.nextCursor !== null,
       nextCursor: page.nextCursor
-        ? await encodeCursor(
-            input,
-            "visitors",
-            input.sort,
-            serializeVisitorListCursor(page.nextCursor),
+        ? await encodePageCursor(
+            input.env,
+            await cursorBinding(input, "visitors", input.sort),
+            page.nextCursor,
           )
         : null,
     },
@@ -239,32 +237,33 @@ export async function readSiteSessions(
     };
   },
 ) {
-  if (!rootSecret(input.env)) throw new Error("data-unavailable");
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
   } as const;
-  const rawCursor = await decodeCursor(input, "sessions", input.sort);
-  const cursor = rawCursor ? parseSessionListCursor(rawCursor, sort) : null;
-  if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
+  const cursor = (await decodeCursor(
+    input,
+    "sessions",
+    input.sort,
+  )) as SessionListCursor | null;
   const page = await querySessionListPageFromD1(
     input.env,
     input.siteId,
     input.window,
     input.filters,
-    { pageSize: input.page.limit, sort, search: input.search, cursor },
+    { limit: input.page.limit, sort, search: input.search, cursor },
   );
   return {
     items: page.rows,
-    page: {
+    pagination: {
       limit: input.page.limit,
+      returned: page.rows.length,
       hasMore: page.nextCursor !== null,
       nextCursor: page.nextCursor
-        ? await encodeCursor(
-            input,
-            "sessions",
-            input.sort,
-            serializeSessionListCursor(page.nextCursor),
+        ? await encodePageCursor(
+            input.env,
+            await cursorBinding(input, "sessions", input.sort),
+            page.nextCursor,
           )
         : null,
     },
@@ -289,7 +288,8 @@ function trajectoryBinding(
     input.window.endExclusiveMs,
     input.window.timeZone,
     filterFingerprint(input.filters, analyticsFilterRegistry),
-    input.search ?? "",
+    effectiveScopeForPagination(input.filters),
+    input.search?.trim().toLowerCase() ?? "",
   ]);
 }
 
@@ -307,6 +307,17 @@ async function readTrajectoryCursor<T>(
     input.env,
     await trajectoryBinding(input, operation, target),
     input.page.cursor,
+    operation,
+    (value) => {
+      const candidate = cursorObject(value);
+      return candidate &&
+        hasExactKeys(candidate, ["occurredAt", "id"]) &&
+        typeof candidate.occurredAt === "number" &&
+        Number.isFinite(candidate.occurredAt) &&
+        typeof candidate.id === "string"
+        ? (candidate as T)
+        : null;
+    },
   );
 }
 
@@ -353,7 +364,6 @@ async function readJourneyEvents(
     operation,
     target.value,
   );
-  if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
   const page = await queryJourneyEventsPageFromD1(
     input.env,
     input.siteId,
@@ -395,21 +405,18 @@ export async function readSiteVisitorSessions(
   const target = { type: "visitor" as const, value: input.visitorId };
   await assertJourneyTargetInWindow(input, target);
   const sort = { key: "startedAt", direction: "desc" } as const;
-  const rawCursor = await readTrajectoryCursor<SessionListCursor>(
+  const cursor = await readTrajectoryCursor<SessionListCursor>(
     input,
     "visitor-sessions",
     target.value,
   );
-  const cursor = rawCursor
-    ? parseSessionListCursor(serializeSessionListCursor(rawCursor), sort)
-    : null;
-  if (input.page.cursor && !cursor) throw new Error("invalid-cursor");
+  const typedCursor = cursor as SessionListCursor | null;
   const page = await querySessionListPageFromD1(
     input.env,
     input.siteId,
     input.window,
     input.filters,
-    { pageSize: input.page.limit, sort, cursor, target },
+    { limit: input.page.limit, sort, cursor: typedCursor, target },
   );
   return {
     items: page.rows,

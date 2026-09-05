@@ -279,17 +279,19 @@ export function PagesClientPage({
     ],
     queryFn: ({ pageParam, signal }) =>
       fetchPagesDashboard(siteId, window, filters, {
-        page: pageParam,
-        pageSize: PAGE_CARD_PAGE_SIZE,
+        cursor: pageParam,
+        limit: PAGE_CARD_PAGE_SIZE,
         signal,
       }),
-    initialPageParam: 1,
+    initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
-      lastPage.meta.hasMore ? lastPage.meta.nextPage : undefined,
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
     enabled: typeof window !== "undefined",
   });
   const items = useMemo(
-    () => data?.pages.flatMap((page) => page.data) ?? [],
+    () => data?.pages.flatMap((page) => page.data.items) ?? [],
     [data?.pages],
   );
   const loadingInitial = isPending;

@@ -590,6 +590,7 @@ export const apiV1AnalyticsRouteRegistry = [
       "method_not_allowed",
       "not_acceptable",
       "unsupported_media_type",
+      "invalid_cursor",
     ],
   }),
 ] as const;
@@ -807,6 +808,7 @@ export const apiV1AnalyticsTeamSitesRouteRegistry = [
       "method_not_allowed",
       "not_acceptable",
       "unsupported_media_type",
+      "invalid_cursor",
     ],
   },
 ] as const satisfies readonly ApiV1AnalyticsTeamSitesRouteDescriptor<string>[];

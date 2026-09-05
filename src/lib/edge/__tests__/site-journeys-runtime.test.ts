@@ -13,16 +13,12 @@ vi.mock(
 vi.mock(
   "@/lib/edge/analytics/providers/d1/internal/journey-list-queries",
   () => ({
-    parseSessionListCursor: vi.fn(),
-    parseVisitorListCursor: vi.fn(),
     querySessionListPageFromD1: vi.fn(),
     queryJourneyEventsFromD1: vi.fn(),
     queryJourneyEventsPageFromD1: vi.fn(),
     queryJourneyTargetExistsFromD1: vi.fn(),
     querySessionsFromD1: vi.fn(),
     queryVisitorListPageFromD1: vi.fn(),
-    serializeSessionListCursor: vi.fn(),
-    serializeVisitorListCursor: vi.fn(),
   }),
 );
 
@@ -32,16 +28,12 @@ import {
   queryVisitorDetailFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries";
 import {
-  parseSessionListCursor,
-  parseVisitorListCursor,
   queryJourneyEventsFromD1,
   queryJourneyEventsPageFromD1,
   queryJourneyTargetExistsFromD1,
   querySessionListPageFromD1,
   querySessionsFromD1,
   queryVisitorListPageFromD1,
-  serializeSessionListCursor,
-  serializeVisitorListCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
   readSiteJourneyEventDetail,
@@ -153,25 +145,17 @@ describe("site journey detail runtime", () => {
     vi.mocked(queryVisitorListPageFromD1).mockResolvedValue({
       rows: [],
       nextCursor: {
-        sortKey: "lastSeenAt",
-        sortDirection: "desc",
         sortValue: 19,
-        lastSeenAt: 19,
         visitorId: "visitor-1",
       },
     });
     vi.mocked(querySessionListPageFromD1).mockResolvedValue({
       rows: [],
       nextCursor: {
-        sortKey: "startedAt",
-        sortDirection: "desc",
         sortValue: 19,
-        startedAt: 19,
         sessionId: "session-1",
       },
     });
-    vi.mocked(serializeVisitorListCursor).mockReturnValue("visitor-inner");
-    vi.mocked(serializeSessionListCursor).mockReturnValue("session-inner");
     const cursorEnv = { MAIN_SECRET: "cursor-secret" } as never;
 
     const visitors = await readSiteVisitors({
@@ -188,11 +172,11 @@ describe("site journey detail runtime", () => {
       sort: { field: "startedAt", direction: "desc" },
       page: { limit: 20 },
     });
-    expect(visitors.page).toMatchObject({
+    expect(visitors.pagination).toMatchObject({
       hasMore: true,
       nextCursor: expect.any(String),
     });
-    expect(sessions.page).toMatchObject({
+    expect(sessions.pagination).toMatchObject({
       hasMore: true,
       nextCursor: expect.any(String),
     });
@@ -201,30 +185,16 @@ describe("site journey detail runtime", () => {
       "site-1",
       base.window,
       { version: 1, root: null },
-      expect.objectContaining({ pageSize: 20, cursor: null }),
+      expect.objectContaining({ limit: 20, cursor: null }),
     );
     expect(querySessionListPageFromD1).toHaveBeenCalledWith(
       cursorEnv,
       "site-1",
       base.window,
       { version: 1, root: null },
-      expect.objectContaining({ pageSize: 20, cursor: null }),
+      expect.objectContaining({ limit: 20, cursor: null }),
     );
 
-    vi.mocked(parseVisitorListCursor).mockReturnValue({
-      sortKey: "lastSeenAt",
-      sortDirection: "desc",
-      sortValue: 19,
-      lastSeenAt: 19,
-      visitorId: "visitor-1",
-    });
-    vi.mocked(parseSessionListCursor).mockReturnValue({
-      sortKey: "startedAt",
-      sortDirection: "desc",
-      sortValue: 19,
-      startedAt: 19,
-      sessionId: "session-1",
-    });
     vi.mocked(queryVisitorListPageFromD1).mockResolvedValueOnce({
       rows: [],
       nextCursor: null,
@@ -239,26 +209,18 @@ describe("site journey detail runtime", () => {
         env: cursorEnv,
         filters: { version: 1, root: null },
         sort: { field: "lastSeenAt", direction: "desc" },
-        page: { limit: 20, cursor: visitors.page.nextCursor },
+        page: { limit: 20, cursor: visitors.pagination.nextCursor },
       }),
-    ).resolves.toMatchObject({ page: { hasMore: false } });
+    ).resolves.toMatchObject({ pagination: { hasMore: false } });
     await expect(
       readSiteSessions({
         ...base,
         env: cursorEnv,
         filters: { version: 1, root: null },
         sort: { field: "startedAt", direction: "desc" },
-        page: { limit: 20, cursor: sessions.page.nextCursor },
+        page: { limit: 20, cursor: sessions.pagination.nextCursor },
       }),
-    ).resolves.toMatchObject({ page: { hasMore: false } });
-    expect(parseVisitorListCursor).toHaveBeenCalledWith("visitor-inner", {
-      key: "lastSeenAt",
-      direction: "desc",
-    });
-    expect(parseSessionListCursor).toHaveBeenCalledWith("session-inner", {
-      key: "startedAt",
-      direction: "desc",
-    });
+    ).resolves.toMatchObject({ pagination: { hasMore: false } });
   });
 
   it("rejects a malformed search cursor before the D1 reader", async () => {
@@ -288,7 +250,9 @@ describe("site journey detail runtime", () => {
         sort: { field: "lastSeenAt", direction: "desc" },
         page: { limit: 20 },
       }),
-    ).resolves.toMatchObject({ page: { hasMore: false, nextCursor: null } });
+    ).resolves.toMatchObject({
+      pagination: { hasMore: false, nextCursor: null },
+    });
   });
 
   it("checks the opaque target after receiving canonical filters", async () => {
@@ -403,7 +367,8 @@ describe("site journey detail runtime", () => {
       base.window,
       { version: 1, root: null },
       expect.objectContaining({
-        pageSize: 50,
+        limit: 50,
+        cursor: null,
         target: { type: "visitor", value: "visitor-1" },
       }),
     );

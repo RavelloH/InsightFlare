@@ -2,6 +2,7 @@ import "@tanstack/react-start/server-only";
 
 import {
   analyticsFilterRegistry,
+  effectiveScopeForPagination,
   type FilterDocument,
   filterFingerprint,
   type OverviewMetrics,
@@ -13,10 +14,10 @@ import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/cor
 import {
   decodePageCursor,
   encodePageCursor,
+  hasExactKeys,
   paginationBinding,
 } from "@/lib/edge/analytics/providers/d1/internal/pagination";
 import {
-  listTeamSites,
   queryTeamSitesPageFromD1,
   type TeamSiteListPage,
 } from "@/lib/edge/analytics/providers/d1/internal/team";
@@ -26,6 +27,7 @@ import {
   toQueryTime,
 } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
+import type { PageResult } from "@/lib/pagination";
 
 export interface ReadTeamSitesInput {
   readonly env: Env;
@@ -52,15 +54,7 @@ export interface TeamSiteAnalyticsResult {
 }
 
 export interface TeamSitesQueryResult {
-  readonly data: {
-    readonly sites: readonly TeamSiteAnalyticsResult[];
-    readonly pagination?: {
-      readonly limit: number;
-      readonly returned: number;
-      readonly hasMore: boolean;
-      readonly nextCursor: string | null;
-    };
-  };
+  readonly data: PageResult<TeamSiteAnalyticsResult>;
   readonly source: QuerySource;
   readonly approximateVisitors: boolean;
 }
@@ -68,7 +62,20 @@ export interface TeamSitesQueryResult {
 function allowedSiteBinding(
   allowedSiteIds?: readonly string[],
 ): readonly string[] {
-  return [...(allowedSiteIds ?? [])].sort();
+  return [...new Set(allowedSiteIds ?? [])].sort();
+}
+
+function teamSiteCursor(value: unknown): {
+  readonly createdAt: number;
+  readonly id: string;
+} | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return hasExactKeys(candidate, ["createdAt", "id"]) &&
+    typeof candidate.id === "string" &&
+    Number.isSafeInteger(candidate.createdAt)
+    ? { createdAt: candidate.createdAt as number, id: candidate.id }
+    : null;
 }
 
 async function teamSitesCursorBinding(
@@ -82,6 +89,7 @@ async function teamSitesCursorBinding(
     input.window.endExclusiveMs,
     input.window.timeZone,
     filterFingerprint(input.filters, analyticsFilterRegistry),
+    effectiveScopeForPagination(input.filters),
     input.interval ?? null,
     allowedSiteBinding(input.allowedSiteIds),
     "createdAt:desc,id:asc",
@@ -93,11 +101,13 @@ async function readTeamSitesPage(
   page: NonNullable<ReadTeamSitesInput["page"]>,
 ): Promise<{ rows: TeamSiteListPage["rows"]; nextCursor: string | null }> {
   const binding = await teamSitesCursorBinding(input);
-  const cursor = await decodePageCursor<{
-    readonly createdAt: number;
-    readonly id: string;
-  }>(input.env, binding, page.cursor);
-  if (page.cursor && !cursor) throw new Error("invalid-cursor");
+  const cursor = await decodePageCursor(
+    input.env,
+    binding,
+    page.cursor,
+    "team-sites",
+    teamSiteCursor,
+  );
   const result = await queryTeamSitesPageFromD1(
     input.env,
     input.teamId,
@@ -126,13 +136,9 @@ function source(values: readonly QuerySource[]): QuerySource {
 export async function readTeamSites(
   input: ReadTeamSitesInput,
 ): Promise<TeamSitesQueryResult> {
-  const allowed = input.allowedSiteIds ? new Set(input.allowedSiteIds) : null;
-  const page = input.page ? await readTeamSitesPage(input, input.page) : null;
-  const sites = page
-    ? page.rows
-    : (await listTeamSites(input.env, input.teamId)).filter(
-        (site) => !allowed || allowed.has(site.id),
-      );
+  const requestedPage = input.page ?? { limit: 20, cursor: null };
+  const page = await readTeamSitesPage(input, requestedPage);
+  const sites = page.rows;
   const time = toQueryTime(input.window);
   const values = await Promise.all(
     sites.map(async (site) => {
@@ -175,17 +181,13 @@ export async function readTeamSites(
   );
   return {
     data: {
-      sites: values.map((value) => value.site),
-      ...(page
-        ? {
-            pagination: {
-              limit: input.page!.limit,
-              returned: values.length,
-              hasMore: page.nextCursor !== null,
-              nextCursor: page.nextCursor,
-            },
-          }
-        : {}),
+      items: values.map((value) => value.site),
+      pagination: {
+        limit: requestedPage.limit,
+        returned: values.length,
+        hasMore: page.nextCursor !== null,
+        nextCursor: page.nextCursor,
+      },
     },
     source: source(values.flatMap((value) => value.sources)),
     approximateVisitors: values.some((value) => value.approximateVisitors),

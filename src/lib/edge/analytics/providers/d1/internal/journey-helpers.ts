@@ -120,7 +120,9 @@ export function visitorListOrderBy(sort: ListSort<VisitorListSortKey>): string {
     sessions: "sessions",
     views: "views",
   };
-  return `${column[sort.key]} ${directionSql(sort.direction)}, lastSeenAt DESC, visitorId ASC`;
+  return sort.key === "lastSeenAt"
+    ? `${column[sort.key]} ${directionSql(sort.direction)}, visitorId ASC`
+    : `${column[sort.key]} ${directionSql(sort.direction)}, lastSeenAt DESC, visitorId ASC`;
 }
 
 export function sessionListOrderBy(sort: ListSort<SessionListSortKey>): string {
@@ -129,7 +131,9 @@ export function sessionListOrderBy(sort: ListSort<SessionListSortKey>): string {
     durationMs: "totalDurationMs",
     views: "views",
   };
-  return `${column[sort.key]} ${directionSql(sort.direction)}, startedAt DESC, sessionId ASC`;
+  return sort.key === "startedAt"
+    ? `${column[sort.key]} ${directionSql(sort.direction)}, sessionId ASC`
+    : `${column[sort.key]} ${directionSql(sort.direction)}, startedAt DESC, sessionId ASC`;
 }
 
 export function mapVisitorRow(row: Record<string, unknown>): VisitorRow {

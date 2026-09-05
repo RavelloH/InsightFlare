@@ -29,7 +29,6 @@ import {
   EVENT_CONTEXT_CARD_KEYS,
   type EventContextCardKey,
 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
-import { parseEventRecordCursor } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
@@ -115,7 +114,7 @@ export async function handleEventsTrendContract(
     eventName: parseEventName(url) ?? "",
   });
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...result.data });
+  return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
 
 export async function handleEventRecordsContract(
@@ -127,16 +126,14 @@ export async function handleEventRecordsContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const pageSize = parseQueryLimit(url, "pageSize", 80, 1, 1_000);
+  const limit = parseQueryLimit(url, "limit", 80, 1, 1_000);
   const sort = parseEventRecordSort(url);
   const rawCursor = url.searchParams.get("cursor");
-  const cursor = rawCursor ? parseEventRecordCursor(rawCursor, sort) : null;
-  if (rawCursor && !cursor) return badRequest("Invalid cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
-    readonly data: Array<ReturnType<typeof mapEventRecord>>;
-    readonly meta: {
-      readonly pageSize: number;
+    readonly items: Array<ReturnType<typeof mapEventRecord>>;
+    readonly pagination: {
+      readonly limit: number;
       readonly returned: number;
       readonly hasMore: boolean;
       readonly nextCursor: string | null;
@@ -145,14 +142,13 @@ export async function handleEventRecordsContract(
     context: queryContext,
     time: toQueryTime(window),
     filters,
-    pageSize,
+    page: { limit, cursor: rawCursor },
     sort,
     search: parseListSearch(url) ?? "",
     eventName: parseEventName(url) ?? "",
-    cursor,
   });
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...result.data });
+  return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
 
 export async function handleEventFieldValuesContract(

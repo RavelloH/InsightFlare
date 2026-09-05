@@ -107,7 +107,7 @@ function policy(
     allowedFilters: filterIdsForAudience(audience),
     allowedDetails,
     limits: DEFAULT_LIMITS,
-    allowedPagination: new Set(["none", "offset", "keyset"]),
+    cursorPagination: true,
   };
 }
 

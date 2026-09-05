@@ -1,4 +1,5 @@
 import type { ZonedInterval } from "@/lib/dashboard/time-zone";
+import type { PageRequest, PageResult, PaginationMeta } from "@/lib/pagination";
 
 import type { FilterDocument } from "./filters";
 import type {
@@ -118,8 +119,6 @@ export interface QueryLimits {
   readonly maxCursorBytes?: number;
 }
 
-export type PaginationKind = "none" | "offset" | "keyset";
-
 export interface QueryPolicy {
   readonly revision: string;
   readonly audience: QueryAudience;
@@ -128,7 +127,8 @@ export interface QueryPolicy {
   readonly allowedFilters: ReadonlySet<string>;
   readonly allowedDetails: ReadonlySet<DetailCapability>;
   readonly limits: QueryLimits;
-  readonly allowedPagination: ReadonlySet<PaginationKind>;
+  /** Whether this operation exposes a cursor-bounded collection. */
+  readonly cursorPagination: boolean;
 }
 
 export interface QueryContext {
@@ -153,38 +153,6 @@ export type SortDirection = "asc" | "desc";
 export interface Sort<Key extends string = string> {
   readonly key: Key;
   readonly direction: SortDirection;
-}
-
-export interface OffsetPageRequest {
-  readonly kind: "offset";
-  readonly offset: number;
-  readonly limit: number;
-}
-
-export interface KeysetPageRequest<Cursor> {
-  readonly kind: "keyset";
-  readonly limit: number;
-  readonly after: Cursor | null;
-}
-
-export interface OffsetPage<T> {
-  readonly items: readonly T[];
-  readonly page: {
-    readonly kind: "offset";
-    readonly offset: number;
-    readonly limit: number;
-    readonly total: number;
-  };
-}
-
-export interface KeysetPage<T, Cursor> {
-  readonly items: readonly T[];
-  readonly page: {
-    readonly kind: "keyset";
-    readonly limit: number;
-    readonly next: Cursor | null;
-    readonly hasMore: boolean;
-  };
 }
 
 export type QuerySource = "raw" | "rollup" | "mixed" | "mock";
@@ -239,10 +207,7 @@ export interface BaseQuery extends QueryInput {
   readonly time: QueryTime;
 }
 
-export interface PageRequest {
-  readonly limit: number;
-  readonly cursor?: string | null;
-}
+export type { PageRequest, PageResult, PaginationMeta } from "@/lib/pagination";
 
 export const COMPARISON_METRIC_KEYS = [
   "views",
@@ -391,7 +356,7 @@ export interface DimensionQuery extends BaseQuery {
 }
 
 export interface PageQuery extends BaseQuery {
-  readonly pagination?: OffsetPageRequest | KeysetPageRequest<CanonicalObject>;
+  readonly page?: PageRequest;
   readonly sort?: Sort;
 }
 
@@ -470,13 +435,6 @@ export interface PageItem {
   readonly sessions: number;
 }
 
-export interface PaginationMeta {
-  readonly limit: number;
-  readonly returned: number;
-  readonly hasMore: boolean;
-  readonly nextCursor: string | null;
-}
-
 export interface ReferrerItem {
   readonly referrer: string;
   readonly views: number;
@@ -514,12 +472,12 @@ export interface ChannelsQuery extends BaseQuery {
 
 export interface PagesResult {
   readonly items: readonly PageItem[];
-  readonly pagination?: PaginationMeta;
+  readonly pagination: PaginationMeta;
 }
 
 export interface ReferrersResult {
   readonly items: readonly ReferrerItem[];
-  readonly pagination?: PaginationMeta;
+  readonly pagination: PaginationMeta;
 }
 
 export interface ReferrerSummaryResult {
@@ -642,13 +600,11 @@ export interface EventQueryOperations {
   trend(input: EventQuery): Promise<AnalyticsResult<CanonicalObject>>;
   records(
     input: PageQuery,
-  ): Promise<AnalyticsResult<KeysetPage<CanonicalObject, CanonicalObject>>>;
+  ): Promise<AnalyticsResult<PageResult<CanonicalObject>>>;
 }
 
 export interface JourneyQueryOperations {
-  list(
-    input: PageQuery,
-  ): Promise<AnalyticsResult<KeysetPage<CanonicalObject, CanonicalObject>>>;
+  list(input: PageQuery): Promise<AnalyticsResult<PageResult<CanonicalObject>>>;
   detail(input: JourneyQuery): Promise<AnalyticsResult<CanonicalObject>>;
 }
 
@@ -684,7 +640,7 @@ export interface TypedQueryOperations {
     top(input: TopPagesQuery): Promise<AnalyticsResult<TopPagesResult>>;
     dashboard(
       input: PagesDashboardQuery,
-    ): Promise<AnalyticsResult<OffsetPage<DashboardPage>>>;
+    ): Promise<AnalyticsResult<PageResult<DashboardPage>>>;
     referrers(input: ReferrerQuery): Promise<AnalyticsResult<ReferrerResult>>;
   };
   readonly channels: {

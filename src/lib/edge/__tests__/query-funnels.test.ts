@@ -130,6 +130,52 @@ describe("funnel query handler", () => {
     expect(calls[0]?.bindings).toEqual(["site-1", "funnel", 51]);
   });
 
+  it("decodes the signed cursor when loading the next funnel page", async () => {
+    const row = (id: string, createdAt: number) => ({
+      id,
+      site_id: "site-1",
+      kind: "funnel",
+      name: id,
+      config_json: JSON.stringify({
+        steps: [
+          { type: "pageview", value: "/" },
+          { type: "event", value: "signup" },
+        ],
+      }),
+      created_at: createdAt,
+      updated_at: createdAt,
+    });
+    const firstSetup = createEnv((sql) =>
+      sql.includes("analysis_definitions")
+        ? [row("funnel-1", 20), row("funnel-2", 10)]
+        : [],
+    );
+    firstSetup.env.DAILY_SALT_SECRET = "test-pagination-secret";
+    const first = await handleFunnel(
+      firstSetup.env,
+      "site-1",
+      makeRequest("/api/private/funnel?limit=1").url,
+    );
+    const firstBody = (await first.json()) as any;
+    expect(firstBody.data.pagination.nextCursor).toEqual(expect.any(String));
+
+    const secondSetup = createEnv((sql) =>
+      sql.includes("analysis_definitions") ? [row("funnel-2", 10)] : [],
+    );
+    secondSetup.env.DAILY_SALT_SECRET = "test-pagination-secret";
+    const secondUrl = makeRequest(
+      `/api/private/funnel?limit=1&cursor=${encodeURIComponent(firstBody.data.pagination.nextCursor)}`,
+    ).url;
+    const second = await handleFunnel(secondSetup.env, "site-1", secondUrl);
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toMatchObject({
+      data: {
+        items: [{ id: "funnel-2" }],
+        pagination: { hasMore: false, nextCursor: null },
+      },
+    });
+  });
+
   it("creates funnel definitions with normalized step input", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-02T00:00:00Z"));

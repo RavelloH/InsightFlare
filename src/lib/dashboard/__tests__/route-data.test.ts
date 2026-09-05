@@ -571,16 +571,25 @@ describe("Dashboard route data loaders", () => {
         generatedAt: 100,
         retentionDays: 30,
         tasks: [],
-        runs: [],
-        runsMeta: {
-          page: 1,
-          pageSize: 50,
-          returned: 0,
-          hasMore: false,
-          nextPage: null,
+        runs: {
+          items: [],
+          pagination: {
+            limit: 50,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+        logs: {
+          items: [],
+          pagination: {
+            limit: 200,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
         },
         selectedRun: null,
-        logs: [],
         health: {
           totalRuns24h: 0,
           failedRuns24h: 0,
@@ -598,8 +607,7 @@ describe("Dashboard route data loaders", () => {
         fetchedAt: expect.any(Number),
       });
       expect(readDashboardAdmin).toHaveBeenCalledWith("scheduled-tasks", {
-        page: 1,
-        pageSize: 50,
+        limit: 50,
       });
 
       const systemPerformance = {

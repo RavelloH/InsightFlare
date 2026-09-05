@@ -73,12 +73,5 @@ export interface PagesDashboardItem {
 export interface PagesDashboardData {
   ok: boolean;
   interval: "minute" | "hour" | "day" | "week" | "month";
-  data: PagesDashboardItem[];
-  meta: {
-    page: number;
-    pageSize: number;
-    returned: number;
-    hasMore: boolean;
-    nextPage: number | null;
-  };
+  data: PaginatedCollection<PagesDashboardItem>;
 }

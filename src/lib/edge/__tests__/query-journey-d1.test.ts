@@ -22,13 +22,7 @@ import {
   buildSessionAggregationSql,
   buildVisitorAggregationSql,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-aggregation-sql";
-import {
-  parseSessionListCursor,
-  parseVisitorListCursor,
-  querySessionsFromD1,
-  serializeSessionListCursor,
-  serializeVisitorListCursor,
-} from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import { querySessionsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
   queryGeoPointAggregate,
   queryGeoPointsFromD1,
@@ -1360,8 +1354,8 @@ describe("edge journey list D1 queries", () => {
     ).resolves.toMatchObject([{ visitorId: "visitor-2" }]);
 
     expect(calls[0].sql).toContain("ORDER BY lastSeenAt DESC");
-    expect(calls[0].bindings.at(-2)).toBe(6);
-    expect(calls[0].bindings.at(-1)).toBe(0);
+    expect(calls[0].bindings.at(-2)).toBe(window.endExclusiveMs);
+    expect(calls[0].bindings.at(-1)).toBe(7);
   });
 
   it("builds visitor list SQL with target, search, sorting, and pagination", async () => {
@@ -1376,7 +1370,7 @@ describe("edge journey list D1 queries", () => {
         filterFixture({ country: "US" }),
         5,
         "123",
-        10,
+        0,
         { key: "views", direction: "asc" },
         "Chrome",
       ),
@@ -1387,11 +1381,11 @@ describe("edge journey list D1 queries", () => {
     expect(calls[0].bindings.slice(0, 8)).toEqual([
       ...visitBindings(window),
       ...eventBindings(window),
-      "123",
       "us",
+      "%chrome%",
     ]);
-    expect(calls[0].bindings.at(-2)).toBe(5);
-    expect(calls[0].bindings.at(-1)).toBe(10);
+    expect(calls[0].bindings.at(-2)).toBe("%chrome%");
+    expect(calls[0].bindings.at(-1)).toBe(6);
   });
 
   it("builds session list SQL with session target and search filters", async () => {
@@ -1406,7 +1400,7 @@ describe("edge journey list D1 queries", () => {
         filterFixture({ device: "desktop" }),
         7,
         { type: "session", value: "session-1" },
-        2,
+        0,
         { key: "durationMs", direction: "asc" },
         "pricing",
       ),
@@ -1420,8 +1414,8 @@ describe("edge journey list D1 queries", () => {
       "session-1",
       "desktop",
     ]);
-    expect(calls[0].bindings.at(-2)).toBe(7);
-    expect(calls[0].bindings.at(-1)).toBe(2);
+    expect(calls[0].bindings.at(-2)).toBe("%pricing%");
+    expect(calls[0].bindings.at(-1)).toBe(8);
   });
 
   it("queries a target journey event list with visit filters and limit", async () => {
@@ -1776,7 +1770,7 @@ describe("edge journey handlers", () => {
       url("/visitors", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        pageSize: 1,
+        limit: 1,
         sortBy: "views",
         sortDir: "asc",
         search: "Chrome",
@@ -1785,12 +1779,14 @@ describe("edge journey handlers", () => {
 
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      data: [{ visitorId: "visitor-1", views: 3, sessions: 2 }],
-      meta: {
-        pageSize: 1,
-        returned: 1,
-        hasMore: true,
-        nextCursor: expect.any(String),
+      data: {
+        items: [{ visitorId: "visitor-1", views: 3, sessions: 2 }],
+        pagination: {
+          limit: 1,
+          returned: 1,
+          hasMore: true,
+          nextCursor: expect.any(String),
+        },
       },
     });
     expect(calls[0].sql).toContain("ORDER BY views ASC");
@@ -1802,20 +1798,8 @@ describe("edge journey handlers", () => {
     const window = queryWindow();
     const visitors = createD1Env([]);
     const sessions = createD1Env([]);
-    const visitorCursor = serializeVisitorListCursor({
-      sortKey: "views",
-      sortDirection: "asc",
-      sortValue: 3,
-      lastSeenAt: baseMs,
-      visitorId: "visitor-1",
-    });
-    const sessionCursor = serializeSessionListCursor({
-      sortKey: "views",
-      sortDirection: "asc",
-      sortValue: 2,
-      startedAt: baseMs,
-      sessionId: "session-1",
-    });
+    const visitorCursor = "invalid-visitor-cursor";
+    const sessionCursor = "invalid-session-cursor";
 
     await expect(
       handleVisitors(
@@ -1824,7 +1808,7 @@ describe("edge journey handlers", () => {
         url("/visitors", {
           from: window.startMs,
           to: window.endExclusiveMs,
-          pageSize: 120,
+          limit: 120,
           cursor: visitorCursor,
           sortBy: "sessions",
         }),
@@ -1837,7 +1821,7 @@ describe("edge journey handlers", () => {
         url("/sessions", {
           from: window.startMs,
           to: window.endExclusiveMs,
-          pageSize: 120,
+          limit: 120,
           cursor: sessionCursor,
           sortBy: "durationMs",
         }),
@@ -1864,16 +1848,18 @@ describe("edge journey handlers", () => {
 
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      data: [{ sessionId: "session-1", visitorId: "visitor-1" }],
-      meta: {
-        pageSize: 3,
-        returned: 1,
-        hasMore: false,
-        nextCursor: null,
+      data: {
+        items: [{ sessionId: "session-1", visitorId: "visitor-1" }],
+        pagination: {
+          limit: 3,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
       },
     });
-    expect(calls[0].bindings.at(-2)).toBe(3);
-    expect(calls[0].bindings.at(-1)).toBe(0);
+    expect(calls[0].bindings.at(-2)).toBe("%pricing%");
+    expect(calls[0].bindings.at(-1)).toBe(4);
   });
 
   it("paginates sessions with a keyset cursor and trims the extra row", async () => {
@@ -1891,7 +1877,7 @@ describe("edge journey handlers", () => {
       url("/sessions", {
         from: window.startMs,
         to: window.endExclusiveMs,
-        pageSize: 1,
+        limit: 1,
         sortBy: "views",
         sortDir: "asc",
       }),
@@ -1899,12 +1885,14 @@ describe("edge journey handlers", () => {
 
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      data: [{ sessionId: "session-1" }],
-      meta: {
-        pageSize: 1,
-        returned: 1,
-        hasMore: true,
-        nextCursor: expect.any(String),
+      data: {
+        items: [{ sessionId: "session-1" }],
+        pagination: {
+          limit: 1,
+          returned: 1,
+          hasMore: true,
+          nextCursor: expect.any(String),
+        },
       },
     });
     expect(calls[0].sql).toContain("ORDER BY views ASC");
@@ -1917,13 +1905,7 @@ describe("edge journey handlers", () => {
     const { env, calls } = createD1Env([
       [visitorRow({ visitorId: "visitor-2" })],
     ]);
-    const cursor = serializeVisitorListCursor({
-      sortKey: "views",
-      sortDirection: "asc",
-      sortValue: 3,
-      lastSeenAt: baseMs + 60_000,
-      visitorId: "visitor-1",
-    });
+    const cursor = "invalid-visitor-cursor";
 
     await expect(
       handleVisitors(
@@ -1932,52 +1914,14 @@ describe("edge journey handlers", () => {
         url("/visitors", {
           from: window.startMs,
           to: window.endExclusiveMs,
-          pageSize: 1,
+          limit: 1,
           cursor,
           sortBy: "views",
           sortDir: "asc",
         }),
       ),
-    ).resolves.toMatchObject({ status: 200 });
-
-    expect(calls[0].sql).toContain("vm.views > ?");
-    expect(calls[0].sql).toContain("vm.lastSeenAt < ?");
-    expect(calls[0].sql).not.toContain("OFFSET");
-    expect(calls[0].bindings.at(-6)).toBe(3);
-    expect(calls[0].bindings.at(-1)).toBe(2);
-  });
-
-  it("serializes Journey cursors only for their matching sort", () => {
-    const visitor = serializeVisitorListCursor({
-      sortKey: "views",
-      sortDirection: "asc",
-      sortValue: 3,
-      lastSeenAt: baseMs,
-      visitorId: "visitor-1",
-    });
-    const session = serializeSessionListCursor({
-      sortKey: "durationMs",
-      sortDirection: "desc",
-      sortValue: 60_000,
-      startedAt: baseMs,
-      sessionId: "session-1",
-    });
-
-    expect(
-      parseVisitorListCursor(visitor, { key: "views", direction: "asc" }),
-    ).toMatchObject({ visitorId: "visitor-1", sortValue: 3 });
-    expect(
-      parseVisitorListCursor(visitor, { key: "sessions", direction: "asc" }),
-    ).toBeNull();
-    expect(
-      parseSessionListCursor(session, {
-        key: "durationMs",
-        direction: "desc",
-      }),
-    ).toMatchObject({ sessionId: "session-1", sortValue: 60_000 });
-    expect(
-      parseSessionListCursor(session, { key: "durationMs", direction: "asc" }),
-    ).toBeNull();
+    ).resolves.toMatchObject({ status: 400 });
+    expect(calls).toEqual([]);
   });
 
   it("rejects invalid list windows before querying D1", async () => {

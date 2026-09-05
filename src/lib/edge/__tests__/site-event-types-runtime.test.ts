@@ -82,14 +82,26 @@ const cards = {
 };
 
 describe("site event-types runtime", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(decodeEventTypeCursor).mockResolvedValue(null);
+    vi.mocked(decodeEventFieldCursor).mockResolvedValue(null);
+    vi.mocked(decodeEventFieldValueCursor).mockResolvedValue(null);
+  });
 
   it("runs the event type list, fields, and values through typed operations", async () => {
-    vi.mocked(queryEventTypeAggregate).mockResolvedValue([
-      { value: "signup", views: 3, sessions: 2, visitors: 2 },
-    ]);
-    vi.mocked(queryEventFieldsFromD1).mockResolvedValue([]);
-    vi.mocked(queryEventFieldValuesFromD1).mockResolvedValue([]);
+    vi.mocked(queryEventTypePageFromD1).mockResolvedValue({
+      items: [{ value: "signup", views: 3, sessions: 2, visitors: 2 }],
+      pagination: { limit: 20, returned: 1, hasMore: false, nextCursor: null },
+    });
+    vi.mocked(queryEventFieldsPageFromD1).mockResolvedValue({
+      items: [],
+      pagination: { limit: 100, returned: 0, hasMore: false, nextCursor: null },
+    });
+    vi.mocked(queryEventFieldValuesPageFromD1).mockResolvedValue({
+      items: [],
+      pagination: { limit: 25, returned: 0, hasMore: false, nextCursor: null },
+    });
 
     await expect(
       readSiteEventTypes({ ...base, search: "sign", limit: 20 }),
@@ -97,14 +109,14 @@ describe("site event-types runtime", () => {
       items: [
         { key: "signup", label: "signup", events: 3, sessions: 2, visitors: 2 },
       ],
-      page: { limit: 20 },
+      pagination: { limit: 20, returned: 1, hasMore: false, nextCursor: null },
     });
     await expect(
       readSiteEventFields({ ...base, eventName: "signup", limit: 100 }),
     ).resolves.toEqual({
       eventName: "signup",
       items: [],
-      page: { limit: 100 },
+      pagination: { limit: 100, returned: 0, hasMore: false, nextCursor: null },
     });
     await expect(
       readSiteEventFieldValues({
@@ -120,25 +132,29 @@ describe("site event-types runtime", () => {
       fieldPath: "plan",
       fieldValueType: "string",
       items: [],
-      page: { limit: 25 },
+      pagination: { limit: 25, returned: 0, hasMore: false, nextCursor: null },
     });
-    expect(queryEventTypeAggregate).toHaveBeenCalledWith(
+    expect(queryEventTypePageFromD1).toHaveBeenCalledWith(
       base.env,
       "site-1",
       base.window,
       base.filters,
       20,
       "sign",
+      null,
+      undefined,
     );
-    expect(queryEventFieldsFromD1).toHaveBeenCalledWith(
+    expect(queryEventFieldsPageFromD1).toHaveBeenCalledWith(
       base.env,
       "site-1",
       base.window,
       base.filters,
       "signup",
       100,
+      null,
+      undefined,
     );
-    expect(queryEventFieldValuesFromD1).toHaveBeenCalledWith(
+    expect(queryEventFieldValuesPageFromD1).toHaveBeenCalledWith(
       base.env,
       "site-1",
       base.window,
@@ -148,6 +164,8 @@ describe("site event-types runtime", () => {
       "string",
       25,
       "pro",
+      null,
+      undefined,
     );
   });
 
@@ -354,7 +372,7 @@ describe("site event-types runtime", () => {
       events: 3,
       occurrences: 4,
       path: "email",
-      valueType: "string",
+      valueType: 1,
     });
     vi.mocked(decodeEventFieldValueCursor).mockResolvedValue({
       occurrences: 3,
@@ -446,6 +464,10 @@ describe("site event-types runtime", () => {
   });
 
   it("passes canonical filters through without audience policy", async () => {
+    vi.mocked(queryEventTypePageFromD1).mockResolvedValue({
+      items: [],
+      pagination: { limit: 20, returned: 0, hasMore: false, nextCursor: null },
+    });
     await expect(
       readSiteEventTypes({
         ...base,
@@ -461,21 +483,25 @@ describe("site event-types runtime", () => {
         },
       }),
     ).resolves.toBeDefined();
-    expect(queryEventTypeAggregate).toHaveBeenCalled();
+    expect(queryEventTypePageFromD1).toHaveBeenCalled();
   });
 
   it("preserves provider failures for the application boundary", async () => {
-    vi.mocked(queryEventTypeAggregate).mockRejectedValueOnce(new Error("down"));
+    vi.mocked(queryEventTypePageFromD1).mockRejectedValueOnce(
+      new Error("down"),
+    );
     await expect(readSiteEventTypes({ ...base, limit: 20 })).rejects.toThrow(
       "down",
     );
 
-    vi.mocked(queryEventFieldsFromD1).mockRejectedValueOnce(new Error("down"));
+    vi.mocked(queryEventFieldsPageFromD1).mockRejectedValueOnce(
+      new Error("down"),
+    );
     await expect(
       readSiteEventFields({ ...base, eventName: "signup", limit: 100 }),
     ).rejects.toThrow("down");
 
-    vi.mocked(queryEventFieldValuesFromD1).mockRejectedValueOnce(
+    vi.mocked(queryEventFieldValuesPageFromD1).mockRejectedValueOnce(
       new Error("down"),
     );
     await expect(
