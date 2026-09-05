@@ -620,6 +620,40 @@ describe("fetchJourneyEventDetail", () => {
 });
 
 describe("fetchEventsTrend", () => {
+  it("unwraps the edge response envelope before chart consumers read the trend", async () => {
+    fetchPrivateJsonMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        interval: "day",
+        series: [
+          {
+            key: "custom-event",
+            eventName: "custom_event",
+            label: "custom_event",
+            events: 3,
+            sessions: 2,
+            visitors: 2,
+          },
+        ],
+        data: [
+          {
+            bucket: 0,
+            timestampMs: 1000,
+            totalEvents: 3,
+            eventsBySeries: { "custom-event": 3 },
+          },
+        ],
+      },
+    } as any);
+
+    await expect(fetchEventsTrend("site-1", window)).resolves.toMatchObject({
+      ok: true,
+      interval: "day",
+      series: [{ key: "custom-event" }],
+      data: [{ totalEvents: 3 }],
+    });
+  });
+
   it("includes eventName when provided", async () => {
     fetchPrivateJsonMock.mockResolvedValueOnce({ ok: true } as any);
 

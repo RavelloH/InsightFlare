@@ -283,15 +283,8 @@ interface RequestObservationPagination {
 }
 
 interface RequestObservationPageData {
-  ok: true;
-  configured: boolean;
-  generatedAt: number;
-  sampling?: RequestObservationSampling;
-  source: "blocked" | "included";
-  data: {
-    items: BotEvent[] | NormalRequestEvent[];
-    pagination: RequestObservationPagination;
-  };
+  items: BotEvent[] | NormalRequestEvent[];
+  pagination: RequestObservationPagination;
 }
 
 interface RequestObservationDimensionData {
@@ -1284,6 +1277,14 @@ function withRequestObservabilityDefaults(
   };
 }
 
+function isInvalidRequestObservationCursorError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.includes("request_observation_invalid_cursor") ||
+    error.message.includes("Invalid request observation page cursor")
+  );
+}
+
 export function RequestObservationClient({
   locale,
   messages,
@@ -1392,13 +1393,10 @@ export function RequestObservationClient({
         queryClient.setQueryData<RequestObservationData | null>(
           observationQueryKey,
           (current) => {
-            if (
-              !current ||
-              normalizeRequestObservationTab(page.source) !== source
-            ) {
+            if (!current || !Array.isArray(page.items)) {
               return current;
             }
-            const pageEvents = page.data.items.map((event) =>
+            const pageEvents = page.items.map((event) =>
               normalizeRequestObservationEvent(
                 event as BotEvent & NormalRequestEvent,
                 source,
@@ -1414,7 +1412,7 @@ export function RequestObservationClient({
                     ...current.blocked!.events,
                     ...(pageEvents as BotEvent[]),
                   ],
-                  pagination: page.data.pagination,
+                  pagination: page.pagination,
                 },
               };
             }
@@ -1430,12 +1428,28 @@ export function RequestObservationClient({
                   ...current.included!.events,
                   ...(pageEvents as NormalRequestEvent[]),
                 ],
-                pagination: page.data.pagination,
+                pagination: page.pagination,
               },
             };
           },
         );
       } catch (error) {
+        if (isInvalidRequestObservationCursorError(error)) {
+          try {
+            const refreshed = await fetchRequestObservation(timeWindow);
+            queryClient.setQueryData<RequestObservationData | null>(
+              observationQueryKey,
+              refreshed,
+            );
+          } catch (refreshError) {
+            toast.error(
+              refreshError instanceof Error
+                ? refreshError.message
+                : copy.loadFailed,
+            );
+          }
+          return;
+        }
         toast.error(error instanceof Error ? error.message : copy.loadFailed);
       } finally {
         if (loadingMoreRef.current === source) {

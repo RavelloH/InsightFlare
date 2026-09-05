@@ -494,9 +494,34 @@ export async function fetchEventsTrend(
         "/api/private/events-trend",
         requestParams,
       );
-  return request.catch((error) =>
-    fallbackUnlessAborted(error, () => emptyEventsTrend(window.interval)),
-  );
+  return request
+    .then((value) => {
+      const payload =
+        value && typeof value === "object"
+          ? (value as unknown as Record<string, unknown>)
+          : {};
+      const nested =
+        payload.data && typeof payload.data === "object"
+          ? (payload.data as Record<string, unknown>)
+          : payload;
+      const interval =
+        nested.interval === "minute" ||
+        nested.interval === "hour" ||
+        nested.interval === "day" ||
+        nested.interval === "week" ||
+        nested.interval === "month"
+          ? nested.interval
+          : window.interval;
+      return {
+        ok: payload.ok !== false,
+        interval,
+        series: Array.isArray(nested.series) ? nested.series : [],
+        data: Array.isArray(nested.data) ? nested.data : [],
+      } satisfies EventsTrendData;
+    })
+    .catch((error) =>
+      fallbackUnlessAborted(error, () => emptyEventsTrend(window.interval)),
+    );
 }
 
 export async function fetchEventsRecords(
