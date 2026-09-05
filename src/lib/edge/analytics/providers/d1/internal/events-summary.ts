@@ -291,16 +291,17 @@ export async function queryEventsSummaryFromD1(
       materialize: true,
     },
   );
-  const rows = await queryD1All<{
-    cardType: string;
-    value: string | null;
-    views: number;
-    eventTypes: number;
-    sessions: number;
-    visitors: number;
-  }>(
-    env,
-    `${source.cte},
+  const rows =
+    (await queryD1All<{
+      cardType: string;
+      value: string | null;
+      views: number;
+      eventTypes: number;
+      sessions: number;
+      visitors: number;
+    }>(
+      env,
+      `${source.cte},
 card_rows AS (
   SELECT
     '__summary__' AS cardType,
@@ -358,8 +359,8 @@ FROM ranked_cards
 WHERE cardType = '__summary__' OR card_rank <= 100
 ORDER BY cardType ASC, card_rank ASC
 `,
-    source.bindings,
-  );
+      source.bindings,
+    )) ?? [];
   const summaryRow = rows.find((row) => row.cardType === "__summary__");
   const summary: EventSummaryRow = summaryRow
     ? {

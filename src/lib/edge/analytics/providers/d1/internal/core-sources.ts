@@ -354,5 +354,8 @@ export async function queryD1All<T extends object>(
         typeof rowsRead === "number" && Number.isFinite(rowsRead),
     });
   }
-  return result.results;
+  // D1 normally always returns an array, but keep the shared source boundary
+  // defensive when a test double or a transient adapter response omits results.
+  // Providers should never leak an undefined collection into map/filter code.
+  return Array.isArray(result.results) ? result.results : [];
 }

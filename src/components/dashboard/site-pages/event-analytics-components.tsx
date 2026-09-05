@@ -814,11 +814,12 @@ function EventRowSkeletonContent({
 
 function appendUniqueEvents(
   current: EventRecord[],
-  incoming: EventRecord[],
+  incoming: readonly EventRecord[] | null | undefined,
 ): EventRecord[] {
-  if (current.length === 0) return incoming;
+  const incomingRows = Array.isArray(incoming) ? [...incoming] : [];
+  if (current.length === 0) return incomingRows;
   const seen = new Set(current.map((row) => row.eventId));
-  const nextRows = incoming.filter((row) => !seen.has(row.eventId));
+  const nextRows = incomingRows.filter((row) => !seen.has(row.eventId));
   return nextRows.length > 0 ? [...current, ...nextRows] : current;
 }
 
@@ -1317,10 +1318,12 @@ export const EventRecordsSection = memo(function EventRecordsSection({
         signal,
       }),
     initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.data.pagination.hasMore
-        ? lastPage.data.pagination.nextCursor
-        : undefined,
+    getNextPageParam: (lastPage) => {
+      const pagination = lastPage.data?.pagination;
+      return pagination?.hasMore && pagination.nextCursor
+        ? pagination.nextCursor
+        : undefined;
+    },
     enabled: typeof window !== "undefined",
   });
   const rows = useMemo(

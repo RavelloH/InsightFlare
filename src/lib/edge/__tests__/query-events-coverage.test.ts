@@ -86,6 +86,20 @@ describe("edge query events summary coverage", () => {
     expect(queryD1AllMock).toHaveBeenCalledOnce();
   });
 
+  it("keeps an absent D1 card collection from reaching array operations", async () => {
+    queryD1AllMock.mockResolvedValueOnce(undefined);
+
+    await expect(
+      queryEventsSummaryFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT),
+    ).resolves.toEqual({
+      summary: { events: 0, eventTypes: 0, sessions: 0, visitors: 0 },
+      cards: {
+        event: { name: [] },
+        page: { path: [], title: [], hostname: [] },
+      },
+    });
+  });
+
   it("reads event summary cards from each dimension query", async () => {
     queryD1AllMock.mockResolvedValueOnce([
       {

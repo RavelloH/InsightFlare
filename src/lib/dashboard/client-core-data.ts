@@ -24,6 +24,7 @@ import type {
   EventField,
   EventFieldValuesData,
   EventFieldValueStat,
+  EventRecord,
   EventRecordDetailData,
   EventsRecordsData,
   EventsSummaryData,
@@ -538,9 +539,25 @@ export async function fetchEventsRecords(
         "/api/private/events-records",
         requestParams,
       );
-  return request.catch((error) =>
-    fallbackUnlessAborted(error, () => emptyEventsRecords(limit)),
-  );
+  return request
+    .then((value) => {
+      // Keep the pagination consumer safe when a rolling deployment briefly
+      // returns the collection without the standard envelope. The API
+      // contract is still strict; this boundary merely prevents a malformed
+      // successful payload from turning into a client-side TypeError.
+      const payload =
+        value && typeof value === "object"
+          ? (value as unknown as Record<string, unknown>)
+          : {};
+      const collection = "data" in payload ? payload.data : payload;
+      return {
+        ok: payload.ok !== false,
+        data: normalizePaginatedCollection<EventRecord>(collection, limit),
+      } satisfies EventsRecordsData;
+    })
+    .catch((error) =>
+      fallbackUnlessAborted(error, () => emptyEventsRecords(limit)),
+    );
 }
 
 export async function fetchEventTypeDetail(

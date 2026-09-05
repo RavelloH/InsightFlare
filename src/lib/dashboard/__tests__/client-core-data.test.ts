@@ -677,6 +677,29 @@ describe("fetchEventsRecords", () => {
     );
   });
 
+  it("normalizes a successful legacy collection before pagination consumers read it", async () => {
+    const event = { eventId: "event-1" };
+    fetchPrivateJsonMock.mockResolvedValueOnce({
+      ok: true,
+      data: [event],
+    } as any);
+
+    await expect(
+      fetchEventsRecords("site-1", window, undefined, { limit: 20 }),
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        items: [event],
+        pagination: {
+          limit: 20,
+          returned: 1,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    });
+  });
+
   it("falls back on error", async () => {
     fetchPrivateJsonMock.mockRejectedValueOnce(new Error("fail"));
 

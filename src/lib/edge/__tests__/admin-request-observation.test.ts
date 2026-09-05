@@ -856,6 +856,59 @@ describe("request observation admin reader", () => {
     expect(invalidCursor.status).toBe(400);
   });
 
+  it("accepts a page cursor when only the cf-ray identity is available", async () => {
+    const encrypted = await encryptAnalyticsEngineSecret(
+      { MAIN_SECRET: "main-secret" },
+      "cf-token",
+    );
+    const sites = statement({
+      all: [{ id: "site-1", name: "Site", domain: "site.test" }],
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const sql = String((init as RequestInit | undefined)?.body || "");
+      return sql.includes("blob1 AS kind")
+        ? analyticsResponse([
+            normalAnalyticsRow({
+              traceId: "",
+              rayId: "ray-only",
+            }),
+            normalAnalyticsRow({
+              traceId: "trace-second",
+              rayId: "ray-second",
+            }),
+          ])
+        : analyticsResponse();
+    });
+
+    const response = await handleRequestObservationAdmin(
+      request(
+        "/api/private/admin/request-observation?from=0&to=3600000&source=included&limit=1",
+      ),
+      createEnv([statement({ first: configRow(encrypted) }), sites]),
+      new URL(
+        "https://app.test/api/private/admin/request-observation?from=0&to=3600000&source=included&limit=1",
+      ),
+    );
+    const body = (await response.json()) as Record<string, any>;
+
+    expect(response.status).toBe(200);
+    expect(body.data.pagination).toMatchObject({
+      hasMore: true,
+      nextCursor: expect.any(String),
+    });
+
+    const nextPage = await handleRequestObservationAdmin(
+      request(
+        `/api/private/admin/request-observation?from=0&to=3600000&source=included&limit=1&cursor=${encodeURIComponent(body.data.pagination.nextCursor)}`,
+      ),
+      createEnv([statement({ first: configRow(encrypted) }), sites]),
+      new URL(
+        `https://app.test/api/private/admin/request-observation?from=0&to=3600000&source=included&limit=1&cursor=${encodeURIComponent(body.data.pagination.nextCursor)}`,
+      ),
+    );
+    expect(nextPage.status).toBe(200);
+  });
+
   it("normalizes sparse observations and missing site metadata safely", async () => {
     const encrypted = await encryptAnalyticsEngineSecret(
       { MAIN_SECRET: "main-secret" },

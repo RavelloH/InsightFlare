@@ -271,9 +271,10 @@ function detailCursor(value: unknown): DetailCursor | null {
   const traceId = clampString(String(candidate.traceId || ""), 128);
   const rayId = clampString(String(candidate.rayId || ""), 120);
   // Cloudflare's cf-ray header is not present in local, test, and some
-  // upstream requests. traceId is generated at collection time and is the
-  // stable identity needed by the final keyset tie-breaker.
-  if (!timestamp || !traceId) return null;
+  // upstream requests. The collector normally supplies traceId, but older
+  // observations may only have rayId. Accept either identity for the final
+  // keyset tuple; rows without both identifiers cannot produce a safe cursor.
+  if (!timestamp || (!traceId && !rayId)) return null;
   return {
     timestamp,
     receivedAt: Math.max(0, toFiniteNumber(candidate.receivedAt)),

@@ -83,8 +83,8 @@ export function mapPages(rows: PageRow[]) {
   }));
 }
 
-export function mapTabs(rows: DimensionRow[]) {
-  return rows.map((row) => ({
+export function mapTabs(rows: readonly DimensionRow[] | null | undefined) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
     label: row.value,
     views: row.views,
     sessions: row.sessions,
@@ -103,8 +103,8 @@ export function mapDimensionRows(rows: DimensionRow[]) {
   }));
 }
 
-export function mapGeoTabs(rows: GeoTabRow[]) {
-  return rows.map((row) => ({
+export function mapGeoTabs(rows: readonly GeoTabRow[] | null | undefined) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
     value: row.value,
     label: row.label,
     views: row.views,
@@ -150,12 +150,12 @@ export function mapEventAnalyticsContextCards(
 export function mapEventSummaryCards(cards: EventSummaryCards) {
   return {
     event: {
-      name: mapTabs(cards.event.name),
+      name: mapTabs(cards?.event?.name),
     },
     page: {
-      path: mapTabs(cards.page.path),
-      title: mapTabs(cards.page.title),
-      hostname: mapTabs(cards.page.hostname),
+      path: mapTabs(cards?.page?.path),
+      title: mapTabs(cards?.page?.title),
+      hostname: mapTabs(cards?.page?.hostname),
     },
   };
 }
