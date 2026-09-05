@@ -50,7 +50,7 @@ function siteIdsSql(siteIds: readonly string[]): string {
 
 function visitSource(siteIds: readonly string[]): string {
   return `
-scope_raw_visits AS (
+scope_raw_visits AS MATERIALIZED (
   SELECT ${VISIT_SOURCE_COLUMNS}
   FROM visits
   WHERE site_pk IN ${siteIdsSql(siteIds)}
@@ -61,10 +61,12 @@ scope_raw_visits AS (
 function eventSource(siteIds: readonly string[]): string {
   // Custom events are windowed by occurred_at. The linked visit supplies
   // identity and context even when that visit started outside the window.
-  return buildEventAnalyticsSourceCte({ cteName: "scope_raw_events" }).replace(
-    `ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}`,
-    `ce.site_pk IN ${siteIdsSql(siteIds)}`,
-  );
+  return buildEventAnalyticsSourceCte({ cteName: "scope_raw_events" })
+    .replace("scope_raw_events AS (", "scope_raw_events AS MATERIALIZED (")
+    .replace(
+      `ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}`,
+      `ce.site_pk IN ${siteIdsSql(siteIds)}`,
+    );
 }
 
 function entityColumn(entityKind: "session" | "visitor"): string {

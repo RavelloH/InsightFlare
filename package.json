@@ -53,6 +53,8 @@
     "ops:secret:daily-salt": "tsx scripts/ops.ts --target cf --action secret --name DAILY_SALT_SECRET",
     "ops:secret:bootstrap-admin-password": "tsx scripts/ops.ts --target cf --action secret --name BOOTSTRAP_ADMIN_PASSWORD",
     "ops:tail": "tsx scripts/ops.ts --target cf --action tail",
+    "bench:d1": "tsx scripts/benchmark-d1.ts",
+    "bench:d1:indexes": "tsx scripts/benchmark-scheduled-index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:i18n": "tsx scripts/check-i18n.ts",
     "watch:i18n": "tsx scripts/watch-i18n.ts",

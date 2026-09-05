@@ -44,6 +44,7 @@ import {
   queryPagesAggregate,
   queryPagesDashboard,
   queryPagesPageFromD1,
+  queryPagesWithTabsFromD1,
   queryPageTabsAggregate,
   queryReferrerAggregate,
   queryReferrersPageFromD1,
@@ -597,7 +598,9 @@ export function registerSiteContractProviders(
     .register(
       "pages",
       typedQueryProvider<
-        PagesResult | Awaited<ReturnType<typeof queryPageTabsAggregate>>
+        | PagesResult
+        | Awaited<ReturnType<typeof queryPageTabsAggregate>>
+        | Awaited<ReturnType<typeof queryPagesWithTabsFromD1>>
       >(async (input) => {
         const request = query(input!);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
@@ -610,6 +613,44 @@ export function registerSiteContractProviders(
               filters,
               numberField(request, "limit", 20),
             ),
+          };
+        }
+        if (request.includeTabs === true) {
+          const rawPage = request.page;
+          const page =
+            rawPage && typeof rawPage === "object"
+              ? (rawPage as { limit?: unknown; cursor?: unknown })
+              : null;
+          const limit =
+            page &&
+            typeof page.limit === "number" &&
+            Number.isFinite(page.limit)
+              ? page.limit
+              : numberField(request, "limit", 20);
+          const cursorText =
+            page && typeof page.cursor === "string" ? page.cursor : null;
+          const cursor = await decodePagesCursor(
+            options.env,
+            options.siteId,
+            timeWindow(request.time),
+            filters,
+            request.includeDetails === true,
+            cursorText,
+            request.context.policy.audience,
+          );
+          if (cursorText && !cursor) throw new Error("invalid-cursor");
+          return {
+            value: await queryPagesWithTabsFromD1(
+              options.env,
+              options.siteId,
+              timeWindow(request.time),
+              filters,
+              limit,
+              request.includeDetails === true,
+              cursor,
+              request.context.policy.audience,
+            ),
+            source: "raw",
           };
         }
         const rawPage = request.page;

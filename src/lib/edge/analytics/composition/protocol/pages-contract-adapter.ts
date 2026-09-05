@@ -25,8 +25,10 @@ import {
   queryErrorResponse,
   type ResponseContext,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import type { queryPageTabsAggregate } from "@/lib/edge/analytics/providers/d1/internal/pages";
-import type { queryPagesDashboard } from "@/lib/edge/analytics/providers/d1/internal/pages";
+import type {
+  PagesWithTabsResult,
+  queryPagesDashboard,
+} from "@/lib/edge/analytics/providers/d1/internal/pages";
 import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
@@ -54,38 +56,32 @@ export async function handlePagesContract(
     filters,
     limit,
     includeDetails,
+    includeTabs,
     page: { limit, ...(cursor ? { cursor } : {}) },
-  } satisfies PagesQuery;
+  } as PagesQuery & { readonly includeTabs: boolean };
   const result = await createD1SiteQueryRuntime({
     env,
     siteId,
-  }).execute<PagesResult>("pages", query);
+  }).execute<PagesResult | PagesWithTabsResult>("pages", query);
   if (!result.ok) return queryErrorResponse(result.error);
+  const pagesResult = includeTabs
+    ? (result.data as PagesWithTabsResult).pages
+    : (result.data as PagesResult);
   const payload: Record<string, unknown> = {
     ok: true,
     data: {
-      items: mapPages([...result.data.items]),
-      pagination: result.data.pagination,
+      items: mapPages([...pagesResult.items]),
+      pagination: pagesResult.pagination,
     },
   };
   if (includeTabs) {
-    const tabsResult = await createD1SiteQueryRuntime({
-      env,
-      siteId,
-    }).execute<Awaited<ReturnType<typeof queryPageTabsAggregate>>>("pages", {
-      context: queryContext,
-      time: toQueryTime(window),
-      filters,
-      variant: "tabs",
-      limit,
-    } as BaseQuery & { readonly variant: "tabs"; readonly limit: number });
-    if (!tabsResult.ok) return queryErrorResponse(tabsResult.error);
+    const tabs = (result.data as PagesWithTabsResult).tabs;
     payload.tabs = {
-      path: mapTabs(tabsResult.data.path),
-      title: mapTabs(tabsResult.data.title),
-      hostname: mapTabs(tabsResult.data.hostname),
-      entry: mapTabs(tabsResult.data.entry),
-      exit: mapTabs(tabsResult.data.exit),
+      path: mapTabs(tabs.path),
+      title: mapTabs(tabs.title),
+      hostname: mapTabs(tabs.hostname),
+      entry: mapTabs(tabs.entry),
+      exit: mapTabs(tabs.exit),
     };
   }
   return jsonResponseWith(ctx!, payload);
