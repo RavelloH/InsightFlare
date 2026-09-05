@@ -76,8 +76,7 @@ export function normalizeFunnelSteps(input: unknown): FunnelStepConfig[] {
 function parseFunnelSteps(configJson: string): FunnelStepConfig[] {
   try {
     const parsed = JSON.parse(configJson) as
-      | FunnelStepConfig[]
-      | { steps?: FunnelStepConfig[] };
+      FunnelStepConfig[] | { steps?: FunnelStepConfig[] };
     return normalizeFunnelSteps(Array.isArray(parsed) ? parsed : parsed.steps);
   } catch {
     return [];

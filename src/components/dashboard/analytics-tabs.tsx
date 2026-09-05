@@ -220,8 +220,7 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
       const current =
         container ??
         (scrollbarRef.current?.elements().viewport as
-          | HTMLDivElement
-          | undefined) ??
+          HTMLDivElement | undefined) ??
         scrollHostRef.current;
       if (!current) {
         applyMaskVisibility(false, false);

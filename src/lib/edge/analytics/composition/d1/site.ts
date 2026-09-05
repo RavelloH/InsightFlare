@@ -158,11 +158,7 @@ export async function overviewTabData(
   }
   if (kind === "page") {
     const pageTab = tab.slice("page.".length) as
-      | "path"
-      | "title"
-      | "hostname"
-      | "entry"
-      | "exit";
+      "path" | "title" | "hostname" | "entry" | "exit";
     if (pageTab === "entry" || pageTab === "exit") {
       const pageKind = pageTab === "entry" ? "entry" : "exit";
       const cursor = await decodeSessionPathDimensionCursor(
@@ -229,11 +225,7 @@ export async function overviewTabData(
   }
   if (kind === "client") {
     const clientTab = tab.slice("client.".length) as
-      | "browser"
-      | "osVersion"
-      | "deviceType"
-      | "language"
-      | "screenSize";
+      "browser" | "osVersion" | "deviceType" | "language" | "screenSize";
     const selectExpr = clientDimensionDefinition(clientTab).labelExpr;
     const cursor = await decodeDimensionCursor(
       options.env,
@@ -266,12 +258,7 @@ export async function overviewTabData(
     };
   }
   const geoTab = tab.slice("geo.".length) as
-    | "country"
-    | "region"
-    | "city"
-    | "continent"
-    | "timezone"
-    | "organization";
+    "country" | "region" | "city" | "continent" | "timezone" | "organization";
   const expression = {
     country: "country",
     region: regionValueExpr(),
@@ -322,11 +309,7 @@ export function dimensionExpression(dimension: string): string {
   if (dimension === "page.hash") return "hash_fragment";
   if (dimension.startsWith("utm.")) {
     const key = dimension.slice("utm.".length) as
-      | "source"
-      | "medium"
-      | "campaign"
-      | "term"
-      | "content";
+      "source" | "medium" | "campaign" | "term" | "content";
     return utmDimensionDefinition(key).labelExpr;
   }
   return dimension;

@@ -49,16 +49,10 @@ interface LoginResponse {
 }
 
 type LoginTurnstileClientConfig =
-  | { enabled: false }
-  | { enabled: true; siteKey: string; mode: "invisible" };
+  { enabled: false } | { enabled: true; siteKey: string; mode: "invisible" };
 
 type TurnstileStatus =
-  | "checking"
-  | "disabled"
-  | "loading"
-  | "running"
-  | "verified"
-  | "error";
+  "checking" | "disabled" | "loading" | "running" | "verified" | "error";
 
 interface TurnstilePublicResponse {
   ok?: boolean;

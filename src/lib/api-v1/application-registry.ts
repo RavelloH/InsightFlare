@@ -302,9 +302,7 @@ export type TrackingScript = z.infer<typeof TrackingScriptSchema>;
 export type FunnelResource = z.infer<typeof FunnelResourceSchema>;
 
 export type ApiV1ApplicationErrorCode =
-  | "not_found"
-  | "internal_error"
-  | "invalid_cursor";
+  "not_found" | "internal_error" | "invalid_cursor";
 
 export interface ApiV1ApplicationSuccess<Result, Meta = undefined> {
   readonly data: Result;

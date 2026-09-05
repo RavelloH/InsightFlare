@@ -485,10 +485,7 @@ function registerSiteOperation(
             siteId: siteId(input, configuredSiteId),
             eventId: stringField(input, "eventId"),
             eventKind: stringField(input, "eventKind") as
-              | "pageview"
-              | "session_start"
-              | "leave"
-              | undefined,
+              "pageview" | "session_start" | "leave" | undefined,
             window: timeWindow(input.time),
           }),
         ),

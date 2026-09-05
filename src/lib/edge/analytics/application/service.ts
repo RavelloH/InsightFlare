@@ -47,12 +47,7 @@ export interface QueryExecutionContext {
 export interface AnalyticsQueryEvent {
   readonly operation: string;
   readonly phase:
-    | "start"
-    | "success"
-    | "cancelled"
-    | "deadline"
-    | "cost"
-    | "failure";
+    "start" | "success" | "cancelled" | "deadline" | "cost" | "failure";
   readonly cost?: number;
   readonly requestedScope?: string;
   readonly resolvedScope?: FilterScope;

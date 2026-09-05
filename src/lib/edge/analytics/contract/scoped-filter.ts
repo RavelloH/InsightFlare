@@ -38,9 +38,7 @@ export interface ScopedFilterPlan {
   readonly mode: "observation" | "entity";
   readonly membership: ObservationMembershipPlan | EntityMembershipPlan;
   readonly expansion:
-    | "matching-observations"
-    | "matching-sessions"
-    | "matching-visitors";
+    "matching-observations" | "matching-sessions" | "matching-visitors";
   readonly requiredSources: ReadonlySet<ObservationSource>;
   readonly requiresRawSource: boolean;
 }
@@ -70,8 +68,7 @@ export interface UnscopedFilteringCapability {
 }
 
 export type FilterScopeCapability =
-  | ScopedFilteringCapability
-  | UnscopedFilteringCapability;
+  ScopedFilteringCapability | UnscopedFilteringCapability;
 
 const ALL_SCOPES = ["event", "session", "visitor"] as const;
 

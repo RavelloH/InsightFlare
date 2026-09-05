@@ -20,9 +20,7 @@ import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overvi
 import type { Env } from "@/lib/edge/types";
 
 type JourneyCollectionPath =
-  | "visitor-events"
-  | "visitor-sessions"
-  | "session-events";
+  "visitor-events" | "visitor-sessions" | "session-events";
 
 export async function handleVisitorsContract(
   env: Env,

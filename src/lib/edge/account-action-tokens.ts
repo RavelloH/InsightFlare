@@ -12,10 +12,7 @@ export type AccountActionTokenType =
   (typeof ACCOUNT_ACTION_TOKEN_TYPES)[number];
 
 export type AccountActionTokenStatus =
-  | "active"
-  | "used"
-  | "revoked"
-  | "expired";
+  "active" | "used" | "revoked" | "expired";
 
 export interface AccountActionTokenRow {
   id: string;

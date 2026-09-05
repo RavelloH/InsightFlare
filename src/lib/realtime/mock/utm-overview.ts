@@ -522,12 +522,7 @@ export function generateDemoOverviewGeoTab(
   siteId: string,
   params: Record<string, string | number>,
   tab:
-    | "country"
-    | "region"
-    | "city"
-    | "continent"
-    | "timezone"
-    | "organization",
+    "country" | "region" | "city" | "continent" | "timezone" | "organization",
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());

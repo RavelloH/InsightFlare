@@ -102,10 +102,7 @@ export const REQUEST_ANALYTICS_DOUBLE_SLOTS = {
 } as const;
 
 export type RequestAnalyticsCategory =
-  | "normal"
-  | "suspected_bot"
-  | "bot"
-  | "custom_block";
+  "normal" | "suspected_bot" | "bot" | "custom_block";
 
 export const REQUEST_ANALYTICS_CATEGORIES = [
   "normal",

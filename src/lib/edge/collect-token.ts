@@ -8,8 +8,7 @@ const COLLECT_TOKEN_KEY_ID = "collect-v1";
 export const COLLECT_TOKEN_TTL_SECONDS = 12 * 60 * 60;
 
 export type CollectTokenVerificationResult =
-  | { ok: true; payload: CollectTokenPayload }
-  | { ok: false; reason: string };
+  { ok: true; payload: CollectTokenPayload } | { ok: false; reason: string };
 
 export interface CollectTokenPayload {
   aud: string;

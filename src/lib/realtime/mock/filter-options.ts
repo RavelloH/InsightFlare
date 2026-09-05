@@ -368,9 +368,7 @@ export function generateDemoFilterValues(
   siteId: string,
   params: Record<string, string | number>,
   audience:
-    | "private-dashboard"
-    | "public-share"
-    | "api-v1" = "private-dashboard",
+    "private-dashboard" | "public-share" | "api-v1" = "private-dashboard",
 ): Record<string, unknown> {
   const field = normalizeDemoFilterValue(params.filterKey);
   const definition = field ? analyticsFilterDefinition(field) : undefined;

@@ -84,12 +84,7 @@ export interface ApiKeyData {
 }
 
 export type NotificationDeliveryStatus =
-  | "created"
-  | "sending"
-  | "sent"
-  | "partial"
-  | "failed"
-  | "skipped";
+  "created" | "sending" | "sent" | "partial" | "failed" | "skipped";
 
 export interface NotificationRuleData {
   id: string;

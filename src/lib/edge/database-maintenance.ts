@@ -10,9 +10,7 @@ const STALE_RUNNING_MS = 6 * 60 * 60 * 1000;
 async function deleteExpiredInBatches(
   context: ScheduledTaskContext,
   table:
-    | "scheduled_task_run_logs"
-    | "scheduled_task_runs"
-    | "notification_messages",
+    "scheduled_task_run_logs" | "scheduled_task_runs" | "notification_messages",
 ): Promise<number> {
   let deleted = 0;
   for (let batch = 0; batch < MAX_DELETE_BATCHES_PER_TABLE; batch += 1) {

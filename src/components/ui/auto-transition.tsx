@@ -7,12 +7,7 @@ import {
 } from "motion/react";
 
 export type TransitionType =
-  | "fade"
-  | "slide"
-  | "scale"
-  | "slideUp"
-  | "slideDown"
-  | "crossFade";
+  "fade" | "slide" | "scale" | "slideUp" | "slideDown" | "crossFade";
 
 export interface AutoTransitionProps extends Omit<
   React.HTMLAttributes<HTMLElement>,

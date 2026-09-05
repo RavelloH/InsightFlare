@@ -10,11 +10,7 @@ import { pickDemoGeoContext } from "@/lib/realtime/mock/dimension-pickers";
 
 type WindowMinutes = 60 | 1440 | 10080 | 43200;
 type DemoNormalEventKind =
-  | "pageview"
-  | "leave"
-  | "visibility"
-  | "custom_event"
-  | "identify";
+  "pageview" | "leave" | "visibility" | "custom_event" | "identify";
 
 type DemoRequestCategory = "normal" | "suspected_bot" | "bot" | "custom_block";
 type DemoRequestDisposition = "included" | "blocked";

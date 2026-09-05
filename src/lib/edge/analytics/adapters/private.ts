@@ -433,9 +433,7 @@ export function executePrivateQuery(
           input.siteId,
           input.url,
           input.pathname as
-            | "visitor-events"
-            | "visitor-sessions"
-            | "session-events",
+            "visitor-events" | "visitor-sessions" | "session-events",
           ctx,
           queryContext,
         ),

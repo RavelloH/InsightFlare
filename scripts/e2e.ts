@@ -67,10 +67,7 @@ interface MockEmail {
 }
 
 type ResendMockMode =
-  | "bad_request"
-  | "rate_limited"
-  | "server_error"
-  | "success";
+  "bad_request" | "rate_limited" | "server_error" | "success";
 
 const E2E_GITHUB_RELEASES = [
   {

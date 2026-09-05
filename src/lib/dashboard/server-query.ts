@@ -16,8 +16,7 @@ export interface ResolvedTeamDashboardRequest {
 }
 
 export type TeamDashboardRequestResolution =
-  | ResolvedTeamDashboardRequest
-  | Response;
+  ResolvedTeamDashboardRequest | Response;
 
 /** Resolves authenticated SSR inputs without bypassing existing team ACLs. */
 export async function resolveTeamDashboardRequest(input: {

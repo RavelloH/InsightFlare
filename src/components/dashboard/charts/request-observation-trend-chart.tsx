@@ -86,11 +86,7 @@ export interface RequestObservationTrendLabels {
 }
 
 export type RequestObservationTrendVariant =
-  | "overview"
-  | "traffic-composition"
-  | "latency"
-  | "blocked"
-  | "included";
+  "overview" | "traffic-composition" | "latency" | "blocked" | "included";
 
 export interface RequestObservationTrendChartProps {
   data: ReadonlyArray<RequestObservationTrendPoint>;

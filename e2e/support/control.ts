@@ -15,10 +15,7 @@ export type MockEmail = {
 };
 
 export type ResendMockMode =
-  | "bad_request"
-  | "rate_limited"
-  | "server_error"
-  | "success";
+  "bad_request" | "rate_limited" | "server_error" | "success";
 
 export function createE2eControlClient(input: {
   controlToken: string;

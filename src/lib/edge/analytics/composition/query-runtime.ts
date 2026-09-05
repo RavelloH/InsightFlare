@@ -11,8 +11,7 @@ import type {
 } from "@/lib/edge/analytics/contract";
 
 type CanonicalRuntimeQuery =
-  | BaseQuery
-  | (BaseQuery & Readonly<Record<string, unknown>>);
+  BaseQuery | (BaseQuery & Readonly<Record<string, unknown>>);
 
 export interface AnalyticsQueryRuntime {
   readonly providerRegistry: AnalyticsProviderRegistry;

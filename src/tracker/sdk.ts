@@ -390,8 +390,7 @@ function scheduleRouteChange(nextHref: string, nextReferrerUrl: string): void {
 
 function wrapHistoryMethod(methodName: "pushState" | "replaceState"): void {
   const original = history[methodName] as
-    | ((...args: any[]) => void)
-    | undefined;
+    ((...args: any[]) => void) | undefined;
   if (!original) return;
   history[methodName] = function (this: any, ...args: any[]) {
     const result = original.apply(this, args);

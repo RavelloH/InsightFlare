@@ -1,10 +1,5 @@
 export type NotificationRuleType =
-  | "report"
-  | "milestone"
-  | "threshold"
-  | "change"
-  | "health"
-  | "test";
+  "report" | "milestone" | "threshold" | "change" | "health" | "test";
 
 export type NotificationMessageType =
   | "report"
@@ -18,12 +13,7 @@ export type NotificationMessageType =
 export type NotificationSeverity = "info" | "success" | "warning" | "critical";
 
 export type NotificationDeliveryStatus =
-  | "created"
-  | "sending"
-  | "sent"
-  | "partial"
-  | "failed"
-  | "skipped";
+  "created" | "sending" | "sent" | "partial" | "failed" | "skipped";
 
 export type NotificationChannel = "inApp" | "email" | "webPush";
 

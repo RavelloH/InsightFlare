@@ -19,9 +19,7 @@ export type FilterStorageProfile =
  */
 export type FilterFieldSource = "visit" | "event" | "session" | "payload";
 export type FilterPresenceSemantics =
-  | "non-null-column"
-  | "derived-session-value"
-  | "json-pointer";
+  "non-null-column" | "derived-session-value" | "json-pointer";
 export type FilterEmptySemantics = "raw-empty-string" | "unsupported";
 export type FilterComparisonSemantics = "case-sensitive" | "case-insensitive";
 
@@ -394,8 +392,7 @@ export function analyticsFilterDefinition(
   fieldId: string,
 ): RegisteredFilterField | undefined {
   return analyticsFilterRegistry.get(fieldId) as
-    | RegisteredFilterField
-    | undefined;
+    RegisteredFilterField | undefined;
 }
 
 export function analyticsFilterOperators(

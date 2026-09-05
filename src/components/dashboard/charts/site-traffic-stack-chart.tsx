@@ -633,8 +633,7 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
               state.activePayload.length > 0
             ) {
               const activePoint = state.activePayload[0].payload as
-                | SiteTrafficChartRow
-                | undefined;
+                SiteTrafficChartRow | undefined;
               onHoverPoint(activePoint ?? null);
             } else {
               onHoverPoint(null);

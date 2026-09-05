@@ -62,8 +62,7 @@ export const DonutChart = memo(function DonutChart({
             cursor={false}
             content={({ active, payload }) => {
               const item = payload?.[0]?.payload as
-                | DonutChartDataPoint
-                | undefined;
+                DonutChartDataPoint | undefined;
               if (!active || !item) return null;
 
               return (

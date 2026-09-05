@@ -2,10 +2,7 @@ import { HIDDEN_LEAVE_GRACE_MS, VISIT_TIMEOUT_MS } from "./ingest-constants";
 import type { SqlReader } from "./ingest-types";
 
 export type ScheduleReason =
-  | "flush"
-  | "hidden_fallback"
-  | "visit_timeout"
-  | "session_timeout";
+  "flush" | "hidden_fallback" | "visit_timeout" | "session_timeout";
 
 export interface NextDueWork {
   nextDueAt: number | null;

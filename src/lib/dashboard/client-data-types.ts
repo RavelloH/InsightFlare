@@ -30,10 +30,7 @@ export type PagesDashboardRow = PagesDashboardRows[number];
 
 export type SortDirection = "asc" | "desc";
 export type VisitorListSortKey =
-  | "firstSeenAt"
-  | "lastSeenAt"
-  | "sessions"
-  | "views";
+  "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
 export type SessionListSortKey = "startedAt" | "durationMs" | "views";
 export type EventRecordSortKey = "occurredAt" | "eventName" | "pathname";
 export type RetentionGranularity = TimeWindow["interval"];
@@ -50,29 +47,15 @@ export type FetchPrivateJsonOptions = {
 };
 
 export type OverviewPageCardTab =
-  | "path"
-  | "query"
-  | "title"
-  | "hostname"
-  | "entry"
-  | "exit";
+  "path" | "query" | "title" | "hostname" | "entry" | "exit";
 
 export type OverviewSourceCardTab = "domain" | "link" | "channel";
 
 export type OverviewClientDimensionTab =
-  | "browser"
-  | "osVersion"
-  | "deviceType"
-  | "language"
-  | "screenSize";
+  "browser" | "osVersion" | "deviceType" | "language" | "screenSize";
 
 export type OverviewGeoDimensionTab =
-  | "country"
-  | "region"
-  | "city"
-  | "continent"
-  | "timezone"
-  | "organization";
+  "country" | "region" | "city" | "continent" | "timezone" | "organization";
 
 export type DashboardFilterOptionKey = Exclude<
   AnalyticsFilterFieldId,
@@ -80,8 +63,4 @@ export type DashboardFilterOptionKey = Exclude<
 >;
 
 export type UtmDimensionTab =
-  | "source"
-  | "medium"
-  | "campaign"
-  | "term"
-  | "content";
+  "source" | "medium" | "campaign" | "term" | "content";

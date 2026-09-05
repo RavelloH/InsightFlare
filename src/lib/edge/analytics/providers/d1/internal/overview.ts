@@ -460,11 +460,7 @@ export async function buildOverviewGeoDimensionTabs(
 }
 
 export type OverviewPageTabKey =
-  | "path"
-  | "title"
-  | "hostname"
-  | "entry"
-  | "exit";
+  "path" | "title" | "hostname" | "entry" | "exit";
 
 export type OverviewSourceTabKey = "domain" | "link";
 
@@ -474,9 +470,4 @@ export type OverviewClientTabKey = Exclude<
 >;
 
 export type OverviewGeoTabKey =
-  | "country"
-  | "region"
-  | "city"
-  | "continent"
-  | "timezone"
-  | "organization";
+  "country" | "region" | "city" | "continent" | "timezone" | "organization";

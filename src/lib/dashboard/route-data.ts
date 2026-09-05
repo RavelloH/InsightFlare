@@ -94,9 +94,8 @@ export const loadDashboardRoot = createServerFn({ method: "GET" }).handler(() =>
 /** Provides the SSR-safe initial query window to the dashboard shell. */
 export const loadDashboardInitialWindow = createServerFn({
   method: "GET",
-}).handler(
-  (): TimeWindow =>
-    resolveDashboardInitialWindow(getRequest().headers.get("cookie")),
+}).handler((): TimeWindow =>
+  resolveDashboardInitialWindow(getRequest().headers.get("cookie")),
 );
 
 export const loadDashboardTeam = createServerFn({ method: "GET" })

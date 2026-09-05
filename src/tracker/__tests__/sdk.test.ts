@@ -125,6 +125,14 @@ describe("Tracker Browser SDK Integration Suite", () => {
       writable: true,
       configurable: true,
     });
+    // Reset happy-dom's full URL as well as the current path. Some anchor tests
+    // exercise cross-origin navigation, which otherwise leaks into later cases.
+    const happyDom = (
+      window as typeof window & {
+        happyDOM?: { setURL?: (url: string) => void };
+      }
+    ).happyDOM;
+    happyDom?.setURL?.("http://localhost:3000/");
     history.replaceState({}, "", "/");
     window.localStorage.clear();
     window.sessionStorage.clear();

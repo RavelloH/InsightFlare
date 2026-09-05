@@ -21,12 +21,7 @@ import type { Locale } from "@/lib/i18n/config";
 import { cn } from "@/lib/utils";
 
 export type PerformanceRadarMetricKey =
-  | "duration"
-  | "engagement"
-  | "depth"
-  | "loyalty"
-  | "frequency"
-  | "traffic";
+  "duration" | "engagement" | "depth" | "loyalty" | "frequency" | "traffic";
 
 export const PERFORMANCE_RADAR_METRIC_KEYS = [
   "duration",

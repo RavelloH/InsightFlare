@@ -26,12 +26,7 @@ import {
 import type { AppMessages } from "@/lib/i18n/messages";
 
 type PreviewType =
-  | "test"
-  | "report"
-  | "milestone"
-  | "threshold"
-  | "change"
-  | "health";
+  "test" | "report" | "milestone" | "threshold" | "change" | "health";
 type PreviewFormat = "html" | "text" | "json";
 type NotificationEmailPreview = {
   subject: string;

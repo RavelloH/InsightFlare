@@ -13,12 +13,7 @@ import { readRetentionConfig } from "./retention-config";
 import type { Env } from "./types";
 
 type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 type LogData = Record<string, JsonValue>;
 

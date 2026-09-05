@@ -362,18 +362,9 @@ type PageCardDetailTab = "path" | "entry" | "exit";
 type SourceCardTab = "domain" | "link" | "channel";
 type OverviewPagesSectionCardKind = "page" | "source" | "client" | "geo";
 type ClientDimensionCardTab =
-  | "browser"
-  | "osVersion"
-  | "deviceType"
-  | "language"
-  | "screenSize";
+  "browser" | "osVersion" | "deviceType" | "language" | "screenSize";
 type GeoDimensionCardTab =
-  | "country"
-  | "region"
-  | "city"
-  | "continent"
-  | "timezone"
-  | "organization";
+  "country" | "region" | "city" | "continent" | "timezone" | "organization";
 type GeoLocationTab = Extract<
   GeoDimensionCardTab,
   "country" | "region" | "city"

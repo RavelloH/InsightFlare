@@ -37,8 +37,7 @@ export function applyDemoFilters(
   const equalsCaseInsensitive = (left: string, right: string) =>
     left.trim().toLowerCase() === right.toLowerCase();
   const channel = filters.channel?.trim().toLowerCase() as
-    | TrafficChannelId
-    | undefined;
+    TrafficChannelId | undefined;
 
   for (const visit of dataset.visits) {
     if (

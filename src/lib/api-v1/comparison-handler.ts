@@ -275,8 +275,7 @@ function resolveSides(
   input: {
     readonly current: SiteReportInput["current"] | TeamReportInput["current"];
     readonly reference:
-      | SiteReportInput["reference"]
-      | TeamReportInput["reference"];
+      SiteReportInput["reference"] | TeamReportInput["reference"];
     readonly timeZone: string;
     readonly scope?: FilterScopePreference;
   },
@@ -331,8 +330,7 @@ function trendInterval(input: SiteReportInput | TeamReportInput) {
 
 function trendMetrics(input: SiteReportInput | TeamReportInput) {
   return input.select.trend?.metrics as
-    | readonly ComparisonMetricKey[]
-    | undefined;
+    readonly ComparisonMetricKey[] | undefined;
 }
 
 function metricKeys(input: SiteReportInput | TeamReportInput) {
@@ -644,8 +642,7 @@ async function executeBreakdown(
   limit: number,
   sort: ComparisonBreakdownQuery["sort"],
   operation:
-    | "site.analytics.comparisonBreakdown"
-    | "team.analytics.comparisonBreakdown",
+    "site.analytics.comparisonBreakdown" | "team.analytics.comparisonBreakdown",
   subject: {
     readonly siteId?: string;
     readonly teamId?: string;
@@ -947,8 +944,7 @@ async function breakdownHandler(
     readonly allowedSiteIds?: readonly string[];
   },
   operation:
-    | "site.analytics.comparisonBreakdown"
-    | "team.analytics.comparisonBreakdown",
+    "site.analytics.comparisonBreakdown" | "team.analytics.comparisonBreakdown",
 ): Promise<Response> {
   if (
     !ANALYTICS_DIMENSIONS.includes(

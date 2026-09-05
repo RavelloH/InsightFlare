@@ -211,7 +211,7 @@ function removeArrayTables(
   const nextLines: string[] = [];
   let removed = 0;
 
-  for (let index = 0; index < lines.length; ) {
+  for (let index = 0; index < lines.length;) {
     if (lines[index]?.trim() !== header) {
       nextLines.push(lines[index] ?? "");
       index += 1;

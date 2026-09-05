@@ -254,8 +254,7 @@ export interface ApiV1GeneratedFailure {
 }
 
 export type ApiV1GeneratedResult<T> =
-  | ApiV1GeneratedSuccess<T>
-  | ApiV1GeneratedFailure;
+  ApiV1GeneratedSuccess<T> | ApiV1GeneratedFailure;
 
 export class ApiV1GeneratedTransportError extends Error {
   constructor(message: string) {

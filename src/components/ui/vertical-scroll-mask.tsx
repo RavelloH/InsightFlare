@@ -49,8 +49,7 @@ export function VerticalScrollMask({
     const current =
       viewport ??
       (scrollbarRef.current?.elements().viewport as
-        | HTMLDivElement
-        | undefined) ??
+        HTMLDivElement | undefined) ??
       hostRef.current;
     if (!current) return;
 

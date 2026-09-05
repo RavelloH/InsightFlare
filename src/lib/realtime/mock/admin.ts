@@ -1776,17 +1776,15 @@ export function generateDemoSystemPerformance(
       .filter((event) => event.latencyMs > 0)
       .sort((left, right) => right.latencyMs - left.latencyMs)
       .slice(0, 10)
-      .map(
-        (event): SystemPerformanceSlowEvent => ({
-          kind: event.kind,
-          siteId: event.siteId,
-          siteName: event.siteName,
-          siteDomain: event.siteDomain,
-          eventAt: event.eventAt,
-          serverAt: event.serverAt,
-          latencyMs: event.latencyMs,
-        }),
-      ),
+      .map((event): SystemPerformanceSlowEvent => ({
+        kind: event.kind,
+        siteId: event.siteId,
+        siteName: event.siteName,
+        siteDomain: event.siteDomain,
+        eventAt: event.eventAt,
+        serverAt: event.serverAt,
+        latencyMs: event.latencyMs,
+      })),
   };
 }
 

@@ -25,13 +25,7 @@ function getAppVersion(): string {
 }
 
 type HttpMethod =
-  | "get"
-  | "post"
-  | "put"
-  | "patch"
-  | "delete"
-  | "options"
-  | "head";
+  "get" | "post" | "put" | "patch" | "delete" | "options" | "head";
 
 interface Operation {
   operationId: string;
@@ -315,8 +309,7 @@ function forEachOperationSchema(
       }
       const requestContents = (
         operation.requestBody as
-          | { content?: Record<string, unknown> }
-          | undefined
+          { content?: Record<string, unknown> } | undefined
       )?.content;
       for (const content of Object.values(requestContents ?? {})) {
         const schema =
@@ -4155,11 +4148,9 @@ function populateTypedApiV1Examples(spec: OpenAPISpec): void {
       for (const body of bodies) {
         if (!body || typeof body !== "object") continue;
         const content = (body as Record<string, unknown>).content as
-          | Record<string, unknown>
-          | undefined;
+          Record<string, unknown> | undefined;
         const jsonContent = content?.[json] as
-          | Record<string, unknown>
-          | undefined;
+          Record<string, unknown> | undefined;
         if (!jsonContent?.schema) continue;
         const example = exampleForSchema(spec, jsonContent.schema);
         if (example === undefined) continue;

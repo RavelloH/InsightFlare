@@ -276,8 +276,7 @@ interface VisitorActivityDayItem {
 }
 
 type VisitorActivityCalendarCell =
-  | { type: "empty"; key: string }
-  | VisitorActivityCalendarDayCell;
+  { type: "empty"; key: string } | VisitorActivityCalendarDayCell;
 
 interface VisitorActivityCalendarDayCell extends VisitorActivityDayItem {
   type: "day";

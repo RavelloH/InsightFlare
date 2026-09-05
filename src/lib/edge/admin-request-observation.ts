@@ -68,12 +68,7 @@ type RequestObservationCategory = RequestAnalyticsCategory;
 type RequestObservationDisposition = RequestAnalyticsDisposition;
 type RequestObservationInterval = "minute" | "hour" | "day" | "week";
 type NetworkDimension =
-  | "asOrganization"
-  | "asn"
-  | "country"
-  | "region"
-  | "city"
-  | "colo";
+  "asOrganization" | "asn" | "country" | "region" | "city" | "colo";
 type DetailSource = "blocked" | "included";
 type DimensionGroup = "detection" | "target" | "network" | "client";
 

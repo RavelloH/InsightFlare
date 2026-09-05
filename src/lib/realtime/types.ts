@@ -6,10 +6,7 @@ import type {
 } from "@/schemas/realtime";
 
 export type RealtimeConnectionState =
-  | "connecting"
-  | "connected"
-  | "disconnected"
-  | "failed";
+  "connecting" | "connected" | "disconnected" | "failed";
 
 export type RealtimeEventKind = RealtimeEntityEventKind;
 export type RealtimeEvent = RealtimeEntityEvent;

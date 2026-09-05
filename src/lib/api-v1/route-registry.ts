@@ -140,8 +140,7 @@ export interface ApiV1AnalyticsRouteDescriptor<Id extends string> {
     readonly scopes: readonly string[];
   }[];
   readonly requestSchema:
-    | typeof SiteOverviewQueryDtoSchema
-    | typeof TeamOverviewQueryDtoSchema;
+    typeof SiteOverviewQueryDtoSchema | typeof TeamOverviewQueryDtoSchema;
   readonly responseSchema: typeof AnalyticsOverviewResponseSchema;
   readonly declaredErrors: readonly ApiV1ErrorCode[];
 }
@@ -194,8 +193,7 @@ export interface ApiV1AnalyticsTimeseriesRouteDescriptor<Id extends string> {
   readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
   readonly operationId: AnalyticsOperationId;
   readonly requestSchema:
-    | typeof SiteTimeseriesQueryDtoSchema
-    | typeof TeamTimeseriesQueryDtoSchema;
+    typeof SiteTimeseriesQueryDtoSchema | typeof TeamTimeseriesQueryDtoSchema;
   readonly responseSchema: typeof AnalyticsTimeseriesResponseSchema;
   readonly declaredErrors: readonly string[];
 }
@@ -344,8 +342,7 @@ export interface ApiV1AnalyticsEventsRouteDescriptor<Id extends string> {
   readonly method: "POST";
   readonly path: string;
   readonly operationId:
-    | "site.analytics.eventsSummary"
-    | "site.analytics.eventsTimeseries";
+    "site.analytics.eventsSummary" | "site.analytics.eventsTimeseries";
   readonly scopes: readonly string[];
   readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
   readonly requestSchema:
@@ -363,8 +360,7 @@ export interface ApiV1AnalyticsEventRecordsRouteDescriptor<Id extends string> {
   readonly method: "POST";
   readonly path: string;
   readonly operationId:
-    | "site.analytics.eventsSearch"
-    | "site.analytics.eventDetail";
+    "site.analytics.eventsSearch" | "site.analytics.eventDetail";
   readonly scopes: readonly string[];
   readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
   readonly requestSchema:
@@ -430,8 +426,7 @@ export interface ApiV1AnalyticsJourneySearchRouteDescriptor<Id extends string> {
   readonly method: "POST";
   readonly path: string;
   readonly operationId:
-    | "site.analytics.visitorsSearch"
-    | "site.analytics.sessionsSearch";
+    "site.analytics.visitorsSearch" | "site.analytics.sessionsSearch";
   readonly scopes: readonly string[];
   readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
   readonly requestSchema:

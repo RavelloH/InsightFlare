@@ -55,10 +55,7 @@ import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
 export type EventDetailDrawerKind =
-  | "session_start"
-  | "pageview"
-  | "leave"
-  | "custom";
+  "session_start" | "pageview" | "leave" | "custom";
 
 export type EventDetailDrawerLabels = AppMessages["events"];
 type EventPageCopy = EventDetailDrawerLabels;

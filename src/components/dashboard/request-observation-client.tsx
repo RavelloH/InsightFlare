@@ -103,10 +103,7 @@ interface RequestObservationClientProps {
 }
 
 type RequestObservationCategory =
-  | "normal"
-  | "suspected_bot"
-  | "bot"
-  | "custom_block";
+  "normal" | "suspected_bot" | "bot" | "custom_block";
 type RequestObservationDisposition = "included" | "blocked";
 
 interface RequestObservationSampling {
@@ -927,25 +924,13 @@ function requestObservationUiLabels(
 }
 
 type DetectionDimensionTab =
-  | "reason"
-  | "category"
-  | "kind"
-  | "botScoreBucket"
-  | "verifiedBotCategory";
+  "reason" | "category" | "kind" | "botScoreBucket" | "verifiedBotCategory";
 type TargetDimensionTab = "site" | "hostname" | "pathname" | "origin";
 type IncludedTargetDimensionTab = "category" | TargetDimensionTab;
 type NetworkDimensionTab =
-  | "asOrganization"
-  | "asn"
-  | "country"
-  | "region"
-  | "city"
-  | "colo";
+  "asOrganization" | "asn" | "country" | "region" | "city" | "colo";
 type ClientDimensionTab =
-  | "ip"
-  | "userAgent"
-  | "userAgentLengthBucket"
-  | "ipPrefix";
+  "ip" | "userAgent" | "userAgentLengthBucket" | "ipPrefix";
 
 interface BotDimensionRow {
   label: string;

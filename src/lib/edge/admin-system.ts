@@ -449,8 +449,7 @@ async function fetchDoDiagnostic(
       };
     }
     const payload = (await response.json()) as
-      | DoDiagnosticPayload
-      | { ok: false; error?: string };
+      DoDiagnosticPayload | { ok: false; error?: string };
     if ("ok" in payload && payload.ok === true) {
       return {
         ...baseEntry,

@@ -10,11 +10,7 @@ export interface CheckProgressStep {
 }
 
 type ProgressStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
+  "pending" | "running" | "completed" | "failed" | "skipped";
 
 interface ProgressStepState extends CheckProgressStep {
   status: ProgressStatus;

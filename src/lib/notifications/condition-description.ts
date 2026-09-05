@@ -8,11 +8,7 @@ import { formatI18nTemplate } from "@/lib/i18n/template";
 type NotificationCopy = AppMessages["teamManagement"]["notifications"];
 type DescriptionTerms = AppMessages["conditionDescription"];
 type NotificationRuleType =
-  | "report"
-  | "milestone"
-  | "threshold"
-  | "change"
-  | "health";
+  "report" | "milestone" | "threshold" | "change" | "health";
 
 export interface NotificationMetricConditionDescriptionInput {
   readonly metric: string;

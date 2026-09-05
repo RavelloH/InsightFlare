@@ -470,8 +470,7 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
                   state.activePayload.length > 0
                 ) {
                   const activePoint = state.activePayload[0]?.payload as
-                    | EventTrendChartDataPoint
-                    | undefined;
+                    EventTrendChartDataPoint | undefined;
                   handleHoverPoint(activePoint ?? null);
                 } else {
                   handleHoverPoint(null);

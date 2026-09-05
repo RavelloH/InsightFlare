@@ -320,8 +320,8 @@ function gapConnectorPaths(
 ): string[] {
   const paths: string[] = [];
   let previous:
-    | (TrendConnectorLinePoint & { x: number; y: number; index: number })
-    | null = null;
+    (TrendConnectorLinePoint & { x: number; y: number; index: number }) | null =
+    null;
 
   points.forEach((point, index) => {
     if (!isRenderedTrendPoint(point, seriesKey)) return;
