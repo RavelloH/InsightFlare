@@ -166,6 +166,50 @@ describe("API v1 query application adapter", () => {
     ).toMatch(/^[0-9a-f]{64}$/u);
   });
 
+  it("does not bind API v1 cursors to the requested page size", async () => {
+    const bindings: string[] = [];
+    const registry = new AnalyticsProviderRegistry().register(
+      canonicalQueryOperationFor("site.analytics.overview"),
+      {
+        execute: async (query) => {
+          const binding = (
+            query as unknown as { time: { paginationBinding: string } }
+          ).time.paginationBinding;
+          bindings.push(binding);
+          return { value: { views: 1 } };
+        },
+      },
+    );
+    const query = {
+      context,
+      time,
+      filters: EMPTY_FILTER_DOCUMENT,
+    };
+
+    await executeApiV1Query(
+      undefined,
+      {
+        ...invocation(registry, query),
+        rawRequest: { page: { limit: 10, cursor: null }, search: "docs" },
+      },
+      {},
+    );
+    await executeApiV1Query(
+      undefined,
+      {
+        ...invocation(registry, query),
+        rawRequest: {
+          page: { limit: 100, cursor: "previous-page-cursor" },
+          search: "docs",
+        },
+      },
+      {},
+    );
+
+    expect(bindings).toHaveLength(2);
+    expect(bindings[0]).toBe(bindings[1]);
+  });
+
   it("translates provider cursor failures to the typed API v1 error", async () => {
     const registry = new AnalyticsProviderRegistry().register(
       canonicalQueryOperationFor("site.analytics.overview"),

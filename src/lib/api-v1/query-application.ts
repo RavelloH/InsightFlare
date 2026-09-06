@@ -72,7 +72,7 @@ function queryTime(
   return undefined;
 }
 
-function rawRequestWithoutCursor(value: unknown): unknown {
+function rawRequestWithoutPaging(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return value;
   }
@@ -82,8 +82,8 @@ function rawRequestWithoutCursor(value: unknown): unknown {
     return value;
   }
   const pageRecord = page as Record<string, unknown>;
-  const { cursor: _cursor, ...pageWithoutCursor } = pageRecord;
-  return { ...record, page: pageWithoutCursor };
+  const { cursor: _cursor, limit: _limit, ...pageWithoutPaging } = pageRecord;
+  return { ...record, page: pageWithoutPaging };
 }
 
 async function apiV1RequestPaginationBinding(
@@ -100,11 +100,11 @@ async function apiV1RequestPaginationBinding(
           authorizedSiteIds: [...subject.authorizedSiteIds].sort(),
         };
   return paginationBinding([
-    "api-v1-request-pagination-v1",
+    "api-v1-request-pagination-v2",
     operation,
     context.policy.audience,
     canonicalSubject,
-    rawRequestWithoutCursor(query),
+    rawRequestWithoutPaging(query),
   ]);
 }
 
