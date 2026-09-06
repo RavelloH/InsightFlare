@@ -131,7 +131,9 @@ export async function queryTopPagesFromD1(
   filters: FilterDocument,
 ): Promise<PageRow[]> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const queryExpr = includeDetails ? "query_string" : "''";
   const hashExpr = includeDetails ? "hash_fragment" : "''";
   const sql = `
@@ -214,7 +216,9 @@ export async function queryPagesPageFromD1(
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<PageRow>> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const queryExpr = includeDetails ? "query_string" : "''";
   const hashExpr = includeDetails ? "hash_fragment" : "''";
   const cursorClause = cursor
@@ -375,7 +379,9 @@ export async function queryPagesWithTabsFromD1(
   audience: QueryAudience = "private-dashboard",
 ): Promise<PagesWithTabsResult> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const queryExpr = includeDetails ? "query_string" : "''";
   const hashExpr = includeDetails ? "hash_fragment" : "''";
   const expandEntities = !scopedDataset && Boolean(filter?.clause);
@@ -660,7 +666,9 @@ export async function queryPageCardMetricsFromD1(
   },
 ): Promise<PageCardAggregateRow[]> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const requestedPathnames = Array.from(
     new Set(
       (options?.pathnames ?? [])
@@ -786,7 +794,9 @@ export async function queryPageCardTitlesFromD1(
   if (requestedPathnames.length === 0) return [];
 
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const filteredClause = appendSqlConditions(filter?.clause ?? "", [
     `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
   ]);
@@ -859,7 +869,9 @@ export async function queryPageCardTrendFromD1(
   if (requestedPathnames.length === 0) return [];
 
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "startedAt");
   const filteredClause = appendSqlConditions(filter?.clause ?? "", [
@@ -924,7 +936,9 @@ async function queryPageCardDetailsFromD1(
   if (requestedPathnames.length === 0) return { titles: [], trend: [] };
 
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "startedAt");
   const filteredClause = appendSqlConditions(filter?.clause ?? "", [
@@ -1079,7 +1093,9 @@ export async function queryReferrerSummaryFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<ReferrerSummaryRow> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const source = scopedDataset?.visitRelation ?? "visit_source";
   const ctes = scopedDataset?.ctes ?? buildVisitSourceCte();
   const bindings = scopedDataset
@@ -1174,7 +1190,9 @@ export async function queryReferrersPageFromD1(
   sortDirection: "asc" | "desc" = "desc",
 ): Promise<PageResult<ReferrerRow>> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
   const primary = sortBy === "visitors" ? "visitors" : "views";
   const secondary = sortBy === "visitors" ? "views" : "sessions";

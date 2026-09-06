@@ -41,7 +41,7 @@ export async function queryRetentionFromD1(
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
   const filter = scopedDataset
     ? null
-    : buildVisitFilterSql(filters, "all_visits");
+    : buildVisitFilterSql(filters, "all_visits", { window });
   const visitRelation = scopedDataset?.visitRelation ?? "visit_source";
   const sql = `
 WITH

@@ -60,7 +60,7 @@ export async function queryOverviewFromD1(
   recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const filter = scopedDataset
     ? { clause: "", bindings: [] as Array<string | number> }
-    : buildVisitFilterSql(filters);
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const hasFilter = filter.clause.length > 0;
   const expandEntities = !scopedDataset && hasFilter;
   const entityExpansion = expandEntities ? entityExpansionSql() : "";
@@ -138,7 +138,7 @@ export async function queryTrendFromD1(
   recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const filter = scopedDataset
     ? { clause: "", bindings: [] as Array<string | number> }
-    : buildVisitFilterSql(filters);
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const hasFilter = filter.clause.length > 0;
   const expandEntities = !scopedDataset && hasFilter;
   const entityExpansion = expandEntities ? entityExpansionSql() : "";
@@ -316,7 +316,7 @@ export async function queryLatestSiteActivity(
   recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const filter = scopedDataset
     ? { clause: "", bindings: [] as Array<string | number> }
-    : buildVisitFilterSql(filters);
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const hasFilter = filter.clause.length > 0;
   const expandEntities = !scopedDataset && hasFilter;
   const entityExpansion = expandEntities ? entityExpansionSql() : "";

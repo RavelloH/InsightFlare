@@ -1263,8 +1263,10 @@ describe("edge query handlers", () => {
     expect(aggregateStatement?.bindings).toEqual(
       expect.arrayContaining(["us", "example.com"]),
     );
+    expect(aggregateStatement?.sql).toContain("scope_matching_visits AS");
+    expect(aggregateStatement?.sql).toContain("scope_matching_events AS");
     expect(aggregateStatement?.sql).toContain(
-      "LOWER(TRIM(COALESCE(rv.referrer_host, ''))) = ''",
+      "LOWER(TRIM(COALESCE(v.referrer_host, ''))) = ''",
     );
   });
 

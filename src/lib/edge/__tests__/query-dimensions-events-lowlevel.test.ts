@@ -231,8 +231,22 @@ describe("edge query dimensions low-level coverage", () => {
     expect(calls[1].sql).toContain("first_rank = 1");
     expect(calls[0].sql).not.toContain("SELECT COALESCE(fv2.pathname");
     expect(calls[0].sql).toContain("WHERE TRIM(value) != ''");
-    expect(calls[0].bindings).toEqual([...visitBindings(), "Chrome", 5]);
-    expect(calls[1].bindings).toEqual([...visitBindings(), "Chrome", 3]);
+    expect(calls[0].bindings).toEqual([
+      ...visitBindings(),
+      "Chrome",
+      window.startMs,
+      window.endExclusiveMs,
+      "Chrome",
+      5,
+    ]);
+    expect(calls[1].bindings).toEqual([
+      ...visitBindings(),
+      "Chrome",
+      window.startMs,
+      window.endExclusiveMs,
+      "Chrome",
+      3,
+    ]);
   });
 
   it("keeps entry and exit tab results while using one indexed visit source", async () => {
@@ -412,6 +426,24 @@ describe("edge query dimensions low-level coverage", () => {
       database.exec(readFileSync(migration, "utf8"));
     }
     installVisitSiteIdentityFixture(database);
+    database.exec(`
+      DROP TABLE IF EXISTS custom_events;
+      DROP TABLE IF EXISTS custom_event_names;
+      CREATE TABLE custom_event_names (
+        id INTEGER PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        name TEXT NOT NULL
+      );
+      CREATE TABLE custom_events (
+        event_pk INTEGER PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        site_id TEXT NOT NULL,
+        site_pk INTEGER NOT NULL DEFAULT 1,
+        visit_id TEXT NOT NULL,
+        event_name_id INTEGER NOT NULL,
+        occurred_at INTEGER NOT NULL
+      );
+    `);
     const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
     const env = {
       DB: {

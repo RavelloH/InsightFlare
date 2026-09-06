@@ -340,9 +340,9 @@ filterBuilder:
   savedFilterDescription: メモ
   scopeLabel: フィルター対象
   scopeAuto: 現在のページに応じて自動選択
-  scopeEvent: 条件に一致するイベントを絞り込む
-  scopeSession: これらのイベントを含むセッションを絞り込む
-  scopeVisitor: これらのイベントを含む訪問者を絞り込む
+  scopeEvent: 同じページビューまたはイベントで、これらの条件を満たす必要があります
+  scopeSession: 同じセッション内の異なるページビューまたはイベントで、これらの条件を満たせます
+  scopeVisitor: 同じ訪問者の異なるセッションまたは行動で、これらの条件を満たせます
   savedFilterVisibility: 公開範囲
   savedFilterVisibilityPrivate: 自分のみ
   savedFilterVisibilityTeam: チームと共有

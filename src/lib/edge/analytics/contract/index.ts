@@ -8,6 +8,7 @@ export * from "./filter-compiler";
 export * from "./filter-registry";
 export * from "./filters";
 export * from "./helpers";
+export * from "./observation-planner";
 export * from "./operations/index";
 export * from "./overview";
 export * from "./pages";

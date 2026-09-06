@@ -38,7 +38,9 @@ export async function queryChannelsFromD1(
   limit: number,
 ): Promise<ChannelAggregateRow[]> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const channelExpression = buildTrafficChannelCaseSql();
   const sql = `
 WITH

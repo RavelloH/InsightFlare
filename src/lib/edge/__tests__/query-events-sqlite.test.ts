@@ -7,10 +7,12 @@ import {
   EMPTY_FILTER_DOCUMENT,
   normalizeFilterDocument,
   prepareScopedQuery,
+  type QueryAudience,
   type QueryInput,
   type QueryTime,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import type { FilterExpression } from "@/lib/edge/analytics/contract/filters";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import { queryEventFieldsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
@@ -275,6 +277,231 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
     },
     d1,
   } as { env: Env; d1: SqliteD1Database };
+}
+
+type TruthScope = "event" | "session" | "visitor";
+type TruthRelationIds = {
+  visits: string[];
+  events: string[];
+  sessions: string[];
+  visitors: string[];
+};
+
+function truthCondition(field: string, value: string): FilterExpression {
+  return {
+    kind: "condition",
+    target: { kind: "field", field: field as never },
+    operator: "eq",
+    value,
+  };
+}
+
+function truthPayload(value: string): FilterExpression {
+  return {
+    kind: "condition",
+    target: { kind: "event-payload", path: "/plan" as never },
+    operator: "eq",
+    value,
+  };
+}
+
+function truthFilters(root: FilterExpression | null) {
+  return normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
+}
+
+function seedFilterSemanticsTruthFixture(d1: SqliteD1Database): void {
+  // Remove the event-detail seed so every expected relation ID belongs to
+  // this fixture and the four final relations can be asserted directly.
+  d1.database.exec(`
+    DELETE FROM custom_event_json_values;
+    DELETE FROM custom_events;
+    DELETE FROM custom_event_json_paths;
+    DELETE FROM custom_event_names;
+    DELETE FROM visits;
+  `);
+
+  const visits = [
+    [
+      "truth-pricing",
+      "truth-visitor-a",
+      "truth-session-pricing",
+      "/pricing",
+      eventTime - 30,
+    ],
+    [
+      "truth-home",
+      "truth-visitor-b",
+      "truth-session-home",
+      "/home",
+      eventTime - 29,
+    ],
+    [
+      "truth-checkout",
+      "truth-visitor-c",
+      "truth-session-checkout",
+      "/checkout",
+      eventTime - 28,
+    ],
+    [
+      "truth-outside",
+      "truth-visitor-d",
+      "truth-session-outside",
+      "/pricing",
+      window.startMs - 1,
+    ],
+    [
+      "truth-cross-pricing",
+      "truth-visitor-e",
+      "truth-session-cross",
+      "/pricing",
+      eventTime - 27,
+    ],
+    [
+      "truth-cross-event",
+      "truth-visitor-e",
+      "truth-session-cross",
+      "/other",
+      eventTime - 26,
+    ],
+    [
+      "truth-visitor-pricing",
+      "truth-visitor-f",
+      "truth-session-visitor-a",
+      "/pricing",
+      eventTime - 25,
+    ],
+    [
+      "truth-visitor-event",
+      "truth-visitor-f",
+      "truth-session-visitor-b",
+      "/other",
+      eventTime - 24,
+    ],
+    [
+      "truth-multi-home",
+      "truth-visitor-g",
+      "truth-session-multi",
+      "/home",
+      eventTime - 23,
+    ],
+    [
+      "truth-multi-pricing",
+      "truth-visitor-g",
+      "truth-session-multi",
+      "/pricing",
+      eventTime - 22,
+    ],
+  ] as const;
+  const visitStatement = d1.database.prepare(
+    `INSERT INTO visits (
+      visit_id, site_id, visitor_id, session_id, started_at, pathname
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  for (const [visitId, visitorId, sessionId, pathname, startedAt] of visits) {
+    visitStatement.run(
+      visitId,
+      siteId,
+      visitorId,
+      sessionId,
+      startedAt,
+      pathname,
+    );
+  }
+
+  d1.database
+    .prepare(
+      "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+    )
+    .run(110, siteId, "truth_purchase");
+  d1.database
+    .prepare(
+      "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+    )
+    .run(111, siteId, "truth_other");
+
+  const events = [
+    [110, "truth-purchase-home", "truth-home", 110, 1],
+    [111, "truth-purchase-free", "truth-checkout", 110, 2],
+    [112, "truth-other-pro", "truth-checkout", 111, 3],
+    [113, "truth-purchase-outside", "truth-outside", 110, 4],
+    [114, "truth-purchase-cross", "truth-cross-event", 110, 5],
+    [115, "truth-purchase-visitor", "truth-visitor-event", 110, 6],
+  ] as const;
+  const eventStatement = d1.database.prepare(
+    "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  for (const [eventPk, eventId, visitId, eventNameId, sequence] of events) {
+    eventStatement.run(
+      eventPk,
+      eventId,
+      siteId,
+      visitId,
+      eventNameId,
+      eventTime,
+      eventTime,
+      sequence,
+      1,
+      1,
+      null,
+    );
+  }
+  d1.database
+    .prepare("INSERT INTO custom_event_json_paths VALUES (?, ?)")
+    .run(1, "/plan");
+  d1.database
+    .prepare(
+      "INSERT INTO custom_event_json_values VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(111, 1, 1, eventTime, "free", null, null);
+  d1.database
+    .prepare(
+      "INSERT INTO custom_event_json_values VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(112, 1, 1, eventTime, "pro", null, null);
+}
+
+function readTruthRelationIds(
+  d1: SqliteD1Database,
+  root: FilterExpression | null,
+  scopePreference: TruthScope,
+  audience: QueryAudience = "private-dashboard",
+): TruthRelationIds {
+  const filters = truthFilters(root);
+  const prepared = prepareScopedQuery("overview", {
+    context: siteQueryContext(siteId, audience),
+    time: {
+      range: {
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+      },
+      reportingTimeZone: "UTC",
+      capturedAtMs: window.nowMs,
+    },
+    filters,
+    scopePreference,
+  } as QueryInput & { time: QueryTime });
+  const dataset = compileScopedDatasetSql({
+    filters: prepared.filters!,
+    plan: prepared.scopePlan!,
+    siteIds: [siteId],
+    window,
+  });
+  const bindings = dataset.bindings.map(({ value }) => value);
+  const read = (relation: string, column: string): string[] =>
+    (
+      d1.database
+        .prepare(
+          `WITH ${dataset.ctes} SELECT ${column} AS id FROM ${relation} ORDER BY id`,
+        )
+        .all(...bindings) as Array<{ id: string }>
+    ).map(({ id }) => id);
+
+  return {
+    visits: read(dataset.visitRelation, "visit_id"),
+    events: read(dataset.eventRelation, "event_id"),
+    sessions: read(dataset.sessionRelation, "session_id"),
+    visitors: read(dataset.visitorRelation, "visitor_id"),
+  };
 }
 
 describe("event detail D1 SQL", () => {
@@ -1308,6 +1535,292 @@ describe("event detail D1 SQL", () => {
         .prepare(`EXPLAIN QUERY PLAN ${cursorQuery?.sql ?? "SELECT 1"}`)
         .all(...(cursorQuery?.bindings ?? []));
       expect(plan.length).toBeGreaterThan(0);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("freezes the four final relations for cross-observation filter semantics", () => {
+    const { d1 } = createSqliteEventEnv();
+    seedFilterSemanticsTruthFixture(d1);
+
+    const page = truthCondition("page.path", "/pricing");
+    const purchase = truthCondition("event.name", "truth_purchase");
+    const pageAndPurchase: FilterExpression = {
+      kind: "and",
+      children: [page, purchase],
+    };
+    const pageOrPurchase: FilterExpression = {
+      kind: "or",
+      children: [page, purchase],
+    };
+    const notPurchase: FilterExpression = {
+      kind: "not",
+      child: purchase,
+    };
+    const eventAndPro: FilterExpression = {
+      kind: "and",
+      children: [
+        truthCondition("event.name", "truth_other"),
+        truthPayload("pro"),
+      ],
+    };
+
+    try {
+      expect(readTruthRelationIds(d1, page, "event")).toEqual({
+        visits: [
+          "truth-cross-pricing",
+          "truth-multi-pricing",
+          "truth-pricing",
+          "truth-visitor-pricing",
+        ],
+        events: ["truth-purchase-outside"],
+        sessions: [
+          "truth-session-cross",
+          "truth-session-multi",
+          "truth-session-outside",
+          "truth-session-pricing",
+          "truth-session-visitor-a",
+        ],
+        visitors: [
+          "truth-visitor-a",
+          "truth-visitor-d",
+          "truth-visitor-e",
+          "truth-visitor-f",
+          "truth-visitor-g",
+        ],
+      });
+      expect(readTruthRelationIds(d1, purchase, "event")).toEqual({
+        visits: [
+          "truth-checkout",
+          "truth-cross-event",
+          "truth-home",
+          "truth-visitor-event",
+        ],
+        events: [
+          "truth-purchase-cross",
+          "truth-purchase-free",
+          "truth-purchase-home",
+          "truth-purchase-outside",
+          "truth-purchase-visitor",
+        ],
+        sessions: [
+          "truth-session-checkout",
+          "truth-session-cross",
+          "truth-session-home",
+          "truth-session-outside",
+          "truth-session-visitor-b",
+        ],
+        visitors: [
+          "truth-visitor-b",
+          "truth-visitor-c",
+          "truth-visitor-d",
+          "truth-visitor-e",
+          "truth-visitor-f",
+        ],
+      });
+      expect(readTruthRelationIds(d1, pageAndPurchase, "event")).toEqual({
+        visits: [],
+        events: ["truth-purchase-outside"],
+        sessions: ["truth-session-outside"],
+        visitors: ["truth-visitor-d"],
+      });
+      expect(readTruthRelationIds(d1, pageOrPurchase, "event")).toEqual({
+        visits: [
+          "truth-checkout",
+          "truth-cross-event",
+          "truth-cross-pricing",
+          "truth-home",
+          "truth-multi-pricing",
+          "truth-pricing",
+          "truth-visitor-event",
+          "truth-visitor-pricing",
+        ],
+        events: [
+          "truth-purchase-cross",
+          "truth-purchase-free",
+          "truth-purchase-home",
+          "truth-purchase-outside",
+          "truth-purchase-visitor",
+        ],
+        sessions: [
+          "truth-session-checkout",
+          "truth-session-cross",
+          "truth-session-home",
+          "truth-session-multi",
+          "truth-session-outside",
+          "truth-session-pricing",
+          "truth-session-visitor-a",
+          "truth-session-visitor-b",
+        ],
+        visitors: [
+          "truth-visitor-a",
+          "truth-visitor-b",
+          "truth-visitor-c",
+          "truth-visitor-d",
+          "truth-visitor-e",
+          "truth-visitor-f",
+          "truth-visitor-g",
+        ],
+      });
+      expect(readTruthRelationIds(d1, notPurchase, "event")).toEqual({
+        visits: ["truth-checkout"],
+        events: ["truth-other-pro"],
+        sessions: ["truth-session-checkout"],
+        visitors: ["truth-visitor-c"],
+      });
+      expect(readTruthRelationIds(d1, eventAndPro, "event")).toEqual({
+        visits: ["truth-checkout"],
+        events: ["truth-other-pro"],
+        sessions: ["truth-session-checkout"],
+        visitors: ["truth-visitor-c"],
+      });
+
+      expect(readTruthRelationIds(d1, pageAndPurchase, "session")).toEqual({
+        visits: ["truth-cross-event", "truth-cross-pricing"],
+        events: ["truth-purchase-cross", "truth-purchase-outside"],
+        sessions: ["truth-session-cross", "truth-session-outside"],
+        visitors: ["truth-visitor-d", "truth-visitor-e"],
+      });
+      expect(readTruthRelationIds(d1, page, "session")).toEqual({
+        visits: [
+          "truth-cross-event",
+          "truth-cross-pricing",
+          "truth-multi-home",
+          "truth-multi-pricing",
+          "truth-pricing",
+          "truth-visitor-pricing",
+        ],
+        events: ["truth-purchase-cross", "truth-purchase-outside"],
+        sessions: [
+          "truth-session-cross",
+          "truth-session-multi",
+          "truth-session-outside",
+          "truth-session-pricing",
+          "truth-session-visitor-a",
+        ],
+        visitors: [
+          "truth-visitor-a",
+          "truth-visitor-d",
+          "truth-visitor-e",
+          "truth-visitor-f",
+          "truth-visitor-g",
+        ],
+      });
+      expect(readTruthRelationIds(d1, notPurchase, "session")).toEqual({
+        visits: [
+          "truth-multi-home",
+          "truth-multi-pricing",
+          "truth-pricing",
+          "truth-visitor-pricing",
+        ],
+        events: [],
+        sessions: [
+          "truth-session-multi",
+          "truth-session-pricing",
+          "truth-session-visitor-a",
+        ],
+        visitors: ["truth-visitor-a", "truth-visitor-f", "truth-visitor-g"],
+      });
+
+      const neq = readTruthRelationIds(
+        d1,
+        {
+          kind: "condition",
+          target: { kind: "field", field: "page.path" as never },
+          operator: "neq",
+          value: "/home",
+        },
+        "session",
+      );
+      const notEq = readTruthRelationIds(
+        d1,
+        {
+          kind: "not",
+          child: truthCondition("page.path", "/home"),
+        },
+        "session",
+      );
+      expect(neq.visits).toContain("truth-multi-pricing");
+      expect(neq.sessions).toContain("truth-session-multi");
+      expect(notEq.visits).not.toContain("truth-multi-pricing");
+      expect(notEq.sessions).not.toContain("truth-session-multi");
+
+      expect(readTruthRelationIds(d1, pageAndPurchase, "visitor")).toEqual({
+        visits: [
+          "truth-cross-event",
+          "truth-cross-pricing",
+          "truth-visitor-event",
+          "truth-visitor-pricing",
+        ],
+        events: [
+          "truth-purchase-cross",
+          "truth-purchase-outside",
+          "truth-purchase-visitor",
+        ],
+        sessions: [
+          "truth-session-cross",
+          "truth-session-outside",
+          "truth-session-visitor-a",
+          "truth-session-visitor-b",
+        ],
+        visitors: ["truth-visitor-d", "truth-visitor-e", "truth-visitor-f"],
+      });
+      expect(readTruthRelationIds(d1, notPurchase, "visitor")).toEqual({
+        visits: ["truth-multi-home", "truth-multi-pricing", "truth-pricing"],
+        events: [],
+        sessions: ["truth-session-multi", "truth-session-pricing"],
+        visitors: ["truth-visitor-a", "truth-visitor-g"],
+      });
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps audience adapters in filter-result parity", () => {
+    const { d1 } = createSqliteEventEnv();
+    seedFilterSemanticsTruthFixture(d1);
+
+    try {
+      const pageResults = (
+        ["private-dashboard", "api-v1", "public-share"] as const
+      ).map((audience) =>
+        readTruthRelationIds(
+          d1,
+          truthCondition("page.path", "/pricing"),
+          "event",
+          audience,
+        ),
+      );
+      expect(pageResults[1]).toEqual(pageResults[0]);
+      expect(pageResults[2]).toEqual(pageResults[0]);
+      expect(
+        pageResults.map(({ visits, events, sessions, visitors }) => ({
+          visits: visits.length,
+          events: events.length,
+          sessions: sessions.length,
+          visitors: visitors.length,
+        })),
+      ).toEqual([
+        { visits: 4, events: 1, sessions: 5, visitors: 5 },
+        { visits: 4, events: 1, sessions: 5, visitors: 5 },
+        { visits: 4, events: 1, sessions: 5, visitors: 5 },
+      ]);
+
+      const privateEvent = readTruthRelationIds(
+        d1,
+        truthCondition("event.name", "truth_purchase"),
+        "event",
+        "private-dashboard",
+      );
+      expect(
+        readTruthRelationIds(
+          d1,
+          truthCondition("event.name", "truth_purchase"),
+          "event",
+          "api-v1",
+        ),
+      ).toEqual(privateEvent);
     } finally {
       d1.close();
     }

@@ -129,7 +129,9 @@ export async function queryDimensionFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const sql = `
 WITH
@@ -207,8 +209,10 @@ export async function queryDimensionPageFromD1(
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<DimensionRow>> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
   const sortBy = options?.sortBy === "visitors" ? "visitors" : "views";
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const sortDirection = options?.sortDirection === "asc" ? "asc" : "desc";
   const primary = sortBy === "visitors" ? "visitors" : "views";
   const secondary = sortBy === "visitors" ? "views" : "sessions";
@@ -366,7 +370,9 @@ export async function querySessionPathDimensionFromD1(
   search?: string,
 ): Promise<DimensionRow[]> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const expandEntities = !scopedDataset && Boolean(filter?.clause);
   const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
@@ -474,7 +480,9 @@ export async function querySessionPathDimensionPageFromD1(
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<DimensionRow>> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const expandEntities = !scopedDataset && Boolean(filter?.clause);
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
   const visitSource = buildVisitSourceCte().replace(
@@ -688,7 +696,9 @@ export async function queryPageTabsFromD1(
   exit: DimensionRow[];
 }> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const expandEntities = !scopedDataset && Boolean(filter?.clause);
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
@@ -846,7 +856,9 @@ export async function queryReferrersFromD1(
   search?: string,
 ): Promise<ReferrerRow[]> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
   const sql = `
 WITH
@@ -908,7 +920,9 @@ export async function queryOverviewClientDimensionsFromD1(
   limit: number,
 ): Promise<ClientDimensionTabs> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const sql = `
 WITH
 ${scopedDataset?.ctes ?? buildVisitSourceCte()},
@@ -998,7 +1012,9 @@ export async function queryOverviewGeoDimensionsFromD1(
   limit: number,
 ): Promise<GeoDimensionTabs> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const cardSources = [
     `SELECT 'country' AS card_type, country AS value, COUNT(*) AS views,
     COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,

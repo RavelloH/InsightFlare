@@ -33,7 +33,7 @@ export function technologyVisitSource(
     };
   }
 
-  const filter = buildVisitFilterSql(filters);
+  const filter = buildVisitFilterSql(filters, "visit_source", { window });
   return {
     ctes: buildVisitSourceCte(),
     relation: "visit_source",

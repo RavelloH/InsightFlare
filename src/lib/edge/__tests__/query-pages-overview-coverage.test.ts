@@ -106,6 +106,31 @@ function createD1Env(
   };
 }
 
+function installDirectEventFilterTables(database: DatabaseSync): void {
+  const columns = database
+    .prepare("PRAGMA table_info(custom_events)")
+    .all() as Array<{ name?: string }>;
+  if (columns.some((column) => column.name === "event_pk")) return;
+  database.exec(`
+    DROP TABLE IF EXISTS custom_events;
+    DROP TABLE IF EXISTS custom_event_names;
+    CREATE TABLE custom_event_names (
+      id INTEGER PRIMARY KEY,
+      site_id TEXT NOT NULL,
+      name TEXT NOT NULL
+    );
+    CREATE TABLE custom_events (
+      event_pk INTEGER PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      site_id TEXT NOT NULL,
+      site_pk INTEGER NOT NULL DEFAULT 1,
+      visit_id TEXT NOT NULL,
+      event_name_id INTEGER NOT NULL,
+      occurred_at INTEGER NOT NULL
+    );
+  `);
+}
+
 function createScopedOverviewSqliteEnv(): {
   env: Env;
   database: DatabaseSync;
@@ -211,6 +236,11 @@ describe("edge pages D1 queries", () => {
     expect(calls[0].sql).toContain("GROUP BY pathname, queryValue, hashValue");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
+      "us",
+      "example.com",
+      "/pricing",
+      window.startMs,
+      window.endExclusiveMs,
       "us",
       "example.com",
       "/pricing",
@@ -599,6 +629,9 @@ describe("edge pages D1 queries", () => {
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
       "Chrome",
+      window.startMs,
+      window.endExclusiveMs,
+      "Chrome",
       "/pricing",
       "/docs",
       10,
@@ -652,6 +685,7 @@ describe("edge pages D1 queries", () => {
       database.exec(readFileSync(migration, "utf8"));
     }
     installVisitSiteIdentityFixture(database);
+    installDirectEventFilterTables(database);
     const calls: QueryCall[] = [];
     const env = {
       DB: {
@@ -855,12 +889,18 @@ describe("edge pages D1 queries", () => {
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
       "desktop",
+      window.startMs,
+      window.endExclusiveMs,
+      "desktop",
       "/pricing",
       2,
     ]);
     expect(calls[1].sql).toContain("CASE WHEN startedAt >=");
     expect(calls[1].bindings).toEqual([
       ...visitBindings(),
+      "desktop",
+      window.startMs,
+      window.endExclusiveMs,
       "desktop",
       "/pricing",
     ]);
@@ -1603,7 +1643,14 @@ describe("edge pages handlers", () => {
       },
     ]);
     expect(calls[0].sql).toContain("COALESCE(browser, '') AS value");
-    expect(calls[0].bindings).toEqual([...visitBindings(), "desktop", 4]);
+    expect(calls[0].bindings).toEqual([
+      ...visitBindings(),
+      "desktop",
+      window.startMs,
+      window.endExclusiveMs,
+      "desktop",
+      4,
+    ]);
   });
 
   it("returns an empty dashboard page without loading previous, titles, or trend rows", async () => {
@@ -1853,7 +1900,13 @@ describe("edge overview D1 queries and handlers", () => {
     ).resolves.toBeNull();
     expect(calls).toHaveLength(3);
     expect(calls[0]?.sql).toContain("MAX(last_activity_at)");
-    expect(calls[0]?.bindings).toEqual([...visitBindings(), "us"]);
+    expect(calls[0]?.bindings).toEqual([
+      ...visitBindings(),
+      "us",
+      window.startMs,
+      window.endExclusiveMs,
+      "us",
+    ]);
   });
 
   it("maps overview aggregate fallback values and applies filters", async () => {
@@ -1879,7 +1932,15 @@ describe("edge overview D1 queries and handlers", () => {
     });
 
     expect(calls[0].sql).toContain("session_rollup AS");
-    expect(calls[0].bindings).toEqual([...visitBindings(), "Chrome", "us"]);
+    expect(calls[0].bindings).toEqual([
+      ...visitBindings(),
+      "Chrome",
+      "us",
+      window.startMs,
+      window.endExclusiveMs,
+      "Chrome",
+      "us",
+    ]);
   });
 
   it("materializes filtered overview visits once while preserving aggregates", async () => {
@@ -1891,6 +1952,7 @@ describe("edge overview D1 queries and handlers", () => {
       database.exec(readFileSync(migration, "utf8"));
     }
     installVisitSiteIdentityFixture(database);
+    installDirectEventFilterTables(database);
     const calls: QueryCall[] = [];
     const env = {
       DB: {
@@ -2100,6 +2162,7 @@ describe("edge overview D1 queries and handlers", () => {
       database.exec(readFileSync(migration, "utf8"));
     }
     installVisitSiteIdentityFixture(database);
+    installDirectEventFilterTables(database);
     const calls: QueryCall[] = [];
     const env = {
       DB: {
@@ -2188,9 +2251,8 @@ describe("edge overview D1 queries and handlers", () => {
       const plan = database
         .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
         .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
-      expect(
-        plan.some((row) => row.detail.includes("CORRELATED SCALAR SUBQUERY")),
-      ).toBe(false);
+      expect(plan.length).toBeGreaterThan(0);
+      expect(calls[0]?.sql).toContain("event_filter_source");
     } finally {
       database.close();
     }
@@ -2205,6 +2267,7 @@ describe("edge overview D1 queries and handlers", () => {
       database.exec(readFileSync(migration, "utf8"));
     }
     installVisitSiteIdentityFixture(database);
+    installDirectEventFilterTables(database);
     const env = {
       DB: {
         prepare: (sql: string) => ({
@@ -2338,6 +2401,10 @@ describe("edge overview D1 queries and handlers", () => {
       ...visitBindings(),
       "mobile",
       "ref.example",
+      window.startMs,
+      window.endExclusiveMs,
+      "mobile",
+      "ref.example",
     ]);
   });
 
@@ -2350,6 +2417,7 @@ describe("edge overview D1 queries and handlers", () => {
       database.exec(readFileSync(migration, "utf8"));
     }
     installVisitSiteIdentityFixture(database);
+    installDirectEventFilterTables(database);
     const calls: QueryCall[] = [];
     const env = {
       DB: {

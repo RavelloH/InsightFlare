@@ -103,6 +103,7 @@ async function apiV1RequestPaginationBinding(
     "api-v1-request-pagination-v2",
     operation,
     context.policy.audience,
+    context.policy.revision,
     canonicalSubject,
     rawRequestWithoutPaging(query),
   ]);

@@ -2954,9 +2954,11 @@ const enMessages = {
     savedFilterDescription: "Notes",
     scopeLabel: "Filter scope",
     scopeAuto: "Automatically choose based on the current page",
-    scopeEvent: "Filter events matching these conditions",
-    scopeSession: "Filter sessions containing these events",
-    scopeVisitor: "Filter visitors containing these events",
+    scopeEvent: "The same page view or event must satisfy these conditions",
+    scopeSession:
+      "The conditions can be satisfied by different page views or events in the same session",
+    scopeVisitor:
+      "The conditions can be satisfied across different sessions or behaviors from the same visitor",
     savedFilterVisibility: "Visibility",
     savedFilterVisibilityPrivate: "Only me",
     savedFilterVisibilityTeam: "Share with team",
@@ -5813,9 +5815,9 @@ const zhMessages = {
     savedFilterDescription: "备注",
     scopeLabel: "筛选范围",
     scopeAuto: "根据当前页面自动选择",
-    scopeEvent: "筛选符合当前条件的事件",
-    scopeSession: "筛选包含此事件的会话",
-    scopeVisitor: "筛选包含此事件的访客",
+    scopeEvent: "同一次页面访问或事件需要满足这些条件",
+    scopeSession: "条件可由同一会话中的不同访问或事件满足",
+    scopeVisitor: "条件可由同一访客的不同会话或行为满足",
     savedFilterVisibility: "可见性",
     savedFilterVisibilityPrivate: "仅自己可见",
     savedFilterVisibilityTeam: "与团队共享",
@@ -8597,9 +8599,12 @@ const jaMessages = {
     savedFilterDescription: "メモ",
     scopeLabel: "フィルター対象",
     scopeAuto: "現在のページに応じて自動選択",
-    scopeEvent: "条件に一致するイベントを絞り込む",
-    scopeSession: "これらのイベントを含むセッションを絞り込む",
-    scopeVisitor: "これらのイベントを含む訪問者を絞り込む",
+    scopeEvent:
+      "同じページビューまたはイベントで、これらの条件を満たす必要があります",
+    scopeSession:
+      "同じセッション内の異なるページビューまたはイベントで、これらの条件を満たせます",
+    scopeVisitor:
+      "同じ訪問者の異なるセッションまたは行動で、これらの条件を満たせます",
     savedFilterVisibility: "公開範囲",
     savedFilterVisibilityPrivate: "自分のみ",
     savedFilterVisibilityTeam: "チームと共有",

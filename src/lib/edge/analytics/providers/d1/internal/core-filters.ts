@@ -9,12 +9,13 @@ import {
   type FilterExpression,
   filterScopePreferenceFromDocument,
   normalizeFilterDocument,
+  planObservationFilter,
   savedFilterScopePreferenceFromDocument,
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import { sitePksFromSiteIdsSql } from "@/lib/edge/site-identity-sql";
 
-import type { EventRecordSortKey, ListSort } from "./core-types";
+import type { EventRecordSortKey, ListSort, QueryWindow } from "./core-types";
 
 export interface ParsedGeoFilter {
   country: string;
@@ -103,38 +104,50 @@ export function usesSessionBoundaryFilter(filters: FilterDocument): boolean {
   return visit(filters.root);
 }
 
-export function usesEventFilter(filters: FilterDocument): boolean {
-  const visit = (expression: FilterExpression | null): boolean => {
-    if (!expression) return false;
-    if (expression.kind === "condition") {
-      return (
-        expression.target.kind === "event-payload" ||
-        (expression.target.kind === "field" &&
-          expression.target.field === "event.name")
-      );
-    }
-    if (expression.kind === "not") return visit(expression.child);
-    return expression.children.some(visit);
-  };
-  return visit(filters.root);
+function compileObservationPredicate(
+  filters: FilterDocument,
+  observationKind: "visit" | "event",
+  alias: string,
+  sessionSource?: string,
+): { clause: string; bindings: Array<string | number> } {
+  const predicate = planObservationFilter(filters.root)[observationKind];
+  if (predicate.kind === "all") return { clause: "", bindings: [] };
+  if (predicate.kind === "none") return { clause: "WHERE 0", bindings: [] };
+  const compiled = compileFilterDocument(
+    { version: 1, root: predicate.expression },
+    {
+      alias,
+      eventAlias: alias,
+      sessionSource,
+    },
+  );
+  return { clause: compiled.clause, bindings: [...compiled.bindings] };
 }
 
-export function buildVisitFilterSql(
+function matchingEventExistsSql(
   filters: FilterDocument,
-  alias = "visit_source",
-): { clause: string; bindings: Array<string | number> } {
-  const scoped = scopedFilterMetadata(filters);
-  if (scoped?.plan.mode === "entity") {
-    const entity = buildEntityMembershipPredicate(scoped, alias);
-    return { clause: `WHERE ${entity.clause}`, bindings: entity.bindings };
-  }
-  if (usesEventFilter(filters)) {
-    const eventFilter = buildEventFilterSql(filters, "event_filter_source", {
-      sessionSource: "visit_source",
-    });
-    const eventClause = eventFilter.clause.replace(/^WHERE\s+/i, "");
-    return {
-      clause: `WHERE EXISTS (
+  outerAlias: string,
+  scoped: NonNullable<ReturnType<typeof scopedFilterMetadata>> | undefined,
+  window?: QueryWindow,
+): { clause: string; bindings: Array<string | number> } | null {
+  const eventPredicate = compileObservationPredicate(
+    filters,
+    "event",
+    "event_filter_source",
+    "visit_source",
+  );
+  if (!eventPredicate.clause) return null;
+  const eventClause = eventPredicate.clause.replace(/^WHERE\s+/i, "");
+  const eventWindow =
+    scoped?.time.range ??
+    (window
+      ? { startMs: window.startMs, endExclusiveMs: window.endExclusiveMs }
+      : undefined);
+  const timePredicate = eventWindow
+    ? "AND ce.occurred_at >= ? AND ce.occurred_at < ?"
+    : "";
+  return {
+    clause: `EXISTS (
   SELECT 1
   FROM (
     SELECT
@@ -147,23 +160,56 @@ export function buildVisitFilterSql(
     INNER JOIN visits v
       ON v.site_pk = ce.site_pk
      AND v.visit_id = ce.visit_id
-    WHERE ce.site_pk = ${alias}.site_pk
-      AND ce.visit_id = ${alias}.visit_id
-      ${scoped ? "AND ce.occurred_at >= ? AND ce.occurred_at < ?" : ""}
+    WHERE ce.site_pk = ${outerAlias}.site_pk
+      AND ce.visit_id = ${outerAlias}.visit_id
+      ${timePredicate}
   ) event_filter_source
   WHERE ${eventClause}
 )`,
-      bindings: scoped
-        ? [
-            scoped.time.range.startMs,
-            scoped.time.range.endExclusiveMs,
-            ...eventFilter.bindings,
-          ]
-        : eventFilter.bindings,
-    };
+    bindings: eventWindow
+      ? [
+          eventWindow.startMs,
+          eventWindow.endExclusiveMs,
+          ...eventPredicate.bindings,
+        ]
+      : eventPredicate.bindings,
+  };
+}
+
+export function buildVisitFilterSql(
+  filters: FilterDocument,
+  alias = "visit_source",
+  options?: {
+    readonly includeEventBranch?: boolean;
+    readonly window?: QueryWindow;
+  },
+): { clause: string; bindings: Array<string | number> } {
+  const scoped = scopedFilterMetadata(filters);
+  if (scoped?.plan.mode === "entity") {
+    const entity = buildEntityMembershipPredicate(scoped, alias);
+    return { clause: `WHERE ${entity.clause}`, bindings: entity.bindings };
   }
-  const compiled = compileFilterDocument(filters, { alias });
-  return { clause: compiled.clause, bindings: [...compiled.bindings] };
+  const visitPredicate = compileObservationPredicate(filters, "visit", alias);
+  const eventExists =
+    options?.includeEventBranch === false
+      ? null
+      : matchingEventExistsSql(filters, alias, scoped, options?.window);
+  const clauses = [
+    ...(visitPredicate.clause
+      ? [visitPredicate.clause.replace(/^WHERE\s+/i, "")]
+      : []),
+    ...(eventExists ? [eventExists.clause] : []),
+  ];
+  const bindings = [
+    ...visitPredicate.bindings,
+    ...(eventExists?.bindings ?? []),
+  ];
+  if (clauses.length === 0) {
+    return planObservationFilter(filters.root).visit.kind === "all"
+      ? { clause: "", bindings }
+      : { clause: "WHERE 0", bindings };
+  }
+  return { clause: `WHERE (${clauses.join(" OR ")})`, bindings };
 }
 
 export function buildEventFilterSql(
@@ -180,11 +226,12 @@ export function buildEventFilterSql(
     scoped?.plan.mode === "entity"
       ? buildEntityMembershipPredicate(scoped, alias)
       : null;
-  const compiled = compileFilterDocument(filters, {
+  const compiled = compileObservationPredicate(
+    filters,
+    "event",
     alias,
-    eventAlias: alias,
-    sessionSource: options?.sessionSource,
-  });
+    options?.sessionSource,
+  );
   const clauses = scopedPredicate
     ? [scopedPredicate.clause]
     : compiled.clause
@@ -221,12 +268,6 @@ interface EntityMembershipSql {
 
 function sourceColumn(entityKind: "session" | "visitor"): string {
   return entityKind === "session" ? "session_id" : "visitor_id";
-}
-
-function conditionAppliesToVisit(condition: FilterExpression): boolean {
-  if (condition.kind !== "condition") return true;
-  if (condition.target.kind === "event-payload") return false;
-  return analyticsFilterDefinition(condition.target.field)?.source !== "event";
 }
 
 /**
@@ -295,33 +336,44 @@ scope_empty AS (
 
   const atom = (condition: FilterExpression): string => {
     const document = { version: 1 as const, root: condition };
-    const visitCompiled = conditionAppliesToVisit(condition)
-      ? compileFilterDocument(document, {
-          alias: "v",
-          eventAlias: "v",
-          sessionSource: "scope_visit_source",
-        })
-      : { clause: "WHERE 0", bindings: [] as Array<string | number> };
-    const eventCompiled = compileFilterDocument(document, {
-      alias: "v",
-      eventAlias: "v",
-      sessionSource: "scope_visit_source",
-    });
+    const fieldId =
+      condition.kind === "condition" && condition.target.kind === "field"
+        ? condition.target.field
+        : "event.payload";
+    const observationKinds =
+      analyticsFilterDefinition(fieldId)?.observationKinds ?? new Set();
+    const branches: string[] = [];
+    if (observationKinds.has("visit")) {
+      const compiled = compileFilterDocument(document, {
+        alias: "v",
+        eventAlias: "v",
+        sessionSource: "scope_visit_source",
+      });
+      branches.push(`
+    SELECT DISTINCT v.site_pk, v.${entityColumn} AS entity_id
+    FROM scope_visit_source v
+    ${compiled.clause}
+    AND TRIM(COALESCE(v.${entityColumn}, '')) != ''`);
+      bindings.push(...compiled.bindings);
+    }
+    if (observationKinds.has("event")) {
+      const compiled = compileFilterDocument(document, {
+        alias: "e",
+        eventAlias: "e",
+        sessionSource: "scope_visit_source",
+      });
+      branches.push(`
+    SELECT DISTINCT e.site_pk, e.${entityColumn} AS entity_id
+    FROM scope_event_source e
+    ${compiled.clause}
+    AND TRIM(COALESCE(e.${entityColumn}, '')) != ''`);
+      bindings.push(...compiled.bindings);
+    }
     const name = `scope_set_${index++}`;
     ctes.push(`
 ${name} AS (
-  SELECT DISTINCT site_pk, ${entityColumn} AS entity_id
-  FROM scope_visit_source v
-  ${visitCompiled.clause}
-  AND TRIM(COALESCE(v.${entityColumn}, '')) != ''
-  UNION
-  SELECT DISTINCT site_pk, ${entityColumn} AS entity_id
-  FROM scope_event_source v
-  ${eventCompiled.clause}
-  AND TRIM(COALESCE(v.${entityColumn}, '')) != ''
+  ${branches.length > 0 ? branches.join("\n  UNION") : "SELECT site_pk, entity_id FROM scope_empty"}
 )`);
-    bindings.push(...visitCompiled.bindings);
-    bindings.push(...eventCompiled.bindings);
     return `SELECT site_pk, entity_id FROM ${name}`;
   };
 

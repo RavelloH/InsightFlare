@@ -1,5 +1,4 @@
 import {
-  type FilterExpression,
   type FunnelAnalysis,
   type FunnelDefinition,
   type FunnelStepConfig,
@@ -202,19 +201,6 @@ function uniqueStepValues(
   );
 }
 
-function usesEventFilter(expression: FilterExpression | null): boolean {
-  if (!expression) return false;
-  if (expression.kind === "condition") {
-    return (
-      expression.target.kind === "event-payload" ||
-      (expression.target.kind === "field" &&
-        expression.target.field === "event.name")
-    );
-  }
-  if (expression.kind === "not") return usesEventFilter(expression.child);
-  return expression.children.some(usesEventFilter);
-}
-
 async function queryFunnelPageviewEvents(
   env: Env,
   siteId: string,
@@ -257,27 +243,29 @@ ORDER BY timestampMs ASC, sourceId ASC
     }));
   }
 
-  const eventFilter = usesEventFilter(filters.root);
-  const filter = eventFilter
-    ? buildEventFilterSql(filters, "fe", { sessionSource: "visit_source" })
-    : buildVisitFilterSql(filters, "vs");
-  const hasFilter = filter.clause.length > 0;
+  const visitFilter = buildVisitFilterSql(filters, "vs", {
+    includeEventBranch: false,
+    window,
+  });
+  const eventFilter = buildEventFilterSql(filters, "fe", {
+    sessionSource: "visit_source",
+  });
+  const hasVisitFilter = visitFilter.clause.length > 0;
+  const hasEventFilter = eventFilter.clause.length > 0;
+  const hasFilter = hasVisitFilter || hasEventFilter;
   const matchedSessionsCte = hasFilter
-    ? eventFilter
-      ? `,
+    ? `,
 ${buildEventAnalyticsSourceCte({ cteName: "filter_event_source" })},
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT fe.session_id
-  FROM filter_event_source fe
-  ${filter.clause}
-    AND TRIM(COALESCE(fe.session_id, '')) != ''
-)`
-      : `,
 matched_sessions AS MATERIALIZED (
   SELECT DISTINCT vs.session_id
   FROM visit_source vs
-  ${filter.clause}
+  ${visitFilter.clause || "WHERE 0"}
     AND TRIM(COALESCE(vs.session_id, '')) != ''
+  UNION
+  SELECT DISTINCT fe.session_id
+  FROM filter_event_source fe
+  ${eventFilter.clause || "WHERE 0"}
+    AND TRIM(COALESCE(fe.session_id, '')) != ''
 )`
     : "";
   const matchedSessionJoin = hasFilter
@@ -299,11 +287,10 @@ ORDER BY timestampMs ASC, sourceId ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
-    ...(hasFilter
-      ? eventFilter
-        ? [...eventSourceBindings(siteId, window), ...filter.bindings]
-        : filter.bindings
+    ...(hasEventFilter
+      ? [...eventSourceBindings(siteId, window), ...eventFilter.bindings]
       : []),
+    ...(hasVisitFilter ? visitFilter.bindings : []),
     ...values,
   ]);
 
@@ -361,27 +348,29 @@ ORDER BY timestampMs ASC, sequence ASC, sourceId ASC
     }));
   }
 
-  const eventFilter = usesEventFilter(filters.root);
-  const filter = eventFilter
-    ? buildEventFilterSql(filters, "fe", { sessionSource: "visit_source" })
-    : buildVisitFilterSql(filters, "mv");
-  const hasFilter = filter.clause.length > 0;
+  const visitFilter = buildVisitFilterSql(filters, "mv", {
+    includeEventBranch: false,
+    window,
+  });
+  const eventFilter = buildEventFilterSql(filters, "fe", {
+    sessionSource: "visit_source",
+  });
+  const hasVisitFilter = visitFilter.clause.length > 0;
+  const hasEventFilter = eventFilter.clause.length > 0;
+  const hasFilter = hasVisitFilter || hasEventFilter;
   const matchedSessionsCte = hasFilter
-    ? eventFilter
-      ? `,
+    ? `,
 ${buildEventAnalyticsSourceCte({ cteName: "filter_event_source" })},
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT fe.session_id
-  FROM filter_event_source fe
-  ${filter.clause}
-    AND TRIM(COALESCE(fe.session_id, '')) != ''
-)`
-      : `,
 matched_sessions AS MATERIALIZED (
   SELECT DISTINCT mv.session_id
   FROM visit_source mv
-  ${filter.clause}
+  ${visitFilter.clause || "WHERE 0"}
     AND TRIM(COALESCE(mv.session_id, '')) != ''
+  UNION
+  SELECT DISTINCT fe.session_id
+  FROM filter_event_source fe
+  ${eventFilter.clause || "WHERE 0"}
+    AND TRIM(COALESCE(fe.session_id, '')) != ''
 )`
     : "";
   const matchedSessionJoin = hasFilter
@@ -406,11 +395,10 @@ ORDER BY timestampMs ASC, sequence ASC, sourceId ASC
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...visitSourceBindings(siteId, window),
     ...eventSourceBindings(siteId, window, values),
-    ...(hasFilter
-      ? eventFilter
-        ? [...eventSourceBindings(siteId, window), ...filter.bindings]
-        : filter.bindings
+    ...(hasEventFilter
+      ? [...eventSourceBindings(siteId, window), ...eventFilter.bindings]
       : []),
+    ...(hasVisitFilter ? visitFilter.bindings : []),
   ]);
 
   return rows.map((row) => ({

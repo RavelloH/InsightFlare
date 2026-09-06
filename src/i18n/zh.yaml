@@ -339,9 +339,9 @@ filterBuilder:
   savedFilterDescription: 备注
   scopeLabel: 筛选范围
   scopeAuto: 根据当前页面自动选择
-  scopeEvent: 筛选符合当前条件的事件
-  scopeSession: 筛选包含此事件的会话
-  scopeVisitor: 筛选包含此事件的访客
+  scopeEvent: 同一次页面访问或事件需要满足这些条件
+  scopeSession: 条件可由同一会话中的不同访问或事件满足
+  scopeVisitor: 条件可由同一访客的不同会话或行为满足
   savedFilterVisibility: 可见性
   savedFilterVisibilityPrivate: 仅自己可见
   savedFilterVisibilityTeam: 与团队共享

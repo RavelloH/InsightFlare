@@ -4,6 +4,8 @@ import {
   type EntitySetExpression,
   type FilterCondition,
   type FilterDocument,
+  type ObservationPredicatePlan,
+  planObservationFilter,
   type ScopedDatasetSql,
   scopedFilterMetadata,
   type ScopedFilterPlan,
@@ -13,7 +15,6 @@ import {
   sitePksFromSiteIdsSql,
 } from "@/lib/edge/site-identity-sql";
 
-import { buildEventFilterSql, buildVisitFilterSql } from "./core-filters";
 import {
   buildEventAnalyticsSourceCte,
   VISIT_SOURCE_COLUMNS,
@@ -73,12 +74,6 @@ function entityColumn(entityKind: "session" | "visitor"): string {
   return entityKind === "session" ? "session_id" : "visitor_id";
 }
 
-function conditionSource(condition: FilterCondition): "visit" | "event" {
-  if (condition.target.kind === "event-payload") return "event";
-  const source = analyticsFilterDefinition(condition.target.field)?.source;
-  return source === "event" || source === "payload" ? "event" : "visit";
-}
-
 function conditionDocument(condition: FilterCondition): FilterDocument {
   return {
     version: 1,
@@ -87,23 +82,49 @@ function conditionDocument(condition: FilterCondition): FilterDocument {
 }
 
 function compileMembershipCondition(condition: FilterCondition): {
-  source: "scope_raw_visits" | "scope_raw_events";
-  alias: string;
-  clause: string;
+  sql: string;
   bindings: Array<string | number>;
 } {
-  const source = conditionSource(condition);
-  const alias = source === "event" ? "e" : "v";
-  const compiled = compileFilterDocument(conditionDocument(condition), {
-    alias,
-    eventAlias: alias,
-    sessionSource: "scope_raw_visits",
-  });
+  const fieldId =
+    condition.target.kind === "field"
+      ? condition.target.field
+      : "event.payload";
+  const observationKinds =
+    analyticsFilterDefinition(fieldId)?.observationKinds ?? new Set();
+  const branches: string[] = [];
+  const bindings: Array<string | number> = [];
+
+  if (observationKinds.has("visit")) {
+    const compiled = compileFilterDocument(conditionDocument(condition), {
+      alias: "v",
+      eventAlias: "v",
+      sessionSource: "scope_raw_visits",
+    });
+    branches.push(`
+  SELECT DISTINCT v.site_pk, v.${"SESSION_COLUMN"} AS entity_id
+  FROM scope_raw_visits v
+  ${compiled.clause}
+    AND TRIM(COALESCE(v.${"SESSION_COLUMN"}, '')) != ''`);
+    bindings.push(...compiled.bindings);
+  }
+
+  if (observationKinds.has("event")) {
+    const compiled = compileFilterDocument(conditionDocument(condition), {
+      alias: "e",
+      eventAlias: "e",
+      sessionSource: "scope_raw_visits",
+    });
+    branches.push(`
+  SELECT DISTINCT e.site_pk, e.${"SESSION_COLUMN"} AS entity_id
+  FROM scope_raw_events e
+  ${compiled.clause}
+    AND TRIM(COALESCE(e.${"SESSION_COLUMN"}, '')) != ''`);
+    bindings.push(...compiled.bindings);
+  }
+
   return {
-    source: source === "event" ? "scope_raw_events" : "scope_raw_visits",
-    alias,
-    clause: compiled.clause,
-    bindings: [...compiled.bindings],
+    sql: branches.join("\n  UNION\n"),
+    bindings,
   };
 }
 
@@ -111,6 +132,40 @@ interface MembershipSql {
   readonly relation: string;
   readonly ctes: string[];
   readonly bindings: Array<string | number>;
+}
+
+interface ObservationRelationSql {
+  readonly cte: string;
+  readonly bindings: Array<string | number>;
+}
+
+function compileObservationRelation(
+  name: string,
+  source: string,
+  alias: string,
+  predicate: ObservationPredicatePlan,
+): ObservationRelationSql {
+  if (predicate.kind === "all") {
+    return { cte: `${name} AS (SELECT * FROM ${source})`, bindings: [] };
+  }
+  if (predicate.kind === "none") {
+    return {
+      cte: `${name} AS (SELECT * FROM ${source} WHERE 0)`,
+      bindings: [],
+    };
+  }
+  const compiled = compileFilterDocument(
+    { version: 1, root: predicate.expression },
+    {
+      alias,
+      eventAlias: alias,
+      sessionSource: "scope_raw_visits",
+    },
+  );
+  return {
+    cte: `${name} AS (SELECT ${alias}.* FROM ${source} ${alias} ${compiled.clause})`,
+    bindings: [...compiled.bindings],
+  };
 }
 
 function compileEntityMembership(
@@ -140,10 +195,7 @@ scope_universe AS (
       const name = `scope_membership_${index++}`;
       ctes.push(`
 ${name} AS (
-  SELECT DISTINCT ${compiled.alias}.site_pk, ${compiled.alias}.${column} AS entity_id
-  FROM ${compiled.source} ${compiled.alias}
-  ${compiled.clause}
-    AND TRIM(COALESCE(${compiled.alias}.${column}, '')) != ''
+${compiled.sql.replaceAll("SESSION_COLUMN", column)}
 )`);
       bindings.push(...compiled.bindings);
       return name;
@@ -213,16 +265,26 @@ export function compileScopedDatasetSql(
           input.plan.membership.entityKind,
         )
       : null;
-  const visitFilter =
+  const observationPlan =
     input.plan.mode === "observation"
-      ? buildVisitFilterSql(input.filters, "rv")
-      : { clause: "", bindings: [] as Array<string | number> };
-  const eventFilter =
-    input.plan.mode === "observation"
-      ? buildEventFilterSql(input.filters, "re", {
-          sessionSource: "scope_raw_visits",
-        })
-      : { clause: "", bindings: [] as Array<string | number> };
+      ? planObservationFilter(input.filters.root)
+      : null;
+  const matchingVisits = observationPlan
+    ? compileObservationRelation(
+        "scope_matching_visits",
+        "scope_raw_visits",
+        "v",
+        observationPlan.visit,
+      )
+    : null;
+  const matchingEvents = observationPlan
+    ? compileObservationRelation(
+        "scope_matching_events",
+        "scope_raw_events",
+        "e",
+        observationPlan.event,
+      )
+    : null;
   const entityColumnName =
     input.plan.mode === "entity" && input.plan.membership.kind === "entity"
       ? entityColumn(input.plan.membership.entityKind)
@@ -239,10 +301,19 @@ scope_final_visits AS (
   WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
 )`
       : `
+scope_matching_visit_ids AS (
+  SELECT site_pk, visit_id
+  FROM scope_matching_visits
+  UNION
+  SELECT site_pk, visit_id
+  FROM scope_matching_events
+),
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
-  ${visitFilter.clause}
+  INNER JOIN scope_matching_visit_ids matching_visits
+    ON matching_visits.site_pk = rv.site_pk
+   AND matching_visits.visit_id = rv.visit_id
 )`;
   const finalEventRelation =
     input.plan.mode === "entity"
@@ -257,15 +328,16 @@ scope_final_events AS (
 )`
       : `
 scope_final_events AS (
-  SELECT re.*
-  FROM scope_raw_events re
-  ${eventFilter.clause}
+  SELECT *
+  FROM scope_matching_events
 )`;
   const ctes = `
 ${visitSource(input.siteIds)},
 ${eventSource(input.siteIds)},
 visit_source AS (SELECT * FROM scope_raw_visits),
 ${entityMembership ? `${entityMembership.ctes.join(",")},` : ""}
+${matchingVisits ? `${matchingVisits.cte},` : ""}
+${matchingEvents ? `${matchingEvents.cte},` : ""}
 ${finalVisitRelation},
 ${finalEventRelation},
 scope_final_sessions AS (
@@ -297,8 +369,8 @@ scope_final_visitors AS (
       input.window.startMs,
       input.window.endExclusiveMs,
       ...(entityMembership?.bindings ?? []),
-      ...visitFilter.bindings,
-      ...eventFilter.bindings,
+      ...(matchingVisits?.bindings ?? []),
+      ...(matchingEvents?.bindings ?? []),
     ].map((value) => ({ value })),
     visitRelation: "scope_final_visits",
     eventRelation: "scope_final_events",

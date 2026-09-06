@@ -342,9 +342,9 @@ filterBuilder:
   savedFilterDescription: Notes
   scopeLabel: Filter scope
   scopeAuto: Automatically choose based on the current page
-  scopeEvent: Filter events matching these conditions
-  scopeSession: Filter sessions containing these events
-  scopeVisitor: Filter visitors containing these events
+  scopeEvent: The same page view or event must satisfy these conditions
+  scopeSession: The conditions can be satisfied by different page views or events in the same session
+  scopeVisitor: The conditions can be satisfied across different sessions or behaviors from the same visitor
   savedFilterVisibility: Visibility
   savedFilterVisibilityPrivate: Only me
   savedFilterVisibilityTeam: Share with team

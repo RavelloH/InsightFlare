@@ -218,6 +218,34 @@ describe("analytics architecture", () => {
     }
   });
 
+  it("keeps filter compilation behind the canonical application and dataset layers", () => {
+    const boundaryFiles = [
+      ...productionFiles("src/lib/api-v1"),
+      ...productionFiles("src/lib/hono/routes"),
+      ...productionFiles("src/lib/edge/analytics/adapters"),
+      ...productionFiles("src/lib/edge/analytics/composition/protocol"),
+    ];
+    for (const file of boundaryFiles) {
+      const content = readFileSync(file, "utf8");
+      expect(
+        content,
+        `${file} bypasses the canonical filter runtime`,
+      ).not.toMatch(
+        /(?:compileFilterDocument|buildVisitFilterSql|buildEventFilterSql|scopedDatasetFor|compileScopedDatasetSql|analytics\/providers\/d1\/internal\/(?:core-filters|scoped-dataset))/u,
+      );
+    }
+
+    expect(source("src/lib/edge/analytics/application/service.ts")).toContain(
+      "prepareScopedQuery",
+    );
+    expect(
+      source("src/lib/edge/analytics/composition/query-runtime.ts"),
+    ).toContain("TypedQueryApplicationService");
+    expect(
+      source("src/lib/edge/analytics/providers/d1/internal/scoped-dataset.ts"),
+    ).toContain("planObservationFilter");
+  });
+
   it("does not reintroduce the generic D1 provider barrel", () => {
     for (const file of productionFiles("src/lib")) {
       expect(readFileSync(file, "utf8")).not.toContain(

@@ -68,7 +68,9 @@ export async function queryGeoPointsFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<GeoPointAggregate> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const conditions =
     filters.root?.kind === "and"
       ? filters.root.children

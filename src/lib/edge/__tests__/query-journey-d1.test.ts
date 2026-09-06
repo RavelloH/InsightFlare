@@ -1380,7 +1380,7 @@ describe("edge journey list D1 queries", () => {
       ...visitBindings(window),
       ...eventBindings(window),
       "us",
-      "%chrome%",
+      window.startMs,
     ]);
     expect(calls[0].bindings.at(-2)).toBe("%chrome%");
     expect(calls[0].bindings.at(-1)).toBe(6);
@@ -1438,6 +1438,9 @@ describe("edge journey list D1 queries", () => {
       ...visitBindings(window),
       ...eventBindings(window),
       "session-1",
+      "/pricing",
+      window.startMs,
+      window.endExclusiveMs,
       "/pricing",
       21,
     ]);

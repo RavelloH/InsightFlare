@@ -370,7 +370,9 @@ export async function queryVisitorListPageFromD1(
   },
 ): Promise<VisitorListPage> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const searchSql = buildJourneySearchSql(options.search);
   const hasFilters = !scopedDataset && hasJourneyFilters(filters);
   const expandEntities = hasFilters;
@@ -486,7 +488,9 @@ export async function querySessionListPageFromD1(
   },
 ): Promise<SessionListPage> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const searchSql = buildJourneySearchSql(options.search);
   const hasFilters = !scopedDataset && hasJourneyFilters(filters);
   const expandEntities = hasFilters;
@@ -579,7 +583,9 @@ export async function queryJourneyEventsPageFromD1(
   cursor?: JourneyEventCursor | null,
 ): Promise<JourneyEventPage> {
   const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset ? null : buildVisitFilterSql(filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
   const targetColumn = target.type === "visitor" ? "visitor_id" : "session_id";
   const targetClause = scopedDataset
     ? `WHERE ${targetColumn} = ?`

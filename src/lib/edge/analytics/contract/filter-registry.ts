@@ -18,6 +18,7 @@ export type FilterStorageProfile =
  * must use these declarations instead of re-inventing NULL/empty handling.
  */
 export type FilterFieldSource = "visit" | "event" | "session" | "payload";
+export type FilterObservationKind = "visit" | "event";
 export type FilterPresenceSemantics =
   "non-null-column" | "derived-session-value" | "json-pointer";
 export type FilterEmptySemantics = "raw-empty-string" | "unsupported";
@@ -61,6 +62,8 @@ function readonlyMap<K, V>(
 export interface RegisteredFilterField extends FilterFieldDefinition {
   readonly profile: FilterStorageProfile;
   readonly source: FilterFieldSource;
+  /** Observations on which this field has filter meaning. */
+  readonly observationKinds: ReadonlySet<FilterObservationKind>;
   readonly presence: FilterPresenceSemantics;
   readonly empty: FilterEmptySemantics;
   readonly comparison: FilterComparisonSemantics;
@@ -109,13 +112,18 @@ export type AnalyticsFilterFieldId =
   (typeof ANALYTICS_FILTER_FIELD_IDS)[number];
 
 /** Bump when canonical IDs, value kinds, or operator semantics change. */
-export const ANALYTICS_FILTER_REGISTRY_REVISION = "analytics-filter-v2";
+export const ANALYTICS_FILTER_REGISTRY_REVISION = "analytics-filter-v3";
 
 const PUBLIC_AUDIENCES = readonlySet<QueryAudience>([
   "private-dashboard",
   "public-share",
   "api-v1",
 ]);
+const VISIT_AND_EVENT_OBSERVATIONS = readonlySet<FilterObservationKind>([
+  "visit",
+  "event",
+]);
+const EVENT_OBSERVATIONS = readonlySet<FilterObservationKind>(["event"]);
 const PRIVATE_AUDIENCES = readonlySet<QueryAudience>([
   "private-dashboard",
   "api-v1",
@@ -246,7 +254,10 @@ function text(
   audiences: ReadonlySet<QueryAudience>,
   profile: "trimmed-text" | "case-folded-text" = "trimmed-text",
   options: Partial<
-    Pick<RegisteredFilterField, "source" | "presence" | "empty" | "comparison">
+    Pick<
+      RegisteredFilterField,
+      "source" | "observationKinds" | "presence" | "empty" | "comparison"
+    >
   > = {},
 ): RegisteredFilterField {
   return {
@@ -257,6 +268,7 @@ function text(
     profile,
     singletonSetEquivalent: true,
     source: options.source ?? "visit",
+    observationKinds: options.observationKinds ?? VISIT_AND_EVENT_OBSERVATIONS,
     presence: options.presence ?? "non-null-column",
     empty: options.empty ?? "raw-empty-string",
     comparison:
@@ -273,7 +285,10 @@ function enumField(
   id: string,
   audiences: ReadonlySet<QueryAudience>,
   options: Partial<
-    Pick<RegisteredFilterField, "source" | "presence" | "empty" | "comparison">
+    Pick<
+      RegisteredFilterField,
+      "source" | "observationKinds" | "presence" | "empty" | "comparison"
+    >
   > = {},
 ): RegisteredFilterField {
   return {
@@ -341,6 +356,7 @@ const FIELDS: readonly RegisteredFilterField[] = [
   text("geo.organization", PRIVATE_AUDIENCES),
   text("event.name", PRIVATE_AUDIENCES, "trimmed-text", {
     source: "event",
+    observationKinds: EVENT_OBSERVATIONS,
   }),
   {
     id: "event.payload",
@@ -349,6 +365,7 @@ const FIELDS: readonly RegisteredFilterField[] = [
     audiences: PRIVATE_AUDIENCES,
     profile: "event-payload",
     source: "payload",
+    observationKinds: EVENT_OBSERVATIONS,
     presence: "json-pointer",
     empty: "raw-empty-string",
     comparison: "case-sensitive",

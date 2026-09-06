@@ -286,6 +286,7 @@ describe("edge team query coverage", () => {
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
       "migrations/0013_add_visit_performance_metrics.sql",
+      "migrations/0017_structured_custom_events.sql",
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
@@ -770,6 +771,13 @@ describe("edge journey retention coverage", () => {
     database.exec(
       readFileSync("migrations/0013_add_visit_performance_metrics.sql", "utf8"),
     );
+    database.exec(
+      readFileSync("migrations/0017_structured_custom_events.sql", "utf8"),
+    );
+    database.exec(`
+      ALTER TABLE custom_event_names ADD COLUMN site_pk INTEGER;
+      ALTER TABLE custom_events ADD COLUMN site_pk INTEGER;
+    `);
     addSiteIdentityFixture(database, [siteId]);
     const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
     const env = {

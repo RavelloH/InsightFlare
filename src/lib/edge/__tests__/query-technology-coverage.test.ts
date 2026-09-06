@@ -1679,6 +1679,9 @@ describe("edge technology query coverage", () => {
     expect(browserEnv.calls[0].bindings).toEqual([
       ...visitBindings(),
       "Chrome",
+      window.startMs,
+      window.endExclusiveMs,
+      "Chrome",
     ]);
     expect(referrerEnv.calls[0].bindings).toEqual([...visitBindings(), 5]);
   });
