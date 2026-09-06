@@ -172,7 +172,6 @@ export interface EventTypeDetailData {
   };
   breakdowns: EventBreakdownsData;
   cards: EventAnalyticsContextCardsData;
-  fields: EventField[];
 }
 
 export interface EventFieldValuesData {

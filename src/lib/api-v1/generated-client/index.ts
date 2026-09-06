@@ -5,8 +5,14 @@ import {
   CreateFunnelInputSchema,
   CreateSiteInputSchema,
   type FunnelResource,
+  type FunnelResourcePage,
+  FunnelResourcePageSchema,
   FunnelResourceSchema,
   GetTeamVisibleSavedFilterInputSchema,
+  type ListFunnelsInput,
+  ListFunnelsInputSchema,
+  type ListSitesInput,
+  ListSitesInputSchema,
   type ListTeamVisibleSavedFiltersInput,
   ListTeamVisibleSavedFiltersInputSchema,
   type PrivacySettings,
@@ -16,6 +22,8 @@ import {
   type SharingSettings,
   SharingSettingsSchema,
   type SiteResource,
+  type SiteResourcePage,
+  SiteResourcePageSchema,
   SiteResourceSchema,
   type TrackingScript,
   TrackingScriptSchema,
@@ -218,6 +226,10 @@ import {
 } from "@/lib/api-v1/wire";
 
 const CreateFunnelBodySchema = CreateFunnelInputSchema.omit({ siteId: true });
+
+type ResourcePageInput = {
+  readonly page?: Partial<ListSitesInput["page"]>;
+};
 
 export interface ApiV1GeneratedClientConfig {
   readonly baseUrl: string;
@@ -443,8 +455,9 @@ export interface ApiV1GeneratedClient {
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<TeamUsageData>>;
   listSites(
+    input?: ResourcePageInput,
     options?: ApiV1GeneratedRequestOptions,
-  ): Promise<ApiV1GeneratedResult<readonly SiteResource[]>>;
+  ): Promise<ApiV1GeneratedResult<SiteResourcePage>>;
   createSite(
     input: Parameters<typeof CreateSiteInputSchema.parse>[0],
     options?: ApiV1GeneratedRequestOptions,
@@ -495,8 +508,9 @@ export interface ApiV1GeneratedClient {
   ): Promise<ApiV1GeneratedResult<TrackingScript>>;
   listFunnels(
     siteId: string,
+    input?: { readonly page?: Partial<ListFunnelsInput["page"]> },
     options?: ApiV1GeneratedRequestOptions,
-  ): Promise<ApiV1GeneratedResult<readonly FunnelResource[]>>;
+  ): Promise<ApiV1GeneratedResult<FunnelResourcePage>>;
   createFunnel(
     siteId: string,
     input: Parameters<typeof CreateFunnelBodySchema.parse>[0],
@@ -805,11 +819,17 @@ export function createApiV1GeneratedClient(
         signal: options?.signal,
       });
     },
-    listSites(options) {
+    listSites(input, options) {
+      const parsed = ListSitesInputSchema.parse(input ?? {});
+      const query = new URLSearchParams();
+      if (parsed.page.limit !== 100)
+        query.set("limit", String(parsed.page.limit));
+      if (parsed.page.cursor) query.set("cursor", parsed.page.cursor);
+      const suffix = query.toString() ? `?${query.toString()}` : "";
       return request(transport, {
-        path: apiV1GeneratedRoutePath("sites.list"),
+        path: apiV1GeneratedRoutePath("sites.list") + suffix,
         method: apiV1GeneratedRouteMethod("sites.list"),
-        responseSchema: apiV1SuccessEnvelopeSchema(SiteResourceSchema.array()),
+        responseSchema: apiV1SuccessEnvelopeSchema(SiteResourcePageSchema),
         signal: options?.signal,
       });
     },
@@ -924,13 +944,21 @@ export function createApiV1GeneratedClient(
         signal: options?.signal,
       });
     },
-    listFunnels(siteId, options) {
+    listFunnels(siteId, input, options) {
+      const parsed = ListFunnelsInputSchema.parse({
+        siteId,
+        ...(input ?? {}),
+      });
+      const query = new URLSearchParams();
+      if (parsed.page.limit !== 100)
+        query.set("limit", String(parsed.page.limit));
+      if (parsed.page.cursor) query.set("cursor", parsed.page.cursor);
+      const suffix = query.toString() ? `?${query.toString()}` : "";
       return request(transport, {
-        path: apiV1GeneratedRoutePath("funnels.list", { siteId: siteId }),
+        path:
+          apiV1GeneratedRoutePath("funnels.list", { siteId: siteId }) + suffix,
         method: apiV1GeneratedRouteMethod("funnels.list"),
-        responseSchema: apiV1SuccessEnvelopeSchema(
-          FunnelResourceSchema.array(),
-        ),
+        responseSchema: apiV1SuccessEnvelopeSchema(FunnelResourcePageSchema),
         signal: options?.signal,
       });
     },

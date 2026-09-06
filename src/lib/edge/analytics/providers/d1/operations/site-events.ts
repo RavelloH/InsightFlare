@@ -16,7 +16,6 @@ import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/prov
 import {
   decodeEventFieldCursor,
   decodeEventFieldValueCursor,
-  queryEventFieldsFromD1,
   queryEventFieldsPageFromD1,
   queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
@@ -233,7 +232,7 @@ export async function readSiteEventFieldValues(
 export async function readSiteEventTypeDetail(
   input: ReadSiteEventTypeDetailInput,
 ) {
-  const [overview, trend, fields, cards] = await Promise.all([
+  const [overview, trend, cards] = await Promise.all([
     queryEventTypeOverviewFromD1(
       input.env,
       input.siteId,
@@ -249,14 +248,6 @@ export async function readSiteEventTypeDetail(
       input.interval,
       input.filters,
       input.eventName,
-    ),
-    queryEventFieldsFromD1(
-      input.env,
-      input.siteId,
-      input.window,
-      input.filters,
-      input.eventName,
-      100,
     ),
     queryEventAnalyticsContextCardsFromD1(
       input.env,
@@ -291,6 +282,5 @@ export async function readSiteEventTypeDetail(
       })),
     },
     cards: mapEventAnalyticsContextCards(cards),
-    fields: fields.map(mapEventField),
   };
 }

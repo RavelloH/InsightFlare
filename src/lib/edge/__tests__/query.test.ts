@@ -1480,13 +1480,6 @@ describe("edge query handlers", () => {
         avgEventsPerSession: 2.4,
         shareOfAllEvents: 1,
       },
-      fields: [
-        {
-          path: "/plan",
-          valueType: "string",
-          exampleValue: "pro",
-        },
-      ],
     });
     expect(await fields.json()).toMatchObject({
       ok: true,

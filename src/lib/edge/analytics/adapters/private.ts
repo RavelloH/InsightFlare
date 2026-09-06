@@ -342,8 +342,6 @@ export function executePrivateQuery(
                   input.url.searchParams.get("includeContext") !== "false",
                 includeBreakdowns:
                   input.url.searchParams.get("includeBreakdowns") !== "false",
-                includeFields:
-                  input.url.searchParams.get("includeFields") !== "false",
               }
             : undefined,
         ),

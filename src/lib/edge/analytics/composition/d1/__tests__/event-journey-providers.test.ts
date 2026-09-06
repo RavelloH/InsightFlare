@@ -291,7 +291,6 @@ describe("D1 event provider routing", () => {
         eventName: "signup",
         includeContext: false,
         includeBreakdowns: false,
-        includeFields: false,
       }),
     );
     await value
@@ -334,7 +333,6 @@ describe("D1 event provider routing", () => {
         filters: undefined,
         includeContext: false,
         includeBreakdowns: false,
-        includeFields: false,
       }),
     );
     await value

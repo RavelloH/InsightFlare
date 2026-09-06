@@ -529,7 +529,6 @@ describe("planned site list analytics adapters", () => {
             organization: [],
           },
         },
-        fields: [],
       });
     const eventTypesResponse = await handlePlannedSiteEventTypes(
       request("event-types", { timeRange }),

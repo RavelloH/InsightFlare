@@ -1084,7 +1084,6 @@ describe("edge query event handlers low-level coverage", () => {
           {
             includeContext: false,
             includeBreakdowns: false,
-            includeFields: false,
           },
         ),
       }),
@@ -1110,7 +1109,6 @@ describe("edge query event handlers low-level coverage", () => {
     });
     await expect(detail.json()).resolves.toMatchObject({
       ok: true,
-      fields: [],
       cards: { page: { path: [] } },
     });
     expect(calls).toHaveLength(4);

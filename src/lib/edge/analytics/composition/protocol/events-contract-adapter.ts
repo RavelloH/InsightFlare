@@ -281,7 +281,6 @@ export async function handleEventTypeDetailContract(
   options?: {
     includeContext?: boolean;
     includeBreakdowns?: boolean;
-    includeFields?: boolean;
   },
 ): Promise<Response> {
   const eventName = parseEventName(url);
@@ -291,7 +290,6 @@ export async function handleEventTypeDetailContract(
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const includeContext = options?.includeContext ?? true;
   const includeBreakdowns = options?.includeBreakdowns ?? true;
-  const includeFields = options?.includeFields ?? true;
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
     readonly eventName: string;
     readonly summary: Record<string, unknown>;
@@ -303,7 +301,6 @@ export async function handleEventTypeDetailContract(
       readonly browsers: ReturnType<typeof mapTabs>;
     };
     readonly cards: ReturnType<typeof mapEventAnalyticsContextCards>;
-    readonly fields: Array<ReturnType<typeof mapEventField>>;
   }>("event-type-detail", {
     context: queryContext,
     time: toQueryTime(window),
@@ -312,7 +309,6 @@ export async function handleEventTypeDetailContract(
     interval: parseInterval(url),
     includeContext,
     includeBreakdowns,
-    includeFields,
   });
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });

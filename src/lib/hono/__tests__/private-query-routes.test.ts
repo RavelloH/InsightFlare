@@ -316,7 +316,7 @@ describe("Hono private query routes", () => {
   it("enables dashboard-only event detail response shaping", async () => {
     const app = createApp();
     const detailUrl =
-      "/api/private/event-type-detail?siteId=site-1&eventName=checkout&includeContext=false&includeBreakdowns=false&includeFields=false";
+      "/api/private/event-type-detail?siteId=site-1&eventName=checkout&includeContext=false&includeBreakdowns=false";
 
     const response = await app.fetch(request(detailUrl), env as never, ctx);
 

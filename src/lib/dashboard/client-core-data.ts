@@ -608,7 +608,6 @@ export async function fetchEventTypeDetail(
       eventName: normalizedEventName,
       includeContext: "false",
       includeBreakdowns: "false",
-      includeFields: "false",
     },
     filters,
   );

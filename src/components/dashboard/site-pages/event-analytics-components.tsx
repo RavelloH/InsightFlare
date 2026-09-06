@@ -1459,7 +1459,6 @@ export const EventFieldsCard = memo(function EventFieldsCard({
   filters,
   eventName,
   loading,
-  fields,
 }: {
   locale: Locale;
   labels: EventPageCopy;
@@ -1468,7 +1467,6 @@ export const EventFieldsCard = memo(function EventFieldsCard({
   filters: FilterDocument;
   eventName: string;
   loading: boolean;
-  fields: EventField[];
 }) {
   const fieldsSectionRef = useRef<HTMLElement | null>(null);
   const [fieldsVisible, setFieldsVisible] = useState(false);
@@ -1576,7 +1574,7 @@ export const EventFieldsCard = memo(function EventFieldsCard({
         : undefined,
   });
   const baseFields =
-    fieldsQuery.data?.pages.flatMap((page) => page.data.items) ?? fields;
+    fieldsQuery.data?.pages.flatMap((page) => page.data.items) ?? [];
   const filteredFields =
     filteredFieldsQuery.data?.pages.flatMap((page) => page.data.items) ?? [];
   const filteredFieldsLoading = filteredFieldsQuery.isPending;

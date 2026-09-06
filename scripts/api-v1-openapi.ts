@@ -5,7 +5,10 @@ import {
   apiV1RouteRegistry,
   isApiV1BatchEligible,
 } from "@/lib/api-v1/route-registry";
-import { ApiV1ErrorEnvelopeSchema } from "@/lib/api-v1/wire";
+import {
+  ApiV1ErrorEnvelopeSchema,
+  ApiV1ResponseMetaSchema,
+} from "@/lib/api-v1/wire";
 
 type JsonSchema = Record<string, unknown>;
 type HttpMethod = "get" | "post" | "patch" | "delete";
@@ -136,15 +139,50 @@ function queryParameters(
 ): Array<Record<string, unknown>> {
   const pathNames = new Set(pathParameterNames(path));
   const required = requiredProperties(schema);
-  return Object.entries(objectProperties(schema))
-    .filter(([name]) => !pathNames.has(name))
-    .map(([name, parameterSchema]) => ({
-      name,
-      in: "query",
-      required: required.has(name),
-      schema: clone(parameterSchema),
-      description: `${name} query parameter.`,
-    }));
+  return Object.entries(objectProperties(schema)).flatMap(
+    ([name, parameterSchema]) => {
+      if (pathNames.has(name)) return [];
+      if (name === "page" && parameterSchema.type === "object") {
+        const pageProperties = objectProperties(parameterSchema);
+        if (pageProperties.limit || pageProperties.cursor) {
+          return [
+            ...(pageProperties.limit
+              ? [
+                  {
+                    name: "limit",
+                    in: "query",
+                    required: false,
+                    schema: clone(pageProperties.limit),
+                    description: "Maximum number of results.",
+                  },
+                ]
+              : []),
+            ...(pageProperties.cursor
+              ? [
+                  {
+                    name: "cursor",
+                    in: "query",
+                    required: false,
+                    schema: clone(pageProperties.cursor),
+                    description:
+                      "Opaque pagination cursor from the previous response.",
+                  },
+                ]
+              : []),
+          ];
+        }
+      }
+      return [
+        {
+          name,
+          in: "query",
+          required: required.has(name),
+          schema: clone(parameterSchema),
+          description: `${name} query parameter.`,
+        },
+      ];
+    },
+  );
 }
 
 function tagForOperation(operationId: string): string {
@@ -262,6 +300,21 @@ function isEmptySchema(schema: JsonSchema): boolean {
   );
 }
 
+function successResponseSchema(schema: z.ZodType): JsonSchema {
+  const data = jsonSchema(schema);
+  const properties = objectProperties(data);
+  if (properties.data && properties.meta) return data;
+  return {
+    type: "object",
+    properties: {
+      data,
+      meta: jsonSchema(ApiV1ResponseMetaSchema),
+    },
+    required: ["data", "meta"],
+    additionalProperties: false,
+  };
+}
+
 /** Build API v1 OpenAPI operations directly from the executable route registry. */
 export function buildApiV1OpenApiPaths(): ApiV1OpenApiPaths {
   const paths: ApiV1OpenApiPaths = {};
@@ -329,7 +382,9 @@ export function buildApiV1OpenApiPaths(): ApiV1OpenApiPaths {
                   },
                 },
                 content: {
-                  [json]: { schema: jsonSchema(route.responseSchema) },
+                  [json]: {
+                    schema: successResponseSchema(route.responseSchema),
+                  },
                 },
               },
         ...errorResponses(route.declaredErrors),

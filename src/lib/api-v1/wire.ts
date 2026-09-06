@@ -1072,7 +1072,6 @@ export const AnalyticsEventTypeDetailDataSchema = z
       })
       .strict(),
     cards: AnalyticsEventContextCardsSchema,
-    fields: z.array(AnalyticsEventFieldSchema),
   })
   .strict();
 export type AnalyticsEventTypeDetailData = z.infer<

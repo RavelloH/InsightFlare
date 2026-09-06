@@ -13,7 +13,6 @@ import {
   queryEventAnalyticsContextCardsFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import {
-  queryEventFieldsFromD1,
   queryEventFieldsPageFromD1,
   queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
@@ -290,8 +289,7 @@ export function registerEventProviders(
         const eventName = stringField(request, "eventName");
         const includeContext = request.includeContext !== false;
         const includeBreakdowns = request.includeBreakdowns !== false;
-        const includeFields = request.includeFields !== false;
-        const [overview, trend, fields, cards] = await Promise.all([
+        const [overview, trend, cards] = await Promise.all([
           measured("event_type_detail.overview", () =>
             queryEventTypeOverviewFromD1(
               options.env,
@@ -312,18 +310,6 @@ export function registerEventProviders(
               eventName,
             ),
           ),
-          includeFields
-            ? measured("event_type_detail.fields", () =>
-                queryEventFieldsFromD1(
-                  options.env,
-                  options.siteId,
-                  timeWindow(request.time),
-                  request.filters ?? EMPTY_FILTER_DOCUMENT,
-                  eventName,
-                  100,
-                ),
-              )
-            : Promise.resolve([]),
           includeContext
             ? measured("event_type_detail.context_cards", () =>
                 queryEventAnalyticsContextCardsFromD1(
@@ -351,7 +337,6 @@ export function registerEventProviders(
             cards: cards
               ? mapEventAnalyticsContextCards(cards)
               : emptyEventContextCards(),
-            fields: fields.map(mapEventField),
           },
         };
       }),

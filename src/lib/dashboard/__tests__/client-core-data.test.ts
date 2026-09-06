@@ -360,7 +360,6 @@ describe("fetchEventTypeDetail", () => {
       expect.objectContaining({
         includeContext: "false",
         includeBreakdowns: "false",
-        includeFields: "false",
       }),
     );
   });

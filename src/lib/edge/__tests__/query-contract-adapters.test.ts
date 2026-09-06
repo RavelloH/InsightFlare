@@ -101,7 +101,6 @@ describe("typed query adapter validation branches", () => {
       handleEventTypeDetailContract(env, siteId, valid, undefined, undefined, {
         includeContext: false,
         includeBreakdowns: false,
-        includeFields: false,
       }),
       handleEventRecordDetailContract(env, siteId, valid),
       handleVisitorsContract(env, siteId, valid),

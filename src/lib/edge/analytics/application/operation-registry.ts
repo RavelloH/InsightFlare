@@ -373,7 +373,6 @@ export const analyticsOperationRegistry = [
         trend: unknown;
         breakdowns: unknown;
         cards: unknown;
-        fields: readonly unknown[];
       }>,
     ) => undefined,
   }),

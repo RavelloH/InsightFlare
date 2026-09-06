@@ -195,7 +195,6 @@ export type SiteEventTypeDetailReader = SiteListReader<
     readonly trend: unknown;
     readonly breakdowns: unknown;
     readonly cards: unknown;
-    readonly fields: readonly unknown[];
   }
 >;
 export type SiteEventFieldsReader = SiteListReader<

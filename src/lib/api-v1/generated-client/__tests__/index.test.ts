@@ -174,6 +174,37 @@ describe("API v1 generated client", () => {
     );
   });
 
+  it("pages site and funnel resource collections through limit and cursor", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      response({
+        data: {
+          items: [],
+          pagination: {
+            limit: 1,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+        meta: { requestId: "req-resource-page" },
+      }),
+    );
+    const client = createApiV1GeneratedClient({
+      baseUrl: "https://api.test",
+      fetch: fetcher,
+    });
+
+    await client.listSites({ page: { limit: 1, cursor: "site-cursor" } });
+    await client.listFunnels("site-1", {
+      page: { limit: 1, cursor: "funnel-cursor" },
+    });
+
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.test/api/v1/sites?limit=1&cursor=site-cursor",
+      "https://api.test/api/v1/sites/site-1/funnels?limit=1&cursor=funnel-cursor",
+    ]);
+  });
+
   it("parses a successful analytics envelope and rejects unknown request fields", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       response({
@@ -1146,7 +1177,6 @@ describe("API v1 generated client", () => {
               organization: [],
             },
           },
-          fields: [],
         },
         meta,
       }),

@@ -60,7 +60,6 @@ function emptyEventTypeDetail(eventName: string): EventTypeDetailData {
       browsers: [],
     },
     cards: emptyDetailCards(),
-    fields: [],
   };
 }
 
@@ -408,7 +407,6 @@ export const EventTypeDetailClientPage = memo(
             filters={requestFilters}
             eventName={eventName}
             loading={loading}
-            fields={detail.fields}
           />
 
           <EventRecordsSection

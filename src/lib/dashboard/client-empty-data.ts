@@ -216,7 +216,6 @@ export function emptyEventTypeDetail(eventName = ""): EventTypeDetailData {
     },
     breakdowns: emptyEventBreakdowns(),
     cards: emptyEventAnalyticsContextCards(),
-    fields: [],
   };
 }
 

@@ -7,6 +7,7 @@ import {
   DeleteSiteInputSchema,
   GetFunnelInputSchema,
   GetSiteInputSchema,
+  ListFunnelsInputSchema,
   ListSitesInputSchema,
   SiteSettingsInputSchema,
   TrackingScriptInputSchema,
@@ -139,7 +140,7 @@ const routeConfigs: Record<ResourceRouteId, ResourceRouteConfig> = {
     operation: "funnels.list",
     method: "GET",
     scope: "analysis:read",
-    schema: SiteSettingsInputSchema,
+    schema: ListFunnelsInputSchema,
   },
   "funnels.create": {
     operation: "funnels.create",
@@ -193,6 +194,7 @@ function error(
     | "missing_scope"
     | "unsupported_media_type"
     | "not_acceptable"
+    | "invalid_cursor"
     | "internal_error"
     | "conflict",
 ): Response {
@@ -206,6 +208,7 @@ function error(
     missing_scope: [403, "The API key lacks the required scope"],
     unsupported_media_type: [415, "Expected application/json"],
     not_acceptable: [406, "Only application/json is supported"],
+    invalid_cursor: [400, "The pagination cursor is invalid"],
     internal_error: [500, "An internal error occurred"],
     conflict: [409, "The resource conflicts with an existing resource"],
   } as const;
@@ -260,8 +263,24 @@ export async function handlePlannedResourceRoute(input: {
       );
     }
   }
+  const isPaginatedCollection =
+    config.operation === "sites.list" || config.operation === "funnels.list";
+  const query = new URL(request.url).searchParams;
+  const queryInput = isPaginatedCollection
+    ? [...query.keys()].every((key) => key === "limit" || key === "cursor")
+      ? {
+          page: {
+            ...(query.has("limit")
+              ? { limit: Number(query.get("limit")) }
+              : {}),
+            ...(query.has("cursor") ? { cursor: query.get("cursor") } : {}),
+          },
+        }
+      : null
+    : {};
   const base = {
     ...(body && typeof body === "object" ? body : {}),
+    ...(queryInput ?? {}),
     ...(input.siteId ? { siteId: input.siteId } : {}),
     ...(input.funnelId ? { funnelId: input.funnelId } : {}),
     ...(config.operation === "settings.trackingScript.get"
@@ -287,7 +306,9 @@ export async function handlePlannedResourceRoute(input: {
           ? "conflict"
           : code === "forbidden"
             ? "missing_scope"
-            : "internal_error",
+            : code === "invalid_cursor"
+              ? "invalid_cursor"
+              : "internal_error",
     );
   }
   if (config.successStatus === 204) return new Response(null, { status: 204 });
