@@ -124,7 +124,10 @@ function FunnelStepRow({
   const dropOffCount = analysisStep?.progression.dropOffCount ?? 0;
   const sessions = analysisStep?.sessions ?? 0;
   const visitors = analysisStep?.visitors ?? 0;
-  const width = `${Math.max(2, Math.min(100, conversionRate * 100))}%`;
+  const width =
+    conversionRate <= 0
+      ? "0%"
+      : `${Math.max(2, Math.min(100, conversionRate * 100))}%`;
 
   return (
     <div className="grid min-w-0 gap-3 border-b p-4 last:border-b-0 lg:grid-cols-[2.5rem_minmax(0,1fr)_11rem_11rem]">

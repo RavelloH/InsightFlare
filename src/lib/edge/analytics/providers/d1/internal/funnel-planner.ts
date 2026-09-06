@@ -1,4 +1,5 @@
 import {
+  FUNNEL_SQL_MAX_BINDINGS as FUNNEL_CONFIG_MAX_SQL_BINDINGS,
   type FunnelConfigV2,
   type FunnelStepV2,
   MAX_FUNNEL_STEPS,
@@ -13,7 +14,7 @@ import {
 } from "./scoped-dataset";
 
 /** D1's existing provider code treats one hundred parameters as the safe cap. */
-export const FUNNEL_SQL_MAX_BINDINGS = 100;
+export const FUNNEL_SQL_MAX_BINDINGS = FUNNEL_CONFIG_MAX_SQL_BINDINGS;
 /** A bounded statement budget for a ten-step plan and its filter expansion. */
 export const FUNNEL_SQL_MAX_LENGTH = 1_000_000;
 export const FUNNEL_SQL_CTES_PER_STEP = 6 as const;

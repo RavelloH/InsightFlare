@@ -4,6 +4,7 @@ import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-re
 import {
   decodeFunnelConfig,
   encodeFunnelConfig,
+  estimateFunnelSqlBindingCount,
   type FunnelConfigV2,
   funnelSemanticFingerprint,
   MAX_FUNNEL_STEPS,
@@ -185,6 +186,36 @@ describe("funnel v2 config contract", () => {
         }),
       ),
     ).toThrow("funnel_step_id_duplicate:1");
+    expect(() =>
+      decodeFunnelConfig(
+        2,
+        JSON.stringify({
+          ...validV2,
+          steps: Array.from({ length: MAX_FUNNEL_STEPS + 1 }, (_, index) =>
+            step(`step-${index}`, 'page.path eq "/step"'),
+          ),
+        }),
+      ),
+    ).toThrow("funnel_has_too_many_steps");
+    expect(() =>
+      decodeFunnelConfig(
+        2,
+        JSON.stringify({
+          ...validV2,
+          steps: [step("first", "not a filter"), validV2.steps[1]],
+        }),
+      ),
+    ).toThrow("funnel_filter_dsl_invalid:0");
+    expect(() =>
+      decodeFunnelConfig(
+        2,
+        JSON.stringify({
+          ...validV2,
+          progressionScope: "visitor",
+          conversionWindowMs: null,
+        }),
+      ),
+    ).toThrow("visitor_funnel_conversion_window_must_be_positive");
   });
 
   it("rejects invalid versions, windows, steps, names, and filters on write", () => {
@@ -255,6 +286,22 @@ describe("funnel v2 config contract", () => {
         conversionWindowMs: 1,
       }),
     ).toThrow("session_funnel_conversion_window_must_be_null");
+
+    const highBindingDsl = Array.from(
+      { length: 10 },
+      (_, index) => `page.path eq "/candidate-${index}"`,
+    ).join(" AND ");
+    const highBindingConfig = writeConfig({
+      steps: Array.from({ length: MAX_FUNNEL_STEPS }, (_, index) =>
+        step(`step-${index}`, highBindingDsl),
+      ),
+    });
+    expect(estimateFunnelSqlBindingCount(highBindingConfig)).toBeGreaterThan(
+      100 - 6,
+    );
+    expect(() => validateFunnelConfigForWrite(highBindingConfig)).toThrow(
+      "funnel_sql_binding_limit_exceeded",
+    );
   });
 
   it("excludes display name while including scope, window, IDs and filter semantics", async () => {

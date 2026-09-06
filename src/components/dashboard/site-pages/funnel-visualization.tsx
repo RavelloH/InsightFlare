@@ -51,6 +51,18 @@ export function FunnelVisualization({
 }) {
   return (
     <div className={compact ? "min-w-0 space-y-4" : "min-w-0 space-y-5"}>
+      {compact && analysis?.steps[0] ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span>
+            {labels.sessions}:{" "}
+            {numberFormat(locale, analysis.steps[0].sessions)}
+          </span>
+          <span>
+            {labels.visitors}:{" "}
+            {numberFormat(locale, analysis.steps[0].visitors)}
+          </span>
+        </div>
+      ) : null}
       {funnel.steps.map((step, index) => {
         const result = analysis?.steps[index];
         const rate = result?.progression.conversionRate ?? 0;
@@ -99,7 +111,10 @@ export function FunnelVisualization({
                     key="ready"
                     className="h-full bg-primary transition-[width]"
                     style={{
-                      width: `${Math.max(2, Math.min(100, rate * 100))}%`,
+                      width:
+                        rate <= 0
+                          ? "0%"
+                          : `${Math.max(2, Math.min(100, rate * 100))}%`,
                     }}
                   />
                 )}

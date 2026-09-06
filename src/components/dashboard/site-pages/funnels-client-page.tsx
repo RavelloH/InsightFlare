@@ -13,6 +13,7 @@ import {
   DetailDrawer,
 } from "@/components/dashboard/site-pages/detail-query-modal";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -118,7 +119,16 @@ function FunnelDetailDrawer({
   const detail = useQuery({
     queryKey: funnel
       ? funnelDetailQueryKey(siteId, funnel, window, filterKey)
-      : ["dashboard", "funnel-detail", siteId, funnelId, filterKey],
+      : [
+          "dashboard",
+          "funnel-detail",
+          siteId,
+          funnelId,
+          window.from,
+          window.to,
+          window.timeZone,
+          filterKey,
+        ],
     queryFn: ({ signal }) =>
       fetchFunnelDetail(siteId, funnelId, window, filters, { signal }),
     enabled: Boolean(funnelId),
@@ -174,11 +184,19 @@ export function FunnelsClientPage({
     enabled: typeof window !== "undefined",
     getNextPageParam: (lastPage) =>
       lastPage.data.pagination.hasMore
-        ? lastPage.data.pagination.nextCursor
+        ? (lastPage.data.pagination.nextCursor ?? undefined)
         : undefined,
   });
   const funnels = list.data?.pages.flatMap((page) => page.data.items) ?? [];
   const selected = funnels.find((funnel) => funnel.id === detailId);
+  const { fetchNextPage, hasNextPage, isFetchingNextPage } = list;
+  const loadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+  const loadMoreSentinelRef = useInfiniteTableSentinel({
+    enabled: Boolean(hasNextPage && !isFetchingNextPage),
+    onReachEnd: loadMore,
+  });
 
   const openDetail = useCallback(
     (id: string) => {
@@ -355,6 +373,14 @@ export function FunnelsClientPage({
           </div>
         )}
       </AutoTransition>
+
+      {funnels.length > 0 ? (
+        <div
+          ref={loadMoreSentinelRef}
+          aria-hidden="true"
+          className="h-px w-full"
+        />
+      ) : null}
 
       <FunnelEditor
         open={editorOpen}

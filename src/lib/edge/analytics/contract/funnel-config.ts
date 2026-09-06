@@ -1,8 +1,14 @@
 import { sha256Hex } from "@/lib/edge/utils";
-import { FILTER_DSL_MAX_LENGTH, parseFilterDsl } from "@/lib/filter-contract";
+import {
+  FILTER_DSL_MAX_LENGTH,
+  type FilterDocument,
+  parseFilterDsl,
+} from "@/lib/filter-contract";
 
+import { compileFilterDocument } from "./filter-compiler";
 import { analyticsFilterRegistry } from "./filter-registry";
 import { assertFilterAudience, filterFingerprint } from "./filters";
+import { planObservationFilter } from "./observation-planner";
 
 export const FUNNEL_CONFIG_VERSION = 2 as const;
 export const FUNNEL_FILTER_DSL_VERSION = 1 as const;
@@ -10,6 +16,11 @@ export const MIN_FUNNEL_STEPS = 2;
 export const MAX_FUNNEL_STEPS = 10;
 export const MAX_FUNNEL_STEP_ID_LENGTH = 128;
 export const MAX_FUNNEL_STEP_NAME_LENGTH = 120;
+/** The D1 planner's hard parameter limit. */
+export const FUNNEL_SQL_MAX_BINDINGS = 100;
+/** A one-site scoped dataset always contributes two IDs and two time bounds
+ * for both visits and events before a Funnel is composed on top. */
+export const FUNNEL_SQL_BASE_DATASET_BINDINGS = 6;
 
 export type FunnelProgressionScope = "session" | "visitor";
 
@@ -161,12 +172,22 @@ function decodeV2(value: unknown): FunnelConfigV2 {
     ids.add(step.id);
   }
 
-  return {
+  const decoded: FunnelConfigV2 = {
     filterDslVersion: FUNNEL_FILTER_DSL_VERSION,
     progressionScope: root.progressionScope,
     conversionWindowMs: root.conversionWindowMs,
     steps,
   };
+
+  try {
+    return validateFunnelConfigForWrite(decoded);
+  } catch (error) {
+    throw new FunnelConfigDecodeError(
+      error instanceof FunnelConfigValidationError
+        ? error.message
+        : "funnel_v2_config_invalid",
+    );
+  }
 }
 
 /** Decode a stored config without truncating historical over-limit funnels. */
@@ -213,6 +234,36 @@ function assertFinitePositiveWindow(config: FunnelConfigV2): void {
       "visitor_funnel_conversion_window_must_be_positive",
     );
   }
+}
+
+function predicateBindingCount(
+  predicate: ReturnType<typeof planObservationFilter>["visit"],
+  alias: string,
+): number {
+  if (predicate.kind !== "expression") return 0;
+  const document: FilterDocument = { version: 1, root: predicate.expression };
+  return compileFilterDocument(document, {
+    alias,
+    eventAlias: alias,
+    sessionSource: "scope_raw_visits",
+  }).bindings.length;
+}
+
+/**
+ * Estimate the bindings owned by a persisted Funnel definition.  Dataset
+ * bindings are request-scoped, so this deliberately counts the Funnel's
+ * projected Observation Filters, the visitor window, and result step IDs.
+ * The write contract reserves the fixed one-site dataset budget as headroom.
+ */
+export function estimateFunnelSqlBindingCount(config: FunnelConfigV2): number {
+  let count =
+    config.steps.length + (config.progressionScope === "visitor" ? 1 : 0);
+  for (const step of config.steps) {
+    const plan = planObservationFilter(parseFunnelStepFilter(step).root);
+    count += predicateBindingCount(plan.visit, "funnel_visit_filter");
+    count += predicateBindingCount(plan.event, "funnel_event_filter");
+  }
+  return count;
 }
 
 /** Validate a decoded config for a new V2 write. */
@@ -281,6 +332,12 @@ export function validateFunnelConfigForWrite(
         `funnel_filter_dsl_invalid:${index}`,
       );
     }
+  }
+  if (
+    estimateFunnelSqlBindingCount(config) + FUNNEL_SQL_BASE_DATASET_BINDINGS >
+    FUNNEL_SQL_MAX_BINDINGS
+  ) {
+    throw new FunnelConfigValidationError("funnel_sql_binding_limit_exceeded");
   }
   return config;
 }

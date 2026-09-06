@@ -14,26 +14,6 @@ import {
   RiFilterOffLine,
 } from "@remixicon/react";
 
-import type { FilterPanelAudience } from "@/components/dashboard/filter-panel";
-import {
-  allowedFields,
-  appendEditorNode,
-  conditionIdFactory,
-  defaultCondition,
-  defaultGroup,
-  directEventName,
-  displayRootExpression,
-  documentFromEditor,
-  type EditorGroup,
-  type EditorNode,
-  editorRootFromDocument,
-  emptyEditorGroup,
-  expressionTextFromEditor,
-  FilterExpressionHelpDialog,
-  GroupEditor,
-  removeEditorNode,
-  updateEditorNode,
-} from "@/components/dashboard/filter-panel";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -52,6 +32,44 @@ import {
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
+export type {
+  EditorGroup,
+  EditorNode,
+  FilterPanelAudience,
+} from "./filter-editor-internals";
+export {
+  allowedFields,
+  conditionIdFactory,
+  documentFromEditor,
+  editorRootFromDocument,
+  emptyEditorGroup,
+  expressionTextFromEditor,
+  reconcileEditorRoot,
+} from "./filter-editor-internals";
+
+import type {
+  EditorGroup,
+  EditorNode,
+  FilterPanelAudience,
+} from "./filter-editor-internals";
+import {
+  allowedFields,
+  appendEditorNode,
+  conditionIdFactory,
+  defaultCondition,
+  defaultGroup,
+  directEventName,
+  displayRootExpression,
+  documentFromEditor,
+  editorRootFromDocument,
+  emptyEditorGroup,
+  expressionTextFromEditor,
+  FilterExpressionHelpDialog,
+  GroupEditor,
+  removeEditorNode,
+  updateEditorNode,
+} from "./filter-editor-internals";
+
 export interface FilterEditorProps {
   readonly audience: FilterPanelAudience;
   readonly initialFilterDsl: string;
@@ -67,7 +85,7 @@ export interface FilterEditorProps {
   readonly invalidFilterLabel?: string;
   readonly placeholder?: string;
   readonly siteId?: string;
-  readonly resolvedScope?: "session" | "visitor";
+  readonly resolvedScope?: "event" | "session" | "visitor";
   readonly window?: TimeWindow;
   readonly controlledRoot?: EditorGroup;
   readonly controlledDocument?: FilterDocument;
@@ -79,6 +97,7 @@ export interface FilterEditorProps {
   readonly onControlledExpressionCommit?: () => void;
   readonly onControlledClear?: () => void;
   readonly onControlledApply?: () => void;
+  readonly headerContent?: ReactNode;
   readonly footerActions?: ReactNode;
 }
 
@@ -113,6 +132,7 @@ export function FilterEditor({
   onControlledExpressionCommit,
   onControlledClear,
   onControlledApply,
+  headerContent,
   footerActions,
 }: FilterEditorProps) {
   const isControlled = controlledRoot !== undefined;
@@ -348,6 +368,7 @@ export function FilterEditor({
         className="min-h-0 flex-1"
         contentClassName="min-h-0 pb-4"
       >
+        {headerContent}
         <GroupEditor
           audience={audience}
           document={editorDocument}

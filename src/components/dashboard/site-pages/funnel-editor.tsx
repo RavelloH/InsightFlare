@@ -33,11 +33,12 @@ const MAX_STEPS = 10;
 const HOUR_MS = 60 * 60 * 1_000;
 const DEFAULT_VISITOR_WINDOW_MS = 7 * 24 * HOUR_MS;
 const WINDOW_OPTIONS = [
-  ["3600000", "oneHour"],
-  ["86400000", "oneDay"],
-  ["604800000", "sevenDays"],
-  ["2592000000", "thirtyDays"],
+  ["1h", HOUR_MS, "oneHour"],
+  ["1d", 24 * HOUR_MS, "oneDay"],
+  ["7d", 7 * 24 * HOUR_MS, "sevenDays"],
+  ["30d", 30 * 24 * HOUR_MS, "thirtyDays"],
 ] as const;
+type VisitorWindowMode = (typeof WINDOW_OPTIONS)[number][0] | "custom";
 
 function newStep(index: number): FunnelStep {
   return {
@@ -46,15 +47,22 @@ function newStep(index: number): FunnelStep {
   };
 }
 
-function windowValue(value: number | null): string {
-  return value === null ? "custom" : String(value);
+function windowModeFromMs(value: number | null): VisitorWindowMode {
+  return (
+    WINDOW_OPTIONS.find(([, milliseconds]) => milliseconds === value)?.[0] ??
+    "custom"
+  );
 }
 
-function isPresetWindow(value: number | null): boolean {
-  return (
-    value !== null &&
-    WINDOW_OPTIONS.some(([preset]) => Number(preset) === value)
-  );
+function windowMsFromMode(
+  mode: VisitorWindowMode,
+  customWindowHours: string,
+): number | null {
+  if (mode === "custom") {
+    const hours = Number(customWindowHours);
+    return Number.isFinite(hours) && hours > 0 ? hours * HOUR_MS : null;
+  }
+  return WINDOW_OPTIONS.find(([value]) => value === mode)?.[1] ?? null;
 }
 
 function stepsFrom(funnel?: FunnelDefinition): FunnelStep[] {
@@ -92,6 +100,7 @@ export function FunnelEditor({
   const [conversionWindowMs, setConversionWindowMs] = useState<number | null>(
     null,
   );
+  const [windowMode, setWindowMode] = useState<VisitorWindowMode>("7d");
   const [customWindowHours, setCustomWindowHours] = useState("168");
   const [steps, setSteps] = useState<FunnelStep[]>(stepsFrom());
   const [filterStepId, setFilterStepId] = useState<string | null>(null);
@@ -103,10 +112,9 @@ export function FunnelEditor({
     setName(funnel?.name ?? "");
     setScope(funnel?.progressionScope ?? "session");
     setConversionWindowMs(funnel?.conversionWindowMs ?? null);
-    if (
-      funnel?.conversionWindowMs &&
-      !isPresetWindow(funnel.conversionWindowMs)
-    ) {
+    const nextWindowMode = windowModeFromMs(funnel?.conversionWindowMs ?? null);
+    setWindowMode(nextWindowMode);
+    if (nextWindowMode === "custom" && funnel?.conversionWindowMs) {
       setCustomWindowHours(String(funnel.conversionWindowMs / HOUR_MS));
     } else {
       setCustomWindowHours("168");
@@ -130,7 +138,11 @@ export function FunnelEditor({
     name.trim().length > 0 &&
     steps.length >= 2 &&
     steps.length <= MAX_STEPS &&
-    steps.every((step) => step.filterDsl.trim().length > 0);
+    steps.every((step) => step.filterDsl.trim().length > 0) &&
+    (scope === "session" ||
+      (conversionWindowMs !== null &&
+        Number.isFinite(conversionWindowMs) &&
+        conversionWindowMs > 0));
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -210,14 +222,14 @@ export function FunnelEditor({
                       onValueChange={(value) => {
                         const nextScope = value as typeof scope;
                         setScope(nextScope);
-                        if (
-                          nextScope === "visitor" &&
-                          conversionWindowMs === null
-                        ) {
-                          setConversionWindowMs(DEFAULT_VISITOR_WINDOW_MS);
-                        }
-                        if (nextScope === "session")
-                          setConversionWindowMs(null);
+                        setConversionWindowMs(
+                          nextScope === "visitor"
+                            ? (windowMsFromMode(
+                                windowMode,
+                                customWindowHours,
+                              ) ?? DEFAULT_VISITOR_WINDOW_MS)
+                            : null,
+                        );
                       }}
                     >
                       <SelectTrigger className="w-full">
@@ -239,25 +251,20 @@ export function FunnelEditor({
                         {labels.conversionWindow}
                       </label>
                       <Select
-                        value={windowValue(conversionWindowMs)}
+                        value={windowMode}
                         onValueChange={(value) => {
-                          if (value === "custom") {
-                            const hours = Number(customWindowHours);
-                            setConversionWindowMs(
-                              Number.isFinite(hours) && hours > 0
-                                ? hours * HOUR_MS
-                                : null,
-                            );
-                          } else {
-                            setConversionWindowMs(Number(value));
-                          }
+                          const nextMode = value as VisitorWindowMode;
+                          setWindowMode(nextMode);
+                          setConversionWindowMs(
+                            windowMsFromMode(nextMode, customWindowHours),
+                          );
                         }}
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {WINDOW_OPTIONS.map(([value, key]) => (
+                          {WINDOW_OPTIONS.map(([value, , key]) => (
                             <SelectItem key={value} value={value}>
                               {labels[key]}
                             </SelectItem>
@@ -267,8 +274,7 @@ export function FunnelEditor({
                           </SelectItem>
                         </SelectContent>
                       </Select>
-                      {conversionWindowMs !== null &&
-                      !isPresetWindow(conversionWindowMs) ? (
+                      {windowMode === "custom" ? (
                         <Input
                           type="number"
                           min="0.001"
