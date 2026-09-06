@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyticsFilterRegistry,
   EMPTY_FILTER_DOCUMENT,
+  type FunnelConfigV2,
   normalizeFilterDocument,
   prepareScopedQuery,
   type QueryAudience,
@@ -85,6 +86,19 @@ const window: QueryWindow = {
   nowMs: eventTime + 60 * 60 * 1000,
   timeZone: "UTC",
 };
+
+function funnelConfig(
+  steps: FunnelConfigV2["steps"],
+  progressionScope: FunnelConfigV2["progressionScope"] = "session",
+  conversionWindowMs: number | null = null,
+): FunnelConfigV2 {
+  return {
+    filterDslVersion: 1,
+    progressionScope,
+    conversionWindowMs,
+    steps,
+  };
+}
 
 function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
   const d1 = new SqliteD1Database();
@@ -847,7 +861,7 @@ describe("event detail D1 SQL", () => {
     }
   });
 
-  it("uses the event-name index for funnel event steps", async () => {
+  it("executes the funnel plan as one staged SQLite statement", async () => {
     const { env, d1 } = createSqliteEventEnv();
 
     try {
@@ -856,20 +870,21 @@ describe("event detail D1 SQL", () => {
         siteId,
         window,
         EMPTY_FILTER_DOCUMENT,
-        [{ type: "event", value: eventName }],
+        funnelConfig([
+          {
+            id: "entry",
+            filterDsl: 'page.path eq "/posts/minecraft-meteor-guide"',
+          },
+          { id: "click", filterDsl: `event.name eq "${eventName}"` },
+        ]),
       );
 
-      expect(analysis.summary.totalSessions).toBe(1);
-      const query = d1.calls.find((call) =>
-        call.sql.includes("target_event_names AS"),
-      );
-      expect(query?.sql).not.toContain("es.event_name IN");
-      const plan = d1.database
-        .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
-        .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
-      expect(plan.map((row) => row.detail).join("\n")).toContain(
-        "idx_custom_events_site_pk_name_time",
-      );
+      expect(analysis.progressionScope).toBe("session");
+      expect(analysis.summary.totalProgressions).toBe(1);
+      expect(analysis.summary.convertedProgressions).toBe(1);
+      expect(d1.calls).toHaveLength(1);
+      expect(d1.calls[0]?.sql).toContain("reached_0 AS");
+      expect(d1.calls[0]?.sql).toContain("reached_1 AS");
     } finally {
       d1.close();
     }
@@ -884,21 +899,22 @@ describe("event detail D1 SQL", () => {
         siteId,
         window,
         filterFixture({ path: "/posts/minecraft-meteor-guide" }),
-        [
-          { type: "pageview", value: "/entry" },
-          { type: "pageview", value: "/posts/minecraft-meteor-guide" },
-          { type: "event", value: eventName },
-        ],
+        funnelConfig([
+          { id: "entry", filterDsl: 'page.path eq "/entry"' },
+          {
+            id: "guide",
+            filterDsl: 'page.path eq "/posts/minecraft-meteor-guide"',
+          },
+          { id: "click", filterDsl: `event.name eq "${eventName}"` },
+        ]),
       );
 
       expect(analysis.steps.map((step) => step.sessions)).toEqual([1, 1, 1]);
       expect(analysis.summary).toMatchObject({
-        totalSessions: 1,
-        convertedSessions: 1,
+        totalProgressions: 1,
+        convertedProgressions: 1,
       });
-      expect(
-        d1.calls.some((call) => call.sql.includes("matched_sessions")),
-      ).toBe(true);
+      expect(d1.calls).toHaveLength(1);
     } finally {
       d1.close();
     }
@@ -926,16 +942,19 @@ describe("event detail D1 SQL", () => {
         siteId,
         window,
         prepared.filters!,
-        [
-          { type: "pageview", value: "/posts/minecraft-meteor-guide" },
-          { type: "event", value: eventName },
-        ],
+        funnelConfig([
+          {
+            id: "guide",
+            filterDsl: 'page.path eq "/posts/minecraft-meteor-guide"',
+          },
+          { id: "click", filterDsl: `event.name eq "${eventName}"` },
+        ]),
       );
 
       expect(analysis.steps.map((step) => step.sessions)).toEqual([1, 1]);
       expect(analysis.summary).toMatchObject({
-        totalSessions: 1,
-        convertedSessions: 1,
+        totalProgressions: 1,
+        convertedProgressions: 1,
       });
       expect(
         d1.calls.some((call) => call.sql.includes("FROM scope_final_visits")),
@@ -943,9 +962,7 @@ describe("event detail D1 SQL", () => {
       expect(
         d1.calls.some((call) => call.sql.includes("FROM scope_final_events")),
       ).toBe(true);
-      expect(
-        d1.calls.every((call) => !call.sql.includes("matched_sessions AS")),
-      ).toBe(true);
+      expect(d1.calls).toHaveLength(1);
     } finally {
       d1.close();
     }
@@ -967,15 +984,19 @@ describe("event detail D1 SQL", () => {
     );
 
     try {
-      const analysis = await queryFunnelAnalysis(env, siteId, window, filters, [
-        { type: "pageview", value: "/entry" },
-        { type: "event", value: eventName },
-      ]);
+      const analysis = await queryFunnelAnalysis(
+        env,
+        siteId,
+        window,
+        filters,
+        funnelConfig([
+          { id: "entry", filterDsl: 'page.path eq "/entry"' },
+          { id: "click", filterDsl: `event.name eq "${eventName}"` },
+        ]),
+      );
 
       expect(analysis.steps.map((step) => step.sessions)).toEqual([1, 1]);
-      expect(
-        d1.calls.every((call) => call.sql.includes("filter_event_source")),
-      ).toBe(true);
+      expect(d1.calls).toHaveLength(1);
     } finally {
       d1.close();
     }

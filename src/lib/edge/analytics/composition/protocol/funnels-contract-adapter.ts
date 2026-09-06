@@ -10,6 +10,10 @@ import {
   type QueryWindow,
   type ResponseContext,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  FUNNEL_SQL_MAX_BINDINGS,
+  FUNNEL_SQL_STRUCTURAL_BUDGET,
+} from "@/lib/edge/analytics/providers/d1/internal/funnel-planner";
 import { toQueryTime } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import { appNow } from "@/lib/edge/e2e-clock";
 import type { Env } from "@/lib/edge/types";
@@ -56,12 +60,28 @@ export async function handleFunnelAnalysisContract(
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
     readonly funnel: Record<string, unknown> | null;
     readonly analysis: Record<string, unknown> | null;
-  }>("funnel-analysis", {
-    context: queryContext,
-    time: toQueryTime(window),
-    filters,
-    funnelId,
-  });
+  }>(
+    "funnel-analysis",
+    {
+      context: queryContext,
+      time: toQueryTime(window),
+      filters,
+      funnelId,
+    },
+    {
+      cost: {
+        rangeMs: window.endExclusiveMs - window.startMs,
+        siteCount: 1,
+        metricCount: 1,
+        provider: "d1",
+        funnelStepCount: FUNNEL_SQL_STRUCTURAL_BUDGET.maxSteps,
+        funnelCteCount: FUNNEL_SQL_STRUCTURAL_BUDGET.maxFunnelCtes,
+        funnelSqlLength: FUNNEL_SQL_STRUCTURAL_BUDGET.maxSqlLength,
+        funnelBindingCount: FUNNEL_SQL_MAX_BINDINGS,
+        funnelWorstCase: true,
+      },
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   if (!result.data.funnel) return notFound();
   if (!result.data.analysis) return badRequest("Funnel has fewer than 2 steps");

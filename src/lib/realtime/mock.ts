@@ -85,6 +85,7 @@ import {
   createDemoFunnel,
   deleteDemoFunnel,
   generateDemoFunnels,
+  updateDemoFunnel,
 } from "@/lib/realtime/mock/funnels";
 import {
   generateDemoJourneyEventDetail,
@@ -642,6 +643,8 @@ function handleDemoRequestInner(options: {
     }
     if (path.includes("/funnels")) {
       if (method === "DELETE") return deleteDemoFunnel(siteId, params);
+      if (method === "PATCH")
+        return updateDemoFunnel(siteId, params, options.body);
       return createDemoFunnel(siteId, options.body);
     }
     // Special cases that need real-looking responses

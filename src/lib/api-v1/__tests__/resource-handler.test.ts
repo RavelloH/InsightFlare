@@ -464,8 +464,8 @@ describe("typed API v1 resource boundary", () => {
           funnelId: "funnel-1",
           name: "Onboarding",
           steps: [
-            { type: "pageview", value: "/" },
-            { type: "event", value: "complete" },
+            { id: "start", filterDsl: 'page.path eq "/"' },
+            { id: "complete", filterDsl: 'event.name eq "complete"' },
           ],
         },
         {},
@@ -585,9 +585,12 @@ describe("typed API v1 resource boundary", () => {
         {
           siteId: "site-1",
           name: "New funnel",
+          filterDslVersion: 1,
+          progressionScope: "session",
+          conversionWindowMs: null,
           steps: [
-            { type: "pageview", value: "/" },
-            { type: "event", value: "signup" },
+            { id: "start", filterDsl: 'page.path eq "/"' },
+            { id: "signup", filterDsl: 'event.name eq "signup"' },
           ],
         },
         {},
@@ -986,8 +989,8 @@ describe("typed API v1 resource boundary", () => {
           siteId: "site-1",
           funnelId: "funnel-1",
           steps: [
-            { type: "pageview", value: "/" },
-            { type: "event", value: "signup" },
+            { id: "start", filterDsl: 'page.path eq "/"' },
+            { id: "signup", filterDsl: 'event.name eq "signup"' },
           ],
         },
         {},

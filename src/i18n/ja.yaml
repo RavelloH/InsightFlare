@@ -82,7 +82,7 @@ common:
   user: ユーザー
   search: 検索
   open: 開く
-  sortBy: '{label}で並べ替え'
+  sortBy: "{label}で並べ替え"
   tableExport:
     action: エクスポート
     title: CSV をエクスポート
@@ -253,7 +253,7 @@ filterBuilder:
   valueLoading: 値を読み込み中
   valueSearchPlaceholder: 値を検索または入力
   valueListPlaceholder: 値を検索または入力して Enter で追加
-  removeValue: 'フィルター値「{value}」を削除'
+  removeValue: "フィルター値「{value}」を削除"
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
   jsonPointer: JSON ポインター
@@ -268,7 +268,8 @@ filterBuilder:
   expressionHelpSyntax: 構文
   expressionHelpLogicDescription: AND は OR より優先されます。ネストには括弧を使用し、AND(...) と OR(...) は明示的な単一条件グループを保持します。
   expressionHelpValues: 値
-  expressionHelpValuesDescription: 文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値]
+  expressionHelpValuesDescription:
+    文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値]
     を使い、between には順序付きの値を 2 つ指定します。
   expressionHelpOperators: 利用可能な演算子
   expressionHelpUnaryOperators: 値を取らない演算子
@@ -340,9 +341,9 @@ filterBuilder:
   savedFilterDescription: メモ
   scopeLabel: フィルター対象
   scopeAuto: 現在のページに応じて自動選択
-  scopeEvent: 同じページビューまたはイベントで、これらの条件を満たす必要があります
-  scopeSession: 同じセッション内の異なるページビューまたはイベントで、これらの条件を満たせます
-  scopeVisitor: 同じ訪問者の異なるセッションまたは行動で、これらの条件を満たせます
+  scopeEvent: 条件に一致するイベントを絞り込む
+  scopeSession: これらの条件を満たすセッションを絞り込む
+  scopeVisitor: これらの条件を満たす訪問者を絞り込む
   savedFilterVisibility: 公開範囲
   savedFilterVisibilityPrivate: 自分のみ
   savedFilterVisibilityTeam: チームと共有
@@ -666,20 +667,38 @@ funnels:
   subtitle: 複数ステップのユーザージャーニーでコンバージョンを測定します。
   listTitle: ファネル定義
   listSubtitle: 再利用可能なシーケンスを作成し、現在のダッシュボード期間でコンバージョンを確認します。
+  open: ファネルを開く
+  moreActions: その他の操作
   create: 新規ファネル
   createTitle: ファネルを作成
-  createDescription: ページビューまたはカスタムイベントの順序付きステップを少なくとも 2 つ定義してください。
+  createDescription: 順序付きの観測フィルターを少なくとも 2 つ定義してください。
   nameLabel: 名前
   namePlaceholder: 登録アクティベーション
   stepsLabel: ステップ
   addStep: ステップを追加
   removeStep: 削除
-  stepTypePageview: ページビュー
-  stepTypeEvent: イベント
-  stepValueLabel: 値
-  pageviewPlaceholder: /pricing
-  eventPlaceholder: signup_started
+  progression: コンバージョン単位
+  conversionWindow: コンバージョン期間
+  custom: カスタム
+  customWindowHours: カスタム期間（時間）
+  stepFilter: ステップフィルター
+  filter: フィルター
+  apply: 適用
+  condition: 条件
+  conditions: 条件
+  expression: フィルター式
+  filterPlaceholder: 例 page.path eq "/pricing"
+  invalidFilter: 無効なフィルター
+  dragStep: ステップをドラッグ
+  unnamed: （名前なし）
+  oneHour: 1 時間
+  oneDay: 24 時間
+  sevenDays: 7 日
+  thirtyDays: 30 日
   save: 作成
+  saveEdit: 変更を保存
+  edit: 編集
+  editTitle: ファネルを編集
   creating: 作成中...
   cancel: キャンセル
   delete: 削除
@@ -691,9 +710,11 @@ funnels:
   emptyHint: ページビューとカスタムイベントからファネルを作成し、コンバージョンを追跡します。
   loadError: ファネルを読み込めません。
   detailLoadError: ファネル分析を読み込めません。
-  invalidFunnel: 名前と、完全なステップを少なくとも 2 つ追加してください。
+  invalidFunnel: 名前と、完全なフィルターステップを少なくとも 2 つ追加してください。
   created: ファネルを作成しました。
   createFailed: ファネルを作成できません。
+  updatedSuccess: ファネルを更新しました。
+  saveFailed: ファネルを保存できません。
   deleted: ファネルを削除しました。
   deleteFailed: ファネルを削除できません。
   overallConversion: 全体コンバージョン
@@ -945,7 +966,8 @@ performance:
   poor: 不良
   datasetTitle: データセット概要
   interpretationTitle: 現在の読み取り
-  currentReading: "{metric} の P75 は {value}、{samples} 件のサンプルに基づく体験スコアは {score}
+  currentReading:
+    "{metric} の P75 は {value}、{samples} 件のサンプルに基づく体験スコアは {score}
     です。現在の判定：{status}。"
   metricThresholdText: "良好：{good} 以下、要改善：{good} から {poor}、不良：{poor} 超。"
   scoreThresholdText: "良好：90 超、要改善：50 から 90、不良：50 未満。"
@@ -1073,7 +1095,8 @@ siteSettings:
         - "-example.com"
         - "-*.example.com"
         - "admin.example.com"
-      exampleDescription: この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する
+      exampleDescription:
+        この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する
         admin.example.com を再びブロックします。
       testLabel: Hostname
       testPlaceholder: www.example.com
@@ -1137,7 +1160,8 @@ siteSettings:
         - "*.example.com"
         - "social.example.com"
         - "-trusted.example.com"
-      exampleDescription: この設定は example.com の参照元ドメインと social.example.com
+      exampleDescription:
+        この設定は example.com の参照元ドメインと social.example.com
         をブロックし、trusted.example.com を許可します。
       testLabel: 参照元
       testPlaceholder: https://social.example.com/article
@@ -1515,7 +1539,8 @@ runtimeConfigError:
   title: ランタイム設定が必要です
   eyebrow: デプロイを一時停止中
   heading: UI を読み込む前に、InsightFlare にはランタイムシークレットが 1 つ必要です。
-  description: アプリは起動していますが、現在のランタイム環境で必須の root secret
+  description:
+    アプリは起動していますが、現在のランタイム環境で必須の root secret
     を取得できないため、ダッシュボードへのアクセスを一時的にブロックしています。
   requiredTitle: 必須のランタイムシークレット
   requiredDescription: Cloudflare のランタイムシークレットに、次の値のいずれかを少なくとも 1 つ設定してください。
@@ -2261,7 +2286,8 @@ requestObservation:
   loadFailed: リクエスト監視データを読み込めません。
   samplingNotice: リクエスト数は Analytics Engine のサンプル重みで補正されています。詳細行は代表サンプルで、重複除外値は近似値です。
   notConfiguredTitle: Analytics Engine リーダーが設定されていません
-  notConfiguredDescription: リクエスト監視用の Analytics Engine データセットを読むには、システム設定で
+  notConfiguredDescription:
+    リクエスト監視用の Analytics Engine データセットを読むには、システム設定で
     Cloudflare Account ID と API トークンを追加してください。
   analyticsEngineDisabledTitle: Analytics Engine が有効ではありません
   analyticsEngineDisabledDescription: Cloudflare アカウントで Analytics Engine
@@ -2454,7 +2480,8 @@ systemSettings:
   retentionSaved: 保持期間を保存しました。
   retentionSaveFailed: 保持期間を保存できません。
   loginTurnstileTitle: ログイン Turnstile 保護
-  loginTurnstileDescription: 有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile
+  loginTurnstileDescription:
+    有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile
     Invisible 検証を実行し、サーバー側のサインイン処理で強制します。
   loginTurnstileEnabledLabel: ログイン保護を有効化
   loginTurnstileSiteKeyLabel: Site Key
@@ -2474,7 +2501,8 @@ systemSettings:
   loginTurnstileDeleteFailed: ログイン Turnstile 設定を削除できません。
   loginTurnstileDeleteConfirm: ログイン Turnstile 設定を削除しますか？ログイン保護は無効になります。
   loginTurnstileLoadFailed: ログイン Turnstile 設定を読み込めません。
-  loginTurnstilePrivacyNotice: Cloudflare Turnstile コンソールで Invisible ウィジェット
+  loginTurnstilePrivacyNotice:
+    Cloudflare Turnstile コンソールで Invisible ウィジェット
     を作成してください。セルフホスト環境では、プライバシーポリシーが Cloudflare Turnstile の要件に合っていることを確認してください。
   loginTurnstileGuideTitle: Turnstile 認証情報を取得
   loginTurnstileGuideDescription: ログイン保護には Cloudflare Turnstile の Site Key と Secret Key が必要です。
@@ -2595,7 +2623,8 @@ systemPerformance:
   doDiagnosticSiteNextDueHidden: 非表示フォールバック
   doDiagnosticSiteNextDueTimeout: 訪問タイムアウト
   doDiagnosticSiteResponseMs: 応答時間
-  doDiagnosticThresholdsHint: "しきい値：stale {stale}、timeout {timeout}、hardAged
+  doDiagnosticThresholdsHint:
+    "しきい値：stale {stale}、timeout {timeout}、hardAged
     {hardAged}、stuck flush_attempts ≥ {stuck}"
   doDiagnosticHealthy: 異常なバッファ行は検出されませんでした。
 loginForm:

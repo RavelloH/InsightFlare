@@ -9,6 +9,7 @@ import {
   type ScopedDatasetSql,
   scopedFilterMetadata,
   type ScopedFilterPlan,
+  type SqlBinding,
 } from "@/lib/edge/analytics/contract";
 import {
   SITE_PK_FROM_SITE_ID_SQL,
@@ -139,6 +140,166 @@ interface ObservationRelationSql {
   readonly bindings: Array<string | number>;
 }
 
+/**
+ * The relations produced when an already-scoped dataset is narrowed by one
+ * observation filter.  The dataset's final relations are deliberately the
+ * only inputs to this bundle: callers can compose one independent bundle per
+ * funnel step without accidentally re-applying the global filter.
+ */
+export interface ScopedObservationFilterSql {
+  readonly ctes: string;
+  readonly bindings: readonly SqlBinding[];
+  readonly matchedVisitRelation: string;
+  readonly matchedEventRelation: string;
+  readonly sessionRelation: string;
+  readonly visitorRelation: string;
+  /** Plural aliases make the relation intent explicit at composition sites. */
+  readonly matchedVisitsRelation: string;
+  readonly matchedEventsRelation: string;
+}
+
+function safeSqlIdentifier(value: string, label: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new TypeError(`${label} must be an internal SQL identifier.`);
+  }
+  return value;
+}
+
+/** Validate and return a CTE prefix before it is interpolated into SQL. */
+export function assertSafeScopedObservationCtePrefix(prefix: string): string {
+  return safeSqlIdentifier(prefix, "observation CTE prefix");
+}
+
+function scopedObservationRelation(
+  relation: string,
+  source: string,
+  alias: string,
+  predicate: ObservationPredicatePlan,
+  sessionSource: string,
+): ObservationRelationSql {
+  if (predicate.kind === "all") {
+    return {
+      cte: `${relation} AS (SELECT * FROM ${source})`,
+      bindings: [],
+    };
+  }
+  if (predicate.kind === "none") {
+    return {
+      cte: `${relation} AS (SELECT * FROM ${source} WHERE 0)`,
+      bindings: [],
+    };
+  }
+  const compiled = compileFilterDocument(
+    { version: 1, root: predicate.expression },
+    {
+      alias,
+      eventAlias: alias,
+      sessionSource,
+    },
+  );
+  return {
+    cte: `${relation} AS (SELECT ${alias}.* FROM ${source} ${alias} ${compiled.clause})`,
+    bindings: [...compiled.bindings],
+  };
+}
+
+/**
+ * Apply one parsed/validated Observation Filter to an existing dataset.
+ *
+ * `planObservationFilter` projects the expression independently into the
+ * visit and event domains.  This is important for mixed filters: a visit-only
+ * step predicate must not be merged with, or evaluated against, the global
+ * dataset's filter document.  `compileFilterDocument` then compiles each
+ * projected predicate against the dataset final relations.
+ */
+export function applyObservationFilterToScopedDataset(
+  dataset: ScopedDatasetSql,
+  filter: FilterDocument,
+  ctePrefix: string,
+): ScopedObservationFilterSql {
+  const prefix = assertSafeScopedObservationCtePrefix(ctePrefix);
+  const visitSource = safeSqlIdentifier(
+    dataset.visitRelation,
+    "scoped visit relation",
+  );
+  const eventSource = safeSqlIdentifier(
+    dataset.eventRelation,
+    "scoped event relation",
+  );
+  const sessionSource = visitSource;
+  const sessionRelation = `${prefix}_sessions`;
+  const visitorRelation = `${prefix}_visitors`;
+  const matchedVisitRelation = `${prefix}_matched_visits`;
+  const matchedEventRelation = `${prefix}_matched_events`;
+  const plan = planObservationFilter(filter.root);
+  const visits = scopedObservationRelation(
+    matchedVisitRelation,
+    visitSource,
+    `${prefix}_visit_filter`,
+    plan.visit,
+    sessionSource,
+  );
+  const events = scopedObservationRelation(
+    matchedEventRelation,
+    eventSource,
+    `${prefix}_event_filter`,
+    plan.event,
+    sessionSource,
+  );
+
+  const ctes = `
+${visits.cte},
+${events.cte},
+${sessionRelation} AS (
+  SELECT DISTINCT site_pk, session_id
+  FROM ${matchedVisitRelation}
+  WHERE site_pk IS NOT NULL
+    AND TRIM(COALESCE(session_id, '')) != ''
+  UNION
+  SELECT DISTINCT site_pk, session_id
+  FROM ${matchedEventRelation}
+  WHERE site_pk IS NOT NULL
+    AND TRIM(COALESCE(session_id, '')) != ''
+),
+${visitorRelation} AS (
+  SELECT DISTINCT site_pk, visitor_id
+  FROM ${matchedVisitRelation}
+  WHERE site_pk IS NOT NULL
+    AND TRIM(COALESCE(visitor_id, '')) != ''
+  UNION
+  SELECT DISTINCT site_pk, visitor_id
+  FROM ${matchedEventRelation}
+  WHERE site_pk IS NOT NULL
+    AND TRIM(COALESCE(visitor_id, '')) != ''
+)`;
+  const bindings = [...visits.bindings, ...events.bindings].map(
+    (value): SqlBinding => ({ value }),
+  );
+
+  return {
+    ctes,
+    bindings,
+    matchedVisitRelation,
+    matchedEventRelation,
+    sessionRelation,
+    visitorRelation,
+    matchedVisitsRelation: matchedVisitRelation,
+    matchedEventsRelation: matchedEventRelation,
+  };
+}
+
+/**
+ * Canonical name for the shared Funnel/analysis primitive. Keep the longer
+ * `apply...` export above for callers that describe this operation as a
+ * compiler step, but expose the execution-oriented name in the contract.
+ */
+export const executeObservationFilterOnScopedDataset =
+  applyObservationFilterToScopedDataset;
+
+/** Concise alias for callers that already operate on a scoped dataset. */
+export const compileScopedObservationFilterSql =
+  applyObservationFilterToScopedDataset;
+
 function compileObservationRelation(
   name: string,
   source: string,
@@ -254,7 +415,15 @@ export function compileScopedDatasetSql(
   input: ScopedDatasetCompilerInput,
 ): ScopedDatasetSql {
   const metadata = scopedFilterMetadata(input.filters);
-  if (!metadata || metadata.plan !== input.plan) {
+  // Empty Funnel base datasets are intentionally allowed to be compiled
+  // without request metadata. A no-filter query has no caller-selected scope,
+  // but the Funnel planner still needs the canonical relation bundle before
+  // applying each Step Observation Filter. Non-empty unprepared documents
+  // remain rejected so ordinary providers cannot bypass query preparation.
+  if (
+    (!metadata && input.filters.root !== null) ||
+    (metadata && metadata.plan !== input.plan)
+  ) {
     throw new Error("scoped_dataset_metadata_required");
   }
 

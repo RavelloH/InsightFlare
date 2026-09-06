@@ -9,6 +9,7 @@ export interface HonoSite {
   id: string;
   name?: string;
   domain?: string;
+  canManage?: boolean;
 }
 
 export interface HonoPublicSite extends HonoSite {

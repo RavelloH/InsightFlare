@@ -12562,29 +12562,56 @@
                             "name": {
                               "type": "string"
                             },
+                            "filterDslVersion": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "progressionScope": {
+                              "type": "string",
+                              "enum": [
+                                "session",
+                                "visitor"
+                              ]
+                            },
+                            "conversionWindowMs": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
                             "steps": {
                               "type": "array",
                               "items": {
                                 "type": "object",
                                 "properties": {
-                                  "type": {
+                                  "id": {
                                     "type": "string",
-                                    "enum": [
-                                      "pageview",
-                                      "event"
-                                    ]
+                                    "minLength": 1,
+                                    "maxLength": 128
                                   },
-                                  "value": {
+                                  "name": {
+                                    "type": "string",
+                                    "maxLength": 120
+                                  },
+                                  "filterDsl": {
                                     "type": "string",
                                     "minLength": 1
                                   }
                                 },
                                 "required": [
-                                  "type",
-                                  "value"
+                                  "id",
+                                  "filterDsl"
                                 ],
                                 "additionalProperties": false
                               }
+                            },
+                            "semanticFingerprint": {
+                              "type": "string",
+                              "minLength": 1
                             },
                             "createdAt": {
                               "type": "integer",
@@ -12601,7 +12628,11 @@
                             "id",
                             "siteId",
                             "name",
+                            "filterDslVersion",
+                            "progressionScope",
+                            "conversionWindowMs",
                             "steps",
+                            "semanticFingerprint",
                             "createdAt",
                             "updatedAt"
                           ],
@@ -12610,25 +12641,27 @@
                         "analysis": {
                           "type": "object",
                           "properties": {
+                            "progressionScope": {
+                              "type": "string",
+                              "enum": [
+                                "session",
+                                "visitor"
+                              ]
+                            },
                             "steps": {
                               "type": "array",
                               "items": {
                                 "type": "object",
                                 "properties": {
+                                  "stepId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128
+                                  },
                                   "index": {
                                     "type": "integer",
                                     "minimum": -9007199254740991,
                                     "maximum": 9007199254740991
-                                  },
-                                  "label": {
-                                    "type": "string"
-                                  },
-                                  "type": {
-                                    "type": "string",
-                                    "enum": [
-                                      "pageview",
-                                      "event"
-                                    ]
                                   },
                                   "sessions": {
                                     "type": "integer",
@@ -12640,31 +12673,45 @@
                                     "minimum": -9007199254740991,
                                     "maximum": 9007199254740991
                                   },
-                                  "conversionRate": {
-                                    "type": "number"
-                                  },
-                                  "stepConversionRate": {
-                                    "type": "number"
-                                  },
-                                  "dropOffSessions": {
-                                    "type": "integer",
-                                    "minimum": -9007199254740991,
-                                    "maximum": 9007199254740991
-                                  },
-                                  "dropOffRate": {
-                                    "type": "number"
+                                  "progression": {
+                                    "type": "object",
+                                    "properties": {
+                                      "count": {
+                                        "type": "integer",
+                                        "minimum": -9007199254740991,
+                                        "maximum": 9007199254740991
+                                      },
+                                      "conversionRate": {
+                                        "type": "number"
+                                      },
+                                      "stepConversionRate": {
+                                        "type": "number"
+                                      },
+                                      "dropOffCount": {
+                                        "type": "integer",
+                                        "minimum": -9007199254740991,
+                                        "maximum": 9007199254740991
+                                      },
+                                      "dropOffRate": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "count",
+                                      "conversionRate",
+                                      "stepConversionRate",
+                                      "dropOffCount",
+                                      "dropOffRate"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
+                                  "stepId",
                                   "index",
-                                  "label",
-                                  "type",
                                   "sessions",
                                   "visitors",
-                                  "conversionRate",
-                                  "stepConversionRate",
-                                  "dropOffSessions",
-                                  "dropOffRate"
+                                  "progression"
                                 ],
                                 "additionalProperties": false
                               }
@@ -12672,22 +12719,12 @@
                             "summary": {
                               "type": "object",
                               "properties": {
-                                "totalSessions": {
+                                "totalProgressions": {
                                   "type": "integer",
                                   "minimum": -9007199254740991,
                                   "maximum": 9007199254740991
                                 },
-                                "convertedSessions": {
-                                  "type": "integer",
-                                  "minimum": -9007199254740991,
-                                  "maximum": 9007199254740991
-                                },
-                                "totalVisitors": {
-                                  "type": "integer",
-                                  "minimum": -9007199254740991,
-                                  "maximum": 9007199254740991
-                                },
-                                "convertedVisitors": {
+                                "convertedProgressions": {
                                   "type": "integer",
                                   "minimum": -9007199254740991,
                                   "maximum": 9007199254740991
@@ -12709,10 +12746,8 @@
                                 }
                               },
                               "required": [
-                                "totalSessions",
-                                "convertedSessions",
-                                "totalVisitors",
-                                "convertedVisitors",
+                                "totalProgressions",
+                                "convertedProgressions",
                                 "overallConversionRate",
                                 "largestDropOffStepIndex"
                               ],
@@ -12720,6 +12755,7 @@
                             }
                           },
                           "required": [
+                            "progressionScope",
                             "steps",
                             "summary"
                           ],
@@ -12748,34 +12784,40 @@
                       "id": "example",
                       "siteId": "example",
                       "name": "example",
+                      "filterDslVersion": 1,
+                      "progressionScope": "session",
+                      "conversionWindowMs": 0,
                       "steps": [
                         {
-                          "type": "pageview",
-                          "value": "example"
+                          "id": "example",
+                          "name": "example",
+                          "filterDsl": "example"
                         }
                       ],
+                      "semanticFingerprint": "example",
                       "createdAt": -9007199254740991,
                       "updatedAt": -9007199254740991
                     },
                     "analysis": {
+                      "progressionScope": "session",
                       "steps": [
                         {
+                          "stepId": "example",
                           "index": -9007199254740991,
-                          "label": "example",
-                          "type": "pageview",
                           "sessions": -9007199254740991,
                           "visitors": -9007199254740991,
-                          "conversionRate": 0,
-                          "stepConversionRate": 0,
-                          "dropOffSessions": -9007199254740991,
-                          "dropOffRate": 0
+                          "progression": {
+                            "count": -9007199254740991,
+                            "conversionRate": 0,
+                            "stepConversionRate": 0,
+                            "dropOffCount": -9007199254740991,
+                            "dropOffRate": 0
+                          }
                         }
                       ],
                       "summary": {
-                        "totalSessions": -9007199254740991,
-                        "convertedSessions": -9007199254740991,
-                        "totalVisitors": -9007199254740991,
-                        "convertedVisitors": -9007199254740991,
+                        "totalProgressions": -9007199254740991,
+                        "convertedProgressions": -9007199254740991,
                         "overallConversionRate": 0,
                         "largestDropOffStepIndex": -9007199254740991
                       }
@@ -30710,31 +30752,57 @@
                                 "minLength": 1,
                                 "maxLength": 200
                               },
+                              "filterDslVersion": {
+                                "type": "number",
+                                "const": 1
+                              },
+                              "progressionScope": {
+                                "type": "string",
+                                "enum": [
+                                  "session",
+                                  "visitor"
+                                ]
+                              },
+                              "conversionWindowMs": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
                               "steps": {
-                                "minItems": 2,
-                                "maxItems": 10,
+                                "minItems": 1,
                                 "type": "array",
                                 "items": {
                                   "type": "object",
                                   "properties": {
-                                    "type": {
+                                    "id": {
                                       "type": "string",
-                                      "enum": [
-                                        "pageview",
-                                        "event"
-                                      ]
+                                      "minLength": 1,
+                                      "maxLength": 128
                                     },
-                                    "value": {
+                                    "name": {
+                                      "type": "string",
+                                      "maxLength": 120
+                                    },
+                                    "filterDsl": {
                                       "type": "string",
                                       "minLength": 1
                                     }
                                   },
                                   "required": [
-                                    "type",
-                                    "value"
+                                    "id",
+                                    "filterDsl"
                                   ],
                                   "additionalProperties": false
                                 }
+                              },
+                              "semanticFingerprint": {
+                                "type": "string",
+                                "minLength": 1
                               },
                               "createdAt": {
                                 "type": "string",
@@ -30760,7 +30828,11 @@
                               "id",
                               "siteId",
                               "name",
+                              "filterDslVersion",
+                              "progressionScope",
+                              "conversionWindowMs",
                               "steps",
+                              "semanticFingerprint",
                               "createdAt",
                               "updatedAt",
                               "links"
@@ -30805,16 +30877,17 @@
                         "id": "example",
                         "siteId": "example",
                         "name": "example",
+                        "filterDslVersion": 1,
+                        "progressionScope": "session",
+                        "conversionWindowMs": 0,
                         "steps": [
                           {
-                            "type": "pageview",
-                            "value": "example"
-                          },
-                          {
-                            "type": "pageview",
-                            "value": "example"
+                            "id": "example",
+                            "name": "example",
+                            "filterDsl": "example"
                           }
                         ],
+                        "semanticFingerprint": "example",
                         "createdAt": "2026-01-01T00:00:00Z",
                         "updatedAt": "2026-01-01T00:00:00Z",
                         "links": {}
@@ -31026,26 +31099,59 @@
                     "minLength": 1,
                     "maxLength": 200
                   },
+                  "filterDslVersion": {
+                    "default": 1,
+                    "type": "number",
+                    "const": 1
+                  },
+                  "progressionScope": {
+                    "default": "session",
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "visitor"
+                    ]
+                  },
+                  "conversionWindowMs": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "steps": {
-                    "$ref": "#/components/schemas/SharedSchema_319bc1b55d41"
+                    "$ref": "#/components/schemas/SharedSchema_4177843de504"
                   }
                 },
                 "required": [
                   "name",
+                  "filterDslVersion",
+                  "progressionScope",
+                  "conversionWindowMs",
                   "steps"
                 ],
                 "additionalProperties": false
               },
               "example": {
                 "name": "example",
+                "filterDslVersion": 1,
+                "progressionScope": "session",
+                "conversionWindowMs": null,
                 "steps": [
                   {
-                    "type": "pageview",
-                    "value": "example"
+                    "id": "example",
+                    "name": "example",
+                    "filterDsl": "example"
                   },
                   {
-                    "type": "pageview",
-                    "value": "example"
+                    "id": "example",
+                    "name": "example",
+                    "filterDsl": "example"
                   }
                 ]
               }
@@ -31067,23 +31173,24 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SharedSchema_c8f6862cbc77"
+                  "$ref": "#/components/schemas/SharedSchema_cae7d6e6fe38"
                 },
                 "example": {
                   "data": {
                     "id": "example",
                     "siteId": "example",
                     "name": "example",
+                    "filterDslVersion": 1,
+                    "progressionScope": "session",
+                    "conversionWindowMs": 0,
                     "steps": [
                       {
-                        "type": "pageview",
-                        "value": "example"
-                      },
-                      {
-                        "type": "pageview",
-                        "value": "example"
+                        "id": "example",
+                        "name": "example",
+                        "filterDsl": "example"
                       }
                     ],
+                    "semanticFingerprint": "example",
                     "createdAt": "2026-01-01T00:00:00Z",
                     "updatedAt": "2026-01-01T00:00:00Z",
                     "links": {}
@@ -31390,23 +31497,24 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SharedSchema_c8f6862cbc77"
+                  "$ref": "#/components/schemas/SharedSchema_cae7d6e6fe38"
                 },
                 "example": {
                   "data": {
                     "id": "example",
                     "siteId": "example",
                     "name": "example",
+                    "filterDslVersion": 1,
+                    "progressionScope": "session",
+                    "conversionWindowMs": 0,
                     "steps": [
                       {
-                        "type": "pageview",
-                        "value": "example"
-                      },
-                      {
-                        "type": "pageview",
-                        "value": "example"
+                        "id": "example",
+                        "name": "example",
+                        "filterDsl": "example"
                       }
                     ],
+                    "semanticFingerprint": "example",
                     "createdAt": "2026-01-01T00:00:00Z",
                     "updatedAt": "2026-01-01T00:00:00Z",
                     "links": {}
@@ -31592,22 +31700,49 @@
                     "minLength": 1,
                     "maxLength": 200
                   },
+                  "filterDslVersion": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "progressionScope": {
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "visitor"
+                    ]
+                  },
+                  "conversionWindowMs": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "steps": {
-                    "$ref": "#/components/schemas/SharedSchema_319bc1b55d41"
+                    "$ref": "#/components/schemas/SharedSchema_4177843de504"
                   }
                 },
                 "additionalProperties": false
               },
               "example": {
                 "name": "example",
+                "filterDslVersion": 1,
+                "progressionScope": "session",
+                "conversionWindowMs": 1,
                 "steps": [
                   {
-                    "type": "pageview",
-                    "value": "example"
+                    "id": "example",
+                    "name": "example",
+                    "filterDsl": "example"
                   },
                   {
-                    "type": "pageview",
-                    "value": "example"
+                    "id": "example",
+                    "name": "example",
+                    "filterDsl": "example"
                   }
                 ]
               }
@@ -31629,23 +31764,24 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SharedSchema_c8f6862cbc77"
+                  "$ref": "#/components/schemas/SharedSchema_cae7d6e6fe38"
                 },
                 "example": {
                   "data": {
                     "id": "example",
                     "siteId": "example",
                     "name": "example",
+                    "filterDslVersion": 1,
+                    "progressionScope": "session",
+                    "conversionWindowMs": 0,
                     "steps": [
                       {
-                        "type": "pageview",
-                        "value": "example"
-                      },
-                      {
-                        "type": "pageview",
-                        "value": "example"
+                        "id": "example",
+                        "name": "example",
+                        "filterDsl": "example"
                       }
                     ],
+                    "semanticFingerprint": "example",
                     "createdAt": "2026-01-01T00:00:00Z",
                     "updatedAt": "2026-01-01T00:00:00Z",
                     "links": {}
@@ -35000,6 +35136,83 @@
         ],
         "additionalProperties": false
       },
+      "SharedSchema_394574a77114": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "siteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "filterDslVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "progressionScope": {
+            "type": "string",
+            "enum": [
+              "session",
+              "visitor"
+            ]
+          },
+          "conversionWindowMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "$ref": "#/components/schemas/SharedSchema_977dfdcaca10"
+          },
+          "semanticFingerprint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/IsoDateTime2"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/IsoDateTime2"
+          },
+          "links": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "siteId",
+          "name",
+          "filterDslVersion",
+          "progressionScope",
+          "conversionWindowMs",
+          "steps",
+          "semanticFingerprint",
+          "createdAt",
+          "updatedAt",
+          "links"
+        ],
+        "additionalProperties": false
+      },
       "SharedSchema_70e5ad1c6250": {
         "type": "object",
         "properties": {
@@ -35099,77 +35312,6 @@
           "createdAt",
           "updatedAt",
           "sharing",
-          "links"
-        ],
-        "additionalProperties": false
-      },
-      "SharedSchema_6c8d36c43022": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "siteId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "steps": {
-            "minItems": 2,
-            "maxItems": 10,
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "enum": [
-                    "pageview",
-                    "event"
-                  ]
-                },
-                "value": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "required": [
-                "type",
-                "value"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "createdAt": {
-            "$ref": "#/components/schemas/IsoDateTime2"
-          },
-          "updatedAt": {
-            "$ref": "#/components/schemas/IsoDateTime2"
-          },
-          "links": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "siteId",
-          "name",
-          "steps",
-          "createdAt",
-          "updatedAt",
           "links"
         ],
         "additionalProperties": false
@@ -35283,27 +35425,11 @@
         ],
         "additionalProperties": false
       },
-      "SharedSchema_54fee11931ae": {
+      "SharedSchema_cae7d6e6fe38": {
         "type": "object",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/SharedSchema_70e5ad1c6250"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/SharedSchema_eb25089bb08d"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "SharedSchema_94662e716bac": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/SharedSchema_fbbfb89aa861"
+            "$ref": "#/components/schemas/SharedSchema_394574a77114"
           },
           "meta": {
             "type": "object",
@@ -35325,11 +35451,27 @@
         ],
         "additionalProperties": false
       },
-      "SharedSchema_c8f6862cbc77": {
+      "SharedSchema_54fee11931ae": {
         "type": "object",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/SharedSchema_6c8d36c43022"
+            "$ref": "#/components/schemas/SharedSchema_70e5ad1c6250"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/SharedSchema_eb25089bb08d"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SharedSchema_94662e716bac": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SharedSchema_fbbfb89aa861"
           },
           "meta": {
             "type": "object",
@@ -38620,6 +38762,63 @@
           "additionalProperties": false
         }
       },
+      "SharedSchema_4177843de504": {
+        "minItems": 2,
+        "maxItems": 10,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "filterDsl": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "id",
+            "filterDsl"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "SharedSchema_977dfdcaca10": {
+        "minItems": 1,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 120
+            },
+            "filterDsl": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id",
+            "filterDsl"
+          ],
+          "additionalProperties": false
+        }
+      },
       "SharedSchema_f026b27b36a1": {
         "minItems": 1,
         "type": "array",
@@ -38746,34 +38945,6 @@
             "views",
             "sessions",
             "visitors"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "SharedSchema_319bc1b55d41": {
-        "minItems": 2,
-        "maxItems": 10,
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "pageview",
-                "event"
-              ],
-              "description": "pageview = match pathname, event = match event name"
-            },
-            "value": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Pathname pattern or event name to match"
-            }
-          },
-          "required": [
-            "type",
-            "value"
           ],
           "additionalProperties": false
         }

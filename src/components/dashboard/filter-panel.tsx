@@ -125,7 +125,7 @@ import type {
 } from "@/lib/saved-filters";
 import { cn } from "@/lib/utils";
 
-type FilterPanelAudience = "private-dashboard" | "public-share";
+export type FilterPanelAudience = "private-dashboard" | "public-share";
 type ScalarKind = "string" | "number" | "boolean";
 const NO_SAVED_FILTER_VALUE = "__no_saved_filter__";
 const EMPTY_SAVED_FILTER_FORM = {
@@ -246,7 +246,7 @@ function systemPresetItem(messages: AppMessages, id: SystemFilterPresetId) {
   return items[id];
 }
 
-interface EditorCondition {
+export interface EditorCondition {
   readonly id: string;
   readonly kind: "condition";
   readonly negated: boolean;
@@ -261,7 +261,7 @@ interface EditorCondition {
   readonly valueDirty: boolean;
 }
 
-interface EditorGroup {
+export interface EditorGroup {
   readonly id: string;
   readonly kind: "group";
   readonly negated: boolean;
@@ -270,7 +270,7 @@ interface EditorGroup {
   readonly children: readonly EditorNode[];
 }
 
-type EditorNode = EditorCondition | EditorGroup;
+export type EditorNode = EditorCondition | EditorGroup;
 
 interface FilterPanelProps {
   readonly audience: FilterPanelAudience;
@@ -302,7 +302,7 @@ const VALUELESS_OPERATORS = new Set<FilterOperator>([
 ]);
 const LIST_OPERATORS = new Set<FilterOperator>(["in", "notIn"]);
 
-function conditionIdFactory() {
+export function conditionIdFactory() {
   let sequence = 0;
   return () => `filter-node-${++sequence}`;
 }
@@ -337,7 +337,7 @@ function filterValueKey(value: FilterValue): string {
   return JSON.stringify(value);
 }
 
-function defaultCondition(createId: () => string): EditorCondition {
+export function defaultCondition(createId: () => string): EditorCondition {
   return {
     id: createId(),
     kind: "condition",
@@ -354,7 +354,7 @@ function defaultCondition(createId: () => string): EditorCondition {
   };
 }
 
-function defaultGroup(createId: () => string): EditorGroup {
+export function defaultGroup(createId: () => string): EditorGroup {
   return {
     id: createId(),
     kind: "group",
@@ -365,7 +365,7 @@ function defaultGroup(createId: () => string): EditorGroup {
   };
 }
 
-function emptyEditorGroup(createId: () => string): EditorGroup {
+export function emptyEditorGroup(createId: () => string): EditorGroup {
   return {
     id: createId(),
     kind: "group",
@@ -421,7 +421,7 @@ function editorNodeFromExpression(
   };
 }
 
-function editorRootFromDocument(
+export function editorRootFromDocument(
   document: FilterDocument,
   createId: () => string,
 ): EditorGroup {
@@ -535,7 +535,9 @@ function displayExpressionFromEditor(
   );
 }
 
-function displayRootExpression(root: EditorGroup): FilterExpression | null {
+export function displayRootExpression(
+  root: EditorGroup,
+): FilterExpression | null {
   const children = root.children
     .map(displayExpressionFromEditor)
     .filter((child): child is FilterExpression => child !== null);
@@ -545,7 +547,7 @@ function displayRootExpression(root: EditorGroup): FilterExpression | null {
     : { kind: root.combinator, children };
 }
 
-function documentFromEditor(root: EditorGroup): FilterDocument {
+export function documentFromEditor(root: EditorGroup): FilterDocument {
   return normalizeFilterDocument(
     {
       version: FILTER_DOCUMENT_VERSION,
@@ -555,7 +557,7 @@ function documentFromEditor(root: EditorGroup): FilterDocument {
   );
 }
 
-function expressionTextFromEditor(root: EditorGroup): string {
+export function expressionTextFromEditor(root: EditorGroup): string {
   try {
     // Do not normalize before formatting. Normalization is required when a
     // filter is applied, but it sorts and deduplicates equivalent branches.
@@ -637,7 +639,7 @@ function reconcileEditorRoot(
   return reconcileEditorNode(current, incoming) as EditorGroup;
 }
 
-function updateEditorNode(
+export function updateEditorNode(
   node: EditorNode,
   id: string,
   update: (node: EditorNode) => EditorNode,
@@ -652,7 +654,7 @@ function updateEditorNode(
     : { ...node, children };
 }
 
-function appendEditorNode(
+export function appendEditorNode(
   node: EditorNode,
   parentId: string,
   child: EditorNode,
@@ -669,7 +671,10 @@ function appendEditorNode(
     : { ...node, children };
 }
 
-function removeEditorNode(node: EditorNode, id: string): EditorNode | null {
+export function removeEditorNode(
+  node: EditorNode,
+  id: string,
+): EditorNode | null {
   if (node.id === id) return null;
   if (node.kind === "condition") return node;
   const children = node.children
@@ -759,7 +764,7 @@ function fieldLabel(field: string, messages: AppMessages): string {
   return messages.filterBuilder.fieldLabels[field] ?? field;
 }
 
-function FilterExpressionHelpDialog({
+export function FilterExpressionHelpDialog({
   audience,
   messages,
   open,
@@ -944,7 +949,7 @@ function FilterExpressionHelpDialog({
   );
 }
 
-function allowedFields(
+export function allowedFields(
   audience: FilterPanelAudience,
 ): readonly FilterFieldDefinition[] {
   return [...analyticsFilterRegistry.values()]
@@ -956,7 +961,7 @@ function allowedFields(
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function directEventName(group: EditorGroup): string | undefined {
+export function directEventName(group: EditorGroup): string | undefined {
   const matches = group.children.filter(
     (node): node is EditorCondition =>
       node.kind === "condition" &&
@@ -1882,7 +1887,7 @@ function ConditionEditor({
   );
 }
 
-function GroupEditor({
+export function GroupEditor({
   audience,
   document,
   eventName,

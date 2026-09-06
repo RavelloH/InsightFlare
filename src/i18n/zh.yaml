@@ -339,9 +339,9 @@ filterBuilder:
   savedFilterDescription: 备注
   scopeLabel: 筛选范围
   scopeAuto: 根据当前页面自动选择
-  scopeEvent: 同一次页面访问或事件需要满足这些条件
-  scopeSession: 条件可由同一会话中的不同访问或事件满足
-  scopeVisitor: 条件可由同一访客的不同会话或行为满足
+  scopeEvent: 筛选符合当前条件的事件
+  scopeSession: 筛选满足这些条件的会话
+  scopeVisitor: 筛选满足这些条件的访客
   savedFilterVisibility: 可见性
   savedFilterVisibilityPrivate: 仅自己可见
   savedFilterVisibilityTeam: 与团队共享
@@ -663,20 +663,38 @@ funnels:
   subtitle: 衡量多步骤用户旅程的转化情况。
   listTitle: 漏斗定义
   listSubtitle: 构建可复用的步骤序列，并按当前看板时间窗查看转化。
+  open: 打开漏斗
+  moreActions: 更多操作
   create: 新建漏斗
   createTitle: 创建漏斗
-  createDescription: 至少定义两个有顺序的页面浏览或自定义事件步骤。
+  createDescription: 至少定义两个有顺序的观察筛选步骤。
   nameLabel: 名称
   namePlaceholder: 注册激活
   stepsLabel: 步骤
   addStep: 添加步骤
   removeStep: 移除步骤
-  stepTypePageview: 页面浏览
-  stepTypeEvent: 事件
-  stepValueLabel: 值
-  pageviewPlaceholder: /pricing
-  eventPlaceholder: signup_started
+  progression: 转化主体
+  conversionWindow: 转化窗口
+  custom: 自定义
+  customWindowHours: 自定义窗口（小时）
+  stepFilter: 步骤筛选
+  filter: 筛选
+  apply: 应用
+  condition: 个条件
+  conditions: 个条件
+  expression: 筛选表达式
+  filterPlaceholder: 例如 page.path eq "/pricing"
+  invalidFilter: 筛选无效
+  dragStep: 拖动步骤
+  unnamed: （未命名）
+  oneHour: 1 小时
+  oneDay: 24 小时
+  sevenDays: 7 天
+  thirtyDays: 30 天
   save: 创建
+  saveEdit: 保存修改
+  edit: 编辑
+  editTitle: 编辑漏斗
   creating: 创建中...
   cancel: 取消
   delete: 删除
@@ -688,9 +706,11 @@ funnels:
   emptyHint: 使用页面浏览和自定义事件创建漏斗来跟踪转化。
   loadError: 无法加载漏斗。
   detailLoadError: 无法加载漏斗分析。
-  invalidFunnel: 请填写名称，并至少补全两个步骤。
+  invalidFunnel: 请填写名称，并至少补全两个筛选步骤。
   created: 漏斗已创建。
   createFailed: 创建漏斗失败。
+  updatedSuccess: 漏斗已更新。
+  saveFailed: 保存漏斗失败。
   deleted: 漏斗已删除。
   deleteFailed: 删除漏斗失败。
   overallConversion: 总转化率
@@ -2256,7 +2276,8 @@ requestObservation:
   notConfiguredTitle: 尚未配置 Analytics Engine 读取凭据
   notConfiguredDescription: 请先在系统设置中填写 Cloudflare Account ID 和 API Token，用于读取请求观测 Analytics Engine 数据集。
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用
-  analyticsEngineDisabledDescription: 当前部署未绑定 Analytics Engine，因为 Cloudflare
+  analyticsEngineDisabledDescription:
+    当前部署未绑定 Analytics Engine，因为 Cloudflare
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。
   openAnalyticsEngine: 打开 Analytics Engine
   openSettings: 打开设置
@@ -2408,7 +2429,8 @@ systemSettings:
   analyticsEngineDeleteFailed: 删除分析引擎配置失败。
   analyticsEngineDeleteConfirm: 确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用
-  analyticsEngineDisabledDescription: 当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare
+  analyticsEngineDisabledDescription:
+    当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用 Analytics Engine，然后重新部署
     InsightFlare 以激活相关分析功能。
   analyticsEngineDisabledHint: 在启用 Analytics Engine 并重新部署 Worker 前，分析引擎设置不可修改。

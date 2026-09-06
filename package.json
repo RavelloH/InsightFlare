@@ -59,6 +59,7 @@
     "ops:secret:bootstrap-admin-password": "tsx scripts/ops.ts --target cf --action secret --name BOOTSTRAP_ADMIN_PASSWORD",
     "ops:tail": "tsx scripts/ops.ts --target cf --action tail",
     "bench:d1": "tsx scripts/benchmark-d1.ts",
+    "bench:funnel:sqlite": "tsx scripts/benchmark-funnel-sqlite.ts",
     "bench:d1:indexes": "tsx scripts/benchmark-scheduled-index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:i18n": "tsx scripts/check-i18n.ts",

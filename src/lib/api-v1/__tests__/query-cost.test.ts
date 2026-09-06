@@ -66,4 +66,32 @@ describe("calculateQueryCost", () => {
     expect(event).toBeLessThan(session);
     expect(session).toBeLessThan(visitor);
   });
+
+  it("charges Funnel structural dimensions and worst-case planning", () => {
+    const ordinary = calculateQueryCost({
+      rangeMs: 86_400_000,
+      provider: "d1",
+    });
+    const tenStepWorstCase = calculateQueryCost({
+      rangeMs: 86_400_000,
+      provider: "d1",
+      funnelStepCount: 10,
+      funnelCteCount: 61,
+      funnelSqlLength: 1_000_000,
+      funnelBindingCount: 100,
+      funnelWorstCase: true,
+    });
+    expect(tenStepWorstCase).toBeGreaterThan(ordinary);
+    expect(
+      calculateQueryCost({
+        rangeMs: 86_400_000,
+        provider: "d1",
+        funnelStepCount: 10,
+        funnelCteCount: 61,
+        funnelSqlLength: 1_000_000,
+        funnelBindingCount: 100,
+        funnelWorstCase: true,
+      }),
+    ).toBe(tenStepWorstCase);
+  });
 });

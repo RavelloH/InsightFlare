@@ -19,6 +19,12 @@ export interface QueryCostInput {
   readonly entityAlgebraComplexity?: number;
   readonly eventPayloadComplexity?: number;
   readonly requiresRawSource?: boolean;
+  /** Funnel planner dimensions. These are structural, not row-count guesses. */
+  readonly funnelStepCount?: number;
+  readonly funnelCteCount?: number;
+  readonly funnelSqlLength?: number;
+  readonly funnelBindingCount?: number;
+  readonly funnelWorstCase?: boolean;
 }
 
 export interface QueryCostPolicy {
@@ -59,6 +65,10 @@ export function calculateQueryCost(
     input.requiredSourceCount ?? 1,
     input.entityAlgebraComplexity ?? 1,
     input.eventPayloadComplexity ?? 1,
+    input.funnelStepCount ?? 1,
+    input.funnelCteCount ?? 1,
+    input.funnelSqlLength ?? 1,
+    input.funnelBindingCount ?? 1,
   ];
   if (values.some((value) => !Number.isFinite(value) || value < 0)) {
     return policy.maxCost;
@@ -70,6 +80,12 @@ export function calculateQueryCost(
   const scopeFactor =
     input.scope === "visitor" ? 1.5 : input.scope === "session" ? 1.25 : 1;
   const rawSourceFactor = input.requiresRawSource ? 1.15 : 1;
+  const funnelFactor =
+    Math.max(1, (input.funnelStepCount ?? 1) / 2) ** 0.75 *
+    Math.max(1, (input.funnelCteCount ?? 1) / 12) ** 0.4 *
+    Math.max(1, (input.funnelSqlLength ?? 1) / 100_000) ** 0.25 *
+    Math.max(1, (input.funnelBindingCount ?? 1) / 20) ** 0.2 *
+    (input.funnelWorstCase ? 1.5 : 1);
   const cost =
     rangeFactor *
     Math.max(1, input.sideCount ?? 1) *
@@ -85,6 +101,7 @@ export function calculateQueryCost(
     Math.max(1, input.eventPayloadComplexity ?? 1) ** 0.2 *
     scopeFactor *
     rawSourceFactor *
+    funnelFactor *
     providerFactor *
     Math.max(1, input.batchFanout ?? 1);
   return Math.min(policy.maxCost, Math.max(1, Math.ceil(cost)));

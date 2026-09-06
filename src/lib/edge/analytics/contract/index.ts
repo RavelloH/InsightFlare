@@ -7,6 +7,7 @@ export * from "./filter-codec";
 export * from "./filter-compiler";
 export * from "./filter-registry";
 export * from "./filters";
+export * from "./funnel-config";
 export * from "./helpers";
 export * from "./observation-planner";
 export * from "./operations/index";

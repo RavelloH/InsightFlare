@@ -757,20 +757,23 @@ describe("API v1 generated client", () => {
             id: "funnel-1",
             siteId: "site-1",
             name: "Checkout",
+            filterDslVersion: 1,
+            progressionScope: "session",
+            conversionWindowMs: null,
             steps: [
-              { type: "pageview", value: "/start" },
-              { type: "event", value: "purchase" },
+              { id: "start", filterDsl: 'page.path eq "/start"' },
+              { id: "purchase", filterDsl: 'event.name eq "purchase"' },
             ],
+            semanticFingerprint: "funnel-v2:test",
             createdAt: 1,
             updatedAt: 2,
           },
           analysis: {
+            progressionScope: "session",
             steps: [],
             summary: {
-              totalSessions: 0,
-              convertedSessions: 0,
-              totalVisitors: 0,
-              convertedVisitors: 0,
+              totalProgressions: 0,
+              convertedProgressions: 0,
               overallConversionRate: 0,
               largestDropOffStepIndex: null,
             },
@@ -1479,9 +1482,12 @@ describe("API v1 generated client", () => {
     });
     const funnel = {
       name: "Signup",
+      filterDslVersion: 1 as const,
+      progressionScope: "session" as const,
+      conversionWindowMs: null,
       steps: [
-        { type: "pageview" as const, value: "/" },
-        { type: "event" as const, value: "signup" },
+        { id: "landing", filterDsl: 'page.path eq "/"' },
+        { id: "signup", filterDsl: 'event.name eq "signup"' },
       ],
     };
 

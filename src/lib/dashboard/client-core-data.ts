@@ -417,14 +417,36 @@ export async function fetchFunnelDetail(
 
 export async function createFunnel(
   siteId: string,
-  name: string,
-  steps: FunnelStep[],
+  input: {
+    name: string;
+    progressionScope: "session" | "visitor";
+    conversionWindowMs: number | null;
+    steps: FunnelStep[];
+  },
 ): Promise<FunnelMutationData> {
   return fetchPrivateJsonMutate<FunnelMutationData>(
     "/api/private/funnels",
     "POST",
     { siteId },
-    { name, steps },
+    input,
+  );
+}
+
+export async function updateFunnel(
+  siteId: string,
+  funnelId: string,
+  input: {
+    name?: string;
+    progressionScope?: "session" | "visitor";
+    conversionWindowMs?: number | null;
+    steps?: FunnelStep[];
+  },
+): Promise<FunnelMutationData> {
+  return fetchPrivateJsonMutate<FunnelMutationData>(
+    "/api/private/funnels",
+    "PATCH",
+    { siteId, id: funnelId },
+    input,
   );
 }
 

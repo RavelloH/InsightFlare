@@ -90,7 +90,7 @@ export async function fetchPrivateJson<T>(
 
 export async function fetchPrivateJsonMutate<T>(
   path: string,
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   params?: PrivateRequestParams,
   body?: unknown,
 ): Promise<T> {

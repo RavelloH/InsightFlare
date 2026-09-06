@@ -9,164 +9,102 @@ import {
   FunnelStepSchema,
 } from "@/schemas/funnel";
 
-describe("FunnelStepSchema", () => {
-  it("accepts a valid pageview step", () => {
+const steps = [
+  { id: "landing", filterDsl: 'page.path eq "/landing"' },
+  { id: "signup", filterDsl: 'event.name eq "signup"' },
+] as const;
+
+describe("Funnel v2 schemas", () => {
+  it("accepts a definition, create input, and analysis input", () => {
+    const config = {
+      filterDslVersion: 1,
+      progressionScope: "session" as const,
+      conversionWindowMs: null,
+      steps,
+    };
+    expect(FunnelStepSchema.safeParse(steps[0]).success).toBe(true);
     expect(
-      FunnelStepSchema.safeParse({ type: "pageview", value: "/home" }).success,
+      FunnelCreateInputSchema.safeParse({ name: "Signup", ...config }).success,
+    ).toBe(true);
+    expect(FunnelAnalyzeInputSchema.safeParse(config).success).toBe(true);
+    expect(
+      FunnelDefinitionSchema.safeParse({
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        siteId: "site-1",
+        name: "Signup",
+        ...config,
+        semanticFingerprint: "funnel-v2:abc",
+        createdAt: 1,
+        updatedAt: 2,
+      }).success,
     ).toBe(true);
   });
 
-  it("accepts a valid event step", () => {
-    expect(
-      FunnelStepSchema.safeParse({ type: "event", value: "signup" }).success,
-    ).toBe(true);
-  });
-
-  it("rejects invalid type", () => {
-    expect(
-      FunnelStepSchema.safeParse({ type: "click", value: "x" }).success,
-    ).toBe(false);
-  });
-
-  it("rejects empty value", () => {
-    expect(
-      FunnelStepSchema.safeParse({ type: "pageview", value: "" }).success,
-    ).toBe(false);
-  });
-
-  it("trims whitespace from value", () => {
-    const result = FunnelStepSchema.safeParse({
-      type: "pageview",
-      value: "  /home  ",
-    });
-    expect(result.success).toBe(true);
-    if (result.success) expect(result.data.value).toBe("/home");
-  });
-});
-
-describe("FunnelDefinitionSchema", () => {
-  const validDefinition = {
-    id: "550e8400-e29b-41d4-a716-446655440000",
-    siteId: "s1",
-    name: "Signup Funnel",
-    steps: [
-      { type: "pageview" as const, value: "/landing" },
-      { type: "event" as const, value: "signup" },
-    ],
-    createdAt: 1700000000,
-    updatedAt: 1700000000,
-  };
-
-  it("accepts a valid definition", () => {
-    expect(FunnelDefinitionSchema.safeParse(validDefinition).success).toBe(
-      true,
-    );
-  });
-
-  it("rejects invalid uuid", () => {
-    expect(
-      FunnelDefinitionSchema.safeParse({ ...validDefinition, id: "bad" })
-        .success,
-    ).toBe(false);
-  });
-});
-
-describe("FunnelCreateInputSchema", () => {
-  it("accepts valid input with 2 steps", () => {
-    const result = FunnelCreateInputSchema.safeParse({
-      name: "My Funnel",
-      steps: [
-        { type: "pageview", value: "/a" },
-        { type: "pageview", value: "/b" },
-      ],
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects fewer than 2 steps", () => {
+  it("requires unique step ids and rejects more than ten steps", () => {
     expect(
       FunnelCreateInputSchema.safeParse({
-        name: "Funnel",
-        steps: [{ type: "pageview", value: "/a" }],
+        name: "Duplicate",
+        filterDslVersion: 1,
+        progressionScope: "session",
+        conversionWindowMs: null,
+        steps: [steps[0], steps[0]],
+      }).success,
+    ).toBe(false);
+    expect(
+      FunnelCreateInputSchema.safeParse({
+        name: "Long",
+        filterDslVersion: 1,
+        progressionScope: "session",
+        conversionWindowMs: null,
+        steps: Array.from({ length: 11 }, (_, index) => ({
+          id: `step-${index}`,
+          filterDsl: `page.path eq "/step-${index}"`,
+        })),
       }).success,
     ).toBe(false);
   });
 
-  it("rejects more than 10 steps", () => {
-    const steps = Array.from({ length: 11 }, (_, i) => ({
-      type: "pageview" as const,
-      value: `/step-${i}`,
-    }));
-    expect(
-      FunnelCreateInputSchema.safeParse({ name: "Funnel", steps }).success,
-    ).toBe(false);
-  });
-
-  it("rejects empty name", () => {
+  it("requires a positive visitor conversion window", () => {
     expect(
       FunnelCreateInputSchema.safeParse({
-        name: "",
-        steps: [
-          { type: "pageview", value: "/a" },
-          { type: "pageview", value: "/b" },
-        ],
+        name: "Visitors",
+        filterDslVersion: 1,
+        progressionScope: "visitor",
+        conversionWindowMs: 86_400_000,
+        steps,
+      }).success,
+    ).toBe(true);
+    expect(
+      FunnelAnalyzeInputSchema.safeParse({
+        filterDslVersion: 1,
+        progressionScope: "visitor",
+        conversionWindowMs: 0,
+        steps,
       }).success,
     ).toBe(false);
   });
-});
 
-describe("FunnelAnalyzeInputSchema", () => {
-  it("accepts valid input", () => {
-    const result = FunnelAnalyzeInputSchema.safeParse({
-      steps: [
-        { type: "pageview", value: "/a" },
-        { type: "event", value: "buy" },
-      ],
-    });
-    expect(result.success).toBe(true);
-  });
-});
-
-describe("FunnelAnalysisStepSchema", () => {
-  it("accepts valid analysis step", () => {
+  it("validates the v2 analysis shape", () => {
     expect(
       FunnelAnalysisStepSchema.safeParse({
+        stepId: "landing",
         index: 0,
-        label: "/landing",
-        type: "pageview",
-        sessions: 100,
-        visitors: 80,
-        conversionRate: 100,
-        stepConversionRate: 100,
-        dropOffSessions: 0,
-        dropOffRate: 0,
+        sessions: 10,
+        visitors: 8,
+        progression: {
+          count: 10,
+          conversionRate: 1,
+          stepConversionRate: 1,
+          dropOffCount: 0,
+          dropOffRate: 0,
+        },
       }).success,
     ).toBe(true);
-  });
-});
-
-describe("FunnelAnalysisSummarySchema", () => {
-  it("accepts valid summary", () => {
     expect(
       FunnelAnalysisSummarySchema.safeParse({
-        totalSessions: 100,
-        convertedSessions: 25,
-        totalVisitors: 80,
-        convertedVisitors: 20,
-        overallConversionRate: 25,
-        largestDropOffStepIndex: 1,
-      }).success,
-    ).toBe(true);
-  });
-
-  it("accepts null largestDropOffStepIndex", () => {
-    expect(
-      FunnelAnalysisSummarySchema.safeParse({
-        totalSessions: 10,
-        convertedSessions: 10,
-        totalVisitors: 10,
-        convertedVisitors: 10,
-        overallConversionRate: 100,
+        totalProgressions: 10,
+        convertedProgressions: 4,
+        overallConversionRate: 0.4,
         largestDropOffStepIndex: null,
       }).success,
     ).toBe(true);

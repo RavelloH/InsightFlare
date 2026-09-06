@@ -160,14 +160,22 @@ export const TrackingScriptSchema = z
   .strict();
 
 const FunnelStepSchema = z
-  .object({ type: z.enum(["pageview", "event"]), value: z.string().min(1) })
+  .object({
+    id: z.string().min(1).max(128),
+    name: z.string().max(120).optional(),
+    filterDsl: z.string().min(1),
+  })
   .strict();
 export const FunnelResourceSchema = z
   .object({
     id: SiteIdSchema,
     siteId: SiteIdSchema,
     name: z.string().min(1).max(200),
-    steps: z.array(FunnelStepSchema).min(2).max(10),
+    filterDslVersion: z.literal(1),
+    progressionScope: z.enum(["session", "visitor"]),
+    conversionWindowMs: z.number().finite().nullable(),
+    steps: z.array(FunnelStepSchema).min(1),
+    semanticFingerprint: z.string().min(1),
     createdAt: z.string().datetime({ offset: true }),
     updatedAt: z.string().datetime({ offset: true }),
     links: z.record(z.string(), z.string()),
@@ -307,6 +315,8 @@ export const UpdateSharingSettingsInputSchema =
 export const CreateFunnelInputSchema = FunnelCreateInputSchema.extend({
   siteId: SiteIdSchema,
 }).strict();
+/** Body schema used by generated clients; the site id comes from the path. */
+export const CreateFunnelBodySchema = FunnelCreateInputSchema;
 export const ListFunnelsInputSchema = z
   .object({ siteId: SiteIdSchema, page: ResourcePageRequestSchema })
   .strict();
@@ -315,7 +325,12 @@ export const GetFunnelInputSchema = z
   .strict();
 const funnelPatchRefinement = (
   value: z.infer<typeof FunnelUpdateInputSchema>,
-) => value.name !== undefined || value.steps !== undefined;
+) =>
+  value.name !== undefined ||
+  value.filterDslVersion !== undefined ||
+  value.progressionScope !== undefined ||
+  value.conversionWindowMs !== undefined ||
+  value.steps !== undefined;
 export const UpdateFunnelBodySchema = FunnelUpdateInputSchema.refine(
   funnelPatchRefinement,
   "A funnel patch must change at least one field",
@@ -432,7 +447,7 @@ export interface ApiV1ApplicationOperationMap {
   "funnels.create": {
     input: z.infer<typeof CreateFunnelInputSchema>;
     result: z.infer<typeof FunnelResourceSchema>;
-    error: "not_found" | "internal_error";
+    error: "not_found" | "invalid_input" | "internal_error";
   };
   "funnels.get": {
     input: z.infer<typeof GetFunnelInputSchema>;
@@ -442,7 +457,7 @@ export interface ApiV1ApplicationOperationMap {
   "funnels.update": {
     input: z.infer<typeof UpdateFunnelInputSchema>;
     result: z.infer<typeof FunnelResourceSchema>;
-    error: "not_found" | "internal_error";
+    error: "not_found" | "invalid_input" | "internal_error";
   };
   "funnels.delete": {
     input: z.infer<typeof GetFunnelInputSchema>;

@@ -195,6 +195,7 @@ function error(
     | "unsupported_media_type"
     | "not_acceptable"
     | "invalid_cursor"
+    | "invalid_input"
     | "internal_error"
     | "conflict",
 ): Response {
@@ -209,6 +210,7 @@ function error(
     unsupported_media_type: [415, "Expected application/json"],
     not_acceptable: [406, "Only application/json is supported"],
     invalid_cursor: [400, "The pagination cursor is invalid"],
+    invalid_input: [400, "The funnel configuration is invalid"],
     internal_error: [500, "An internal error occurred"],
     conflict: [409, "The resource conflicts with an existing resource"],
   } as const;
@@ -308,7 +310,9 @@ export async function handlePlannedResourceRoute(input: {
             ? "missing_scope"
             : code === "invalid_cursor"
               ? "invalid_cursor"
-              : "internal_error",
+              : code === "invalid_input"
+                ? "validation_failed"
+                : "internal_error",
     );
   }
   if (config.successStatus === 204) return new Response(null, { status: 204 });

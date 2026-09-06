@@ -102,6 +102,7 @@ describe("Hono private query routes", () => {
       id: "site-1",
       name: "Site",
       domain: "app.test",
+      canManage: true,
     });
     vi.mocked(dispatchQueryRoute).mockResolvedValue(new Response("query"));
     vi.mocked(handleOverviewContract).mockResolvedValue(new Response("query"));
@@ -203,6 +204,25 @@ describe("Hono private query routes", () => {
     expect(postResponse.status).toBe(200);
     expect(deleteResponse.status).toBe(200);
     expect(withDashboardCache).not.toHaveBeenCalled();
+  });
+
+  it("denies funnel mutations to a readable site member", async () => {
+    vi.mocked(resolvePrivateSiteForSession).mockResolvedValueOnce({
+      id: "site-1",
+      name: "Site",
+      domain: "app.test",
+      canManage: false,
+    });
+    const app = createApp();
+    const response = await app.fetch(
+      request("/api/private/funnels?siteId=site-1", {
+        method: "PATCH",
+        body: "{}",
+      }),
+      env as never,
+      ctx,
+    );
+    expect(response.status).toBe(403);
   });
 
   it("throws when the private session context is missing", async () => {

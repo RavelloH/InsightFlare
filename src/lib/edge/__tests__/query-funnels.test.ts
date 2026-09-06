@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  analyzeFunnelEvents,
-  handleFunnel,
-  normalizeFunnelSteps,
-} from "@/lib/edge/analytics/providers/d1/internal/funnels";
+import { handleFunnel } from "@/lib/edge/analytics/providers/d1/internal/funnels";
 import type { Env } from "@/lib/edge/types";
 
 interface PreparedCall {
@@ -36,423 +32,163 @@ function createEnv(
       })),
     },
   } as unknown as Env;
-
-  return { calls, env };
+  return { env, calls };
 }
 
-function makeRequest(
-  path: string,
-  init?: RequestInit,
-): { request: Request; url: URL } {
-  const request = new Request(`https://edge.test${path}`, init);
-  return { request, url: new URL(request.url) };
+const v2 = {
+  filterDslVersion: 1,
+  progressionScope: "session",
+  conversionWindowMs: null,
+  steps: [
+    { id: "landing", filterDsl: 'page.path eq "/pricing"' },
+    { id: "signup", filterDsl: 'event.name eq "signup_started"' },
+  ],
+};
+
+function request(path: string, init?: RequestInit) {
+  const next = new Request(`https://edge.test${path}`, init);
+  return { request: next, url: new URL(next.url) };
 }
 
-function nowSeconds() {
-  return Math.floor(Date.now() / 1000);
-}
+describe("funnel v2 query handler", () => {
+  afterEach(() => vi.restoreAllMocks());
 
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-});
-
-describe("funnel query handler", () => {
-  it("lists funnel definitions from the unified resource endpoint", async () => {
-    const steps = [
-      { type: "pageview", value: "/pricing" },
-      { type: "event", value: "signup_started" },
-    ];
-    const legacySteps = [
-      { type: "pageview", value: "/docs" },
-      { type: "pageview", value: "/docs/install" },
-    ];
-    const { calls, env } = createEnv((sql) =>
+  it("lists definitions after decoding v1 rows into the v2 representation", async () => {
+    const { env, calls } = createEnv((sql) =>
       sql.includes("analysis_definitions")
         ? [
             {
               id: "funnel-1",
               site_id: "site-1",
-              kind: "funnel",
               name: "Signup",
-              config_json: JSON.stringify({ steps }),
+              config_json: JSON.stringify({
+                steps: [
+                  { type: "pageview", value: "/pricing" },
+                  { type: "event", value: "signup_started" },
+                ],
+              }),
+              config_version: 1,
               created_at: 10,
               updated_at: 20,
-            },
-            {
-              id: "funnel-legacy",
-              site_id: "site-1",
-              kind: "funnel",
-              name: "Docs",
-              config_json: JSON.stringify(legacySteps),
-              created_at: 30,
-              updated_at: 40,
             },
           ]
         : [],
     );
-    const { request, url } = makeRequest("/api/private/funnel");
-
-    const response = await handleFunnel(env, "site-1", url, undefined, request);
+    const { request: req, url } = request("/api/private/funnels");
+    const response = await handleFunnel(env, "site-1", url, undefined, req);
+    const body = (await response.json()) as any;
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      data: {
-        items: [
-          {
-            id: "funnel-1",
-            siteId: "site-1",
-            name: "Signup",
-            steps,
-            createdAt: 10,
-            updatedAt: 20,
-          },
-          {
-            id: "funnel-legacy",
-            siteId: "site-1",
-            name: "Docs",
-            steps: legacySteps,
-            createdAt: 30,
-            updatedAt: 40,
-          },
-        ],
-        pagination: {
-          limit: 50,
-          returned: 2,
-          hasMore: false,
-          nextCursor: null,
-        },
-      },
+    expect(body.data.items[0]).toMatchObject({
+      id: "funnel-1",
+      progressionScope: "session",
+      conversionWindowMs: null,
+      steps: [
+        { id: "v1:0", filterDsl: 'page.path eq "/pricing"' },
+        { id: "v1:1", filterDsl: 'event.name eq "signup_started"' },
+      ],
+      semanticFingerprint: expect.stringContaining("funnel-v2:"),
     });
-    expect(calls[0]?.sql).toContain("FROM analysis_definitions");
-    expect(calls[0]?.sql).not.toContain("widgets");
-    expect(calls[0]?.bindings).toEqual(["site-1", "funnel", 51]);
+    expect(calls[0]?.sql).toContain("config_version");
   });
 
-  it("decodes the signed cursor when loading the next funnel page", async () => {
-    const row = (id: string, createdAt: number) => ({
-      id,
-      site_id: "site-1",
-      kind: "funnel",
-      name: id,
-      config_json: JSON.stringify({
-        steps: [
-          { type: "pageview", value: "/" },
-          { type: "event", value: "signup" },
-        ],
-      }),
-      created_at: createdAt,
-      updated_at: createdAt,
-    });
-    const firstSetup = createEnv((sql) =>
-      sql.includes("analysis_definitions")
-        ? [row("funnel-1", 20), row("funnel-2", 10)]
-        : [],
-    );
-    firstSetup.env.DAILY_SALT_SECRET = "test-pagination-secret";
-    const first = await handleFunnel(
-      firstSetup.env,
-      "site-1",
-      makeRequest("/api/private/funnel?limit=1").url,
-    );
-    const firstBody = (await first.json()) as any;
-    expect(firstBody.data.pagination.nextCursor).toEqual(expect.any(String));
-
-    const secondSetup = createEnv((sql) =>
-      sql.includes("analysis_definitions") ? [row("funnel-2", 10)] : [],
-    );
-    secondSetup.env.DAILY_SALT_SECRET = "test-pagination-secret";
-    const secondUrl = makeRequest(
-      `/api/private/funnel?limit=1&cursor=${encodeURIComponent(firstBody.data.pagination.nextCursor)}`,
-    ).url;
-    const second = await handleFunnel(secondSetup.env, "site-1", secondUrl);
-    expect(second.status).toBe(200);
-    await expect(second.json()).resolves.toMatchObject({
-      data: {
-        items: [{ id: "funnel-2" }],
-        pagination: { hasMore: false, nextCursor: null },
-      },
-    });
-  });
-
-  it("creates funnel definitions with normalized step input", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-02T00:00:00Z"));
+  it("writes v2 config on create and supports PATCH update", async () => {
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
       "00000000-0000-4000-8000-000000000001",
     );
-    const steps = [
-      { type: "pageview", value: " /pricing " },
-      { type: "unknown", value: "/ignored" },
-      { type: "event", value: "signup_started" },
-    ];
-    const normalizedSteps = [
-      { type: "pageview", value: "/pricing" },
-      { type: "event", value: "signup_started" },
-    ];
-    const { calls, env } = createEnv();
-    const { request, url } = makeRequest("/api/private/funnel", {
-      body: JSON.stringify({ name: " Signup ", steps }),
-      method: "POST",
-    });
-
-    const response = await handleFunnel(env, "site-1", url, undefined, request);
-
-    const now = nowSeconds();
-    expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      data: {
-        funnel: {
-          id: "00000000-0000-4000-8000-000000000001",
-          siteId: "site-1",
-          name: "Signup",
-          steps: normalizedSteps,
-          createdAt: now,
-          updatedAt: now,
-        },
-      },
-    });
-    expect(calls[0]?.sql).toContain("INSERT INTO analysis_definitions");
-    expect(calls[0]?.sql).not.toContain("widgets");
-    expect(calls[0]?.bindings).toEqual([
-      "00000000-0000-4000-8000-000000000001",
+    const { env, calls } = createEnv((sql) =>
+      sql.includes("analysis_definitions")
+        ? [
+            {
+              id: "00000000-0000-4000-8000-000000000001",
+              site_id: "site-1",
+              name: "Signup",
+              config_json: JSON.stringify(v2),
+              config_version: 2,
+              created_at: 100,
+              updated_at: 100,
+            },
+          ]
+        : [],
+    );
+    const created = await handleFunnel(
+      env,
       "site-1",
-      "funnel",
-      "Signup",
-      JSON.stringify({ steps: normalizedSteps }),
-      now,
-      now,
-    ]);
+      request("/api/private/funnels", {
+        method: "POST",
+        body: JSON.stringify({ name: "Signup", ...v2 }),
+      }).url,
+      undefined,
+      request("/api/private/funnels", {
+        method: "POST",
+        body: JSON.stringify({ name: "Signup", ...v2 }),
+      }).request,
+    );
+    expect(created.status).toBe(201);
+    const insert = calls.find((call) => call.method === "run");
+    expect(insert?.bindings).toContain(2);
+    expect(insert?.bindings).toContain(JSON.stringify(v2));
+
+    const update = await handleFunnel(
+      env,
+      "site-1",
+      request("/api/private/funnels?id=00000000-0000-4000-8000-000000000001", {
+        method: "PATCH",
+        body: JSON.stringify({ name: "Renamed" }),
+      }).url,
+      undefined,
+      request("/api/private/funnels?id=00000000-0000-4000-8000-000000000001", {
+        method: "PATCH",
+        body: JSON.stringify({ name: "Renamed" }),
+      }).request,
+    );
+    expect(update.status).toBe(200);
+    expect(
+      calls.some((call) =>
+        call.sql.startsWith("UPDATE analysis_definitions SET name"),
+      ),
+    ).toBe(true);
   });
 
-  it("archives funnel definitions through DELETE", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-02T00:00:00Z"));
-    const { calls, env } = createEnv();
-    const { request, url } = makeRequest("/api/private/funnel?id=funnel-1", {
-      method: "DELETE",
-    });
-
-    const response = await handleFunnel(env, "site-1", url, undefined, request);
-
-    const now = nowSeconds();
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
-    expect(calls[0]?.sql).toContain("UPDATE analysis_definitions");
-    expect(calls[0]?.sql).not.toContain("widgets");
-    expect(calls[0]?.bindings).toEqual([
-      now,
-      now,
-      "funnel-1",
-      "site-1",
-      "funnel",
-    ]);
-  });
-
-  it("loads a funnel detail and applies visit filters to pageview and event queries", async () => {
-    const steps = [
-      { type: "pageview", value: "/pricing" },
-      { type: "event", value: "signup_started" },
-    ];
-    const { calls, env } = createEnv((sql) => {
+  it("runs one staged SQL statement and returns zero rows for later steps", async () => {
+    const { env, calls } = createEnv((sql) => {
       if (sql.includes("analysis_definitions")) {
         return [
           {
             id: "funnel-1",
             site_id: "site-1",
             name: "Signup",
-            config_json: JSON.stringify({ steps }),
-            created_at: 10,
-            updated_at: 20,
+            config_json: JSON.stringify(v2),
+            config_version: 2,
+            created_at: 1,
+            updated_at: 1,
           },
         ];
       }
-      if (sql.includes("FROM visit_source vs")) {
+      if (sql.includes("stepIndex"))
         return [
-          {
-            sessionId: "session-1",
-            visitorId: "visitor-1",
-            value: "/pricing",
-            timestampMs: 100,
-            sourceId: "visit-1",
-          },
+          { stepIndex: 0, sessions: 2, visitors: 1 },
+          { stepIndex: 1, sessions: 0, visitors: 0 },
         ];
-      }
-      if (sql.includes("FROM event_source es")) {
-        return [
-          {
-            sessionId: "session-1",
-            visitorId: "visitor-1",
-            value: "signup_started",
-            timestampMs: 100,
-            sequence: 1,
-            sourceId: "event-1",
-          },
-        ];
-      }
       return [];
     });
-    const { request, url } = makeRequest(
-      "/api/private/funnel?id=funnel-1&from=1&to=1000&filter[client.deviceType]=desktop",
+    const { request: req, url } = request(
+      "/api/private/funnels?id=funnel-1&from=1&to=1000",
     );
-
-    const response = await handleFunnel(env, "site-1", url, undefined, request);
-
+    const response = await handleFunnel(env, "site-1", url, undefined, req);
+    const body = (await response.json()) as any;
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      ok: true,
-      data: {
-        funnel: {
-          id: "funnel-1",
-          siteId: "site-1",
-          name: "Signup",
-          steps,
-          createdAt: 10,
-          updatedAt: 20,
-        },
-        analysis: {
-          steps: [
-            {
-              index: 0,
-              label: "/pricing",
-              type: "pageview",
-              sessions: 1,
-              visitors: 1,
-              conversionRate: 1,
-              stepConversionRate: 1,
-              dropOffSessions: 0,
-              dropOffRate: 0,
-            },
-            {
-              index: 1,
-              label: "signup_started",
-              type: "event",
-              sessions: 1,
-              visitors: 1,
-              conversionRate: 1,
-              stepConversionRate: 1,
-              dropOffSessions: 0,
-              dropOffRate: 0,
-            },
-          ],
-          summary: {
-            totalSessions: 1,
-            convertedSessions: 1,
-            totalVisitors: 1,
-            convertedVisitors: 1,
-            overallConversionRate: 1,
-            largestDropOffStepIndex: null,
-          },
-        },
-      },
+    expect(body.data.analysis.summary).toMatchObject({
+      totalProgressions: 2,
+      convertedProgressions: 0,
     });
-
-    const pageviewCall = calls.find((call) =>
-      call.sql.includes("FROM visit_source vs"),
+    expect(body.data.analysis.steps[1]).toMatchObject({
+      stepId: "signup",
+      progression: { count: 0, dropOffCount: 2 },
+    });
+    const queryCalls = calls.filter(
+      (call) => call.method === "all" && call.sql.includes("reached_0"),
     );
-    const eventCall = calls.find((call) =>
-      call.sql.includes("FROM event_source es"),
-    );
-    expect(pageviewCall?.sql).toContain("vs.device_type");
-    expect(eventCall?.sql).toContain("mv.device_type");
-    expect(pageviewCall?.bindings).toContain("desktop");
-    expect(eventCall?.bindings).toContain("desktop");
-  });
-
-  it("returns zero drop-off for empty analysis instead of treating missing prior steps as 100 percent loss", async () => {
-    const steps = [
-      { type: "pageview" as const, value: "/pricing" },
-      { type: "event" as const, value: "signup_started" },
-    ];
-
-    expect(analyzeFunnelEvents(steps, [])).toEqual({
-      steps: [
-        {
-          index: 0,
-          label: "/pricing",
-          type: "pageview",
-          sessions: 0,
-          visitors: 0,
-          conversionRate: 0,
-          stepConversionRate: 0,
-          dropOffSessions: 0,
-          dropOffRate: 0,
-        },
-        {
-          index: 1,
-          label: "signup_started",
-          type: "event",
-          sessions: 0,
-          visitors: 0,
-          conversionRate: 0,
-          stepConversionRate: 0,
-          dropOffSessions: 0,
-          dropOffRate: 0,
-        },
-      ],
-      summary: {
-        totalSessions: 0,
-        convertedSessions: 0,
-        totalVisitors: 0,
-        convertedVisitors: 0,
-        overallConversionRate: 0,
-        largestDropOffStepIndex: null,
-      },
-    });
-  });
-
-  it("matches same-timestamp pageviews before custom events with stable event ordering", () => {
-    const steps = [
-      { type: "pageview" as const, value: "/pricing" },
-      { type: "event" as const, value: "signup_started" },
-      { type: "event" as const, value: "signup_finished" },
-    ];
-
-    expect(
-      analyzeFunnelEvents(steps, [
-        {
-          sessionId: "session-1",
-          visitorId: "visitor-1",
-          type: "event",
-          value: "signup_finished",
-          timestampMs: 100,
-          sourceOrder: 1,
-          sourceId: "event-2",
-        },
-        {
-          sessionId: "session-1",
-          visitorId: "visitor-1",
-          type: "pageview",
-          value: "/pricing",
-          timestampMs: 100,
-          sourceOrder: 0,
-          sourceId: "visit-1",
-        },
-        {
-          sessionId: "session-1",
-          visitorId: "visitor-1",
-          type: "event",
-          value: "signup_started",
-          timestampMs: 100,
-          sourceOrder: 1,
-          sourceId: "event-1",
-        },
-      ]).summary,
-    ).toMatchObject({
-      totalSessions: 1,
-      convertedSessions: 1,
-      overallConversionRate: 1,
-    });
-  });
-
-  it("limits normalized funnel steps", () => {
-    const steps = Array.from({ length: 20 }, (_, index) => ({
-      type: "pageview",
-      value: `/step-${index}`,
-    }));
-
-    expect(normalizeFunnelSteps(steps)).toHaveLength(12);
+    expect(queryCalls).toHaveLength(1);
   });
 });

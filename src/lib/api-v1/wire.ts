@@ -555,8 +555,9 @@ export const AnalyticsRetentionCohortsResponseSchema =
 
 const AnalyticsFunnelStepSchema = z
   .object({
-    type: z.enum(["pageview", "event"]),
-    value: z.string().min(1),
+    id: z.string().min(1).max(128),
+    name: z.string().max(120).optional(),
+    filterDsl: z.string().min(1),
   })
   .strict();
 const AnalyticsFunnelDefinitionSchema = z
@@ -564,30 +565,36 @@ const AnalyticsFunnelDefinitionSchema = z
     id: z.string().min(1).max(512),
     siteId: z.string().min(1).max(512),
     name: z.string(),
+    filterDslVersion: z.literal(1),
+    progressionScope: z.enum(["session", "visitor"]),
+    conversionWindowMs: z.number().finite().nullable(),
     steps: z.array(AnalyticsFunnelStepSchema),
+    semanticFingerprint: z.string().min(1),
     createdAt: z.number().int(),
     updatedAt: z.number().int(),
   })
   .strict();
 const AnalyticsFunnelAnalysisStepSchema = z
   .object({
+    stepId: z.string().min(1).max(128),
     index: z.number().int(),
-    label: z.string(),
-    type: z.enum(["pageview", "event"]),
     sessions: z.number().int(),
     visitors: z.number().int(),
-    conversionRate: z.number(),
-    stepConversionRate: z.number(),
-    dropOffSessions: z.number().int(),
-    dropOffRate: z.number(),
+    progression: z
+      .object({
+        count: z.number().int(),
+        conversionRate: z.number(),
+        stepConversionRate: z.number(),
+        dropOffCount: z.number().int(),
+        dropOffRate: z.number(),
+      })
+      .strict(),
   })
   .strict();
 const AnalyticsFunnelAnalysisSummarySchema = z
   .object({
-    totalSessions: z.number().int(),
-    convertedSessions: z.number().int(),
-    totalVisitors: z.number().int(),
-    convertedVisitors: z.number().int(),
+    totalProgressions: z.number().int(),
+    convertedProgressions: z.number().int(),
     overallConversionRate: z.number(),
     largestDropOffStepIndex: z.number().int().nullable(),
   })
@@ -597,6 +604,7 @@ export const AnalyticsFunnelAnalysisDataSchema = z
     funnel: AnalyticsFunnelDefinitionSchema,
     analysis: z
       .object({
+        progressionScope: z.enum(["session", "visitor"]),
         steps: z.array(AnalyticsFunnelAnalysisStepSchema),
         summary: AnalyticsFunnelAnalysisSummarySchema,
       })

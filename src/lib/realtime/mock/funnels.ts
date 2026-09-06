@@ -13,16 +13,24 @@ import type { ErrorEnvelope } from "@/lib/response-envelope";
 const CREATED_AT = 1_767_225_600;
 let customFunnelCounter = 0;
 
+function step(id: string, filterDsl: string, name?: string): FunnelStep {
+  return { id, filterDsl, ...(name ? { name } : {}) };
+}
+
 const demoFunnels: FunnelDefinition[] = [
   {
     id: "demo-funnel-signup",
     siteId: "demo-site-001",
     name: "Signup activation",
+    filterDslVersion: 1,
+    progressionScope: "session",
+    conversionWindowMs: null,
+    semanticFingerprint: "demo-funnel-signup-v2",
     steps: [
-      { type: "pageview", value: "/pricing" },
-      { type: "event", value: "signup_started" },
-      { type: "event", value: "signup_completed" },
-      { type: "pageview", value: "/app/onboarding" },
+      step("landing", 'page.path eq "/pricing"'),
+      step("started", 'event.name eq "signup_started"'),
+      step("completed", 'event.name eq "signup_completed"'),
+      step("onboarding", 'page.path eq "/app/onboarding"'),
     ],
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT + 86_400,
@@ -31,29 +39,23 @@ const demoFunnels: FunnelDefinition[] = [
     id: "demo-funnel-checkout",
     siteId: "demo-site-001",
     name: "Checkout",
+    filterDslVersion: 1,
+    progressionScope: "visitor",
+    conversionWindowMs: 7 * 86_400_000,
+    semanticFingerprint: "demo-funnel-checkout-v2",
     steps: [
-      { type: "pageview", value: "/products" },
-      { type: "event", value: "cart_add" },
-      { type: "pageview", value: "/checkout" },
-      { type: "event", value: "purchase" },
+      step("products", 'page.path eq "/products"'),
+      step("cart", 'event.name eq "cart_add"'),
+      step("checkout", 'page.path eq "/checkout"'),
+      step("purchase", 'event.name eq "purchase"'),
     ],
     createdAt: CREATED_AT - 172_800,
     updatedAt: CREATED_AT + 43_200,
   },
 ];
 
-function normalizeDemoSteps(input: unknown): FunnelStep[] {
-  if (!Array.isArray(input)) return [];
-  return input
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const record = item as Record<string, unknown>;
-      if (record.type !== "pageview" && record.type !== "event") return null;
-      const value = String(record.value ?? "").trim();
-      return value ? { type: record.type, value } : null;
-    })
-    .filter((step): step is FunnelStep => Boolean(step))
-    .slice(0, 12);
+function cloneFunnel(funnel: FunnelDefinition): FunnelDefinition {
+  return { ...funnel, steps: funnel.steps.map((item) => ({ ...item })) };
 }
 
 function siteFunnels(siteId: string): FunnelDefinition[] {
@@ -67,10 +69,7 @@ function siteFunnels(siteId: string): FunnelDefinition[] {
             .filter((funnel) => funnel.siteId === "demo-site-001")
             .map((funnel) => ({ ...funnel, siteId })),
         ];
-  return templates.map((funnel) => ({
-    ...funnel,
-    steps: funnel.steps.map((step) => ({ ...step })),
-  }));
+  return templates.map(cloneFunnel);
 }
 
 function analysisFor(funnel: FunnelDefinition): FunnelAnalysis {
@@ -78,55 +77,50 @@ function analysisFor(funnel: FunnelDefinition): FunnelAnalysis {
   const retention = funnel.id.includes("checkout")
     ? [1, 0.62, 0.39, 0.24]
     : [1, 0.54, 0.38, 0.31];
-  const counts = funnel.steps.map((_, index) =>
+  const progressionCounts = funnel.steps.map((_, index) =>
     Math.round(
       base * (retention[index] ?? Math.max(0.12, 0.31 - index * 0.06)),
     ),
   );
-  const visitorCounts = counts.map((count) => Math.round(count * 0.82));
+  const sessionCounts = progressionCounts.map((count) =>
+    funnel.progressionScope === "session" ? count : Math.round(count * 0.78),
+  );
+  const visitorCounts = progressionCounts.map((count) =>
+    funnel.progressionScope === "visitor" ? count : Math.round(count * 0.82),
+  );
   let largestDropOffStepIndex: number | null = null;
-  let largestDropOffSessions = 0;
-
-  const steps = funnel.steps.map((step, index) => {
-    const sessions = counts[index] ?? 0;
-    const previous = index === 0 ? sessions : (counts[index - 1] ?? 0);
-    const dropOffSessions = index === 0 ? 0 : Math.max(0, previous - sessions);
-    if (index > 0 && dropOffSessions > largestDropOffSessions) {
-      largestDropOffSessions = dropOffSessions;
+  let largestDropOff = 0;
+  const first = progressionCounts[0] ?? 0;
+  const steps = funnel.steps.map((stepConfig, index) => {
+    const count = progressionCounts[index] ?? 0;
+    const previous = index === 0 ? count : (progressionCounts[index - 1] ?? 0);
+    const dropOffCount = index === 0 ? 0 : Math.max(0, previous - count);
+    if (index > 0 && dropOffCount > largestDropOff) {
+      largestDropOff = dropOffCount;
       largestDropOffStepIndex = index;
     }
     return {
+      stepId: stepConfig.id,
       index,
-      label: step.value,
-      type: step.type,
-      sessions,
+      sessions: sessionCounts[index] ?? 0,
       visitors: visitorCounts[index] ?? 0,
-      conversionRate: counts[0] ? sessions / counts[0] : 0,
-      stepConversionRate:
-        index === 0
-          ? sessions > 0
-            ? 1
-            : 0
-          : previous > 0
-            ? sessions / previous
-            : 0,
-      dropOffSessions,
-      dropOffRate:
-        index === 0 || previous <= 0 ? 0 : dropOffSessions / previous,
+      progression: {
+        count,
+        conversionRate: first > 0 ? count / first : 0,
+        stepConversionRate: previous > 0 ? count / previous : 0,
+        dropOffCount,
+        dropOffRate: previous > 0 ? dropOffCount / previous : 0,
+      },
     };
   });
-  const converted = steps[steps.length - 1];
-
+  const converted = steps.at(-1)?.progression.count ?? 0;
   return {
+    progressionScope: funnel.progressionScope,
     steps,
     summary: {
-      totalSessions: steps[0]?.sessions ?? 0,
-      convertedSessions: converted?.sessions ?? 0,
-      totalVisitors: steps[0]?.visitors ?? 0,
-      convertedVisitors: converted?.visitors ?? 0,
-      overallConversionRate: steps[0]?.sessions
-        ? (converted?.sessions ?? 0) / steps[0].sessions
-        : 0,
+      totalProgressions: first,
+      convertedProgressions: converted,
+      overallConversionRate: first > 0 ? converted / first : 0,
       largestDropOffStepIndex,
     },
   };
@@ -139,52 +133,141 @@ export function generateDemoFunnels(
   const id = String(params.id ?? "").trim();
   const funnels = siteFunnels(siteId);
   if (!id) {
-    const page = demoPage(
-      funnels,
-      params,
-      { operation: "funnels", siteId, sort: "createdAt:desc,id:desc" },
-      50,
-      100,
-    );
     return {
       ok: true,
-      data: page,
+      data: demoPage(
+        funnels,
+        params,
+        { operation: "funnels", siteId, sort: "createdAt:desc,id:desc" },
+        50,
+        100,
+      ),
     };
   }
-
   const funnel = funnels.find((item) => item.id === id);
   if (!funnel) return demoNotFound();
-  if (funnel.steps.length < 2) {
+  if (funnel.steps.length < 2)
     return demoBadRequest("Funnel has fewer than 2 steps");
-  }
-  return {
-    ok: true,
-    data: { funnel, analysis: analysisFor(funnel) },
-  };
+  return { ok: true, data: { funnel, analysis: analysisFor(funnel) } };
+}
+
+function parseV2Input(record: Record<string, unknown>): {
+  progressionScope: "session" | "visitor";
+  conversionWindowMs: number | null;
+  steps: FunnelStep[];
+} | null {
+  const progressionScope = record.progressionScope ?? "session";
+  const conversionWindowMs = record.conversionWindowMs ?? null;
+  if (
+    (progressionScope !== "session" && progressionScope !== "visitor") ||
+    (progressionScope === "session" && conversionWindowMs !== null) ||
+    (progressionScope === "visitor" &&
+      (typeof conversionWindowMs !== "number" ||
+        !Number.isFinite(conversionWindowMs) ||
+        conversionWindowMs <= 0)) ||
+    !Array.isArray(record.steps) ||
+    record.steps.length < 2 ||
+    record.steps.length > 10
+  )
+    return null;
+  const steps = record.steps.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Record<string, unknown>;
+    if (
+      typeof candidate.id !== "string" ||
+      !candidate.id.trim() ||
+      typeof candidate.filterDsl !== "string" ||
+      !candidate.filterDsl.trim()
+    )
+      return [];
+    return [
+      {
+        id: candidate.id,
+        filterDsl: candidate.filterDsl,
+        ...(typeof candidate.name === "string" ? { name: candidate.name } : {}),
+      },
+    ];
+  });
+  const ids = new Set(steps.map((item) => item.id));
+  return ids.size === steps.length && steps.length === record.steps.length
+    ? {
+        progressionScope,
+        conversionWindowMs: conversionWindowMs as number | null,
+        steps,
+      }
+    : null;
+}
+
+function semanticFingerprintFor(
+  id: string,
+  config: Pick<
+    FunnelDefinition,
+    "progressionScope" | "conversionWindowMs" | "steps"
+  >,
+): string {
+  return `${id}-v2-${config.progressionScope}-${config.conversionWindowMs ?? "none"}-${config.steps
+    .map((item) => `${item.id}:${item.filterDsl}`)
+    .join("|")}`;
 }
 
 export function createDemoFunnel(
   siteId: string,
   body: unknown,
 ): FunnelMutationData | ErrorEnvelope {
-  const payload = body && typeof body === "object" ? body : {};
-  const record = payload as Record<string, unknown>;
-  const name = String(record.name ?? "").trim();
-  if (!name) return demoBadRequest("Name is required");
-  const steps = normalizeDemoSteps(record.steps);
-  if (steps.length < 2) return demoBadRequest("At least 2 steps are required");
+  const record =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const config = parseV2Input(record);
+  if (!name || !config) return demoBadRequest("Invalid funnel configuration");
   customFunnelCounter += 1;
   const now = Math.floor(Date.now() / 1000);
   const funnel: FunnelDefinition = {
     id: `demo-funnel-custom-${customFunnelCounter}`,
     siteId,
     name,
-    steps,
+    filterDslVersion: 1,
+    ...config,
+    semanticFingerprint: semanticFingerprintFor(
+      `demo-funnel-custom-${customFunnelCounter}`,
+      config,
+    ),
     createdAt: now,
     updatedAt: now,
   };
   demoFunnels.unshift(funnel);
-  return { ok: true, data: { funnel } };
+  return { ok: true, data: { funnel: cloneFunnel(funnel) } };
+}
+
+export function updateDemoFunnel(
+  siteId: string,
+  params: Record<string, string | number>,
+  body: unknown,
+): FunnelMutationData | ErrorEnvelope {
+  const id = String(params.id ?? "").trim();
+  const index = demoFunnels.findIndex(
+    (funnel) => funnel.siteId === siteId && funnel.id === id,
+  );
+  if (index < 0) return demoNotFound();
+  const record =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const current = demoFunnels[index]!;
+  const merged = {
+    ...current,
+    ...record,
+    steps: record.steps ?? current.steps,
+  };
+  const config = parseV2Input(merged);
+  const name = typeof merged.name === "string" ? merged.name.trim() : "";
+  if (!name || !config) return demoBadRequest("Invalid funnel configuration");
+  const next = {
+    ...current,
+    name,
+    ...config,
+    semanticFingerprint: semanticFingerprintFor(current.id, config),
+    updatedAt: Math.floor(Date.now() / 1000),
+  };
+  demoFunnels[index] = next;
+  return { ok: true, data: { funnel: cloneFunnel(next) } };
 }
 
 export function deleteDemoFunnel(

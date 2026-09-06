@@ -23,9 +23,13 @@ const funnel = {
   id: "funnel-1",
   siteId: "site-1",
   name: "Signup",
+  filterDslVersion: 1 as const,
+  progressionScope: "visitor" as const,
+  conversionWindowMs: 86_400_000,
+  semanticFingerprint: "funnel-v2:abc",
   steps: [
-    { type: "pageview" as const, value: "/landing" },
-    { type: "event" as const, value: "signup" },
+    { id: "landing", filterDsl: 'page.path eq "/landing"' },
+    { id: "signup", filterDsl: 'event.name eq "signup"' },
   ],
   createdAt: 1,
   updatedAt: 2,
@@ -36,12 +40,11 @@ describe("site funnel analysis runtime", () => {
 
   it("resolves the definition before delegating analysis", async () => {
     const analysis = {
+      progressionScope: "visitor" as const,
       steps: [],
       summary: {
-        totalSessions: 1,
-        convertedSessions: 1,
-        totalVisitors: 1,
-        convertedVisitors: 1,
+        totalProgressions: 1,
+        convertedProgressions: 1,
         overallConversionRate: 1,
         largestDropOffStepIndex: null,
       },
@@ -63,7 +66,12 @@ describe("site funnel analysis runtime", () => {
       input.siteId,
       input.window,
       input.filters,
-      funnel.steps,
+      {
+        filterDslVersion: 1,
+        progressionScope: "visitor",
+        conversionWindowMs: 86_400_000,
+        steps: funnel.steps,
+      },
     );
   });
 
@@ -73,7 +81,7 @@ describe("site funnel analysis runtime", () => {
 
     vi.mocked(queryFunnelDefinition).mockResolvedValueOnce({
       ...funnel,
-      steps: [funnel.steps[0]],
+      steps: [funnel.steps[0]!],
     });
     await expect(readSiteFunnelAnalysis(input)).resolves.toBeNull();
     expect(queryFunnelAnalysis).not.toHaveBeenCalled();

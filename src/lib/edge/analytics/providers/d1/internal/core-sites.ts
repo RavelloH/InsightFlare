@@ -21,7 +21,12 @@ async function demoSiteById(siteId: string): Promise<SiteRow | null> {
     (candidate) => candidate.id === siteId,
   );
   return profile
-    ? { id: profile.id, name: profile.name, domain: profile.domain }
+    ? {
+        id: profile.id,
+        name: profile.name,
+        domain: profile.domain,
+        canManage: true,
+      }
     : null;
 }
 
@@ -60,7 +65,9 @@ export async function resolvePrivateSiteForSession(
 
   if (isDemoBuild) {
     const site = await demoSiteById(siteId);
-    return site ?? notFound("Site not found", undefined, request);
+    return site
+      ? { ...site, canManage: true }
+      : notFound("Site not found", undefined, request);
   }
 
   if (session.systemRole === "admin") {
@@ -97,13 +104,15 @@ export async function resolvePrivateSiteForSession(
       }
     >();
   if (!site) return notFound("Site not found", undefined, request);
-  if (site.ownerUserId === session.userId) return site;
-  if (site.role === "owner" || site.role === "admin") return site;
+  if (site.ownerUserId === session.userId) return { ...site, canManage: true };
+  if (site.role === "owner" || site.role === "admin") {
+    return { ...site, canManage: true };
+  }
   if (
     site.role &&
     canAccessMemberSite(parseMemberSiteIdsJson(site.siteIdsJson), siteId)
   ) {
-    return site;
+    return { ...site, canManage: false };
   }
   return notFound("Site not found", undefined, request);
 }

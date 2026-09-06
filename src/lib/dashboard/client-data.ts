@@ -39,6 +39,7 @@ export {
   fetchVisitorEvents,
   fetchVisitors,
   fetchVisitorSessions,
+  updateFunnel,
 } from "./client-core-data";
 export type {
   DashboardFilterOptionData,

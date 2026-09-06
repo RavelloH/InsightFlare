@@ -2,6 +2,7 @@ import type { ZonedInterval } from "@/lib/dashboard/time-zone";
 import type { PageRequest, PageResult, PaginationMeta } from "@/lib/pagination";
 
 import type { FilterDocument } from "./filters";
+import type { FunnelProgressionScope, FunnelStepV2 } from "./funnel-config";
 import type {
   FilterScope,
   FilterScopePreference,
@@ -498,39 +499,41 @@ export interface ChannelsResult {
   readonly items: readonly ChannelItem[];
 }
 
-export interface FunnelStepConfig {
-  readonly type: "pageview" | "event";
-  readonly value: string;
-}
+export type FunnelStepConfig = FunnelStepV2;
 
 export interface FunnelDefinition {
   readonly id: string;
   readonly siteId: string;
   readonly name: string;
-  readonly steps: FunnelStepConfig[];
+  readonly filterDslVersion: 1;
+  readonly progressionScope: FunnelProgressionScope;
+  readonly conversionWindowMs: number | null;
+  readonly steps: FunnelStepV2[];
+  readonly semanticFingerprint: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
 
 export interface FunnelAnalysisStep {
+  readonly stepId: string;
   readonly index: number;
-  readonly label: string;
-  readonly type: FunnelStepConfig["type"];
   readonly sessions: number;
   readonly visitors: number;
-  readonly conversionRate: number;
-  readonly stepConversionRate: number;
-  readonly dropOffSessions: number;
-  readonly dropOffRate: number;
+  readonly progression: {
+    readonly count: number;
+    readonly conversionRate: number;
+    readonly stepConversionRate: number;
+    readonly dropOffCount: number;
+    readonly dropOffRate: number;
+  };
 }
 
 export interface FunnelAnalysis {
+  readonly progressionScope: FunnelProgressionScope;
   readonly steps: FunnelAnalysisStep[];
   readonly summary: {
-    readonly totalSessions: number;
-    readonly convertedSessions: number;
-    readonly totalVisitors: number;
-    readonly convertedVisitors: number;
+    readonly totalProgressions: number;
+    readonly convertedProgressions: number;
     readonly overallConversionRate: number;
     readonly largestDropOffStepIndex: number | null;
   };

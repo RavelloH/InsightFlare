@@ -18,7 +18,13 @@ import {
   deleteSiteData,
   ensurePublicSlugAvailable,
 } from "@/lib/edge/admin-sites";
-import { normalizeFunnelSteps } from "@/lib/edge/analytics/providers/d1/internal/funnels";
+import {
+  decodeFunnelConfig,
+  encodeFunnelConfig,
+  type FunnelConfigV2,
+  FunnelConfigValidationError,
+  funnelSemanticFingerprint,
+} from "@/lib/edge/analytics/contract";
 import {
   readSiteScriptSettings,
   upsertSiteScriptSettings,
@@ -63,6 +69,7 @@ interface FunnelRow {
   readonly site_id: string;
   readonly name: string;
   readonly config_json: string;
+  readonly config_version?: number;
   readonly created_at: number;
   readonly updated_at: number;
 }
@@ -132,21 +139,24 @@ function siteResource(row: SiteRow): SiteResource {
   };
 }
 
-function parseSteps(value: string): FunnelResource["steps"] {
-  try {
-    const parsed = JSON.parse(value) as { readonly steps?: unknown };
-    return normalizeFunnelSteps(parsed.steps);
-  } catch {
-    return [];
-  }
+function funnelConfig(row: FunnelRow): FunnelConfigV2 {
+  return decodeFunnelConfig(
+    Number.isSafeInteger(row.config_version) ? row.config_version! : 1,
+    row.config_json,
+  );
 }
 
-function funnelResource(row: FunnelRow): FunnelResource {
+async function funnelResource(row: FunnelRow): Promise<FunnelResource> {
+  const config = funnelConfig(row);
   return {
     id: row.id,
     siteId: row.site_id,
     name: row.name,
-    steps: parseSteps(row.config_json),
+    filterDslVersion: config.filterDslVersion,
+    progressionScope: config.progressionScope,
+    conversionWindowMs: config.conversionWindowMs,
+    steps: [...config.steps],
+    semanticFingerprint: await funnelSemanticFingerprint(config),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
     links: {
@@ -225,7 +235,7 @@ async function funnelById(
 ): Promise<FunnelRow | null> {
   return (
     (await env.DB.prepare(
-      `SELECT id, site_id, name, config_json, created_at, updated_at
+      `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
        FROM analysis_definitions
        WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL
        LIMIT 1`,
@@ -244,6 +254,7 @@ function failed(
     | "not_found"
     | "conflict"
     | "forbidden"
+    | "invalid_input"
     | "internal_error"
     | "invalid_cursor",
 ): ResourceOutcome {
@@ -507,7 +518,7 @@ export function createResourceApplicationService(
         }
         parameters.push(value.page.limit + 1);
         const rows = await env.DB.prepare(
-          `SELECT id, site_id, name, config_json, created_at, updated_at
+          `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
            FROM analysis_definitions WHERE ${where.join(" AND ")}
            ORDER BY created_at DESC, id ASC LIMIT ?`,
         )
@@ -523,7 +534,7 @@ export function createResourceApplicationService(
             : null;
         return ok(
           pageResponse(
-            page.rows.map(funnelResource),
+            await Promise.all(page.rows.map(funnelResource)),
             value.page.limit,
             nextCursor,
           ),
@@ -532,27 +543,44 @@ export function createResourceApplicationService(
       if (operation === "funnels.create") {
         const value =
           input as ApiV1ApplicationOperationMap["funnels.create"]["input"];
+        const config: FunnelConfigV2 = {
+          filterDslVersion: value.filterDslVersion,
+          progressionScope: value.progressionScope,
+          conversionWindowMs: value.conversionWindowMs,
+          steps: value.steps,
+        };
+        let encoded;
+        try {
+          encoded = encodeFunnelConfig(config);
+        } catch (error) {
+          if (error instanceof FunnelConfigValidationError) {
+            return failed("invalid_input") as never;
+          }
+          throw error;
+        }
         const id = crypto.randomUUID();
         const now = Math.floor(Date.now() / 1_000);
         await env.DB.prepare(
           `INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at)
-           VALUES (?, ?, 'funnel', ?, ?, 1, ?, ?)`,
+           VALUES (?, ?, 'funnel', ?, ?, ?, ?, ?)`,
         )
           .bind(
             id,
             site.id,
             value.name,
-            JSON.stringify({ steps: value.steps }),
+            encoded.configJson,
+            encoded.configVersion,
             now,
             now,
           )
           .run();
         return ok(
-          funnelResource({
+          await funnelResource({
             id,
             site_id: site.id,
             name: value.name,
-            config_json: JSON.stringify({ steps: value.steps }),
+            config_json: encoded.configJson,
+            config_version: encoded.configVersion,
             created_at: now,
             updated_at: now,
           }),
@@ -562,7 +590,7 @@ export function createResourceApplicationService(
       const funnel = await funnelById(env, site.id, request.funnelId);
       if (!funnel) return failed("not_found") as never;
       if (operation === "funnels.get")
-        return ok(funnelResource(funnel)) as never;
+        return ok(await funnelResource(funnel)) as never;
       if (operation === "funnels.delete") {
         const now = Math.floor(Date.now() / 1_000);
         await env.DB.prepare(
@@ -574,21 +602,52 @@ export function createResourceApplicationService(
       }
       const value =
         input as ApiV1ApplicationOperationMap["funnels.update"]["input"];
-      const steps = value.steps ?? parseSteps(funnel.config_json);
-      if (steps.length < 2) return failed("internal_error") as never;
+      let currentConfig: FunnelConfigV2;
+      try {
+        currentConfig = funnelConfig(funnel);
+      } catch {
+        return failed("internal_error") as never;
+      }
+      const config: FunnelConfigV2 = {
+        filterDslVersion:
+          value.filterDslVersion ?? currentConfig.filterDslVersion,
+        progressionScope:
+          value.progressionScope ?? currentConfig.progressionScope,
+        conversionWindowMs:
+          value.conversionWindowMs !== undefined
+            ? value.conversionWindowMs
+            : currentConfig.conversionWindowMs,
+        steps: value.steps ?? currentConfig.steps,
+      };
+      let encoded;
+      try {
+        encoded = encodeFunnelConfig(config);
+      } catch (error) {
+        if (error instanceof FunnelConfigValidationError) {
+          return failed("invalid_input") as never;
+        }
+        throw error;
+      }
       const now = Math.floor(Date.now() / 1_000);
       const name = value.name ?? funnel.name;
-      const config = JSON.stringify({ steps });
       await env.DB.prepare(
-        "UPDATE analysis_definitions SET name=?, config_json=?, updated_at=? WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL",
+        "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL",
       )
-        .bind(name, config, now, funnel.id, site.id)
+        .bind(
+          name,
+          encoded.configJson,
+          encoded.configVersion,
+          now,
+          funnel.id,
+          site.id,
+        )
         .run();
       return ok(
-        funnelResource({
+        await funnelResource({
           ...funnel,
           name,
-          config_json: config,
+          config_json: encoded.configJson,
+          config_version: encoded.configVersion,
           updated_at: now,
         }),
       ) as never;

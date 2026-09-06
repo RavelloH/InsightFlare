@@ -643,6 +643,8 @@ export interface AppMessages {
     subtitle: string;
     listTitle: string;
     listSubtitle: string;
+    open: string;
+    moreActions: string;
     create: string;
     createTitle: string;
     createDescription: string;
@@ -651,12 +653,28 @@ export interface AppMessages {
     stepsLabel: string;
     addStep: string;
     removeStep: string;
-    stepTypePageview: string;
-    stepTypeEvent: string;
-    stepValueLabel: string;
-    pageviewPlaceholder: string;
-    eventPlaceholder: string;
+    progression: string;
+    conversionWindow: string;
+    custom: string;
+    customWindowHours: string;
+    stepFilter: string;
+    filter: string;
+    apply: string;
+    condition: string;
+    conditions: string;
+    expression: string;
+    filterPlaceholder: string;
+    invalidFilter: string;
+    dragStep: string;
+    unnamed: string;
+    oneHour: string;
+    oneDay: string;
+    sevenDays: string;
+    thirtyDays: string;
     save: string;
+    saveEdit: string;
+    edit: string;
+    editTitle: string;
     creating: string;
     cancel: string;
     delete: string;
@@ -671,6 +689,8 @@ export interface AppMessages {
     invalidFunnel: string;
     created: string;
     createFailed: string;
+    updatedSuccess: string;
+    saveFailed: string;
     deleted: string;
     deleteFailed: string;
     overallConversion: string;
@@ -2038,6 +2058,7 @@ export interface AppMessages {
       empty: string;
       refresh: string;
       loadFailed: string;
+      loadMore: string;
       allStatuses: string;
       runs24h: string;
       successRate24h: string;
@@ -2088,7 +2109,6 @@ export interface AppMessages {
       logTitle: string;
       noRunSelected: string;
       noLogs: string;
-      loadMore: string;
       error: string;
       status: {
         running: string;
@@ -2954,11 +2974,9 @@ const enMessages = {
     savedFilterDescription: "Notes",
     scopeLabel: "Filter scope",
     scopeAuto: "Automatically choose based on the current page",
-    scopeEvent: "The same page view or event must satisfy these conditions",
-    scopeSession:
-      "The conditions can be satisfied by different page views or events in the same session",
-    scopeVisitor:
-      "The conditions can be satisfied across different sessions or behaviors from the same visitor",
+    scopeEvent: "Filter events matching these conditions",
+    scopeSession: "Filter sessions meeting these conditions",
+    scopeVisitor: "Filter visitors meeting these conditions",
     savedFilterVisibility: "Visibility",
     savedFilterVisibilityPrivate: "Only me",
     savedFilterVisibilityTeam: "Share with team",
@@ -3306,21 +3324,38 @@ const enMessages = {
     listTitle: "Funnel definitions",
     listSubtitle:
       "Build a reusable sequence, then inspect conversion for the current dashboard window.",
+    open: "Open funnel",
+    moreActions: "More actions",
     create: "New funnel",
     createTitle: "Create funnel",
-    createDescription:
-      "Define at least two ordered pageview or custom event steps.",
+    createDescription: "Define at least two ordered observation filters.",
     nameLabel: "Name",
     namePlaceholder: "Signup activation",
     stepsLabel: "Steps",
     addStep: "Add step",
     removeStep: "Remove step",
-    stepTypePageview: "Pageview",
-    stepTypeEvent: "Event",
-    stepValueLabel: "Value",
-    pageviewPlaceholder: "/pricing",
-    eventPlaceholder: "signup_started",
+    progression: "Progression identity",
+    conversionWindow: "Conversion window",
+    custom: "Custom",
+    customWindowHours: "Custom window in hours",
+    stepFilter: "Step filter",
+    filter: "Filter",
+    apply: "Apply",
+    condition: "condition",
+    conditions: "conditions",
+    expression: "Filter expression",
+    filterPlaceholder: 'e.g. page.path eq "/pricing"',
+    invalidFilter: "Invalid filter",
+    dragStep: "Drag step",
+    unnamed: "(unnamed)",
+    oneHour: "1 hour",
+    oneDay: "24 hours",
+    sevenDays: "7 days",
+    thirtyDays: "30 days",
     save: "Create",
+    saveEdit: "Save changes",
+    edit: "Edit",
+    editTitle: "Edit funnel",
     creating: "Creating...",
     cancel: "Cancel",
     delete: "Delete",
@@ -3334,14 +3369,16 @@ const enMessages = {
       "Create a funnel from pageviews and custom events to track conversion.",
     loadError: "Unable to load funnels.",
     detailLoadError: "Unable to load funnel analysis.",
-    invalidFunnel: "Add a name and at least two complete steps.",
+    invalidFunnel: "Add a name and at least two complete filters.",
     created: "Funnel created.",
     createFailed: "Unable to create funnel.",
+    updatedSuccess: "Funnel updated.",
+    saveFailed: "Unable to save funnel.",
     deleted: "Funnel deleted.",
     deleteFailed: "Unable to delete funnel.",
     overallConversion: "Overall conversion",
-    startedSessions: "Started sessions",
-    convertedSessions: "Converted sessions",
+    startedSessions: "Started progressions",
+    convertedSessions: "Converted progressions",
     convertedVisitors: "Converted visitors",
     largestDropOff: "Largest drop-off",
     noDropOff: "No drop-off",
@@ -4841,6 +4878,7 @@ const enMessages = {
       empty: "No scheduled tasks yet.",
       refresh: "Refresh",
       loadFailed: "Failed to load scheduled tasks.",
+      loadMore: "Load more",
       allStatuses: "All statuses",
       runs24h: "Runs in 24h",
       successRate24h: "Success rate in 24h",
@@ -4892,7 +4930,6 @@ const enMessages = {
       logTitle: "Run logs",
       noRunSelected: "Select a run to inspect logs.",
       noLogs: "No logs for this run.",
-      loadMore: "Load more",
       error: "Error",
       status: {
         running: "Running",
@@ -5815,9 +5852,9 @@ const zhMessages = {
     savedFilterDescription: "备注",
     scopeLabel: "筛选范围",
     scopeAuto: "根据当前页面自动选择",
-    scopeEvent: "同一次页面访问或事件需要满足这些条件",
-    scopeSession: "条件可由同一会话中的不同访问或事件满足",
-    scopeVisitor: "条件可由同一访客的不同会话或行为满足",
+    scopeEvent: "筛选符合当前条件的事件",
+    scopeSession: "筛选满足这些条件的会话",
+    scopeVisitor: "筛选满足这些条件的访客",
     savedFilterVisibility: "可见性",
     savedFilterVisibilityPrivate: "仅自己可见",
     savedFilterVisibilityTeam: "与团队共享",
@@ -6153,20 +6190,38 @@ const zhMessages = {
     subtitle: "衡量多步骤用户旅程的转化情况。",
     listTitle: "漏斗定义",
     listSubtitle: "构建可复用的步骤序列，并按当前看板时间窗查看转化。",
+    open: "打开漏斗",
+    moreActions: "更多操作",
     create: "新建漏斗",
     createTitle: "创建漏斗",
-    createDescription: "至少定义两个有顺序的页面浏览或自定义事件步骤。",
+    createDescription: "至少定义两个有顺序的观察筛选步骤。",
     nameLabel: "名称",
     namePlaceholder: "注册激活",
     stepsLabel: "步骤",
     addStep: "添加步骤",
     removeStep: "移除步骤",
-    stepTypePageview: "页面浏览",
-    stepTypeEvent: "事件",
-    stepValueLabel: "值",
-    pageviewPlaceholder: "/pricing",
-    eventPlaceholder: "signup_started",
+    progression: "转化主体",
+    conversionWindow: "转化窗口",
+    custom: "自定义",
+    customWindowHours: "自定义窗口（小时）",
+    stepFilter: "步骤筛选",
+    filter: "筛选",
+    apply: "应用",
+    condition: "个条件",
+    conditions: "个条件",
+    expression: "筛选表达式",
+    filterPlaceholder: '例如 page.path eq "/pricing"',
+    invalidFilter: "筛选无效",
+    dragStep: "拖动步骤",
+    unnamed: "（未命名）",
+    oneHour: "1 小时",
+    oneDay: "24 小时",
+    sevenDays: "7 天",
+    thirtyDays: "30 天",
     save: "创建",
+    saveEdit: "保存修改",
+    edit: "编辑",
+    editTitle: "编辑漏斗",
     creating: "创建中...",
     cancel: "取消",
     delete: "删除",
@@ -6178,9 +6233,11 @@ const zhMessages = {
     emptyHint: "使用页面浏览和自定义事件创建漏斗来跟踪转化。",
     loadError: "无法加载漏斗。",
     detailLoadError: "无法加载漏斗分析。",
-    invalidFunnel: "请填写名称，并至少补全两个步骤。",
+    invalidFunnel: "请填写名称，并至少补全两个筛选步骤。",
     created: "漏斗已创建。",
     createFailed: "创建漏斗失败。",
+    updatedSuccess: "漏斗已更新。",
+    saveFailed: "保存漏斗失败。",
     deleted: "漏斗已删除。",
     deleteFailed: "删除漏斗失败。",
     overallConversion: "总转化率",
@@ -7632,6 +7689,7 @@ const zhMessages = {
       empty: "暂无定时任务。",
       refresh: "刷新",
       loadFailed: "加载定时任务失败。",
+      loadMore: "加载更多",
       allStatuses: "全部状态",
       runs24h: "24 小时内运行次数",
       successRate24h: "24 小时成功率",
@@ -7682,7 +7740,6 @@ const zhMessages = {
       logTitle: "运行日志",
       noRunSelected: "选择一条运行记录以查看日志。",
       noLogs: "暂无日志。",
-      loadMore: "加载更多",
       error: "错误",
       status: {
         running: "运行中",
@@ -8599,12 +8656,9 @@ const jaMessages = {
     savedFilterDescription: "メモ",
     scopeLabel: "フィルター対象",
     scopeAuto: "現在のページに応じて自動選択",
-    scopeEvent:
-      "同じページビューまたはイベントで、これらの条件を満たす必要があります",
-    scopeSession:
-      "同じセッション内の異なるページビューまたはイベントで、これらの条件を満たせます",
-    scopeVisitor:
-      "同じ訪問者の異なるセッションまたは行動で、これらの条件を満たせます",
+    scopeEvent: "条件に一致するイベントを絞り込む",
+    scopeSession: "これらの条件を満たすセッションを絞り込む",
+    scopeVisitor: "これらの条件を満たす訪問者を絞り込む",
     savedFilterVisibility: "公開範囲",
     savedFilterVisibilityPrivate: "自分のみ",
     savedFilterVisibilityTeam: "チームと共有",
@@ -8953,21 +9007,39 @@ const jaMessages = {
     listTitle: "ファネル定義",
     listSubtitle:
       "再利用可能なシーケンスを作成し、現在のダッシュボード期間でコンバージョンを確認します。",
+    open: "ファネルを開く",
+    moreActions: "その他の操作",
     create: "新規ファネル",
     createTitle: "ファネルを作成",
     createDescription:
-      "ページビューまたはカスタムイベントの順序付きステップを少なくとも 2 つ定義してください。",
+      "順序付きの観測フィルターを少なくとも 2 つ定義してください。",
     nameLabel: "名前",
     namePlaceholder: "登録アクティベーション",
     stepsLabel: "ステップ",
     addStep: "ステップを追加",
     removeStep: "削除",
-    stepTypePageview: "ページビュー",
-    stepTypeEvent: "イベント",
-    stepValueLabel: "値",
-    pageviewPlaceholder: "/pricing",
-    eventPlaceholder: "signup_started",
+    progression: "コンバージョン単位",
+    conversionWindow: "コンバージョン期間",
+    custom: "カスタム",
+    customWindowHours: "カスタム期間（時間）",
+    stepFilter: "ステップフィルター",
+    filter: "フィルター",
+    apply: "適用",
+    condition: "条件",
+    conditions: "条件",
+    expression: "フィルター式",
+    filterPlaceholder: '例 page.path eq "/pricing"',
+    invalidFilter: "無効なフィルター",
+    dragStep: "ステップをドラッグ",
+    unnamed: "（名前なし）",
+    oneHour: "1 時間",
+    oneDay: "24 時間",
+    sevenDays: "7 日",
+    thirtyDays: "30 日",
     save: "作成",
+    saveEdit: "変更を保存",
+    edit: "編集",
+    editTitle: "ファネルを編集",
     creating: "作成中...",
     cancel: "キャンセル",
     delete: "削除",
@@ -8981,9 +9053,12 @@ const jaMessages = {
       "ページビューとカスタムイベントからファネルを作成し、コンバージョンを追跡します。",
     loadError: "ファネルを読み込めません。",
     detailLoadError: "ファネル分析を読み込めません。",
-    invalidFunnel: "名前と、完全なステップを少なくとも 2 つ追加してください。",
+    invalidFunnel:
+      "名前と、完全なフィルターステップを少なくとも 2 つ追加してください。",
     created: "ファネルを作成しました。",
     createFailed: "ファネルを作成できません。",
+    updatedSuccess: "ファネルを更新しました。",
+    saveFailed: "ファネルを保存できません。",
     deleted: "ファネルを削除しました。",
     deleteFailed: "ファネルを削除できません。",
     overallConversion: "全体コンバージョン",
@@ -10486,6 +10561,7 @@ const jaMessages = {
       empty: "スケジュールタスクはまだありません。",
       refresh: "更新",
       loadFailed: "スケジュールタスクを読み込めません。",
+      loadMore: "さらに読み込む",
       allStatuses: "すべてのステータス",
       runs24h: "24時間以内の実行回数",
       successRate24h: "24時間以内の成功率",
@@ -10537,7 +10613,6 @@ const jaMessages = {
       logTitle: "実行ログ",
       noRunSelected: "ログを確認する実行を選択してください。",
       noLogs: "この実行にログはありません。",
-      loadMore: "さらに読み込む",
       error: "エラー",
       status: {
         running: "実行中",

@@ -1,38 +1,44 @@
 import type { PaginatedCollection } from "./pagination";
 
 export interface FunnelStep {
-  type: "pageview" | "event";
-  value: string;
+  id: string;
+  name?: string;
+  filterDsl: string;
 }
 
 export interface FunnelDefinition {
   id: string;
   siteId: string;
   name: string;
+  filterDslVersion: 1;
+  progressionScope: "session" | "visitor";
+  conversionWindowMs: number | null;
   steps: FunnelStep[];
+  semanticFingerprint: string;
   createdAt: number;
   updatedAt: number;
 }
 
 export interface FunnelAnalysisStep {
+  stepId: string;
   index: number;
-  label: string;
-  type: FunnelStep["type"];
   sessions: number;
   visitors: number;
-  conversionRate: number;
-  stepConversionRate: number;
-  dropOffSessions: number;
-  dropOffRate: number;
+  progression: {
+    count: number;
+    conversionRate: number;
+    stepConversionRate: number;
+    dropOffCount: number;
+    dropOffRate: number;
+  };
 }
 
 export interface FunnelAnalysis {
+  progressionScope: "session" | "visitor";
   steps: FunnelAnalysisStep[];
   summary: {
-    totalSessions: number;
-    convertedSessions: number;
-    totalVisitors: number;
-    convertedVisitors: number;
+    totalProgressions: number;
+    convertedProgressions: number;
     overallConversionRate: number;
     largestDropOffStepIndex: number | null;
   };

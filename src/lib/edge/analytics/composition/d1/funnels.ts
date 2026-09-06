@@ -1,6 +1,9 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  EMPTY_FILTER_DOCUMENT,
+  type FunnelConfigV2,
+} from "@/lib/edge/analytics/contract";
 import {
   decodeFunnelDefinitionCursor,
   queryFunnelAnalysis,
@@ -66,7 +69,12 @@ export function registerFunnelProvider(
                   options.siteId,
                   timeWindow(request.time),
                   request.filters ?? EMPTY_FILTER_DOCUMENT,
-                  funnel.steps,
+                  {
+                    filterDslVersion: funnel.filterDslVersion,
+                    progressionScope: funnel.progressionScope,
+                    conversionWindowMs: funnel.conversionWindowMs,
+                    steps: funnel.steps,
+                  } satisfies FunnelConfigV2,
                 )
               : null,
         } as Record<string, unknown>,

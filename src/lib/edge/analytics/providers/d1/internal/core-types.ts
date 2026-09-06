@@ -32,6 +32,8 @@ export interface SiteRow {
   id: string;
   name: string;
   domain: string;
+  /** Resolved once at the private-site boundary for mutation guards. */
+  canManage?: boolean;
 }
 
 export interface TeamSiteRow {

@@ -1,4 +1,7 @@
-import type { FilterDocument } from "@/lib/edge/analytics/contract";
+import type {
+  FilterDocument,
+  FunnelConfigV2,
+} from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import {
   type FunnelAnalysis,
@@ -36,7 +39,12 @@ export async function readSiteFunnelAnalysis(
     input.siteId,
     input.window,
     input.filters,
-    funnel.steps,
+    {
+      filterDslVersion: funnel.filterDslVersion,
+      progressionScope: funnel.progressionScope,
+      conversionWindowMs: funnel.conversionWindowMs,
+      steps: funnel.steps,
+    } satisfies FunnelConfigV2,
   );
   return { funnel, analysis };
 }

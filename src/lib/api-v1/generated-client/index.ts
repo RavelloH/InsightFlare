@@ -2,7 +2,7 @@
 import type { ZodType } from "zod";
 
 import {
-  CreateFunnelInputSchema,
+  CreateFunnelBodySchema,
   CreateSiteInputSchema,
   type FunnelResource,
   type FunnelResourcePage,
@@ -224,8 +224,6 @@ import {
   type TypedBatchData,
   TypedBatchResponseSchema,
 } from "@/lib/api-v1/wire";
-
-const CreateFunnelBodySchema = CreateFunnelInputSchema.omit({ siteId: true });
 
 type ResourcePageInput = {
   readonly page?: Partial<ListSitesInput["page"]>;

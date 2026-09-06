@@ -314,9 +314,15 @@ describe("fetchFunnelDetail", () => {
     fetchPrivateJsonMutateMock.mockResolvedValueOnce({ ok: true } as any);
     fetchPrivateJsonMutateMock.mockResolvedValueOnce({ ok: true } as any);
 
-    await createFunnel("site-1", "Signup", [
-      { id: "step-1", type: "page", value: "/signup" },
-    ] as any);
+    await createFunnel("site-1", {
+      name: "Signup",
+      progressionScope: "session",
+      conversionWindowMs: null,
+      steps: [
+        { id: "step-1", filterDsl: 'page.path eq "/signup"' },
+        { id: "step-2", filterDsl: 'event.name eq "complete"' },
+      ],
+    });
     await deleteFunnel("site-1", "funnel-1");
 
     expect(fetchPrivateJsonMutateMock).toHaveBeenNthCalledWith(
@@ -326,7 +332,12 @@ describe("fetchFunnelDetail", () => {
       { siteId: "site-1" },
       {
         name: "Signup",
-        steps: [{ id: "step-1", type: "page", value: "/signup" }],
+        progressionScope: "session",
+        conversionWindowMs: null,
+        steps: [
+          { id: "step-1", filterDsl: 'page.path eq "/signup"' },
+          { id: "step-2", filterDsl: 'event.name eq "complete"' },
+        ],
       },
     );
     expect(fetchPrivateJsonMutateMock).toHaveBeenNthCalledWith(
