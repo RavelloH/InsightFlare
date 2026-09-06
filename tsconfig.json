@@ -13,6 +13,7 @@
   "include": [
     "vite.config.ts",
     "vitest.config.ts",
+    "vitest.tracker.config.ts",
     "playwright.config.ts",
     "src/routeTree.gen.ts",
     "src/**/*.ts",

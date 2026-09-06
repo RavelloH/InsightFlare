@@ -64,19 +64,24 @@ export default defineConfig({
         lines: 96,
       },
       include: [
-        "src/routes/**/*.ts",
+        // The default project measures server/business logic only. UI route
+        // modules and the browser SDK are measured by separate coverage
+        // projects so their execution model does not distort this aggregate.
         "src/components/dashboard/**/*.ts",
         "src/hooks/**/*.ts",
         "src/lib/**/*.ts",
         "src/schemas/**/*.ts",
         "src/middleware.ts",
-        "src/tracker/sdk.ts",
       ],
       exclude: [
         "src/**/*.d.ts",
         "src/**/*.test.{ts,tsx}",
         "src/**/*.spec.{ts,tsx}",
         "src/**/__tests__/**",
+        // Reserve React route/component coverage for a separate UI project;
+        // keep browser rendering out of the server/business aggregate.
+        "src/routes/**",
+        "src/components/**/*.tsx",
         "src/app/.well-known/**",
         "src/**/types.ts",
         "src/**/*types*.ts",
@@ -100,7 +105,6 @@ export default defineConfig({
         "src/lib/edge/ingest-flush-types.ts",
         "src/lib/edge/ingest-types.ts",
         "src/lib/realtime/mock/events-helpers.ts",
-        "src/tracker/sdk.ts",
         "src/lib/system-performance.ts",
         "src/components/dashboard/site-pages/use-dashboard-query.ts",
         // The query provider is browser orchestration. Its hydration and

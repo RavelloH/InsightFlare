@@ -1,12 +1,25 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   adminServicePath,
   adminServiceRouteForPath,
 } from "@/lib/admin-service-contract";
-import { executeAdminService } from "@/lib/edge/admin-service";
+import {
+  executeAdminService,
+  readAdminService,
+} from "@/lib/edge/admin-service";
 import { executeDemoAdminService } from "@/lib/edge/admin-service-demo";
+import { executeRealAdminService } from "@/lib/edge/admin-service-real";
 
+vi.mock("@/lib/edge/admin-service-real", () => ({
+  executeRealAdminService: vi.fn(),
+}));
+
+const executeRealAdminServiceMock = vi.mocked(executeRealAdminService);
+
+beforeEach(() => {
+  executeRealAdminServiceMock.mockReset();
+});
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -123,5 +136,102 @@ describe("admin service route contract", () => {
     expect(response.ok).toBe(true);
     expect(payload.ok).toBe(true);
     expect(payload.data).toBeInstanceOf(Array);
+  });
+
+  it("selects the real adapter when demo mode is disabled", async () => {
+    vi.stubEnv("VITE_DEMO_MODE", "0");
+    const delegatedResponse = new Response(
+      JSON.stringify({ ok: true, data: { source: "real" } }),
+      { headers: { "content-type": "application/json" } },
+    );
+    executeRealAdminServiceMock.mockResolvedValue(delegatedResponse);
+    const request = new Request(
+      "https://app.test/api/private/admin/api-keys?teamId=team-real",
+    );
+
+    await expect(
+      executeAdminService({
+        route: "api-keys",
+        request,
+        env: {} as never,
+        url: new URL(request.url),
+      }),
+    ).resolves.toBe(delegatedResponse);
+    expect(executeRealAdminServiceMock).toHaveBeenCalledWith({
+      route: "api-keys",
+      request,
+      env: {},
+      url: new URL(request.url),
+    });
+  });
+
+  it("returns null for non-OK admin responses", async () => {
+    vi.stubEnv("VITE_DEMO_MODE", "0");
+    executeRealAdminServiceMock.mockResolvedValue(
+      new Response("denied", { status: 403 }),
+    );
+
+    await expect(
+      readAdminService({
+        route: "teams",
+        request: new Request("https://app.test/api/private/admin/teams"),
+        env: {} as never,
+        url: new URL("https://app.test/api/private/admin/teams"),
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("returns null when a successful response has a non-true ok value", async () => {
+    vi.stubEnv("VITE_DEMO_MODE", "0");
+    executeRealAdminServiceMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: "yes", data: [] }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(
+      readAdminService({
+        route: "teams",
+        request: new Request("https://app.test/api/private/admin/teams"),
+        env: {} as never,
+        url: new URL("https://app.test/api/private/admin/teams"),
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("preserves the undefined data value when the envelope omits data", async () => {
+    vi.stubEnv("VITE_DEMO_MODE", "0");
+    executeRealAdminServiceMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(
+      readAdminService({
+        route: "teams",
+        request: new Request("https://app.test/api/private/admin/teams"),
+        env: {} as never,
+        url: new URL("https://app.test/api/private/admin/teams"),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("returns null when the successful response is not valid JSON", async () => {
+    vi.stubEnv("VITE_DEMO_MODE", "0");
+    executeRealAdminServiceMock.mockResolvedValue(
+      new Response("{", {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(
+      readAdminService({
+        route: "teams",
+        request: new Request("https://app.test/api/private/admin/teams"),
+        env: {} as never,
+        url: new URL("https://app.test/api/private/admin/teams"),
+      }),
+    ).resolves.toBeNull();
   });
 });

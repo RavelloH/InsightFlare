@@ -64,8 +64,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests with coverage
+      - name: Run core tests with coverage
+        id: core
         run: npm run test:coverage
+
+      - name: Run tracker tests with coverage
+        id: tracker
+        if: always()
+        run: npm run test:coverage:tracker
+
+      - name: Check coverage baselines
+        if: always() && steps.core.outcome == 'success' && steps.tracker.outcome == 'success'
+        run: npm run check:coverage-baseline
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+          path: |
+            coverage/core
+            coverage/tracker
+          if-no-files-found: warn
 
   spec:
     name: OpenAPI & Skills Spec
