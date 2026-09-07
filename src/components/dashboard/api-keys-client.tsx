@@ -535,106 +535,112 @@ export function ApiKeysClient({
               {copy.createSubtitle}
             </ResponsiveDialogDescription>
           </ResponsiveDialogHeader>
-          <ResponsiveDialogBody className="grid gap-4">
-            <Field>
-              <FieldLabel htmlFor="api-key-name">{copy.nameLabel}</FieldLabel>
-              <Input
-                id="api-key-name"
-                value={name}
-                placeholder={copy.namePlaceholder}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>{copy.scopesTitle}</FieldLabel>
-              <FieldDescription>{copy.scopesDescription}</FieldDescription>
-              <div className="grid gap-3">
-                {getScopeGroups(copy).map((group) => (
-                  <div key={group.key}>
-                    <div className="mb-1 text-xs font-medium text-muted-foreground">
-                      {group.label}
+          <ResponsiveDialogBody>
+            <div className="min-h-max min-w-0 space-y-3">
+              <Field>
+                <FieldLabel htmlFor="api-key-name">{copy.nameLabel}</FieldLabel>
+                <Input
+                  id="api-key-name"
+                  value={name}
+                  placeholder={copy.namePlaceholder}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </Field>
+              <Field>
+                <FieldLabel>{copy.scopesTitle}</FieldLabel>
+                <FieldDescription>{copy.scopesDescription}</FieldDescription>
+                <div className="grid gap-3">
+                  {getScopeGroups(copy).map((group) => (
+                    <div key={group.key}>
+                      <div className="mb-1 text-xs font-medium text-muted-foreground">
+                        {group.label}
+                      </div>
+                      <div className="grid gap-1 pl-5">
+                        {group.scopes.map((scope) => (
+                          <label
+                            key={scope}
+                            className="flex cursor-pointer items-start gap-2 py-0.5"
+                          >
+                            <Checkbox
+                              checked={scopes.includes(scope)}
+                              onCheckedChange={() => toggleScope(scope)}
+                              className="mt-0.5"
+                            />
+                            <div className="grid gap-0">
+                              <span className="text-xs">
+                                {scopeLabel(copy, scope)}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">
+                                {scopeDescription(copy, scope)}
+                              </span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid gap-1 pl-5">
-                      {group.scopes.map((scope) => (
-                        <label
-                          key={scope}
-                          className="flex items-start gap-2 cursor-pointer py-0.5"
-                        >
-                          <Checkbox
-                            checked={scopes.includes(scope)}
-                            onCheckedChange={() => toggleScope(scope)}
-                            className="mt-0.5"
-                          />
-                          <div className="grid gap-0">
-                            <span className="text-xs">
-                              {scopeLabel(copy, scope)}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground">
-                              {scopeDescription(copy, scope)}
-                            </span>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Field>
-            <Field>
-              <FieldLabel>{copy.siteScopeTitle}</FieldLabel>
-              <FieldDescription>{copy.siteScopeDescription}</FieldDescription>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant={siteIds.length === 0 ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setSiteIds([])}
-                >
-                  {siteIds.length === 0 ? (
-                    <RiCheckLine />
-                  ) : (
-                    <RiCheckboxBlankCircleLine />
-                  )}
-                  <span>{copy.allSites}</span>
-                </Button>
-                {sites.map((site) => (
+                  ))}
+                </div>
+              </Field>
+              <Field>
+                <FieldLabel>{copy.siteScopeTitle}</FieldLabel>
+                <FieldDescription>{copy.siteScopeDescription}</FieldDescription>
+                <div className="flex flex-wrap gap-2">
                   <Button
-                    key={site.id}
                     type="button"
-                    variant={siteIds.includes(site.id) ? "default" : "outline"}
+                    variant={siteIds.length === 0 ? "default" : "outline"}
                     size="sm"
-                    onClick={() => toggleSite(site.id)}
+                    onClick={() => setSiteIds([])}
                   >
-                    {siteIds.includes(site.id) ? (
+                    {siteIds.length === 0 ? (
                       <RiCheckLine />
                     ) : (
                       <RiCheckboxBlankCircleLine />
                     )}
-                    <span>{site.name}</span>
+                    <span>{copy.allSites}</span>
                   </Button>
-                ))}
-              </div>
-            </Field>
-            <Field>
-              <FieldLabel>{copy.expirationLabel}</FieldLabel>
-              <Select
-                value={expiration}
-                onValueChange={(value) =>
-                  setExpiration(value as ExpirationChoice)
-                }
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="30">{copy.expiration30}</SelectItem>
-                  <SelectItem value="90">{copy.expiration90}</SelectItem>
-                  <SelectItem value="180">{copy.expiration180}</SelectItem>
-                  <SelectItem value="365">{copy.expiration365}</SelectItem>
-                  <SelectItem value="never">{copy.expirationNever}</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
+                  {sites.map((site) => (
+                    <Button
+                      key={site.id}
+                      type="button"
+                      variant={
+                        siteIds.includes(site.id) ? "default" : "outline"
+                      }
+                      size="sm"
+                      onClick={() => toggleSite(site.id)}
+                    >
+                      {siteIds.includes(site.id) ? (
+                        <RiCheckLine />
+                      ) : (
+                        <RiCheckboxBlankCircleLine />
+                      )}
+                      <span>{site.name}</span>
+                    </Button>
+                  ))}
+                </div>
+              </Field>
+              <Field>
+                <FieldLabel>{copy.expirationLabel}</FieldLabel>
+                <Select
+                  value={expiration}
+                  onValueChange={(value) =>
+                    setExpiration(value as ExpirationChoice)
+                  }
+                >
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="30">{copy.expiration30}</SelectItem>
+                    <SelectItem value="90">{copy.expiration90}</SelectItem>
+                    <SelectItem value="180">{copy.expiration180}</SelectItem>
+                    <SelectItem value="365">{copy.expiration365}</SelectItem>
+                    <SelectItem value="never">
+                      {copy.expirationNever}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
           </ResponsiveDialogBody>
           <ResponsiveDialogFooter>
             <Button onClick={createKey} disabled={submitting}>
