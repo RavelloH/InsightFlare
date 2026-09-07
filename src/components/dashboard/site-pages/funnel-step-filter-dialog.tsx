@@ -19,7 +19,6 @@ export function FunnelStepFilterDialog({
   labels,
   messages,
   siteId,
-  resolvedScope,
   window: timeWindow,
 }: {
   readonly open: boolean;
@@ -29,7 +28,6 @@ export function FunnelStepFilterDialog({
   readonly labels: AppMessages["funnels"];
   readonly messages: AppMessages;
   readonly siteId?: string;
-  readonly resolvedScope: "session" | "visitor";
   readonly window?: TimeWindow;
 }) {
   return (
@@ -53,7 +51,7 @@ export function FunnelStepFilterDialog({
             initialFilterDsl={filterDsl}
             messages={messages}
             siteId={siteId}
-            resolvedScope={resolvedScope}
+            resolvedScope="event"
             window={timeWindow}
             onApply={(next) => {
               onApply(next);

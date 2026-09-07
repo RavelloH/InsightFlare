@@ -396,7 +396,6 @@ export function FunnelEditor({
         labels={labels}
         messages={messages}
         siteId={siteId}
-        resolvedScope={scope}
         window={window}
       />
     </>

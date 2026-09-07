@@ -1185,6 +1185,17 @@ describe("edge query handlers", () => {
     expect(statements[0].bind).toHaveBeenCalledWith("site-1");
   });
 
+  it("marks sites resolved for system administrators as manageable", async () => {
+    const { env } = createEnv({
+      matches: [firstMatch(["FROM sites", "WHERE id=? LIMIT 1"], siteRow)],
+    });
+    const edgeRequest = request(privatePath("overview"));
+
+    await expect(
+      resolvePrivateSite(edgeRequest, env, new URL(edgeRequest.url)),
+    ).resolves.toEqual({ ...siteRow, canManage: true });
+  });
+
   it("uses team membership lookup for non-admin users", async () => {
     requireSessionMock.mockResolvedValue(userSession);
     const { env, statements } = createEnv({

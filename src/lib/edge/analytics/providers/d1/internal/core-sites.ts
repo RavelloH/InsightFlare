@@ -76,7 +76,9 @@ export async function resolvePrivateSiteForSession(
     )
       .bind(siteId)
       .first<SiteRow>();
-    return site ?? notFound("Site not found", undefined, request);
+    return site
+      ? { ...site, canManage: true }
+      : notFound("Site not found", undefined, request);
   }
 
   const site = await env.DB.prepare(
