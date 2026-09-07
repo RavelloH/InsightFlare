@@ -684,7 +684,10 @@ describe("fetchEventsTrend", () => {
   });
 
   it("includes eventName when provided", async () => {
-    fetchPrivateJsonMock.mockResolvedValueOnce({ ok: true } as any);
+    fetchPrivateJsonMock.mockResolvedValueOnce({
+      ok: true,
+      data: { interval: "day", series: [], data: [] },
+    } as any);
 
     await fetchEventsTrend("site-1", window, undefined, { eventName: "click" });
 
@@ -695,7 +698,10 @@ describe("fetchEventsTrend", () => {
   });
 
   it("omits eventName when not provided", async () => {
-    fetchPrivateJsonMock.mockResolvedValueOnce({ ok: true } as any);
+    fetchPrivateJsonMock.mockResolvedValueOnce({
+      ok: true,
+      data: { interval: "day", series: [], data: [] },
+    } as any);
 
     await fetchEventsTrend("site-1", window);
 
@@ -704,6 +710,19 @@ describe("fetchEventsTrend", () => {
       unknown
     >;
     expect(params.eventName).toBeUndefined();
+  });
+
+  it("rejects the legacy top-level trend shape", async () => {
+    fetchPrivateJsonMock.mockResolvedValueOnce({
+      ok: true,
+      interval: "day",
+      series: [],
+      data: [],
+    } as any);
+
+    await expect(fetchEventsTrend("site-1", window)).rejects.toThrow(
+      "events_trend_contract_violation",
+    );
   });
 
   it("falls back on error", async () => {

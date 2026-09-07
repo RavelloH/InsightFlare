@@ -4,7 +4,6 @@ import {
 } from "@/lib/realtime/demo-site-profiles";
 import {
   createDemoRng,
-  expandPathLabels,
   normalizePath,
   sInt,
   sShuffle,
@@ -14,9 +13,7 @@ import {
 } from "@/lib/realtime/demo-utils";
 import {
   buildCountryPool,
-  buildReferrerPool,
   pickFromList,
-  pickReferrerByCountry,
   weightedPickIndex,
 } from "@/lib/realtime/mock/dimension-pickers";
 import {
@@ -60,10 +57,38 @@ const EMPTY_DEMO_UTM: DemoUtmAttribution = {
   utmCampaign: "",
 };
 
+function profilePaths(profile: DemoSiteProfile): string[] {
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const rawPath of profile.paths) {
+    const path = normalizePath(rawPath);
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    paths.push(path);
+  }
+  return paths.length > 0 ? paths : ["/"];
+}
+
+function profileReferrers(
+  profile: DemoSiteProfile,
+): Array<{ label: string; weight: number }> {
+  const weights = new Map<string, number>();
+  for (const entry of profile.topReferrers) {
+    const label = String(entry.name || "").trim();
+    const weight = Math.max(0, Number(entry.weight) || 0);
+    if (!label || weight <= 0) continue;
+    weights.set(label, (weights.get(label) ?? 0) + weight);
+  }
+  if (weights.size === 0) return [{ label: "(direct)", weight: 1 }];
+  return Array.from(weights.entries()).map(([label, weight]) => ({
+    label,
+    weight,
+  }));
+}
+
 /**
- * Keep demo traffic varied enough for the channel table to exercise every
- * bucket. The empty slots intentionally preserve the profile's organic,
- * social, referral, and direct referrer mix.
+ * Keep tagged traffic varied enough for the channel table to exercise the
+ * UTM buckets while leaving untagged traffic to the profile referrer mix.
  */
 function demoUtmAttributionForSession(
   sessionIndex: number,
@@ -256,23 +281,11 @@ export function buildDemoFactDataset(
     profile.topCountries,
     Math.min(36, Math.max(18, profile.topCountries.length + 14)),
   );
-  const referrerPool = buildReferrerPool(
-    rng,
-    profile.topReferrers,
-    // Demo dashboard tables request up to 100 rows on their first page. Keep
-    // a substantial deterministic long tail so the pagination controls are
-    // visible in demo mode without changing production query limits.
-    Math.min(160, Math.max(140, profile.topReferrers.length + 120)),
-  );
-
-  const expandedPaths = expandPathLabels(
-    rng,
-    profile.paths,
-    // The overview/page-detail tables also request up to 100 rows initially.
-    // Generate enough distinct paths for those tables to expose a second
-    // cursor page while retaining the profile's real paths at the front.
-    Math.max(180, Math.min(240, profile.paths.length * 18)),
-  );
+  // Overview dimensions are profile fixtures, not synthetic pagination data.
+  // Keep the fact universe bounded so the dashboard only exposes the paths
+  // and referrers described by the selected demo site.
+  const referrerPool = profileReferrers(profile);
+  const expandedPaths = profilePaths(profile);
   const pathWeights = expandedPaths.map((_, index) => 1 / (1 + index * 0.85));
   const pathTitleMap = buildDemoPathTitleMap(profile, expandedPaths);
   // C2 方案 — 一阶马尔可夫路径转移图,从 profile.paths 顺序推断,
@@ -328,13 +341,15 @@ export function buildDemoFactDataset(
     const language = fingerprint.language;
     const screenSize = fingerprint.screenSize;
 
-    // C3 方案 — referrer 受访客国别弱影响(CN→baidu/qq, RU→yandex 等)。
-    const selectedReferrer = pickReferrerByCountry(
-      rng,
-      referrerPool,
-      country,
-      "(direct)",
-    );
+    // Keep the selected referrer within the site's profile so overview source
+    // dimensions do not acquire unrelated country/global long-tail labels.
+    const selectedReferrer =
+      referrerPool[
+        weightedPickIndex(
+          rng,
+          referrerPool.map((entry) => entry.weight),
+        )
+      ]?.label ?? "(direct)";
     const isDirect = selectedReferrer === "(direct)";
     const referrerHost = isDirect ? "" : selectedReferrer.toLowerCase();
     const keyword = encodeURIComponent(

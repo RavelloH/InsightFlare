@@ -148,7 +148,18 @@ describe("dashboard client empty data builders", () => {
         },
       },
     });
-    expect(emptyDimension()).toEqual({ ok: true, data: [] });
+    expect(emptyDimension()).toEqual({
+      ok: true,
+      data: {
+        items: [],
+        pagination: {
+          limit: 1,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    });
     expect(emptyOverviewTab()).toEqual({
       ok: true,
       data: {
@@ -161,7 +172,18 @@ describe("dashboard client empty data builders", () => {
         },
       },
     });
-    expect(emptyOverviewGeoTab()).toEqual({ ok: true, data: [] });
+    expect(emptyOverviewGeoTab()).toEqual({
+      ok: true,
+      data: {
+        items: [],
+        pagination: {
+          limit: 1,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    });
     expect(emptyDashboardFilterOptions()).toEqual({
       ok: true,
       data: {

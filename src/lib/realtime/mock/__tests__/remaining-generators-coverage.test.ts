@@ -680,7 +680,7 @@ describe("mock remaining generator coverage", () => {
       limit: 4,
     });
     expect(dimension).toMatchObject({ ok: true });
-    expect(dimension.data).toEqual(
+    expect((dimension.data as { items: unknown[] }).items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           value: expect.any(String),
@@ -732,7 +732,10 @@ describe("mock remaining generator coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME + 1,
       }),
-    ).toEqual({ ok: true, data: [] });
+    ).toMatchObject({
+      ok: true,
+      data: { items: [], pagination: expect.any(Object) },
+    });
     expect(
       generateDemoUtmTrend(SITE_ID, {
         dimension: "source",
@@ -759,13 +762,13 @@ describe("mock remaining generator coverage", () => {
     });
 
     expect(result).toMatchObject({ ok: true });
-    expect(result.data).toEqual(
+    expect((result.data as { items: unknown[] }).items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ value: "newsletter" }),
       ]),
     );
     expect(
-      (result.data as Array<{ value: string }>).some(
+      (result.data as { items: Array<{ value: string }> }).items.some(
         (row) => row.value === "(direct)" || row.value === "",
       ),
     ).toBe(false);
@@ -804,9 +807,9 @@ describe("mock remaining generator coverage", () => {
         to: BASE_TIME + 3_600_000,
         limit: 6,
       });
-      const values = (result.data as Array<{ value: string }>).map(
-        (row) => row.value,
-      );
+      const values = (
+        result.data as { items: Array<{ value: string }> }
+      ).items.map((row) => row.value);
 
       expect(values).toEqual(expect.arrayContaining([".", "solo", "news"]));
       expect(values).not.toEqual(
@@ -825,7 +828,10 @@ describe("mock remaining generator coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME + 1,
       }),
-    ).toEqual({ ok: true, data: [] });
+    ).toMatchObject({
+      ok: true,
+      data: { items: [], pagination: expect.any(Object) },
+    });
     expect(
       generateDemoUtmTrend(SITE_ID, {
         dimension: "medium",
@@ -851,13 +857,15 @@ describe("mock remaining generator coverage", () => {
 
       expect(result).toMatchObject({
         ok: true,
-        data: expect.arrayContaining([
-          expect.objectContaining({
-            value: expect.any(String),
-            views: expect.any(Number),
-            sessions: expect.any(Number),
-          }),
-        ]),
+        data: {
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              value: expect.any(String),
+              views: expect.any(Number),
+              sessions: expect.any(Number),
+            }),
+          ]),
+        },
       });
     }
   });
@@ -878,13 +886,15 @@ describe("mock remaining generator coverage", () => {
       }),
     ).toMatchObject({
       ok: true,
-      data: expect.arrayContaining([
-        expect.objectContaining({
-          value: expect.any(String),
-          views: expect.any(Number),
-          sessions: expect.any(Number),
-        }),
-      ]),
+      data: {
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            value: expect.any(String),
+            views: expect.any(Number),
+            sessions: expect.any(Number),
+          }),
+        ]),
+      },
     });
   });
 

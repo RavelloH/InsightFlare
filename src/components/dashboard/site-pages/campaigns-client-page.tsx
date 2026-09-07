@@ -25,25 +25,6 @@ interface CampaignsClientPageProps {
 }
 
 const EMPTY_ROWS: CampaignRawRowsByTab["source"] = [];
-function extractDimensionRows(
-  payload: unknown,
-): CampaignRawRowsByTab["source"] {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "data" in payload &&
-    Array.isArray((payload as { data?: unknown }).data)
-  ) {
-    return (payload as { data: CampaignRawRowsByTab["source"] }).data;
-  }
-
-  return EMPTY_ROWS;
-}
-
 function emptyRowsUnlessAborted(
   error: unknown,
 ): CampaignRawRowsByTab["source"] {
@@ -90,7 +71,7 @@ export function CampaignsClientPage({
           { signal },
         );
         const items = buildCampaignRows(
-          extractDimensionRows(payload),
+          payload.items,
           tab,
           messages.campaigns.notSet,
         );

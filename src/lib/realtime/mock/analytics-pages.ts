@@ -7,10 +7,11 @@ import {
   collectReferrerRows,
 } from "@/lib/realtime/mock/fact-builder";
 import {
+  parseDemoBoolean,
   parseDemoFilters,
   parseDemoInterval,
-  parseDemoLimit,
   parseDemoNumber,
+  parseDemoQueryLimit,
   withoutDemoGeoFilter,
 } from "@/lib/realtime/mock/filters";
 import { demoPage } from "@/lib/realtime/mock/pagination";
@@ -29,21 +30,32 @@ import {
 export function generateDemoPages(
   siteId: string,
   params: Record<string, string | number>,
+  options: { includeTabs?: boolean; defaultLimit?: number } = {},
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
+  const includeDetails = parseDemoBoolean(params.details);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
   const allPages = aggregateDimensionRowsFromVisits(
     dataset,
     filtered.visits,
     Math.max(1, filtered.visits.length),
-    (visit) => visit.pathname,
+    (visit) =>
+      includeDetails
+        ? [
+            visit.pathname,
+            demoQueryStringForVisit(visit),
+            demoHashFragmentForVisit(visit),
+          ].join("\u001f")
+        : visit.pathname,
   );
   const page = demoPage(
     allPages.map((row) => ({
-      pathname: row.label,
+      pathname: row.label.split("\u001f")[0] ?? row.label,
+      query: includeDetails ? (row.label.split("\u001f")[1] ?? "") : "",
+      hash: includeDetails ? (row.label.split("\u001f")[2] ?? "") : "",
       views: row.views,
       sessions: row.sessions,
     })),
@@ -60,18 +72,20 @@ export function generateDemoPages(
       sort: String(params.sort ?? params.sortBy ?? "views"),
       direction: String(params.direction ?? params.sortDir ?? "desc"),
     },
-    100,
+    options.defaultLimit ?? 20,
+    200,
   );
   const pages = collectPageDataAndTabs(dataset, filtered, 100);
 
-  return {
+  const result: Record<string, unknown> = {
     ok: true,
     data: {
       items: page.items,
       pagination: page.pagination,
     },
-    tabs: pages.tabs,
   };
+  if (options.includeTabs !== false) result.tabs = pages.tabs;
+  return result;
 }
 
 export function generateDemoPagesDashboard(
@@ -207,20 +221,28 @@ export function generateDemoPagesDashboard(
 export function generateDemoReferrers(
   siteId: string,
   params: Record<string, string | number>,
+  options: { allowFullUrl?: boolean; defaultLimit?: number } = {},
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
+  const includeFullUrl =
+    options.allowFullUrl !== false && parseDemoBoolean(params.fullUrl);
 
   const allRows = collectReferrerRows(
     dataset,
     filtered,
     Math.max(1, filtered.visits.length),
+    { includeFullUrl },
   );
   const page = demoPage(
-    allRows,
+    allRows.map(({ referrer, views, sessions }) => ({
+      referrer,
+      views,
+      sessions,
+    })),
     params,
     {
       operation: "referrers",
@@ -228,14 +250,15 @@ export function generateDemoReferrers(
       from,
       to,
       filters,
-      includeFullUrl: Boolean(params.includeFullUrl),
+      includeFullUrl,
       search: String(params.search ?? "")
         .trim()
         .toLowerCase(),
       sort: String(params.sort ?? params.sortBy ?? "views"),
       direction: String(params.direction ?? params.sortDir ?? "desc"),
     },
-    100,
+    options.defaultLimit ?? 20,
+    200,
   );
   return {
     ok: true,
@@ -250,7 +273,7 @@ export function generateDemoReferrerSummary(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const topN = parseDemoLimit(params.topN, 5, 1, 20);
+  const topN = parseDemoQueryLimit(params.topN, 5, 1, 20);
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
   const filters = parseDemoFilters(params);
@@ -340,16 +363,20 @@ export function generateDemoDimension(
   }
 
   const items = rows
-    .map((row) => ({
-      value:
+    .map((row) => {
+      const value =
         row.label === DEMO_EMPTY_HASH_VALUE ||
         row.label === DEMO_EMPTY_QUERY_VALUE
           ? ""
-          : row.label,
-      views: row.views,
-      sessions: row.sessions,
-      visitors: row.visitors,
-    }))
+          : row.label;
+      return {
+        value,
+        label: value,
+        views: row.views,
+        sessions: row.sessions,
+        visitors: row.visitors,
+      };
+    })
     .sort((a, b) => b.views - a.views || a.value.localeCompare(b.value));
   const page = demoPage(
     items,
@@ -367,6 +394,7 @@ export function generateDemoDimension(
       sort: "views:desc,value:asc",
     },
     20,
+    200,
   );
   return { ok: true, data: page };
 }

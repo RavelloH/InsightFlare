@@ -116,7 +116,10 @@ export function emptyReferrers(): ReferrersData {
 }
 
 export function emptyDimension(): DimensionData {
-  return { ok: true, data: [] };
+  return {
+    ok: true,
+    data: { items: [], pagination: emptyPagination() },
+  };
 }
 
 export function emptyVisitors(): VisitorsData {
@@ -309,7 +312,13 @@ export function emptyOverviewTab(): OverviewTabData {
 }
 
 export function emptyOverviewGeoTab(): OverviewGeoTabData {
-  return { ok: true, data: [] };
+  return {
+    ok: true,
+    data: {
+      items: [],
+      pagination: emptyPagination(),
+    },
+  };
 }
 
 export function emptyDashboardFilterOptions(): DashboardFilterOptionsData {

@@ -23,6 +23,7 @@ import {
   parseDemoInterval,
   parseDemoLimit,
   parseDemoNumber,
+  parseDemoQueryLimit,
   withoutDemoGeoFilter,
 } from "@/lib/realtime/mock/filters";
 
@@ -320,6 +321,18 @@ describe("mock/filters", () => {
     it("uses fallback when the value is not parseable", () => {
       expect(parseDemoLimit(undefined, 8, 1, 30)).toBe(8);
       expect(parseDemoLimit("bad", 8, 1, 30)).toBe(8);
+      expect(parseDemoLimit(0, 8, 1, 30)).toBe(8);
+      expect(parseDemoLimit(-4, 8, 1, 30)).toBe(8);
+    });
+  });
+
+  describe("parseDemoQueryLimit", () => {
+    it("matches query-limit fallback and minimum-clamp semantics", () => {
+      expect(parseDemoQueryLimit(undefined, 8, 1, 30)).toBe(8);
+      expect(parseDemoQueryLimit("", 8, 1, 30)).toBe(8);
+      expect(parseDemoQueryLimit(0, 8, 1, 30)).toBe(1);
+      expect(parseDemoQueryLimit(-4, 8, 1, 30)).toBe(1);
+      expect(parseDemoQueryLimit(99, 8, 1, 30)).toBe(30);
     });
   });
 

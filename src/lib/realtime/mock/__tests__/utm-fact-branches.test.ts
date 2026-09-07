@@ -95,9 +95,9 @@ describe("mock UTM and fact branch coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME + 3_600_000,
         limit: 8,
-      }) as { data: Array<{ value: string }> };
+      }) as { data: { items: Array<{ value: string }> } };
 
-      expect(result.data.map((row) => row.value)).toEqual(
+      expect(result.data.items.map((row) => row.value)).toEqual(
         expect.arrayContaining([expect.stringMatching(/^brand-example-/)]),
       );
     } finally {
@@ -139,19 +139,25 @@ describe("mock UTM and fact branch coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME + 3_600_000,
         limit: 12,
-      }) as { data: Array<{ value: string; views: number; sessions: number }> };
-      const sourceValues = source.data.map((row) => row.value);
+      }) as {
+        data: {
+          items: Array<{ value: string; views: number; sessions: number }>;
+        };
+      };
+      const sourceValues = source.data.items.map((row) => row.value);
       expect(sourceValues).toContain("search");
       expect(sourceValues).not.toContain("(direct)");
       expect(sourceValues).not.toContain("zero");
-      expect(source.data.every((row) => row.views >= row.sessions)).toBe(true);
+      expect(source.data.items.every((row) => row.views >= row.sessions)).toBe(
+        true,
+      );
 
       const medium = generateDemoUtmDimension(profile.id, "medium", {
         from: BASE_TIME,
         to: BASE_TIME + 3_600_000,
         limit: 6,
-      }) as { data: Array<{ value: string }> };
-      expect(medium.data.map((row) => row.value)).toEqual(
+      }) as { data: { items: Array<{ value: string }> } };
+      expect(medium.data.items.map((row) => row.value)).toEqual(
         expect.arrayContaining([
           expect.stringMatching(
             /^(email|cpc|paid-social|organic-social|referral|affiliate|display|sponsored|community|influencer)$/,
@@ -163,8 +169,8 @@ describe("mock UTM and fact branch coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME + 3_600_000,
         limit: 10,
-      }) as { data: Array<{ value: string }> };
-      expect(term.data.map((row) => row.value)).toEqual(
+      }) as { data: { items: Array<{ value: string }> } };
+      expect(term.data.items.map((row) => row.value)).toEqual(
         expect.arrayContaining([
           expect.stringMatching(
             /^(pricing|comparison|automation|guide|brand|template|free-trial|discount)$/,
@@ -176,8 +182,8 @@ describe("mock UTM and fact branch coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME + 3_600_000,
         limit: 10,
-      }) as { data: Array<{ value: string }> };
-      expect(content.data.map((row) => row.value)).toEqual(
+      }) as { data: { items: Array<{ value: string }> } };
+      expect(content.data.items.map((row) => row.value)).toEqual(
         expect.arrayContaining([
           expect.stringMatching(
             /(-hero|-cta|hero-a|hero-b|pricing-card|email-1|email-2)$/,
@@ -197,7 +203,10 @@ describe("mock UTM and fact branch coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME + 3_600_000,
       }),
-    ).toEqual({ ok: true, data: [] });
+    ).toMatchObject({
+      ok: true,
+      data: { items: [], pagination: expect.any(Object) },
+    });
     expect(
       generateDemoUtmTrend("demo-site-001", {
         dimension: "unknown",

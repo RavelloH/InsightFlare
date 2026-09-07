@@ -1,5 +1,5 @@
 import type { UtmDimensionTab } from "@/lib/dashboard/client-data";
-import type { DimensionData } from "@/lib/edge-client";
+import type { DimensionRow } from "@/lib/edge-client";
 
 export type CampaignTab = UtmDimensionTab;
 
@@ -12,7 +12,7 @@ export interface CampaignBreakdownRow {
   mono?: boolean;
 }
 
-export type CampaignRawRowsByTab = Record<CampaignTab, DimensionData["data"]>;
+export type CampaignRawRowsByTab = Record<CampaignTab, DimensionRow[]>;
 export type CampaignRowsByTab = Record<CampaignTab, CampaignBreakdownRow[]>;
 
 export const CAMPAIGN_TABS = [

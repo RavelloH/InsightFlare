@@ -587,6 +587,78 @@ describe("browser-client mock coverage", () => {
       ],
     });
   });
+
+  it("evaluates every generic client-cross dimension contract", () => {
+    setFacts([makeVisit()]);
+
+    const dimensions = [
+      "browser",
+      "operatingSystem",
+      "osVersion",
+      "deviceType",
+      "language",
+      "screenSize",
+      "page.path",
+      "page.title",
+      "page.hostname",
+      "page.query",
+      "page.hash",
+      "referrer.domain",
+      "referrer.url",
+      "utm.source",
+      "utm.medium",
+      "utm.campaign",
+      "utm.term",
+      "utm.content",
+      "client.browserVersion",
+      "client.browserEngine",
+      "client.os",
+      "client.osVersion",
+      "client.deviceType",
+      "client.language",
+      "client.screenSize",
+      "geo.country",
+      "geo.region",
+      "geo.city",
+      "geo.continent",
+      "geo.timeZone",
+      "geo.organization",
+    ];
+
+    for (const primaryDimension of dimensions) {
+      const secondaryDimension =
+        primaryDimension === "browser" ? "operatingSystem" : "browser";
+      expect(
+        generateDemoClientCrossBreakdown(SITE_ID, {
+          primaryDimension,
+          secondaryDimension,
+        }),
+      ).toMatchObject({ ok: true });
+    }
+
+    expect(
+      generateDemoClientCrossBreakdown(SITE_ID, {
+        primaryDimension: "client.browser",
+        secondaryDimension: "client.os",
+      }),
+    ).toMatchObject({ ok: true });
+
+    mockAggregateDimensionRowsFromVisits
+      .mockImplementationOnce(() => [
+        { label: "Chrome", views: 1, sessions: 1, visitors: 1 },
+      ])
+      .mockImplementationOnce(() => []);
+
+    expect(
+      generateDemoClientCrossBreakdown(SITE_ID, {
+        primaryDimension: "browser",
+        secondaryDimension: "utm.content",
+      }),
+    ).toEqual({
+      ok: true,
+      data: { columns: [], rows: [], totalVisitors: 0 },
+    });
+  });
 });
 
 function setFacts(visits: DemoVisitFact[]): DemoFactDataset {

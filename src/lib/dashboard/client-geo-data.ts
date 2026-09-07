@@ -14,7 +14,7 @@ import type {
 import type { FilterDocument, FilterScope } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
-import { withFilters } from "./client-utils";
+import { normalizePaginatedCollection, withFilters } from "./client-utils";
 
 function emptyGeoPointsUnlessAborted(error: unknown): OverviewGeoPointsData {
   if (error instanceof Error && error.name === "AbortError") throw error;
@@ -147,15 +147,16 @@ export async function fetchOverviewGeoDimensionTab(
     ),
     { signal: options?.signal },
   ).catch(emptyGeoTabUnlessAborted);
-  return Array.isArray(payload.data)
-    ? payload.data.map((row) => ({
-        value:
-          String((row as { value?: unknown }).value ?? "").trim() ||
-          String((row as { label?: unknown }).label ?? "").trim(),
-        label: normalizeGeoDimensionLabel(tab, row as Record<string, unknown>),
-        views: Number((row as { views?: unknown }).views ?? 0),
-        sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
-        visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
-      }))
-    : [];
+  const rows = normalizePaginatedCollection<
+    OverviewGeoTabData["data"]["items"][number]
+  >(payload.data).items;
+  return rows.map((row) => ({
+    value:
+      String((row as { value?: unknown }).value ?? "").trim() ||
+      String((row as { label?: unknown }).label ?? "").trim(),
+    label: normalizeGeoDimensionLabel(tab, row as Record<string, unknown>),
+    views: Number((row as { views?: unknown }).views ?? 0),
+    sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
+    visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
+  }));
 }

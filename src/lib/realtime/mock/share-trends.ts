@@ -191,12 +191,13 @@ function generateDemoShareTrend(
   options: {
     fallbackKeyBase: string;
     getLabel: (visit: DemoVisitFact) => string;
+    maxLimit?: number;
   },
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
   const interval = parseDemoInterval(params.interval);
-  const limit = parseDemoLimit(params.limit, 5, 1, 12);
+  const limit = parseDemoLimit(params.limit, 5, 1, options.maxLimit ?? 12);
   const filters = parseDemoFilters(params);
   const timeZone = parseDemoTimeZone(params);
   const buckets = buildDemoTimeBuckets(from, to, interval, timeZone);
@@ -450,6 +451,7 @@ export function generateDemoBrowserEngineTrend(
   return generateDemoShareTrend(siteId, params, {
     fallbackKeyBase: "engine",
     getLabel: (visit) => browserEngineLabel(visit.browser, visit.osVersion),
+    maxLimit: 8,
   });
 }
 
@@ -471,23 +473,27 @@ export function generateDemoClientDimensionTrend(
   return generateDemoShareTrend(siteId, params, {
     fallbackKeyBase: meta.fallbackKeyBase,
     getLabel: meta.getLabel,
+    maxLimit: 8,
   });
 }
 
 export function generateDemoReferrerTrend(
   siteId: string,
   params: Record<string, string | number>,
+  options: { maxLimit?: number } = {},
 ): Record<string, unknown> {
   return generateDemoShareTrend(siteId, params, {
     fallbackKeyBase: "referrer-domain",
     getLabel: (visit) =>
       visit.referrerHost.trim() || DEMO_DIRECT_REFERRER_FILTER_VALUE,
+    maxLimit: options.maxLimit ?? 8,
   });
 }
 
 export function generateDemoChannelTrend(
   siteId: string,
   params: Record<string, string | number>,
+  options: { maxLimit?: number } = {},
 ): Record<string, unknown> {
   return generateDemoShareTrend(siteId, params, {
     fallbackKeyBase: "traffic-channel",
@@ -498,5 +504,6 @@ export function generateDemoChannelTrend(
         utmMedium: visit.utmMedium,
         utmCampaign: visit.utmCampaign,
       }),
+    maxLimit: options.maxLimit ?? 12,
   });
 }

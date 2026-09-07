@@ -85,7 +85,29 @@ describe("mock/fact-builder", () => {
       }
     });
 
-    it("includes varied UTM channels in demo facts", () => {
+    it("keeps page and referrer facts within the selected profile", () => {
+      DEMO_FACT_DATASET_CACHE.clear();
+      const profile = findSiteProfile(SITE_ID);
+      const dataset = buildDemoFactDataset(SITE_ID, DAY_MS, 2 * DAY_MS);
+      const profilePaths = new Set(profile.paths);
+      const profileReferrers = new Set(
+        profile.topReferrers
+          .map((referrer) => referrer.name.trim().toLowerCase())
+          .filter((referrer) => referrer && referrer !== "(direct)"),
+      );
+
+      expect(
+        dataset.visits.every((visit) => profilePaths.has(visit.pathname)),
+      ).toBe(true);
+      expect(
+        dataset.visits
+          .map((visit) => visit.referrerHost)
+          .filter(Boolean)
+          .every((referrer) => profileReferrers.has(referrer)),
+      ).toBe(true);
+    });
+
+    it("includes profile and UTM channels in demo facts", () => {
       DEMO_FACT_DATASET_CACHE.clear();
       const dataset = buildDemoFactDataset(SITE_ID, DAY_MS, 2 * DAY_MS);
       const rows = collectTrafficChannelRows(
@@ -105,7 +127,6 @@ describe("mock/fact-builder", () => {
           "display",
           "email",
           "affiliate",
-          "referral",
           "campaign",
           "other",
         ]),

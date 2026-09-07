@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { findSiteProfile } from "@/lib/realtime/demo-site-profiles";
 import {
   createMockRealtimeSocket,
   handleDemoRequest,
@@ -878,7 +879,6 @@ describe("mock — handleDemoRequest", () => {
       "/api/private/referrers",
       "/api/private/visitors",
       "/api/private/countries",
-      "/api/private/devices",
       "/api/private/page-hash",
       "/api/private/page-query",
       "/api/private/event-types",
@@ -973,6 +973,113 @@ describe("mock — handleDemoRequest", () => {
           response.data.pagination.returned,
         );
       }
+    });
+
+    it("keeps demo analytics envelopes aligned with the real route contracts", () => {
+      const request = (
+        path: string,
+        extra: Record<string, string | number> = {},
+      ) =>
+        asRecord(
+          handleDemoRequest({
+            path,
+            params: { ...ANALYTICS_PARAMS, ...extra },
+          }),
+        );
+
+      const pages = request("/api/private/pages");
+      expect(pages.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      });
+      expect(pages.tabs).toBeDefined();
+
+      const publicPages = request("/api/public/share/some-token/pages");
+      expect(publicPages.tabs).toBeUndefined();
+      expect(publicPages.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      });
+
+      const referrers = request("/api/private/referrers");
+      const referrerItems = (
+        referrers.data as { items: Array<Record<string, unknown>> }
+      ).items;
+      expect(referrerItems[0]).not.toHaveProperty("visitors");
+
+      const channel = request("/api/private/referrer-channel-dimension-trend");
+      expect(Object.keys(channel.source as object).sort()).toEqual([
+        "data",
+        "series",
+      ]);
+      expect(Object.keys(channel.channel as object).sort()).toEqual([
+        "data",
+        "series",
+      ]);
+
+      const eventsTrend = request("/api/private/events-trend");
+      expect(eventsTrend.data).toMatchObject({
+        interval: expect.any(String),
+        series: expect.any(Array),
+        data: expect.any(Array),
+      });
+
+      const utm = request("/api/private/utm-source");
+      expect(utm.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      });
+      expect(utm.data).not.toEqual(expect.any(Array));
+    });
+
+    it("paginates only profile page paths and referrer domains", () => {
+      const profile = findSiteProfile(SITE_ID);
+      const serialize = (path: string) =>
+        JSON.parse(
+          JSON.stringify(
+            handleDemoRequest({
+              path,
+              params: { ...baseParams, limit: 100 },
+            }),
+          ),
+        ) as Record<string, any>;
+
+      const pageResponse = serialize("/api/private/overview-page-path");
+      const sourceResponse = serialize("/api/private/overview-source-domain");
+      const geoResponse = serialize("/api/private/overview-geo-country");
+      const pageItems = pageResponse.data.items as Array<{ label: string }>;
+      const sourceItems = sourceResponse.data.items as Array<{
+        label: string;
+      }>;
+
+      expect(pageResponse.data.pagination).toMatchObject({
+        hasMore: false,
+        nextCursor: null,
+      });
+      expect(sourceResponse.data.pagination).toMatchObject({
+        hasMore: false,
+        nextCursor: null,
+      });
+      expect(geoResponse.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.objectContaining({
+          hasMore: false,
+          nextCursor: null,
+        }),
+      });
+      expect(
+        pageItems.every((item) => profile.paths.includes(item.label)),
+      ).toBe(true);
+      const profileSources = new Set(
+        profile.topReferrers.map((referrer) =>
+          referrer.name === "(direct)" ? "" : referrer.name.toLowerCase(),
+        ),
+      );
+      expect(
+        sourceItems.every((item) =>
+          profileSources.has(item.label.toLowerCase()),
+        ),
+      ).toBe(true);
     });
 
     it("serializes split journey collections and event payload details", () => {
@@ -1074,12 +1181,8 @@ describe("mock — handleDemoRequest", () => {
         params: baseParams,
       }) as Record<string, unknown>;
       expect(res).toMatchObject({
-        ok: true,
-        data: {
-          columns: expect.any(Array),
-          rows: expect.any(Array),
-          totalVisitors: 0,
-        },
+        ok: false,
+        error: { message: "Unsupported primary dimension" },
       });
     });
 
@@ -1088,11 +1191,38 @@ describe("mock — handleDemoRequest", () => {
         path: "/api/private/client-cross-breakdown",
         params: {
           ...baseParams,
-          primaryDimension: "browser",
-          secondaryDimension: "deviceType",
+          primaryDimension: "client.browser",
+          secondaryDimension: "client.deviceType",
         },
       }) as Record<string, unknown>;
-      expect(res).toBeDefined();
+      expect(res.ok).toBe(true);
+    });
+
+    it("client-cross-breakdown accepts the same generic dimensions as Edge", () => {
+      for (const [primaryDimension, secondaryDimension] of [
+        ["page.path", "utm.source"],
+        ["client.browser", "geo.country"],
+        ["browser", "language"],
+      ] as const) {
+        const res = asRecord(
+          handleDemoRequest({
+            path: "/api/private/client-cross-breakdown",
+            params: {
+              ...baseParams,
+              primaryDimension,
+              secondaryDimension,
+            },
+          }),
+        );
+        expect(res).toMatchObject({
+          ok: true,
+          data: {
+            columns: expect.any(Array),
+            rows: expect.any(Array),
+            totalVisitors: expect.any(Number),
+          },
+        });
+      }
     });
 
     it("returns ok for team dashboard", () => {
@@ -1171,7 +1301,7 @@ describe("mock — handleDemoRequest", () => {
       );
     }, 20000);
 
-    it("falls back to a single trend bucket for an inverted time window", () => {
+    it("rejects an inverted time window", () => {
       const res = asRecord(
         handleDemoRequest({
           path: "/api/private/trend",
@@ -1184,16 +1314,10 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
 
-      expect(res.ok).toBe(true);
-      expect(res.interval).toBe("hour");
-      expect(res.data).toEqual([
-        expect.objectContaining({
-          bucket: 0,
-          views: 0,
-          visitors: 0,
-          sessions: 0,
-        }),
-      ]);
+      expect(res).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
     });
 
     it("returns event detail, context cards, and payload field values", () => {
@@ -1266,18 +1390,6 @@ describe("mock — handleDemoRequest", () => {
           geo: expect.any(Object),
         }),
       );
-      expect(typeDetail.fields).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ path: "/plan", valueType: "string" }),
-          expect.objectContaining({ path: "/value", valueType: "number" }),
-          expect.objectContaining({
-            path: "/flags/signedIn",
-            valueType: "boolean",
-          }),
-          expect.objectContaining({ path: "/items/*", valueType: "null" }),
-        ]),
-      );
-
       const fieldValues = dataRows(
         handleDemoRequest({
           path: "/api/private/event-type-field-values",
@@ -1395,12 +1507,13 @@ describe("mock — handleDemoRequest", () => {
       );
 
       expect(res.ok).toBe(true);
-      expect(res.series).toEqual(
-        expect.arrayContaining([
+      expect(res.data).toMatchObject({
+        interval: "hour",
+        series: expect.arrayContaining([
           expect.objectContaining({ key: "other", isOther: true }),
         ]),
-      );
-      expect(res.data).toEqual(expect.any(Array));
+        data: expect.any(Array),
+      });
     });
 
     it("returns empty event field values when required params are absent", () => {
@@ -1411,10 +1524,9 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
 
-      expect(res.ok).toBe(true);
-      expect(res.data).toMatchObject({
-        items: [],
-        pagination: { hasMore: false },
+      expect(res).toMatchObject({
+        ok: false,
+        error: { message: "fieldPath is required" },
       });
     });
 
@@ -1526,7 +1638,7 @@ describe("mock — handleDemoRequest", () => {
       );
       expect(denied).toMatchObject({
         ok: false,
-        data: { items: [], pagination: { hasMore: false } },
+        error: { message: "Invalid filter field" },
       });
     });
 
@@ -1635,18 +1747,14 @@ describe("mock — handleDemoRequest", () => {
           path: "/api/private/client-cross-breakdown",
           params: {
             ...ANALYTICS_PARAMS,
-            primaryDimension: "browser",
-            secondaryDimension: "browser",
+            primaryDimension: "client.browser",
+            secondaryDimension: "client.browser",
           },
         }),
       );
       expect(sameDimension).toMatchObject({
-        ok: true,
-        data: {
-          columns: [],
-          rows: [],
-          totalVisitors: 0,
-        },
+        ok: false,
+        error: { message: "Primary and secondary dimensions must differ" },
       });
 
       const clientCross = asRecord(
@@ -1654,8 +1762,8 @@ describe("mock — handleDemoRequest", () => {
           path: "/api/private/client-cross-breakdown",
           params: {
             ...ANALYTICS_PARAMS,
-            primaryDimension: "browser",
-            secondaryDimension: "language",
+            primaryDimension: "client.browser",
+            secondaryDimension: "client.language",
             primaryLimit: 1,
             secondaryLimit: 1,
           },
@@ -1670,7 +1778,7 @@ describe("mock — handleDemoRequest", () => {
       });
     });
 
-    it("returns empty shaped data for inverted-window trend and radar routes", () => {
+    it("rejects inverted-window trend and radar routes", () => {
       const invertedParams = {
         siteId: SITE_ID,
         from: FIXED_TO,
@@ -1685,10 +1793,8 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
       expect(clientTrend).toMatchObject({
-        ok: true,
-        interval: "hour",
-        series: [],
-        data: [],
+        ok: false,
+        error: { message: "Invalid time window" },
       });
 
       const utmTrend = asRecord(
@@ -1698,10 +1804,8 @@ describe("mock — handleDemoRequest", () => {
         }),
       );
       expect(utmTrend).toMatchObject({
-        ok: true,
-        interval: "hour",
-        series: [],
-        data: [],
+        ok: false,
+        error: { message: "Invalid time window" },
       });
 
       const browserRadar = asRecord(
@@ -1710,7 +1814,10 @@ describe("mock — handleDemoRequest", () => {
           params: invertedParams,
         }),
       );
-      expect(browserRadar).toMatchObject({ ok: true, data: [] });
+      expect(browserRadar).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
 
       const referrerRadar = asRecord(
         handleDemoRequest({
@@ -1718,7 +1825,10 @@ describe("mock — handleDemoRequest", () => {
           params: invertedParams,
         }),
       );
-      expect(referrerRadar).toMatchObject({ ok: true, data: [] });
+      expect(referrerRadar).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
 
       const browserCross = asRecord(
         handleDemoRequest({
@@ -1726,10 +1836,9 @@ describe("mock — handleDemoRequest", () => {
           params: invertedParams,
         }),
       );
-      expect(browserCross.operatingSystem).toEqual({
-        columns: [],
-        rows: [],
-        totalVisitors: 0,
+      expect(browserCross).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
       });
 
       const clientCross = asRecord(
@@ -1737,18 +1846,14 @@ describe("mock — handleDemoRequest", () => {
           path: "/api/private/client-cross-breakdown",
           params: {
             ...invertedParams,
-            primaryDimension: "browser",
-            secondaryDimension: "language",
+            primaryDimension: "client.browser",
+            secondaryDimension: "client.language",
           },
         }),
       );
       expect(clientCross).toMatchObject({
-        ok: true,
-        data: {
-          columns: [],
-          rows: [],
-          totalVisitors: 0,
-        },
+        ok: false,
+        error: { message: "Invalid time window" },
       });
     });
 
@@ -1894,23 +1999,19 @@ describe("mock — handleDemoRequest", () => {
       );
     });
 
-    it("returns null details when journey IDs are missing", () => {
+    it("rejects missing journey IDs", () => {
       expect(
-        ok(
-          handleDemoRequest({
-            path: "/api/private/visitor-detail",
-            params: ANALYTICS_PARAMS,
-          }),
-        ).data,
-      ).toBeNull();
+        handleDemoRequest({
+          path: "/api/private/visitor-detail",
+          params: ANALYTICS_PARAMS,
+        }),
+      ).toMatchObject({ ok: false, error: { message: "Missing visitorId" } });
       expect(
-        ok(
-          handleDemoRequest({
-            path: "/api/private/session-detail",
-            params: ANALYTICS_PARAMS,
-          }),
-        ).data,
-      ).toBeNull();
+        handleDemoRequest({
+          path: "/api/private/session-detail",
+          params: ANALYTICS_PARAMS,
+        }),
+      ).toMatchObject({ ok: false, error: { message: "Missing sessionId" } });
     });
 
     it("normalizes retention granularity and returns monthly cohorts", () => {
@@ -2062,8 +2163,8 @@ describe("mock — handleDemoRequest", () => {
           ...params,
           dimension: "browser",
           filterKey: "client.browser",
-          primaryDimension: "browser",
-          secondaryDimension: "language",
+          primaryDimension: "client.browser",
+          secondaryDimension: "client.language",
         },
       });
 

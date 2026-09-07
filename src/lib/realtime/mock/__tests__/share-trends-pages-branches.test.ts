@@ -260,8 +260,14 @@ describe("mock/analytics-pages branch coverage", () => {
       ok: true,
       data: {
         items: expect.arrayContaining([
-          { pathname: "/", views: 1, sessions: 1 },
-          { pathname: "/pricing", views: 1, sessions: 1 },
+          { pathname: "/", query: "", hash: "", views: 1, sessions: 1 },
+          {
+            pathname: "/pricing",
+            query: "",
+            hash: "",
+            views: 1,
+            sessions: 1,
+          },
         ]),
       },
       tabs: {
@@ -276,8 +282,8 @@ describe("mock/analytics-pages branch coverage", () => {
       ok: true,
       data: {
         items: [
-          { referrer: "(direct)", views: 1, sessions: 1, visitors: 1 },
-          { referrer: "search.example", views: 1, sessions: 1, visitors: 1 },
+          { referrer: "(direct)", views: 1, sessions: 1 },
+          { referrer: "search.example", views: 1, sessions: 1 },
         ],
         pagination: {
           limit: 10,
@@ -293,8 +299,8 @@ describe("mock/analytics-pages branch coverage", () => {
       ok: true,
       data: {
         items: expect.arrayContaining([
-          { value: "US", views: 1, sessions: 1, visitors: 1 },
-          { value: "DE", views: 1, sessions: 1, visitors: 1 },
+          { value: "US", label: "US", views: 1, sessions: 1, visitors: 1 },
+          { value: "DE", label: "DE", views: 1, sessions: 1, visitors: 1 },
         ]),
       },
     });
@@ -302,15 +308,35 @@ describe("mock/analytics-pages branch coverage", () => {
       ok: true,
       data: {
         items: expect.arrayContaining([
-          { value: "Desktop", views: 1, sessions: 1, visitors: 1 },
-          { value: "Mobile", views: 1, sessions: 1, visitors: 1 },
+          {
+            value: "Desktop",
+            label: "Desktop",
+            views: 1,
+            sessions: 1,
+            visitors: 1,
+          },
+          {
+            value: "Mobile",
+            label: "Mobile",
+            views: 1,
+            sessions: 1,
+            visitors: 1,
+          },
         ]),
       },
     });
     expect(generateDemoDimension(SITE_ID, "event-types", {})).toEqual({
       ok: true,
       data: {
-        items: [{ value: "signup", views: 1, sessions: 1, visitors: 1 }],
+        items: [
+          {
+            value: "signup",
+            label: "signup",
+            views: 1,
+            sessions: 1,
+            visitors: 1,
+          },
+        ],
         pagination: {
           limit: 20,
           returned: 1,

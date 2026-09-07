@@ -120,8 +120,8 @@ import {
   parseDemoFilters,
   parseDemoGeoFilterValue,
   parseDemoInterval,
-  parseDemoLimit,
   parseDemoNumber,
+  parseDemoQueryLimit,
   withoutDemoGeoFilter,
 } from "@/lib/realtime/mock/filters";
 import {
@@ -145,7 +145,6 @@ import {
   demoClientDimensionMeta,
   type DemoSortDirection,
   findDemoTimeBucketIndex,
-  parseDemoClientDimensionKey,
   parseDemoScreenSize,
   parseDemoTimeZone,
 } from "@/lib/realtime/mock/shared";
@@ -175,7 +174,6 @@ import {
   DEMO_EMPTY_HASH_VALUE,
   DEMO_EMPTY_QUERY_VALUE,
   demoHashFragmentForVisit,
-  demoOperatingSystemLabel,
   demoQueryStringForVisit,
   demoStringHash,
 } from "@/lib/realtime/mock/visit-helpers";
@@ -183,13 +181,197 @@ import {
   getVisitorFingerprint,
   sampleActiveVisitors,
 } from "@/lib/realtime/mock/visitor-pool";
+type DemoCrossDimensionKey =
+  | DemoClientDimensionKey
+  | "page.path"
+  | "page.title"
+  | "page.hostname"
+  | "page.query"
+  | "page.hash"
+  | "referrer.domain"
+  | "referrer.url"
+  | "utm.source"
+  | "utm.medium"
+  | "utm.campaign"
+  | "utm.term"
+  | "utm.content"
+  | "client.browserVersion"
+  | "client.browserEngine"
+  | "client.osVersion"
+  | "geo.country"
+  | "geo.region"
+  | "geo.city"
+  | "geo.continent"
+  | "geo.timeZone"
+  | "geo.organization";
+
+type DemoCrossDimensionMeta = {
+  fallbackKeyBase: string;
+  getLabel: (visit: DemoVisitFact) => string;
+};
+
+function parseDemoCrossDimensionKey(
+  value: string | number | undefined,
+): DemoCrossDimensionKey | null {
+  const normalized = String(value ?? "").trim();
+  const aliases: Record<string, DemoCrossDimensionKey> = {
+    "client.browser": "browser",
+    "client.os": "operatingSystem",
+    "client.osVersion": "osVersion",
+    "client.deviceType": "deviceType",
+    "client.language": "language",
+    "client.screenSize": "screenSize",
+  };
+  return (
+    aliases[normalized] ??
+    (CROSS_DIMENSION_KEYS.has(normalized)
+      ? (normalized as DemoCrossDimensionKey)
+      : null)
+  );
+}
+
+const CROSS_DIMENSION_KEYS = new Set<string>([
+  "browser",
+  "operatingSystem",
+  "osVersion",
+  "deviceType",
+  "language",
+  "screenSize",
+  "page.path",
+  "page.title",
+  "page.hostname",
+  "page.query",
+  "page.hash",
+  "referrer.domain",
+  "referrer.url",
+  "utm.source",
+  "utm.medium",
+  "utm.campaign",
+  "utm.term",
+  "utm.content",
+  "client.browserVersion",
+  "client.browserEngine",
+  "client.osVersion",
+  "geo.country",
+  "geo.region",
+  "geo.city",
+  "geo.continent",
+  "geo.timeZone",
+  "geo.organization",
+]);
+
+function demoCrossDimensionMeta(
+  dimension: DemoCrossDimensionKey,
+): DemoCrossDimensionMeta {
+  if (
+    dimension === "browser" ||
+    dimension === "operatingSystem" ||
+    dimension === "osVersion" ||
+    dimension === "deviceType" ||
+    dimension === "language" ||
+    dimension === "screenSize"
+  ) {
+    return demoClientDimensionMeta(dimension);
+  }
+  const definitions: Record<
+    Exclude<DemoCrossDimensionKey, DemoClientDimensionKey>,
+    DemoCrossDimensionMeta
+  > = {
+    "page.path": {
+      fallbackKeyBase: "page",
+      getLabel: (visit) => visit.pathname,
+    },
+    "page.title": {
+      fallbackKeyBase: "title",
+      getLabel: (visit) => visit.title,
+    },
+    "page.hostname": {
+      fallbackKeyBase: "hostname",
+      getLabel: (visit) => visit.hostname,
+    },
+    "page.query": {
+      fallbackKeyBase: "query",
+      getLabel: (visit) => demoQueryStringForVisit(visit),
+    },
+    "page.hash": {
+      fallbackKeyBase: "hash",
+      getLabel: (visit) => demoHashFragmentForVisit(visit),
+    },
+    "referrer.domain": {
+      fallbackKeyBase: "referrer-domain",
+      getLabel: (visit) =>
+        visit.referrerHost || DEMO_DIRECT_REFERRER_FILTER_VALUE,
+    },
+    "referrer.url": {
+      fallbackKeyBase: "referrer-url",
+      getLabel: (visit) => visit.referrerUrl,
+    },
+    "utm.source": {
+      fallbackKeyBase: "utm-source",
+      getLabel: (visit) => visit.utmSource ?? "",
+    },
+    "utm.medium": {
+      fallbackKeyBase: "utm-medium",
+      getLabel: (visit) => visit.utmMedium ?? "",
+    },
+    "utm.campaign": {
+      fallbackKeyBase: "utm-campaign",
+      getLabel: (visit) => visit.utmCampaign ?? "",
+    },
+    "utm.term": {
+      fallbackKeyBase: "utm-term",
+      getLabel: () => "",
+    },
+    "utm.content": {
+      fallbackKeyBase: "utm-content",
+      getLabel: () => "",
+    },
+    "client.browserVersion": {
+      fallbackKeyBase: "browser-version",
+      getLabel: (visit) => visit.browserVersion,
+    },
+    "client.browserEngine": {
+      fallbackKeyBase: "engine",
+      getLabel: (visit) => browserEngineLabel(visit.browser, visit.osVersion),
+    },
+    "client.osVersion": {
+      fallbackKeyBase: "os-version",
+      getLabel: (visit) => visit.osVersion,
+    },
+    "geo.country": {
+      fallbackKeyBase: "country",
+      getLabel: (visit) => visit.country,
+    },
+    "geo.region": {
+      fallbackKeyBase: "region",
+      getLabel: (visit) => visit.region,
+    },
+    "geo.city": { fallbackKeyBase: "city", getLabel: (visit) => visit.city },
+    "geo.continent": {
+      fallbackKeyBase: "continent",
+      getLabel: (visit) => visit.continent,
+    },
+    "geo.timeZone": {
+      fallbackKeyBase: "timezone",
+      getLabel: (visit) => visit.timezone,
+    },
+    "geo.organization": {
+      fallbackKeyBase: "organization",
+      getLabel: (visit) => visit.organization,
+    },
+  };
+  return definitions[
+    dimension as Exclude<DemoCrossDimensionKey, DemoClientDimensionKey>
+  ];
+}
+
 function generateDemoClientCrossDimensionData(
   dataset: DemoFactDataset,
   filtered: DemoFilteredFacts,
   primaryLimit: number,
   secondaryLimit: number,
-  primaryDimension: DemoClientDimensionKey,
-  secondaryDimension: DemoClientDimensionKey,
+  primaryDimension: DemoCrossDimensionKey,
+  secondaryDimension: DemoCrossDimensionKey,
 ): {
   columns: Array<{
     key: string;
@@ -219,8 +401,8 @@ function generateDemoClientCrossDimensionData(
   }>;
   totalVisitors: number;
 } {
-  const primaryMeta = demoClientDimensionMeta(primaryDimension);
-  const secondaryMeta = demoClientDimensionMeta(secondaryDimension);
+  const primaryMeta = demoCrossDimensionMeta(primaryDimension);
+  const secondaryMeta = demoCrossDimensionMeta(secondaryDimension);
   const topPrimary = aggregateDimensionRowsFromVisits(
     dataset,
     filtered.visits,
@@ -524,8 +706,8 @@ export function generateDemoClientCrossBreakdown(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const primaryDimension = parseDemoClientDimensionKey(params.primaryDimension);
-  const secondaryDimension = parseDemoClientDimensionKey(
+  const primaryDimension = parseDemoCrossDimensionKey(params.primaryDimension);
+  const secondaryDimension = parseDemoCrossDimensionKey(
     params.secondaryDimension,
   );
   if (
@@ -542,8 +724,8 @@ export function generateDemoClientCrossBreakdown(
 
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
-  const primaryLimit = parseDemoLimit(params.primaryLimit, 5, 1, 12);
-  const secondaryLimit = parseDemoLimit(params.secondaryLimit, 6, 1, 8);
+  const primaryLimit = parseDemoQueryLimit(params.primaryLimit, 5, 1, 12);
+  const secondaryLimit = parseDemoQueryLimit(params.secondaryLimit, 6, 1, 8);
   const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);

@@ -583,6 +583,21 @@ describe("Dashboard Client Data Processing Utilities", () => {
       });
     }
 
+    function geoTabResponse(items: unknown[]): Response {
+      return freshJsonResponse({
+        ok: true,
+        data: {
+          items,
+          pagination: {
+            limit: 100,
+            returned: items.length,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      });
+    }
+
     function paramsFromCall(fetchMock: any, callIndex = 0): URLSearchParams {
       const calledUrl = String(fetchMock.mock.calls[callIndex][0]);
       return new URLSearchParams(calledUrl.split("?")[1] ?? "");
@@ -775,9 +790,11 @@ describe("Dashboard Client Data Processing Utilities", () => {
         .mockImplementation((url: string) =>
           Promise.resolve(
             freshJsonResponse(
-              url.includes("/api/private/events-records")
-                ? { ok: true, data: emptyPaginatedCollection }
-                : { ok: true, data: [] },
+              url.includes("/api/private/events-trend")
+                ? { ok: true, data: { interval: "day", series: [], data: [] } }
+                : url.includes("/api/private/events-records")
+                  ? { ok: true, data: emptyPaginatedCollection }
+                  : { ok: true, data: [] },
             ),
           ),
         );
@@ -900,9 +917,11 @@ describe("Dashboard Client Data Processing Utilities", () => {
         .mockImplementation((url: string) =>
           Promise.resolve(
             freshJsonResponse(
-              url.includes("/api/private/events-records")
-                ? { ok: true, data: emptyPaginatedCollection }
-                : { ok: true, data: [] },
+              url.includes("/api/private/events-trend")
+                ? { ok: true, data: { interval: "day", series: [], data: [] } }
+                : url.includes("/api/private/events-records")
+                  ? { ok: true, data: emptyPaginatedCollection }
+                  : { ok: true, data: [] },
             ),
           ),
         );
@@ -1370,9 +1389,20 @@ describe("Dashboard Client Data Processing Utilities", () => {
     });
 
     it("forwards cancellation signals for UTM dimension requests", async () => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue(freshJsonResponse({ ok: true, data: [] }));
+      const fetchMock = vi.fn().mockResolvedValue(
+        freshJsonResponse({
+          ok: true,
+          data: {
+            items: [],
+            pagination: {
+              limit: 100,
+              returned: 0,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        }),
+      );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
 
@@ -1565,7 +1595,9 @@ describe("Dashboard Client Data Processing Utilities", () => {
     it("forwards cancellation signals for overview geo dimension requests", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(freshJsonResponse({ ok: true, data: [] }));
+        .mockResolvedValue(
+          freshJsonResponse({ ok: true, data: emptyPaginatedCollection }),
+        );
       globalThis.fetch = fetchMock as any;
       const controller = new AbortController();
 
@@ -1937,61 +1969,52 @@ describe("Dashboard Client Data Processing Utilities", () => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(
-          freshJsonResponse({
-            ok: true,
-            data: [
-              {
-                value: "US::CA::California",
-                label: "United States :: CA :: California",
-                views: "4",
-                sessions: null,
-                visitors: undefined,
-              },
-              {
-                value: "JP::13::Tokyo",
-                label: "  ",
-                views: 1,
-                sessions: 2,
-                visitors: 3,
-              },
-              {
-                value: "raw-region",
-                label: "",
-                views: 0,
-              },
-            ],
-          }),
+          geoTabResponse([
+            {
+              value: "US::CA::California",
+              label: "United States :: CA :: California",
+              views: "4",
+              sessions: null,
+              visitors: undefined,
+            },
+            {
+              value: "JP::13::Tokyo",
+              label: "  ",
+              views: 1,
+              sessions: 2,
+              visitors: 3,
+            },
+            {
+              value: "raw-region",
+              label: "",
+              views: 0,
+            },
+          ]),
         )
         .mockResolvedValueOnce(
-          freshJsonResponse({
-            ok: true,
-            data: [
-              {
-                value: "US::CA::California::San Francisco",
-                label: "United States :: CA :: California :: San Francisco",
-                views: "9",
-              },
-              {
-                value: "raw-city",
-                label: "",
-                sessions: "2",
-              },
-            ],
-          }),
+          geoTabResponse([
+            {
+              value: "US::CA::California::San Francisco",
+              label: "United States :: CA :: California :: San Francisco",
+              views: "9",
+            },
+            {
+              value: "raw-city",
+              label: "",
+              sessions: "2",
+            },
+          ]),
         )
         .mockResolvedValueOnce(
-          freshJsonResponse({
-            ok: true,
-            data: [
-              {
-                value: "  ",
-                label: "Canada",
-                views: "6",
-                sessions: "3",
-                visitors: "2",
-              },
-            ],
-          }),
+          geoTabResponse([
+            {
+              value: "  ",
+              label: "Canada",
+              views: "6",
+              sessions: "3",
+              visitors: "2",
+            },
+          ]),
         )
         .mockResolvedValueOnce(freshJsonResponse({ ok: true, data: null }));
       globalThis.fetch = fetchMock as any;
@@ -2043,7 +2066,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
 
       await expect(
         fetchOverviewGeoDimensionTab("geo-non-array", mockWindow, "country"),
-      ).resolves.toEqual([]);
+      ).rejects.toThrow("pagination_contract_violation");
     });
 
     it("should fall back to empty page card tabs when tabs are omitted", async () => {

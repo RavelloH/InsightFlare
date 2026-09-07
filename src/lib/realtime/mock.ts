@@ -149,6 +149,7 @@ function paginateDemoEnvelope(
   params: Record<string, string | number>,
   fallbackLimit: number,
   operation = "demo-collection",
+  maxLimit = 200,
 ): unknown {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     return result;
@@ -171,11 +172,257 @@ function paginateDemoEnvelope(
       dimension: params.dimension ?? null,
     },
     fallbackLimit,
+    maxLimit,
   );
   return {
     ...record,
     data: page,
   };
+}
+
+function demoShareTrendDimension(result: unknown): {
+  series: unknown[];
+  data: unknown[];
+} {
+  const record =
+    result && typeof result === "object"
+      ? (result as Record<string, unknown>)
+      : {};
+  return {
+    series: Array.isArray(record.series) ? record.series : [],
+    data: Array.isArray(record.data) ? record.data : [],
+  };
+}
+
+const DEMO_CLIENT_DIMENSIONS = new Set([
+  "browser",
+  "operatingSystem",
+  "osVersion",
+  "deviceType",
+  "language",
+  "screenSize",
+]);
+const DEMO_UTM_DIMENSIONS = new Set([
+  "source",
+  "medium",
+  "campaign",
+  "term",
+  "content",
+]);
+const DEMO_CROSS_DIMENSIONS = new Set([
+  "page.path",
+  "page.title",
+  "page.hostname",
+  "page.query",
+  "page.hash",
+  "referrer.domain",
+  "referrer.url",
+  "utm.source",
+  "utm.medium",
+  "utm.campaign",
+  "utm.term",
+  "utm.content",
+  "client.browser",
+  "browser",
+  "client.browserVersion",
+  "client.browserEngine",
+  "client.os",
+  "operatingSystem",
+  "client.osVersion",
+  "osVersion",
+  "client.deviceType",
+  "deviceType",
+  "client.language",
+  "language",
+  "client.screenSize",
+  "screenSize",
+  "geo.country",
+  "geo.region",
+  "geo.city",
+  "geo.continent",
+  "geo.timeZone",
+  "geo.organization",
+]);
+const DEMO_EVENT_CONTEXT_CARDS = new Set([
+  "path",
+  "query",
+  "title",
+  "hostname",
+  "entry",
+  "exit",
+  "sourceDomain",
+  "sourceLink",
+  "browser",
+  "osVersion",
+  "deviceType",
+  "language",
+  "screenSize",
+  "country",
+  "region",
+  "city",
+  "continent",
+  "timezone",
+  "organization",
+]);
+
+function parseDemoRequestNumber(value: string | number): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || value.length === 0) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function invalidDemoTimeWindow(
+  params: Record<string, string | number>,
+): boolean {
+  const hasFrom = Object.prototype.hasOwnProperty.call(params, "from");
+  const hasTo = Object.prototype.hasOwnProperty.call(params, "to");
+  const from = hasFrom ? parseDemoRequestNumber(params.from!) : null;
+  const to = hasTo ? parseDemoRequestNumber(params.to!) : null;
+  if ((hasFrom && from === null) || (hasTo && to === null)) return true;
+
+  const now = Date.now();
+  const start = from ?? now - 24 * 60 * 60 * 1000;
+  const end = to ?? now;
+  return start < 0 || end <= start;
+}
+
+function demoRequiredParam(
+  params: Record<string, string | number>,
+  key: string,
+): boolean {
+  return String(params[key] ?? "").trim().length > 0;
+}
+
+function validateDemoAnalyticsRequest(
+  path: string,
+  params: Record<string, string | number>,
+): unknown | null {
+  const isAnalyticsRequest =
+    path.includes("/api/private/") ||
+    path.includes("/api/public/share/") ||
+    path.includes("/api/v1/");
+  if (!isAnalyticsRequest) return null;
+  if (invalidDemoTimeWindow(params))
+    return demoBadRequest("Invalid time window");
+
+  if (path.includes("/client-dimension-trend")) {
+    const dimension = String(params.dimension ?? "").trim();
+    if (!DEMO_CLIENT_DIMENSIONS.has(dimension)) {
+      return demoBadRequest("Invalid client dimension");
+    }
+  }
+  if (path.includes("/utm-dimension-trend")) {
+    const dimension = String(params.dimension ?? "").trim();
+    if (!DEMO_UTM_DIMENSIONS.has(dimension)) {
+      return demoBadRequest("Invalid UTM dimension");
+    }
+  }
+  if (path.includes("/client-cross-breakdown")) {
+    const primary = String(params.primaryDimension ?? "").trim();
+    const secondary = String(params.secondaryDimension ?? "").trim();
+    if (!DEMO_CROSS_DIMENSIONS.has(primary)) {
+      return demoBadRequest("Unsupported primary dimension");
+    }
+    if (!DEMO_CROSS_DIMENSIONS.has(secondary)) {
+      return demoBadRequest("Unsupported secondary dimension");
+    }
+    if (primary === secondary) {
+      return demoBadRequest("Primary and secondary dimensions must differ");
+    }
+  }
+  if (path.includes("/event-type-context")) {
+    if (!demoRequiredParam(params, "eventName")) {
+      return demoBadRequest("eventName is required");
+    }
+    const cards = [
+      ...new Set(
+        String(params.cards ?? "")
+          .split(",")
+          .map((card) => card.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (
+      cards.length === 0 ||
+      cards.length > DEMO_EVENT_CONTEXT_CARDS.size ||
+      cards.some((card) => !DEMO_EVENT_CONTEXT_CARDS.has(card))
+    ) {
+      return demoBadRequest("Valid context cards are required");
+    }
+  }
+  if (
+    path.includes("/event-type-detail") &&
+    !demoRequiredParam(params, "eventName")
+  ) {
+    return demoBadRequest("eventName is required");
+  }
+  if (
+    path.includes("/event-type-field-values") ||
+    path.includes("/event-fields/values")
+  ) {
+    if (String(params.fieldPath ?? "").length === 0) {
+      return demoBadRequest("fieldPath is required");
+    }
+    if (!demoRequiredParam(params, "fieldValueType")) {
+      return demoBadRequest("fieldValueType is required");
+    }
+    const fieldValueType = String(params.fieldValueType).trim();
+    if (
+      !new Set(["string", "number", "boolean", "object", "array", "null"]).has(
+        fieldValueType,
+      )
+    ) {
+      return demoBadRequest("Invalid fieldValueType");
+    }
+  }
+  if (
+    path.includes("/event-record-detail") &&
+    !demoRequiredParam(params, "eventId")
+  ) {
+    return demoBadRequest("eventId is required");
+  }
+  if (
+    (path.includes("/journey-event-detail") ||
+      path.includes("/journey-events/detail")) &&
+    !demoRequiredParam(params, "eventId")
+  ) {
+    return demoBadRequest("Missing eventId");
+  }
+  if (
+    (path.includes("/journey-event-detail") ||
+      path.includes("/journey-events/detail")) &&
+    params.eventKind !== undefined &&
+    !new Set(["pageview", "session_start", "leave"]).has(
+      String(params.eventKind).trim(),
+    )
+  ) {
+    return demoBadRequest("Invalid eventKind");
+  }
+  if (
+    path.includes("/visitor-detail") &&
+    !demoRequiredParam(params, "visitorId")
+  ) {
+    return demoBadRequest("Missing visitorId");
+  }
+  if (
+    path.includes("/session-detail") &&
+    !demoRequiredParam(params, "sessionId")
+  ) {
+    return demoBadRequest("Missing sessionId");
+  }
+  if (path.includes("/visitor-events") || path.includes("/visitor-sessions")) {
+    if (!demoRequiredParam(params, "visitorId")) {
+      return demoBadRequest("Missing visitorId");
+    }
+  }
+  if (
+    path.includes("/session-events") &&
+    !demoRequiredParam(params, "sessionId")
+  ) {
+    return demoBadRequest("Missing sessionId");
+  }
+  return null;
 }
 
 function paginateDemoDetailCollection(
@@ -1118,6 +1365,8 @@ function handleDemoRequestInner(options: {
   }
 
   // Analytics query routes
+  const analyticsValidationError = validateDemoAnalyticsRequest(path, params);
+  if (analyticsValidationError) return analyticsValidationError;
   if (path.includes("/filter-values")) {
     return paginateDemoEnvelope(
       generateDemoFilterValues(
@@ -1136,6 +1385,7 @@ function handleDemoRequestInner(options: {
         : path.includes("/api/v1/")
           ? "filter-values:api-v1"
           : "filter-values:private",
+      500,
     );
   }
   if (path.includes("/overview-page-path")) {
@@ -1246,22 +1496,52 @@ function handleDemoRequestInner(options: {
     );
   }
   if (path.includes("/overview-geo-country")) {
-    return generateDemoOverviewGeoTab(siteId, params, "country");
+    return paginateDemoEnvelope(
+      generateDemoOverviewGeoTab(siteId, params, "country"),
+      params,
+      100,
+      "overview-geo-country",
+    );
   }
   if (path.includes("/overview-geo-region")) {
-    return generateDemoOverviewGeoTab(siteId, params, "region");
+    return paginateDemoEnvelope(
+      generateDemoOverviewGeoTab(siteId, params, "region"),
+      params,
+      100,
+      "overview-geo-region",
+    );
   }
   if (path.includes("/overview-geo-city")) {
-    return generateDemoOverviewGeoTab(siteId, params, "city");
+    return paginateDemoEnvelope(
+      generateDemoOverviewGeoTab(siteId, params, "city"),
+      params,
+      100,
+      "overview-geo-city",
+    );
   }
   if (path.includes("/overview-geo-continent")) {
-    return generateDemoOverviewGeoTab(siteId, params, "continent");
+    return paginateDemoEnvelope(
+      generateDemoOverviewGeoTab(siteId, params, "continent"),
+      params,
+      100,
+      "overview-geo-continent",
+    );
   }
   if (path.includes("/overview-geo-timezone")) {
-    return generateDemoOverviewGeoTab(siteId, params, "timezone");
+    return paginateDemoEnvelope(
+      generateDemoOverviewGeoTab(siteId, params, "timezone"),
+      params,
+      100,
+      "overview-geo-timezone",
+    );
   }
   if (path.includes("/overview-geo-organization")) {
-    return generateDemoOverviewGeoTab(siteId, params, "organization");
+    return paginateDemoEnvelope(
+      generateDemoOverviewGeoTab(siteId, params, "organization"),
+      params,
+      100,
+      "overview-geo-organization",
+    );
   }
   if (path.includes("/overview-geo-points")) {
     return generateDemoGeoPoints(siteId, params);
@@ -1359,8 +1639,12 @@ function handleDemoRequestInner(options: {
     return {
       ok: true,
       interval: parseDemoInterval(params.interval),
-      source: generateDemoReferrerTrend(siteId, params),
-      channel: generateDemoChannelTrend(siteId, params),
+      source: demoShareTrendDimension(
+        generateDemoReferrerTrend(siteId, params, { maxLimit: 12 }),
+      ),
+      channel: demoShareTrendDimension(
+        generateDemoChannelTrend(siteId, params, { maxLimit: 12 }),
+      ),
     };
   }
   if (path.includes("/referrer-dimension-trend")) {
@@ -1394,10 +1678,17 @@ function handleDemoRequestInner(options: {
     return generateDemoSessions(siteId, params);
   }
   if (path.includes("/pages")) {
-    return generateDemoPages(siteId, params);
+    return generateDemoPages(siteId, params, {
+      includeTabs: !path.includes("/api/public/") && !path.includes("/api/v1/"),
+      defaultLimit: 20,
+    });
   }
   if (path.includes("/referrers")) {
-    return generateDemoReferrers(siteId, params);
+    const isPublic = path.includes("/api/public/");
+    return generateDemoReferrers(siteId, params, {
+      allowFullUrl: !isPublic,
+      defaultLimit: isPublic ? 8 : 20,
+    });
   }
   if (path.includes("/utm-source")) {
     return generateDemoUtmDimension(siteId, "source", params);
@@ -1421,7 +1712,7 @@ function handleDemoRequestInner(options: {
     return generateDemoDimension(siteId, "countries", params);
   }
   if (path.includes("/devices")) {
-    return generateDemoDimension(siteId, "devices", params);
+    return demoNotFoundResponse();
   }
   if (path.includes("/page-hash")) {
     return generateDemoDimension(siteId, "page-hash", params);
@@ -1440,8 +1731,16 @@ function handleDemoRequestInner(options: {
     const subPath = publicMatch[1];
     if (subPath === "overview") return generateDemoOverview(siteId, params);
     if (subPath === "trend") return generateDemoTrend(siteId, params);
-    if (subPath === "pages") return generateDemoPages(siteId, params);
-    if (subPath === "referrers") return generateDemoReferrers(siteId, params);
+    if (subPath === "pages")
+      return generateDemoPages(siteId, params, {
+        includeTabs: false,
+        defaultLimit: 20,
+      });
+    if (subPath === "referrers")
+      return generateDemoReferrers(siteId, params, {
+        allowFullUrl: false,
+        defaultLimit: 8,
+      });
     if (subPath === "referrer-summary")
       return generateDemoReferrerSummary(siteId, params);
     if (subPath === "performance")
@@ -1479,7 +1778,12 @@ function handleDemoRequestInner(options: {
         tab === "timezone" ||
         tab === "organization"
       ) {
-        return generateDemoOverviewGeoTab(siteId, params, tab);
+        return paginateDemoEnvelope(
+          generateDemoOverviewGeoTab(siteId, params, tab),
+          params,
+          100,
+          `overview-geo-${tab}`,
+        );
       }
     }
     if (subPath === "browser-trend")
@@ -1498,8 +1802,12 @@ function handleDemoRequestInner(options: {
       return {
         ok: true,
         interval: parseDemoInterval(params.interval),
-        source: generateDemoReferrerTrend(siteId, params),
-        channel: generateDemoChannelTrend(siteId, params),
+        source: demoShareTrendDimension(
+          generateDemoReferrerTrend(siteId, params, { maxLimit: 12 }),
+        ),
+        channel: demoShareTrendDimension(
+          generateDemoChannelTrend(siteId, params, { maxLimit: 12 }),
+        ),
       };
     if (subPath === "referrer-dimension-trend")
       return generateDemoReferrerTrend(siteId, params);

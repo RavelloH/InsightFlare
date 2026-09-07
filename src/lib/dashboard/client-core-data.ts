@@ -29,6 +29,7 @@ import type {
   EventsRecordsData,
   EventsSummaryData,
   EventsTrendData,
+  EventsTrendResponseData,
   EventTypeDetailData,
   EventTypeFieldsData,
   FunnelDeleteData,
@@ -74,7 +75,8 @@ function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   if (error instanceof Error && error.name === "AbortError") throw error;
   if (
     error instanceof Error &&
-    error.message === "pagination_contract_violation"
+    (error.message === "pagination_contract_violation" ||
+      error.message === "events_trend_contract_violation")
   ) {
     throw error;
   }
@@ -513,38 +515,38 @@ export async function fetchEventsTrend(
   if (eventName) params.eventName = eventName;
   const requestParams = withFilters(params, filters);
   const request = options?.signal
-    ? fetchPrivateJson<EventsTrendData>(
+    ? fetchPrivateJson<EventsTrendResponseData>(
         "/api/private/events-trend",
         requestParams,
         { signal: options.signal },
       )
-    : fetchPrivateJson<EventsTrendData>(
+    : fetchPrivateJson<EventsTrendResponseData>(
         "/api/private/events-trend",
         requestParams,
       );
   return request
     .then((value) => {
-      const payload =
-        value && typeof value === "object"
-          ? (value as unknown as Record<string, unknown>)
-          : {};
-      const nested =
-        payload.data && typeof payload.data === "object"
-          ? (payload.data as Record<string, unknown>)
-          : payload;
-      const interval =
-        nested.interval === "minute" ||
-        nested.interval === "hour" ||
-        nested.interval === "day" ||
-        nested.interval === "week" ||
-        nested.interval === "month"
-          ? nested.interval
-          : window.interval;
+      const payload = value as EventsTrendResponseData;
+      const data = payload?.data;
+      if (
+        !data ||
+        !(
+          data.interval === "minute" ||
+          data.interval === "hour" ||
+          data.interval === "day" ||
+          data.interval === "week" ||
+          data.interval === "month"
+        ) ||
+        !Array.isArray(data.series) ||
+        !Array.isArray(data.data)
+      ) {
+        throw new Error("events_trend_contract_violation");
+      }
       return {
-        ok: payload.ok !== false,
-        interval,
-        series: Array.isArray(nested.series) ? nested.series : [],
-        data: Array.isArray(nested.data) ? nested.data : [],
+        ok: payload.ok,
+        interval: data.interval,
+        series: data.series,
+        data: data.data,
       } satisfies EventsTrendData;
     })
     .catch((error) =>
@@ -594,14 +596,10 @@ export async function fetchEventsRecords(
       );
   return request
     .then((value) => {
-      const payload =
-        value && typeof value === "object"
-          ? (value as unknown as Record<string, unknown>)
-          : {};
-      const collection = "data" in payload ? payload.data : payload;
+      const payload = value as EventsRecordsData;
       return {
-        ok: payload.ok !== false,
-        data: normalizePaginatedCollection<EventRecord>(collection),
+        ok: payload.ok,
+        data: normalizePaginatedCollection<EventRecord>(payload.data),
       } satisfies EventsRecordsData;
     })
     .catch((error) =>

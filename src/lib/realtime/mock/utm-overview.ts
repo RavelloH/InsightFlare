@@ -236,7 +236,7 @@ export function generateDemoGeoPoints(
   siteId: string,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const limit = parseDemoLimit(params.limit, 5000, 50, 20_000);
+  const limit = parseDemoLimit(params.limit, 5000, 1, 20_000);
   const from = parseDemoNumber(
     params.from,
     Math.max(0, Date.now() - 24 * 3600 * 1000),

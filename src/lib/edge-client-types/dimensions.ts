@@ -1,14 +1,16 @@
 import type { PaginatedCollection } from "./pagination";
 
+export interface DimensionRow {
+  value: string;
+  label: string;
+  views: number;
+  sessions: number;
+  visitors?: number;
+}
+
 export interface DimensionData {
   ok: boolean;
-  data: Array<{
-    value: string;
-    label: string;
-    views: number;
-    sessions: number;
-    visitors?: number;
-  }>;
+  data: PaginatedCollection<DimensionRow>;
 }
 
 export interface DashboardFilterOption {

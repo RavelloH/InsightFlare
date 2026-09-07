@@ -117,8 +117,8 @@ describe("mock/events coverage", () => {
     }) as any;
 
     expect(result.ok).toBe(true);
-    expect(result.interval).toBe("hour");
-    expect(result.series).toEqual([
+    expect(result.data.interval).toBe("hour");
+    expect(result.data.series).toEqual([
       expect.objectContaining({
         key: "alpha",
         eventName: "alpha",
@@ -131,11 +131,17 @@ describe("mock/events coverage", () => {
         isOther: true,
       }),
     ]);
-    expect(result.data.map((point: any) => point.totalEvents)).toEqual([
+    expect(result.data.data.map((point: any) => point.totalEvents)).toEqual([
       1, 2, 0,
     ]);
-    expect(result.data[0].eventsBySeries).toMatchObject({ alpha: 1, other: 0 });
-    expect(result.data[1].eventsBySeries).toMatchObject({ alpha: 1, other: 1 });
+    expect(result.data.data[0].eventsBySeries).toMatchObject({
+      alpha: 1,
+      other: 0,
+    });
+    expect(result.data.data[1].eventsBySeries).toMatchObject({
+      alpha: 1,
+      other: 1,
+    });
   });
 
   it("returns empty trend series and zeroed buckets when no events match", () => {
@@ -164,8 +170,8 @@ describe("mock/events coverage", () => {
     }) as any;
 
     expect(result.ok).toBe(true);
-    expect(result.series).toEqual([]);
-    expect(result.data).toEqual([
+    expect(result.data.series).toEqual([]);
+    expect(result.data.data).toEqual([
       { bucket: 0, timestampMs: 0, totalEvents: 0, eventsBySeries: {} },
       {
         bucket: 1,
@@ -394,11 +400,6 @@ describe("mock/events coverage", () => {
         path: [{ label: "/signup", views: 2, sessions: 7, visitors: 11 }],
       },
     });
-    expect(result.fields).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ path: "/plan", valueType: "string" }),
-      ]),
-    );
   });
 
   it("returns empty event type detail fallbacks for a missing event name", () => {
@@ -443,7 +444,6 @@ describe("mock/events coverage", () => {
     expect(result.cards.source.domain).toEqual([]);
     expect(result.cards.client.browser).toEqual([]);
     expect(result.cards.geo.country).toEqual([]);
-    expect(result.fields).toEqual([]);
   });
 
   it("returns field values across event types when no event name is provided", () => {
@@ -562,7 +562,7 @@ describe("mock/events coverage", () => {
     });
   });
 
-  it("returns a requested record detail and falls back to the first event", () => {
+  it("returns a requested record detail and keeps unknown IDs empty", () => {
     const visits = [
       makeVisit({ visitId: "first", eventType: "signup", startedAt: 1_000 }),
       makeVisit({
@@ -596,12 +596,7 @@ describe("mock/events coverage", () => {
         to: 10_000,
         eventId: "missing",
       }),
-    ).toMatchObject({
-      ok: true,
-      data: {
-        event: { eventId: "second:purchase", eventName: "purchase" },
-      },
-    });
+    ).toEqual({ ok: true, data: null });
   });
 
   it("returns null record detail when the dataset has no custom events", () => {

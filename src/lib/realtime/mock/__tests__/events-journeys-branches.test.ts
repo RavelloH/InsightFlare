@@ -94,11 +94,15 @@ describe("mock events and journeys branch coverage", () => {
       limit: 5,
       timeZone: "UTC",
     });
-    const data = result.data as Array<Record<string, unknown>>;
+    const trend = result.data as Record<string, unknown>;
+    const data = trend.data as Array<Record<string, unknown>>;
 
     expect(result).toMatchObject({
       ok: true,
-      series: [expect.objectContaining({ eventName: "signup", events: 1 })],
+      data: {
+        interval: "hour",
+        series: [expect.objectContaining({ eventName: "signup", events: 1 })],
+      },
     });
     expect(data.map((point) => point.totalEvents)).toEqual([0, 0]);
   });

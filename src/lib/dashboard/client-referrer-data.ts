@@ -14,7 +14,7 @@ import type {
 import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
-import { withFilters } from "./client-utils";
+import { normalizePaginatedCollection, withFilters } from "./client-utils";
 
 const utmPathMap: Record<UtmDimensionTab, string> = {
   source: "utm-source",
@@ -78,7 +78,7 @@ export async function fetchUtmDimension(
   tab: UtmDimensionTab,
   filters?: FilterDocument,
   options?: { signal?: AbortSignal },
-): Promise<DimensionData> {
+): Promise<DimensionData["data"]> {
   const requestParams = withFilters(
     {
       siteId,
@@ -89,7 +89,7 @@ export async function fetchUtmDimension(
     },
     filters,
   );
-  return options?.signal
+  const response = options?.signal
     ? fetchPrivateJson<DimensionData>(
         `/api/private/${utmPathMap[tab]}`,
         requestParams,
@@ -101,6 +101,7 @@ export async function fetchUtmDimension(
         `/api/private/${utmPathMap[tab]}`,
         requestParams,
       );
+  return response.then((payload) => normalizePaginatedCollection(payload.data));
 }
 
 export async function fetchUtmTrend(

@@ -121,13 +121,17 @@ export function demoPage<T>(
   binding: unknown,
   defaultLimit: number,
   maxLimit = 500,
+  zeroUsesFallback = true,
 ): { items: T[]; pagination: DemoPagination } {
   const rawLimit = Number(params.limit ?? defaultLimit);
+  const parsedLimit = Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : null;
   const limit = Math.max(
     1,
     Math.min(
       maxLimit,
-      Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : defaultLimit,
+      parsedLimit === null || (zeroUsesFallback && parsedLimit <= 0)
+        ? defaultLimit
+        : parsedLimit,
     ),
   );
   const cursor = decodeDemoCursor(

@@ -132,7 +132,7 @@ export interface OverviewTabData {
 
 export interface OverviewGeoTabData {
   ok: boolean;
-  data: Array<{
+  data: PaginatedCollection<{
     value: string;
     label: string;
     views: number;

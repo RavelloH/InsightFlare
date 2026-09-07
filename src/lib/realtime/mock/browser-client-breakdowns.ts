@@ -120,8 +120,8 @@ import {
   parseDemoFilters,
   parseDemoGeoFilterValue,
   parseDemoInterval,
-  parseDemoLimit,
   parseDemoNumber,
+  parseDemoQueryLimit,
   withoutDemoGeoFilter,
 } from "@/lib/realtime/mock/filters";
 import {
@@ -194,7 +194,7 @@ export function generateDemoBrowserVersionBreakdown(
     Number.isFinite(rawBrowserLimit) && rawBrowserLimit > 0
       ? Math.max(1, Math.floor(rawBrowserLimit))
       : Number.MAX_SAFE_INTEGER;
-  const versionLimit = parseDemoLimit(params.versionLimit, 5, 1, 8);
+  const versionLimit = parseDemoQueryLimit(params.versionLimit, 5, 1, 8);
   const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
@@ -598,9 +598,9 @@ export function generateDemoBrowserCrossBreakdown(
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
-  const browserLimit = parseDemoLimit(params.browserLimit, 8, 1, 12);
-  const osLimit = parseDemoLimit(params.osLimit, 6, 1, 8);
-  const deviceTypeLimit = parseDemoLimit(params.deviceTypeLimit, 5, 1, 8);
+  const browserLimit = parseDemoQueryLimit(params.browserLimit, 8, 1, 12);
+  const osLimit = parseDemoQueryLimit(params.osLimit, 6, 1, 8);
+  const deviceTypeLimit = parseDemoQueryLimit(params.deviceTypeLimit, 5, 1, 8);
   const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);

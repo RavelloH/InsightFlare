@@ -169,6 +169,24 @@ export function parseDemoLimit(
   max: number,
 ): number {
   const parsed = Math.floor(parseDemoNumber(value, fallback));
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+/** Mirrors the real parseQueryLimit helper, including its minimum clamp. */
+export function parseDemoQueryLimit(
+  value: string | number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (
+    value === undefined ||
+    (typeof value === "string" && value.length === 0)
+  ) {
+    return fallback;
+  }
+  const parsed = Math.floor(parseDemoNumber(value, fallback));
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
 }

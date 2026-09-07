@@ -103,6 +103,15 @@ export interface EventsTrendData {
   data: EventTrendPoint[];
 }
 
+export interface EventsTrendResponseData {
+  ok: boolean;
+  data: {
+    interval: EventsTrendData["interval"];
+    series: EventTrendSeries[];
+    data: EventTrendPoint[];
+  };
+}
+
 export interface EventRecord {
   eventId: string;
   eventName: string;

@@ -125,6 +125,7 @@ import {
   parseDemoNumber,
   withoutDemoGeoFilter,
 } from "@/lib/realtime/mock/filters";
+import { demoPage } from "@/lib/realtime/mock/pagination";
 import {
   buildPathTransitionGraph,
   nextPath,
@@ -406,20 +407,38 @@ export function generateDemoUtmDimension(
   tab: DemoUtmDimensionKey,
   params: Record<string, string | number>,
 ): Record<string, unknown> {
-  const limit = parseDemoLimit(params.limit, 100, 1, 500);
+  const from = parseDemoNumber(params.from, 0);
+  const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const rows = buildDemoUtmRows(siteId, tab, params, 500).map((row) => ({
+    value: row.label,
+    label: row.label,
+    views: row.views,
+    sessions: row.sessions,
+    visitors: row.visitors,
+  }));
+  const page = demoPage(
+    rows,
+    params,
+    {
+      operation: "utm-dimension",
+      siteId,
+      tab,
+      from,
+      to,
+      filters,
+      search: String(params.search ?? "")
+        .trim()
+        .toLowerCase(),
+      sort: String(params.sort ?? params.sortBy ?? "views"),
+      direction: String(params.direction ?? params.sortDir ?? "desc"),
+    },
+    20,
+    200,
+  );
   return {
     ok: true,
-    data: buildDemoUtmRows(siteId, tab, params, limit)
-      .map((row) => ({
-        value: row.label,
-        label: row.label,
-        views: row.views,
-        sessions: row.sessions,
-      }))
-      .sort(
-        (left, right) =>
-          right.views - left.views || right.sessions - left.sessions,
-      ),
+    data: page,
   };
 }
 
@@ -440,7 +459,7 @@ export function generateDemoUtmTrend(
 
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
-  const limit = parseDemoLimit(params.limit, 5, 1, 12);
+  const limit = parseDemoLimit(params.limit, 5, 1, 8);
   const filters = parseDemoFilters(params);
   const rows = buildDemoUtmRows(
     siteId,
