@@ -400,6 +400,26 @@ export function buildDemoFactDataset(
         0,
         Math.round((sessionDuration / viewCount) * (0.74 + rng() * 0.62)),
       );
+      const screenMatch = /^(\d+)x(\d+)$/.exec(screenSize.trim());
+      const screenWidth = screenMatch ? Number(screenMatch[1]) : null;
+      const screenHeight = screenMatch ? Number(screenMatch[2]) : null;
+      const hasPerformance = (sessionIndex + visitIndex) % 3 !== 0;
+      const perfTtfbMs = hasPerformance
+        ? Math.max(1, Math.round(durationMs * 0.04))
+        : null;
+      const perfFcpMs = hasPerformance
+        ? Math.max(1, Math.round(durationMs * 0.1))
+        : null;
+      const perfLcpMs = hasPerformance
+        ? Math.max(1, Math.round(durationMs * 0.18))
+        : null;
+      const perfCls = hasPerformance
+        ? Number((0.02 + ((sessionIndex + visitIndex) % 9) * 0.015).toFixed(3))
+        : null;
+      const perfInpMs = hasPerformance
+        ? Math.max(1, Math.round(durationMs * 0.06))
+        : null;
+      const identified = sessionIndex % 5 === 0;
 
       visits.push({
         visitId: `${sessionId}-v-${visitIndex.toString(36).padStart(3, "0")}`,
@@ -433,6 +453,48 @@ export function buildDemoFactDataset(
         longitude: geo.longitude,
         eventType,
         durationMs,
+        screenWidth,
+        screenHeight,
+        isEU: new Set([
+          "AT",
+          "BE",
+          "BG",
+          "HR",
+          "CY",
+          "CZ",
+          "DE",
+          "DK",
+          "EE",
+          "ES",
+          "FI",
+          "FR",
+          "GR",
+          "HU",
+          "IE",
+          "IT",
+          "LT",
+          "LU",
+          "LV",
+          "MT",
+          "NL",
+          "PL",
+          "PT",
+          "RO",
+          "SE",
+          "SI",
+          "SK",
+        ]).has(country.trim().toUpperCase()),
+        perfTtfbMs,
+        perfFcpMs,
+        perfLcpMs,
+        perfCls,
+        perfInpMs,
+        ...(identified
+          ? {
+              userId: `demo-user-${visitorId}`,
+              userName: `User ${visitorId.slice(-6)}`,
+            }
+          : {}),
       });
     }
 
@@ -460,6 +522,62 @@ export function buildDemoFactDataset(
     for (const visit of visits) {
       visit.durationMs = Math.max(0, Math.round(visit.durationMs * scale));
     }
+  }
+
+  // Refresh the shared fact maps after the duration scaling above. These
+  // values are consumed by the canonical mock filter evaluator as well as
+  // the historical presentation-filter paths.
+  const sessionStats = new Map<
+    string,
+    { durationMs: number; views: number; events: number }
+  >();
+  for (const visit of visits) {
+    const current = sessionStats.get(visit.sessionId) ?? {
+      durationMs: 0,
+      views: 0,
+      events: 0,
+    };
+    current.durationMs += visit.durationMs;
+    current.views += 1;
+    if (visit.eventType.trim().toLowerCase() !== "pageview")
+      current.events += 1;
+    sessionStats.set(visit.sessionId, current);
+  }
+  for (const [sessionId, session] of sessions) {
+    const stats = sessionStats.get(sessionId);
+    if (!stats) continue;
+    sessions.set(sessionId, {
+      ...session,
+      durationMs: stats.durationMs,
+      views: stats.views,
+      events: stats.events,
+      bounce: stats.views === 1,
+    });
+  }
+  const visitorStats = new Map<
+    string,
+    { sessions: Set<string>; views: number; events: number }
+  >();
+  for (const visit of visits) {
+    const current = visitorStats.get(visit.visitorId) ?? {
+      sessions: new Set<string>(),
+      views: 0,
+      events: 0,
+    };
+    current.sessions.add(visit.sessionId);
+    current.views += 1;
+    if (visit.eventType.trim().toLowerCase() !== "pageview")
+      current.events += 1;
+    visitorStats.set(visit.visitorId, current);
+  }
+  for (const [visitorId, visitor] of visitors) {
+    const stats = visitorStats.get(visitorId);
+    visitors.set(visitorId, {
+      ...visitor,
+      sessions: stats?.sessions.size ?? 0,
+      views: stats?.views ?? 0,
+      events: stats?.events ?? 0,
+    });
   }
 
   const dataset: DemoFactDataset = {

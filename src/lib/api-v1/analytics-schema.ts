@@ -56,6 +56,12 @@ function analyticsFilterProtocol(): AnalyticsSchemaData["filterProtocol"] {
     id,
     valueKind: field.valueKind,
     operators: [...field.operators],
+    group: field.group,
+    nativeEntity: field.nativeEntity,
+    nullable: field.nullable,
+    ...(field.unit ? { unit: field.unit } : {}),
+    suggestionMode: field.suggestionMode,
+    ...(field.number ? { number: field.number } : {}),
   }));
   const jsonOperators = [...FILTER_OPERATOR_IDS];
   return {

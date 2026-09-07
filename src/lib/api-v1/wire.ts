@@ -1417,6 +1417,29 @@ const AnalyticsSchemaFilterFieldSchema = z
       "json-scalar",
     ]),
     operators: z.array(z.string().min(1)).min(1),
+    group: z.enum([
+      "page",
+      "session",
+      "visitor",
+      "acquisition",
+      "device",
+      "geo",
+      "event",
+      "performance",
+      "user",
+    ]),
+    nativeEntity: z.enum(["visit", "event", "session", "visitor"]),
+    nullable: z.boolean(),
+    unit: z.enum(["ms", "px", "ratio"]).optional(),
+    suggestionMode: z.enum(["discrete", "search", "boolean", "none"]),
+    number: z
+      .object({
+        min: z.number().finite().optional(),
+        max: z.number().finite().optional(),
+        step: z.number().positive().finite().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

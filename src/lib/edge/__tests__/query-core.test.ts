@@ -8,6 +8,7 @@ import {
   filterScopePreferenceFromDocument,
   prepareScopedQuery,
   savedFilterScopePreferenceFromDocument,
+  scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import {
   addDimensionValue,
@@ -18,6 +19,7 @@ import {
   buildVisitFilterSql,
   buildVisitSourceCte,
   clientDimensionDefinition,
+  compileScopedDatasetSql,
   customEventJsonTypeCode,
   customEventJsonTypeLabel,
   dedupeFilterOptions,
@@ -62,6 +64,7 @@ import {
   parseWindow,
   performanceMetricColumn,
   type QueryWindow,
+  scopedDatasetFor,
   shareTrendSeriesKey,
   sourceLabel,
   timeBucketCase,
@@ -1079,7 +1082,7 @@ describe("edge query core SQL helpers", () => {
     });
   });
 
-  it("builds entity membership SQL for scoped visit and event filters", () => {
+  it("uses canonical scoped datasets and keeps observation fallback semantics", () => {
     const context = {
       subject: { kind: "site", siteId: "site-1" },
       policy: {
@@ -1102,17 +1105,46 @@ describe("edge query core SQL helpers", () => {
     } as never);
 
     const visit = buildVisitFilterSql(prepared.filters!, "v");
-    expect(visit.clause).toContain("scope_universe");
-    expect(visit.clause).toContain("v.session_id");
-    expect(visit.bindings).toEqual(
+    expect(visit.clause).not.toContain("scope_universe");
+    expect(visit.clause).toContain("v.browser");
+    expect(visit.bindings).toEqual(expect.arrayContaining(["/docs", "Chrome"]));
+
+    const sessionDataset = scopedDatasetFor(
+      "site-1",
+      { startMs: 100, endExclusiveMs: 200, nowMs: 200, timeZone: "UTC" },
+      prepared.filters!,
+    );
+    expect(sessionDataset).not.toBeNull();
+    expect(sessionDataset!.ctes).toContain(
+      "matching_entities.entity_id = rv.session_id",
+    );
+    expect(sessionDataset!.ctes).toContain("scope_membership_");
+    expect(sessionDataset!.ctes).toContain("scope_final_visits");
+    expect(sessionDataset!.ctes).toContain("scope_final_events");
+    expect(sessionDataset!.bindings.map((binding) => binding.value)).toEqual(
       expect.arrayContaining(["site-1", 100, 200, "/docs", "Chrome"]),
     );
+    const sessionMetadata = scopedFilterMetadata(prepared.filters!);
+    expect(sessionMetadata).toBeDefined();
+    expect(
+      compileScopedDatasetSql({
+        filters: prepared.filters!,
+        plan: sessionMetadata!.plan,
+        siteIds: ["site-1"],
+        window: {
+          startMs: 100,
+          endExclusiveMs: 200,
+          nowMs: 200,
+          timeZone: "UTC",
+        },
+      }),
+    ).toEqual(sessionDataset);
 
     const event = buildEventFilterSql(prepared.filters!, "e", {
       eventName: "Signup",
       search: "50%",
     });
-    expect(event.clause).toContain("e.session_id");
+    expect(event.clause).toContain("e.browser");
     expect(event.clause).toContain("event_name");
     expect(event.bindings).toEqual(
       expect.arrayContaining(["Signup", "%50\\%%"]),
@@ -1124,9 +1156,22 @@ describe("edge query core SQL helpers", () => {
       filters: filterFixture({ path: "/docs" }),
       scopePreference: "visitor",
     } as never);
+    expect(
+      buildEventFilterSql(visitorPrepared.filters!, "e").clause,
+    ).not.toContain("scope_universe");
     expect(buildEventFilterSql(visitorPrepared.filters!, "e").clause).toContain(
-      "e.visitor_id",
+      "e.pathname",
     );
+    const visitorDataset = scopedDatasetFor(
+      "site-1",
+      { startMs: 100, endExclusiveMs: 200, nowMs: 200, timeZone: "UTC" },
+      visitorPrepared.filters!,
+    );
+    expect(visitorDataset).not.toBeNull();
+    expect(visitorDataset!.ctes).toContain(
+      "matching_entities.entity_id = rv.visitor_id",
+    );
+    expect(visitorDataset!.ctes).toContain("scope_final_visitors");
 
     const payloadPrepared = prepareScopedQuery("overview", {
       context,
@@ -1142,9 +1187,20 @@ describe("edge query core SQL helpers", () => {
       },
       scopePreference: "session",
     } as never);
+    expect(
+      buildVisitFilterSql(payloadPrepared.filters!, "v").clause,
+    ).not.toContain("scope_universe");
     expect(buildVisitFilterSql(payloadPrepared.filters!, "v").clause).toContain(
-      "scope_universe",
+      "custom_event_json_values",
     );
+    const payloadDataset = scopedDatasetFor(
+      "site-1",
+      { startMs: 100, endExclusiveMs: 200, nowMs: 200, timeZone: "UTC" },
+      payloadPrepared.filters!,
+    );
+    expect(payloadDataset).not.toBeNull();
+    expect(payloadDataset!.ctes).toContain("custom_event_json_values");
+    expect(payloadDataset!.ctes).toContain("scope_final_events");
 
     const logicalPrepared = prepareScopedQuery("overview", {
       context,
@@ -1165,8 +1221,19 @@ describe("edge query core SQL helpers", () => {
       scopePreference: "visitor",
     } as never);
     const logicalVisit = buildVisitFilterSql(logicalPrepared.filters!, "v");
-    expect(logicalVisit.clause).toContain("NOT EXISTS");
-    expect(logicalVisit.clause).toContain("UNION");
+    expect(logicalVisit.clause).toContain("NOT");
+    expect(logicalVisit.clause).toContain("OR");
+    const logicalDataset = scopedDatasetFor(
+      "site-1",
+      { startMs: 100, endExclusiveMs: 200, nowMs: 200, timeZone: "UTC" },
+      logicalPrepared.filters!,
+    );
+    expect(logicalDataset).not.toBeNull();
+    expect(logicalDataset!.ctes).toContain("NOT EXISTS");
+    expect(logicalDataset!.ctes).toContain("UNION");
+    expect(logicalDataset!.ctes).toContain(
+      "matching_entities.entity_id = rv.visitor_id",
+    );
 
     const eventPrepared = prepareScopedQuery("overview", {
       context,

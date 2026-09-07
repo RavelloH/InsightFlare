@@ -254,6 +254,18 @@ export function resolveCrossBreakdownDimension(
       fallbackKeyBase: "organization",
     };
 
+  // ── user identity (private-only filter suggestions) ──────────────────
+  if (dimension === "user.id")
+    return {
+      labelExpr: "TRIM(COALESCE(user_id, ''))",
+      fallbackKeyBase: "user-id",
+    };
+  if (dimension === "user.name")
+    return {
+      labelExpr: "TRIM(COALESCE(user_name, ''))",
+      fallbackKeyBase: "user-name",
+    };
+
   // ── event (requires events table join, not supported) ─────────────────
   return null;
 }

@@ -22,6 +22,7 @@ export const VISIT_SOURCE_COLUMNS = `
     is_eu, country, region, region_code, city, continent, latitude, longitude,
     postal_code, metro_code, timezone, as_organization, ua_raw, browser, browser_version,
     os, os_version, device_type, screen_width, screen_height, language,
+    user_id, user_name,
     perf_ttfb_ms, perf_fcp_ms, perf_lcp_ms, perf_cls, perf_inp_ms,
     ae_synced_at
   `;
@@ -61,6 +62,10 @@ event_source AS (
     v.utm_campaign,
     v.utm_term,
     v.utm_content,
+    v.duration_ms,
+    v.user_id,
+    v.user_name,
+    v.is_eu,
     v.country,
     v.region,
     v.region_code,
@@ -76,6 +81,11 @@ event_source AS (
     v.as_organization,
     v.screen_width,
     v.screen_height,
+    v.perf_ttfb_ms,
+    v.perf_fcp_ms,
+    v.perf_lcp_ms,
+    v.perf_cls,
+    v.perf_inp_ms,
     ce.ae_synced_at
   FROM custom_events ce
   INNER JOIN custom_event_names cen
@@ -113,6 +123,7 @@ event_source${options?.materialize ? " AS MATERIALIZED" : " AS"} (
     fv.hash_fragment,
     fv.hostname, fv.title,
     fv.referrer_url, fv.referrer_host, fv.country, fv.region, fv.city,
+    fv.duration_ms, fv.user_id, fv.user_name, fv.is_eu,
     fv.browser, fv.browser_version, fv.os, fv.os_version, fv.device_type,
     fv.language, fv.timezone, fv.screen_width, fv.screen_height,
     fv.perf_ttfb_ms, fv.perf_fcp_ms, fv.perf_lcp_ms, fv.perf_cls, fv.perf_inp_ms,
@@ -163,6 +174,10 @@ export function buildEventAnalyticsSourceCte(options?: {
     v.utm_campaign,
     v.utm_term,
     v.utm_content,
+    v.duration_ms,
+    v.user_id,
+    v.user_name,
+    v.is_eu,
     v.country,
     v.region,
     v.region_code,
@@ -177,6 +192,11 @@ export function buildEventAnalyticsSourceCte(options?: {
     v.timezone,
     v.screen_width,
     v.screen_height,
+    v.perf_ttfb_ms,
+    v.perf_fcp_ms,
+    v.perf_lcp_ms,
+    v.perf_cls,
+    v.perf_inp_ms,
     v.as_organization`;
   const eventNameSource = options?.eventName
     ? `

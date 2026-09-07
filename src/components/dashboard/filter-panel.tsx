@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   RiCheckLine,
   RiDeleteBinLine,
@@ -55,8 +62,8 @@ import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   SYSTEM_FILTER_PRESETS,
   type SystemFilterPreset,
+  systemFilterPresetAvailableForAudience,
   systemFilterPresetFromOptionValue,
-  type SystemFilterPresetId,
   systemFilterPresetOptionValue,
 } from "@/lib/dashboard/system-filter-presets";
 import {
@@ -97,38 +104,84 @@ const EMPTY_SAVED_FILTER_FORM = {
   scopePreference: "auto",
 } as const satisfies Omit<SavedFilterInput, "filterDsl">;
 type SavedFilterForm = Omit<SavedFilterInput, "filterDsl">;
-function systemPresetItem(messages: AppMessages, id: SystemFilterPresetId) {
-  const items = {
-    directTraffic: messages.filterBuilder.systemPresetItems.directTraffic,
-    externalReferrals:
-      messages.filterBuilder.systemPresetItems.externalReferrals,
-    organicSearchDiscovery:
-      messages.filterBuilder.systemPresetItems.organicSearchDiscovery,
-    organicSocialDiscovery:
-      messages.filterBuilder.systemPresetItems.organicSocialDiscovery,
-    campaignTaggedTraffic:
-      messages.filterBuilder.systemPresetItems.campaignTaggedTraffic,
-    mobileTraffic: messages.filterBuilder.systemPresetItems.mobileTraffic,
-    desktopTraffic: messages.filterBuilder.systemPresetItems.desktopTraffic,
-    campaignTaggedExternalAcquisition:
-      messages.filterBuilder.systemPresetItems
-        .campaignTaggedExternalAcquisition,
-    campaignTaggedDirectEntry:
-      messages.filterBuilder.systemPresetItems.campaignTaggedDirectEntry,
-    untaggedExternalReferrals:
-      messages.filterBuilder.systemPresetItems.untaggedExternalReferrals,
-    mobileAcquiredTraffic:
-      messages.filterBuilder.systemPresetItems.mobileAcquiredTraffic,
-    mobileOrganicDiscovery:
-      messages.filterBuilder.systemPresetItems.mobileOrganicDiscovery,
-    desktopDirectAudience:
-      messages.filterBuilder.systemPresetItems.desktopDirectAudience,
-    geographicAttributionGap:
-      messages.filterBuilder.systemPresetItems.geographicAttributionGap,
-    tabletTraffic: messages.filterBuilder.systemPresetItems.tabletTraffic,
-  } as const;
+type MessageRecord = Record<string, unknown>;
+type SystemPresetCopy = { readonly name: string; readonly description: string };
 
-  return items[id];
+function readMessagePath(
+  messages: AppMessages,
+  path: string,
+): string | undefined {
+  let value: unknown = messages;
+  for (const segment of path.split(".")) {
+    if (!value || typeof value !== "object") return undefined;
+    value = (value as MessageRecord)[segment];
+  }
+  return typeof value === "string" ? value : undefined;
+}
+
+function systemPresetItem(
+  messages: AppMessages,
+  preset: SystemFilterPreset,
+): SystemPresetCopy {
+  const item = (
+    messages.filterBuilder.systemPresetItems as unknown as MessageRecord
+  )[preset.id];
+  const legacyItem =
+    item && typeof item === "object" ? (item as MessageRecord) : undefined;
+  return {
+    name:
+      readMessagePath(messages, preset.labelKey) ??
+      (typeof legacyItem?.name === "string" ? legacyItem.name : preset.id),
+    description:
+      readMessagePath(messages, preset.descriptionKey) ??
+      (typeof legacyItem?.description === "string"
+        ? legacyItem.description
+        : ""),
+  };
+}
+
+function systemPresetCategoryLabel(
+  messages: AppMessages,
+  category: string,
+): string {
+  const categories = (messages.filterBuilder as unknown as MessageRecord)
+    .systemPresetCategories;
+  return categories && typeof categories === "object"
+    ? (((categories as MessageRecord)[category] as string | undefined) ??
+        category)
+    : category;
+}
+
+export function systemPresetGroupLabel(
+  messages: AppMessages,
+  category: string,
+): string {
+  return `${messages.filterBuilder.systemPresets} · ${systemPresetCategoryLabel(messages, category)}`;
+}
+
+function systemPresetScopeLabel(
+  messages: AppMessages,
+  scope: SystemFilterPreset["scope"],
+): string {
+  const scopes = (messages.filterBuilder as unknown as MessageRecord)
+    .systemPresetScopes;
+  return scopes && typeof scopes === "object"
+    ? (((scopes as MessageRecord)[scope] as string | undefined) ?? scope)
+    : scope;
+}
+
+export function systemPresetScopeForApply(
+  preset: SystemFilterPreset,
+  currentScope: FilterScopePreference,
+): FilterScopePreference {
+  return preset.scope === "preserve" ? currentScope : preset.scope;
+}
+
+export function systemPresetMatchesScope(
+  preset: SystemFilterPreset,
+  currentScope: FilterScopePreference,
+): boolean {
+  return preset.scope === "preserve" || preset.scope === currentScope;
 }
 
 interface FilterPanelProps {
@@ -274,6 +327,21 @@ function FilterPanelHeader({
   onClearSavedFilter: () => void;
   onScopeChange: (preference: FilterScopePreference) => void;
 }) {
+  const visibleSystemPresets = SYSTEM_FILTER_PRESETS.filter((preset) =>
+    systemFilterPresetAvailableForAudience(preset, audience),
+  );
+  const systemPresetGroups = visibleSystemPresets.reduce<
+    Array<{ category: string; presets: SystemFilterPreset[] }>
+  >((groups, preset) => {
+    const existing = groups.find((group) => group.category === preset.category);
+    if (existing) {
+      existing.presets.push(preset);
+    } else {
+      groups.push({ category: preset.category, presets: [preset] });
+    }
+    return groups;
+  }, []);
+
   return (
     <>
       <div className="mb-4 border-b border-border pb-4">
@@ -354,17 +422,24 @@ function FilterPanelHeader({
               </>
             ) : null}
             <SelectSeparator />
-            <SelectGroup>
-              <SelectLabel>{messages.filterBuilder.systemPresets}</SelectLabel>
-              {SYSTEM_FILTER_PRESETS.map((preset) => (
-                <SelectItem
-                  key={preset.id}
-                  value={systemFilterPresetOptionValue(preset.id)}
-                >
-                  {systemPresetItem(messages, preset.id).name}
-                </SelectItem>
-              ))}
-            </SelectGroup>
+            {systemPresetGroups.map((group, index) => (
+              <Fragment key={group.category}>
+                {index > 0 ? <SelectSeparator /> : null}
+                <SelectGroup>
+                  <SelectLabel>
+                    {systemPresetGroupLabel(messages, group.category)}
+                  </SelectLabel>
+                  {group.presets.map((preset) => (
+                    <SelectItem
+                      key={preset.id}
+                      value={systemFilterPresetOptionValue(preset.id)}
+                    >
+                      {systemPresetItem(messages, preset).name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </Fragment>
+            ))}
           </SelectContent>
         </Select>
 
@@ -403,9 +478,25 @@ function FilterPanelHeader({
                 </div>
               </div>
             ) : matchedSystemPreset ? (
-              <p className="pt-3 text-xs text-muted-foreground">
-                {systemPresetItem(messages, matchedSystemPreset.id).description}
-              </p>
+              <div className="space-y-1.5 pt-3 text-xs text-muted-foreground">
+                <p>
+                  {systemPresetItem(messages, matchedSystemPreset).description}
+                </p>
+                <p className="flex flex-wrap gap-x-3 gap-y-1">
+                  <span>
+                    {systemPresetCategoryLabel(
+                      messages,
+                      matchedSystemPreset.category,
+                    )}
+                  </span>
+                  <span>
+                    {systemPresetScopeLabel(
+                      messages,
+                      matchedSystemPreset.scope,
+                    )}
+                  </span>
+                </p>
+              </div>
             ) : null}
           </AutoTransition>
         </AutoResizer>
@@ -615,6 +706,10 @@ export function FilterPanel({
     }
 
     return SYSTEM_FILTER_PRESETS.find((preset) => {
+      if (!systemFilterPresetAvailableForAudience(preset, audience)) {
+        return false;
+      }
+      if (!systemPresetMatchesScope(preset, scopePreference)) return false;
       if (preset.filterDsl === expressionText) return true;
       if (!currentFilterFingerprint) return false;
       try {
@@ -632,8 +727,10 @@ export function FilterPanel({
     currentFilterFingerprint,
     expressionError,
     expressionText,
+    audience,
     matchedSavedFilter,
     root.children.length,
+    scopePreference,
   ]);
   const managedSavedFilter = savedFilters.find(
     (filter) => filter.id === managedSavedFilterId && filter.isOwner,
@@ -660,7 +757,7 @@ export function FilterPanel({
     : matchedSavedFilter
       ? matchedSavedFilter.name
       : matchedSystemPreset
-        ? systemPresetItem(messages, matchedSystemPreset.id).name
+        ? systemPresetItem(messages, matchedSystemPreset).name
         : messages.filterBuilder.noSavedFilter;
   const savedFilterTriggerKey = savedFiltersQuery.isFetching
     ? "loading"
@@ -816,8 +913,12 @@ export function FilterPanel({
     [applyFilterDsl, onScopeChange],
   );
   const applySystemPreset = useCallback(
-    (preset: SystemFilterPreset) => applyFilterDsl(preset.filterDsl),
-    [applyFilterDsl],
+    (preset: SystemFilterPreset) => {
+      const nextScope = systemPresetScopeForApply(preset, scopePreference);
+      if (nextScope !== scopePreference) onScopeChange(nextScope);
+      applyFilterDsl(preset.filterDsl, nextScope);
+    },
+    [applyFilterDsl, onScopeChange, scopePreference],
   );
 
   const openSavedFilterCreate = useCallback(

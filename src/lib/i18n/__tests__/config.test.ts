@@ -8,6 +8,7 @@ import {
   resolveLocale,
   SUPPORTED_LOCALES,
 } from "@/lib/i18n/config";
+import { getMessages } from "@/lib/i18n/messages";
 
 describe("i18n locale config", () => {
   it("exports supported locale constants", () => {
@@ -33,5 +34,12 @@ describe("i18n locale config", () => {
     expect(localeToHtmlLang("en")).toBe("en");
     expect(localeToHtmlLang("zh")).toBe("zh-CN");
     expect(localeToHtmlLang("ja")).toBe("ja");
+  });
+
+  it("uses symbol labels for filter percentage units in every locale", () => {
+    for (const locale of SUPPORTED_LOCALES) {
+      expect(getMessages(locale).filterBuilder.units.percent).toBe("%");
+      expect(getMessages(locale).filterBuilder.units.perMille).toBe("‰");
+    }
   });
 });

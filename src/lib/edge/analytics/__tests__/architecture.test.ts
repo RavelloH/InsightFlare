@@ -244,6 +244,49 @@ describe("analytics architecture", () => {
     expect(
       source("src/lib/edge/analytics/providers/d1/internal/scoped-dataset.ts"),
     ).toContain("planObservationFilter");
+
+    const coreFilters = source(
+      "src/lib/edge/analytics/providers/d1/internal/core-filters.ts",
+    );
+    for (const legacyMembershipSymbol of [
+      "membershipSetSql",
+      "buildEntityMembershipPredicate",
+      "scope_universe",
+    ]) {
+      expect(
+        coreFilters,
+        `legacy membership implementation returned: ${legacyMembershipSymbol}`,
+      ).not.toContain(legacyMembershipSymbol);
+    }
+  });
+
+  it("does not reintroduce legacy D1 entity-membership SQL", () => {
+    const legacyPatterns = [
+      /membershipSetSql/u,
+      /buildEntityMembershipPredicate/u,
+      /fullEntityFilterCtes/u,
+      /entityExpansionSql/u,
+      /calculated_visits/u,
+      /matched_entities/u,
+      /matched_sessions/u,
+      /matched_visitors/u,
+      /scope_visit_source/u,
+      /scope_event_source/u,
+      /scope_set_/u,
+      /scope_empty/u,
+      /entity_membership/u,
+    ];
+    for (const file of productionFiles(
+      "src/lib/edge/analytics/providers/d1/internal",
+    )) {
+      const content = readFileSync(file, "utf8");
+      for (const pattern of legacyPatterns) {
+        expect(
+          content,
+          `${file} reintroduced legacy entity-membership SQL: ${pattern}`,
+        ).not.toMatch(pattern);
+      }
+    }
   });
 
   it("does not reintroduce the generic D1 provider barrel", () => {

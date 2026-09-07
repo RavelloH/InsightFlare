@@ -141,6 +141,7 @@ function createScopedOverviewSqliteEnv(): {
     "migrations/0008_rebuild_analytics.sql",
     "migrations/0013_add_visit_performance_metrics.sql",
     "migrations/0017_structured_custom_events.sql",
+    "migrations/0019_add_user_identity.sql",
   ]) {
     database.exec(readFileSync(migration, "utf8"));
   }
@@ -285,9 +286,7 @@ describe("edge pages D1 queries", () => {
       5,
       true,
     );
-    expect(filtered.calls[0]?.sql).toContain(
-      "INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id",
-    );
+    expect(filtered.calls[0]?.sql).not.toContain("matched_sessions");
 
     const prepared = prepareScopedQuery("pages", {
       context: siteQueryContext(siteId, "private-dashboard"),
@@ -681,6 +680,7 @@ describe("edge pages D1 queries", () => {
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
       "migrations/0013_add_visit_performance_metrics.sql",
+      "migrations/0019_add_user_identity.sql",
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
@@ -1948,6 +1948,7 @@ describe("edge overview D1 queries and handlers", () => {
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
       "migrations/0013_add_visit_performance_metrics.sql",
+      "migrations/0019_add_user_identity.sql",
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
@@ -2158,6 +2159,7 @@ describe("edge overview D1 queries and handlers", () => {
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
       "migrations/0013_add_visit_performance_metrics.sql",
+      "migrations/0019_add_user_identity.sql",
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
@@ -2263,6 +2265,7 @@ describe("edge overview D1 queries and handlers", () => {
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
       "migrations/0013_add_visit_performance_metrics.sql",
+      "migrations/0019_add_user_identity.sql",
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }
@@ -2413,6 +2416,7 @@ describe("edge overview D1 queries and handlers", () => {
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
       "migrations/0013_add_visit_performance_metrics.sql",
+      "migrations/0019_add_user_identity.sql",
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }

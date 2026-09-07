@@ -4,6 +4,7 @@ import { analyticsOperationRegistry } from "@/lib/edge/analytics/application/ope
 import {
   attachFilterScopePreference,
   attachSavedFilterScopePreference,
+  factEntityKindsForFilter,
   FILTER_SCOPE_CAPABILITIES,
   type FilterDocument,
   type FilterExpression,
@@ -18,8 +19,10 @@ import {
   serializeFilterScopePreference,
 } from "@/lib/edge/analytics/contract";
 import {
+  applyObservationFilterToScopedDataset,
   compileScopedDatasetSql,
   scopedDatasetFor,
+  scopedDatasetForUnpreparedReader,
 } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 
 const context = {
@@ -218,7 +221,7 @@ describe("scoped filter contract", () => {
       time,
       filters: filter("page.path", "/docs"),
       scopePreference: "auto",
-    } as QueryInput & { time: QueryTime });
+    } as unknown as QueryInput & { time: QueryTime });
 
     expect(prepared.scopePreference).toBe("auto");
     expect(prepared.scopePlan?.scope).toBe("event");
@@ -231,7 +234,7 @@ describe("scoped filter contract", () => {
       context,
       time,
       scopePreference: "auto",
-    } as QueryInput & { time: QueryTime });
+    } as unknown as QueryInput & { time: QueryTime });
 
     expect(prepared.scopePlan?.scope).toBe("event");
     expect(prepared.filters?.root).toBeNull();
@@ -580,5 +583,233 @@ describe("scoped filter contract", () => {
         },
       }).ctes,
     ).toContain("scope_universe");
+  });
+
+  it("plans facts as entity membership while preserving event observation expansion", () => {
+    const root: FilterExpression = {
+      kind: "and",
+      children: [
+        {
+          kind: "condition",
+          target: { kind: "field", field: "page.path" as never },
+          operator: "eq",
+          value: "/docs",
+        },
+        {
+          kind: "condition",
+          target: { kind: "field", field: "session.views" as never },
+          operator: "gte",
+          value: 2,
+        },
+        {
+          kind: "condition",
+          target: { kind: "field", field: "visitor.events" as never },
+          operator: "gt",
+          value: 0,
+        },
+        { kind: "not", child: condition("page.path", "/private") },
+      ],
+    };
+    expect(factEntityKindsForFilter(root)).toEqual(
+      new Set(["session", "visitor"]),
+    );
+
+    const prepared = prepareScopedQuery("overview", {
+      context: {
+        ...context,
+        subject: { kind: "team", authorizedSiteIds: ["site-1", "site-2"] },
+      },
+      time,
+      filters: documentWithRoot(root),
+      scopePreference: "auto",
+    } as unknown as QueryInput & { time: QueryTime });
+    expect(prepared.scopePlan).toMatchObject({
+      scope: "event",
+      mode: "entity",
+      membership: { kind: "entity", entityKind: "session" },
+      expansion: "matching-observations",
+    });
+
+    const dataset = compileScopedDatasetSql({
+      filters: prepared.filters!,
+      plan: prepared.scopePlan!,
+      siteIds: ["site-1", "site-2"],
+      window: {
+        startMs: time.range.startMs,
+        endExclusiveMs: time.range.endExclusiveMs,
+        nowMs: time.capturedAtMs,
+        timeZone: time.reportingTimeZone,
+      },
+    });
+    expect(dataset.ctes).toContain("scope_session_facts");
+    expect(dataset.ctes).toContain("scope_visitor_facts");
+    expect(dataset.ctes).toContain("GROUP BY site_pk, site_id, session_id");
+    expect(dataset.ctes).toContain("GROUP BY site_pk, site_id, visitor_id");
+    expect(dataset.ctes).toContain("COUNT(DISTINCT session_id)");
+    expect(dataset.ctes).toContain("session_bounce");
+    expect(dataset.ctes).toContain("NOT EXISTS");
+    expect(dataset.ctes).toContain("ON matching_entities.site_pk = rv.site_pk");
+  });
+
+  it("expands reverse fact domains for session and visitor scopes", () => {
+    const visitorFact = documentWithRoot({
+      kind: "condition",
+      target: { kind: "field", field: "visitor.views" as never },
+      operator: "gte",
+      value: 1,
+    });
+    const sessionFact = documentWithRoot({
+      kind: "condition",
+      target: { kind: "field", field: "session.events" as never },
+      operator: "gte",
+      value: 1,
+    });
+    const compile = (filters: FilterDocument, scope: "session" | "visitor") => {
+      const prepared = prepareScopedQuery("overview", {
+        context,
+        time,
+        filters,
+        scopePreference: scope,
+      } as unknown as QueryInput & { time: QueryTime });
+      return compileScopedDatasetSql({
+        filters: prepared.filters!,
+        plan: prepared.scopePlan!,
+        siteIds: ["site-1"],
+        window: {
+          startMs: time.range.startMs,
+          endExclusiveMs: time.range.endExclusiveMs,
+          nowMs: time.capturedAtMs,
+          timeZone: time.reportingTimeZone,
+        },
+      });
+    };
+
+    const sessionDataset = compile(visitorFact, "session");
+    expect(sessionDataset.ctes).toContain("scope_visitor_facts");
+    expect(sessionDataset.ctes).toContain("identities.session_id");
+    expect(sessionDataset.ctes).toContain("vf.visitor_views");
+
+    const visitorDataset = compile(sessionFact, "visitor");
+    expect(visitorDataset.ctes).toContain("scope_session_facts");
+    expect(visitorDataset.ctes).toContain("identities.visitor_id");
+    expect(visitorDataset.ctes).toContain("sf.session_events");
+  });
+
+  it("keeps unprepared reader compatibility paths on the canonical compiler", () => {
+    const window = {
+      startMs: time.range.startMs,
+      endExclusiveMs: time.range.endExclusiveMs,
+      nowMs: time.capturedAtMs,
+      timeZone: time.reportingTimeZone,
+    };
+    const pageFilter = filter("page.path", "/docs");
+
+    expect(
+      scopedDatasetForUnpreparedReader(
+        "overview",
+        "site-1",
+        window,
+        documentWithRoot(null),
+        "event",
+      ),
+    ).toBeNull();
+    expect(() =>
+      scopedDatasetForUnpreparedReader(
+        "overview",
+        "site-1",
+        window,
+        pageFilter,
+        "event",
+      ),
+    ).toThrow("requires an entity scope");
+
+    const overviewDataset = scopedDatasetForUnpreparedReader(
+      "overview",
+      "site-1",
+      window,
+      pageFilter,
+      "visitor",
+    );
+    expect(overviewDataset).toMatchObject({
+      scope: "visitor",
+      visitRelation: "scope_final_visits",
+    });
+    expect(overviewDataset?.ctes).toContain("scope_raw_events AS");
+    expect(overviewDataset?.ctes).toContain("WHERE 0");
+
+    const visitorsDataset = scopedDatasetForUnpreparedReader(
+      "visitors",
+      "site-1",
+      window,
+      pageFilter,
+      "visitor",
+    );
+    expect(visitorsDataset?.ctes).toContain("ce.event_pk");
+    expect(visitorsDataset?.ctes).toContain("'{}' AS event_data_json");
+    expect(visitorsDataset?.bindings).toEqual([
+      { value: "site-1" },
+      { value: 1 },
+      { value: 100 },
+      { value: "site-1" },
+      { value: 1 },
+      { value: 100 },
+      { value: "/docs" },
+      { value: 1 },
+      { value: 100 },
+      { value: "/docs" },
+    ]);
+
+    const factDataset = scopedDatasetForUnpreparedReader(
+      "overview",
+      "site-1",
+      window,
+      documentWithRoot({
+        kind: "condition",
+        target: { kind: "field", field: "session.views" as never },
+        operator: "gte",
+        value: 2,
+      }),
+      "event",
+    );
+    expect(factDataset?.ctes).toContain("scope_session_facts");
+    expect(factDataset?.ctes).toContain("'{}' AS event_data_json");
+  });
+
+  it("handles empty observation steps and rejects unsafe relation names", () => {
+    const dataset = {
+      ctes: "scope_raw_visits AS (...), scope_raw_events AS (...)",
+      bindings: [{ value: "base" }],
+      visitRelation: "scope_final_visits",
+      eventRelation: "scope_final_events",
+      sessionRelation: "scope_final_sessions",
+      visitorRelation: "scope_final_visitors",
+      scope: "event" as const,
+    };
+    const empty = applyObservationFilterToScopedDataset(
+      dataset,
+      documentWithRoot(null),
+      "empty_step",
+    );
+    expect(empty.ctes).toContain(
+      "empty_step_matched_visits AS (SELECT * FROM scope_final_visits)",
+    );
+    expect(empty.ctes).toContain(
+      "empty_step_matched_events AS (SELECT * FROM scope_final_events)",
+    );
+    expect(empty.bindings).toEqual([]);
+    expect(() =>
+      applyObservationFilterToScopedDataset(
+        { ...dataset, visitRelation: "scope;drop" },
+        documentWithRoot(null),
+        "safe_step",
+      ),
+    ).toThrow("internal SQL identifier");
+    expect(() =>
+      applyObservationFilterToScopedDataset(
+        { ...dataset, eventRelation: "scope-event" },
+        documentWithRoot(null),
+        "safe_step",
+      ),
+    ).toThrow("internal SQL identifier");
   });
 });

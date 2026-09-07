@@ -3634,7 +3634,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_a62dea0c843b"
+                $ref: "#/components/schemas/SharedSchema_7039bf5f94b6"
               example:
                 data:
                   metrics:
@@ -3658,6 +3658,15 @@ paths:
                         valueKind: string
                         operators:
                           - example
+                        group: page
+                        nativeEntity: visit
+                        nullable: false
+                        unit: ms
+                        suggestionMode: discrete
+                        number:
+                          min: 0
+                          max: 0
+                          step: 1
                     json:
                       documentVersion: 1
                       fields:
@@ -3665,6 +3674,15 @@ paths:
                           valueKind: string
                           operators:
                             - example
+                          group: page
+                          nativeEntity: visit
+                          nullable: false
+                          unit: ms
+                          suggestionMode: discrete
+                          number:
+                            min: 0
+                            max: 0
+                            step: 1
                       operators:
                         - example
                     dsl:
@@ -3821,7 +3839,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_a62dea0c843b"
+                $ref: "#/components/schemas/SharedSchema_7039bf5f94b6"
               example:
                 data:
                   metrics:
@@ -3845,6 +3863,15 @@ paths:
                         valueKind: string
                         operators:
                           - example
+                        group: page
+                        nativeEntity: visit
+                        nullable: false
+                        unit: ms
+                        suggestionMode: discrete
+                        number:
+                          min: 0
+                          max: 0
+                          step: 1
                     json:
                       documentVersion: 1
                       fields:
@@ -3852,6 +3879,15 @@ paths:
                           valueKind: string
                           operators:
                             - example
+                          group: page
+                          nativeEntity: visit
+                          nullable: false
+                          unit: ms
+                          suggestionMode: discrete
+                          number:
+                            min: 0
+                            max: 0
+                            step: 1
                       operators:
                         - example
                     dsl:
@@ -24053,11 +24089,11 @@ components:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_a62dea0c843b:
+    SharedSchema_7039bf5f94b6:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_5f649afa378e"
+          $ref: "#/components/schemas/SharedSchema_40bd16e4a989"
         meta:
           type: object
           properties:
@@ -24145,7 +24181,7 @@ components:
         - dimension
         - items
       additionalProperties: false
-    SharedSchema_5f649afa378e:
+    SharedSchema_40bd16e4a989:
       type: object
       properties:
         metrics:
@@ -24163,7 +24199,7 @@ components:
             type: string
             minLength: 1
         filterProtocol:
-          $ref: "#/components/schemas/SharedSchema_d3535969acb5"
+          $ref: "#/components/schemas/SharedSchema_b3bdf9bd98a9"
         intervals:
           type: array
           items:
@@ -24212,7 +24248,7 @@ components:
         - operations
         - links
       additionalProperties: false
-    SharedSchema_84a6cc32c164:
+    SharedSchema_86469c181296:
       type: object
       properties:
         documentVersion:
@@ -24220,7 +24256,7 @@ components:
           exclusiveMinimum: 0
           maximum: 9007199254740991
         fields:
-          $ref: "#/components/schemas/SharedSchema_2e70ba04a8b9"
+          $ref: "#/components/schemas/SharedSchema_16e32fc73372"
         operators:
           minItems: 1
           type: array
@@ -24232,7 +24268,7 @@ components:
         - fields
         - operators
       additionalProperties: false
-    SharedSchema_d3535969acb5:
+    SharedSchema_b3bdf9bd98a9:
       type: object
       properties:
         version:
@@ -24240,9 +24276,9 @@ components:
           exclusiveMinimum: 0
           maximum: 9007199254740991
         fields:
-          $ref: "#/components/schemas/SharedSchema_2e70ba04a8b9"
+          $ref: "#/components/schemas/SharedSchema_16e32fc73372"
         json:
-          $ref: "#/components/schemas/SharedSchema_84a6cc32c164"
+          $ref: "#/components/schemas/SharedSchema_86469c181296"
         dsl:
           $ref: "#/components/schemas/SharedSchema_a5b781122326"
       required:
@@ -26036,29 +26072,7 @@ components:
           - id
           - filterDsl
         additionalProperties: false
-    SharedSchema_f026b27b36a1:
-      minItems: 1
-      type: array
-      items:
-        type: object
-        properties:
-          id:
-            type: string
-            minLength: 1
-          method:
-            type: string
-            enum:
-              - GET
-              - POST
-          path:
-            type: string
-            minLength: 1
-        required:
-          - id
-          - method
-          - path
-        additionalProperties: false
-    SharedSchema_2e70ba04a8b9:
+    SharedSchema_16e32fc73372:
       type: array
       items:
         type: object
@@ -26082,10 +26096,81 @@ components:
             items:
               type: string
               minLength: 1
+          group:
+            type: string
+            enum:
+              - page
+              - session
+              - visitor
+              - acquisition
+              - device
+              - geo
+              - event
+              - performance
+              - user
+          nativeEntity:
+            type: string
+            enum:
+              - visit
+              - event
+              - session
+              - visitor
+          nullable:
+            type: boolean
+          unit:
+            type: string
+            enum:
+              - ms
+              - px
+              - ratio
+          suggestionMode:
+            type: string
+            enum:
+              - discrete
+              - search
+              - boolean
+              - none
+          number:
+            type: object
+            properties:
+              min:
+                type: number
+              max:
+                type: number
+              step:
+                type: number
+                exclusiveMinimum: 0
+            additionalProperties: false
         required:
           - id
           - valueKind
           - operators
+          - group
+          - nativeEntity
+          - nullable
+          - suggestionMode
+        additionalProperties: false
+    SharedSchema_f026b27b36a1:
+      minItems: 1
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+            minLength: 1
+          method:
+            type: string
+            enum:
+              - GET
+              - POST
+          path:
+            type: string
+            minLength: 1
+        required:
+          - id
+          - method
+          - path
         additionalProperties: false
     SharedSchema_49fb9f10e217:
       type: array

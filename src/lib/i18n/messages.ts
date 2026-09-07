@@ -181,11 +181,17 @@ export interface AppMessages {
     fieldGroups: {
       page: string;
       session: string;
+      visitor: string;
       referrer: string;
       campaign: string;
       client: string;
       geography: string;
       event: string;
+      acquisition: string;
+      device: string;
+      geo: string;
+      performance: string;
+      user: string;
     };
     fieldLabels: Record<string, string>;
     operatorLabels: Record<string, string>;
@@ -208,6 +214,16 @@ export interface AppMessages {
     removeValue: string;
     rangeStartPlaceholder: string;
     rangeEndPlaceholder: string;
+    unitAriaLabel: string;
+    units: {
+      hours: string;
+      minutes: string;
+      seconds: string;
+      milliseconds: string;
+      percent: string;
+      perMille: string;
+      pixels: string;
+    };
     jsonPointer: string;
     jsonPointerPlaceholder: string;
     match: string;
@@ -230,6 +246,21 @@ export interface AppMessages {
     savedFiltersLoading: string;
     noSavedFilter: string;
     systemPresets: string;
+    systemPresetCategories: {
+      acquisition: string;
+      device: string;
+      visitBehavior: string;
+      sessionEngagement: string;
+      visitorBehavior: string;
+      performance: string;
+      dataQuality: string;
+    };
+    systemPresetScopes: {
+      preserve: string;
+      event: string;
+      session: string;
+      visitor: string;
+    };
     systemPresetItems: {
       directTraffic: {
         name: string;
@@ -288,6 +319,98 @@ export interface AppMessages {
         description: string;
       };
       tabletTraffic: {
+        name: string;
+        description: string;
+      };
+      longPageViews: {
+        name: string;
+        description: string;
+      };
+      shortPageViews: {
+        name: string;
+        description: string;
+      };
+      identifiedActivity: {
+        name: string;
+        description: string;
+      };
+      customEventActivity: {
+        name: string;
+        description: string;
+      };
+      bouncedSessions: {
+        name: string;
+        description: string;
+      };
+      nonBouncedSessions: {
+        name: string;
+        description: string;
+      };
+      longSessions: {
+        name: string;
+        description: string;
+      };
+      shortSessions: {
+        name: string;
+        description: string;
+      };
+      deepSessions: {
+        name: string;
+        description: string;
+      };
+      eventfulSessions: {
+        name: string;
+        description: string;
+      };
+      highEngagementSessions: {
+        name: string;
+        description: string;
+      };
+      returningVisitors: {
+        name: string;
+        description: string;
+      };
+      frequentVisitors: {
+        name: string;
+        description: string;
+      };
+      deepVisitors: {
+        name: string;
+        description: string;
+      };
+      eventfulVisitors: {
+        name: string;
+        description: string;
+      };
+      identifiedVisitors: {
+        name: string;
+        description: string;
+      };
+      organicSearchVisitors: {
+        name: string;
+        description: string;
+      };
+      coreWebVitalsNeedsImprovement: {
+        name: string;
+        description: string;
+      };
+      slowLcp: {
+        name: string;
+        description: string;
+      };
+      slowInp: {
+        name: string;
+        description: string;
+      };
+      highCls: {
+        name: string;
+        description: string;
+      };
+      slowTtfb: {
+        name: string;
+        description: string;
+      };
+      slowFcp: {
         name: string;
         description: string;
       };
@@ -2793,11 +2916,17 @@ const enMessages = {
     fieldGroups: {
       page: "Page",
       session: "Session",
+      visitor: "Visitor",
       referrer: "Sources & channels",
       campaign: "Campaign",
       client: "Client",
       geography: "Geography",
       event: "Event",
+      acquisition: "Acquisition",
+      device: "Device",
+      geo: "Geography",
+      performance: "Performance",
+      user: "User",
     },
     fieldLabels: {
       "page.path": "Page path",
@@ -2831,6 +2960,24 @@ const enMessages = {
       "geo.organization": "Organization",
       "event.name": "Event name",
       "event.payload": "Event payload",
+      "page.durationMs": "Page duration",
+      "session.durationMs": "Session duration",
+      "session.views": "Session views",
+      "session.events": "Session events",
+      "session.bounce": "Bounced session",
+      "visitor.sessions": "Visitor sessions",
+      "visitor.views": "Visitor views",
+      "visitor.events": "Visitor events",
+      "performance.ttfbMs": "Time to first byte",
+      "performance.fcpMs": "First contentful paint",
+      "performance.lcpMs": "Largest contentful paint",
+      "performance.cls": "Cumulative layout shift",
+      "performance.inpMs": "Interaction to next paint",
+      "user.id": "User ID",
+      "user.name": "User name",
+      "client.screenWidth": "Screen width",
+      "client.screenHeight": "Screen height",
+      "geo.isEU": "European Union visitor",
     },
     operatorLabels: {
       eq: "Equals",
@@ -2871,6 +3018,16 @@ const enMessages = {
     removeValue: 'Remove filter value "{value}"',
     rangeStartPlaceholder: "Lower bound",
     rangeEndPlaceholder: "Upper bound",
+    unitAriaLabel: "Display unit",
+    units: {
+      hours: "Hours",
+      minutes: "Minutes",
+      seconds: "Seconds",
+      milliseconds: "Milliseconds",
+      percent: "%",
+      perMille: "‰",
+      pixels: "Pixels",
+    },
     jsonPointer: "JSON Pointer",
     jsonPointerPlaceholder: "Search or enter a JSON pointer",
     match: "Match",
@@ -2896,6 +3053,21 @@ const enMessages = {
     savedFiltersLoading: "Loading saved filters...",
     noSavedFilter: "Do not use a saved filter",
     systemPresets: "System presets",
+    systemPresetCategories: {
+      acquisition: "Acquisition",
+      device: "Device",
+      visitBehavior: "Visit behavior",
+      sessionEngagement: "Session engagement",
+      visitorBehavior: "Visitor behavior",
+      performance: "Performance",
+      dataQuality: "Data quality",
+    },
+    systemPresetScopes: {
+      preserve: "Keep current scope",
+      event: "Event scope",
+      session: "Session scope",
+      visitor: "Visitor scope",
+    },
     systemPresetItems: {
       directTraffic: {
         name: "Direct traffic",
@@ -2958,6 +3130,99 @@ const enMessages = {
       tabletTraffic: {
         name: "Tablet traffic",
         description: "Visits from tablet devices.",
+      },
+      longPageViews: {
+        name: "Long page views",
+        description: "Page views lasting at least 30 seconds.",
+      },
+      shortPageViews: {
+        name: "Short page views",
+        description: "Page views lasting less than 10 seconds.",
+      },
+      identifiedActivity: {
+        name: "Identified activity",
+        description: "Events associated with an identified user.",
+      },
+      customEventActivity: {
+        name: "Custom event activity",
+        description: "Events with a recorded custom event name.",
+      },
+      bouncedSessions: {
+        name: "Bounced sessions",
+        description: "Sessions containing a single page view.",
+      },
+      nonBouncedSessions: {
+        name: "Non-bounced sessions",
+        description: "Sessions containing more than one page view.",
+      },
+      longSessions: {
+        name: "Long sessions",
+        description: "Sessions lasting at least five minutes.",
+      },
+      shortSessions: {
+        name: "Short sessions",
+        description: "Sessions lasting less than one minute.",
+      },
+      deepSessions: {
+        name: "Deep sessions",
+        description: "Sessions with at least three page views.",
+      },
+      eventfulSessions: {
+        name: "Eventful sessions",
+        description: "Sessions with at least one custom event.",
+      },
+      highEngagementSessions: {
+        name: "Highly engaged sessions",
+        description:
+          "Sessions with at least three views and two custom events.",
+      },
+      returningVisitors: {
+        name: "Returning visitors",
+        description: "Visitors with at least two sessions.",
+      },
+      frequentVisitors: {
+        name: "Frequent visitors",
+        description: "Visitors with at least five sessions.",
+      },
+      deepVisitors: {
+        name: "Deep visitors",
+        description: "Visitors with at least five page views.",
+      },
+      eventfulVisitors: {
+        name: "Eventful visitors",
+        description: "Visitors with at least two custom events.",
+      },
+      identifiedVisitors: {
+        name: "Identified visitors",
+        description: "Visitors associated with an identified user.",
+      },
+      organicSearchVisitors: {
+        name: "Organic search visitors",
+        description: "Visitors with an untagged search referral.",
+      },
+      coreWebVitalsNeedsImprovement: {
+        name: "Core Web Vitals need improvement",
+        description: "Visits exceeding a Core Web Vitals threshold.",
+      },
+      slowLcp: {
+        name: "Slow LCP",
+        description: "Visits with LCP above 2.5 seconds.",
+      },
+      slowInp: {
+        name: "Slow INP",
+        description: "Visits with INP above 200 milliseconds.",
+      },
+      highCls: {
+        name: "High CLS",
+        description: "Visits with CLS above 0.1.",
+      },
+      slowTtfb: {
+        name: "Slow TTFB",
+        description: "Visits with TTFB above 800 milliseconds.",
+      },
+      slowFcp: {
+        name: "Slow FCP",
+        description: "Visits with FCP above 1.8 seconds.",
       },
     },
     savedFiltersPersonal: "Personal filters",
@@ -5675,11 +5940,17 @@ const zhMessages = {
     fieldGroups: {
       page: "页面",
       session: "会话",
+      visitor: "访客",
       referrer: "来源与渠道",
       campaign: "营销活动",
       client: "客户端",
       geography: "地理位置",
       event: "事件",
+      acquisition: "获客",
+      device: "设备",
+      geo: "地理位置",
+      performance: "性能",
+      user: "用户",
     },
     fieldLabels: {
       "page.path": "页面路径",
@@ -5713,6 +5984,24 @@ const zhMessages = {
       "geo.organization": "组织",
       "event.name": "事件名称",
       "event.payload": "事件载荷",
+      "page.durationMs": "页面时长",
+      "session.durationMs": "会话时长",
+      "session.views": "会话浏览量",
+      "session.events": "会话事件数",
+      "session.bounce": "跳出会话",
+      "visitor.sessions": "访客会话数",
+      "visitor.views": "访客浏览量",
+      "visitor.events": "访客事件数",
+      "performance.ttfbMs": "首字节时间",
+      "performance.fcpMs": "首次内容绘制",
+      "performance.lcpMs": "最大内容绘制",
+      "performance.cls": "累积布局偏移",
+      "performance.inpMs": "交互到下一次绘制",
+      "user.id": "用户 ID",
+      "user.name": "用户名称",
+      "client.screenWidth": "屏幕宽度",
+      "client.screenHeight": "屏幕高度",
+      "geo.isEU": "欧盟访客",
     },
     operatorLabels: {
       eq: "等于",
@@ -5753,6 +6042,16 @@ const zhMessages = {
     removeValue: "移除筛选值「{value}」",
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
+    unitAriaLabel: "显示单位",
+    units: {
+      hours: "小时",
+      minutes: "分钟",
+      seconds: "秒",
+      milliseconds: "毫秒",
+      percent: "%",
+      perMille: "‰",
+      pixels: "像素",
+    },
     jsonPointer: "JSON 指针",
     jsonPointerPlaceholder: "搜索或输入 JSON 指针",
     match: "匹配方式",
@@ -5777,6 +6076,21 @@ const zhMessages = {
     savedFiltersLoading: "正在获取已保存的筛选...",
     noSavedFilter: "不使用已保存的筛选",
     systemPresets: "系统预设",
+    systemPresetCategories: {
+      acquisition: "获客",
+      device: "设备",
+      visitBehavior: "访问行为",
+      sessionEngagement: "会话参与度",
+      visitorBehavior: "访客行为",
+      performance: "性能",
+      dataQuality: "数据质量",
+    },
+    systemPresetScopes: {
+      preserve: "保留当前范围",
+      event: "事件范围",
+      session: "会话范围",
+      visitor: "访客范围",
+    },
     systemPresetItems: {
       directTraffic: {
         name: "直接访问",
@@ -5837,6 +6151,98 @@ const zhMessages = {
       tabletTraffic: {
         name: "平板端流量",
         description: "来自平板设备的访问。",
+      },
+      longPageViews: {
+        name: "长时页面浏览",
+        description: "持续至少 30 秒的页面浏览。",
+      },
+      shortPageViews: {
+        name: "短时页面浏览",
+        description: "持续少于 10 秒的页面浏览。",
+      },
+      identifiedActivity: {
+        name: "已识别活动",
+        description: "与已识别用户关联的事件。",
+      },
+      customEventActivity: {
+        name: "自定义事件活动",
+        description: "记录了自定义事件名称的事件。",
+      },
+      bouncedSessions: {
+        name: "跳出会话",
+        description: "只包含一次页面浏览的会话。",
+      },
+      nonBouncedSessions: {
+        name: "非跳出会话",
+        description: "包含多次页面浏览的会话。",
+      },
+      longSessions: {
+        name: "长会话",
+        description: "持续至少五分钟的会话。",
+      },
+      shortSessions: {
+        name: "短会话",
+        description: "持续少于一分钟的会话。",
+      },
+      deepSessions: {
+        name: "深度会话",
+        description: "至少浏览三个页面的会话。",
+      },
+      eventfulSessions: {
+        name: "活跃会话",
+        description: "至少包含一个自定义事件的会话。",
+      },
+      highEngagementSessions: {
+        name: "高参与度会话",
+        description: "至少三次浏览且包含两个自定义事件的会话。",
+      },
+      returningVisitors: {
+        name: "回访访客",
+        description: "至少拥有两个会话的访客。",
+      },
+      frequentVisitors: {
+        name: "高频访客",
+        description: "至少拥有五个会话的访客。",
+      },
+      deepVisitors: {
+        name: "深度访客",
+        description: "至少浏览五个页面的访客。",
+      },
+      eventfulVisitors: {
+        name: "活跃访客",
+        description: "至少产生两个自定义事件的访客。",
+      },
+      identifiedVisitors: {
+        name: "已识别访客",
+        description: "与已识别用户关联的访客。",
+      },
+      organicSearchVisitors: {
+        name: "自然搜索访客",
+        description: "拥有未标记搜索来源的访客。",
+      },
+      coreWebVitalsNeedsImprovement: {
+        name: "Core Web Vitals 需改进",
+        description: "超过 Core Web Vitals 阈值的访问。",
+      },
+      slowLcp: {
+        name: "LCP 较慢",
+        description: "LCP 超过 2.5 秒的访问。",
+      },
+      slowInp: {
+        name: "INP 较慢",
+        description: "INP 超过 200 毫秒的访问。",
+      },
+      highCls: {
+        name: "CLS 较高",
+        description: "CLS 超过 0.1 的访问。",
+      },
+      slowTtfb: {
+        name: "TTFB 较慢",
+        description: "TTFB 超过 800 毫秒的访问。",
+      },
+      slowFcp: {
+        name: "FCP 较慢",
+        description: "FCP 超过 1.8 秒的访问。",
       },
     },
     savedFiltersPersonal: "个人筛选",
@@ -8474,11 +8880,17 @@ const jaMessages = {
     fieldGroups: {
       page: "ページ",
       session: "セッション",
+      visitor: "訪問者",
       referrer: "参照元とチャネル",
       campaign: "キャンペーン",
       client: "クライアント",
       geography: "地域",
       event: "イベント",
+      acquisition: "獲得",
+      device: "デバイス",
+      geo: "地域",
+      performance: "パフォーマンス",
+      user: "ユーザー",
     },
     fieldLabels: {
       "page.path": "ページパス",
@@ -8512,6 +8924,24 @@ const jaMessages = {
       "geo.organization": "組織",
       "event.name": "イベント名",
       "event.payload": "イベントペイロード",
+      "page.durationMs": "ページ滞在時間",
+      "session.durationMs": "セッション時間",
+      "session.views": "セッションビュー数",
+      "session.events": "セッションイベント数",
+      "session.bounce": "バウンスセッション",
+      "visitor.sessions": "訪問者セッション数",
+      "visitor.views": "訪問者ビュー数",
+      "visitor.events": "訪問者イベント数",
+      "performance.ttfbMs": "Time to First Byte",
+      "performance.fcpMs": "First Contentful Paint",
+      "performance.lcpMs": "Largest Contentful Paint",
+      "performance.cls": "Cumulative Layout Shift",
+      "performance.inpMs": "Interaction to Next Paint",
+      "user.id": "ユーザー ID",
+      "user.name": "ユーザー名",
+      "client.screenWidth": "画面幅",
+      "client.screenHeight": "画面の高さ",
+      "geo.isEU": "欧州連合の訪問者",
     },
     operatorLabels: {
       eq: "等しい",
@@ -8552,6 +8982,16 @@ const jaMessages = {
     removeValue: "フィルター値「{value}」を削除",
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
+    unitAriaLabel: "表示単位",
+    units: {
+      hours: "時間",
+      minutes: "分",
+      seconds: "秒",
+      milliseconds: "ミリ秒",
+      percent: "%",
+      perMille: "‰",
+      pixels: "ピクセル",
+    },
     jsonPointer: "JSON ポインター",
     jsonPointerPlaceholder: "JSON ポインターを検索または入力",
     match: "一致条件",
@@ -8578,6 +9018,21 @@ const jaMessages = {
     savedFiltersLoading: "保存済みフィルターを取得中...",
     noSavedFilter: "保存済みフィルターを使用しない",
     systemPresets: "システムプリセット",
+    systemPresetCategories: {
+      acquisition: "獲得",
+      device: "デバイス",
+      visitBehavior: "訪問行動",
+      sessionEngagement: "セッションエンゲージメント",
+      visitorBehavior: "訪問者行動",
+      performance: "パフォーマンス",
+      dataQuality: "データ品質",
+    },
+    systemPresetScopes: {
+      preserve: "現在のスコープを維持",
+      event: "イベントスコープ",
+      session: "セッションスコープ",
+      visitor: "訪問者スコープ",
+    },
     systemPresetItems: {
       directTraffic: {
         name: "直接トラフィック",
@@ -8642,6 +9097,99 @@ const jaMessages = {
       tabletTraffic: {
         name: "タブレットトラフィック",
         description: "タブレット端末からの訪問です。",
+      },
+      longPageViews: {
+        name: "長いページビュー",
+        description: "30 秒以上続いたページビューです。",
+      },
+      shortPageViews: {
+        name: "短いページビュー",
+        description: "10 秒未満で終わったページビューです。",
+      },
+      identifiedActivity: {
+        name: "識別済みアクティビティ",
+        description: "識別済みユーザーに関連するイベントです。",
+      },
+      customEventActivity: {
+        name: "カスタムイベントアクティビティ",
+        description: "カスタムイベント名が記録されたイベントです。",
+      },
+      bouncedSessions: {
+        name: "バウンスセッション",
+        description: "ページビューが 1 回だけのセッションです。",
+      },
+      nonBouncedSessions: {
+        name: "非バウンスセッション",
+        description: "複数のページビューを含むセッションです。",
+      },
+      longSessions: {
+        name: "長いセッション",
+        description: "5 分以上続いたセッションです。",
+      },
+      shortSessions: {
+        name: "短いセッション",
+        description: "1 分未満のセッションです。",
+      },
+      deepSessions: {
+        name: "深いセッション",
+        description: "3 ページ以上を閲覧したセッションです。",
+      },
+      eventfulSessions: {
+        name: "イベントの多いセッション",
+        description: "カスタムイベントを 1 件以上含むセッションです。",
+      },
+      highEngagementSessions: {
+        name: "高エンゲージメントセッション",
+        description:
+          "3 ビュー以上かつ 2 件以上のカスタムイベントを含むセッションです。",
+      },
+      returningVisitors: {
+        name: "リピーター訪問者",
+        description: "2 セッション以上を持つ訪問者です。",
+      },
+      frequentVisitors: {
+        name: "頻繁な訪問者",
+        description: "5 セッション以上を持つ訪問者です。",
+      },
+      deepVisitors: {
+        name: "深い訪問者",
+        description: "5 ページ以上を閲覧した訪問者です。",
+      },
+      eventfulVisitors: {
+        name: "イベントの多い訪問者",
+        description: "2 件以上のカスタムイベントを持つ訪問者です。",
+      },
+      identifiedVisitors: {
+        name: "識別済み訪問者",
+        description: "識別済みユーザーに関連する訪問者です。",
+      },
+      organicSearchVisitors: {
+        name: "自然検索訪問者",
+        description: "タグのない検索リファラーを持つ訪問者です。",
+      },
+      coreWebVitalsNeedsImprovement: {
+        name: "Core Web Vitals の改善が必要",
+        description: "Core Web Vitals のしきい値を超えた訪問です。",
+      },
+      slowLcp: {
+        name: "LCP が遅い",
+        description: "LCP が 2.5 秒を超える訪問です。",
+      },
+      slowInp: {
+        name: "INP が遅い",
+        description: "INP が 200 ミリ秒を超える訪問です。",
+      },
+      highCls: {
+        name: "CLS が高い",
+        description: "CLS が 0.1 を超える訪問です。",
+      },
+      slowTtfb: {
+        name: "TTFB が遅い",
+        description: "TTFB が 800 ミリ秒を超える訪問です。",
+      },
+      slowFcp: {
+        name: "FCP が遅い",
+        description: "FCP が 1.8 秒を超える訪問です。",
       },
     },
     savedFiltersPersonal: "個人用フィルター",

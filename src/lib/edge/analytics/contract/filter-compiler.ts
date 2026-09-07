@@ -4,6 +4,8 @@ import { browserEngineCaseSql } from "@/lib/browser-engine";
 import {
   analyticsFilterDefinition,
   analyticsFilterRegistry,
+  type FilterColumnStrategy,
+  type FilterCompilerStrategy,
   type RegisteredFilterField,
 } from "./filter-registry";
 import {
@@ -42,32 +44,50 @@ type Compiler = {
 
 const FILTER_SQL_CACHE = new WeakMap<FilterDocument, Map<string, FilterSql>>();
 
-const FIELD_COLUMNS: Readonly<Record<string, string>> = {
-  "page.path": "pathname",
-  "page.title": "title",
-  "page.hostname": "hostname",
-  "page.query": "query_string",
-  "page.hash": "hash_fragment",
-  "referrer.domain": "referrer_host",
-  "referrer.url": "referrer_url",
-  "utm.source": "utm_source",
-  "utm.medium": "utm_medium",
-  "utm.campaign": "utm_campaign",
-  "utm.term": "utm_term",
-  "utm.content": "utm_content",
-  "client.browser": "browser",
-  "client.browserVersion": "browser_version",
-  "client.os": "os",
-  "client.deviceType": "device_type",
-  "client.language": "language",
-  "geo.country": "country",
-  "geo.region": "region",
-  "geo.city": "city",
-  "geo.continent": "continent",
-  "geo.timeZone": "timezone",
-  "geo.organization": "as_organization",
-  "event.name": "event_name",
-};
+const COLUMN_STRATEGY_COLUMNS: Readonly<Record<FilterColumnStrategy, string>> =
+  {
+    "column.pathname": "pathname",
+    "column.title": "title",
+    "column.hostname": "hostname",
+    "column.query_string": "query_string",
+    "column.hash_fragment": "hash_fragment",
+    "column.referrer_host": "referrer_host",
+    "column.referrer_url": "referrer_url",
+    "column.utm_source": "utm_source",
+    "column.utm_medium": "utm_medium",
+    "column.utm_campaign": "utm_campaign",
+    "column.utm_term": "utm_term",
+    "column.utm_content": "utm_content",
+    "column.browser": "browser",
+    "column.browser_version": "browser_version",
+    "column.os": "os",
+    "column.device_type": "device_type",
+    "column.language": "language",
+    "column.country": "country",
+    "column.region": "region",
+    "column.city": "city",
+    "column.continent": "continent",
+    "column.timezone": "timezone",
+    "column.as_organization": "as_organization",
+    "column.duration_ms": "duration_ms",
+    "column.perf_ttfb_ms": "perf_ttfb_ms",
+    "column.perf_fcp_ms": "perf_fcp_ms",
+    "column.perf_lcp_ms": "perf_lcp_ms",
+    "column.perf_cls": "perf_cls",
+    "column.perf_inp_ms": "perf_inp_ms",
+    "column.user_id": "user_id",
+    "column.user_name": "user_name",
+    "column.screen_width": "screen_width",
+    "column.screen_height": "screen_height",
+    "column.is_eu": "is_eu",
+    "fact.session_duration_ms": "session_duration_ms",
+    "fact.session_views": "session_views",
+    "fact.session_events": "session_events",
+    "fact.session_bounce": "session_bounce",
+    "fact.visitor_sessions": "visitor_sessions",
+    "fact.visitor_views": "visitor_views",
+    "fact.visitor_events": "visitor_events",
+  };
 
 function validAlias(value: string, label: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
@@ -80,9 +100,21 @@ function column(compiler: Compiler, name: string): string {
   return `${compiler.alias}.${name}`;
 }
 
-function directColumn(compiler: Compiler, fieldId: string): string {
-  if (fieldId === "event.name") return `${compiler.eventAlias}.event_name`;
-  if (fieldId === "traffic.channel") {
+function compilerStrategyFor(
+  field: RegisteredFilterField,
+): FilterCompilerStrategy {
+  if (!field.compilerStrategy) {
+    throw new TypeError(`No compiler strategy registered for ${field.id}.`);
+  }
+  return field.compilerStrategy;
+}
+
+function directColumn(
+  compiler: Compiler,
+  strategy: FilterCompilerStrategy,
+): string {
+  if (strategy === "event.name") return `${compiler.eventAlias}.event_name`;
+  if (strategy === "derived.trafficChannel") {
     return buildTrafficChannelSqlExpression({
       referrerHost: column(compiler, "referrer_host"),
       utmSource: column(compiler, "utm_source"),
@@ -90,21 +122,21 @@ function directColumn(compiler: Compiler, fieldId: string): string {
       utmCampaign: column(compiler, "utm_campaign"),
     });
   }
-  if (fieldId === "client.browserEngine") {
+  if (strategy === "derived.browserEngine") {
     return browserEngineCaseSql(
       column(compiler, "browser"),
       column(compiler, "os"),
     );
   }
-  if (fieldId === "client.osVersion") {
+  if (strategy === "derived.osVersion") {
     return `TRIM(CASE WHEN ${column(compiler, "os")} != '' AND ${column(compiler, "os_version")} != '' THEN ${column(compiler, "os")} || ' ' || ${column(compiler, "os_version")} WHEN ${column(compiler, "os")} != '' THEN ${column(compiler, "os")} WHEN ${column(compiler, "os_version")} != '' THEN ${column(compiler, "os_version")} ELSE '' END)`;
   }
-  if (fieldId === "client.screenSize") {
+  if (strategy === "derived.screenSize") {
     return `CASE WHEN ${column(compiler, "screen_width")} IS NOT NULL AND ${column(compiler, "screen_height")} IS NOT NULL THEN CAST(${column(compiler, "screen_width")} AS TEXT) || 'x' || CAST(${column(compiler, "screen_height")} AS TEXT) ELSE '' END`;
   }
-  const name = FIELD_COLUMNS[fieldId];
+  const name = COLUMN_STRATEGY_COLUMNS[strategy as FilterColumnStrategy];
   if (!name)
-    throw new TypeError(`No SQL column strategy registered for ${fieldId}.`);
+    throw new TypeError(`No SQL column strategy registered for ${strategy}.`);
   return column(compiler, name);
 }
 
@@ -112,6 +144,9 @@ function normalizedColumn(
   field: RegisteredFilterField,
   expression: string,
 ): string {
+  if (field.valueKind === "number" || field.valueKind === "boolean") {
+    return expression;
+  }
   const trimmed = `TRIM(COALESCE(${expression}, ''))`;
   return field.comparison === "case-insensitive"
     ? `LOWER(${trimmed})`
@@ -131,19 +166,25 @@ function jsonSet(values: readonly FilterValue[]): string {
   return encoded;
 }
 
+function jsonBindingSet(values: readonly FilterSqlBinding[]): string {
+  const encoded = JSON.stringify(values);
+  if (encoded === undefined) {
+    throw new TypeError("Filter set values must be JSON serializable.");
+  }
+  return encoded;
+}
+
 function setComparison(
   compiler: Compiler,
   normalized: string,
   operator: FilterOperator,
-  values: readonly FilterValue[],
+  values: readonly FilterSqlBinding[],
 ): string {
   const sqlOperator = operator === "notIn" ? "NOT IN" : "IN";
   if (values.length >= JSON_EACH_SET_THRESHOLD) {
-    return `${normalized} ${sqlOperator} (SELECT value FROM json_each(${push(compiler, jsonSet(values))}))`;
+    return `${normalized} ${sqlOperator} (SELECT value FROM json_each(${push(compiler, jsonBindingSet(values))}))`;
   }
-  const placeholders = values
-    .map((item) => push(compiler, scalar(item)))
-    .join(", ");
+  const placeholders = values.map((item) => push(compiler, item)).join(", ");
   return `${normalized} ${sqlOperator} (${placeholders})`;
 }
 
@@ -154,6 +195,28 @@ function scalar(value: FilterValue): FilterSqlBinding {
     );
   }
   return value;
+}
+
+function fieldScalar(
+  field: RegisteredFilterField,
+  value: FilterValue,
+): FilterSqlBinding {
+  if (value === null) {
+    throw new TypeError(
+      "This SQL predicate requires a non-null scalar binding.",
+    );
+  }
+  if (field.valueKind === "boolean") {
+    if (typeof value !== "boolean")
+      throw new TypeError("Boolean filter values must be boolean.");
+    return value ? 1 : 0;
+  }
+  if (field.valueKind === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value))
+      throw new TypeError("Numeric filter values must be finite numbers.");
+    return value;
+  }
+  return scalar(value);
 }
 
 function escapedLike(value: string): string {
@@ -206,7 +269,7 @@ function orVectorCondition(
   }
   return {
     field,
-    source: directColumn(compiler, field.id),
+    source: directColumn(compiler, compilerStrategyFor(field)),
     operator: item.operator,
     value: storedComparisonValue(field, item.value),
   };
@@ -315,15 +378,20 @@ function comparison(
     return `${source} IS NOT NULL AND ${normalized} != ''`;
   if (Array.isArray(value)) {
     if (operator === "between") {
-      return `${normalized} BETWEEN ${push(compiler, scalar(value[0]!))} AND ${push(compiler, scalar(value[1]!))}`;
+      return `${normalized} BETWEEN ${push(compiler, fieldScalar(field, value[0]!))} AND ${push(compiler, fieldScalar(field, value[1]!))}`;
     }
     const storedValues =
       field.profile === "direct-referrer"
         ? value.map((item) => (item === "__direct__" ? "" : item))
         : value;
-    return setComparison(compiler, normalized, operator, storedValues);
+    return setComparison(
+      compiler,
+      normalized,
+      operator,
+      storedValues.map((item) => fieldScalar(field, item)),
+    );
   }
-  const binding = scalar(value as FilterValue);
+  const binding = fieldScalar(field, value as FilterValue);
   if (
     operator === "contains" ||
     operator === "startsWith" ||
@@ -495,14 +563,15 @@ function condition(compiler: Compiler, item: FilterCondition): string {
   const field = analyticsFilterDefinition(item.target.field);
   if (!field)
     throw new TypeError(`No filter definition for ${item.target.field}.`);
-  if (field.id === "session.entryPath")
+  const strategy = compilerStrategyFor(field);
+  if (strategy === "session.boundary.entry")
     return sessionBoundary(compiler, item, "entry");
-  if (field.id === "session.exitPath")
+  if (strategy === "session.boundary.exit")
     return sessionBoundary(compiler, item, "exit");
   return comparison(
     compiler,
     field,
-    directColumn(compiler, field.id),
+    directColumn(compiler, strategy),
     item.operator,
     item.value,
   );

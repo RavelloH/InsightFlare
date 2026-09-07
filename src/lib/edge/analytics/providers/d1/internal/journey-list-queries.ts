@@ -76,19 +76,22 @@ export interface JourneyEventPage {
   };
 }
 
-function hasJourneyFilters(filters: FilterDocument): boolean {
-  return filters.root !== null;
-}
-
-function fullEntityFilterCtes(
+/**
+ * Direct readers receive normalized filters without scoped-query metadata.
+ * Resolve filter/search membership first, then expand each matching entity to
+ * every visit in the window so aggregation is not limited to the hit row.
+ */
+function entityFilterCtes(
   entity: "visitor" | "session",
   filterClause: string,
   searchCondition?: string,
 ): string {
-  // Legacy direct-reader path. Prepared scoped queries use the canonical
-  // scopedDataset relations below and never enter this branch.
   const column = entity === "visitor" ? "visitor_id" : "session_id";
-  return `matched_${entity}s AS (
+  const entityRelation =
+    entity === "visitor"
+      ? "visitor_filter_entities"
+      : "session_filter_entities";
+  return `${entityRelation} AS (
   SELECT DISTINCT visit_source.${column}
   FROM visit_source
   ${filterClause}
@@ -98,7 +101,8 @@ function fullEntityFilterCtes(
 filtered_visits AS (
   SELECT v.*, 1 AS is_visit_observation
   FROM visit_source v
-  INNER JOIN matched_${entity}s me ON me.${column} = v.${column}
+  INNER JOIN ${entityRelation} entity_ids
+    ON entity_ids.${column} = v.${column}
 )`;
 }
 
@@ -149,6 +153,8 @@ const EVENT_ONLY_VISIT_PROJECTION = `
     e.screen_width,
     e.screen_height,
     e.language,
+    NULL,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -374,18 +380,18 @@ export async function queryVisitorListPageFromD1(
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
   const searchSql = buildJourneySearchSql(options.search);
-  const hasFilters = !scopedDataset && hasJourneyFilters(filters);
+  const hasFilters = !scopedDataset && filters.root !== null;
   const expandEntities = hasFilters;
   const searchCte = searchSql
     ? `,
-matched_visitors AS (
+visitor_search_entities AS (
   SELECT DISTINCT visitor_id
   FROM filtered_visits
   WHERE visitor_id != '' AND ${searchSql.condition}
 )`
     : "";
   const searchWhere = searchSql
-    ? "AND fv.visitor_id IN (SELECT visitor_id FROM matched_visitors)"
+    ? "AND fv.visitor_id IN (SELECT visitor_id FROM visitor_search_entities)"
     : "";
   const cursor = options.cursor
     ? visitorCursorFilter(options.cursor, options.sort)
@@ -398,11 +404,7 @@ ${
   scopedDataset
     ? scopedAggregationFilteredVisitsCte(scopedDataset, "visitor", "")
     : expandEntities
-      ? fullEntityFilterCtes(
-          "visitor",
-          filter?.clause ?? "",
-          searchSql?.condition,
-        )
+      ? entityFilterCtes("visitor", filter?.clause ?? "", searchSql?.condition)
       : `filtered_visits AS (
   SELECT visit_source.*, 1 AS is_visit_observation
   FROM visit_source
@@ -492,18 +494,18 @@ export async function querySessionListPageFromD1(
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
   const searchSql = buildJourneySearchSql(options.search);
-  const hasFilters = !scopedDataset && hasJourneyFilters(filters);
+  const hasFilters = !scopedDataset && filters.root !== null;
   const expandEntities = hasFilters;
   const searchCte = searchSql
     ? `,
-matched_sessions AS (
+session_search_entities AS (
   SELECT DISTINCT session_id
   FROM filtered_visits
   WHERE session_id != '' AND ${searchSql.condition}
 )`
     : "";
   const searchWhere = searchSql
-    ? "AND fv.session_id IN (SELECT session_id FROM matched_sessions)"
+    ? "AND fv.session_id IN (SELECT session_id FROM session_search_entities)"
     : "";
   const cursor = options.cursor
     ? sessionCursorFilter(options.cursor, options.sort)
@@ -530,7 +532,7 @@ ${
   scopedDataset
     ? scopedAggregationFilteredVisitsCte(scopedDataset, "session", targetClause)
     : expandEntities
-      ? fullEntityFilterCtes("session", targetClause, searchSql?.condition)
+      ? entityFilterCtes("session", targetClause, searchSql?.condition)
       : `filtered_visits AS (
   SELECT visit_source.*, 1 AS is_visit_observation
   FROM visit_source

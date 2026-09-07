@@ -5,6 +5,7 @@ import {
   DETAIL_DRAWER_Z_INDEX_STEP,
   FLOATING_LAYER_Z_ATTR,
   getDetailDrawerLayerSnapshot,
+  getFloatingLayerZIndexAbove,
   getTopFloatingLayerZIndex,
   hasHigherFloatingLayer,
   removeDetailDrawerLayer,
@@ -85,5 +86,17 @@ describe("floating layer helpers", () => {
   it("returns negative infinity when no floating layer is registered in the DOM", () => {
     expect(getTopFloatingLayerZIndex()).toBe(Number.NEGATIVE_INFINITY);
     expect(hasHigherFloatingLayer(Number.NEGATIVE_INFINITY)).toBe(false);
+  });
+
+  it("places a floating layer above the current top layer", () => {
+    const outer = document.createElement("div");
+    outer.setAttribute(FLOATING_LAYER_Z_ATTR, "50");
+    const nested = document.createElement("div");
+    nested.setAttribute(FLOATING_LAYER_Z_ATTR, "52");
+    document.body.appendChild(outer);
+    document.body.appendChild(nested);
+
+    expect(getFloatingLayerZIndexAbove()).toBe(53);
+    expect(getFloatingLayerZIndexAbove(100)).toBe(100);
   });
 });

@@ -97,6 +97,7 @@ function createSqliteDetailEnv(): {
     "migrations/0008_rebuild_analytics.sql",
     "migrations/0013_add_visit_performance_metrics.sql",
     "migrations/0017_structured_custom_events.sql",
+    "migrations/0019_add_user_identity.sql",
   ]) {
     database.exec(readFileSync(migration, "utf8"));
   }
@@ -1374,7 +1375,7 @@ describe("edge journey list D1 queries", () => {
       ),
     ).resolves.toMatchObject([{ visitorId: "123", views: 3 }]);
 
-    expect(calls[0].sql).toContain("matched_visitors");
+    expect(calls[0].sql).not.toContain("matched_visitors");
     expect(calls[0].sql).toContain("ORDER BY views ASC");
     expect(calls[0].bindings.slice(0, 8)).toEqual([
       ...visitBindings(window),
@@ -1403,7 +1404,7 @@ describe("edge journey list D1 queries", () => {
       ),
     ).resolves.toMatchObject([{ sessionId: "session-1", durationMs: 60_000 }]);
 
-    expect(calls[0].sql).toContain("matched_sessions");
+    expect(calls[0].sql).not.toContain("matched_sessions");
     expect(calls[0].sql).toContain("ORDER BY totalDurationMs ASC");
     expect(calls[0].bindings.slice(0, 8)).toEqual([
       ...visitBindings(window),

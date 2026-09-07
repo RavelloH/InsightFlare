@@ -273,6 +273,7 @@ describe("edge query dimensions low-level coverage", () => {
         browser_version TEXT NOT NULL DEFAULT '', os TEXT NOT NULL DEFAULT '',
         os_version TEXT NOT NULL DEFAULT '', device_type TEXT NOT NULL DEFAULT '',
         screen_width INTEGER, screen_height INTEGER, language TEXT NOT NULL DEFAULT '',
+        user_id TEXT, user_name TEXT,
         perf_ttfb_ms REAL, perf_fcp_ms REAL, perf_lcp_ms REAL, perf_cls REAL,
         perf_inp_ms REAL, ae_synced_at INTEGER
       );
@@ -422,6 +423,7 @@ describe("edge query dimensions low-level coverage", () => {
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
       "migrations/0013_add_visit_performance_metrics.sql",
+      "migrations/0019_add_user_identity.sql",
     ]) {
       database.exec(readFileSync(migration, "utf8"));
     }

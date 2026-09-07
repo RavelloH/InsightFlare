@@ -182,11 +182,17 @@ filterBuilder:
   fieldGroups:
     page: ページ
     session: セッション
+    visitor: 訪問者
     referrer: 参照元とチャネル
     campaign: キャンペーン
     client: クライアント
     geography: 地域
     event: イベント
+    acquisition: 獲得
+    device: デバイス
+    geo: 地域
+    performance: パフォーマンス
+    user: ユーザー
   fieldLabels:
     page.path: ページパス
     page.title: ページタイトル
@@ -219,6 +225,24 @@ filterBuilder:
     geo.organization: 組織
     event.name: イベント名
     event.payload: イベントペイロード
+    page.durationMs: ページ滞在時間
+    session.durationMs: セッション時間
+    session.views: セッションビュー数
+    session.events: セッションイベント数
+    session.bounce: バウンスセッション
+    visitor.sessions: 訪問者セッション数
+    visitor.views: 訪問者ビュー数
+    visitor.events: 訪問者イベント数
+    performance.ttfbMs: Time to First Byte
+    performance.fcpMs: First Contentful Paint
+    performance.lcpMs: Largest Contentful Paint
+    performance.cls: Cumulative Layout Shift
+    performance.inpMs: Interaction to Next Paint
+    user.id: ユーザー ID
+    user.name: ユーザー名
+    client.screenWidth: 画面幅
+    client.screenHeight: 画面の高さ
+    geo.isEU: 欧州連合の訪問者
   operatorLabels:
     eq: 等しい
     neq: 等しくない
@@ -256,6 +280,15 @@ filterBuilder:
   removeValue: "フィルター値「{value}」を削除"
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
+  unitAriaLabel: 表示単位
+  units:
+    hours: 時間
+    minutes: 分
+    seconds: 秒
+    milliseconds: ミリ秒
+    percent: "%"
+    perMille: "‰"
+    pixels: ピクセル
   jsonPointer: JSON ポインター
   jsonPointerPlaceholder: JSON ポインターを検索または入力
   match: 一致条件
@@ -280,6 +313,19 @@ filterBuilder:
   savedFiltersLoading: 保存済みフィルターを取得中...
   noSavedFilter: 保存済みフィルターを使用しない
   systemPresets: システムプリセット
+  systemPresetCategories:
+    acquisition: 獲得
+    device: デバイス
+    visitBehavior: 訪問行動
+    sessionEngagement: セッションエンゲージメント
+    visitorBehavior: 訪問者行動
+    performance: パフォーマンス
+    dataQuality: データ品質
+  systemPresetScopes:
+    preserve: 現在のスコープを維持
+    event: イベントスコープ
+    session: セッションスコープ
+    visitor: 訪問者スコープ
   systemPresetItems:
     directTraffic:
       name: 直接トラフィック
@@ -326,6 +372,75 @@ filterBuilder:
     tabletTraffic:
       name: タブレットトラフィック
       description: タブレット端末からの訪問です。
+    longPageViews:
+      name: 長いページビュー
+      description: 30 秒以上続いたページビューです。
+    shortPageViews:
+      name: 短いページビュー
+      description: 10 秒未満で終わったページビューです。
+    identifiedActivity:
+      name: 識別済みアクティビティ
+      description: 識別済みユーザーに関連するイベントです。
+    customEventActivity:
+      name: カスタムイベントアクティビティ
+      description: カスタムイベント名が記録されたイベントです。
+    bouncedSessions:
+      name: バウンスセッション
+      description: ページビューが 1 回だけのセッションです。
+    nonBouncedSessions:
+      name: 非バウンスセッション
+      description: 複数のページビューを含むセッションです。
+    longSessions:
+      name: 長いセッション
+      description: 5 分以上続いたセッションです。
+    shortSessions:
+      name: 短いセッション
+      description: 1 分未満のセッションです。
+    deepSessions:
+      name: 深いセッション
+      description: 3 ページ以上を閲覧したセッションです。
+    eventfulSessions:
+      name: イベントの多いセッション
+      description: カスタムイベントを 1 件以上含むセッションです。
+    highEngagementSessions:
+      name: 高エンゲージメントセッション
+      description: 3 ビュー以上かつ 2 件以上のカスタムイベントを含むセッションです。
+    returningVisitors:
+      name: リピーター訪問者
+      description: 2 セッション以上を持つ訪問者です。
+    frequentVisitors:
+      name: 頻繁な訪問者
+      description: 5 セッション以上を持つ訪問者です。
+    deepVisitors:
+      name: 深い訪問者
+      description: 5 ページ以上を閲覧した訪問者です。
+    eventfulVisitors:
+      name: イベントの多い訪問者
+      description: 2 件以上のカスタムイベントを持つ訪問者です。
+    identifiedVisitors:
+      name: 識別済み訪問者
+      description: 識別済みユーザーに関連する訪問者です。
+    organicSearchVisitors:
+      name: 自然検索訪問者
+      description: タグのない検索リファラーを持つ訪問者です。
+    coreWebVitalsNeedsImprovement:
+      name: Core Web Vitals の改善が必要
+      description: Core Web Vitals のしきい値を超えた訪問です。
+    slowLcp:
+      name: LCP が遅い
+      description: LCP が 2.5 秒を超える訪問です。
+    slowInp:
+      name: INP が遅い
+      description: INP が 200 ミリ秒を超える訪問です。
+    highCls:
+      name: CLS が高い
+      description: CLS が 0.1 を超える訪問です。
+    slowTtfb:
+      name: TTFB が遅い
+      description: TTFB が 800 ミリ秒を超える訪問です。
+    slowFcp:
+      name: FCP が遅い
+      description: FCP が 1.8 秒を超える訪問です。
   savedFiltersPersonal: 個人用フィルター
   savedFiltersTeam: チームのフィルター
   savedFiltersAuthor: "作成者: {name}"

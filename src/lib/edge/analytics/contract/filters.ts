@@ -114,6 +114,11 @@ export interface FilterFieldDefinition {
   readonly valueKind: FilterValueKind;
   readonly operators: ReadonlySet<FilterOperator>;
   readonly audiences: ReadonlySet<QueryAudience>;
+  readonly number?: {
+    readonly min?: number;
+    readonly max?: number;
+    readonly step?: number;
+  };
   /** Set-to-scalar reduction is only sound when the storage profile proves it. */
   readonly singletonSetEquivalent?: boolean;
   readonly canonicalize?: (value: FilterValue) => FilterValue;
@@ -350,6 +355,33 @@ function canonicalValue(
       fail("invalid_number", path, "Expected a finite numeric filter value.");
     }
     value = Object.is(raw, -0) ? 0 : raw;
+    if (definition.number?.min !== undefined && value < definition.number.min) {
+      fail(
+        "number_below_minimum",
+        path,
+        "Numeric filter value is below the field minimum.",
+      );
+    }
+    if (definition.number?.max !== undefined && value > definition.number.max) {
+      fail(
+        "number_above_maximum",
+        path,
+        "Numeric filter value is above the field maximum.",
+      );
+    }
+    if (definition.number?.step !== undefined) {
+      const step = definition.number.step;
+      const base = definition.number.min ?? 0;
+      const quotient = (value - base) / step;
+      const tolerance = Number.EPSILON * Math.max(1, Math.abs(quotient)) * 8;
+      if (Math.abs(quotient - Math.round(quotient)) > tolerance) {
+        fail(
+          "number_not_on_step",
+          path,
+          "Numeric filter value does not match the field step.",
+        );
+      }
+    }
   } else if (definition.valueKind === "boolean") {
     if (typeof raw !== "boolean") {
       fail("invalid_boolean", path, "Expected a boolean filter value.");

@@ -100,7 +100,8 @@ function createSqlitePerformanceEnv(): { env: Env; d1: SqliteD1Database } {
       longitude REAL, postal_code TEXT, metro_code TEXT, timezone TEXT,
       as_organization TEXT, ua_raw TEXT, browser TEXT, browser_version TEXT,
       os TEXT, os_version TEXT, device_type TEXT, screen_width INTEGER,
-      screen_height INTEGER, language TEXT, perf_ttfb_ms REAL,
+      screen_height INTEGER, language TEXT, user_id TEXT, user_name TEXT,
+      perf_ttfb_ms REAL,
       perf_fcp_ms REAL, perf_lcp_ms REAL, perf_cls REAL, perf_inp_ms REAL,
       ae_synced_at INTEGER
     );

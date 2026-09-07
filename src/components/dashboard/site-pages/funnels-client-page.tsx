@@ -76,7 +76,7 @@ function FunnelListLoading() {
   return (
     <div className="grid min-w-0 gap-4 md:grid-cols-2">
       {Array.from({ length: 4 }, (_, index) => (
-        <Card key={index}>
+        <Card key={index} className="h-full">
           <CardContent className="space-y-4 p-5">
             <Skeleton className="h-5 w-44" />
             <Skeleton className="h-3 w-full" />
@@ -353,7 +353,7 @@ export function FunnelsClientPage({
             </CardContent>
           </Card>
         ) : (
-          <div className="grid min-w-0 items-start gap-4 md:grid-cols-2">
+          <div className="grid min-w-0 items-stretch gap-4 md:grid-cols-2">
             {funnels.map((funnel) => (
               <FunnelCard
                 key={funnel.id}

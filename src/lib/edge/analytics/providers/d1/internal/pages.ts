@@ -46,7 +46,10 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
-import { scopedDatasetFor } from "./scoped-dataset";
+import {
+  scopedDatasetFor,
+  scopedDatasetForUnpreparedReader,
+} from "./scoped-dataset";
 
 export interface PageAggregateCursor {
   readonly views: number;
@@ -378,13 +381,31 @@ export async function queryPagesWithTabsFromD1(
   cursor?: PageAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PagesWithTabsResult> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
+  const preparedDataset = scopedDatasetFor(siteId, window, filters);
+  const expandedDataset =
+    preparedDataset ??
+    scopedDatasetForUnpreparedReader(
+      "pages",
+      siteId,
+      window,
+      filters,
+      "session",
+    );
+  const scopedDataset = preparedDataset ?? expandedDataset;
+  const filter = preparedDataset
     ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
+    : buildVisitFilterSql(filters, "rv", { window });
+  const observationVisitRelation = preparedDataset
+    ? preparedDataset.visitRelation
+    : expandedDataset
+      ? "scope_raw_visits"
+      : "visit_source";
+  const edgeVisitRelation =
+    preparedDataset || !expandedDataset
+      ? "filtered_visits"
+      : expandedDataset.visitRelation;
   const queryExpr = includeDetails ? "query_string" : "''";
   const hashExpr = includeDetails ? "hash_fragment" : "''";
-  const expandEntities = !scopedDataset && Boolean(filter?.clause);
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
     "visit_source AS MATERIALIZED (",
@@ -412,7 +433,7 @@ filtered_visits AS MATERIALIZED (
     visit_id,
     TRIM(COALESCE(title, '')) AS title,
     TRIM(COALESCE(hostname, '')) AS hostname
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  FROM ${observationVisitRelation} rv
   ${filter?.clause ?? ""}
 ),
 page_rollup AS (
@@ -454,11 +475,6 @@ page_rows AS (
   ORDER BY pageRank ASC
   LIMIT ?
 ),
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT session_id
-  FROM filtered_visits
-  WHERE session_id != ''
-),
 ranked_session_visits AS (
   SELECT
     vs.session_id,
@@ -472,7 +488,7 @@ ranked_session_visits AS (
       PARTITION BY vs.session_id
       ORDER BY vs.started_at DESC, vs.visit_id DESC
     ) AS latest_rank
-  FROM ${expandEntities ? "visit_source vs\n    INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id" : "filtered_visits vs"}
+  FROM ${edgeVisitRelation} vs
   WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
@@ -589,7 +605,8 @@ ORDER BY rowType ASC, cardType ASC, rowRank ASC, value ASC
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...(scopedDataset
       ? scopedDataset.bindings.map((binding) => binding.value)
-      : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])]),
+      : [...visitSourceBindings(siteId, window)]),
+    ...(filter?.bindings ?? []),
     ...cursorBindings,
     limit + 1,
     limit,

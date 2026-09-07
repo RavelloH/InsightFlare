@@ -182,11 +182,17 @@ filterBuilder:
   fieldGroups:
     page: 页面
     session: 会话
+    visitor: 访客
     referrer: 来源与渠道
     campaign: 营销活动
     client: 客户端
     geography: 地理位置
     event: 事件
+    acquisition: 获客
+    device: 设备
+    geo: 地理位置
+    performance: 性能
+    user: 用户
   fieldLabels:
     page.path: 页面路径
     page.title: 页面标题
@@ -219,6 +225,24 @@ filterBuilder:
     geo.organization: 组织
     event.name: 事件名称
     event.payload: 事件载荷
+    page.durationMs: 页面时长
+    session.durationMs: 会话时长
+    session.views: 会话浏览量
+    session.events: 会话事件数
+    session.bounce: 跳出会话
+    visitor.sessions: 访客会话数
+    visitor.views: 访客浏览量
+    visitor.events: 访客事件数
+    performance.ttfbMs: 首字节时间
+    performance.fcpMs: 首次内容绘制
+    performance.lcpMs: 最大内容绘制
+    performance.cls: 累积布局偏移
+    performance.inpMs: 交互到下一次绘制
+    user.id: 用户 ID
+    user.name: 用户名称
+    client.screenWidth: 屏幕宽度
+    client.screenHeight: 屏幕高度
+    geo.isEU: 欧盟访客
   operatorLabels:
     eq: 等于
     neq: 不等于
@@ -256,6 +280,15 @@ filterBuilder:
   removeValue: 移除筛选值「{value}」
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
+  unitAriaLabel: 显示单位
+  units:
+    hours: 小时
+    minutes: 分钟
+    seconds: 秒
+    milliseconds: 毫秒
+    percent: "%"
+    perMille: "‰"
+    pixels: 像素
   jsonPointer: JSON 指针
   jsonPointerPlaceholder: 搜索或输入 JSON 指针
   match: 匹配方式
@@ -278,6 +311,19 @@ filterBuilder:
   savedFiltersLoading: 正在获取已保存的筛选...
   noSavedFilter: 不使用已保存的筛选
   systemPresets: 系统预设
+  systemPresetCategories:
+    acquisition: 获客
+    device: 设备
+    visitBehavior: 访问行为
+    sessionEngagement: 会话参与度
+    visitorBehavior: 访客行为
+    performance: 性能
+    dataQuality: 数据质量
+  systemPresetScopes:
+    preserve: 保留当前范围
+    event: 事件范围
+    session: 会话范围
+    visitor: 访客范围
   systemPresetItems:
     directTraffic:
       name: 直接访问
@@ -324,6 +370,75 @@ filterBuilder:
     tabletTraffic:
       name: 平板端流量
       description: 来自平板设备的访问。
+    longPageViews:
+      name: 长时页面浏览
+      description: 持续至少 30 秒的页面浏览。
+    shortPageViews:
+      name: 短时页面浏览
+      description: 持续少于 10 秒的页面浏览。
+    identifiedActivity:
+      name: 已识别活动
+      description: 与已识别用户关联的事件。
+    customEventActivity:
+      name: 自定义事件活动
+      description: 记录了自定义事件名称的事件。
+    bouncedSessions:
+      name: 跳出会话
+      description: 只包含一次页面浏览的会话。
+    nonBouncedSessions:
+      name: 非跳出会话
+      description: 包含多次页面浏览的会话。
+    longSessions:
+      name: 长会话
+      description: 持续至少五分钟的会话。
+    shortSessions:
+      name: 短会话
+      description: 持续少于一分钟的会话。
+    deepSessions:
+      name: 深度会话
+      description: 至少浏览三个页面的会话。
+    eventfulSessions:
+      name: 活跃会话
+      description: 至少包含一个自定义事件的会话。
+    highEngagementSessions:
+      name: 高参与度会话
+      description: 至少三次浏览且包含两个自定义事件的会话。
+    returningVisitors:
+      name: 回访访客
+      description: 至少拥有两个会话的访客。
+    frequentVisitors:
+      name: 高频访客
+      description: 至少拥有五个会话的访客。
+    deepVisitors:
+      name: 深度访客
+      description: 至少浏览五个页面的访客。
+    eventfulVisitors:
+      name: 活跃访客
+      description: 至少产生两个自定义事件的访客。
+    identifiedVisitors:
+      name: 已识别访客
+      description: 与已识别用户关联的访客。
+    organicSearchVisitors:
+      name: 自然搜索访客
+      description: 拥有未标记搜索来源的访客。
+    coreWebVitalsNeedsImprovement:
+      name: Core Web Vitals 需改进
+      description: 超过 Core Web Vitals 阈值的访问。
+    slowLcp:
+      name: LCP 较慢
+      description: LCP 超过 2.5 秒的访问。
+    slowInp:
+      name: INP 较慢
+      description: INP 超过 200 毫秒的访问。
+    highCls:
+      name: CLS 较高
+      description: CLS 超过 0.1 的访问。
+    slowTtfb:
+      name: TTFB 较慢
+      description: TTFB 超过 800 毫秒的访问。
+    slowFcp:
+      name: FCP 较慢
+      description: FCP 超过 1.8 秒的访问。
   savedFiltersPersonal: 个人筛选
   savedFiltersTeam: 团队筛选
   savedFiltersAuthor: "作者：{name}"

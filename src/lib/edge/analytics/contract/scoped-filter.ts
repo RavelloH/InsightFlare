@@ -14,6 +14,8 @@ export type FilterScopePreference = FilterScope | "auto";
 
 export type ObservationSource = FilterFieldSource;
 
+export type ScopedFactEntityKind = "session" | "visitor";
+
 export type EntitySetExpression =
   | { readonly kind: "condition"; readonly condition: FilterCondition }
   | {
@@ -29,7 +31,7 @@ export interface ObservationMembershipPlan {
 
 export interface EntityMembershipPlan {
   readonly kind: "entity";
-  readonly entityKind: "session" | "visitor";
+  readonly entityKind: ScopedFactEntityKind;
   readonly expression: EntitySetExpression | null;
 }
 
@@ -142,6 +144,48 @@ function entityExpression(
     kind: expression.kind,
     children: expression.children.map((child) => entityExpression(child)!),
   };
+}
+
+function factEntityKindForCondition(
+  condition: FilterCondition,
+): ScopedFactEntityKind | null {
+  if (condition.target.kind !== "field") return null;
+  const definition = analyticsFilterDefinition(condition.target.field);
+  if (!definition) return null;
+  if (definition.evaluation === "session-fact") return "session";
+  if (definition.evaluation === "visitor-fact") return "visitor";
+
+  // Keep compatibility with metadata produced before `evaluation` was
+  // introduced. Derived session boundary fields intentionally do not enter
+  // this fallback because their explicit evaluation remains `derived`.
+  if (!definition.evaluation && definition.nativeEntity === "session") {
+    return "session";
+  }
+  if (!definition.evaluation && definition.nativeEntity === "visitor") {
+    return "visitor";
+  }
+  return null;
+}
+
+export function factEntityKindsForFilter(
+  expression: FilterExpression | null,
+): ReadonlySet<ScopedFactEntityKind> {
+  const kinds = new Set<ScopedFactEntityKind>();
+  const visit = (item: FilterExpression | null): void => {
+    if (!item) return;
+    if (item.kind === "condition") {
+      const kind = factEntityKindForCondition(item);
+      if (kind) kinds.add(kind);
+      return;
+    }
+    if (item.kind === "not") {
+      visit(item.child);
+      return;
+    }
+    item.children.forEach(visit);
+  };
+  visit(expression);
+  return kinds;
 }
 
 function requiredSources(
@@ -275,18 +319,26 @@ export function createScopedFilterPlan(
   if (!scope) return null;
   const expression = filters.root;
   const sources = requiredSources(expression);
-  const entityKind = scope === "session" ? "session" : "visitor";
+  const factKinds = factEntityKindsForFilter(expression);
+  const entityKind =
+    scope === "session"
+      ? "session"
+      : scope === "visitor"
+        ? "visitor"
+        : factKinds.has("session")
+          ? "session"
+          : "visitor";
+  const usesEntityMembership = scope !== "event" || factKinds.size > 0;
   return {
     scope,
-    mode: scope === "event" ? "observation" : "entity",
-    membership:
-      scope === "event"
-        ? { kind: "observation", expression }
-        : {
-            kind: "entity",
-            entityKind,
-            expression: entityExpression(expression),
-          },
+    mode: usesEntityMembership ? "entity" : "observation",
+    membership: !usesEntityMembership
+      ? { kind: "observation", expression }
+      : {
+          kind: "entity",
+          entityKind,
+          expression: entityExpression(expression),
+        },
     expansion:
       scope === "event"
         ? "matching-observations"

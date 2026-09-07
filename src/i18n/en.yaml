@@ -182,11 +182,17 @@ filterBuilder:
   fieldGroups:
     page: Page
     session: Session
+    visitor: Visitor
     referrer: Sources & channels
     campaign: Campaign
     client: Client
     geography: Geography
     event: Event
+    acquisition: Acquisition
+    device: Device
+    geo: Geography
+    performance: Performance
+    user: User
   fieldLabels:
     page.path: Page path
     page.title: Page title
@@ -219,6 +225,24 @@ filterBuilder:
     geo.organization: Organization
     event.name: Event name
     event.payload: Event payload
+    page.durationMs: Page duration
+    session.durationMs: Session duration
+    session.views: Session views
+    session.events: Session events
+    session.bounce: Bounced session
+    visitor.sessions: Visitor sessions
+    visitor.views: Visitor views
+    visitor.events: Visitor events
+    performance.ttfbMs: Time to first byte
+    performance.fcpMs: First contentful paint
+    performance.lcpMs: Largest contentful paint
+    performance.cls: Cumulative layout shift
+    performance.inpMs: Interaction to next paint
+    user.id: User ID
+    user.name: User name
+    client.screenWidth: Screen width
+    client.screenHeight: Screen height
+    geo.isEU: European Union visitor
   operatorLabels:
     eq: Equals
     neq: Does not equal
@@ -256,6 +280,15 @@ filterBuilder:
   removeValue: Remove filter value "{value}"
   rangeStartPlaceholder: Lower bound
   rangeEndPlaceholder: Upper bound
+  unitAriaLabel: Display unit
+  units:
+    hours: Hours
+    minutes: Minutes
+    seconds: Seconds
+    milliseconds: Milliseconds
+    percent: "%"
+    perMille: "‰"
+    pixels: Pixels
   jsonPointer: JSON Pointer
   jsonPointerPlaceholder: Search or enter a JSON pointer
   match: Match
@@ -282,6 +315,19 @@ filterBuilder:
   savedFiltersLoading: Loading saved filters...
   noSavedFilter: Do not use a saved filter
   systemPresets: System presets
+  systemPresetCategories:
+    acquisition: Acquisition
+    device: Device
+    visitBehavior: Visit behavior
+    sessionEngagement: Session engagement
+    visitorBehavior: Visitor behavior
+    performance: Performance
+    dataQuality: Data quality
+  systemPresetScopes:
+    preserve: Keep current scope
+    event: Event scope
+    session: Session scope
+    visitor: Visitor scope
   systemPresetItems:
     directTraffic:
       name: Direct traffic
@@ -328,6 +374,75 @@ filterBuilder:
     tabletTraffic:
       name: Tablet traffic
       description: Visits from tablet devices.
+    longPageViews:
+      name: Long page views
+      description: Page views lasting at least 30 seconds.
+    shortPageViews:
+      name: Short page views
+      description: Page views lasting less than 10 seconds.
+    identifiedActivity:
+      name: Identified activity
+      description: Events associated with an identified user.
+    customEventActivity:
+      name: Custom event activity
+      description: Events with a recorded custom event name.
+    bouncedSessions:
+      name: Bounced sessions
+      description: Sessions containing a single page view.
+    nonBouncedSessions:
+      name: Non-bounced sessions
+      description: Sessions containing more than one page view.
+    longSessions:
+      name: Long sessions
+      description: Sessions lasting at least five minutes.
+    shortSessions:
+      name: Short sessions
+      description: Sessions lasting less than one minute.
+    deepSessions:
+      name: Deep sessions
+      description: Sessions with at least three page views.
+    eventfulSessions:
+      name: Eventful sessions
+      description: Sessions with at least one custom event.
+    highEngagementSessions:
+      name: Highly engaged sessions
+      description: Sessions with at least three views and two custom events.
+    returningVisitors:
+      name: Returning visitors
+      description: Visitors with at least two sessions.
+    frequentVisitors:
+      name: Frequent visitors
+      description: Visitors with at least five sessions.
+    deepVisitors:
+      name: Deep visitors
+      description: Visitors with at least five page views.
+    eventfulVisitors:
+      name: Eventful visitors
+      description: Visitors with at least two custom events.
+    identifiedVisitors:
+      name: Identified visitors
+      description: Visitors associated with an identified user.
+    organicSearchVisitors:
+      name: Organic search visitors
+      description: Visitors with an untagged search referral.
+    coreWebVitalsNeedsImprovement:
+      name: Core Web Vitals need improvement
+      description: Visits exceeding a Core Web Vitals threshold.
+    slowLcp:
+      name: Slow LCP
+      description: Visits with LCP above 2.5 seconds.
+    slowInp:
+      name: Slow INP
+      description: Visits with INP above 200 milliseconds.
+    highCls:
+      name: High CLS
+      description: Visits with CLS above 0.1.
+    slowTtfb:
+      name: Slow TTFB
+      description: Visits with TTFB above 800 milliseconds.
+    slowFcp:
+      name: Slow FCP
+      description: Visits with FCP above 1.8 seconds.
   savedFiltersPersonal: Personal filters
   savedFiltersTeam: Team filters
   savedFiltersAuthor: "Author: {name}"

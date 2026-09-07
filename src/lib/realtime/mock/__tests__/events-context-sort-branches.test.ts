@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
-import type { CanonicalJsonPath, FilterDocument } from "@/lib/filter-contract";
+import type {
+  CanonicalJsonPath,
+  FilterDocument,
+  FilterFieldId,
+} from "@/lib/filter-contract";
 import {
   demoEventContextCards,
   demoEventDimensionRows,
   demoEventSummaryCards,
 } from "@/lib/realtime/mock/events-context";
-import type { DemoCustomEventFact } from "@/lib/realtime/mock/events-facts";
+import {
+  createDemoCustomEventFacts,
+  type DemoCustomEventFact,
+} from "@/lib/realtime/mock/events-facts";
 import { filterDemoCustomEventsByPayload } from "@/lib/realtime/mock/events-payload-filter";
 import {
   parseDemoEventRecordSort,
@@ -664,6 +671,129 @@ describe("mock/events-payload-filter branch behavior", () => {
     expect(filterDemoCustomEventsByPayload([event], orDocument)).toHaveLength(
       1,
     );
+  });
+
+  it("preserves mixed observation and payload boolean semantics", () => {
+    const signedIn = makeEvent(
+      "signed-in",
+      "signup",
+      200,
+      makeVisit({ visitId: "visit-signed-in", pathname: "/checkout" }),
+    );
+    const signedOut = makeEvent(
+      "alpha",
+      "signup",
+      100,
+      makeVisit({ visitId: "visit-signed-out", pathname: "/home" }),
+    );
+    const events = [signedIn, signedOut];
+    const pagePath = (value: string) => ({
+      kind: "condition" as const,
+      target: {
+        kind: "field" as const,
+        field: "page.path" as FilterFieldId,
+      },
+      operator: "eq" as const,
+      value,
+    });
+    const signedInPayload = {
+      kind: "condition" as const,
+      target: {
+        kind: "event-payload" as const,
+        path: "/flags/signedIn" as CanonicalJsonPath,
+      },
+      operator: "eq" as const,
+      value: true,
+    };
+
+    const andDocument: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "and",
+        children: [pagePath("/checkout"), signedInPayload],
+      },
+    };
+    expect(
+      filterDemoCustomEventsByPayload(events, andDocument).map(
+        (event) => event.eventId,
+      ),
+    ).toEqual(["signed-in"]);
+
+    const orDocument: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "or",
+        children: [pagePath("/home"), signedInPayload],
+      },
+    };
+    expect(
+      filterDemoCustomEventsByPayload(events, orDocument).map(
+        (event) => event.eventId,
+      ),
+    ).toEqual(["signed-in", "alpha"]);
+
+    const nestedNotDocument: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "not",
+        child: {
+          kind: "or",
+          children: [
+            pagePath("/pricing"),
+            {
+              kind: "condition",
+              target: {
+                kind: "event-payload",
+                path: "/flags/signedIn" as CanonicalJsonPath,
+              },
+              operator: "eq",
+              value: false,
+            },
+          ],
+        },
+      },
+    };
+    expect(
+      filterDemoCustomEventsByPayload(events, nestedNotDocument).map(
+        (event) => event.eventId,
+      ),
+    ).toEqual(["signed-in"]);
+  });
+
+  it("uses all events in an entity for scoped payload witnesses", () => {
+    const candidateVisit = makeVisit({
+      visitId: "candidate",
+      sessionId: "shared-session",
+      visitorId: "shared-visitor",
+      eventType: "signup",
+    });
+    const payloadVisit = makeVisit({
+      visitId: "payload-witness",
+      sessionId: "shared-session",
+      visitorId: "shared-visitor",
+      eventType: "signed-in",
+    });
+    const candidates = createDemoCustomEventFacts([candidateVisit]);
+    const document: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "condition",
+        target: {
+          kind: "event-payload",
+          path: "/flags/signedIn" as CanonicalJsonPath,
+        },
+        operator: "eq",
+        value: true,
+      },
+    };
+
+    expect(
+      filterDemoCustomEventsByPayload(
+        candidates,
+        { filterDocument: document, scope: "session" },
+        { allVisits: [candidateVisit, payloadVisit] },
+      ).map((event) => event.eventId),
+    ).toEqual(["candidate:signup"]);
   });
 });
 

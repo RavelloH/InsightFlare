@@ -8,6 +8,7 @@ import {
   FILTER_DSL_SYNTAX,
   FILTER_DSL_VERSION,
   FilterDslParseError,
+  type FilterFieldDefinition,
   type FilterFieldRegistry,
   FilterValidationError,
   formatFilterDsl,
@@ -51,7 +52,10 @@ describe("filter DSL v1", () => {
   });
 
   it("supports every v1 operator spelling, typed values, precedence, and payload targets", () => {
-    const numberRegistry: FilterFieldRegistry = new Map([
+    const numberRegistry: FilterFieldRegistry = new Map<
+      string,
+      FilterFieldDefinition
+    >([
       [
         "metric.number",
         {

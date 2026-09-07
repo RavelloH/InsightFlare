@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyticsFilterRegistry,
   EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
   type FunnelConfigV2,
   normalizeFilterDocument,
   prepareScopedQuery,
@@ -132,6 +133,7 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
       browser_version TEXT NOT NULL DEFAULT '', os TEXT NOT NULL DEFAULT '',
       os_version TEXT NOT NULL DEFAULT '', device_type TEXT NOT NULL DEFAULT '',
       screen_width INTEGER, screen_height INTEGER, language TEXT NOT NULL DEFAULT '',
+      user_id TEXT, user_name TEXT,
       perf_ttfb_ms REAL, perf_fcp_ms REAL, perf_lcp_ms REAL, perf_cls REAL,
       perf_inp_ms REAL, ae_synced_at INTEGER
     );
@@ -516,6 +518,26 @@ function readTruthRelationIds(
     sessions: read(dataset.sessionRelation, "session_id"),
     visitors: read(dataset.visitorRelation, "visitor_id"),
   };
+}
+
+function preparedJourneyFilters(
+  operation: "sessions" | "visitors",
+  filters: FilterDocument,
+): FilterDocument {
+  const prepared = prepareScopedQuery(operation, {
+    context: siteQueryContext(siteId, "private-dashboard"),
+    time: {
+      range: {
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+      },
+      reportingTimeZone: "UTC",
+      capturedAtMs: window.nowMs,
+    },
+    filters,
+    scopePreference: "auto",
+  } as QueryInput & { time: QueryTime });
+  return prepared.filters!;
 }
 
 describe("event detail D1 SQL", () => {
@@ -1332,25 +1354,27 @@ describe("event detail D1 SQL", () => {
         );
 
       const filter = filterFixture({ path: "/posts/minecraft-meteor-guide" });
+      const sessionFilters = preparedJourneyFilters("sessions", filter);
+      const visitorFilters = preparedJourneyFilters("visitors", filter);
       const sessions = await querySessionsFromD1(
         env,
         siteId,
         window,
-        filter,
+        sessionFilters,
         10,
       );
       const visitors = await queryVisitorsFromD1(
         env,
         siteId,
         window,
-        filter,
+        visitorFilters,
         10,
       );
       const sessionPage = await querySessionListPageFromD1(
         env,
         siteId,
         window,
-        filter,
+        sessionFilters,
         {
           limit: 10,
           sort: { key: "startedAt", direction: "asc" },
@@ -1360,7 +1384,7 @@ describe("event detail D1 SQL", () => {
         env,
         siteId,
         window,
-        filter,
+        visitorFilters,
         {
           limit: 10,
           sort: { key: "firstSeenAt", direction: "asc" },
@@ -1418,9 +1442,11 @@ describe("event detail D1 SQL", () => {
     );
 
     try {
+      const sessionFilters = preparedJourneyFilters("sessions", filters);
+      const visitorFilters = preparedJourneyFilters("visitors", filters);
       const [sessions, visitors] = await Promise.all([
-        querySessionsFromD1(env, siteId, window, filters, 10),
-        queryVisitorsFromD1(env, siteId, window, filters, 10),
+        querySessionsFromD1(env, siteId, window, sessionFilters, 10),
+        queryVisitorsFromD1(env, siteId, window, visitorFilters, 10),
       ]);
 
       expect(sessions).toMatchObject([{ sessionId: "session-1", views: 3 }]);
@@ -1429,17 +1455,23 @@ describe("event detail D1 SQL", () => {
       ]);
       expect(d1.calls.every(({ sql }) => sql.includes("EXISTS ("))).toBe(true);
       expect(
-        d1.calls.every(({ sql }) =>
-          sql.includes("event_filter_source.event_name"),
+        d1.calls.every(
+          ({ sql }) =>
+            sql.includes("scope_raw_events") && sql.includes("e.event_name"),
         ),
       ).toBe(true);
       expect(
-        d1.calls.every(({ sql }) =>
-          sql.includes("event_filter_source.event_pk"),
+        d1.calls.every(
+          ({ sql }) =>
+            sql.includes("scope_raw_events") && sql.includes("e.event_pk"),
         ),
       ).toBe(true);
       expect(
-        d1.calls.every(({ sql }) => !sql.includes("visit_source.event_name")),
+        d1.calls.every(
+          ({ sql }) =>
+            !sql.includes("event_filter_source") &&
+            !sql.includes("visit_source.event_name"),
+        ),
       ).toBe(true);
     } finally {
       d1.close();

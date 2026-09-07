@@ -138,6 +138,14 @@ export function getTopFloatingLayerZIndex() {
   }, Number.NEGATIVE_INFINITY);
 }
 
+export function getFloatingLayerZIndexAbove(
+  fallbackZIndex = MODAL_LAYER_Z_INDEX,
+) {
+  const topZIndex = getTopFloatingLayerZIndex();
+  if (!Number.isFinite(topZIndex)) return fallbackZIndex;
+  return Math.max(fallbackZIndex, topZIndex + 1);
+}
+
 export function hasHigherFloatingLayer(currentZIndex: number) {
   return getTopFloatingLayerZIndex() > currentZIndex;
 }

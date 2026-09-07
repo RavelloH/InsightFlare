@@ -101,9 +101,9 @@ export function FunnelCard({
   });
 
   return (
-    <div ref={ref} className="min-w-0">
+    <div ref={ref} className="h-full min-w-0">
       <Card
-        className="min-w-0 cursor-pointer transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-full min-w-0 cursor-pointer transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
         role="button"
         tabIndex={0}
         aria-label={`${labels.open}: ${funnel.name}`}

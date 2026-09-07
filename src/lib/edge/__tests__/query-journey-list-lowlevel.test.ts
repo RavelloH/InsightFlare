@@ -120,7 +120,7 @@ describe("D1 journey list low-level query coverage", () => {
       { key: "sessions", direction: "asc" },
       "Chrome%",
     );
-    expect(filtered.calls[0].sql).toContain("matched_visitors AS");
+    expect(filtered.calls[0].sql).not.toContain("matched_visitors AS");
     expect(filtered.calls[0].sql).toContain("visitor_id != ''");
 
     const scoped = createD1Env([[visitorRow]]);
@@ -171,7 +171,7 @@ describe("D1 journey list low-level query coverage", () => {
         search: "docs",
       },
     );
-    expect(searched.calls[0].sql).toContain("matched_visitors AS");
+    expect(searched.calls[0].sql).not.toContain("matched_visitors AS");
 
     const scopedPage = createD1Env([[]]);
     await queryVisitorListPageFromD1(
@@ -208,7 +208,7 @@ describe("D1 journey list low-level query coverage", () => {
       { key: "durationMs", direction: "desc" },
       "Chrome",
     );
-    expect(sessionTarget.calls[0].sql).toContain("matched_sessions AS");
+    expect(sessionTarget.calls[0].sql).not.toContain("matched_sessions AS");
     expect(sessionTarget.calls[0].sql).toContain("session_id = ?");
 
     const scoped = createD1Env([[sessionRow]]);

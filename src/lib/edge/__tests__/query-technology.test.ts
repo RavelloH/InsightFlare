@@ -177,6 +177,8 @@ function createSqliteTrendEnv(): { env: Env; d1: SqliteD1Database } {
       screen_width INTEGER,
       screen_height INTEGER,
       language TEXT NOT NULL DEFAULT '',
+      user_id TEXT,
+      user_name TEXT,
       perf_ttfb_ms REAL,
       perf_fcp_ms REAL,
       perf_lcp_ms REAL,

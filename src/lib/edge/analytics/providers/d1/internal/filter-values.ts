@@ -66,9 +66,22 @@ export async function queryFilterValuesFromD1(
   field: string,
   limit: number,
   search?: string,
+  audience: QueryAudience = "private-dashboard",
 ): Promise<FilterValueRow[]> {
   const definition = analyticsFilterDefinition(field);
-  if (!definition || definition.source === "payload") return [];
+  if (
+    !definition ||
+    definition.source === "payload" ||
+    !definition.audiences.has(audience)
+  )
+    return [];
+  if (definition.suggestionMode === "none") return [];
+  if (definition.suggestionMode === "boolean") {
+    return ["false", "true"]
+      .filter((value) => matchesSearch(value, search))
+      .slice(0, limit)
+      .map((value) => ({ value, occurrences: 0 }));
+  }
 
   // Query a bounded superset before applying the UI search token. This keeps
   // the SQL reader shared with existing dimension contracts while preserving
@@ -151,10 +164,30 @@ export async function queryFilterValuesPageFromD1(
   audience: QueryAudience = "private-dashboard",
 ): Promise<FilterValuePage> {
   const definition = analyticsFilterDefinition(field);
-  if (!definition || definition.source === "payload") {
+  if (
+    !definition ||
+    definition.source === "payload" ||
+    !definition.audiences.has(audience) ||
+    definition.suggestionMode === "none"
+  ) {
     return {
       items: [],
       pagination: { limit, returned: 0, hasMore: false, nextCursor: null },
+    };
+  }
+  if (definition.suggestionMode === "boolean") {
+    const items = ["false", "true"]
+      .filter((value) => matchesSearch(value, search))
+      .slice(0, limit)
+      .map((value) => ({ value, occurrences: 0 }));
+    return {
+      items,
+      pagination: {
+        limit,
+        returned: items.length,
+        hasMore: false,
+        nextCursor: null,
+      },
     };
   }
   if (field === "event.name") {

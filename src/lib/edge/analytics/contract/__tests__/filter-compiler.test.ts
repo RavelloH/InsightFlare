@@ -13,6 +13,56 @@ function document(root: unknown) {
 }
 
 describe("filter SQL compiler", () => {
+  it("compiles numeric and boolean observation fields without text coercion", () => {
+    const numeric = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "field", field: "performance.lcpMs" },
+        operator: "gte",
+        value: 2500,
+      }),
+      { alias: "vs" },
+    );
+    expect(numeric.clause).toContain("vs.perf_lcp_ms >= ?");
+    expect(numeric.clause).not.toContain("TRIM(COALESCE");
+    expect(numeric.bindings).toEqual([2500]);
+
+    const boolean = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "field", field: "geo.isEU" },
+        operator: "eq",
+        value: true,
+      }),
+      { alias: "vs" },
+    );
+    expect(boolean.clause).toContain("vs.is_eu = ?");
+    expect(boolean.bindings).toEqual([1]);
+  });
+
+  it("preserves nullable numeric presence predicates", () => {
+    const result = compileFilterDocument(
+      document({
+        kind: "and",
+        children: [
+          {
+            kind: "condition",
+            target: { kind: "field", field: "performance.lcpMs" },
+            operator: "isNull",
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "performance.cls" },
+            operator: "notNull",
+          },
+        ],
+      }),
+      { alias: "vs" },
+    );
+    expect(result.clause).toContain("vs.perf_lcp_ms IS NULL");
+    expect(result.clause).toContain("vs.perf_cls IS NOT NULL");
+  });
+
   it("compiles traffic channel filters from the shared attribution expression", () => {
     const result = compileFilterDocument(
       document({

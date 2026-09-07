@@ -211,6 +211,7 @@ export function generateDemoEventsSummary(
   const events = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
+    { allVisits: dataset.visits },
   );
   const sessions = new Set(events.map((event) => event.visit.sessionId));
   const visitors = new Set(events.map((event) => event.visit.visitorId));
@@ -252,6 +253,7 @@ export function generateDemoEventsTrend(
   const allEvents = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
+    { allVisits: dataset.visits },
   ).filter((event) => !eventName || event.eventName === eventName);
   const buckets = buildDemoTimeBuckets(from, to, interval, timeZone);
   const seriesRows = demoEventDimensionRows(
@@ -356,6 +358,7 @@ export function generateDemoEventsRecords(
   const events = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
+    { allVisits: dataset.visits },
   ).filter((event) => {
     if (eventName && event.eventName !== eventName) return false;
     return demoValuesIncludeSearch(search, [
@@ -407,6 +410,7 @@ export function generateDemoEventTypeDetail(
   const allEvents = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
+    { allVisits: dataset.visits },
   );
   const events = allEvents.filter((event) => event.eventName === eventName);
   const sessions = new Set(events.map((event) => event.visit.sessionId));
@@ -512,6 +516,7 @@ export function generateDemoEventTypeContext(
   const events = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
+    { allVisits: dataset.visits },
   ).filter((event) => event.eventName === eventName);
 
   const cards = demoEventContextCards(dataset, events, 100);
@@ -572,6 +577,7 @@ export function generateDemoEventFields(
   const events = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
+    { allVisits: dataset.visits },
   ).filter((event) => !eventName || event.eventName === eventName);
   const binding = {
     operation: "event-fields",
@@ -632,6 +638,7 @@ export function generateDemoEventTypeFieldValues(
   const events = filterDemoCustomEventsByPayload(
     createDemoCustomEventFacts(filtered.visits),
     filters,
+    { allVisits: dataset.visits },
   ).filter((event) => !eventName || event.eventName === eventName);
 
   const rows = collectDemoEventFieldValues(

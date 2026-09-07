@@ -34,7 +34,10 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
-import { scopedDatasetFor } from "./scoped-dataset";
+import {
+  scopedDatasetFor,
+  scopedDatasetForUnpreparedReader,
+} from "./scoped-dataset";
 
 export interface DimensionAggregateCursor {
   /** The first two values are the concrete ORDER BY metrics. */
@@ -369,11 +372,18 @@ export async function querySessionPathDimensionFromD1(
   diagnostics?: D1ReadDiagnostics,
   search?: string,
 ): Promise<DimensionRow[]> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
+  const scopedDataset =
+    scopedVisitDataset(siteId, window, filters) ??
+    scopedDatasetForUnpreparedReader(
+      "dimension",
+      siteId,
+      window,
+      filters,
+      "session",
+    );
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
-  const expandEntities = !scopedDataset && Boolean(filter?.clause);
   const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
   const visitSource = buildVisitSourceCte().replace(
@@ -393,11 +403,6 @@ filtered_visits AS MATERIALIZED (
   FROM ${scopedDataset?.visitRelation ?? "visit_source"}
   ${filter?.clause ?? ""}
 ),
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT session_id
-  FROM filtered_visits
-  WHERE session_id != ''
-),
 ranked_session_visits AS (
   SELECT
     vs.session_id,
@@ -411,7 +416,7 @@ ranked_session_visits AS (
       PARTITION BY vs.session_id
       ORDER BY vs.started_at DESC, vs.visit_id DESC
     ) AS latest_rank
-  FROM ${expandEntities ? "visit_source vs\n  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id" : "filtered_visits vs"}
+  FROM filtered_visits vs
   WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
@@ -479,11 +484,18 @@ export async function querySessionPathDimensionPageFromD1(
   cursor?: SessionPathDimensionCursor | null,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<DimensionRow>> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
+  const scopedDataset =
+    scopedVisitDataset(siteId, window, filters) ??
+    scopedDatasetForUnpreparedReader(
+      "dimension",
+      siteId,
+      window,
+      filters,
+      "session",
+    );
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
-  const expandEntities = !scopedDataset && Boolean(filter?.clause);
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
@@ -502,11 +514,6 @@ filtered_visits AS MATERIALIZED (
   FROM ${scopedDataset?.visitRelation ?? "visit_source"}
   ${filter?.clause ?? ""}
 ),
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT session_id
-  FROM filtered_visits
-  WHERE session_id != ''
-),
 ranked_session_visits AS (
   SELECT
     vs.session_id,
@@ -520,7 +527,7 @@ ranked_session_visits AS (
       PARTITION BY vs.session_id
       ORDER BY vs.started_at DESC, vs.visit_id DESC
     ) AS latest_rank
-  FROM ${expandEntities ? "visit_source vs\n  INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id" : "filtered_visits vs"}
+  FROM filtered_visits vs
   WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
@@ -695,11 +702,29 @@ export async function queryPageTabsFromD1(
   entry: DimensionRow[];
   exit: DimensionRow[];
 }> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset
+  const preparedDataset = scopedVisitDataset(siteId, window, filters);
+  const expandedDataset =
+    preparedDataset ??
+    scopedDatasetForUnpreparedReader(
+      "pages",
+      siteId,
+      window,
+      filters,
+      "session",
+    );
+  const scopedDataset = preparedDataset ?? expandedDataset;
+  const filter = preparedDataset
     ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const expandEntities = !scopedDataset && Boolean(filter?.clause);
+    : buildVisitFilterSql(filters, "rv", { window });
+  const observationVisitRelation = preparedDataset
+    ? preparedDataset.visitRelation
+    : expandedDataset
+      ? "scope_raw_visits"
+      : "visit_source";
+  const edgeVisitRelation =
+    preparedDataset || !expandedDataset
+      ? "filtered_visits"
+      : expandedDataset.visitRelation;
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
     "visit_source AS MATERIALIZED (",
@@ -716,13 +741,8 @@ filtered_visits AS MATERIALIZED (
     TRIM(COALESCE(pathname, '')) AS pathname,
     TRIM(COALESCE(title, '')) AS title,
     TRIM(COALESCE(hostname, '')) AS hostname
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  FROM ${observationVisitRelation} rv
   ${filter?.clause ?? ""}
-),
-matched_sessions AS MATERIALIZED (
-  SELECT DISTINCT session_id
-  FROM filtered_visits
-  WHERE session_id != ''
 ),
 ranked_session_visits AS (
   SELECT
@@ -737,7 +757,7 @@ ranked_session_visits AS (
       PARTITION BY vs.session_id
       ORDER BY vs.started_at DESC, vs.visit_id DESC
     ) AS latest_rank
-  FROM ${expandEntities ? "visit_source vs\n    INNER JOIN matched_sessions ms ON ms.session_id = vs.session_id" : "filtered_visits vs"}
+  FROM ${edgeVisitRelation} vs
   WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
@@ -821,7 +841,8 @@ ORDER BY card_type ASC, card_rank ASC
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...(scopedDataset
       ? scopedDataset.bindings.map((binding) => binding.value)
-      : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])]),
+      : [...visitSourceBindings(siteId, window)]),
+    ...(filter?.bindings ?? []),
     limit,
   ]);
   const byCard = new Map<string, DimensionRow[]>();

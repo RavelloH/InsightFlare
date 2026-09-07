@@ -7,6 +7,7 @@ export {
   FLOATING_LAYER_Z_ATTR,
   FLOATING_LAYER_Z_INDEX,
   getDetailDrawerLayerSnapshot,
+  getFloatingLayerZIndexAbove,
   getTopFloatingLayerZIndex,
   hasHigherFloatingLayer,
   MODAL_LAYER_Z_INDEX,

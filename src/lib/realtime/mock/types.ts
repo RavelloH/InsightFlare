@@ -45,11 +45,18 @@ export interface DemoSessionFact {
   visitorId: string;
   entryPath: string;
   exitPath: string;
+  durationMs?: number;
+  views?: number;
+  events?: number;
+  bounce?: boolean;
   weight: number;
 }
 
 export interface DemoVisitorFact {
   visitorId: string;
+  sessions?: number;
+  views?: number;
+  events?: number;
   weight: number;
 }
 
@@ -85,6 +92,16 @@ export interface DemoVisitFact {
   longitude: number;
   eventType: string;
   durationMs: number;
+  screenWidth?: number | null;
+  screenHeight?: number | null;
+  isEU?: boolean;
+  perfTtfbMs?: number | null;
+  perfFcpMs?: number | null;
+  perfLcpMs?: number | null;
+  perfCls?: number | null;
+  perfInpMs?: number | null;
+  userId?: string;
+  userName?: string;
 }
 
 export interface DemoFactDataset {
