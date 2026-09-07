@@ -727,8 +727,9 @@ funnels:
   deleted: Funnel deleted.
   deleteFailed: Unable to delete funnel.
   overallConversion: Overall conversion
-  startedSessions: Started progressions
-  convertedSessions: Converted progressions
+  startedSessions: Started sessions
+  startedVisitors: Started visitors
+  convertedSessions: Converted sessions
   convertedVisitors: Converted visitors
   largestDropOff: Largest drop-off
   noDropOff: No drop-off

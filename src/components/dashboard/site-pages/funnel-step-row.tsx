@@ -25,6 +25,7 @@ export function FunnelStepRow({
   step,
   index,
   total,
+  animateIn = false,
   onChange,
   onDelete,
   onFilter,
@@ -32,6 +33,7 @@ export function FunnelStepRow({
 }: {
   readonly step: FunnelStep;
   readonly index: number;
+  readonly animateIn?: boolean;
   readonly total: number;
   readonly onChange: (patch: Partial<FunnelStep>) => void;
   readonly onDelete: () => void;
@@ -45,6 +47,9 @@ export function FunnelStepRow({
     <Reorder.Item
       value={step}
       id={step.id}
+      initial={animateIn ? { opacity: 0 } : false}
+      animate={animateIn ? { opacity: 1 } : undefined}
+      transition={animateIn ? { duration: 0.2 } : undefined}
       dragListener={false}
       dragControls={controls}
       className="flex min-w-0 items-center gap-2 border bg-muted/20 p-2"

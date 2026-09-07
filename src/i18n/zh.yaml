@@ -715,6 +715,7 @@ funnels:
   deleteFailed: 删除漏斗失败。
   overallConversion: 总转化率
   startedSessions: 起始会话数
+  startedVisitors: 起始访客数
   convertedSessions: 转化会话数
   convertedVisitors: 转化访客数
   largestDropOff: 最大流失

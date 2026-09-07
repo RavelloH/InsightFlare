@@ -112,9 +112,18 @@ export function ResponsiveDialogContent({
 export function ResponsiveDialogBody({
   children,
   className,
+  scrollable = true,
   ...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> & { scrollable?: boolean }) {
   const isMobile = React.useContext(ResponsiveDialogContext);
+
+  if (!scrollable) {
+    return (
+      <div className={cn("flex min-h-0 flex-1 flex-col", className)} {...props}>
+        {children}
+      </div>
+    );
+  }
 
   if (isMobile) {
     return (

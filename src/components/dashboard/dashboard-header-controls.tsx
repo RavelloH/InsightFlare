@@ -806,10 +806,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                     {messages.dashboardHeader.filterSubtitle}
                   </DrawerDescription>
                 </DrawerHeader>
-                <DrawerScrollArea
-                  className="overflow-hidden"
-                  contentClassName="px-4"
-                >
+                <div className="min-h-0 flex-1 px-4">
                   <FilterPanel
                     audience={filterAudience}
                     document={queryDocument}
@@ -823,7 +820,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                     onApply={applyFilterDocument}
                     onScopeChange={handleScopeChange}
                   />
-                </DrawerScrollArea>
+                </div>
               </DrawerContent>
             </Drawer>
           ) : null}

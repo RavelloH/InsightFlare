@@ -719,6 +719,7 @@ funnels:
   deleteFailed: ファネルを削除できません。
   overallConversion: 全体コンバージョン
   startedSessions: 開始セッション数
+  startedVisitors: 開始訪問者数
   convertedSessions: コンバージョンセッション数
   convertedVisitors: コンバージョン訪問者数
   largestDropOff: 最大離脱

@@ -44,7 +44,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import {
   createSavedFilter,
   deleteSavedFilter,
@@ -243,6 +242,207 @@ function SavedFilterFormFields({
         </Select>
       </div>
     </div>
+  );
+}
+
+function FilterPanelHeader({
+  audience,
+  matchedSavedFilter,
+  matchedSystemPreset,
+  messages,
+  savedFilterTriggerKey,
+  savedFilterTriggerLabel,
+  savedFilters,
+  savedFiltersLoading,
+  scopePreference,
+  onApplySavedFilter,
+  onApplySystemPreset,
+  onClearSavedFilter,
+  onScopeChange,
+}: {
+  audience: FilterPanelAudience;
+  matchedSavedFilter?: SavedFilter;
+  matchedSystemPreset?: SystemFilterPreset;
+  messages: AppMessages;
+  savedFilterTriggerKey: string;
+  savedFilterTriggerLabel: string;
+  savedFilters: readonly SavedFilter[];
+  savedFiltersLoading: boolean;
+  scopePreference: FilterScopePreference;
+  onApplySavedFilter: (filter: SavedFilter) => void;
+  onApplySystemPreset: (preset: SystemFilterPreset) => void;
+  onClearSavedFilter: () => void;
+  onScopeChange: (preference: FilterScopePreference) => void;
+}) {
+  return (
+    <>
+      <div className="mb-4 border-b border-border pb-4">
+        <Select
+          value={
+            matchedSavedFilter?.id ??
+            (matchedSystemPreset
+              ? systemFilterPresetOptionValue(matchedSystemPreset.id)
+              : NO_SAVED_FILTER_VALUE)
+          }
+          disabled={savedFiltersLoading}
+          onValueChange={(value) => {
+            if (value === NO_SAVED_FILTER_VALUE) {
+              onClearSavedFilter();
+              return;
+            }
+            const preset = systemFilterPresetFromOptionValue(value);
+            if (preset) {
+              onApplySystemPreset(preset);
+              return;
+            }
+            const filter = savedFilters.find((item) => item.id === value);
+            if (filter) onApplySavedFilter(filter);
+          }}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue>
+              <AutoTransition
+                transitionKey={savedFilterTriggerKey}
+                type="fade"
+                duration={0.18}
+                initial={false}
+              >
+                <span>{savedFilterTriggerLabel}</span>
+              </AutoTransition>
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value={NO_SAVED_FILTER_VALUE}>
+                {messages.filterBuilder.noSavedFilter}
+              </SelectItem>
+            </SelectGroup>
+            {audience === "private-dashboard" &&
+            savedFilters.some((filter) => filter.isOwner) ? (
+              <>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectLabel>
+                    {messages.filterBuilder.savedFiltersPersonal}
+                  </SelectLabel>
+                  {savedFilters
+                    .filter((filter) => filter.isOwner)
+                    .map((filter) => (
+                      <SelectItem key={filter.id} value={filter.id}>
+                        {filter.name}
+                      </SelectItem>
+                    ))}
+                </SelectGroup>
+              </>
+            ) : null}
+            {audience === "private-dashboard" &&
+            savedFilters.some((filter) => !filter.isOwner) ? (
+              <>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectLabel>
+                    {messages.filterBuilder.savedFiltersTeam}
+                  </SelectLabel>
+                  {savedFilters
+                    .filter((filter) => !filter.isOwner)
+                    .map((filter) => (
+                      <SelectItem key={filter.id} value={filter.id}>
+                        {filter.name}
+                      </SelectItem>
+                    ))}
+                </SelectGroup>
+              </>
+            ) : null}
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectLabel>{messages.filterBuilder.systemPresets}</SelectLabel>
+              {SYSTEM_FILTER_PRESETS.map((preset) => (
+                <SelectItem
+                  key={preset.id}
+                  value={systemFilterPresetOptionValue(preset.id)}
+                >
+                  {systemPresetItem(messages, preset.id).name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+
+        <AutoResizer initial={false} duration={0.18}>
+          <AutoTransition
+            transitionKey={
+              matchedSavedFilter?.id ??
+              (matchedSystemPreset
+                ? systemFilterPresetOptionValue(matchedSystemPreset.id)
+                : "none")
+            }
+            type="fade"
+            duration={0.18}
+            initial={false}
+          >
+            {matchedSavedFilter ? (
+              <div className="space-y-1.5 pt-3 text-xs text-muted-foreground">
+                {matchedSavedFilter.description ? (
+                  <p className="break-words">
+                    {matchedSavedFilter.description}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="inline-flex items-center gap-1">
+                    <RiUserLine className="size-3.5" aria-hidden />
+                    {formatI18nTemplate(
+                      messages.filterBuilder.savedFiltersAuthor,
+                      { name: matchedSavedFilter.authorName },
+                    )}
+                  </span>
+                  <span>
+                    {matchedSavedFilter.visibility === "team"
+                      ? messages.filterBuilder.savedFiltersTeamShared
+                      : messages.filterBuilder.savedFiltersPrivate}
+                  </span>
+                </div>
+              </div>
+            ) : matchedSystemPreset ? (
+              <p className="pt-3 text-xs text-muted-foreground">
+                {systemPresetItem(messages, matchedSystemPreset.id).description}
+              </p>
+            ) : null}
+          </AutoTransition>
+        </AutoResizer>
+      </div>
+
+      <div className="mb-4 border-b border-border pb-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="filter-panel-scope">
+            {messages.filterBuilder.scopeLabel}
+          </Label>
+          <Select
+            value={scopePreference}
+            onValueChange={(value) =>
+              onScopeChange(value as FilterScopePreference)
+            }
+          >
+            <SelectTrigger id="filter-panel-scope" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">
+                {messages.filterBuilder.scopeAuto}
+              </SelectItem>
+              <SelectItem value="event">
+                {messages.filterBuilder.scopeEvent}
+              </SelectItem>
+              <SelectItem value="session">
+                {messages.filterBuilder.scopeSession}
+              </SelectItem>
+              <SelectItem value="visitor">
+                {messages.filterBuilder.scopeVisitor}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -679,267 +879,109 @@ export function FilterPanel({
   ]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <VerticalScrollMask
-        className="min-h-0 flex-1"
-        contentClassName="min-h-0 pb-4"
-      >
-        <div className="mb-4 border-b border-border pb-4">
-          <Select
-            value={
-              matchedSavedFilter?.id ??
-              (matchedSystemPreset
-                ? systemFilterPresetOptionValue(matchedSystemPreset.id)
-                : NO_SAVED_FILTER_VALUE)
-            }
-            disabled={savedFiltersQuery.isFetching}
-            onValueChange={(value) => {
-              if (value === NO_SAVED_FILTER_VALUE) {
-                clearSavedFilter();
-                return;
-              }
-              const preset = systemFilterPresetFromOptionValue(value);
-              if (preset) {
-                applySystemPreset(preset);
-                return;
-              }
-              const filter = savedFilters.find((item) => item.id === value);
-              if (filter) applySavedFilter(filter);
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue>
-                <AutoTransition
-                  transitionKey={savedFilterTriggerKey}
-                  type="fade"
-                  duration={0.18}
-                  initial={false}
-                >
-                  <span>{savedFilterTriggerLabel}</span>
-                </AutoTransition>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value={NO_SAVED_FILTER_VALUE}>
-                  {messages.filterBuilder.noSavedFilter}
-                </SelectItem>
-              </SelectGroup>
-              {audience === "private-dashboard" &&
-              savedFilters.some((filter) => filter.isOwner) ? (
-                <>
-                  <SelectSeparator />
-                  <SelectGroup>
-                    <SelectLabel>
-                      {messages.filterBuilder.savedFiltersPersonal}
-                    </SelectLabel>
-                    {savedFilters
-                      .filter((filter) => filter.isOwner)
-                      .map((filter) => (
-                        <SelectItem key={filter.id} value={filter.id}>
-                          {filter.name}
-                        </SelectItem>
-                      ))}
-                  </SelectGroup>
-                </>
-              ) : null}
-              {audience === "private-dashboard" &&
-              savedFilters.some((filter) => !filter.isOwner) ? (
-                <>
-                  <SelectSeparator />
-                  <SelectGroup>
-                    <SelectLabel>
-                      {messages.filterBuilder.savedFiltersTeam}
-                    </SelectLabel>
-                    {savedFilters
-                      .filter((filter) => !filter.isOwner)
-                      .map((filter) => (
-                        <SelectItem key={filter.id} value={filter.id}>
-                          {filter.name}
-                        </SelectItem>
-                      ))}
-                  </SelectGroup>
-                </>
-              ) : null}
-              <SelectSeparator />
-              <SelectGroup>
-                <SelectLabel>
-                  {messages.filterBuilder.systemPresets}
-                </SelectLabel>
-                {SYSTEM_FILTER_PRESETS.map((preset) => (
-                  <SelectItem
-                    key={preset.id}
-                    value={systemFilterPresetOptionValue(preset.id)}
-                  >
-                    {systemPresetItem(messages, preset.id).name}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-
-          <AutoResizer initial={false} duration={0.18}>
-            <AutoTransition
-              transitionKey={
-                matchedSavedFilter?.id ??
-                (matchedSystemPreset
-                  ? systemFilterPresetOptionValue(matchedSystemPreset.id)
-                  : "none")
-              }
-              type="fade"
-              duration={0.18}
-              initial={false}
-            >
-              {matchedSavedFilter ? (
-                <div className="space-y-1.5 pt-3 text-xs text-muted-foreground">
-                  {matchedSavedFilter.description ? (
-                    <p className="break-words">
-                      {matchedSavedFilter.description}
-                    </p>
-                  ) : null}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="inline-flex items-center gap-1">
-                      <RiUserLine className="size-3.5" aria-hidden />
-                      {formatI18nTemplate(
-                        messages.filterBuilder.savedFiltersAuthor,
-                        { name: matchedSavedFilter.authorName },
-                      )}
-                    </span>
-                    <span>
-                      {matchedSavedFilter.visibility === "team"
-                        ? messages.filterBuilder.savedFiltersTeamShared
-                        : messages.filterBuilder.savedFiltersPrivate}
-                    </span>
-                  </div>
-                </div>
-              ) : matchedSystemPreset ? (
-                <p className="pt-3 text-xs text-muted-foreground">
-                  {
-                    systemPresetItem(messages, matchedSystemPreset.id)
-                      .description
-                  }
-                </p>
-              ) : null}
-            </AutoTransition>
-          </AutoResizer>
-        </div>
-
-        <div className="mb-4 border-b border-border pb-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="filter-panel-scope">
-              {messages.filterBuilder.scopeLabel}
-            </Label>
-            <Select
-              value={scopePreference}
-              onValueChange={(value) =>
-                onScopeChange(value as FilterScopePreference)
-              }
-            >
-              <SelectTrigger id="filter-panel-scope" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">
-                  {messages.filterBuilder.scopeAuto}
-                </SelectItem>
-                <SelectItem value="event">
-                  {messages.filterBuilder.scopeEvent}
-                </SelectItem>
-                <SelectItem value="session">
-                  {messages.filterBuilder.scopeSession}
-                </SelectItem>
-                <SelectItem value="visitor">
-                  {messages.filterBuilder.scopeVisitor}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <FilterEditor
-          audience={audience}
-          initialFilterDsl={expressionText}
-          messages={messages}
-          siteId={siteId}
-          resolvedScope={suggestionScope}
-          window={window}
-          controlledRoot={root}
-          controlledDocument={document}
-          controlledExpressionText={expressionText}
-          controlledExpressionError={expressionError}
-          controlledValidationError={validationError}
-          onControlledRootChange={(nextRoot) => {
-            setRoot((current) => reconcileEditorRoot(current, nextRoot));
-            setExpressionError(null);
-            setValidationError(null);
-          }}
-          onControlledExpressionChange={(source) => {
-            setExpressionText(source);
-            updateFromExpressionText(source);
-          }}
-          onControlledExpressionCommit={commitExpressionText}
-          onControlledClear={() => {
-            setRoot(emptyEditorGroup(createId));
-            setExpressionText("");
-            setExpressionError(null);
-            setValidationError(null);
-          }}
-          onControlledApply={apply}
-          footerActions={
-            <>
-              {savedFilterPrimaryAction === "save" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => openSavedFilterCreate()}
-                >
-                  <RiSaveLine />
-                  <span>{messages.filterBuilder.saveThisFilter}</span>
-                </Button>
-              ) : null}
-              {savedFilterPrimaryAction === "save-as" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => openSavedFilterCreate(matchedSavedFilter)}
-                >
-                  <RiFileCopyLine />
-                  <span>{messages.filterBuilder.saveAsThisFilter}</span>
-                </Button>
-              ) : null}
-              {savedFilterPrimaryAction === "manage" && matchedSavedFilter ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => openSavedFilterManagement(matchedSavedFilter)}
-                >
-                  <RiEditLine />
-                  <span>{messages.filterBuilder.manageThisFilter}</span>
-                </Button>
-              ) : null}
-              {savedFilterPrimaryAction === "finish" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={updateSavedFilterMutation.isPending}
-                  onClick={finishSavedFilterEditing}
-                >
-                  {updateSavedFilterMutation.isPending ? (
-                    <Spinner />
-                  ) : (
-                    <RiCheckLine />
-                  )}
-                  <span>{messages.filterBuilder.finishEditingFilter}</span>
-                </Button>
-              ) : null}
-              <Button type="button" onClick={apply}>
-                <RiCheckLine />
-                <span>{messages.filterBuilder.apply}</span>
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <FilterEditor
+        audience={audience}
+        initialFilterDsl={expressionText}
+        messages={messages}
+        siteId={siteId}
+        resolvedScope={suggestionScope}
+        window={window}
+        controlledRoot={root}
+        controlledDocument={document}
+        controlledExpressionText={expressionText}
+        controlledExpressionError={expressionError}
+        controlledValidationError={validationError}
+        onControlledRootChange={(nextRoot) => {
+          const reconciledRoot = reconcileEditorRoot(root, nextRoot);
+          setRoot(reconciledRoot);
+          setExpressionText(expressionTextFromEditor(reconciledRoot));
+          setExpressionError(null);
+          setValidationError(null);
+        }}
+        onControlledExpressionChange={(source) => {
+          setExpressionText(source);
+          updateFromExpressionText(source);
+        }}
+        onControlledExpressionCommit={commitExpressionText}
+        onControlledClear={() => {
+          setRoot(emptyEditorGroup(createId));
+          setExpressionText("");
+          setExpressionError(null);
+          setValidationError(null);
+        }}
+        onControlledApply={apply}
+        headerContent={
+          <FilterPanelHeader
+            audience={audience}
+            matchedSavedFilter={matchedSavedFilter}
+            matchedSystemPreset={matchedSystemPreset}
+            messages={messages}
+            savedFilterTriggerKey={savedFilterTriggerKey}
+            savedFilterTriggerLabel={savedFilterTriggerLabel}
+            savedFilters={savedFilters}
+            savedFiltersLoading={savedFiltersQuery.isFetching}
+            scopePreference={scopePreference}
+            onApplySavedFilter={applySavedFilter}
+            onApplySystemPreset={applySystemPreset}
+            onClearSavedFilter={clearSavedFilter}
+            onScopeChange={onScopeChange}
+          />
+        }
+        footerActions={
+          <>
+            {savedFilterPrimaryAction === "save" ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => openSavedFilterCreate()}
+              >
+                <RiSaveLine />
+                <span>{messages.filterBuilder.saveThisFilter}</span>
               </Button>
-            </>
-          }
-        />
-      </VerticalScrollMask>
+            ) : null}
+            {savedFilterPrimaryAction === "save-as" ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => openSavedFilterCreate(matchedSavedFilter)}
+              >
+                <RiFileCopyLine />
+                <span>{messages.filterBuilder.saveAsThisFilter}</span>
+              </Button>
+            ) : null}
+            {savedFilterPrimaryAction === "manage" && matchedSavedFilter ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => openSavedFilterManagement(matchedSavedFilter)}
+              >
+                <RiEditLine />
+                <span>{messages.filterBuilder.manageThisFilter}</span>
+              </Button>
+            ) : null}
+            {savedFilterPrimaryAction === "finish" ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={updateSavedFilterMutation.isPending}
+                onClick={finishSavedFilterEditing}
+              >
+                {updateSavedFilterMutation.isPending ? (
+                  <Spinner />
+                ) : (
+                  <RiCheckLine />
+                )}
+                <span>{messages.filterBuilder.finishEditingFilter}</span>
+              </Button>
+            ) : null}
+            <Button type="button" onClick={apply}>
+              <RiCheckLine />
+              <span>{messages.filterBuilder.apply}</span>
+            </Button>
+          </>
+        }
+      />
 
       <ResponsiveDialog
         open={createSavedFilterOpen}

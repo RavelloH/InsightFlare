@@ -363,10 +363,11 @@ export function FilterEditor({
   ]);
 
   return (
-    <div className={cn("flex min-h-0 flex-col", className)}>
+    <div className={cn("flex h-full min-h-0 min-w-0 flex-col", className)}>
       <VerticalScrollMask
-        className="min-h-0 flex-1"
-        contentClassName="min-h-0 pb-4"
+        syncKey={naturalLanguageDescription}
+        className="min-h-0 min-w-0 flex-1"
+        contentClassName="min-h-0 min-w-0 pb-4"
       >
         {headerContent}
         <GroupEditor
@@ -392,8 +393,8 @@ export function FilterEditor({
         ) : null}
       </VerticalScrollMask>
 
-      <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background">
-        <div className="border-b border-border bg-muted/20">
+      <div className="sticky bottom-0 z-10 -mx-4 min-w-0 border-t bg-background">
+        <div className="min-w-0 border-b border-border bg-muted/20">
           <AutoResizer initial={false} duration={0.18}>
             <AutoTransition
               transitionKey={naturalLanguageDescription}
@@ -423,11 +424,11 @@ export function FilterEditor({
             </AutoTransition>
           </AutoResizer>
         </div>
-        <div className="border-b border-border">
+        <div className="min-w-0 border-b border-border">
           <OverlayScrollbar
             axis="horizontal"
             syncKey={renderedExpressionText}
-            className="w-full"
+            className="w-full min-w-0"
           >
             <Input
               id={id}

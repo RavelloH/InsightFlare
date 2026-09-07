@@ -695,6 +695,7 @@ export interface AppMessages {
     deleteFailed: string;
     overallConversion: string;
     startedSessions: string;
+    startedVisitors: string;
     convertedSessions: string;
     convertedVisitors: string;
     largestDropOff: string;
@@ -3377,8 +3378,9 @@ const enMessages = {
     deleted: "Funnel deleted.",
     deleteFailed: "Unable to delete funnel.",
     overallConversion: "Overall conversion",
-    startedSessions: "Started progressions",
-    convertedSessions: "Converted progressions",
+    startedSessions: "Started sessions",
+    startedVisitors: "Started visitors",
+    convertedSessions: "Converted sessions",
     convertedVisitors: "Converted visitors",
     largestDropOff: "Largest drop-off",
     noDropOff: "No drop-off",
@@ -6242,6 +6244,7 @@ const zhMessages = {
     deleteFailed: "删除漏斗失败。",
     overallConversion: "总转化率",
     startedSessions: "起始会话数",
+    startedVisitors: "起始访客数",
     convertedSessions: "转化会话数",
     convertedVisitors: "转化访客数",
     largestDropOff: "最大流失",
@@ -9063,6 +9066,7 @@ const jaMessages = {
     deleteFailed: "ファネルを削除できません。",
     overallConversion: "全体コンバージョン",
     startedSessions: "開始セッション数",
+    startedVisitors: "開始訪問者数",
     convertedSessions: "コンバージョンセッション数",
     convertedVisitors: "コンバージョン訪問者数",
     largestDropOff: "最大離脱",

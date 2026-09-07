@@ -139,6 +139,7 @@ function FunnelDetailDrawer({
       labels={labels}
       descriptionMessages={descriptionMessages}
       payload={detail.data}
+      funnel={funnel}
       loading={detail.isPending}
       error={detail.isError}
       canManage={canManage}

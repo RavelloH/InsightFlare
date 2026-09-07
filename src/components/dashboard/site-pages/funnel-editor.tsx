@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { RiAddLine, RiCloseLine, RiSave3Line } from "@remixicon/react";
 import { Reorder } from "motion/react";
 
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -31,7 +32,6 @@ import { FunnelStepRow } from "./funnel-step-row";
 
 const MAX_STEPS = 10;
 const HOUR_MS = 60 * 60 * 1_000;
-const DEFAULT_VISITOR_WINDOW_MS = 7 * 24 * HOUR_MS;
 const WINDOW_OPTIONS = [
   ["1h", HOUR_MS, "oneHour"],
   ["1d", 24 * HOUR_MS, "oneDay"],
@@ -48,6 +48,8 @@ function newStep(index: number): FunnelStep {
 }
 
 function windowModeFromMs(value: number | null): VisitorWindowMode {
+  if (value === null) return "7d";
+
   return (
     WINDOW_OPTIONS.find(([, milliseconds]) => milliseconds === value)?.[0] ??
     "custom"
@@ -101,8 +103,9 @@ export function FunnelEditor({
     null,
   );
   const [windowMode, setWindowMode] = useState<VisitorWindowMode>("7d");
-  const [customWindowHours, setCustomWindowHours] = useState("168");
+  const [customWindowHours, setCustomWindowHours] = useState("");
   const [steps, setSteps] = useState<FunnelStep[]>(stepsFrom());
+  const [newStepId, setNewStepId] = useState<string | null>(null);
   const [filterStepId, setFilterStepId] = useState<string | null>(null);
   const filterStepIdRef = useRef<string | null>(null);
   const filterDismissGuardRef = useRef(false);
@@ -117,9 +120,10 @@ export function FunnelEditor({
     if (nextWindowMode === "custom" && funnel?.conversionWindowMs) {
       setCustomWindowHours(String(funnel.conversionWindowMs / HOUR_MS));
     } else {
-      setCustomWindowHours("168");
+      setCustomWindowHours("");
     }
     setSteps(stepsFrom(funnel ?? undefined));
+    setNewStepId(null);
     filterStepIdRef.current = null;
     filterDismissGuardRef.current = false;
     setFilterStepId(null);
@@ -224,10 +228,7 @@ export function FunnelEditor({
                         setScope(nextScope);
                         setConversionWindowMs(
                           nextScope === "visitor"
-                            ? (windowMsFromMode(
-                                windowMode,
-                                customWindowHours,
-                              ) ?? DEFAULT_VISITOR_WINDOW_MS)
+                            ? windowMsFromMode(windowMode, customWindowHours)
                             : null,
                         );
                       }}
@@ -245,58 +246,71 @@ export function FunnelEditor({
                       </SelectContent>
                     </Select>
                   </div>
-                  {scope === "visitor" ? (
-                    <div className="min-w-0 space-y-1.5">
-                      <label className="text-sm font-medium">
-                        {labels.conversionWindow}
-                      </label>
-                      <Select
-                        value={windowMode}
-                        onValueChange={(value) => {
-                          const nextMode = value as VisitorWindowMode;
-                          setWindowMode(nextMode);
-                          setConversionWindowMs(
-                            windowMsFromMode(nextMode, customWindowHours),
-                          );
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {WINDOW_OPTIONS.map(([value, , key]) => (
-                            <SelectItem key={value} value={value}>
-                              {labels[key]}
-                            </SelectItem>
-                          ))}
-                          <SelectItem value="custom">
-                            {labels.custom}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {windowMode === "custom" ? (
-                        <Input
-                          type="number"
-                          min="0.001"
-                          step="0.001"
-                          value={customWindowHours}
-                          aria-label={labels.customWindowHours}
-                          className="w-full"
-                          placeholder={labels.customWindowHours}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            setCustomWindowHours(value);
-                            const hours = Number(value);
+                  <AutoResizer
+                    initial={false}
+                    className="min-w-0"
+                    duration={0.2}
+                  >
+                    {scope === "visitor" ? (
+                      <div className="min-w-0 space-y-1.5">
+                        <label className="text-sm font-medium">
+                          {labels.conversionWindow}
+                        </label>
+                        <Select
+                          value={windowMode}
+                          onValueChange={(value) => {
+                            const nextMode = value as VisitorWindowMode;
+                            setWindowMode(nextMode);
+                            if (nextMode === "custom") {
+                              setCustomWindowHours("");
+                              setConversionWindowMs(null);
+                              return;
+                            }
                             setConversionWindowMs(
-                              Number.isFinite(hours) && hours > 0
-                                ? hours * HOUR_MS
-                                : null,
+                              windowMsFromMode(nextMode, customWindowHours),
                             );
                           }}
-                        />
-                      ) : null}
-                    </div>
-                  ) : null}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {WINDOW_OPTIONS.map(([value, , key]) => (
+                              <SelectItem key={value} value={value}>
+                                {labels[key]}
+                              </SelectItem>
+                            ))}
+                            <SelectItem value="custom">
+                              {labels.custom}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <AutoResizer initial={false} duration={0.18}>
+                          {windowMode === "custom" ? (
+                            <Input
+                              type="number"
+                              min="0.001"
+                              step="0.001"
+                              value={customWindowHours}
+                              aria-label={labels.customWindowHours}
+                              className="w-full"
+                              placeholder={labels.customWindowHours}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setCustomWindowHours(value);
+                                const hours = Number(value);
+                                setConversionWindowMs(
+                                  Number.isFinite(hours) && hours > 0
+                                    ? hours * HOUR_MS
+                                    : null,
+                                );
+                              }}
+                            />
+                          ) : null}
+                        </AutoResizer>
+                      </div>
+                    ) : null}
+                  </AutoResizer>
                 </div>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
@@ -305,46 +319,48 @@ export function FunnelEditor({
                       type="button"
                       variant="outline"
                       disabled={steps.length >= MAX_STEPS}
-                      onClick={() =>
-                        setSteps((current) => [
-                          ...current,
-                          newStep(current.length),
-                        ])
-                      }
+                      onClick={() => {
+                        const step = newStep(steps.length);
+                        setNewStepId(step.id);
+                        setSteps((current) => [...current, step]);
+                      }}
                     >
                       <RiAddLine /> {labels.addStep}
                     </Button>
                   </div>
-                  <Reorder.Group axis="y" values={steps} onReorder={setSteps}>
-                    {steps.map((step, index) => (
-                      <FunnelStepRow
-                        key={step.id}
-                        step={step}
-                        index={index}
-                        total={steps.length}
-                        onChange={(patch) =>
-                          setSteps((current) =>
-                            current.map((item) =>
-                              item.id === step.id
-                                ? { ...item, ...patch }
-                                : item,
-                            ),
-                          )
-                        }
-                        onDelete={() =>
-                          setSteps((current) =>
-                            current.filter((item) => item.id !== step.id),
-                          )
-                        }
-                        onFilter={() => {
-                          filterStepIdRef.current = step.id;
-                          filterDismissGuardRef.current = false;
-                          setFilterStepId(step.id);
-                        }}
-                        labels={labels}
-                      />
-                    ))}
-                  </Reorder.Group>
+                  <AutoResizer initial={false} duration={0.2}>
+                    <Reorder.Group axis="y" values={steps} onReorder={setSteps}>
+                      {steps.map((step, index) => (
+                        <FunnelStepRow
+                          key={step.id}
+                          step={step}
+                          index={index}
+                          total={steps.length}
+                          animateIn={step.id === newStepId}
+                          onChange={(patch) =>
+                            setSteps((current) =>
+                              current.map((item) =>
+                                item.id === step.id
+                                  ? { ...item, ...patch }
+                                  : item,
+                              ),
+                            )
+                          }
+                          onDelete={() =>
+                            setSteps((current) =>
+                              current.filter((item) => item.id !== step.id),
+                            )
+                          }
+                          onFilter={() => {
+                            filterStepIdRef.current = step.id;
+                            filterDismissGuardRef.current = false;
+                            setFilterStepId(step.id);
+                          }}
+                          labels={labels}
+                        />
+                      ))}
+                    </Reorder.Group>
+                  </AutoResizer>
                 </div>
               </div>
             </ResponsiveDialogBody>
@@ -380,6 +396,7 @@ export function FunnelEditor({
         labels={labels}
         messages={messages}
         siteId={siteId}
+        resolvedScope={scope}
         window={window}
       />
     </>
