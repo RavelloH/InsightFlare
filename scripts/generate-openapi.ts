@@ -358,7 +358,12 @@ function schemaNameHint(schema: Record<string, unknown>): string | undefined {
   const names = new Set(Object.keys(properties));
   if (names.has("error") && names.has("meta")) return "ApiV1ErrorEnvelope";
   if (names.size === 1 && names.has("requestId")) return "ApiV1ResponseMeta";
-  if (names.size === 2 && names.has("path") && names.has("code")) {
+  if (
+    names.size === 3 &&
+    names.has("path") &&
+    names.has("code") &&
+    names.has("message")
+  ) {
     return "ApiV1ErrorIssue";
   }
   if (

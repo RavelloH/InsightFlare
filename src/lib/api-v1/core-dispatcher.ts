@@ -1,5 +1,6 @@
 import type { ApiV1CoreRouteId } from "@/lib/api-v1/core-registry";
 import { TokenCheckSchema } from "@/lib/api-v1/core-registry";
+import { fromRequestBodyError, fromZodIssues } from "@/lib/api-v1/errors";
 import { epochSecondsToIso } from "@/lib/api-v1/normalization";
 import {
   API_V1_VERSION,
@@ -98,6 +99,7 @@ async function tokenCheckResponse(
       400,
       undefined,
       request,
+      fromRequestBodyError(new Error("invalid_json")),
     );
   }
   const parsed = TokenCheckSchema.safeParse(body);
@@ -112,8 +114,9 @@ async function tokenCheckResponse(
       "validation_failed",
       message || "Validation failed",
       400,
-      { issues: parsed.error.issues },
+      undefined,
       request,
+      fromZodIssues(parsed.error.issues),
     );
   }
   const active = (principal.status ?? "active") === "active";

@@ -1,3 +1,4 @@
+import type { ApiV1ErrorIssue } from "@/lib/api-v1/errors";
 import { jsonResponse } from "@/lib/response";
 
 export const API_V1_VERSION = import.meta.env?.VITE_APP_VERSION || "1.0.0";
@@ -90,6 +91,7 @@ export function jsonError(
   status: number,
   details?: Record<string, unknown>,
   request?: Request,
+  issues?: readonly ApiV1ErrorIssue[],
 ): Response {
   const requestId = serverRequestId(request);
   return jsonResponse(
@@ -97,6 +99,7 @@ export function jsonError(
       error: {
         code,
         message,
+        ...(issues && issues.length > 0 ? { issues } : {}),
         ...(details ? { details } : {}),
       },
       meta: { requestId, generatedAt: generatedAt() },

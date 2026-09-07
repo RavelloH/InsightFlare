@@ -35137,7 +35137,7 @@
         ],
         "additionalProperties": false
       },
-      "SharedSchema_44ed2f0490c4": {
+      "SharedSchema_7293514e8d05": {
         "type": "object",
         "properties": {
           "code": {
@@ -35160,11 +35160,15 @@
                 },
                 "code": {
                   "type": "string"
+                },
+                "message": {
+                  "type": "string"
                 }
               },
               "required": [
                 "path",
-                "code"
+                "code",
+                "message"
               ],
               "additionalProperties": false
             }
@@ -35848,7 +35852,7 @@
         "type": "object",
         "properties": {
           "error": {
-            "$ref": "#/components/schemas/SharedSchema_44ed2f0490c4"
+            "$ref": "#/components/schemas/SharedSchema_7293514e8d05"
           },
           "meta": {
             "type": "object",

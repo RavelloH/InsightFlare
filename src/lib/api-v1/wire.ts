@@ -44,7 +44,15 @@ export const ApiV1ErrorSchema = z
     message: z.string(),
     retryable: z.boolean().optional(),
     issues: z
-      .array(z.object({ path: z.string(), code: z.string() }).strict())
+      .array(
+        z
+          .object({
+            path: z.string(),
+            code: z.string(),
+            message: z.string(),
+          })
+          .strict(),
+      )
       .optional(),
   })
   .strict();

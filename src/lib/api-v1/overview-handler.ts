@@ -2,7 +2,12 @@ import {
   type AnalysisDefinitionReader,
   executeApiV1SiteOverview,
 } from "@/lib/api-v1/analytics-overview";
-import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
+import {
+  type ApiV1ErrorIssue,
+  apiV1ErrorRegistry,
+  fromInputIssues,
+  fromRequestBodyError,
+} from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { serializeAnalyticsResult } from "@/lib/api-v1/serializer";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
@@ -37,7 +42,7 @@ function response(_request: Request, status: number, body: unknown): Response {
 function errorResponse(
   request: Request,
   code: keyof typeof apiV1ErrorRegistry,
-  details?: Record<string, unknown>,
+  issues?: readonly ApiV1ErrorIssue[],
 ): Response {
   const definition = apiV1ErrorRegistry[code];
   return response(request, definition.status, {
@@ -45,14 +50,7 @@ function errorResponse(
       code,
       message: definition.message,
       retryable: definition.retryable,
-      ...(details
-        ? {
-            issues: Object.entries(details).map(([path, value]) => ({
-              path: `/${path}`,
-              code: String(value),
-            })),
-          }
-        : {}),
+      ...(issues && issues.length > 0 ? { issues } : {}),
     },
     meta: { requestId: getServerRequestId() },
   });
@@ -89,7 +87,15 @@ async function readBody(request: Request): Promise<unknown> {
 
 function serviceErrorResponse(
   request: Request,
-  error: { readonly kind: string },
+  error: {
+    readonly kind: string;
+    readonly reason?: string;
+    readonly issues?: readonly {
+      readonly path: string;
+      readonly code: string;
+      readonly message?: string;
+    }[];
+  },
 ): Response {
   if (
     error.kind === "request_cancelled" ||
@@ -126,10 +132,25 @@ function serviceErrorResponse(
     return errorResponse(request, "missing_scope");
   }
   if (error.kind === "invalid_input") {
-    return errorResponse(request, "validation_failed");
+    return errorResponse(
+      request,
+      "validation_failed",
+      fromInputIssues(
+        error.issues ?? [
+          {
+            path: "",
+            code: error.reason ?? "validation_failed",
+          },
+        ],
+      ),
+    );
   }
   if (error.kind === "invalid-input") {
-    return errorResponse(request, "validation_failed");
+    return errorResponse(
+      request,
+      "validation_failed",
+      fromInputIssues(error.issues ?? []),
+    );
   }
   return errorResponse(request, "internal_error");
 }
@@ -181,8 +202,11 @@ export async function handlePlannedSiteOverview(
   try {
     input = await readBody(request);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "invalid_json";
-    return errorResponse(request, "validation_failed", { reason });
+    return errorResponse(
+      request,
+      "validation_failed",
+      fromRequestBodyError(error),
+    );
   }
   let result: Awaited<ReturnType<typeof executeApiV1SiteOverview>>;
   try {

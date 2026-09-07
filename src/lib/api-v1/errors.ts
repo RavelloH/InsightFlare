@@ -148,6 +148,7 @@ export const apiV1ErrorRegistry: Readonly<
 export interface ApiV1ErrorIssue {
   readonly path: string;
   readonly code: string;
+  readonly message: string;
 }
 
 export interface ApiV1WireError {
@@ -166,6 +167,90 @@ export function toJsonPointer(path: string): string {
     .join("/")}`;
 }
 
+function pathSegmentsToJsonPointer(path: readonly PropertyKey[]): string {
+  if (path.length === 0) return "";
+  return `/${path
+    .map((segment) =>
+      String(segment).replaceAll("~", "~0").replaceAll("/", "~1"),
+    )
+    .join("/")}`;
+}
+
+/**
+ * Keeps public validation responses useful without exposing the full Zod
+ * issue object (which can contain echoed input values and version-specific
+ * fields). The path, code, and message are the stable public projection.
+ */
+export function fromZodIssues(
+  issues: readonly {
+    readonly path: readonly PropertyKey[];
+    readonly code: string;
+    readonly message: string;
+  }[],
+): ApiV1ErrorIssue[] {
+  return issues.map((issue) => ({
+    path: pathSegmentsToJsonPointer(issue.path),
+    code: issue.code,
+    message: issue.message,
+  }));
+}
+
+function validationMessageForCode(code: string): string {
+  const messages: Record<string, string> = {
+    body_not_serializable: "The request body must be JSON-serializable.",
+    body_too_complex: "The request body is too complex.",
+    body_too_deep: "The request body is nested too deeply.",
+    body_too_large: "The request body exceeds the maximum size.",
+    schema_validation_failed:
+      "The request body does not match the expected schema.",
+    invalid_body: "The request body is invalid.",
+    invalid_input: "The request input is invalid.",
+    required: "This field is required.",
+    unrecognized_key: "This field is not recognized.",
+    invalid_filter: "The filter is invalid or not allowed.",
+    invalid_or_unauthorized_filter: "The filter is invalid or not authorized.",
+    invalid_time_range: "The requested time range is invalid.",
+    invalid_time_zone: "The requested time zone is invalid.",
+    too_many_filter_clauses: "The filter contains too many clauses.",
+    invalid_filter_scope: "The requested filter scope is invalid.",
+    scope_conflict: "The requested filter scopes are incompatible.",
+    scoped_query_requires_time: "A scoped query requires a time range.",
+    comparison_alignment_mismatch: "The comparison datasets cannot be aligned.",
+    dimension_not_supported:
+      "The requested analytics dimension is not supported.",
+    estimated_cost_exceeded:
+      "The estimated analytics query cost exceeds the allowed limit.",
+    range_too_wide: "The comparison range is too wide.",
+    too_many_buckets: "The requested trend contains too many buckets.",
+  };
+  return messages[code] ?? apiV1ErrorRegistry.validation_failed.message;
+}
+
+export function fromInputIssues(
+  issues: readonly {
+    readonly path: string;
+    readonly code: string;
+    readonly message?: string;
+  }[],
+): ApiV1ErrorIssue[] {
+  return issues.map((issue) => ({
+    path: issue.path.startsWith("/") ? issue.path : toJsonPointer(issue.path),
+    code: issue.code,
+    message: issue.message ?? validationMessageForCode(issue.code),
+  }));
+}
+
+export function fromRequestBodyError(error: unknown): ApiV1ErrorIssue[] {
+  const code = error instanceof Error ? error.message : "invalid_body";
+  const message =
+    code === "invalid_json"
+      ? "The request body is not valid JSON."
+      : code === "body_too_large"
+        ? "The request body exceeds the maximum size."
+        : "The request body could not be read.";
+  return [{ path: "", code, message }];
+}
+
 export function fromAnalyticsDomainError(
   error: AnalyticsDomainError,
 ): ApiV1WireError {
@@ -174,10 +259,7 @@ export function fromAnalyticsDomainError(
       code: "validation_failed",
       message: apiV1ErrorRegistry.validation_failed.message,
       retryable: false,
-      issues: error.issues.map((issue) => ({
-        path: toJsonPointer(issue.path),
-        code: issue.code,
-      })),
+      issues: fromInputIssues(error.issues),
     };
   }
   if (error.kind === "invalid-cursor") {

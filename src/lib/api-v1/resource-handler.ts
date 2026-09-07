@@ -17,6 +17,12 @@ import {
   UpdateSiteInputSchema,
   UpdateTrackingSettingsInputSchema,
 } from "@/lib/api-v1/application-registry";
+import {
+  type ApiV1ErrorIssue,
+  fromInputIssues,
+  fromRequestBodyError,
+  fromZodIssues,
+} from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { createResourceApplicationService } from "@/lib/api-v1/resource-application-service";
 import {
@@ -198,6 +204,7 @@ function error(
     | "invalid_input"
     | "internal_error"
     | "conflict",
+  issues?: readonly ApiV1ErrorIssue[],
 ): Response {
   const map = {
     validation_failed: [400, "Request validation failed"],
@@ -215,7 +222,7 @@ function error(
     conflict: [409, "The resource conflicts with an existing resource"],
   } as const;
   const [status, message] = map[code];
-  return jsonError(code, message, status, undefined, request);
+  return jsonError(code, message, status, undefined, request, issues);
 }
 
 /** Strict HTTP adapter for typed non-analytics API v1 resources. */
@@ -262,6 +269,7 @@ export async function handlePlannedResourceRoute(input: {
         readError instanceof Error && readError.message === "body_too_large"
           ? "payload_too_large"
           : "validation_failed",
+        fromRequestBodyError(readError),
       );
     }
   }
@@ -290,7 +298,13 @@ export async function handlePlannedResourceRoute(input: {
       : {}),
   };
   const parsed = config.schema.safeParse(base);
-  if (!parsed.success) return error(request, "validation_failed");
+  if (!parsed.success) {
+    return error(
+      request,
+      "validation_failed",
+      fromZodIssues(parsed.error.issues),
+    );
+  }
   const service = createResourceApplicationService(input.env);
   const result = await service.execute(
     { teamId: principal.teamId, siteIds: principal.siteIds },
@@ -313,6 +327,15 @@ export async function handlePlannedResourceRoute(input: {
               : code === "invalid_input"
                 ? "validation_failed"
                 : "internal_error",
+      code === "invalid_input"
+        ? fromInputIssues([
+            {
+              path: "",
+              code: "invalid_input",
+              message: "The resource request is invalid.",
+            },
+          ])
+        : undefined,
     );
   }
   if (config.successStatus === 204) return new Response(null, { status: 204 });

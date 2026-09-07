@@ -8,6 +8,7 @@ import {
   toApiV1QueryTime,
 } from "@/lib/api-v1/analytics-overview";
 import { SiteTimeseriesQueryDtoSchema } from "@/lib/api-v1/dto/analytics";
+import { fromZodIssues } from "@/lib/api-v1/errors";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
@@ -39,7 +40,11 @@ export async function executeApiV1SiteTimeseries(
   if (!parsed.success) {
     return {
       ok: false,
-      error: { kind: "invalid_input", reason: "schema_validation_failed" },
+      error: {
+        kind: "invalid_input",
+        reason: "schema_validation_failed",
+        issues: fromZodIssues(parsed.error.issues),
+      },
     };
   }
   if (executionContext.signal?.aborted) {

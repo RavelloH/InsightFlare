@@ -194,9 +194,19 @@ describe("API v1 overview adapter", () => {
       {},
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: false,
-      error: { kind: "invalid_input", reason: "invalid_filter" },
+      error: {
+        kind: "invalid_input",
+        reason: "invalid_filter",
+        issues: [
+          {
+            path: "/filter",
+            code: "invalid_filter",
+            message: "The filter is invalid or not allowed.",
+          },
+        ],
+      },
     });
     expect(reader.readOverview).not.toHaveBeenCalled();
   });
@@ -241,9 +251,20 @@ describe("API v1 overview adapter", () => {
       {},
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: false,
       error: { kind: "invalid_input", reason: "body_too_deep" },
+    });
+    expect(result).toMatchObject({
+      error: {
+        issues: [
+          {
+            path: "",
+            code: "body_too_deep",
+            message: "The request body is nested too deeply.",
+          },
+        ],
+      },
     });
     expect(reader.readOverview).not.toHaveBeenCalled();
   });
@@ -252,57 +273,93 @@ describe("API v1 overview adapter", () => {
     const reader = overviewReader();
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    expect(
-      await executeApiV1SiteOverview(
-        cyclic,
-        principal(),
-        "site-1",
-        createTestProviderRegistry(reader),
-        {},
-      ),
-    ).toEqual({
+    const cyclicResult = await executeApiV1SiteOverview(
+      cyclic,
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+    expect(cyclicResult).toMatchObject({
       ok: false,
-      error: { kind: "invalid_input", reason: "body_not_serializable" },
+      error: {
+        kind: "invalid_input",
+        reason: "body_not_serializable",
+        issues: [
+          {
+            path: "",
+            code: "body_not_serializable",
+            message: "The request body must be JSON-serializable.",
+          },
+        ],
+      },
     });
-    expect(
-      await executeApiV1SiteOverview(
-        { payload: "x".repeat(70_000) },
-        principal(),
-        "site-1",
-        createTestProviderRegistry(reader),
-        {},
-      ),
-    ).toEqual({
+    const largeBodyResult = await executeApiV1SiteOverview(
+      { payload: "x".repeat(70_000) },
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+    expect(largeBodyResult).toMatchObject({
       ok: false,
-      error: { kind: "invalid_input", reason: "body_too_large" },
+      error: {
+        kind: "invalid_input",
+        reason: "body_too_large",
+        issues: [
+          {
+            path: "",
+            code: "body_too_large",
+            message: "The request body exceeds the maximum size.",
+          },
+        ],
+      },
     });
-    expect(
-      await executeApiV1SiteOverview(
-        Array.from({ length: 520 }, () => null),
-        principal(),
-        "site-1",
-        createTestProviderRegistry(reader),
-        {},
-      ),
-    ).toEqual({
+    const complexBodyResult = await executeApiV1SiteOverview(
+      Array.from({ length: 520 }, () => null),
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+    expect(complexBodyResult).toMatchObject({
       ok: false,
-      error: { kind: "invalid_input", reason: "body_too_complex" },
+      error: {
+        kind: "invalid_input",
+        reason: "body_too_complex",
+        issues: [
+          {
+            path: "",
+            code: "body_too_complex",
+            message: "The request body is too complex.",
+          },
+        ],
+      },
     });
   });
 
   it("rejects schema, cancellation, deadline, inactive-token, and site access failures", async () => {
     const reader = overviewReader();
-    expect(
-      await executeApiV1SiteOverview(
-        { ...body, unexpected: true },
-        principal(),
-        "site-1",
-        createTestProviderRegistry(reader),
-        {},
-      ),
-    ).toEqual({
+    const schemaResult = await executeApiV1SiteOverview(
+      { ...body, unexpected: true },
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+    expect(schemaResult).toMatchObject({
       ok: false,
-      error: { kind: "invalid_input", reason: "schema_validation_failed" },
+      error: {
+        kind: "invalid_input",
+        reason: "schema_validation_failed",
+        issues: [
+          {
+            path: "",
+            code: "unrecognized_keys",
+            message: 'Unrecognized key: "unexpected"',
+          },
+        ],
+      },
     });
     const controller = new AbortController();
     controller.abort();
@@ -351,29 +408,47 @@ describe("API v1 overview adapter", () => {
 
   it("fails closed for saved-filter lookup and inline-filter errors", async () => {
     const reader = overviewReader();
-    expect(
-      await executeApiV1SiteOverview(
-        { ...body, timeRange: { ...body.timeRange, to: body.timeRange.from } },
-        principal(),
-        "site-1",
-        createTestProviderRegistry(reader),
-        {},
-      ),
-    ).toEqual({
+    const invalidTimeRangeResult = await executeApiV1SiteOverview(
+      { ...body, timeRange: { ...body.timeRange, to: body.timeRange.from } },
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+    expect(invalidTimeRangeResult).toMatchObject({
       ok: false,
-      error: { kind: "invalid_input", reason: "invalid_time_range" },
+      error: {
+        kind: "invalid_input",
+        reason: "invalid_time_range",
+        issues: [
+          {
+            path: "/timeRange",
+            code: "invalid_time_range",
+            message: "The requested time range is invalid.",
+          },
+        ],
+      },
     });
-    expect(
-      await executeApiV1SiteOverview(
-        { ...body, timeRange: { ...body.timeRange, timeZone: "Not/AZone" } },
-        principal(),
-        "site-1",
-        createTestProviderRegistry(reader),
-        {},
-      ),
-    ).toEqual({
+    const invalidTimeZoneResult = await executeApiV1SiteOverview(
+      { ...body, timeRange: { ...body.timeRange, timeZone: "Not/AZone" } },
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+    expect(invalidTimeZoneResult).toMatchObject({
       ok: false,
-      error: { kind: "invalid_input", reason: "invalid_time_zone" },
+      error: {
+        kind: "invalid_input",
+        reason: "invalid_time_zone",
+        issues: [
+          {
+            path: "/timeRange/timeZone",
+            code: "invalid_time_zone",
+            message: "The requested time zone is invalid.",
+          },
+        ],
+      },
     });
     const missingDefinitions = await executeApiV1SiteOverview(
       { ...body, filter: { type: "saved", id: "filter-1" } },

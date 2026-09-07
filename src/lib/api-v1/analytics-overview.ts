@@ -10,6 +10,7 @@ import {
   type SiteOverviewQueryDto,
   SiteOverviewQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
+import { fromInputIssues, fromZodIssues } from "@/lib/api-v1/errors";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
@@ -102,7 +103,15 @@ export async function aggregateCacheKey(input: {
 }
 
 export type ApiV1OverviewInputError =
-  | { readonly kind: "invalid_input"; readonly reason: string }
+  | {
+      readonly kind: "invalid_input";
+      readonly reason: string;
+      readonly issues?: readonly {
+        readonly path: string;
+        readonly code: string;
+        readonly message?: string;
+      }[];
+    }
   | { readonly kind: "missing_scope" | "site_not_found" | "token_inactive" }
   | { readonly kind: "saved_filter_not_available" | "internal_error" }
   | { readonly kind: "request_cancelled" | "deadline_exceeded" };
@@ -157,13 +166,21 @@ function parseInput(
   if (preflightError)
     return {
       ok: false,
-      error: { kind: "invalid_input", reason: preflightError },
+      error: {
+        kind: "invalid_input",
+        reason: preflightError,
+        issues: fromInputIssues([{ path: "", code: preflightError }]),
+      },
     };
   const parsed = SiteOverviewQueryDtoSchema.safeParse(value);
   if (!parsed.success) {
     return {
       ok: false,
-      error: { kind: "invalid_input", reason: "schema_validation_failed" },
+      error: {
+        kind: "invalid_input",
+        reason: "schema_validation_failed",
+        issues: fromZodIssues(parsed.error.issues),
+      },
     };
   }
   return { ok: true, value: parsed.data };
@@ -177,7 +194,13 @@ export function toApiV1QueryTime(
   if (!range) {
     return {
       ok: false,
-      error: { kind: "invalid_input", reason: "invalid_time_range" },
+      error: {
+        kind: "invalid_input",
+        reason: "invalid_time_range",
+        issues: fromInputIssues([
+          { path: "timeRange", code: "invalid_time_range" },
+        ]),
+      },
     };
   }
   const startMs = Date.parse(range.from);
@@ -190,13 +213,25 @@ export function toApiV1QueryTime(
   ) {
     return {
       ok: false,
-      error: { kind: "invalid_input", reason: "invalid_time_range" },
+      error: {
+        kind: "invalid_input",
+        reason: "invalid_time_range",
+        issues: fromInputIssues([
+          { path: "timeRange", code: "invalid_time_range" },
+        ]),
+      },
     };
   }
   if (!isReportingTimeZone(timeZone)) {
     return {
       ok: false,
-      error: { kind: "invalid_input", reason: "invalid_time_zone" },
+      error: {
+        kind: "invalid_input",
+        reason: "invalid_time_zone",
+        issues: fromInputIssues([
+          { path: "timeRange.timeZone", code: "invalid_time_zone" },
+        ]),
+      },
     };
   }
   return {
@@ -258,7 +293,11 @@ export async function resolveApiV1Filter(
     } catch {
       return {
         ok: false,
-        error: { kind: "invalid_input", reason: "invalid_filter" },
+        error: {
+          kind: "invalid_input",
+          reason: "invalid_filter",
+          issues: fromInputIssues([{ path: "filter", code: "invalid_filter" }]),
+        },
       };
     }
   }
@@ -273,7 +312,11 @@ export async function resolveApiV1Filter(
   } catch {
     return {
       ok: false,
-      error: { kind: "invalid_input", reason: "invalid_filter" },
+      error: {
+        kind: "invalid_input",
+        reason: "invalid_filter",
+        issues: fromInputIssues([{ path: "filter", code: "invalid_filter" }]),
+      },
     };
   }
 }

@@ -4,6 +4,11 @@ import {
 } from "@/lib/api-v1/analysis-definition-reader";
 import { parseApiV1FilterDsl } from "@/lib/api-v1/analytics-overview";
 import { SiteFunnelAnalysisQueryDtoSchema } from "@/lib/api-v1/dto/analytics";
+import {
+  fromInputIssues,
+  fromRequestBodyError,
+  fromZodIssues,
+} from "@/lib/api-v1/errors";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
@@ -190,6 +195,7 @@ export async function handlePlannedSiteFunnelAnalysis(
       422,
       undefined,
       request,
+      fromRequestBodyError(error),
     );
   }
   const parsed = SiteFunnelAnalysisQueryDtoSchema.safeParse(raw);
@@ -200,6 +206,7 @@ export async function handlePlannedSiteFunnelAnalysis(
       400,
       undefined,
       request,
+      fromZodIssues(parsed.error.issues),
     );
   }
   if (
@@ -225,6 +232,7 @@ export async function handlePlannedSiteFunnelAnalysis(
       400,
       undefined,
       request,
+      fromInputIssues([{ path: "timeRange", code: "invalid_time_range" }]),
     );
   }
   let filters: FilterDocument | null;
@@ -261,6 +269,9 @@ export async function handlePlannedSiteFunnelAnalysis(
       isSavedFilter ? 404 : 400,
       undefined,
       request,
+      isSavedFilter
+        ? undefined
+        : fromInputIssues([{ path: "filter", code: "invalid_filter" }]),
     );
   }
 
@@ -321,6 +332,16 @@ export async function handlePlannedSiteFunnelAnalysis(
           504,
           undefined,
           request,
+        );
+      }
+      if (serviceResult.error.kind === "invalid-input") {
+        return jsonError(
+          "validation_failed",
+          "Request validation failed",
+          400,
+          undefined,
+          request,
+          fromInputIssues(serviceResult.error.issues),
         );
       }
       return jsonError(

@@ -16,7 +16,14 @@ import {
   type TeamComparisonQueryDto,
   TeamComparisonQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
-import { type ApiV1ErrorCode, apiV1ErrorRegistry } from "@/lib/api-v1/errors";
+import {
+  type ApiV1ErrorCode,
+  type ApiV1ErrorIssue,
+  apiV1ErrorRegistry,
+  fromInputIssues,
+  fromRequestBodyError,
+  fromZodIssues,
+} from "@/lib/api-v1/errors";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/query-context";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
@@ -120,7 +127,7 @@ function response(
 function errorResponse(
   code: ApiV1ErrorCode,
   request: Request,
-  issues?: readonly { readonly path: string; readonly code: string }[],
+  issues?: readonly ApiV1ErrorIssue[],
 ): Response {
   const requestId = crypto.randomUUID();
   const definition = apiV1ErrorRegistry[code];
@@ -180,15 +187,16 @@ async function parseBody<T>(
       return errorResponse(
         "validation_failed",
         request,
-        parsed.error.issues.map((issue) => ({
-          path: `/${issue.path.map((segment) => String(segment)).join("/")}`,
-          code: issue.code,
-        })),
+        fromZodIssues(parsed.error.issues),
       );
     }
     return parsed.data;
-  } catch {
-    return errorResponse("validation_failed", request);
+  } catch (error) {
+    return errorResponse(
+      "validation_failed",
+      request,
+      fromRequestBodyError(error),
+    );
   }
 }
 
@@ -338,7 +346,7 @@ function metricKeys(input: SiteReportInput | TeamReportInput) {
 }
 
 function sideIssue(path: string, code: string) {
-  return [{ path, code }] as const;
+  return fromInputIssues([{ path, code }]);
 }
 
 function contextForSite(
@@ -372,6 +380,24 @@ function domainErrorCode(error: { readonly kind: string }): ApiV1ErrorCode {
   if (error.kind === "invalid-input") return "validation_failed";
   if (error.kind === "data-unavailable") return "data_unavailable";
   return "internal_error";
+}
+
+function domainErrorResponse(
+  error: {
+    readonly kind: string;
+    readonly issues?: readonly {
+      readonly path: string;
+      readonly code: string;
+      readonly message?: string;
+    }[];
+  },
+  request: Request,
+): Response {
+  return errorResponse(
+    domainErrorCode(error),
+    request,
+    error.issues ? fromInputIssues(error.issues) : undefined,
+  );
 }
 
 function queryCost(input: {
@@ -747,10 +773,20 @@ async function prepareSiteReport(
   ]);
   const request = executionContext.request;
   if (filters.some((value) => value instanceof Error)) {
-    const error = filters.find((value) => value instanceof Error) as Error;
+    const errorIndex = filters.findIndex((value) => value instanceof Error);
+    const error = filters[errorIndex] as Error;
     return {
       ok: false,
-      response: errorResponse(error.message as ApiV1ErrorCode, request),
+      response: errorResponse(
+        error.message as ApiV1ErrorCode,
+        request,
+        error.message === "validation_failed"
+          ? sideIssue(
+              `${errorIndex === 0 ? "current" : "reference"}.filter`,
+              "invalid_filter",
+            )
+          : undefined,
+      ),
     };
   }
   const sides = resolveSides(
@@ -761,8 +797,16 @@ async function prepareSiteReport(
     },
     executionContext.capturedAtMs ?? Date.now(),
   );
-  if (!sides)
-    return { ok: false, response: errorResponse("validation_failed", request) };
+  if (!sides) {
+    return {
+      ok: false,
+      response: errorResponse(
+        "validation_failed",
+        request,
+        sideIssue("timeRange", "invalid_time_range"),
+      ),
+    };
+  }
   return { ok: true, context, sides };
 }
 
@@ -776,30 +820,48 @@ function prepareTeamSides(
       readonly context: QueryContext;
       readonly sides: { current: ResolvedSide; reference: ResolvedSide };
     }
-  | { readonly ok: false; readonly error: ApiV1ErrorCode } {
+  | {
+      readonly ok: false;
+      readonly error: ApiV1ErrorCode;
+      readonly issues?: readonly ApiV1ErrorIssue[];
+    } {
+  let filters: {
+    readonly current: FilterDocument;
+    readonly reference: FilterDocument;
+  };
   try {
-    const filters = {
+    filters = {
       current: resolveTeamFilter(input.current.filter),
       reference: resolveTeamFilter(input.reference.filter),
     };
-    const sides = resolveSides(
-      input,
-      filters,
-      executionContext.capturedAtMs ?? Date.now(),
-    );
-    if (!sides) return { ok: false, error: "validation_failed" };
-    return {
-      ok: true,
-      context: teamQueryContext(
-        principal.teamId,
-        "api-v1",
-        [...principal.siteIds].sort(),
-      ),
-      sides,
-    };
   } catch {
-    return { ok: false, error: "validation_failed" };
+    return {
+      ok: false,
+      error: "validation_failed",
+      issues: sideIssue("filter", "invalid_filter"),
+    };
   }
+  const sides = resolveSides(
+    input,
+    filters,
+    executionContext.capturedAtMs ?? Date.now(),
+  );
+  if (!sides) {
+    return {
+      ok: false,
+      error: "validation_failed",
+      issues: sideIssue("timeRange", "invalid_time_range"),
+    };
+  }
+  return {
+    ok: true,
+    context: teamQueryContext(
+      principal.teamId,
+      "api-v1",
+      [...principal.siteIds].sort(),
+    ),
+    sides,
+  };
 }
 
 async function reportHandler(
@@ -894,8 +956,8 @@ async function reportHandler(
     { ...executionContextFor(request), cost },
     cacheKey,
   );
-  if (!result.ok)
-    return errorResponse(
+  if (!result.ok) {
+    const code =
       result.error.kind === "query-cost-exceeded"
         ? "query_too_expensive"
         : result.error.kind === "request-cancelled"
@@ -909,11 +971,17 @@ async function reportHandler(
               ? "conflict"
               : result.error.kind === "invalid-input"
                 ? "validation_failed"
-                : "internal_error",
+                : "internal_error";
+    return errorResponse(
+      code,
       request,
+      result.error.kind === "invalid-input"
+        ? fromInputIssues(result.error.issues)
+        : undefined,
     );
+  }
   const domain = result.value;
-  if (!domain.ok) return errorResponse(domainErrorCode(domain.error), request);
+  if (!domain.ok) return domainErrorResponse(domain.error, request);
   const requestId = crypto.randomUUID();
   const trend =
     "trend" in domain.data && domain.data.trend ? domain.data.trend : null;
@@ -999,8 +1067,8 @@ async function breakdownHandler(
     { ...executionContextFor(request), cost },
     cacheKey,
   );
-  if (!result.ok)
-    return errorResponse(
+  if (!result.ok) {
+    const code =
       result.error.kind === "query-cost-exceeded"
         ? "query_too_expensive"
         : result.error.kind === "request-cancelled"
@@ -1014,11 +1082,17 @@ async function breakdownHandler(
               ? "conflict"
               : result.error.kind === "invalid-input"
                 ? "validation_failed"
-                : "internal_error",
+                : "internal_error";
+    return errorResponse(
+      code,
       request,
+      result.error.kind === "invalid-input"
+        ? fromInputIssues(result.error.issues)
+        : undefined,
     );
+  }
   const domain = result.value;
-  if (!domain.ok) return errorResponse(domainErrorCode(domain.error), request);
+  if (!domain.ok) return domainErrorResponse(domain.error, request);
   const requestId = crypto.randomUUID();
   return response(
     200,
@@ -1100,7 +1174,8 @@ export async function handleTeamComparison(
     principal,
     executionContextFor(request),
   );
-  if (!prepared.ok) return errorResponse(prepared.error, request);
+  if (!prepared.ok)
+    return errorResponse(prepared.error, request, prepared.issues);
   return reportHandler(
     request,
     principal,
@@ -1163,7 +1238,8 @@ export async function handleTeamComparisonBreakdown(
     principal,
     executionContextFor(request),
   );
-  if (!prepared.ok) return errorResponse(prepared.error, request);
+  if (!prepared.ok)
+    return errorResponse(prepared.error, request, prepared.issues);
   return breakdownHandler(
     request,
     principal,

@@ -1,6 +1,11 @@
 import type { AnalysisDefinitionReader } from "@/lib/api-v1/analysis-definition-reader";
 import { executeApiV1SiteTimeseries } from "@/lib/api-v1/analytics-timeseries";
-import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
+import {
+  type ApiV1ErrorIssue,
+  apiV1ErrorRegistry,
+  fromInputIssues,
+  fromRequestBodyError,
+} from "@/lib/api-v1/errors";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { serializeAnalyticsResult } from "@/lib/api-v1/serializer";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
@@ -28,6 +33,7 @@ function response(status: number, body: unknown, requestId = id()): Response {
 function errorResponse(
   code: keyof typeof apiV1ErrorRegistry,
   status = apiV1ErrorRegistry[code].status,
+  issues?: readonly ApiV1ErrorIssue[],
 ): Response {
   const requestId = id();
   return response(
@@ -37,6 +43,7 @@ function errorResponse(
         code,
         message: apiV1ErrorRegistry[code].message,
         retryable: apiV1ErrorRegistry[code].retryable,
+        ...(issues && issues.length > 0 ? { issues } : {}),
       },
       meta: { requestId },
     },
@@ -86,6 +93,20 @@ function mapAdapterError(error: {
   return "internal_error";
 }
 
+function adapterIssues(error: {
+  readonly kind: string;
+  readonly issues?: readonly {
+    readonly path: string;
+    readonly code: string;
+    readonly message?: string;
+  }[];
+  readonly reason?: string;
+}): ApiV1ErrorIssue[] {
+  return fromInputIssues(
+    error.issues ?? (error.reason ? [{ path: "", code: error.reason }] : []),
+  );
+}
+
 /** Planned typed timeseries adapter; route registration remains gated. */
 export async function handlePlannedSiteTimeseries(
   request: Request,
@@ -115,8 +136,12 @@ export async function handlePlannedSiteTimeseries(
   let input: unknown;
   try {
     input = await readBody(request);
-  } catch {
-    return errorResponse("validation_failed");
+  } catch (error) {
+    return errorResponse(
+      "validation_failed",
+      undefined,
+      fromRequestBodyError(error),
+    );
   }
   let result: Awaited<ReturnType<typeof executeApiV1SiteTimeseries>>;
   try {
@@ -131,9 +156,19 @@ export async function handlePlannedSiteTimeseries(
   } catch {
     return errorResponse("data_unavailable");
   }
-  if (!result.ok) return errorResponse(mapAdapterError(result.error));
+  if (!result.ok) {
+    return errorResponse(
+      mapAdapterError(result.error),
+      undefined,
+      adapterIssues(result.error),
+    );
+  }
   if (!result.value.ok)
-    return errorResponse(mapAdapterError(result.value.error));
+    return errorResponse(
+      mapAdapterError(result.value.error),
+      undefined,
+      adapterIssues(result.value.error),
+    );
   const analytics = result.value.value;
   if (!analytics.ok) return errorResponse("internal_error");
   const serialized = serializeAnalyticsResult(

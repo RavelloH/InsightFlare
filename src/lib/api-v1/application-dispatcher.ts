@@ -3,6 +3,11 @@ import {
   GetTeamVisibleSavedFilterInputSchema,
   ListTeamVisibleSavedFiltersInputSchema,
 } from "@/lib/api-v1/application-registry";
+import {
+  type ApiV1ErrorIssue,
+  fromInputIssues,
+  fromZodIssues,
+} from "@/lib/api-v1/errors";
 import { createSavedFilterApplicationService } from "@/lib/api-v1/saved-filters-service";
 import {
   jsonError,
@@ -33,6 +38,7 @@ export interface ApiV1ApplicationDispatchInput {
 function errorResponse(
   request: Request,
   code: "not_found" | "invalid_cursor" | "internal_error" | "validation_failed",
+  issues?: readonly ApiV1ErrorIssue[],
 ): Response {
   if (code === "validation_failed") {
     return jsonError(
@@ -41,6 +47,7 @@ function errorResponse(
       400,
       undefined,
       request,
+      issues,
     );
   }
   if (code === "not_found") {
@@ -128,12 +135,24 @@ export async function dispatchApiV1ApplicationRoute(
     input.service ?? createSavedFilterApplicationService(env, cursorSecret!);
   const context = { teamId: principal.teamId, siteIds: principal.siteIds };
   if (routeId === "site.saved-filters.get") {
-    if (!savedFilterId) return errorResponse(request, "validation_failed");
+    if (!savedFilterId) {
+      return errorResponse(
+        request,
+        "validation_failed",
+        fromInputIssues([{ path: "savedFilterId", code: "required" }]),
+      );
+    }
     const parsed = GetTeamVisibleSavedFilterInputSchema.safeParse({
       siteId,
       id: savedFilterId,
     });
-    if (!parsed.success) return errorResponse(request, "validation_failed");
+    if (!parsed.success) {
+      return errorResponse(
+        request,
+        "validation_failed",
+        fromZodIssues(parsed.error.issues),
+      );
+    }
     const result = await application.execute(
       context,
       "savedFilters.get",
@@ -145,7 +164,13 @@ export async function dispatchApiV1ApplicationRoute(
   } else {
     const parsed = parseListInput(new URL(request.url), siteId);
     if (!parsed || !parsed.success) {
-      return errorResponse(request, "validation_failed");
+      return errorResponse(
+        request,
+        "validation_failed",
+        parsed && !parsed.success
+          ? fromZodIssues(parsed.error.issues)
+          : fromInputIssues([{ path: "query", code: "unrecognized_key" }]),
+      );
     }
     const result = await application.execute(
       context,

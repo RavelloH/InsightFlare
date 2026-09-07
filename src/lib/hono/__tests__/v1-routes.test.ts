@@ -178,7 +178,8 @@ vi.mock("@/lib/api-v1/timeseries-handler", () => ({
 
 vi.mock("@/lib/api-v1/site-list-handler", async (importOriginal) => ({
   ...(await importOriginal<typeof SiteListHandlerModule>()),
-  handlePlannedSitePages: vi.fn(typedReaderMock.invoke),
+  handlePlannedSitePages: (await importOriginal<typeof SiteListHandlerModule>())
+    .handlePlannedSitePages,
   handlePlannedSiteReferrers: vi.fn(typedReaderMock.invoke),
   handlePlannedSiteChannels: vi.fn(typedReaderMock.invoke),
   handlePlannedSiteFilterValues: vi.fn(typedReaderMock.invoke),
@@ -348,6 +349,33 @@ describe("Hono API v1 routes", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "validation_failed" },
+    });
+  });
+
+  it("includes path, code, and message for a Zod-invalid site-list body", async () => {
+    const response = await createApp().fetch(
+      request("/api/v1/sites/site-1/analytics/pages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+      env as never,
+      ctx,
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      error: {
+        code: "validation_failed",
+        issues: [
+          {
+            path: "/timeRange",
+            code: "invalid_type",
+            message: expect.any(String),
+          },
+        ],
+      },
     });
   });
 

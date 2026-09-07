@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { requireScope } from "@/lib/api-v1/auth-helpers";
 import { dispatchApiV1CoreRoute } from "@/lib/api-v1/core-dispatcher";
 import { TypedBatchRequestSchema } from "@/lib/api-v1/dto/batch";
+import { fromRequestBodyError, fromZodIssues } from "@/lib/api-v1/errors";
 import {
   API_V1_BATCH_BODY_MAX_BYTES,
   API_V1_BATCH_ITEM_BODY_MAX_BYTES,
@@ -120,6 +121,7 @@ v1Routes.post("/batch", async (c) => {
       400,
       undefined,
       c.req.raw,
+      fromRequestBodyError(new Error("invalid_json")),
     );
   }
   let raw: unknown;
@@ -134,6 +136,7 @@ v1Routes.post("/batch", async (c) => {
       400,
       undefined,
       c.req.raw,
+      fromRequestBodyError(new Error("invalid_json")),
     );
   }
   const budget = inspectJsonBudget(raw);
@@ -154,6 +157,7 @@ v1Routes.post("/batch", async (c) => {
       422,
       undefined,
       c.req.raw,
+      fromZodIssues(parsed.error.issues),
     );
   }
   let itemBytes = 0;

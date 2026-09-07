@@ -3,7 +3,13 @@ import {
   type TeamBreakdownQueryDto,
   TeamBreakdownQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
-import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
+import {
+  type ApiV1ErrorIssue,
+  apiV1ErrorRegistry,
+  fromInputIssues,
+  fromRequestBodyError,
+  fromZodIssues,
+} from "@/lib/api-v1/errors";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
@@ -55,7 +61,10 @@ function response(
   });
 }
 
-function errorResponse(code: keyof typeof apiV1ErrorRegistry) {
+function errorResponse(
+  code: keyof typeof apiV1ErrorRegistry,
+  issues?: readonly ApiV1ErrorIssue[],
+) {
   const requestId = crypto.randomUUID();
   const definition = apiV1ErrorRegistry[code];
   return response(
@@ -65,6 +74,7 @@ function errorResponse(code: keyof typeof apiV1ErrorRegistry) {
         code,
         message: definition.message,
         retryable: definition.retryable,
+        ...(issues && issues.length > 0 ? { issues } : {}),
       },
       meta: { requestId },
     },
@@ -156,15 +166,33 @@ export async function handleTeamBreakdown(
   )
     return errorResponse("unsupported_media_type");
   if (!acceptsJson(request)) return errorResponse("not_acceptable");
-  if (!DIMENSIONS.has(dimension)) return errorResponse("validation_failed");
+  if (!DIMENSIONS.has(dimension)) {
+    return errorResponse(
+      "validation_failed",
+      fromInputIssues([
+        {
+          path: "dimension",
+          code: "dimension_not_supported",
+          message: "The requested analytics dimension is not supported.",
+        },
+      ]),
+    );
+  }
 
   let input: TeamBreakdownQueryDto;
   try {
-    input = TeamBreakdownQueryDtoSchema.parse(
+    const parsed = TeamBreakdownQueryDtoSchema.safeParse(
       await readBoundedJson(request, MAX_BODY_BYTES),
     );
-  } catch {
-    return errorResponse("validation_failed");
+    if (!parsed.success) {
+      return errorResponse(
+        "validation_failed",
+        fromZodIssues(parsed.error.issues),
+      );
+    }
+    input = parsed.data;
+  } catch (error) {
+    return errorResponse("validation_failed", fromRequestBodyError(error));
   }
   const range = resolveApiV1TimeRange(
     input.timeRange,
@@ -178,10 +206,19 @@ export async function handleTeamBreakdown(
     !Number.isSafeInteger(endExclusiveMs) ||
     endExclusiveMs <= startMs ||
     !isReportingTimeZone(timeZone)
-  )
-    return errorResponse("validation_failed");
+  ) {
+    return errorResponse(
+      "validation_failed",
+      fromInputIssues([{ path: "timeRange", code: "invalid_time_range" }]),
+    );
+  }
   const filters = parseFilter(input);
-  if (!filters) return errorResponse("validation_failed");
+  if (!filters) {
+    return errorResponse(
+      "validation_failed",
+      fromInputIssues([{ path: "filter", code: "invalid_filter" }]),
+    );
+  }
 
   try {
     const query = {

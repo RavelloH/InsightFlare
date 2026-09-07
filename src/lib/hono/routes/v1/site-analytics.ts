@@ -8,6 +8,7 @@ import {
   handleSiteComparisonBreakdown,
 } from "@/lib/api-v1/comparison-handler";
 import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
+import { fromZodIssues } from "@/lib/api-v1/errors";
 import { handlePlannedSiteFunnelAnalysis } from "@/lib/api-v1/funnel-analysis-handler";
 import { handlePlannedSiteOverview } from "@/lib/api-v1/overview-handler";
 import { handlePlannedSavedFilters } from "@/lib/api-v1/saved-filters-handler";
@@ -295,6 +296,7 @@ export function registerV1SiteAnalyticsRoutes(
               SitePerformanceBreakdownDimensionSchema.options,
           },
           c.req.raw,
+          fromZodIssues(parsedDimension.error.issues),
         );
       }
       return handlePlannedSitePerformanceBreakdown(

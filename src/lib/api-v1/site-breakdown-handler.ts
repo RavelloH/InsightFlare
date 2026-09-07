@@ -8,7 +8,13 @@ import {
   type SiteBreakdownQueryDto,
   SiteBreakdownQueryDtoSchema,
 } from "@/lib/api-v1/dto/analytics";
-import { apiV1ErrorRegistry } from "@/lib/api-v1/errors";
+import {
+  type ApiV1ErrorIssue,
+  apiV1ErrorRegistry,
+  fromInputIssues,
+  fromRequestBodyError,
+  fromZodIssues,
+} from "@/lib/api-v1/errors";
 import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/query-application";
 import { readBoundedJson } from "@/lib/api-v1/request-budget";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/time-range";
@@ -58,7 +64,10 @@ function response(
   });
 }
 
-function errorResponse(code: keyof typeof apiV1ErrorRegistry): Response {
+function errorResponse(
+  code: keyof typeof apiV1ErrorRegistry,
+  issues?: readonly ApiV1ErrorIssue[],
+): Response {
   const requestId = crypto.randomUUID();
   const definition = apiV1ErrorRegistry[code];
   return response(
@@ -68,6 +77,7 @@ function errorResponse(code: keyof typeof apiV1ErrorRegistry): Response {
         code,
         message: definition.message,
         retryable: definition.retryable,
+        ...(issues && issues.length > 0 ? { issues } : {}),
       },
       meta: { requestId },
     },
@@ -185,9 +195,18 @@ export async function handlePlannedSiteBreakdown(
 
   let input: SiteBreakdownQueryDto;
   try {
-    input = SiteBreakdownQueryDtoSchema.parse(await readBody(request));
-  } catch {
-    return errorResponse("validation_failed");
+    const parsed = SiteBreakdownQueryDtoSchema.safeParse(
+      await readBody(request),
+    );
+    if (!parsed.success) {
+      return errorResponse(
+        "validation_failed",
+        fromZodIssues(parsed.error.issues),
+      );
+    }
+    input = parsed.data;
+  } catch (error) {
+    return errorResponse("validation_failed", fromRequestBodyError(error));
   }
   if (!principal.scopes.includes("analytics:read")) {
     return errorResponse("missing_scope");
@@ -204,7 +223,18 @@ export async function handlePlannedSiteBreakdown(
   ) {
     return errorResponse("missing_scope");
   }
-  if (!DIMENSIONS.has(dimension)) return errorResponse("validation_failed");
+  if (!DIMENSIONS.has(dimension)) {
+    return errorResponse(
+      "validation_failed",
+      fromInputIssues([
+        {
+          path: "dimension",
+          code: "dimension_not_supported",
+          message: "The requested analytics dimension is not supported.",
+        },
+      ]),
+    );
+  }
 
   const resolvedTimeRange = resolveApiV1TimeRange(
     input.timeRange,
@@ -221,7 +251,10 @@ export async function handlePlannedSiteBreakdown(
     endExclusiveMs <= startMs ||
     !isReportingTimeZone(timeZone)
   ) {
-    return errorResponse("validation_failed");
+    return errorResponse(
+      "validation_failed",
+      fromInputIssues([{ path: "timeRange", code: "invalid_time_range" }]),
+    );
   }
   let filters: FilterDocument | null;
   try {
@@ -245,6 +278,9 @@ export async function handlePlannedSiteBreakdown(
       input.filter?.type === "saved"
         ? "resource_not_found"
         : "validation_failed",
+      input.filter?.type === "saved"
+        ? undefined
+        : fromInputIssues([{ path: "filter", code: "invalid_filter" }]),
     );
   }
   try {

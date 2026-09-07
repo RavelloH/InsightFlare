@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { fromAnalyticsDomainError, toJsonPointer } from "@/lib/api-v1/errors";
+import {
+  fromAnalyticsDomainError,
+  fromZodIssues,
+  toJsonPointer,
+} from "@/lib/api-v1/errors";
 import {
   serializeAnalyticsResult,
   toWireSuccess,
@@ -17,12 +21,36 @@ describe("API v1 wire serializer", () => {
     expect(
       fromAnalyticsDomainError({
         kind: "invalid-input",
-        issues: [{ path: "filter.root", code: "invalid_filter" }],
+        issues: [{ path: "timeRange", code: "invalid_time_range" }],
       }),
     ).toMatchObject({
       code: "validation_failed",
-      issues: [{ path: "/filter/root", code: "invalid_filter" }],
+      issues: [
+        {
+          path: "/timeRange",
+          code: "invalid_time_range",
+          message: "The requested time range is invalid.",
+        },
+      ],
     });
+  });
+
+  it("projects Zod schema issues to the stable validation issue shape", () => {
+    expect(
+      fromZodIssues([
+        {
+          path: ["timeRange", "from"],
+          code: "invalid_format",
+          message: "Invalid ISO datetime",
+        },
+      ]),
+    ).toEqual([
+      {
+        path: "/timeRange/from",
+        code: "invalid_format",
+        message: "Invalid ISO datetime",
+      },
+    ]);
   });
 
   it.each([
@@ -31,6 +59,8 @@ describe("API v1 wire serializer", () => {
     ["not-found", "resource_not_found"],
     ["unsupported-operation", "unsupported_query"],
     ["range-not-supported", "range_too_wide"],
+    ["comparison-alignment-mismatch", "comparison_alignment_mismatch"],
+    ["dimension-not-supported", "dimension_not_supported"],
     ["data-unavailable", "data_unavailable"],
     ["internal", "internal_error"],
   ] as const)("maps %s domain failures to %s", (kind, code) => {
@@ -47,7 +77,11 @@ describe("API v1 wire serializer", () => {
                 ? { kind, operation: "overview" }
                 : kind === "range-not-supported"
                   ? { kind, reason: "too-wide" }
-                  : { kind, operation: "overview" };
+                  : kind === "comparison-alignment-mismatch"
+                    ? { kind }
+                    : kind === "dimension-not-supported"
+                      ? { kind, dimension: "page.path" }
+                      : { kind, operation: "overview" };
     expect(
       fromAnalyticsDomainError(error as AnalyticsDomainError),
     ).toMatchObject({ code });

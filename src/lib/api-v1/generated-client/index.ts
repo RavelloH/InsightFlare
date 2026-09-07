@@ -257,6 +257,7 @@ export interface ApiV1GeneratedFailure {
     readonly issues?: readonly {
       readonly path: string;
       readonly code: string;
+      readonly message: string;
     }[];
   };
   readonly meta: Record<string, unknown>;
