@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchFunnelDetail } from "@/lib/dashboard/client-data";
@@ -114,7 +113,7 @@ export function FunnelCard({
           onOpen();
         }}
       >
-        <CardHeader className="flex items-start justify-between gap-3 space-y-0">
+        <CardHeader className="flex items-center justify-between gap-3 space-y-0">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <CardTitle className="min-w-0 truncate text-base">
               {funnel.name}
@@ -139,24 +138,15 @@ export function FunnelCard({
               {labels.detailLoadError}
             </p>
           ) : (
-            <AutoTransition
-              initial={false}
-              transitionKey={detail.isPending ? "loading" : "ready"}
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              className="min-w-0"
-            >
-              <FunnelVisualization
-                locale={locale}
-                labels={labels}
-                descriptionMessages={descriptionMessages}
-                funnel={detail.data?.data.funnel ?? funnel}
-                analysis={detail.data?.data.analysis}
-                compact
-                loading={detail.isPending || !detail.data}
-              />
-            </AutoTransition>
+            <FunnelVisualization
+              locale={locale}
+              labels={labels}
+              descriptionMessages={descriptionMessages}
+              funnel={detail.data?.data.funnel ?? funnel}
+              analysis={detail.data?.data.analysis}
+              compact
+              loading={detail.isFetching || !detail.data}
+            />
           )}
         </CardContent>
       </Card>

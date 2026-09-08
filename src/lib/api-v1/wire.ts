@@ -627,6 +627,65 @@ export const AnalyticsFunnelAnalysisResponseSchema = apiV1SuccessEnvelopeSchema(
   ApiV1AnalyticsResponseMetaSchema,
 );
 
+const AnalyticsGoalDefinitionSchema = z
+  .object({
+    id: z.string().min(1).max(512),
+    siteId: z.string().min(1).max(512),
+    name: z.string(),
+    filterDslVersion: z.literal(1),
+    filterDsl: z.string().min(1),
+    semanticFingerprint: z.string().min(1),
+    createdAt: z.number().int(),
+    updatedAt: z.number().int(),
+  })
+  .strict();
+const AnalyticsGoalMetricSchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    converted: z.number().int().nonnegative(),
+    conversionRate: z.number().finite().nonnegative(),
+  })
+  .strict();
+export const AnalyticsGoalSummaryDataSchema = z
+  .object({
+    goal: AnalyticsGoalDefinitionSchema,
+    summary: z
+      .object({
+        sessions: AnalyticsGoalMetricSchema,
+        visitors: AnalyticsGoalMetricSchema,
+      })
+      .strict(),
+  })
+  .strict();
+export type AnalyticsGoalSummaryData = z.infer<
+  typeof AnalyticsGoalSummaryDataSchema
+>;
+export const AnalyticsGoalSummaryResponseSchema = apiV1SuccessEnvelopeSchema(
+  AnalyticsGoalSummaryDataSchema,
+  ApiV1AnalyticsResponseMetaSchema,
+);
+const AnalyticsGoalTimeseriesPointSchema = z
+  .object({
+    timestampMs: z.number().int(),
+    sessions: AnalyticsGoalMetricSchema,
+    visitors: AnalyticsGoalMetricSchema,
+  })
+  .strict();
+export const AnalyticsGoalTimeseriesDataSchema = z
+  .object({
+    goal: AnalyticsGoalDefinitionSchema,
+    interval: z.enum(["minute", "hour", "day", "week", "month"]),
+    timeseries: z.array(AnalyticsGoalTimeseriesPointSchema),
+  })
+  .strict();
+export type AnalyticsGoalTimeseriesData = z.infer<
+  typeof AnalyticsGoalTimeseriesDataSchema
+>;
+export const AnalyticsGoalTimeseriesResponseSchema = apiV1SuccessEnvelopeSchema(
+  AnalyticsGoalTimeseriesDataSchema,
+  ApiV1AnalyticsResponseMetaSchema,
+);
+
 export const AnalyticsPerformanceMetricSummarySchema = z
   .object({
     avg: z.number().nullable(),

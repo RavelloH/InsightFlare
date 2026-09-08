@@ -96,6 +96,8 @@ export type QueryOperation =
   | "sessions"
   | "session-detail"
   | "funnel-analysis"
+  | "goal-summary"
+  | "goal-timeseries"
   | "team-dashboard"
   | "explore";
 

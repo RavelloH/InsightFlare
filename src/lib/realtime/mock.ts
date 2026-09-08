@@ -88,6 +88,12 @@ import {
   updateDemoFunnel,
 } from "@/lib/realtime/mock/funnels";
 import {
+  createDemoGoal,
+  deleteDemoGoal,
+  generateDemoGoals,
+  updateDemoGoal,
+} from "@/lib/realtime/mock/goals";
+import {
   generateDemoJourneyEventDetail,
   generateDemoSessionDetail,
   generateDemoSessions,
@@ -847,6 +853,23 @@ function handleDemoRequestInner(options: {
     });
   }
 
+  if (
+    method === "POST" &&
+    (path.includes("/analytics/goals/summary") ||
+      path.includes("/analytics/goals/timeseries"))
+  ) {
+    return generateDemoGoals(siteId, {
+      ...params,
+      id: String(bodyRecord.goalId ?? params.id ?? ""),
+      operation: path.includes("/analytics/goals/timeseries")
+        ? "goal-timeseries"
+        : "goal-summary",
+      ...(bodyRecord.interval !== undefined
+        ? { interval: String(bodyRecord.interval) }
+        : {}),
+    });
+  }
+
   // Write operations → read-only stub
   if (
     method === "POST" ||
@@ -893,6 +916,12 @@ function handleDemoRequestInner(options: {
       if (method === "PATCH")
         return updateDemoFunnel(siteId, params, options.body);
       return createDemoFunnel(siteId, options.body);
+    }
+    if (path.includes("/goals") && !path.includes("/analytics/goals/")) {
+      if (method === "DELETE") return deleteDemoGoal(siteId, params);
+      if (method === "PATCH")
+        return updateDemoGoal(siteId, params, options.body);
+      return createDemoGoal(siteId, options.body);
     }
     // Special cases that need real-looking responses
     if (path === "/api/public/session" || path.includes("/auth/login")) {
@@ -1613,6 +1642,15 @@ function handleDemoRequestInner(options: {
   }
   if (path.includes("/funnels")) {
     return generateDemoFunnels(siteId, params);
+  }
+  if (path.includes("/goal-summary") || path.includes("/goal-timeseries")) {
+    params.operation = path.includes("goal-timeseries")
+      ? "goal-timeseries"
+      : "goal-summary";
+    return generateDemoGoals(siteId, params);
+  }
+  if (path.includes("/goals")) {
+    return generateDemoGoals(siteId, params);
   }
   if (path.includes("/retention")) {
     return generateDemoRetention(siteId, params);

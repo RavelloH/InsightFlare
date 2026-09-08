@@ -23,6 +23,7 @@ import {
   RiShareForwardLine,
   RiShieldCheckLine,
   RiSpeedUpLine,
+  RiTargetLine,
   RiUser3Line,
 } from "@remixicon/react";
 import { motion } from "motion/react";
@@ -48,6 +49,7 @@ type AnalyticsTabKey =
   | "campaigns"
   | "events"
   | "funnels"
+  | "goals"
   | "visitors"
   | "retention"
   | "geo"
@@ -97,6 +99,7 @@ function getAnalyticsSectionIcon(key: AnalyticsTabKey) {
   if (key === "campaigns") return RiMegaphoneLine;
   if (key === "events") return RiFlashlightLine;
   if (key === "funnels") return RiFilter2Line;
+  if (key === "goals") return RiTargetLine;
   if (key === "visitors") return RiUser3Line;
   if (key === "retention") return RiRepeatLine;
   if (key === "geo") return RiMapPin2Line;

@@ -4,6 +4,7 @@ export type * from "./edge-client-types/dimensions";
 export type * from "./edge-client-types/events";
 export type * from "./edge-client-types/filters";
 export type * from "./edge-client-types/funnels";
+export type * from "./edge-client-types/goals";
 export type * from "./edge-client-types/journeys";
 export type * from "./edge-client-types/overview";
 export type * from "./edge-client-types/pages";

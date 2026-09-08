@@ -31,6 +31,8 @@ import {
 } from "@/lib/edge/analytics/providers/d1/operations/site-events";
 import { readSiteFilterValues } from "@/lib/edge/analytics/providers/d1/operations/site-filter-values";
 import { readSiteFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/operations/site-funnel-analysis";
+import { readSiteGoalSummary } from "@/lib/edge/analytics/providers/d1/operations/site-goal-summary";
+import { readSiteGoalTimeseries } from "@/lib/edge/analytics/providers/d1/operations/site-goal-timeseries";
 import {
   readSiteJourneyEventDetail,
   readSiteSessionDetail,
@@ -295,6 +297,37 @@ function registerSiteOperation(
           });
           return result;
         }),
+      );
+      return;
+    case "site.analytics.goalSummary":
+      registry.register(
+        operation,
+        provider((input) =>
+          readSiteGoalSummary({
+            env,
+            siteId: siteId(input, configuredSiteId),
+            goalId: stringField(input, "goalId"),
+            window: timeWindow(input.time),
+            filters: filters(input),
+            scopedDataset: input.scopedDataset,
+          }),
+        ),
+      );
+      return;
+    case "site.analytics.goalTimeseries":
+      registry.register(
+        operation,
+        provider((input) =>
+          readSiteGoalTimeseries({
+            env,
+            siteId: siteId(input, configuredSiteId),
+            goalId: stringField(input, "goalId"),
+            interval: input.interval as never,
+            window: timeWindow(input.time),
+            filters: filters(input),
+            scopedDataset: input.scopedDataset,
+          }),
+        ),
       );
       return;
     case "site.analytics.performanceSummary":

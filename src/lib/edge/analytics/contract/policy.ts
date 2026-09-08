@@ -58,6 +58,8 @@ const ALL_OPERATIONS: readonly QueryOperation[] = [
   "sessions",
   "session-detail",
   "funnel-analysis",
+  "goal-summary",
+  "goal-timeseries",
   "team-dashboard",
   "explore",
 ];

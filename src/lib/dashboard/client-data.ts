@@ -15,7 +15,9 @@ export {
 } from "./client-browser-data";
 export {
   createFunnel,
+  createGoal,
   deleteFunnel,
+  deleteGoal,
   fetchEventRecordDetail,
   fetchEventsRecords,
   fetchEventsSummary,
@@ -26,6 +28,10 @@ export {
   fetchEventTypeFieldValues,
   fetchFunnelDetail,
   fetchFunnels,
+  fetchGoalDefinition,
+  fetchGoals,
+  fetchGoalSummary,
+  fetchGoalTimeseries,
   fetchJourneyEventDetail,
   fetchOverview,
   fetchPages,
@@ -40,6 +46,7 @@ export {
   fetchVisitors,
   fetchVisitorSessions,
   updateFunnel,
+  updateGoal,
 } from "./client-core-data";
 export type {
   DashboardFilterOptionData,

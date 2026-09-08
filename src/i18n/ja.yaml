@@ -7,6 +7,7 @@ navigation:
   sessions: セッション
   events: イベント
   funnels: ファネル
+  goals: 目標
   campaigns: キャンペーン
   visitors: 訪問者
   retention: リテンション
@@ -176,8 +177,19 @@ conditionDescription:
   filterAnyOf: "{field} は {values} のいずれかに一致"
   filterNoneOf: "{field} は {values} のいずれにも一致しない"
   filterBetween: "{field} は {from} から {to} の間"
+  filterContains: "{field} は {value} を含む"
   filterStartsWith: "{field} は {value} で始まる"
   filterEndsWith: "{field} は {value} で終わる"
+  filterGreaterThan: "{field} は {value} より大きい"
+  filterGreaterThanOrEqual: "{field} は {value} 以上"
+  filterLessThan: "{field} は {value} より小さい"
+  filterLessThanOrEqual: "{field} は {value} 以下"
+  filterExists: "{field} が存在する"
+  filterNotExists: "{field} が存在しない"
+  filterIsNull: "{field} は NULL"
+  filterNotNull: "{field} は NULL ではない"
+  filterIsEmpty: "{field} は空"
+  filterNotEmpty: "{field} は空ではない"
 filterBuilder:
   fieldGroups:
     page: ページ
@@ -845,6 +857,52 @@ funnels:
   conversion: コンバージョン
   stepConversion: ステップコンバージョン率
   dropOff: 離脱
+  updated: 更新
+goals:
+  title: 目標
+  subtitle: 再利用可能なイベントまたはページ条件でコンバージョンを測定します。
+  listTitle: 目標定義
+  listSubtitle: この期間のコンバージョン率の変化を確認します。
+  open: 目標を開く
+  moreActions: その他の操作
+  create: 新しい目標
+  createTitle: 目標を作成
+  createDescription: コンバージョンとして数えるイベントまたはページ条件を定義します。
+  nameLabel: 名前
+  namePlaceholder: 購入完了
+  filter: コンバージョン条件
+  apply: 適用
+  cancel: キャンセル
+  expression: フィルター式
+  filterPlaceholder: 例 event.name eq "purchase"
+  invalidFilter: 無効なフィルター
+  save: 作成
+  saveEdit: 変更を保存
+  edit: 編集
+  editTitle: 目標を編集
+  creating: 作成中...
+  delete: 削除
+  deleteTitle: 目標を削除
+  deleteDescription: 保存した目標定義を削除します。過去の分析データは削除されません。
+  deleteConfirm: 目標を削除
+  deleting: 削除中...
+  empty: 目標はまだありません。
+  emptyHint: ページ条件またはカスタムイベントから目標を作成します。
+  loadError: 目標を読み込めません。
+  detailLoadError: 目標分析を読み込めません。
+  invalidGoal: 名前と完全なコンバージョン条件を入力してください。
+  created: 目標を作成しました。
+  createFailed: 目標を作成できません。
+  updatedSuccess: 目標を更新しました。
+  saveFailed: 目標を保存できません。
+  deleted: 目標を削除しました。
+  deleteFailed: 目標を削除できません。
+  sessions: セッション
+  visitors: 訪問者
+  total: 合計
+  converted: コンバージョン
+  conversion: 転換率
+  timeseries: コンバージョン率
   updated: 更新
 visitors:
   title: 訪問者

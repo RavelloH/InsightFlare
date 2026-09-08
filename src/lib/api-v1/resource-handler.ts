@@ -3,15 +3,19 @@ import type { z } from "zod";
 import {
   type ApiV1ApplicationOperationId,
   CreateFunnelInputSchema,
+  CreateGoalInputSchema,
   CreateSiteInputSchema,
   DeleteSiteInputSchema,
   GetFunnelInputSchema,
+  GetGoalInputSchema,
   GetSiteInputSchema,
   ListFunnelsInputSchema,
+  ListGoalsInputSchema,
   ListSitesInputSchema,
   SiteSettingsInputSchema,
   TrackingScriptInputSchema,
   UpdateFunnelInputSchema,
+  UpdateGoalInputSchema,
   UpdatePrivacySettingsInputSchema,
   UpdateSharingSettingsInputSchema,
   UpdateSiteInputSchema,
@@ -51,7 +55,12 @@ type ResourceRouteId =
   | "funnels.create"
   | "funnels.get"
   | "funnels.update"
-  | "funnels.delete";
+  | "funnels.delete"
+  | "goals.list"
+  | "goals.create"
+  | "goals.get"
+  | "goals.update"
+  | "goals.delete";
 
 interface ResourceRouteConfig {
   readonly operation: ResourceRouteId;
@@ -174,6 +183,38 @@ const routeConfigs: Record<ResourceRouteId, ResourceRouteConfig> = {
     schema: GetFunnelInputSchema,
     successStatus: 204,
   },
+  "goals.list": {
+    operation: "goals.list",
+    method: "GET",
+    scope: "analysis:read",
+    schema: ListGoalsInputSchema,
+  },
+  "goals.create": {
+    operation: "goals.create",
+    method: "POST",
+    scope: "analysis:write",
+    schema: CreateGoalInputSchema,
+    successStatus: 201,
+  },
+  "goals.get": {
+    operation: "goals.get",
+    method: "GET",
+    scope: "analysis:read",
+    schema: GetGoalInputSchema,
+  },
+  "goals.update": {
+    operation: "goals.update",
+    method: "PATCH",
+    scope: "analysis:write",
+    schema: UpdateGoalInputSchema,
+  },
+  "goals.delete": {
+    operation: "goals.delete",
+    method: "DELETE",
+    scope: "analysis:write",
+    schema: GetGoalInputSchema,
+    successStatus: 204,
+  },
 };
 
 function acceptsJson(request: Request): boolean {
@@ -217,7 +258,7 @@ function error(
     unsupported_media_type: [415, "Expected application/json"],
     not_acceptable: [406, "Only application/json is supported"],
     invalid_cursor: [400, "The pagination cursor is invalid"],
-    invalid_input: [400, "The funnel configuration is invalid"],
+    invalid_input: [400, "The analysis configuration is invalid"],
     internal_error: [500, "An internal error occurred"],
     conflict: [409, "The resource conflicts with an existing resource"],
   } as const;
@@ -233,6 +274,7 @@ export async function handlePlannedResourceRoute(input: {
   readonly routeId: ResourceRouteId;
   readonly siteId?: string;
   readonly funnelId?: string;
+  readonly goalId?: string;
   readonly allow?: string;
 }): Promise<Response> {
   const config = routeConfigs[input.routeId];
@@ -274,7 +316,9 @@ export async function handlePlannedResourceRoute(input: {
     }
   }
   const isPaginatedCollection =
-    config.operation === "sites.list" || config.operation === "funnels.list";
+    config.operation === "sites.list" ||
+    config.operation === "funnels.list" ||
+    config.operation === "goals.list";
   const query = new URL(request.url).searchParams;
   const queryInput = isPaginatedCollection
     ? [...query.keys()].every((key) => key === "limit" || key === "cursor")
@@ -293,6 +337,7 @@ export async function handlePlannedResourceRoute(input: {
     ...(queryInput ?? {}),
     ...(input.siteId ? { siteId: input.siteId } : {}),
     ...(input.funnelId ? { funnelId: input.funnelId } : {}),
+    ...(input.goalId ? { goalId: input.goalId } : {}),
     ...(config.operation === "settings.trackingScript.get"
       ? { origin: new URL(request.url).origin }
       : {}),

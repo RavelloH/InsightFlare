@@ -5,6 +5,7 @@ import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operatio
 
 import { registerEventProviders } from "./events";
 import { registerFunnelProvider } from "./funnels";
+import { registerGoalProviders } from "./goals";
 import { registerJourneyProviders } from "./journeys";
 import { overviewProvider, trendProvider } from "./overview";
 import type { D1SiteQueryRuntimeOptions } from "./shared";
@@ -30,6 +31,7 @@ export function createD1SiteQueryRuntime(options: D1SiteQueryRuntimeOptions) {
   registerJourneyProviders(registry, options);
   registerTechnologyProviders(registry, options);
   registerFunnelProvider(registry, options);
+  registerGoalProviders(registry, options);
 
   return createAnalyticsQueryRuntime(registry);
 }

@@ -3,14 +3,19 @@ import { z } from "zod";
 import {
   type ApiV1ApplicationOperationId,
   CreateFunnelInputSchema,
+  CreateGoalInputSchema,
   CreateSiteInputSchema,
   DeleteSiteInputSchema,
   FunnelResourcePageSchema,
   FunnelResourceSchema,
   GetFunnelInputSchema,
+  GetGoalInputSchema,
   GetSiteInputSchema,
   GetTeamVisibleSavedFilterInputSchema,
+  GoalResourcePageSchema,
+  GoalResourceSchema,
   ListFunnelsInputSchema,
+  ListGoalsInputSchema,
   ListSitesInputSchema,
   ListTeamVisibleSavedFiltersInputSchema,
   PrivacySettingsSchema,
@@ -23,6 +28,7 @@ import {
   TrackingScriptSchema,
   TrackingSettingsSchema,
   UpdateFunnelInputSchema,
+  UpdateGoalInputSchema,
   UpdatePrivacySettingsInputSchema,
   UpdateSharingSettingsInputSchema,
   UpdateSiteInputSchema,
@@ -45,6 +51,8 @@ import {
   SiteEventTypesQueryDtoSchema,
   SiteFilterValuesQueryDtoSchema,
   SiteFunnelAnalysisQueryDtoSchema,
+  SiteGoalSummaryQueryDtoSchema,
+  SiteGoalTimeseriesQueryDtoSchema,
   SiteJourneyEventDetailQueryDtoSchema,
   SiteOverviewQueryDtoSchema,
   SitePagesQueryDtoSchema,
@@ -91,6 +99,8 @@ import {
   AnalyticsEventTypesResponseSchema,
   AnalyticsFilterValuesResponseSchema,
   AnalyticsFunnelAnalysisResponseSchema,
+  AnalyticsGoalSummaryResponseSchema,
+  AnalyticsGoalTimeseriesResponseSchema,
   AnalyticsJourneyEventDetailResponseSchema,
   AnalyticsJourneyEventsResponseSchema,
   AnalyticsJourneySessionsResponseSchema,
@@ -313,6 +323,24 @@ export interface ApiV1AnalyticsFunnelAnalysisRouteDescriptor<
   readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
   readonly requestSchema: typeof SiteFunnelAnalysisQueryDtoSchema;
   readonly responseSchema: typeof AnalyticsFunnelAnalysisResponseSchema;
+  readonly declaredErrors: readonly string[];
+}
+
+export interface ApiV1AnalyticsGoalRouteDescriptor<Id extends string> {
+  readonly id: Id;
+  readonly lifecycle: ApiV1RouteLifecycle;
+  readonly method: "POST";
+  readonly path: string;
+  readonly operationId:
+    "site.analytics.goalSummary" | "site.analytics.goalTimeseries";
+  readonly scopes: readonly string[];
+  readonly conditionalScopes?: ApiV1AnalyticsRouteDescriptor<string>["conditionalScopes"];
+  readonly requestSchema:
+    | typeof SiteGoalSummaryQueryDtoSchema
+    | typeof SiteGoalTimeseriesQueryDtoSchema;
+  readonly responseSchema:
+    | typeof AnalyticsGoalSummaryResponseSchema
+    | typeof AnalyticsGoalTimeseriesResponseSchema;
   readonly declaredErrors: readonly string[];
 }
 
@@ -1060,6 +1088,61 @@ export const apiV1AnalyticsFunnelAnalysisRouteRegistry = [
     ],
   },
 ] as const satisfies readonly ApiV1AnalyticsFunnelAnalysisRouteDescriptor<string>[];
+
+export const apiV1AnalyticsGoalRouteRegistry = [
+  {
+    id: "site.analytics.goalSummary",
+    lifecycle: "exposed",
+    method: "POST",
+    path: "/api/v1/sites/{siteId}/analytics/goals/summary",
+    operationId: "site.analytics.goalSummary",
+    scopes: ["analytics:read"],
+    conditionalScopes: [
+      {
+        when: "filter.type=saved",
+        scopes: ["analytics:read", "analysis:read"],
+      },
+    ],
+    requestSchema: SiteGoalSummaryQueryDtoSchema,
+    responseSchema: AnalyticsGoalSummaryResponseSchema,
+    declaredErrors: [
+      "validation_failed",
+      "missing_scope",
+      "resource_not_found",
+      "data_unavailable",
+      "internal_error",
+      "method_not_allowed",
+      "not_acceptable",
+      "unsupported_media_type",
+    ],
+  },
+  {
+    id: "site.analytics.goalTimeseries",
+    lifecycle: "exposed",
+    method: "POST",
+    path: "/api/v1/sites/{siteId}/analytics/goals/timeseries",
+    operationId: "site.analytics.goalTimeseries",
+    scopes: ["analytics:read"],
+    conditionalScopes: [
+      {
+        when: "filter.type=saved",
+        scopes: ["analytics:read", "analysis:read"],
+      },
+    ],
+    requestSchema: SiteGoalTimeseriesQueryDtoSchema,
+    responseSchema: AnalyticsGoalTimeseriesResponseSchema,
+    declaredErrors: [
+      "validation_failed",
+      "missing_scope",
+      "resource_not_found",
+      "data_unavailable",
+      "internal_error",
+      "method_not_allowed",
+      "not_acceptable",
+      "unsupported_media_type",
+    ],
+  },
+] as const satisfies readonly ApiV1AnalyticsGoalRouteDescriptor<string>[];
 
 export const apiV1AnalyticsPerformanceRouteRegistry = [
   {
@@ -1902,6 +1985,82 @@ export const apiV1ApplicationRouteRegistry = [
     declaredErrors: ["missing_scope", "resource_not_found", "internal_error"],
   }),
   applicationRoute({
+    id: "goals.list",
+    lifecycle: "exposed",
+    method: "GET",
+    path: "/api/v1/sites/{siteId}/goals",
+    operationId: "goals.list",
+    scopes: ["analysis:read"],
+    requestSchema: ListGoalsInputSchema,
+    responseSchema: GoalResourcePageSchema,
+    declaredErrors: [
+      "missing_scope",
+      "resource_not_found",
+      "invalid_cursor",
+      "internal_error",
+    ],
+  }),
+  applicationRoute({
+    id: "goals.create",
+    lifecycle: "exposed",
+    method: "POST",
+    path: "/api/v1/sites/{siteId}/goals",
+    operationId: "goals.create",
+    scopes: ["analysis:write"],
+    requestSchema: CreateGoalInputSchema,
+    responseSchema: GoalResourceSchema,
+    declaredErrors: [
+      "validation_failed",
+      "payload_too_large",
+      "missing_scope",
+      "resource_not_found",
+      "unsupported_media_type",
+      "not_acceptable",
+      "internal_error",
+    ],
+  }),
+  applicationRoute({
+    id: "goals.get",
+    lifecycle: "exposed",
+    method: "GET",
+    path: "/api/v1/sites/{siteId}/goals/{goalId}",
+    operationId: "goals.get",
+    scopes: ["analysis:read"],
+    requestSchema: GetGoalInputSchema,
+    responseSchema: GoalResourceSchema,
+    declaredErrors: ["missing_scope", "resource_not_found", "internal_error"],
+  }),
+  applicationRoute({
+    id: "goals.update",
+    lifecycle: "exposed",
+    method: "PATCH",
+    path: "/api/v1/sites/{siteId}/goals/{goalId}",
+    operationId: "goals.update",
+    scopes: ["analysis:write"],
+    requestSchema: UpdateGoalInputSchema,
+    responseSchema: GoalResourceSchema,
+    declaredErrors: [
+      "validation_failed",
+      "payload_too_large",
+      "missing_scope",
+      "resource_not_found",
+      "unsupported_media_type",
+      "not_acceptable",
+      "internal_error",
+    ],
+  }),
+  applicationRoute({
+    id: "goals.delete",
+    lifecycle: "exposed",
+    method: "DELETE",
+    path: "/api/v1/sites/{siteId}/goals/{goalId}",
+    operationId: "goals.delete",
+    scopes: ["analysis:write"],
+    requestSchema: GetGoalInputSchema,
+    responseSchema: z.undefined(),
+    declaredErrors: ["missing_scope", "resource_not_found", "internal_error"],
+  }),
+  applicationRoute({
     id: "site.saved-filters.list",
     lifecycle: "exposed",
     method: "GET",
@@ -2031,6 +2190,7 @@ export const apiV1RouteRegistry = [
   ...apiV1AnalyticsFilterValuesRouteRegistry,
   ...apiV1AnalyticsRetentionRouteRegistry,
   ...apiV1AnalyticsFunnelAnalysisRouteRegistry,
+  ...apiV1AnalyticsGoalRouteRegistry,
   ...apiV1AnalyticsPerformanceRouteRegistry,
   ...apiV1AnalyticsEventsRouteRegistry,
   ...apiV1AnalyticsEventRecordsRouteRegistry,

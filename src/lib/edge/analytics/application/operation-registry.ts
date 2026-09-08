@@ -6,6 +6,7 @@ import type {
   FilterValuesResult,
   FunnelAnalysis,
   FunnelDefinition,
+  GoalDefinition,
   OverviewResult,
   PagesResult,
   ReferrersResult,
@@ -240,6 +241,38 @@ export const analyticsOperationRegistry = [
       _result: AnalyticsResult<{
         funnel: FunnelDefinition;
         analysis: FunnelAnalysis;
+      }>,
+    ) => undefined,
+  }),
+  operation({
+    id: "site.analytics.goalSummary",
+    subjectKinds: ["site"],
+    audiences: ["api-v1", "private-dashboard"],
+    cache: "aggregate",
+    operationRevision: "1",
+    schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
+    result: (
+      _result: AnalyticsResult<{
+        goal: GoalDefinition;
+        summary: {
+          sessions: unknown;
+          visitors: unknown;
+        };
+      }>,
+    ) => undefined,
+  }),
+  operation({
+    id: "site.analytics.goalTimeseries",
+    subjectKinds: ["site"],
+    audiences: ["api-v1", "private-dashboard"],
+    cache: "aggregate",
+    operationRevision: "1",
+    schema: { metrics: ANALYTICS_METRICS, dimensions: ANALYTICS_DIMENSIONS },
+    result: (
+      _result: AnalyticsResult<{
+        goal: GoalDefinition;
+        interval: string;
+        timeseries: readonly unknown[];
       }>,
     ) => undefined,
   }),

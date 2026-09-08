@@ -13134,6 +13134,1224 @@
         ]
       }
     },
+    "/api/v1/sites/{siteId}/analytics/goals/summary": {
+      "post": {
+        "operationId": "site.analytics.goalSummary",
+        "summary": "API v1 site analytics goalSummary operation",
+        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "tags": [
+          "Analytics"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "siteId path parameter."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "timeRange": {
+                    "$ref": "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  },
+                  "filter": {
+                    "anyOf": [
+                      {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "inline"
+                              },
+                              "expression": {
+                                "$ref": "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1goals~1summary/post/requestBody/content/application~1json/schema/$defs/__schema0"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "expression"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "dsl"
+                              },
+                              "expression": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 65536
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "expression"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "saved"
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
+                  "goalId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "timeRange",
+                  "goalId"
+                ],
+                "additionalProperties": false,
+                "$defs": {
+                  "__schema0": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/SharedSchema_75b932d026c1"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "and"
+                          },
+                          "children": {
+                            "minItems": 1,
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1goals~1summary/post/requestBody/content/application~1json/schema/$defs/__schema0"
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "children"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "or"
+                          },
+                          "children": {
+                            "minItems": 1,
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1goals~1summary/post/requestBody/content/application~1json/schema/$defs/__schema0"
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "children"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "not"
+                          },
+                          "child": {
+                            "$ref": "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1goals~1summary/post/requestBody/content/application~1json/schema/$defs/__schema0"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "child"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "example": {
+                "timeRange": {
+                  "kind": "absolute",
+                  "from": "2026-01-01T00:00:00Z",
+                  "to": "2026-01-01T00:00:00Z",
+                  "timeZone": "example"
+                },
+                "filter": {
+                  "type": "inline",
+                  "expression": {
+                    "kind": "condition",
+                    "target": {
+                      "kind": "field",
+                      "field": "example"
+                    },
+                    "operator": "example",
+                    "value": "example"
+                  }
+                },
+                "scope": "auto",
+                "goalId": "example"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "goal": {
+                          "$ref": "#/components/schemas/SharedSchema_f4e15ae6b45c"
+                        },
+                        "summary": {
+                          "type": "object",
+                          "properties": {
+                            "sessions": {
+                              "$ref": "#/components/schemas/SharedSchema_6f2e032c34e9"
+                            },
+                            "visitors": {
+                              "$ref": "#/components/schemas/SharedSchema_6f2e032c34e9"
+                            }
+                          },
+                          "required": [
+                            "sessions",
+                            "visitors"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "goal",
+                        "summary"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "data": {
+                    "goal": {
+                      "id": "example",
+                      "siteId": "example",
+                      "name": "example",
+                      "filterDslVersion": 1,
+                      "filterDsl": "example",
+                      "semanticFingerprint": "example",
+                      "createdAt": -9007199254740991,
+                      "updatedAt": -9007199254740991
+                    },
+                    "summary": {
+                      "sessions": {
+                        "total": 0,
+                        "converted": 0,
+                        "conversionRate": 0
+                      },
+                      "visitors": {
+                        "total": 0,
+                        "converted": 0,
+                        "conversionRate": 0
+                      }
+                    }
+                  },
+                  "meta": {
+                    "requestId": "example",
+                    "generatedAt": "2026-01-01T00:00:00Z",
+                    "timeRange": {
+                      "from": "2026-01-01T00:00:00Z",
+                      "to": "2026-01-01T00:00:00Z",
+                      "timeZone": "example"
+                    },
+                    "source": "raw",
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "API v1 error: validation_failed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "validation_failed",
+                    "message": "Request validation failed.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API v1 error: missing_scope.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "missing_scope",
+                    "message": "The API key lacks the required scope.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API v1 error: resource_not_found.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "resource_not_found",
+                    "message": "Resource not found.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "API v1 error: method_not_allowed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "method_not_allowed",
+                    "message": "The HTTP method is not allowed for this route.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "API v1 error: not_acceptable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "not_acceptable",
+                    "message": "The requested response media type is not acceptable.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "API v1 error: unsupported_media_type.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "unsupported_media_type",
+                    "message": "The request media type is unsupported.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "API v1 error: internal_error.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "internal_error",
+                    "message": "An internal error occurred.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "API v1 error: data_unavailable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "data_unavailable",
+                    "message": "Analytics data is temporarily unavailable.",
+                    "retryable": true
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-api-v1-lifecycle": "exposed",
+        "x-api-v1-scopes": [
+          "analytics:read"
+        ],
+        "x-required-scopes": [
+          "analytics:read"
+        ],
+        "x-api-v1-batch-eligible": false,
+        "x-api-v1-conditional-scopes": [
+          {
+            "when": "filter.type=saved",
+            "scopes": [
+              "analytics:read",
+              "analysis:read"
+            ]
+          }
+        ]
+      }
+    },
+    "/api/v1/sites/{siteId}/analytics/goals/timeseries": {
+      "post": {
+        "operationId": "site.analytics.goalTimeseries",
+        "summary": "API v1 site analytics goalTimeseries operation",
+        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "tags": [
+          "Analytics"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "siteId path parameter."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "timeRange": {
+                    "$ref": "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  },
+                  "filter": {
+                    "anyOf": [
+                      {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "inline"
+                              },
+                              "expression": {
+                                "$ref": "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1goals~1timeseries/post/requestBody/content/application~1json/schema/$defs/__schema0"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "expression"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "dsl"
+                              },
+                              "expression": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 65536
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "expression"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "saved"
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "event",
+                      "session",
+                      "visitor"
+                    ]
+                  },
+                  "goalId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "interval": {
+                    "type": "string",
+                    "enum": [
+                      "minute",
+                      "hour",
+                      "day",
+                      "week",
+                      "month"
+                    ]
+                  }
+                },
+                "required": [
+                  "timeRange",
+                  "goalId",
+                  "interval"
+                ],
+                "additionalProperties": false,
+                "$defs": {
+                  "__schema0": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/SharedSchema_75b932d026c1"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "and"
+                          },
+                          "children": {
+                            "minItems": 1,
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1goals~1timeseries/post/requestBody/content/application~1json/schema/$defs/__schema0"
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "children"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "or"
+                          },
+                          "children": {
+                            "minItems": 1,
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1goals~1timeseries/post/requestBody/content/application~1json/schema/$defs/__schema0"
+                            }
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "children"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "not"
+                          },
+                          "child": {
+                            "$ref": "#/paths/~1api~1v1~1sites~1{siteId}~1analytics~1goals~1timeseries/post/requestBody/content/application~1json/schema/$defs/__schema0"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "child"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "example": {
+                "timeRange": {
+                  "kind": "absolute",
+                  "from": "2026-01-01T00:00:00Z",
+                  "to": "2026-01-01T00:00:00Z",
+                  "timeZone": "example"
+                },
+                "filter": {
+                  "type": "inline",
+                  "expression": {
+                    "kind": "condition",
+                    "target": {
+                      "kind": "field",
+                      "field": "example"
+                    },
+                    "operator": "example",
+                    "value": "example"
+                  }
+                },
+                "scope": "auto",
+                "goalId": "example",
+                "interval": "minute"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "goal": {
+                          "$ref": "#/components/schemas/SharedSchema_f4e15ae6b45c"
+                        },
+                        "interval": {
+                          "type": "string",
+                          "enum": [
+                            "minute",
+                            "hour",
+                            "day",
+                            "week",
+                            "month"
+                          ]
+                        },
+                        "timeseries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "timestampMs": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "sessions": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "converted": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "conversionRate": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "converted",
+                                  "conversionRate"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "visitors": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "converted": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "conversionRate": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "total",
+                                  "converted",
+                                  "conversionRate"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "timestampMs",
+                              "sessions",
+                              "visitors"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "goal",
+                        "interval",
+                        "timeseries"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "data": {
+                    "goal": {
+                      "id": "example",
+                      "siteId": "example",
+                      "name": "example",
+                      "filterDslVersion": 1,
+                      "filterDsl": "example",
+                      "semanticFingerprint": "example",
+                      "createdAt": -9007199254740991,
+                      "updatedAt": -9007199254740991
+                    },
+                    "interval": "minute",
+                    "timeseries": [
+                      {
+                        "timestampMs": -9007199254740991,
+                        "sessions": {
+                          "total": 0,
+                          "converted": 0,
+                          "conversionRate": 0
+                        },
+                        "visitors": {
+                          "total": 0,
+                          "converted": 0,
+                          "conversionRate": 0
+                        }
+                      }
+                    ]
+                  },
+                  "meta": {
+                    "requestId": "example",
+                    "generatedAt": "2026-01-01T00:00:00Z",
+                    "timeRange": {
+                      "from": "2026-01-01T00:00:00Z",
+                      "to": "2026-01-01T00:00:00Z",
+                      "timeZone": "example"
+                    },
+                    "source": "raw",
+                    "accuracy": "exact",
+                    "filterScope": {
+                      "requested": "auto",
+                      "resolved": "event"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "API v1 error: validation_failed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "validation_failed",
+                    "message": "Request validation failed.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API v1 error: missing_scope.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "missing_scope",
+                    "message": "The API key lacks the required scope.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API v1 error: resource_not_found.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "resource_not_found",
+                    "message": "Resource not found.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "API v1 error: method_not_allowed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "method_not_allowed",
+                    "message": "The HTTP method is not allowed for this route.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "API v1 error: not_acceptable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "not_acceptable",
+                    "message": "The requested response media type is not acceptable.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "API v1 error: unsupported_media_type.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "unsupported_media_type",
+                    "message": "The request media type is unsupported.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "API v1 error: internal_error.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "internal_error",
+                    "message": "An internal error occurred.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "API v1 error: data_unavailable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "data_unavailable",
+                    "message": "Analytics data is temporarily unavailable.",
+                    "retryable": true
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-api-v1-lifecycle": "exposed",
+        "x-api-v1-scopes": [
+          "analytics:read"
+        ],
+        "x-required-scopes": [
+          "analytics:read"
+        ],
+        "x-api-v1-batch-eligible": false,
+        "x-api-v1-conditional-scopes": [
+          {
+            "when": "filter.type=saved",
+            "scopes": [
+              "analytics:read",
+              "analysis:read"
+            ]
+          }
+        ]
+      }
+    },
     "/api/v1/sites/{siteId}/analytics/performance/summary": {
       "post": {
         "operationId": "site.analytics.performanceSummary",
@@ -32242,6 +33460,1418 @@
         "x-api-v1-batch-eligible": false
       }
     },
+    "/api/v1/sites/{siteId}/goals": {
+      "get": {
+        "operationId": "goals.list",
+        "summary": "API v1 goals list operation",
+        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "tags": [
+          "Sites"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "siteId path parameter."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "description": "Maximum number of results."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 12288
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": "Opaque pagination cursor from the previous response."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256
+                              },
+                              "siteId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "filterDslVersion": {
+                                "type": "number",
+                                "const": 1
+                              },
+                              "filterDsl": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 65536
+                              },
+                              "semanticFingerprint": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              "updatedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                              },
+                              "links": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "siteId",
+                              "name",
+                              "filterDslVersion",
+                              "filterDsl",
+                              "semanticFingerprint",
+                              "createdAt",
+                              "updatedAt",
+                              "links"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "pagination": {
+                          "$ref": "#/components/schemas/SharedSchema_d2eefd68225a"
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "pagination"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "requestId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "data": {
+                    "items": [
+                      {
+                        "id": "example",
+                        "siteId": "example",
+                        "name": "example",
+                        "filterDslVersion": 1,
+                        "filterDsl": "example",
+                        "semanticFingerprint": "example",
+                        "createdAt": "2026-01-01T00:00:00Z",
+                        "updatedAt": "2026-01-01T00:00:00Z",
+                        "links": {}
+                      }
+                    ],
+                    "pagination": {
+                      "limit": 1,
+                      "returned": 0,
+                      "hasMore": false,
+                      "nextCursor": "example"
+                    }
+                  },
+                  "meta": {
+                    "requestId": "example"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "API v1 error: invalid_cursor.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "invalid_cursor",
+                    "message": "The cursor is invalid for this query.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API v1 error: missing_scope.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "missing_scope",
+                    "message": "The API key lacks the required scope.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API v1 error: resource_not_found.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "resource_not_found",
+                    "message": "Resource not found.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "API v1 error: method_not_allowed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "method_not_allowed",
+                    "message": "The HTTP method is not allowed for this route.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "API v1 error: internal_error.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "internal_error",
+                    "message": "An internal error occurred.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-api-v1-lifecycle": "exposed",
+        "x-api-v1-scopes": [
+          "analysis:read"
+        ],
+        "x-required-scopes": [
+          "analysis:read"
+        ],
+        "x-api-v1-batch-eligible": false
+      },
+      "post": {
+        "operationId": "goals.create",
+        "summary": "API v1 goals create operation",
+        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "tags": [
+          "Sites"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "siteId path parameter."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filterDslVersion": {
+                    "default": 1,
+                    "type": "number",
+                    "const": 1
+                  },
+                  "filterDsl": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 65536
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "filterDslVersion",
+                  "filterDsl",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              "example": {
+                "filterDslVersion": 1,
+                "filterDsl": "example",
+                "name": "example"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedSchema_2feca814b2e1"
+                },
+                "example": {
+                  "data": {
+                    "id": "example",
+                    "siteId": "example",
+                    "name": "example",
+                    "filterDslVersion": 1,
+                    "filterDsl": "example",
+                    "semanticFingerprint": "example",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-01T00:00:00Z",
+                    "links": {}
+                  },
+                  "meta": {
+                    "requestId": "example"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "API v1 error: validation_failed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "validation_failed",
+                    "message": "Request validation failed.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API v1 error: missing_scope.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "missing_scope",
+                    "message": "The API key lacks the required scope.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API v1 error: resource_not_found.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "resource_not_found",
+                    "message": "Resource not found.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "API v1 error: method_not_allowed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "method_not_allowed",
+                    "message": "The HTTP method is not allowed for this route.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "API v1 error: not_acceptable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "not_acceptable",
+                    "message": "The requested response media type is not acceptable.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "API v1 error: payload_too_large.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "payload_too_large",
+                    "message": "The request payload exceeds the configured size limit.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "API v1 error: unsupported_media_type.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "unsupported_media_type",
+                    "message": "The request media type is unsupported.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "API v1 error: internal_error.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "internal_error",
+                    "message": "An internal error occurred.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-api-v1-lifecycle": "exposed",
+        "x-api-v1-scopes": [
+          "analysis:write"
+        ],
+        "x-required-scopes": [
+          "analysis:write"
+        ],
+        "x-api-v1-batch-eligible": false
+      }
+    },
+    "/api/v1/sites/{siteId}/goals/{goalId}": {
+      "get": {
+        "operationId": "goals.get",
+        "summary": "API v1 goals get operation",
+        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "tags": [
+          "Sites"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "siteId path parameter."
+          },
+          {
+            "name": "goalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "goalId path parameter."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedSchema_2feca814b2e1"
+                },
+                "example": {
+                  "data": {
+                    "id": "example",
+                    "siteId": "example",
+                    "name": "example",
+                    "filterDslVersion": 1,
+                    "filterDsl": "example",
+                    "semanticFingerprint": "example",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-01T00:00:00Z",
+                    "links": {}
+                  },
+                  "meta": {
+                    "requestId": "example"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API v1 error: missing_scope.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "missing_scope",
+                    "message": "The API key lacks the required scope.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API v1 error: resource_not_found.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "resource_not_found",
+                    "message": "Resource not found.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "API v1 error: method_not_allowed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "method_not_allowed",
+                    "message": "The HTTP method is not allowed for this route.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "API v1 error: internal_error.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "internal_error",
+                    "message": "An internal error occurred.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-api-v1-lifecycle": "exposed",
+        "x-api-v1-scopes": [
+          "analysis:read"
+        ],
+        "x-required-scopes": [
+          "analysis:read"
+        ],
+        "x-api-v1-batch-eligible": false
+      },
+      "patch": {
+        "operationId": "goals.update",
+        "summary": "API v1 goals update operation",
+        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "tags": [
+          "Sites"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "siteId path parameter."
+          },
+          {
+            "name": "goalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "goalId path parameter."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filterDslVersion": {
+                    "default": 1,
+                    "type": "number",
+                    "const": 1
+                  },
+                  "filterDsl": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 65536
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "additionalProperties": false
+              },
+              "example": {
+                "filterDslVersion": 1,
+                "filterDsl": "example",
+                "name": "example"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedSchema_2feca814b2e1"
+                },
+                "example": {
+                  "data": {
+                    "id": "example",
+                    "siteId": "example",
+                    "name": "example",
+                    "filterDslVersion": 1,
+                    "filterDsl": "example",
+                    "semanticFingerprint": "example",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-01T00:00:00Z",
+                    "links": {}
+                  },
+                  "meta": {
+                    "requestId": "example"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "API v1 error: validation_failed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "validation_failed",
+                    "message": "Request validation failed.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API v1 error: missing_scope.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "missing_scope",
+                    "message": "The API key lacks the required scope.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API v1 error: resource_not_found.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "resource_not_found",
+                    "message": "Resource not found.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "API v1 error: method_not_allowed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "method_not_allowed",
+                    "message": "The HTTP method is not allowed for this route.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "API v1 error: not_acceptable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "not_acceptable",
+                    "message": "The requested response media type is not acceptable.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "API v1 error: payload_too_large.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "payload_too_large",
+                    "message": "The request payload exceeds the configured size limit.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "API v1 error: unsupported_media_type.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "unsupported_media_type",
+                    "message": "The request media type is unsupported.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "API v1 error: internal_error.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "internal_error",
+                    "message": "An internal error occurred.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-api-v1-lifecycle": "exposed",
+        "x-api-v1-scopes": [
+          "analysis:write"
+        ],
+        "x-required-scopes": [
+          "analysis:write"
+        ],
+        "x-api-v1-batch-eligible": false
+      },
+      "delete": {
+        "operationId": "goals.delete",
+        "summary": "API v1 goals delete operation",
+        "description": "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.",
+        "tags": [
+          "Sites"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "siteId path parameter."
+          },
+          {
+            "name": "goalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "goalId path parameter."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful response with no content."
+          },
+          "403": {
+            "description": "API v1 error: missing_scope.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "missing_scope",
+                    "message": "The API key lacks the required scope.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "API v1 error: resource_not_found.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "resource_not_found",
+                    "message": "Resource not found.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "API v1 error: method_not_allowed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "method_not_allowed",
+                    "message": "The HTTP method is not allowed for this route.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "API v1 error: internal_error.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiV1ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "code": "internal_error",
+                    "message": "An internal error occurred.",
+                    "retryable": false
+                  },
+                  "meta": {
+                    "requestId": "req_01J7EXAMPLE"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-api-v1-lifecycle": "exposed",
+        "x-api-v1-scopes": [
+          "analysis:write"
+        ],
+        "x-required-scopes": [
+          "analysis:write"
+        ],
+        "x-api-v1-batch-eligible": false
+      }
+    },
     "/api/v1/sites/{siteId}/saved-filters": {
       "get": {
         "operationId": "savedFilters.list",
@@ -35180,6 +37810,31 @@
         ],
         "additionalProperties": false
       },
+      "SharedSchema_6f2e032c34e9": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "converted": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "conversionRate": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "converted",
+          "conversionRate"
+        ],
+        "additionalProperties": false
+      },
       "SharedSchema_394574a77114": {
         "type": "object",
         "properties": {
@@ -35360,6 +38015,117 @@
         ],
         "additionalProperties": false
       },
+      "SharedSchema_517ad4ea46a2": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "siteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "filterDslVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "filterDsl": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536
+          },
+          "semanticFingerprint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/IsoDateTime2"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/IsoDateTime2"
+          },
+          "links": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "siteId",
+          "name",
+          "filterDslVersion",
+          "filterDsl",
+          "semanticFingerprint",
+          "createdAt",
+          "updatedAt",
+          "links"
+        ],
+        "additionalProperties": false
+      },
+      "SharedSchema_f4e15ae6b45c": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "siteId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "name": {
+            "type": "string"
+          },
+          "filterDslVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "filterDsl": {
+            "type": "string",
+            "minLength": 1
+          },
+          "semanticFingerprint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "updatedAt": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "siteId",
+          "name",
+          "filterDslVersion",
+          "filterDsl",
+          "semanticFingerprint",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
       "SharedSchema_eb25089bb08d": {
         "type": "object",
         "properties": {
@@ -35516,6 +38282,32 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/SharedSchema_fbbfb89aa861"
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "requestId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SharedSchema_2feca814b2e1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SharedSchema_517ad4ea46a2"
           },
           "meta": {
             "type": "object",

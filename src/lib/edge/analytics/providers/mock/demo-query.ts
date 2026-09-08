@@ -76,14 +76,17 @@ export interface DemoQueryPayloadResult {
 function successStatus(request: Request, url: URL): number {
   if (request.method !== "POST") return 200;
   const lastPathSegment = url.pathname.split("/").filter(Boolean).at(-1);
-  return lastPathSegment === "funnels" || lastPathSegment === "saved-filters"
+  return lastPathSegment === "funnels" ||
+    lastPathSegment === "goals" ||
+    lastPathSegment === "saved-filters"
     ? 201
     : 200;
 }
 
 function requiresJsonBodyValidation(request: Request, url: URL): boolean {
   if (request.method !== "POST") return false;
-  return url.pathname.split("/").filter(Boolean).at(-1) === "funnels";
+  const last = url.pathname.split("/").filter(Boolean).at(-1);
+  return last === "funnels" || last === "goals";
 }
 
 function unsupportedSavedFilterMethod(request: Request, url: URL): boolean {

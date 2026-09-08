@@ -1522,6 +1522,158 @@ describe("API v1 generated client", () => {
     );
   });
 
+  it("exposes Goal CRUD and dedicated summary/timeseries operations", async () => {
+    const goalResource = {
+      id: "goal-1",
+      siteId: "site-1",
+      name: "Purchase completed",
+      filterDslVersion: 1,
+      filterDsl: 'event.name eq "purchase"',
+      semanticFingerprint: "goal-v1-purchase",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      links: { self: "/api/v1/sites/site-1/goals/goal-1" },
+    };
+    const analyticsGoal = {
+      id: goalResource.id,
+      siteId: goalResource.siteId,
+      name: goalResource.name,
+      filterDslVersion: goalResource.filterDslVersion,
+      filterDsl: goalResource.filterDsl,
+      semanticFingerprint: goalResource.semanticFingerprint,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const summary = {
+      goal: analyticsGoal,
+      summary: {
+        sessions: { total: 10, converted: 2, conversionRate: 0.2 },
+        visitors: { total: 8, converted: 1, conversionRate: 0.125 },
+      },
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (url, init) => {
+        const value = String(url);
+        if (value.includes("/analytics/goals/timeseries")) {
+          return response({
+            data: { goal: analyticsGoal, interval: "day", timeseries: [] },
+            meta: {
+              requestId: "req-goal",
+              generatedAt: "2026-08-02T00:00:00.000Z",
+              timeRange: {
+                from: overviewInput.timeRange.from,
+                to: overviewInput.timeRange.to,
+                timeZone: "UTC",
+              },
+              source: "raw",
+              accuracy: "exact",
+            },
+          });
+        }
+        if (value.includes("/analytics/goals/summary")) {
+          return response({
+            data: summary,
+            meta: {
+              requestId: "req-goal",
+              generatedAt: "2026-08-02T00:00:00.000Z",
+              timeRange: {
+                from: overviewInput.timeRange.from,
+                to: overviewInput.timeRange.to,
+                timeZone: "UTC",
+              },
+              source: "raw",
+              accuracy: "exact",
+            },
+          });
+        }
+        if (
+          (value.includes("/goals?") || value.endsWith("/goals")) &&
+          init?.method !== "POST"
+        ) {
+          return response({
+            data: {
+              items: [goalResource],
+              pagination: {
+                limit: 20,
+                returned: 1,
+                hasMore: false,
+                nextCursor: null,
+              },
+            },
+            meta: { requestId: "req-goal" },
+          });
+        }
+        if (value.includes("/goals/") && init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        return response({
+          data: goalResource,
+          meta: { requestId: "req-goal" },
+        });
+      });
+    const client = createApiV1GeneratedClient({
+      baseUrl: "https://api.test",
+      fetch: fetcher,
+    });
+
+    await expect(
+      client.listGoals("site-1", { page: { limit: 20 } }),
+    ).resolves.toMatchObject({
+      ok: true,
+      data: { items: [{ id: "goal-1" }] },
+    });
+    await expect(
+      client.createGoal("site-1", {
+        name: "Purchase completed",
+        filterDslVersion: 1,
+        filterDsl: 'event.name eq "purchase"',
+      }),
+    ).resolves.toMatchObject({ ok: true, data: { id: "goal-1" } });
+    await expect(client.getGoal("site-1", "goal-1")).resolves.toMatchObject({
+      ok: true,
+      data: { id: "goal-1" },
+    });
+    await expect(
+      client.updateGoal("site-1", "goal-1", { name: "Completed purchase" }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(client.deleteGoal("site-1", "goal-1")).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(
+      client.siteAnalyticsGoalSummary("site-1", {
+        goalId: "goal-1",
+        timeRange: overviewInput.timeRange,
+        filter: null,
+      }),
+    ).resolves.toMatchObject({ ok: true, data: summary });
+    await expect(
+      client.siteAnalyticsGoalTimeseries("site-1", {
+        goalId: "goal-1",
+        timeRange: overviewInput.timeRange,
+        filter: null,
+        interval: "day",
+      }),
+    ).resolves.toMatchObject({ ok: true, data: { interval: "day" } });
+
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.test/api/v1/sites/site-1/goals?limit=20",
+      "https://api.test/api/v1/sites/site-1/goals",
+      "https://api.test/api/v1/sites/site-1/goals/goal-1",
+      "https://api.test/api/v1/sites/site-1/goals/goal-1",
+      "https://api.test/api/v1/sites/site-1/goals/goal-1",
+      "https://api.test/api/v1/sites/site-1/analytics/goals/summary",
+      "https://api.test/api/v1/sites/site-1/analytics/goals/timeseries",
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual(
+      expect.objectContaining({ filterDslVersion: 1 }),
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[3]?.[1]?.body))).toEqual({
+      name: "Completed purchase",
+      filterDslVersion: 1,
+    });
+  });
+
   it("posts typed journey trajectories and realtime reads to their dedicated paths", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
       response(

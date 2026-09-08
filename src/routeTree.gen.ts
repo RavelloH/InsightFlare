@@ -53,6 +53,7 @@ import { Route as LocaleAppTeamSlugSiteSlugDevicesRouteImport } from './routes/$
 import { Route as LocaleAppTeamSlugSiteSlugEventsRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.events'
 import { Route as LocaleAppTeamSlugSiteSlugFunnelsRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.funnels'
 import { Route as LocaleAppTeamSlugSiteSlugGeoRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.geo'
+import { Route as LocaleAppTeamSlugSiteSlugGoalsRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.goals'
 import { Route as LocaleAppTeamSlugSiteSlugPagesRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.pages'
 import { Route as LocaleAppTeamSlugSiteSlugPerformanceRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.performance'
 import { Route as LocaleAppTeamSlugSiteSlugRealtimeRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.realtime'
@@ -314,6 +315,12 @@ const LocaleAppTeamSlugSiteSlugGeoRoute =
     path: '/geo',
     getParentRoute: () => LocaleAppTeamSlugSiteSlugRoute,
   } as any)
+const LocaleAppTeamSlugSiteSlugGoalsRoute =
+  LocaleAppTeamSlugSiteSlugGoalsRouteImport.update({
+    id: '/goals',
+    path: '/goals',
+    getParentRoute: () => LocaleAppTeamSlugSiteSlugRoute,
+  } as any)
 const LocaleAppTeamSlugSiteSlugPagesRoute =
   LocaleAppTeamSlugSiteSlugPagesRouteImport.update({
     id: '/pages',
@@ -455,6 +462,7 @@ export interface FileRoutesByFullPath {
   '/$locale/app/$teamSlug/$siteSlug/events': typeof LocaleAppTeamSlugSiteSlugEventsRoute
   '/$locale/app/$teamSlug/$siteSlug/funnels': typeof LocaleAppTeamSlugSiteSlugFunnelsRoute
   '/$locale/app/$teamSlug/$siteSlug/geo': typeof LocaleAppTeamSlugSiteSlugGeoRoute
+  '/$locale/app/$teamSlug/$siteSlug/goals': typeof LocaleAppTeamSlugSiteSlugGoalsRoute
   '/$locale/app/$teamSlug/$siteSlug/pages': typeof LocaleAppTeamSlugSiteSlugPagesRoute
   '/$locale/app/$teamSlug/$siteSlug/performance': typeof LocaleAppTeamSlugSiteSlugPerformanceRoute
   '/$locale/app/$teamSlug/$siteSlug/realtime': typeof LocaleAppTeamSlugSiteSlugRealtimeRoute
@@ -513,6 +521,7 @@ export interface FileRoutesByTo {
   '/$locale/app/$teamSlug/$siteSlug/events': typeof LocaleAppTeamSlugSiteSlugEventsRoute
   '/$locale/app/$teamSlug/$siteSlug/funnels': typeof LocaleAppTeamSlugSiteSlugFunnelsRoute
   '/$locale/app/$teamSlug/$siteSlug/geo': typeof LocaleAppTeamSlugSiteSlugGeoRoute
+  '/$locale/app/$teamSlug/$siteSlug/goals': typeof LocaleAppTeamSlugSiteSlugGoalsRoute
   '/$locale/app/$teamSlug/$siteSlug/pages': typeof LocaleAppTeamSlugSiteSlugPagesRoute
   '/$locale/app/$teamSlug/$siteSlug/performance': typeof LocaleAppTeamSlugSiteSlugPerformanceRoute
   '/$locale/app/$teamSlug/$siteSlug/realtime': typeof LocaleAppTeamSlugSiteSlugRealtimeRoute
@@ -576,6 +585,7 @@ export interface FileRoutesById {
   '/$locale/app/$teamSlug/$siteSlug/events': typeof LocaleAppTeamSlugSiteSlugEventsRoute
   '/$locale/app/$teamSlug/$siteSlug/funnels': typeof LocaleAppTeamSlugSiteSlugFunnelsRoute
   '/$locale/app/$teamSlug/$siteSlug/geo': typeof LocaleAppTeamSlugSiteSlugGeoRoute
+  '/$locale/app/$teamSlug/$siteSlug/goals': typeof LocaleAppTeamSlugSiteSlugGoalsRoute
   '/$locale/app/$teamSlug/$siteSlug/pages': typeof LocaleAppTeamSlugSiteSlugPagesRoute
   '/$locale/app/$teamSlug/$siteSlug/performance': typeof LocaleAppTeamSlugSiteSlugPerformanceRoute
   '/$locale/app/$teamSlug/$siteSlug/realtime': typeof LocaleAppTeamSlugSiteSlugRealtimeRoute
@@ -640,6 +650,7 @@ export interface FileRouteTypes {
     | '/$locale/app/$teamSlug/$siteSlug/events'
     | '/$locale/app/$teamSlug/$siteSlug/funnels'
     | '/$locale/app/$teamSlug/$siteSlug/geo'
+    | '/$locale/app/$teamSlug/$siteSlug/goals'
     | '/$locale/app/$teamSlug/$siteSlug/pages'
     | '/$locale/app/$teamSlug/$siteSlug/performance'
     | '/$locale/app/$teamSlug/$siteSlug/realtime'
@@ -698,6 +709,7 @@ export interface FileRouteTypes {
     | '/$locale/app/$teamSlug/$siteSlug/events'
     | '/$locale/app/$teamSlug/$siteSlug/funnels'
     | '/$locale/app/$teamSlug/$siteSlug/geo'
+    | '/$locale/app/$teamSlug/$siteSlug/goals'
     | '/$locale/app/$teamSlug/$siteSlug/pages'
     | '/$locale/app/$teamSlug/$siteSlug/performance'
     | '/$locale/app/$teamSlug/$siteSlug/realtime'
@@ -760,6 +772,7 @@ export interface FileRouteTypes {
     | '/$locale/app/$teamSlug/$siteSlug/events'
     | '/$locale/app/$teamSlug/$siteSlug/funnels'
     | '/$locale/app/$teamSlug/$siteSlug/geo'
+    | '/$locale/app/$teamSlug/$siteSlug/goals'
     | '/$locale/app/$teamSlug/$siteSlug/pages'
     | '/$locale/app/$teamSlug/$siteSlug/performance'
     | '/$locale/app/$teamSlug/$siteSlug/realtime'
@@ -1094,6 +1107,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LocaleAppTeamSlugSiteSlugGeoRouteImport
       parentRoute: typeof LocaleAppTeamSlugSiteSlugRoute
     }
+    '/$locale/app/$teamSlug/$siteSlug/goals': {
+      id: '/$locale/app/$teamSlug/$siteSlug/goals'
+      path: '/goals'
+      fullPath: '/$locale/app/$teamSlug/$siteSlug/goals'
+      preLoaderRoute: typeof LocaleAppTeamSlugSiteSlugGoalsRouteImport
+      parentRoute: typeof LocaleAppTeamSlugSiteSlugRoute
+    }
     '/$locale/app/$teamSlug/$siteSlug/pages': {
       id: '/$locale/app/$teamSlug/$siteSlug/pages'
       path: '/pages'
@@ -1216,6 +1236,7 @@ interface LocaleAppTeamSlugSiteSlugRouteChildren {
   LocaleAppTeamSlugSiteSlugEventsRoute: typeof LocaleAppTeamSlugSiteSlugEventsRoute
   LocaleAppTeamSlugSiteSlugFunnelsRoute: typeof LocaleAppTeamSlugSiteSlugFunnelsRoute
   LocaleAppTeamSlugSiteSlugGeoRoute: typeof LocaleAppTeamSlugSiteSlugGeoRoute
+  LocaleAppTeamSlugSiteSlugGoalsRoute: typeof LocaleAppTeamSlugSiteSlugGoalsRoute
   LocaleAppTeamSlugSiteSlugPagesRoute: typeof LocaleAppTeamSlugSiteSlugPagesRoute
   LocaleAppTeamSlugSiteSlugPerformanceRoute: typeof LocaleAppTeamSlugSiteSlugPerformanceRoute
   LocaleAppTeamSlugSiteSlugRealtimeRoute: typeof LocaleAppTeamSlugSiteSlugRealtimeRoute
@@ -1243,6 +1264,7 @@ const LocaleAppTeamSlugSiteSlugRouteChildren: LocaleAppTeamSlugSiteSlugRouteChil
     LocaleAppTeamSlugSiteSlugFunnelsRoute:
       LocaleAppTeamSlugSiteSlugFunnelsRoute,
     LocaleAppTeamSlugSiteSlugGeoRoute: LocaleAppTeamSlugSiteSlugGeoRoute,
+    LocaleAppTeamSlugSiteSlugGoalsRoute: LocaleAppTeamSlugSiteSlugGoalsRoute,
     LocaleAppTeamSlugSiteSlugPagesRoute: LocaleAppTeamSlugSiteSlugPagesRoute,
     LocaleAppTeamSlugSiteSlugPerformanceRoute:
       LocaleAppTeamSlugSiteSlugPerformanceRoute,

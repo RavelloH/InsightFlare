@@ -113,6 +113,7 @@ type AnalyticsNavKey =
   | "campaigns"
   | "events"
   | "funnels"
+  | "goals"
   | "visitors"
   | "retention"
   | "geo"
@@ -138,6 +139,7 @@ const VALID_ANALYTICS_SECTIONS = new Set([
   "settings",
   "campaigns",
   "funnels",
+  "goals",
   "retention",
 ]);
 
@@ -594,6 +596,7 @@ export function DashboardShell({
             { key: "visitors", href: `${activeSiteBase}/visitors` },
             { key: "events", href: `${activeSiteBase}/events` },
             { key: "funnels", href: `${activeSiteBase}/funnels` },
+            { key: "goals", href: `${activeSiteBase}/goals` },
             { key: "retention", href: `${activeSiteBase}/retention` },
             { key: "geo", href: `${activeSiteBase}/geo` },
             { key: "devices", href: `${activeSiteBase}/devices` },

@@ -7,6 +7,7 @@ navigation:
   sessions: 会话
   events: 事件
   funnels: 漏斗
+  goals: 目标
   campaigns: 推广
   visitors: 访客
   retention: 留存
@@ -176,8 +177,19 @@ conditionDescription:
   filterAnyOf: "{field} 是以下任一值：{values}"
   filterNoneOf: "{field} 不属于以下任一值：{values}"
   filterBetween: "{field} 介于 {from} 与 {to} 之间"
+  filterContains: "{field} 包含 {value}"
   filterStartsWith: "{field} 以 {value} 开头"
   filterEndsWith: "{field} 以 {value} 结尾"
+  filterGreaterThan: "{field} 大于 {value}"
+  filterGreaterThanOrEqual: "{field} 大于或等于 {value}"
+  filterLessThan: "{field} 小于 {value}"
+  filterLessThanOrEqual: "{field} 小于或等于 {value}"
+  filterExists: "{field} 存在"
+  filterNotExists: "{field} 不存在"
+  filterIsNull: "{field} 为 NULL"
+  filterNotNull: "{field} 不为 NULL"
+  filterIsEmpty: "{field} 为空"
+  filterNotEmpty: "{field} 不为空"
 filterBuilder:
   fieldGroups:
     page: 页面
@@ -841,6 +853,52 @@ funnels:
   conversion: 转化率
   stepConversion: 步骤转化率
   dropOff: 流失
+  updated: 更新于
+goals:
+  title: 目标分析
+  subtitle: 使用一个可复用的事件或页面条件衡量转化。
+  listTitle: 目标定义
+  listSubtitle: 查看这段时间范围内的转化率变化情况
+  open: 打开目标
+  moreActions: 更多操作
+  create: 新建目标
+  createTitle: 创建目标
+  createDescription: 定义计为转化的事件或页面条件。
+  nameLabel: 名称
+  namePlaceholder: 完成购买
+  filter: 转化条件
+  apply: 应用
+  cancel: 取消
+  expression: 筛选表达式
+  filterPlaceholder: 例如 event.name eq "purchase"
+  invalidFilter: 筛选无效
+  save: 创建
+  saveEdit: 保存修改
+  edit: 编辑
+  editTitle: 编辑目标
+  creating: 创建中...
+  delete: 删除
+  deleteTitle: 删除目标
+  deleteDescription: 这会移除已保存的目标定义，不会删除历史分析数据。
+  deleteConfirm: 删除目标
+  deleting: 删除中...
+  empty: 暂无目标。
+  emptyHint: 使用页面条件或自定义事件创建目标来跟踪转化。
+  loadError: 无法加载目标。
+  detailLoadError: 无法加载目标分析。
+  invalidGoal: 请填写名称，并补全转化条件。
+  created: 目标已创建。
+  createFailed: 创建目标失败。
+  updatedSuccess: 目标已更新。
+  saveFailed: 保存目标失败。
+  deleted: 目标已删除。
+  deleteFailed: 删除目标失败。
+  sessions: 会话
+  visitors: 访客
+  total: 总数
+  converted: 已转化
+  conversion: 转化率
+  timeseries: 转化率
   updated: 更新于
 visitors:
   title: 访客分析

@@ -4,6 +4,7 @@ import { describeFilterExpression } from "@/lib/dashboard/filter-description";
 import {
   analyticsFilterRegistry,
   type CanonicalJsonPath,
+  type FilterExpression,
   type FilterFieldId,
 } from "@/lib/filter-contract";
 
@@ -21,8 +22,19 @@ const messages = {
     filterAnyOf: "{field} is one of {values}",
     filterNoneOf: "{field} is none of {values}",
     filterBetween: "{field} is between {from} and {to}",
+    filterContains: "{field} contains {value}",
     filterStartsWith: "{field} starts with {value}",
     filterEndsWith: "{field} ends with {value}",
+    filterGreaterThan: "{field} is greater than {value}",
+    filterGreaterThanOrEqual: "{field} is greater than or equal to {value}",
+    filterLessThan: "{field} is less than {value}",
+    filterLessThanOrEqual: "{field} is less than or equal to {value}",
+    filterExists: "{field} exists",
+    filterNotExists: "{field} does not exist",
+    filterIsNull: "{field} is null",
+    filterNotNull: "{field} is not null",
+    filterIsEmpty: "{field} is empty",
+    filterNotEmpty: "{field} is not empty",
   },
   filterBuilder: {
     fieldLabels: {
@@ -30,6 +42,8 @@ const messages = {
       "referrer.domain": "Referrer domain",
       "client.deviceType": "Device type",
       "event.payload": "Event payload",
+      "page.durationMs": "Page duration",
+      "event.name": "Event name",
     },
     operatorLabels: {
       eq: "equals",
@@ -113,8 +127,19 @@ describe("filter descriptions", () => {
         filterAnyOf: "{field} 属于 {values} 中的任一值",
         filterNoneOf: "{field} 不属于 {values} 中的任何值",
         filterBetween: "{field} 介于 {from} 与 {to} 之间",
+        filterContains: "{field} 包含 {value}",
         filterStartsWith: "{field} 以 {value} 开头",
         filterEndsWith: "{field} 以 {value} 结尾",
+        filterGreaterThan: "{field} 大于 {value}",
+        filterGreaterThanOrEqual: "{field} 大于或等于 {value}",
+        filterLessThan: "{field} 小于 {value}",
+        filterLessThanOrEqual: "{field} 小于或等于 {value}",
+        filterExists: "{field} 存在",
+        filterNotExists: "{field} 不存在",
+        filterIsNull: "{field} 为 NULL",
+        filterNotNull: "{field} 不为 NULL",
+        filterIsEmpty: "{field} 为空",
+        filterNotEmpty: "{field} 不为空",
       },
       filterBuilder: {
         fieldLabels: {
@@ -149,6 +174,42 @@ describe("filter descriptions", () => {
       ),
     ).toBe(
       '页面路径 以 "/docs" 开头 且 来源域名 属于 "google.com" 或 "news.example.com" 中的任一值',
+    );
+  });
+
+  it("naturalizes scalar comparisons and valueless operators", () => {
+    const expression: FilterExpression = {
+      kind: "and",
+      children: [
+        {
+          kind: "condition",
+          target: { kind: "field", field: fieldId("page.path") },
+          operator: "contains",
+          value: "docs",
+        },
+        {
+          kind: "condition",
+          target: { kind: "field", field: fieldId("page.durationMs") },
+          operator: "gte",
+          value: 1000,
+        },
+        {
+          kind: "condition",
+          target: { kind: "field", field: fieldId("event.name") },
+          operator: "exists",
+        },
+        {
+          kind: "condition",
+          target: { kind: "field", field: fieldId("page.path") },
+          operator: "notEmpty",
+        },
+      ],
+    };
+
+    expect(
+      describeFilterExpression(expression, analyticsFilterRegistry, messages),
+    ).toBe(
+      'Page path contains "docs" and Page duration is greater than or equal to 1000 and Event name exists and Page path is not empty',
     );
   });
 });

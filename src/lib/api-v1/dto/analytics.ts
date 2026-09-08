@@ -458,6 +458,16 @@ export const SiteFunnelAnalysisQueryDtoSchema =
     funnelId: z.string().min(1).max(512),
   }).strict();
 
+export const SiteGoalSummaryQueryDtoSchema =
+  SiteAnalyticsQueryBaseDtoSchema.extend({
+    goalId: z.string().min(1).max(512),
+  }).strict();
+
+export const SiteGoalTimeseriesQueryDtoSchema =
+  SiteGoalSummaryQueryDtoSchema.extend({
+    interval: z.enum(["minute", "hour", "day", "week", "month"]),
+  }).strict();
+
 export const SitePerformanceSummaryQueryDtoSchema =
   SiteAnalyticsQueryBaseDtoSchema;
 export const SitePerformanceBreakdownDimensionSchema = z.enum([
@@ -757,6 +767,18 @@ export type SiteRetentionCohortsQueryDtoInput = z.input<
 >;
 export type SiteFunnelAnalysisQueryDtoInput = z.input<
   typeof SiteFunnelAnalysisQueryDtoSchema
+>;
+export type SiteGoalSummaryQueryDto = z.infer<
+  typeof SiteGoalSummaryQueryDtoSchema
+>;
+export type SiteGoalTimeseriesQueryDto = z.infer<
+  typeof SiteGoalTimeseriesQueryDtoSchema
+>;
+export type SiteGoalSummaryQueryDtoInput = z.input<
+  typeof SiteGoalSummaryQueryDtoSchema
+>;
+export type SiteGoalTimeseriesQueryDtoInput = z.input<
+  typeof SiteGoalTimeseriesQueryDtoSchema
 >;
 export type SitePerformanceSummaryQueryDto = z.infer<
   typeof SitePerformanceSummaryQueryDtoSchema

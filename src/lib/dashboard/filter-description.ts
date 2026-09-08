@@ -74,7 +74,39 @@ function conditionDescription(
   const operator =
     messages.filterBuilder.operatorLabels[condition.operator] ??
     condition.operator;
-  if (condition.value === undefined) return `${field} ${operator}`;
+  if (condition.value === undefined) {
+    if (condition.operator === "exists") {
+      return formatI18nTemplate(messages.conditionDescription.filterExists, {
+        field,
+      });
+    }
+    if (condition.operator === "notExists") {
+      return formatI18nTemplate(messages.conditionDescription.filterNotExists, {
+        field,
+      });
+    }
+    if (condition.operator === "isNull") {
+      return formatI18nTemplate(messages.conditionDescription.filterIsNull, {
+        field,
+      });
+    }
+    if (condition.operator === "notNull") {
+      return formatI18nTemplate(messages.conditionDescription.filterNotNull, {
+        field,
+      });
+    }
+    if (condition.operator === "isEmpty") {
+      return formatI18nTemplate(messages.conditionDescription.filterIsEmpty, {
+        field,
+      });
+    }
+    if (condition.operator === "notEmpty") {
+      return formatI18nTemplate(messages.conditionDescription.filterNotEmpty, {
+        field,
+      });
+    }
+    return `${field} ${operator}`;
+  }
   const value = condition.value;
   if (condition.operator === "eq" && !isFilterValueList(value)) {
     return formatI18nTemplate(messages.conditionDescription.filterEquals, {
@@ -99,6 +131,36 @@ function conditionDescription(
       field,
       value: formatValue(value),
     });
+  }
+  if (condition.operator === "contains" && !isFilterValueList(value)) {
+    return formatI18nTemplate(messages.conditionDescription.filterContains, {
+      field,
+      value: formatValue(value),
+    });
+  }
+  if (condition.operator === "gt" && !isFilterValueList(value)) {
+    return formatI18nTemplate(messages.conditionDescription.filterGreaterThan, {
+      field,
+      value: formatValue(value),
+    });
+  }
+  if (condition.operator === "gte" && !isFilterValueList(value)) {
+    return formatI18nTemplate(
+      messages.conditionDescription.filterGreaterThanOrEqual,
+      { field, value: formatValue(value) },
+    );
+  }
+  if (condition.operator === "lt" && !isFilterValueList(value)) {
+    return formatI18nTemplate(messages.conditionDescription.filterLessThan, {
+      field,
+      value: formatValue(value),
+    });
+  }
+  if (condition.operator === "lte" && !isFilterValueList(value)) {
+    return formatI18nTemplate(
+      messages.conditionDescription.filterLessThanOrEqual,
+      { field, value: formatValue(value) },
+    );
   }
   if (isFilterValueList(value)) {
     if (condition.operator === "in") {

@@ -356,4 +356,34 @@ v1Routes.all("/sites/:siteId/funnels/:funnelId", (c) =>
     }),
   ),
 );
+v1Routes.all("/sites/:siteId/goals", (c) =>
+  withSiteId(c, (siteId) =>
+    handlePlannedResourceRoute({
+      request: c.req.raw,
+      env: c.env,
+      principal: principal(c),
+      siteId,
+      routeId: c.req.method === "POST" ? "goals.create" : "goals.list",
+      allow: "GET, POST",
+    }),
+  ),
+);
+v1Routes.all("/sites/:siteId/goals/:goalId", (c) =>
+  withSiteId(c, (siteId) =>
+    handlePlannedResourceRoute({
+      request: c.req.raw,
+      env: c.env,
+      principal: principal(c),
+      siteId,
+      goalId: c.req.param("goalId"),
+      routeId:
+        c.req.method === "PATCH"
+          ? "goals.update"
+          : c.req.method === "DELETE"
+            ? "goals.delete"
+            : "goals.get",
+      allow: "GET, PATCH, DELETE",
+    }),
+  ),
+);
 v1Routes.all("/*", resourceNotFound);

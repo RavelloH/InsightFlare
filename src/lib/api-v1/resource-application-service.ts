@@ -7,6 +7,7 @@ import {
   type ApiV1ApplicationOutcome,
   type ApiV1ApplicationService,
   type FunnelResourceSchema,
+  type GoalResourceSchema,
   type PrivacySettingsSchema,
   type SharingSettingsSchema,
   type SiteResourceSchema,
@@ -26,6 +27,13 @@ import {
   funnelSemanticFingerprint,
 } from "@/lib/edge/analytics/contract";
 import {
+  decodeGoalConfig,
+  encodeGoalConfig,
+  type GoalConfigV1,
+  GoalConfigValidationError,
+  goalSemanticFingerprint,
+} from "@/lib/edge/analytics/contract/goal-config";
+import {
   readSiteScriptSettings,
   upsertSiteScriptSettings,
 } from "@/lib/edge/site-settings-store";
@@ -43,6 +51,7 @@ import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
 
 type SiteResource = z.infer<typeof SiteResourceSchema>;
 type FunnelResource = z.infer<typeof FunnelResourceSchema>;
+type GoalResource = z.infer<typeof GoalResourceSchema>;
 type TrackingSettings = z.infer<typeof TrackingSettingsSchema>;
 type PrivacySettings = z.infer<typeof PrivacySettingsSchema>;
 type SharingSettings = z.infer<typeof SharingSettingsSchema>;
@@ -74,6 +83,16 @@ interface FunnelRow {
   readonly updated_at: number;
 }
 
+interface GoalRow {
+  readonly id: string;
+  readonly site_id: string;
+  readonly name: string;
+  readonly config_json: string;
+  readonly config_version?: number;
+  readonly created_at: number;
+  readonly updated_at: number;
+}
+
 interface ResourcePageKey {
   readonly createdAt: number;
   readonly id: string;
@@ -96,7 +115,7 @@ function decodeResourcePageKey(value: unknown): ResourcePageKey | null {
 
 async function resourcePaginationBinding(
   context: ApiV1ApplicationContext,
-  operation: "sites" | "funnels",
+  operation: "sites" | "funnels" | "goals",
   siteId?: string,
 ): Promise<string> {
   return paginationBinding([
@@ -120,6 +139,7 @@ function siteLinks(siteId: string): Record<string, string> {
     settingsPrivacy: `${base}/settings/privacy`,
     settingsSharing: `${base}/settings/sharing`,
     funnels: `${base}/funnels`,
+    goals: `${base}/goals`,
     analyticsOverview: `${base}/analytics/overview`,
   };
 }
@@ -146,6 +166,13 @@ function funnelConfig(row: FunnelRow): FunnelConfigV2 {
   );
 }
 
+function goalConfig(row: GoalRow): GoalConfigV1 {
+  return decodeGoalConfig(
+    Number.isSafeInteger(row.config_version) ? row.config_version! : 0,
+    row.config_json,
+  );
+}
+
 async function funnelResource(row: FunnelRow): Promise<FunnelResource> {
   const config = funnelConfig(row);
   return {
@@ -162,6 +189,25 @@ async function funnelResource(row: FunnelRow): Promise<FunnelResource> {
     links: {
       self: `/api/v1/sites/${row.site_id}/funnels/${row.id}`,
       analysis: `/api/v1/sites/${row.site_id}/funnels/${row.id}/analysis`,
+    },
+  };
+}
+
+async function goalResource(row: GoalRow): Promise<GoalResource> {
+  const config = goalConfig(row);
+  return {
+    id: row.id,
+    siteId: row.site_id,
+    name: row.name,
+    filterDslVersion: config.filterDslVersion,
+    filterDsl: config.filterDsl,
+    semanticFingerprint: await goalSemanticFingerprint(config),
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    links: {
+      self: `/api/v1/sites/${row.site_id}/goals/${row.id}`,
+      summary: `/api/v1/sites/${row.site_id}/analytics/goals/summary`,
+      timeseries: `/api/v1/sites/${row.site_id}/analytics/goals/timeseries`,
     },
   };
 }
@@ -245,6 +291,23 @@ async function funnelById(
   );
 }
 
+async function goalById(
+  env: Pick<Env, "DB">,
+  siteId: string,
+  goalId: string,
+): Promise<GoalRow | null> {
+  return (
+    (await env.DB.prepare(
+      `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
+       FROM analysis_definitions
+       WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL
+       LIMIT 1`,
+    )
+      .bind(goalId, siteId)
+      .first<GoalRow>()) ?? null
+  );
+}
+
 function ok<T>(value: T): ApiV1ApplicationOutcome<T, never> {
   return { ok: true, value };
 }
@@ -281,6 +344,7 @@ export function createResourceApplicationService(
       const request = input as {
         readonly siteId?: string;
         readonly funnelId?: string;
+        readonly goalId?: string;
       };
       if (operation === "sites.list") {
         const value =
@@ -582,6 +646,163 @@ export function createResourceApplicationService(
             config_json: encoded.configJson,
             config_version: encoded.configVersion,
             created_at: now,
+            updated_at: now,
+          }),
+        ) as never;
+      }
+      if (operation === "goals.list") {
+        const value =
+          input as ApiV1ApplicationOperationMap["goals.list"]["input"];
+        const site = await siteById(env, context, value.siteId);
+        if (!site) return failed("not_found") as never;
+        const binding = await resourcePaginationBinding(
+          context,
+          "goals",
+          site.id,
+        );
+        let cursor: ResourcePageKey | null;
+        try {
+          cursor = await decodePageCursor(
+            env,
+            binding,
+            value.page.cursor,
+            "api-v1-goals",
+            decodeResourcePageKey,
+          );
+        } catch (error) {
+          if (error instanceof InvalidCursorError)
+            return failed("invalid_cursor") as never;
+          throw error;
+        }
+        const where = ["site_id=?", "kind='goal'", "archived_at IS NULL"];
+        const parameters: unknown[] = [site.id];
+        if (cursor) {
+          where.push("(created_at < ? OR (created_at = ? AND id < ?))");
+          parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
+        }
+        parameters.push(value.page.limit + 1);
+        const rows = await env.DB.prepare(
+          `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
+           FROM analysis_definitions WHERE ${where.join(" AND ")}
+           ORDER BY created_at DESC, id DESC LIMIT ?`,
+        )
+          .bind(...parameters)
+          .all<GoalRow>();
+        const page = pageResult(rows.results, value.page.limit);
+        const nextCursor =
+          page.hasMore && page.last
+            ? await encodePageCursor(env, binding, {
+                createdAt: page.last.created_at,
+                id: page.last.id,
+              })
+            : null;
+        return ok(
+          pageResponse(
+            await Promise.all(page.rows.map(goalResource)),
+            value.page.limit,
+            nextCursor,
+          ),
+        ) as never;
+      }
+      if (operation === "goals.create") {
+        const value =
+          input as ApiV1ApplicationOperationMap["goals.create"]["input"];
+        const site = await siteById(env, context, value.siteId);
+        if (!site) return failed("not_found") as never;
+        let encoded;
+        try {
+          encoded = encodeGoalConfig({
+            filterDslVersion: value.filterDslVersion,
+            filterDsl: value.filterDsl,
+          });
+        } catch (error) {
+          if (error instanceof GoalConfigValidationError)
+            return failed("invalid_input") as never;
+          throw error;
+        }
+        const id = crypto.randomUUID();
+        const now = Math.floor(Date.now() / 1_000);
+        await env.DB.prepare(
+          `INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at)
+           VALUES (?, ?, 'goal', ?, ?, ?, ?, ?)`,
+        )
+          .bind(
+            id,
+            site.id,
+            value.name.trim(),
+            encoded.configJson,
+            encoded.configVersion,
+            now,
+            now,
+          )
+          .run();
+        return ok(
+          await goalResource({
+            id,
+            site_id: site.id,
+            name: value.name.trim(),
+            config_json: encoded.configJson,
+            config_version: encoded.configVersion,
+            created_at: now,
+            updated_at: now,
+          }),
+        ) as never;
+      }
+      if (
+        operation === "goals.get" ||
+        operation === "goals.update" ||
+        operation === "goals.delete"
+      ) {
+        if (!request.goalId) return failed("not_found") as never;
+        const goal = await goalById(env, site.id, request.goalId);
+        if (!goal) return failed("not_found") as never;
+        if (operation === "goals.get") {
+          return ok(await goalResource(goal)) as never;
+        }
+        if (operation === "goals.delete") {
+          const now = Math.floor(Date.now() / 1_000);
+          await env.DB.prepare(
+            "UPDATE analysis_definitions SET archived_at=?, updated_at=? WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL",
+          )
+            .bind(now, now, goal.id, site.id)
+            .run();
+          return ok(undefined) as never;
+        }
+        const value =
+          input as ApiV1ApplicationOperationMap["goals.update"]["input"];
+        const current = goalConfig(goal);
+        let encoded;
+        try {
+          encoded = encodeGoalConfig({
+            filterDslVersion:
+              value.filterDslVersion ?? current.filterDslVersion,
+            filterDsl: value.filterDsl ?? current.filterDsl,
+          });
+        } catch (error) {
+          if (error instanceof GoalConfigValidationError)
+            return failed("invalid_input") as never;
+          throw error;
+        }
+        const now = Math.floor(Date.now() / 1_000);
+        const name = value.name?.trim() || goal.name;
+        await env.DB.prepare(
+          "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL",
+        )
+          .bind(
+            name,
+            encoded.configJson,
+            encoded.configVersion,
+            now,
+            goal.id,
+            site.id,
+          )
+          .run();
+        return ok(
+          await goalResource({
+            ...goal,
+            name,
+            config_json: encoded.configJson,
+            config_version: encoded.configVersion,
             updated_at: now,
           }),
         ) as never;

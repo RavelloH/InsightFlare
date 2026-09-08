@@ -1,3 +1,9 @@
+import {
+  GOAL_TIMESERIES_MAX_BUCKETS,
+  goalQueryCost,
+} from "@/lib/edge/analytics/application/goal-cost";
+import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1";
+import { queryGoalDefinition } from "@/lib/edge/analytics/composition/d1/goals";
 import type { SimpleDimensionKey } from "@/lib/edge/analytics/composition/protocol/dimensions-contract-adapter";
 import type { OverviewTab } from "@/lib/edge/analytics/composition/protocol/overview-tabs-contract-adapter";
 import {
@@ -24,8 +30,10 @@ import {
   buildCalendarBucketPlan,
   createQueryTime,
   createTimeRange,
+  filterConditionCount,
   normalizeReportingTimeZone,
   parseFilterUrlForAudience,
+  parseGoalFilter,
   siteQueryContext,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
@@ -477,6 +485,75 @@ export function executePrivateQuery(
     return import("../composition/protocol/funnels-contract-adapter").then(
       ({ handleFunnel }) =>
         handleFunnel(input.env, input.siteId, input.url, ctx, input.request),
+    );
+  }
+  if (
+    input.pathname === "goal-summary" ||
+    input.pathname === "goal-timeseries"
+  ) {
+    return (async () => {
+      const operation = operationForQueryRoute(input.pathname);
+      const window = parseWindow(input.url);
+      if (!window) return badRequest("Invalid time window");
+      const interval = parseInterval(input.url);
+      const filters = parseFilterUrlForAudience("private-dashboard", input.url);
+      const goalId = input.url.searchParams.get("id")?.trim() ?? "";
+      let goal;
+      try {
+        goal = await queryGoalDefinition(input.env, input.siteId, goalId);
+      } catch {
+        return queryErrorResponse({ kind: "internal", operation });
+      }
+      if (!goal) return notFound();
+      const cost = goalQueryCost({
+        filters,
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+        timeZone: window.timeZone,
+        goalFilterComplexity: filterConditionCount(parseGoalFilter(goal)),
+        ...(input.pathname === "goal-timeseries" ? { interval } : {}),
+      });
+      if ((cost.bucketCount ?? 1) > GOAL_TIMESERIES_MAX_BUCKETS) {
+        return queryErrorResponse({
+          kind: "range-not-supported",
+          reason: "too-many-buckets",
+        });
+      }
+      const diagnostics = createD1ReadDiagnostics();
+      const query = {
+        context: queryContext,
+        time: createQueryTime(
+          window.startMs,
+          window.endExclusiveMs,
+          window.timeZone,
+          window.nowMs,
+        ),
+        filters,
+        goalId,
+        ...(input.pathname === "goal-timeseries" ? { interval } : {}),
+      };
+      return createD1SiteQueryRuntime({
+        env: input.env,
+        siteId: input.siteId,
+        diagnostics,
+      })
+        .execute(operation, query, { cost })
+        .then((result) => {
+          if (!result.ok) return queryErrorResponse(result.error);
+          if (!result.data) return notFound();
+          return jsonResponseWith(
+            ctx!,
+            { ok: true, data: result.data },
+            200,
+            analyticsDiagnosticHeaders(result.meta.source, diagnostics),
+          );
+        });
+    })();
+  }
+  if (input.pathname === "goals") {
+    return import("../composition/protocol/goals-contract-adapter").then(
+      ({ handleGoal }) =>
+        handleGoal(input.env, input.siteId, input.url, ctx, input.request),
     );
   }
   const dimension = SIMPLE_DIMENSIONS[input.pathname];

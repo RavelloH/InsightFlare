@@ -82,6 +82,34 @@ e2eRoutes.post("/clock/advance", async (c) => {
   return c.json({ ok: true, data: { nowMs: advanceE2eClock(deltaMs) } });
 });
 
+e2eRoutes.post("/d1/execute", async (c) => {
+  const input = await body(c.req.raw);
+  const sql = typeof input?.sql === "string" ? input.sql : "";
+  if (!sql.trim()) return c.json({ ok: false, error: "sql is required" }, 400);
+  try {
+    return c.json({ ok: true, data: await c.env.DB.exec(sql) });
+  } catch {
+    return c.json({ ok: false, error: "d1_execute_failed" }, 500);
+  }
+});
+
+e2eRoutes.post("/archive/put", async (c) => {
+  const input = await body(c.req.raw);
+  const key = String(input?.key || "")
+    .trim()
+    .slice(0, 512);
+  const content = typeof input?.content === "string" ? input.content : null;
+  if (!key || content === null || !c.env.ARCHIVE_BUCKET) {
+    return c.json({ ok: false, error: "archive object is required" }, 400);
+  }
+  try {
+    await c.env.ARCHIVE_BUCKET.put(key, content);
+    return c.json({ ok: true, data: { key } });
+  } catch {
+    return c.json({ ok: false, error: "archive_put_failed" }, 502);
+  }
+});
+
 e2eRoutes.post("/scheduled/run", async (c) => {
   const input = await body(c.req.raw);
   const key = String(input?.key || "");

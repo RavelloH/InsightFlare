@@ -42,12 +42,12 @@
               {
                 "id": "analysis:read",
                 "label": "Analysis definitions read",
-                "useWhen": "The agent needs shared saved filters, funnel definitions, or a query that explicitly requires this scope."
+                "useWhen": "The agent needs shared saved filters, goal or funnel definitions, or a query that explicitly requires this scope."
               },
               {
                 "id": "analysis:write",
                 "label": "Analysis definitions write",
-                "useWhen": "The user explicitly asks the agent to create, update, or delete funnel or other analysis definitions."
+                "useWhen": "The user explicitly asks the agent to create, update, or delete a goal, funnel, or other analysis definition."
               },
               {
                 "id": "site:read",
@@ -86,7 +86,7 @@
                 ]
               },
               {
-                "task": "Manage funnels or other analysis definitions",
+                "task": "Manage goals, funnels, or other analysis definitions",
                 "select": [
                   "analysis:read",
                   "analysis:write"
@@ -490,6 +490,34 @@
       ],
       "requiresConfirmation": true,
       "result": "Report funnel conversion results or the confirmed funnel-management outcome."
+    },
+    {
+      "id": "goal_analysis_and_management",
+      "intent": "Analyze a saved goal or create, update, delete, list, and inspect goal definitions.",
+      "scope": "site",
+      "requiredContext": [
+        "site identifier",
+        "goal identifier for an existing goal"
+      ],
+      "preparation": [
+        "site.analytics.schema",
+        "goals.list"
+      ],
+      "operations": [
+        "site.analytics.goalSummary",
+        "site.analytics.goalTimeseries",
+        "goals.list",
+        "goals.get",
+        "goals.create",
+        "goals.update",
+        "goals.delete"
+      ],
+      "decisionBranches": [
+        "For analysis, read the goal definition before running summary or timeseries analytics.",
+        "For a mutation, preview the exact goal name and raw filter DSL or change set before confirmation."
+      ],
+      "requiresConfirmation": true,
+      "result": "Report goal conversion results or the confirmed goal-management outcome."
     },
     {
       "id": "retention_analysis",

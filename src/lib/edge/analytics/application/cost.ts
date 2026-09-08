@@ -8,6 +8,8 @@ export interface QueryCostInput {
   readonly bucketCount?: number;
   readonly dimensionCardinality?: number;
   readonly filterComplexity?: number;
+  /** Complexity of a persisted Goal matcher, separate from global filters. */
+  readonly goalFilterComplexity?: number;
   readonly breakdownLimit?: number;
   readonly projectionFields?: number;
   readonly pageLimit?: number;
@@ -58,6 +60,7 @@ export function calculateQueryCost(
     input.bucketCount ?? 1,
     input.dimensionCardinality ?? 1,
     input.filterComplexity ?? 1,
+    input.goalFilterComplexity ?? 1,
     input.breakdownLimit ?? 1,
     input.projectionFields ?? 1,
     input.pageLimit ?? 1,
@@ -94,6 +97,7 @@ export function calculateQueryCost(
     Math.max(1, input.bucketCount ?? 1) ** 0.5 *
     Math.max(1, input.dimensionCardinality ?? 1) ** 0.5 *
     Math.max(1, input.filterComplexity ?? 1) ** 0.25 *
+    Math.max(1, input.goalFilterComplexity ?? 1) ** 0.25 *
     Math.max(1, input.projectionFields ?? 1) ** 0.25 *
     Math.max(1, input.breakdownLimit ?? input.pageLimit ?? 1) ** 0.25 *
     Math.max(1, input.requiredSourceCount ?? 1) ** 0.15 *

@@ -8,6 +8,7 @@ export type SiteSection =
   | "campaigns"
   | "events"
   | "funnels"
+  | "goals"
   | "visitors"
   | "retention"
   | "geo"

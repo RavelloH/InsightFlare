@@ -8,6 +8,8 @@ export * from "./filter-compiler";
 export * from "./filter-registry";
 export * from "./filters";
 export * from "./funnel-config";
+export type * from "./goal";
+export * from "./goal-config";
 export * from "./helpers";
 export * from "./observation-planner";
 export * from "./operations/index";

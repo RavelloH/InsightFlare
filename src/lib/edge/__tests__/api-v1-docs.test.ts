@@ -432,6 +432,32 @@ describe("api v1 public docs", () => {
     }
   });
 
+  it("publishes the Goal resource/analytics contract without a multi-Goal batch escape hatch", () => {
+    const spec = readJson<OpenApiSpec>("docs/openapi.json");
+    const goals = spec.paths["/api/v1/sites/{siteId}/goals"];
+    const goal = spec.paths["/api/v1/sites/{siteId}/goals/{goalId}"];
+    const summary =
+      spec.paths["/api/v1/sites/{siteId}/analytics/goals/summary"]?.post;
+    const timeseries =
+      spec.paths["/api/v1/sites/{siteId}/analytics/goals/timeseries"]?.post;
+
+    expect(goals?.get?.operationId).toBe("goals.list");
+    expect(goals?.post?.operationId).toBe("goals.create");
+    expect(goal?.get?.operationId).toBe("goals.get");
+    expect(goal?.patch?.operationId).toBe("goals.update");
+    expect(goal?.delete?.operationId).toBe("goals.delete");
+    expect(summary?.operationId).toBe("site.analytics.goalSummary");
+    expect(timeseries?.operationId).toBe("site.analytics.goalTimeseries");
+    expect(
+      summary?.requestBody?.content?.["application/json"]?.schema,
+    ).toBeDefined();
+    expect(
+      timeseries?.requestBody?.content?.["application/json"]?.schema,
+    ).toBeDefined();
+    expect(summary?.["x-api-v1-batch-eligible"]).not.toBe(true);
+    expect(timeseries?.["x-api-v1-batch-eligible"]).not.toBe(true);
+  });
+
   it("covers public operations with operationId-based recipes", () => {
     const spec = readJson<OpenApiSpec>("docs/openapi.json");
     const manifest = readJson<{

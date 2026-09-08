@@ -265,7 +265,7 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
     const overview = await readSiteOverview(page, siteA?.id || "");
     expect(overview.views).toBe(expected?.overview.views);
 
-    const pages = await apiRequest<DashboardPage[]>(
+    const pages = await apiRequest<{ items: DashboardPage[] }>(
       page,
       "GET",
       siteQueryPath(siteA?.id || "", "pages"),
@@ -273,7 +273,7 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
       "no-store",
     );
     expect(pages.status).toBe(200);
-    expect(pages.payload.data).toEqual(
+    expect(pages.payload.data?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ pathname: "/", views: 1 }),
         expect.objectContaining({ pathname: "/spa/checkout", views: 1 }),
@@ -281,7 +281,7 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
       ]),
     );
 
-    const eventTypes = await apiRequest<EventType[]>(
+    const eventTypes = await apiRequest<{ items: EventType[] }>(
       page,
       "GET",
       siteQueryPath(siteA?.id || "", "event-types"),
@@ -289,7 +289,7 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
       "no-store",
     );
     expect(eventTypes.status).toBe(200);
-    expect(eventTypes.payload.data).toEqual(
+    expect(eventTypes.payload.data?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ label: "signup_clicked", views: 1 }),
       ]),

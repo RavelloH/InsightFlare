@@ -19,6 +19,8 @@ import {
   type QueryOperation,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import { InvalidCursorError } from "@/lib/pagination";
 
 const time = createQueryTime(1_000, 2_000, "UTC", 2_000);
 
@@ -388,6 +390,131 @@ describe("TypedQueryApplicationService", () => {
       resolvedScope: "event",
       requiredSources: [],
       requiresRawSource: false,
+    });
+  });
+
+  it("accounts for nested entity membership and payload source cost", async () => {
+    const overviewReader = reader();
+    const filters = parseFilterDsl(
+      "session.durationMs gt 10 AND session.views gt 1",
+      analyticsFilterRegistry,
+    );
+    const context = siteQueryContext("site-1", "private-dashboard");
+    const result = await new TypedQueryApplicationService().execute(
+      {
+        kind: "typed-query",
+        operation: "overview",
+        query: {
+          context,
+          time,
+          filters,
+        } as OverviewQuery,
+        providerRegistry: new AnalyticsProviderRegistry().register("overview", {
+          execute: (input) => overviewReader.readOverview(input as never),
+        }),
+      },
+      { cost: { rangeMs: 1, provider: "d1" } },
+    );
+
+    expect(result).toMatchObject({ ok: true, data: { views: 1 } });
+    expect(overviewReader.readOverview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopePlan: expect.objectContaining({ mode: "entity" }),
+      }),
+    );
+
+    const payloadFilters = parseFilterDsl(
+      'event.payload("/plan") eq "pro"',
+      analyticsFilterRegistry,
+    );
+    const payloadResult = await new TypedQueryApplicationService().execute(
+      {
+        kind: "typed-query",
+        operation: "overview",
+        query: { context, time, filters: payloadFilters } as OverviewQuery,
+        providerRegistry: new AnalyticsProviderRegistry().register("overview", {
+          execute: (input) => overviewReader.readOverview(input as never),
+        }),
+      },
+      { cost: { rangeMs: 1, provider: "d1" } },
+    );
+    expect(payloadResult).toMatchObject({ ok: true, data: { views: 1 } });
+
+    const notFilters = parseFilterDsl(
+      "NOT session.durationMs gt 10",
+      analyticsFilterRegistry,
+    );
+    const notResult = await new TypedQueryApplicationService().execute(
+      {
+        kind: "typed-query",
+        operation: "overview",
+        query: { context, time, filters: notFilters } as OverviewQuery,
+        providerRegistry: new AnalyticsProviderRegistry().register("overview", {
+          execute: (input) => overviewReader.readOverview(input as never),
+        }),
+      },
+      { cost: { rangeMs: 1, provider: "d1" } },
+    );
+    expect(notResult).toMatchObject({ ok: true, data: { views: 1 } });
+  });
+
+  it("supports current-time query shapes and maps provider cursor failures", async () => {
+    const context = siteQueryContext("site-1", "private-dashboard");
+    const current = await new TypedQueryApplicationService().execute({
+      kind: "typed-query",
+      operation: "realtime",
+      query: {
+        context,
+        filters: EMPTY_FILTER_DOCUMENT,
+        current: { time, filters: EMPTY_FILTER_DOCUMENT } as never,
+      } as never,
+      providerRegistry: new AnalyticsProviderRegistry().register("realtime", {
+        execute: async () => ({ value: { connected: true } }),
+      }),
+    });
+    expect(current).toMatchObject({ ok: true, data: { connected: true } });
+
+    const cursorFailure = await new TypedQueryApplicationService().execute({
+      kind: "typed-query",
+      operation: "pages",
+      query: { context, time, filters: EMPTY_FILTER_DOCUMENT } as never,
+      providerRegistry: new AnalyticsProviderRegistry().register("pages", {
+        execute: async () => {
+          throw new InvalidCursorError("pages");
+        },
+      }),
+    });
+    expect(cursorFailure).toEqual({
+      ok: false,
+      error: { kind: "invalid-cursor", cursorKind: "pages" },
+    });
+  });
+
+  it("rehydrates an already-enveloped provider value with resolved scope", async () => {
+    const providerValue = {
+      ok: true as const,
+      data: { views: 2 },
+      meta: { source: "raw" },
+    };
+    const result = await new TypedQueryApplicationService().execute({
+      kind: "typed-query",
+      operation: "overview",
+      query: {
+        context: siteQueryContext("site-1", "private-dashboard"),
+        time,
+        filters: EMPTY_FILTER_DOCUMENT,
+      } as OverviewQuery,
+      providerRegistry: new AnalyticsProviderRegistry().register("overview", {
+        execute: async () => ({ value: providerValue }),
+      }),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        meta: {
+          filterScope: { requested: "auto", resolved: "event" },
+        },
+      },
     });
   });
 

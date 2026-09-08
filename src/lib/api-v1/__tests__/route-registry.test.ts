@@ -16,6 +16,7 @@ import {
   apiV1AnalyticsEventTypesRouteRegistry,
   apiV1AnalyticsFilterValuesRouteRegistry,
   apiV1AnalyticsFunnelAnalysisRouteRegistry,
+  apiV1AnalyticsGoalRouteRegistry,
   apiV1AnalyticsJourneyDetailsRouteRegistry,
   apiV1AnalyticsJourneySearchRouteRegistry,
   apiV1AnalyticsJourneyTrajectoryRouteRegistry,
@@ -51,6 +52,12 @@ describe("target API v1 route registry", () => {
     expect(apiV1BatchEligibleRouteIds).toContain("site.saved-filters.list");
     expect(apiV1BatchEligibleRouteIds).not.toContain("batch");
     expect(apiV1BatchEligibleRouteIds).not.toContain("sites.create");
+    expect(apiV1BatchEligibleRouteIds).not.toContain(
+      "site.analytics.goalSummary",
+    );
+    expect(apiV1BatchEligibleRouteIds).not.toContain(
+      "site.analytics.goalTimeseries",
+    );
     for (const routeId of apiV1BatchEligibleRouteIds) {
       expect(apiV1RouteRegistry.some((route) => route.id === routeId)).toBe(
         true,
@@ -420,6 +427,7 @@ describe("target API v1 route registry", () => {
         ...apiV1AnalyticsFilterValuesRouteRegistry,
         ...apiV1AnalyticsRetentionRouteRegistry,
         ...apiV1AnalyticsFunnelAnalysisRouteRegistry,
+        ...apiV1AnalyticsGoalRouteRegistry,
         ...apiV1AnalyticsPerformanceRouteRegistry,
         ...apiV1AnalyticsEventsRouteRegistry,
         ...apiV1AnalyticsEventRecordsRouteRegistry,
@@ -451,8 +459,8 @@ describe("target API v1 route registry", () => {
   });
 
   it("includes planned saved-filter collection and item contracts", () => {
-    expect(apiV1ApplicationRouteRegistry).toHaveLength(19);
-    expect(apiV1RouteRegistry).toHaveLength(69);
+    expect(apiV1ApplicationRouteRegistry).toHaveLength(24);
+    expect(apiV1RouteRegistry).toHaveLength(76);
     expect(
       apiV1ApplicationRouteRegistry
         .filter((route) => route.id.startsWith("site.saved-filters."))

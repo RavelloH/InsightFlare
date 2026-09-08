@@ -126,6 +126,8 @@ export const FILTER_SCOPE_CAPABILITIES: Readonly<
   sessions: scoped("session"),
   "session-detail": none,
   "funnel-analysis": scoped("event"),
+  "goal-summary": scoped("event"),
+  "goal-timeseries": scoped("event"),
   "team-dashboard": scoped("event"),
   explore: scoped("event"),
 };

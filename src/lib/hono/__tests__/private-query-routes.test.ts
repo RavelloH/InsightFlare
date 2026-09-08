@@ -60,6 +60,10 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
   handleFunnel: vi.fn(async () => new Response("funnel")),
 }));
 
+vi.mock("@/lib/edge/analytics/providers/d1/internal/goals", () => ({
+  handleGoal: vi.fn(async () => new Response("goal")),
+}));
+
 vi.mock(
   "@/lib/edge/analytics/composition/protocol/events-contract-adapter",
   () => ({
@@ -204,6 +208,44 @@ describe("Hono private query routes", () => {
     expect(postResponse.status).toBe(200);
     expect(deleteResponse.status).toBe(200);
     expect(withDashboardCache).not.toHaveBeenCalled();
+  });
+
+  it("allows Goal definition CRUD through the private site route", async () => {
+    const app = createApp();
+
+    const getResponse = await app.fetch(
+      request("/api/private/goals?siteId=site-1"),
+      env as never,
+      ctx,
+    );
+    const postResponse = await app.fetch(
+      request("/api/private/goals?siteId=site-1", { method: "POST" }),
+      env as never,
+      ctx,
+    );
+
+    expect(getResponse.status).toBe(200);
+    expect(postResponse.status).toBe(200);
+    expect(withDashboardCache).not.toHaveBeenCalled();
+  });
+
+  it("denies Goal mutations to a readable site member", async () => {
+    vi.mocked(resolvePrivateSiteForSession).mockResolvedValueOnce({
+      id: "site-1",
+      name: "Site",
+      domain: "app.test",
+      canManage: false,
+    });
+    const app = createApp();
+    const response = await app.fetch(
+      request("/api/private/goals?siteId=site-1", {
+        method: "PATCH",
+        body: "{}",
+      }),
+      env as never,
+      ctx,
+    );
+    expect(response.status).toBe(403);
   });
 
   it("denies funnel mutations to a readable site member", async () => {

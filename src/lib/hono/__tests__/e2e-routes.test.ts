@@ -27,6 +27,7 @@ function controlRequest(path: string, init?: RequestInit) {
 
 function createEnv(input?: { exists?: boolean; response?: Response }) {
   const response = input?.response ?? Response.json({ ok: true, visits: {} });
+  const exec = vi.fn().mockResolvedValue({ count: 1, duration: 1 });
   const statement = {
     bind: vi.fn().mockReturnThis(),
     first: vi
@@ -34,14 +35,18 @@ function createEnv(input?: { exists?: boolean; response?: Response }) {
       .mockResolvedValue(input?.exists === false ? null : { id: "site-1" }),
   };
   const stub = { fetch: vi.fn().mockResolvedValue(response) };
+  const archive = { put: vi.fn().mockResolvedValue(undefined) };
   return {
-    DB: { prepare: vi.fn().mockReturnValue(statement) },
+    DB: { exec, prepare: vi.fn().mockReturnValue(statement) },
+    ARCHIVE_BUCKET: archive,
     INGEST_DO: {
       get: vi.fn().mockReturnValue(stub),
       idFromName: vi.fn(() => "do-id"),
     },
     INSIGHTFLARE_E2E: "1",
     INSIGHTFLARE_E2E_CONTROL_TOKEN: "control-token",
+    archive,
+    exec,
     statement,
     stub,
   };
@@ -164,5 +169,70 @@ describe("E2E control routes", () => {
     expect(env.stub.fetch).toHaveBeenCalledWith(
       "https://ingest.internal/diagnostic",
     );
+  });
+
+  it("executes guarded D1 and archive seed operations", async () => {
+    const env = createEnv();
+    const invalidD1 = await e2eRoutes.fetch(
+      controlRequest("d1/execute", {
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      env as never,
+    );
+    const d1 = await e2eRoutes.fetch(
+      controlRequest("d1/execute", {
+        body: JSON.stringify({ sql: "INSERT INTO visits VALUES (1)" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      env as never,
+    );
+    const d1FailedEnv = createEnv();
+    d1FailedEnv.exec.mockRejectedValueOnce(new Error("locked"));
+    const d1Failed = await e2eRoutes.fetch(
+      controlRequest("d1/execute", {
+        body: JSON.stringify({ sql: "INSERT INTO visits VALUES (2)" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      d1FailedEnv as never,
+    );
+    const invalidArchive = await e2eRoutes.fetch(
+      controlRequest("archive/put", {
+        body: JSON.stringify({ key: "archive.txt" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      env as never,
+    );
+    const archive = await e2eRoutes.fetch(
+      controlRequest("archive/put", {
+        body: JSON.stringify({ content: "archive", key: "archive.txt" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      env as never,
+    );
+    const archiveFailedEnv = createEnv();
+    archiveFailedEnv.archive.put.mockRejectedValueOnce(new Error("write"));
+    const archiveFailed = await e2eRoutes.fetch(
+      controlRequest("archive/put", {
+        body: JSON.stringify({ content: "archive", key: "archive.txt" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      archiveFailedEnv as never,
+    );
+
+    expect(invalidD1.status).toBe(400);
+    expect(d1.status).toBe(200);
+    expect(env.exec).toHaveBeenCalledWith("INSERT INTO visits VALUES (1)");
+    expect(d1Failed.status).toBe(500);
+    expect(invalidArchive.status).toBe(400);
+    expect(archive.status).toBe(200);
+    expect(env.archive.put).toHaveBeenCalledWith("archive.txt", "archive");
+    expect(archiveFailed.status).toBe(502);
   });
 });

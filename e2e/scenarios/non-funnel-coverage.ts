@@ -212,9 +212,9 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
       siteA?.id || "",
     );
     expect(afterDuplicates.views).toBe(before.views + 1);
-    const eventTypes = await apiRequest<
-      Array<{ label: string; views: number }>
-    >(
+    const eventTypes = await apiRequest<{
+      items: Array<{ label: string; views: number }>;
+    }>(
       page,
       "GET",
       context.siteQueryPath(siteA?.id || "", "event-types"),
@@ -222,7 +222,7 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
       "no-store",
     );
     expect(eventTypes.status).toBe(200);
-    expect(eventTypes.payload.data).toEqual(
+    expect(eventTypes.payload.data?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ label: "e2e_idempotent_event", views: 1 }),
       ]),
@@ -287,9 +287,9 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
       views: privateOverview.views,
     });
 
-    const publicPages = await apiRequest<
-      Array<{ pathname: string; views: number }>
-    >(
+    const publicPages = await apiRequest<{
+      items: Array<{ pathname: string; views: number }>;
+    }>(
       page,
       "GET",
       `/api/public/share/e2e-public-analytics/pages?${query}`,
@@ -297,7 +297,7 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
       "no-store",
     );
     expect(publicPages.status).toBe(200);
-    expect(publicPages.payload.data).toEqual(
+    expect(publicPages.payload.data?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ pathname: "/", views: 1 }),
         expect.objectContaining({ pathname: "/product", views: 1 }),
@@ -486,7 +486,7 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
     const privateFilterId = createdPrivate.payload.filter?.id || "";
 
     await signIn(page, "member-a", memberAPassword);
-    const memberList = await apiRequest<{ filters: SavedFilter[] }>(
+    const memberList = await apiRequest<{ items: SavedFilter[] }>(
       page,
       "GET",
       filterPath,
@@ -494,7 +494,7 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
       "no-store",
     );
     expect(memberList.status).toBe(200);
-    expect(memberList.payload.filters).toEqual([
+    expect(memberList.payload.items).toEqual([
       expect.objectContaining({ id: teamFilterId, isOwner: false }),
     ]);
 
@@ -597,8 +597,16 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
         name: "cross-breakdowns",
         path: "cross-breakdowns",
       },
-      { body: { timeRange, limit: 10 }, name: "pages", path: "pages" },
-      { body: { timeRange, limit: 10 }, name: "referrers", path: "referrers" },
+      {
+        body: { page: { limit: 10 }, timeRange },
+        name: "pages",
+        path: "pages",
+      },
+      {
+        body: { page: { limit: 10 }, timeRange },
+        name: "referrers",
+        path: "referrers",
+      },
       { body: { timeRange, limit: 10 }, name: "channels", path: "channels" },
       {
         body: { field: "page.path", timeRange },
@@ -665,5 +673,187 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
     expect(unsupportedDimension.payload).toMatchObject({
       error: { code: "dimension_not_supported" },
     });
+  });
+
+  test("32. Goals create, lazy-load, detail, edit, permissions, and API parity", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const siteA = seed.sites.siteA;
+    const teamA = seed.teams.teamA;
+    const analyticsKey = seed.apiKeys.analyticsRead?.secret;
+    expect(siteA).toBeDefined();
+    expect(teamA).toBeDefined();
+    expect(analyticsKey).toBeTruthy();
+
+    await signIn(page, "owner-a", ownerAPassword);
+    const now = context.currentE2eNowMs();
+    const eventName = `e2e_goal_purchase_${context.runId}`;
+    await context.seedGoalEvents(page, siteA?.id || "", eventName);
+
+    const goalPath = `/api/private/goals?siteId=${encodeURIComponent(siteA?.id || "")}`;
+    const created = await apiRequest<{
+      goal: { id: string; name: string; semanticFingerprint: string };
+    }>(page, "POST", goalPath, {
+      filterDsl: `event.name eq "${eventName}"`,
+      filterDslVersion: 1,
+      name: `E2E purchase ${context.runId}`,
+    });
+    expect(created.status).toBe(201);
+    const createdGoal = created.payload.data?.goal;
+    expect(createdGoal).toMatchObject({
+      name: `E2E purchase ${context.runId}`,
+    });
+    const goalId = createdGoal?.id || "";
+    const firstFingerprint = createdGoal?.semanticFingerprint || "";
+
+    const list = await apiRequest<{ items: Array<{ id: string }> }>(
+      page,
+      "GET",
+      goalPath,
+      undefined,
+      "no-store",
+    );
+    expect(list.status).toBe(200);
+    expect(list.payload.data?.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: goalId })]),
+    );
+
+    const from = now - 4 * 24 * 60 * 60 * 1000;
+    const to = now + 60 * 60 * 1000;
+    const analyticsPath = (
+      operation: string,
+      range = { from, to },
+      extra = "",
+    ) =>
+      `/api/private/${operation}?siteId=${encodeURIComponent(siteA?.id || "")}&id=${encodeURIComponent(goalId)}&from=${range.from}&to=${range.to}&timeZone=UTC&goalFingerprint=${encodeURIComponent(firstFingerprint)}${extra}`;
+    type GoalSummary = {
+      sessions: { total: number; converted: number; conversionRate: number };
+      visitors: { total: number; converted: number; conversionRate: number };
+    };
+    const privateSummary = await apiRequest<{
+      goal: unknown;
+      summary: GoalSummary;
+    }>(page, "GET", analyticsPath("goal-summary"), undefined, "no-store");
+    expect(privateSummary.status).toBe(200);
+    expect(privateSummary.payload.data?.summary).toBeDefined();
+
+    const route = `/zh/app/${teamA?.slug}/analytics-a-example-test/goals`;
+    const cardSummary = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/private/goal-summary") &&
+        response.request().method() === "GET",
+    );
+    const goalsLoaded = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/private/goals") &&
+        response.request().method() === "GET",
+    );
+    await page.goto(route, { waitUntil: "domcontentloaded" });
+    expect((await goalsLoaded).status()).toBe(200);
+    expect((await cardSummary).status()).toBe(200);
+    await expect(page.getByText(`E2E purchase ${context.runId}`)).toBeVisible();
+    const timeseries = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/private/goal-timeseries") &&
+        response.request().method() === "GET",
+    );
+    await page.getByText(`E2E purchase ${context.runId}`).click();
+    await expect(page.getByText("转化率", { exact: true })).toBeVisible();
+    expect((await timeseries).status()).toBe(200);
+    const goalChart = page.locator('[data-goal-series="visitors,sessions"]');
+    await expect(goalChart.getByText("访客", { exact: true })).toBeVisible();
+    await expect(goalChart.getByText("会话", { exact: true })).toBeVisible();
+
+    const changedRange = await apiRequest<{
+      summary: GoalSummary;
+    }>(
+      page,
+      "GET",
+      analyticsPath("goal-summary", { from: now - 6 * 60 * 60 * 1000, to }),
+      undefined,
+      "no-store",
+    );
+    expect(changedRange.status).toBe(200);
+    expect(changedRange.payload.data?.summary).toBeDefined();
+    expect(changedRange.payload.data?.summary.sessions.total).not.toBe(
+      privateSummary.payload.data?.summary.sessions.total,
+    );
+    const changedTimeseries = await apiRequest<unknown>(
+      page,
+      "GET",
+      analyticsPath("goal-timeseries", {
+        from: now - 6 * 60 * 60 * 1000,
+        to,
+      }) + "&interval=hour",
+      undefined,
+      "no-store",
+    );
+    expect(changedTimeseries.status).toBe(200);
+    const edited = await apiRequest<{
+      goal: { semanticFingerprint: string; filterDsl: string };
+    }>(page, "PATCH", `${goalPath}&id=${encodeURIComponent(goalId)}`, {
+      filterDsl: `event.name eq "${eventName}" AND event.payload("/plan") eq "pro"`,
+      filterDslVersion: 1,
+    });
+    expect(edited.status).toBe(200);
+    expect(edited.payload.data?.goal.filterDsl).toContain("/plan");
+    expect(edited.payload.data?.goal.semanticFingerprint).not.toBe(
+      firstFingerprint,
+    );
+
+    const apiV1Summary = await apiV1Request<{ summary: GoalSummary }>(
+      page,
+      "POST",
+      `/api/v1/sites/${encodeURIComponent(siteA?.id || "")}/analytics/goals/summary`,
+      analyticsKey || "",
+      {
+        goalId,
+        timeRange: absoluteTimeRange(from, to),
+        filter: null,
+      },
+    );
+    expect(apiV1Summary.status).toBe(200);
+    expect(apiV1Summary.payload.data?.summary).toEqual(
+      privateSummary.payload.data?.summary,
+    );
+    const apiV1Timeseries = await apiV1Request<{
+      timeseries: Array<{ visitors: { converted: number } }>;
+    }>(
+      page,
+      "POST",
+      `/api/v1/sites/${encodeURIComponent(siteA?.id || "")}/analytics/goals/timeseries`,
+      analyticsKey || "",
+      {
+        goalId,
+        interval: "day",
+        timeRange: absoluteTimeRange(from, to),
+        filter: null,
+      },
+    );
+    expect(apiV1Timeseries.status).toBe(200);
+    const bucketConvertedVisitors =
+      apiV1Timeseries.payload.data?.timeseries.reduce(
+        (sum, point) => sum + point.visitors.converted,
+        0,
+      ) ?? 0;
+    expect(bucketConvertedVisitors).toBeGreaterThan(
+      apiV1Summary.payload.data?.summary.visitors.converted ?? 0,
+    );
+
+    await signIn(page, "member-a", memberAPassword);
+    await page.goto(route, { waitUntil: "domcontentloaded" });
+    await expect(page.getByText(`E2E purchase ${context.runId}`)).toBeVisible();
+    await expect(page.getByRole("button", { name: "新建目标" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "编辑" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "删除" })).toHaveCount(0);
+
+    await signIn(page, "owner-a", ownerAPassword);
+    const deleted = await apiRequest<unknown>(
+      page,
+      "DELETE",
+      `${goalPath}&id=${encodeURIComponent(goalId)}`,
+    );
+    expect(deleted.status).toBe(200);
   });
 }

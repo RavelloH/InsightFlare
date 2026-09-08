@@ -22,6 +22,7 @@ import { executionContext, requestUrl } from "@/lib/hono/utils/context";
 import { forb } from "@/lib/response";
 
 const FUNNEL_PATH = "funnels";
+const GOAL_PATH = "goals";
 const TEAM_DASHBOARD_PATH = "team-dashboard";
 
 function privateQuery(pathname: string) {
@@ -98,6 +99,27 @@ privateQueryRoutes.all(
       );
     }
     return privateQuery(FUNNEL_PATH)(c);
+  },
+);
+
+privateQueryRoutes.use(
+  `/${GOAL_PATH}`,
+  requireMethodsMiddleware(["GET", "POST", "PATCH", "DELETE"]),
+);
+privateQueryRoutes.all(
+  `/${GOAL_PATH}`,
+  resolvePrivateSiteMiddleware(),
+  async (c) => {
+    const method = c.req.raw.method;
+    const site = c.get("privateSite");
+    if (method !== "GET" && !site?.canManage) {
+      return forb(
+        "Goal mutations require team owner or admin access",
+        undefined,
+        c.req.raw,
+      );
+    }
+    return privateQuery(GOAL_PATH)(c);
   },
 );
 

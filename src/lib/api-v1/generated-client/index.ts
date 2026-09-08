@@ -3,14 +3,21 @@ import type { ZodType } from "zod";
 
 import {
   CreateFunnelBodySchema,
+  CreateGoalBodySchema,
   CreateSiteInputSchema,
   type FunnelResource,
   type FunnelResourcePage,
   FunnelResourcePageSchema,
   FunnelResourceSchema,
   GetTeamVisibleSavedFilterInputSchema,
+  type GoalResource,
+  type GoalResourcePage,
+  GoalResourcePageSchema,
+  GoalResourceSchema,
   type ListFunnelsInput,
   ListFunnelsInputSchema,
+  type ListGoalsInput,
+  ListGoalsInputSchema,
   type ListSitesInput,
   ListSitesInputSchema,
   type ListTeamVisibleSavedFiltersInput,
@@ -30,6 +37,7 @@ import {
   type TrackingSettings,
   TrackingSettingsSchema,
   UpdateFunnelBodySchema,
+  UpdateGoalBodySchema,
   UpdatePrivacySettingsBodySchema,
   UpdateSharingSettingsBodySchema,
   UpdateSiteBodySchema,
@@ -82,6 +90,10 @@ import {
   SiteFilterValuesQueryDtoSchema,
   type SiteFunnelAnalysisQueryDtoInput,
   SiteFunnelAnalysisQueryDtoSchema,
+  type SiteGoalSummaryQueryDtoInput,
+  SiteGoalSummaryQueryDtoSchema,
+  type SiteGoalTimeseriesQueryDtoInput,
+  SiteGoalTimeseriesQueryDtoSchema,
   type SiteJourneyEventDetailQueryDtoInput,
   SiteJourneyEventDetailQueryDtoSchema,
   type SiteOverviewQueryDto,
@@ -174,6 +186,10 @@ import {
   AnalyticsFilterValuesResponseSchema,
   type AnalyticsFunnelAnalysisData,
   AnalyticsFunnelAnalysisResponseSchema,
+  type AnalyticsGoalSummaryData,
+  AnalyticsGoalSummaryResponseSchema,
+  type AnalyticsGoalTimeseriesData,
+  AnalyticsGoalTimeseriesResponseSchema,
   type AnalyticsJourneyEventDetailData,
   AnalyticsJourneyEventDetailResponseSchema,
   type AnalyticsJourneyEventsData,
@@ -531,6 +547,32 @@ export interface ApiV1GeneratedClient {
     funnelId: string,
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<undefined>>;
+  listGoals(
+    siteId: string,
+    input?: { readonly page?: Partial<ListGoalsInput["page"]> },
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<GoalResourcePage>>;
+  createGoal(
+    siteId: string,
+    input: Parameters<typeof CreateGoalBodySchema.parse>[0],
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<GoalResource>>;
+  getGoal(
+    siteId: string,
+    goalId: string,
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<GoalResource>>;
+  updateGoal(
+    siteId: string,
+    goalId: string,
+    input: Parameters<typeof UpdateGoalBodySchema.parse>[0],
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<GoalResource>>;
+  deleteGoal(
+    siteId: string,
+    goalId: string,
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<undefined>>;
   siteAnalyticsSchema(
     siteId: string,
     options?: ApiV1GeneratedRequestOptions,
@@ -609,6 +651,16 @@ export interface ApiV1GeneratedClient {
     input: SiteFunnelAnalysisQueryDtoInput,
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<AnalyticsFunnelAnalysisData>>;
+  siteAnalyticsGoalSummary(
+    siteId: string,
+    input: SiteGoalSummaryQueryDtoInput,
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<AnalyticsGoalSummaryData>>;
+  siteAnalyticsGoalTimeseries(
+    siteId: string,
+    input: SiteGoalTimeseriesQueryDtoInput,
+    options?: ApiV1GeneratedRequestOptions,
+  ): Promise<ApiV1GeneratedResult<AnalyticsGoalTimeseriesData>>;
   siteAnalyticsPerformanceSummary(
     siteId: string,
     input: SitePerformanceSummaryQueryDtoInput,
@@ -1005,6 +1057,68 @@ export function createApiV1GeneratedClient(
         signal: options?.signal,
       });
     },
+    listGoals(siteId, input, options) {
+      const parsed = ListGoalsInputSchema.parse({
+        siteId,
+        ...(input ?? {}),
+      });
+      const query = new URLSearchParams();
+      if (parsed.page.limit !== 50)
+        query.set("limit", String(parsed.page.limit));
+      if (parsed.page.cursor) query.set("cursor", parsed.page.cursor);
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      return request(transport, {
+        path:
+          apiV1GeneratedRoutePath("goals.list", { siteId: siteId }) + suffix,
+        method: apiV1GeneratedRouteMethod("goals.list"),
+        responseSchema: apiV1SuccessEnvelopeSchema(GoalResourcePageSchema),
+        signal: options?.signal,
+      });
+    },
+    createGoal(siteId, input, options) {
+      const parsed = CreateGoalBodySchema.parse(input);
+      return request(transport, {
+        path: apiV1GeneratedRoutePath("goals.create", { siteId: siteId }),
+        method: apiV1GeneratedRouteMethod("goals.create"),
+        body: parsed,
+        responseSchema: apiV1SuccessEnvelopeSchema(GoalResourceSchema),
+        signal: options?.signal,
+      });
+    },
+    getGoal(siteId, goalId, options) {
+      return request(transport, {
+        path: apiV1GeneratedRoutePath("goals.get", {
+          siteId: siteId,
+          goalId: goalId,
+        }),
+        method: apiV1GeneratedRouteMethod("goals.get"),
+        responseSchema: apiV1SuccessEnvelopeSchema(GoalResourceSchema),
+        signal: options?.signal,
+      });
+    },
+    updateGoal(siteId, goalId, input, options) {
+      const parsed = UpdateGoalBodySchema.parse(input);
+      return request(transport, {
+        path: apiV1GeneratedRoutePath("goals.update", {
+          siteId: siteId,
+          goalId: goalId,
+        }),
+        method: apiV1GeneratedRouteMethod("goals.update"),
+        body: parsed,
+        responseSchema: apiV1SuccessEnvelopeSchema(GoalResourceSchema),
+        signal: options?.signal,
+      });
+    },
+    deleteGoal(siteId, goalId, options) {
+      return requestNoContent(transport, {
+        path: apiV1GeneratedRoutePath("goals.delete", {
+          siteId: siteId,
+          goalId: goalId,
+        }),
+        method: apiV1GeneratedRouteMethod("goals.delete"),
+        signal: options?.signal,
+      });
+    },
     siteAnalyticsSchema(siteId, options) {
       return request(transport, {
         path: apiV1GeneratedRoutePath("site.analytics.schema", {
@@ -1188,6 +1302,30 @@ export function createApiV1GeneratedClient(
         method: apiV1GeneratedRouteMethod("site.analytics.funnelAnalysis"),
         body: parsed,
         responseSchema: AnalyticsFunnelAnalysisResponseSchema,
+        signal: options?.signal,
+      });
+    },
+    siteAnalyticsGoalSummary(siteId, input, options) {
+      const parsed = SiteGoalSummaryQueryDtoSchema.parse(input);
+      return request(transport, {
+        path: apiV1GeneratedRoutePath("site.analytics.goalSummary", {
+          siteId: siteId,
+        }),
+        method: apiV1GeneratedRouteMethod("site.analytics.goalSummary"),
+        body: parsed,
+        responseSchema: AnalyticsGoalSummaryResponseSchema,
+        signal: options?.signal,
+      });
+    },
+    siteAnalyticsGoalTimeseries(siteId, input, options) {
+      const parsed = SiteGoalTimeseriesQueryDtoSchema.parse(input);
+      return request(transport, {
+        path: apiV1GeneratedRoutePath("site.analytics.goalTimeseries", {
+          siteId: siteId,
+        }),
+        method: apiV1GeneratedRouteMethod("site.analytics.goalTimeseries"),
+        body: parsed,
+        responseSchema: AnalyticsGoalTimeseriesResponseSchema,
         signal: options?.signal,
       });
     },

@@ -25,6 +25,8 @@ export const API_V1_QUERY_OPERATION_MAP = {
   "site.analytics.filterValues": "filter-values",
   "site.analytics.retentionCohorts": "retention",
   "site.analytics.funnelAnalysis": "funnel-analysis",
+  "site.analytics.goalSummary": "goal-summary",
+  "site.analytics.goalTimeseries": "goal-timeseries",
   "site.analytics.performanceSummary": "performance",
   "site.analytics.performanceTimeseries": "performance",
   "site.analytics.performanceBreakdown": "performance",

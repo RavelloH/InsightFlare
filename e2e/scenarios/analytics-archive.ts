@@ -34,7 +34,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
     const siteB = seed.sites.siteB;
     expect(siteB).toBeDefined();
 
-    const history = await seedHistoricalVisits(siteB?.id || "");
+    const history = await seedHistoricalVisits(page, siteB?.id || "");
     seed.history = { siteB: history };
     await saveManifest();
 
@@ -61,7 +61,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       visitors: 24,
     });
 
-    const pages = await apiRequest<DashboardPage[]>(
+    const pages = await apiRequest<{ items: DashboardPage[] }>(
       page,
       "GET",
       path("pages"),
@@ -69,7 +69,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       "no-store",
     );
     expect(pages.status).toBe(200);
-    expect(pages.payload.data).toEqual(
+    expect(pages.payload.data?.items).toEqual(
       expect.arrayContaining(
         Object.entries(history.pages).map(([pathname, views]) =>
           expect.objectContaining({ pathname, views }),
@@ -77,7 +77,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       ),
     );
 
-    const referrers = await apiRequest<ReferrerMetric[]>(
+    const referrers = await apiRequest<{ items: ReferrerMetric[] }>(
       page,
       "GET",
       path("referrers"),
@@ -85,7 +85,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       "no-store",
     );
     expect(referrers.status).toBe(200);
-    expect(referrers.payload.data).toEqual(
+    expect(referrers.payload.data?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           referrer: "google.com",
@@ -95,7 +95,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       ]),
     );
 
-    const campaign = await apiRequest<DimensionMetric[]>(
+    const campaign = await apiRequest<{ items: DimensionMetric[] }>(
       page,
       "GET",
       path("utm-campaign"),
@@ -103,7 +103,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       "no-store",
     );
     expect(campaign.status).toBe(200);
-    expect(campaign.payload.data).toEqual(
+    expect(campaign.payload.data?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           label: "summer-launch",
@@ -114,7 +114,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       ]),
     );
 
-    const countries = await apiRequest<DimensionMetric[]>(
+    const countries = await apiRequest<{ items: DimensionMetric[] }>(
       page,
       "GET",
       path("countries"),
@@ -122,7 +122,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       "no-store",
     );
     expect(countries.status).toBe(200);
-    expect(countries.payload.data).toEqual(
+    expect(countries.payload.data?.items).toEqual(
       expect.arrayContaining(
         ["CN", "DE", "JP", "US"].map((label) =>
           expect.objectContaining({ label, views: 30 }),
@@ -130,7 +130,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       ),
     );
 
-    const devices = await apiRequest<DimensionMetric[]>(
+    const devices = await apiRequest<{ items: DimensionMetric[] }>(
       page,
       "GET",
       path("overview-client-device-type"),
@@ -138,14 +138,14 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       "no-store",
     );
     expect(devices.status).toBe(200);
-    expect(devices.payload.data).toEqual(
+    expect(devices.payload.data?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ label: "desktop", views: 80 }),
         expect.objectContaining({ label: "mobile", views: 40 }),
       ]),
     );
 
-    const browsers = await apiRequest<DimensionMetric[]>(
+    const browsers = await apiRequest<{ items: DimensionMetric[] }>(
       page,
       "GET",
       path("overview-client-browser"),
@@ -153,7 +153,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       "no-store",
     );
     expect(browsers.status).toBe(200);
-    expect(browsers.payload.data).toEqual(
+    expect(browsers.payload.data?.items).toEqual(
       expect.arrayContaining(
         ["Chrome", "Edge", "Firefox", "Safari"].map((label) =>
           expect.objectContaining({ label, views: 30 }),
@@ -192,7 +192,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       ),
     );
 
-    const visitors = await apiRequest<Array<{ visitorId: string }>>(
+    const visitors = await apiRequest<{ items: Array<{ visitorId: string }> }>(
       page,
       "GET",
       `${path("visitors")}&limit=30`,
@@ -200,9 +200,9 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       "no-store",
     );
     expect(visitors.status).toBe(200);
-    expect(visitors.payload.data).toHaveLength(24);
+    expect(visitors.payload.data?.items).toHaveLength(24);
 
-    const sessions = await apiRequest<Array<{ sessionId: string }>>(
+    const sessions = await apiRequest<{ items: Array<{ sessionId: string }> }>(
       page,
       "GET",
       `${path("sessions")}&limit=50`,
@@ -210,7 +210,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
       "no-store",
     );
     expect(sessions.status).toBe(200);
-    expect(sessions.payload.data).toHaveLength(40);
+    expect(sessions.payload.data?.items).toHaveLength(40);
   });
 
   test("14b. archive manifests and ranged files use the local R2 binding", async ({
@@ -218,7 +218,7 @@ export function registerAnalyticsArchiveScenarios(context: E2eContext) {
   }) => {
     const siteB = seed.sites.siteB;
     expect(siteB).toBeDefined();
-    const archive = await seedArchiveObject(siteB?.id || "");
+    const archive = await seedArchiveObject(page, siteB?.id || "");
     const from = archive.hour * 60 * 60 * 1000;
     const to = from + 60 * 60 * 1000 - 1;
 

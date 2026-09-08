@@ -10,6 +10,7 @@ export interface AppMessages {
     sessions: string;
     events: string;
     funnels: string;
+    goals: string;
     campaigns: string;
     visitors: string;
     retention: string;
@@ -174,8 +175,19 @@ export interface AppMessages {
     filterAnyOf: string;
     filterNoneOf: string;
     filterBetween: string;
+    filterContains: string;
     filterStartsWith: string;
     filterEndsWith: string;
+    filterGreaterThan: string;
+    filterGreaterThanOrEqual: string;
+    filterLessThan: string;
+    filterLessThanOrEqual: string;
+    filterExists: string;
+    filterNotExists: string;
+    filterIsNull: string;
+    filterNotNull: string;
+    filterIsEmpty: string;
+    filterNotEmpty: string;
   };
   filterBuilder: {
     fieldGroups: {
@@ -829,6 +841,53 @@ export interface AppMessages {
     conversion: string;
     stepConversion: string;
     dropOff: string;
+    updated: string;
+  };
+  goals: {
+    title: string;
+    subtitle: string;
+    listTitle: string;
+    listSubtitle: string;
+    open: string;
+    moreActions: string;
+    create: string;
+    createTitle: string;
+    createDescription: string;
+    nameLabel: string;
+    namePlaceholder: string;
+    filter: string;
+    apply: string;
+    cancel: string;
+    expression: string;
+    filterPlaceholder: string;
+    invalidFilter: string;
+    save: string;
+    saveEdit: string;
+    edit: string;
+    editTitle: string;
+    creating: string;
+    delete: string;
+    deleteTitle: string;
+    deleteDescription: string;
+    deleteConfirm: string;
+    deleting: string;
+    empty: string;
+    emptyHint: string;
+    loadError: string;
+    detailLoadError: string;
+    invalidGoal: string;
+    created: string;
+    createFailed: string;
+    updatedSuccess: string;
+    saveFailed: string;
+    deleted: string;
+    deleteFailed: string;
+    sessions: string;
+    visitors: string;
+    total: string;
+    converted: string;
+    conversion: string;
+    timeseries: string;
     updated: string;
   };
   visitors: {
@@ -2727,6 +2786,7 @@ const enMessages = {
     sessions: "Sessions",
     events: "Events",
     funnels: "Funnels",
+    goals: "Goals",
     campaigns: "Campaigns",
     visitors: "Visitors",
     retention: "Retention",
@@ -2909,8 +2969,19 @@ const enMessages = {
     filterAnyOf: "{field} is one of {values}",
     filterNoneOf: "{field} is none of {values}",
     filterBetween: "{field} is between {from} and {to}",
+    filterContains: "{field} contains {value}",
     filterStartsWith: "{field} starts with {value}",
     filterEndsWith: "{field} ends with {value}",
+    filterGreaterThan: "{field} is greater than {value}",
+    filterGreaterThanOrEqual: "{field} is greater than or equal to {value}",
+    filterLessThan: "{field} is less than {value}",
+    filterLessThanOrEqual: "{field} is less than or equal to {value}",
+    filterExists: "{field} exists",
+    filterNotExists: "{field} does not exist",
+    filterIsNull: "{field} is null",
+    filterNotNull: "{field} is not null",
+    filterIsEmpty: "{field} is empty",
+    filterNotEmpty: "{field} is not empty",
   },
   filterBuilder: {
     fieldGroups: {
@@ -3655,6 +3726,57 @@ const enMessages = {
     conversion: "Conversion",
     stepConversion: "Step conversion rate",
     dropOff: "Drop-off",
+    updated: "Updated",
+  },
+  goals: {
+    title: "Goals",
+    subtitle:
+      "Measure conversion from a single reusable event or page condition.",
+    listTitle: "Goal definitions",
+    listSubtitle: "View conversion rate changes across this time range.",
+    open: "Open goal",
+    moreActions: "More actions",
+    create: "New goal",
+    createTitle: "Create goal",
+    createDescription:
+      "Define the event or page condition that counts as a conversion.",
+    nameLabel: "Name",
+    namePlaceholder: "Purchase completed",
+    filter: "Conversion condition",
+    apply: "Apply",
+    cancel: "Cancel",
+    expression: "Filter expression",
+    filterPlaceholder: 'e.g. event.name eq "purchase"',
+    invalidFilter: "Invalid filter",
+    save: "Create",
+    saveEdit: "Save changes",
+    edit: "Edit",
+    editTitle: "Edit goal",
+    creating: "Creating...",
+    delete: "Delete",
+    deleteTitle: "Delete goal",
+    deleteDescription:
+      "This removes the saved goal definition. Historical analytics data is not deleted.",
+    deleteConfirm: "Delete goal",
+    deleting: "Deleting...",
+    empty: "No goals yet.",
+    emptyHint:
+      "Create a goal from a page condition or custom event to track conversion.",
+    loadError: "Unable to load goals.",
+    detailLoadError: "Unable to load goal analysis.",
+    invalidGoal: "Add a name and a complete conversion condition.",
+    created: "Goal created.",
+    createFailed: "Unable to create goal.",
+    updatedSuccess: "Goal updated.",
+    saveFailed: "Unable to save goal.",
+    deleted: "Goal deleted.",
+    deleteFailed: "Unable to delete goal.",
+    sessions: "Sessions",
+    visitors: "Visitors",
+    total: "Total",
+    converted: "Converted",
+    conversion: "Conversion rate",
+    timeseries: "Conversion rate",
     updated: "Updated",
   },
   visitors: {
@@ -5754,6 +5876,7 @@ const zhMessages = {
     sessions: "会话",
     events: "事件",
     funnels: "漏斗",
+    goals: "目标",
     campaigns: "推广",
     visitors: "访客",
     retention: "留存",
@@ -5933,8 +6056,19 @@ const zhMessages = {
     filterAnyOf: "{field} 是以下任一值：{values}",
     filterNoneOf: "{field} 不属于以下任一值：{values}",
     filterBetween: "{field} 介于 {from} 与 {to} 之间",
+    filterContains: "{field} 包含 {value}",
     filterStartsWith: "{field} 以 {value} 开头",
     filterEndsWith: "{field} 以 {value} 结尾",
+    filterGreaterThan: "{field} 大于 {value}",
+    filterGreaterThanOrEqual: "{field} 大于或等于 {value}",
+    filterLessThan: "{field} 小于 {value}",
+    filterLessThanOrEqual: "{field} 小于或等于 {value}",
+    filterExists: "{field} 存在",
+    filterNotExists: "{field} 不存在",
+    filterIsNull: "{field} 为 NULL",
+    filterNotNull: "{field} 不为 NULL",
+    filterIsEmpty: "{field} 为空",
+    filterNotEmpty: "{field} 不为空",
   },
   filterBuilder: {
     fieldGroups: {
@@ -6661,6 +6795,53 @@ const zhMessages = {
     conversion: "转化率",
     stepConversion: "步骤转化率",
     dropOff: "流失",
+    updated: "更新于",
+  },
+  goals: {
+    title: "目标分析",
+    subtitle: "使用一个可复用的事件或页面条件衡量转化。",
+    listTitle: "目标定义",
+    listSubtitle: "查看这段时间范围内的转化率变化情况",
+    open: "打开目标",
+    moreActions: "更多操作",
+    create: "新建目标",
+    createTitle: "创建目标",
+    createDescription: "定义计为转化的事件或页面条件。",
+    nameLabel: "名称",
+    namePlaceholder: "完成购买",
+    filter: "转化条件",
+    apply: "应用",
+    cancel: "取消",
+    expression: "筛选表达式",
+    filterPlaceholder: '例如 event.name eq "purchase"',
+    invalidFilter: "筛选无效",
+    save: "创建",
+    saveEdit: "保存修改",
+    edit: "编辑",
+    editTitle: "编辑目标",
+    creating: "创建中...",
+    delete: "删除",
+    deleteTitle: "删除目标",
+    deleteDescription: "这会移除已保存的目标定义，不会删除历史分析数据。",
+    deleteConfirm: "删除目标",
+    deleting: "删除中...",
+    empty: "暂无目标。",
+    emptyHint: "使用页面条件或自定义事件创建目标来跟踪转化。",
+    loadError: "无法加载目标。",
+    detailLoadError: "无法加载目标分析。",
+    invalidGoal: "请填写名称，并补全转化条件。",
+    created: "目标已创建。",
+    createFailed: "创建目标失败。",
+    updatedSuccess: "目标已更新。",
+    saveFailed: "保存目标失败。",
+    deleted: "目标已删除。",
+    deleteFailed: "删除目标失败。",
+    sessions: "会话",
+    visitors: "访客",
+    total: "总数",
+    converted: "已转化",
+    conversion: "转化率",
+    timeseries: "转化率",
     updated: "更新于",
   },
   visitors: {
@@ -8692,6 +8873,7 @@ const jaMessages = {
     sessions: "セッション",
     events: "イベント",
     funnels: "ファネル",
+    goals: "目標",
     campaigns: "キャンペーン",
     visitors: "訪問者",
     retention: "リテンション",
@@ -8873,8 +9055,19 @@ const jaMessages = {
     filterAnyOf: "{field} は {values} のいずれかに一致",
     filterNoneOf: "{field} は {values} のいずれにも一致しない",
     filterBetween: "{field} は {from} から {to} の間",
+    filterContains: "{field} は {value} を含む",
     filterStartsWith: "{field} は {value} で始まる",
     filterEndsWith: "{field} は {value} で終わる",
+    filterGreaterThan: "{field} は {value} より大きい",
+    filterGreaterThanOrEqual: "{field} は {value} 以上",
+    filterLessThan: "{field} は {value} より小さい",
+    filterLessThanOrEqual: "{field} は {value} 以下",
+    filterExists: "{field} が存在する",
+    filterNotExists: "{field} が存在しない",
+    filterIsNull: "{field} は NULL",
+    filterNotNull: "{field} は NULL ではない",
+    filterIsEmpty: "{field} は空",
+    filterNotEmpty: "{field} は空ではない",
   },
   filterBuilder: {
     fieldGroups: {
@@ -9625,6 +9818,56 @@ const jaMessages = {
     conversion: "コンバージョン",
     stepConversion: "ステップコンバージョン率",
     dropOff: "離脱",
+    updated: "更新",
+  },
+  goals: {
+    title: "目標",
+    subtitle:
+      "再利用可能なイベントまたはページ条件でコンバージョンを測定します。",
+    listTitle: "目標定義",
+    listSubtitle: "この期間のコンバージョン率の変化を確認します。",
+    open: "目標を開く",
+    moreActions: "その他の操作",
+    create: "新しい目標",
+    createTitle: "目標を作成",
+    createDescription:
+      "コンバージョンとして数えるイベントまたはページ条件を定義します。",
+    nameLabel: "名前",
+    namePlaceholder: "購入完了",
+    filter: "コンバージョン条件",
+    apply: "適用",
+    cancel: "キャンセル",
+    expression: "フィルター式",
+    filterPlaceholder: '例 event.name eq "purchase"',
+    invalidFilter: "無効なフィルター",
+    save: "作成",
+    saveEdit: "変更を保存",
+    edit: "編集",
+    editTitle: "目標を編集",
+    creating: "作成中...",
+    delete: "削除",
+    deleteTitle: "目標を削除",
+    deleteDescription:
+      "保存した目標定義を削除します。過去の分析データは削除されません。",
+    deleteConfirm: "目標を削除",
+    deleting: "削除中...",
+    empty: "目標はまだありません。",
+    emptyHint: "ページ条件またはカスタムイベントから目標を作成します。",
+    loadError: "目標を読み込めません。",
+    detailLoadError: "目標分析を読み込めません。",
+    invalidGoal: "名前と完全なコンバージョン条件を入力してください。",
+    created: "目標を作成しました。",
+    createFailed: "目標を作成できません。",
+    updatedSuccess: "目標を更新しました。",
+    saveFailed: "目標を保存できません。",
+    deleted: "目標を削除しました。",
+    deleteFailed: "目標を削除できません。",
+    sessions: "セッション",
+    visitors: "訪問者",
+    total: "合計",
+    converted: "コンバージョン",
+    conversion: "転換率",
+    timeseries: "コンバージョン率",
     updated: "更新",
   },
   visitors: {

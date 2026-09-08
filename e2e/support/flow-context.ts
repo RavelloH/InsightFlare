@@ -1,10 +1,8 @@
-import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
-import path from "node:path";
-import { promisify } from "node:util";
 
 import { expect, type Page } from "@playwright/test";
 
+import { buildGoalSeed } from "../../scripts/e2e/seed-goal";
 import {
   buildHistorySeed,
   type HistorySeedManifest,
@@ -15,8 +13,6 @@ import {
   siteQueryPath as siteQueryPathAt,
 } from "./api";
 import { createE2eControlClient } from "./control";
-
-const execFileAsync = promisify(execFile);
 
 function required(name: string): string {
   const value = process.env[name];
@@ -158,10 +154,6 @@ export function createFlowContext() {
   const testSiteURL = required("INSIGHTFLARE_E2E_TEST_SITE_URL");
   const controlToken = required("INSIGHTFLARE_E2E_CONTROL_TOKEN");
   const mockControlToken = required("INSIGHTFLARE_E2E_MOCK_CONTROL_TOKEN");
-  const configPath = required("INSIGHTFLARE_E2E_CONFIG_PATH");
-  const archiveBucketName = required("INSIGHTFLARE_E2E_ARCHIVE_BUCKET");
-  const d1Name = required("INSIGHTFLARE_E2E_D1_NAME");
-  const persistencePath = required("INSIGHTFLARE_E2E_PERSISTENCE_PATH");
   const e2eNowMs = Number(required("INSIGHTFLARE_E2E_NOW_MS"));
   if (!Number.isFinite(e2eNowMs))
     throw new Error("INSIGHTFLARE_E2E_NOW_MS must be a timestamp.");
@@ -224,87 +216,56 @@ export function createFlowContext() {
     await saveManifest();
     return nowMs;
   }
-  async function seedHistoricalVisits(siteId: string) {
+  async function seedHistoricalVisits(page: Page, siteId: string) {
     const history = buildHistorySeed({ nowMs: e2eNowMs, runId, siteId });
-    const sqlPath = path.join(path.dirname(manifestPath), "history-seed.sql");
-    await writeFile(sqlPath, history.sql);
-    await execFileAsync(process.execPath, [
-      path.join(
-        process.cwd(),
-        "node_modules",
-        "wrangler",
-        "bin",
-        "wrangler.js",
-      ),
-      "d1",
-      "execute",
-      d1Name,
-      "--config",
-      configPath,
-      "--file",
-      sqlPath,
-      "--local",
-      "--persist-to",
-      persistencePath,
-    ]);
+    const result = await controls.e2eControlRequest(
+      page,
+      "POST",
+      "d1/execute",
+      { sql: history.sql },
+    );
+    if (result.status !== 200)
+      throw new Error("Unable to seed historical visits.");
     return history.manifest;
   }
-  async function seedArchiveObject(siteId: string) {
+  async function seedGoalEvents(page: Page, siteId: string, eventName: string) {
+    const result = await controls.e2eControlRequest(
+      page,
+      "POST",
+      "d1/execute",
+      {
+        sql: buildGoalSeed({ eventName, nowMs: e2eNowMs, runId, siteId }),
+      },
+    );
+    if (result.status !== 200) throw new Error("Unable to seed goal events.");
+  }
+  async function seedArchiveObject(page: Page, siteId: string) {
     const hour = Math.floor(e2eNowMs / 3_600_000);
     const archiveKey = `e2e/${siteId}/${hour}.parquet`;
     const content = "E2E archive\n";
-    const directory = path.dirname(manifestPath);
-    const archivePath = path.join(directory, "archive.parquet");
-    const sqlPath = path.join(directory, "archive-seed.sql");
-    await writeFile(archivePath, content);
-    await execFileAsync(process.execPath, [
-      path.join(
-        process.cwd(),
-        "node_modules",
-        "wrangler",
-        "bin",
-        "wrangler.js",
-      ),
-      "r2",
-      "object",
-      "put",
-      `${archiveBucketName}/${archiveKey}`,
-      "--config",
-      configPath,
-      "--file",
-      archivePath,
-      "--local",
-      "--persist-to",
-      persistencePath,
-    ]);
+    const archiveResult = await controls.e2eControlRequest(
+      page,
+      "POST",
+      "archive/put",
+      { content, key: archiveKey },
+    );
+    if (archiveResult.status !== 200)
+      throw new Error("Unable to seed archive object.");
     const quote = (value: string | number) =>
       typeof value === "number"
         ? String(value)
         : `'${value.replaceAll("'", "''")}'`;
     const sitePk = `(SELECT site_pk FROM site_identities WHERE site_id = ${quote(siteId)})`;
-    await writeFile(
-      sqlPath,
-      `INSERT OR IGNORE INTO site_identities (site_id) VALUES (${quote(siteId)});\nINSERT INTO archive_objects (archive_key, site_id, start_hour, end_hour, granularity, format, row_count, size_bytes, created_at, updated_at, site_pk) VALUES (${quote(archiveKey)}, ${quote(siteId)}, ${quote(hour)}, ${quote(hour)}, 'hour', 'parquet', 1, ${quote(content.length)}, ${quote(e2eNowMs)}, ${quote(e2eNowMs)}, ${sitePk});\n`,
+    const result = await controls.e2eControlRequest(
+      page,
+      "POST",
+      "d1/execute",
+      {
+        sql: `INSERT OR IGNORE INTO site_identities (site_id) VALUES (${quote(siteId)});\nINSERT INTO archive_objects (archive_key, site_id, start_hour, end_hour, granularity, format, row_count, size_bytes, created_at, updated_at, site_pk) VALUES (${quote(archiveKey)}, ${quote(siteId)}, ${quote(hour)}, ${quote(hour)}, 'hour', 'parquet', 1, ${quote(content.length)}, ${quote(e2eNowMs)}, ${quote(e2eNowMs)}, ${sitePk});\n`,
+      },
     );
-    await execFileAsync(process.execPath, [
-      path.join(
-        process.cwd(),
-        "node_modules",
-        "wrangler",
-        "bin",
-        "wrangler.js",
-      ),
-      "d1",
-      "execute",
-      d1Name,
-      "--config",
-      configPath,
-      "--file",
-      sqlPath,
-      "--local",
-      "--persist-to",
-      persistencePath,
-    ]);
+    if (result.status !== 200)
+      throw new Error("Unable to seed archive metadata.");
     return { archiveKey, content, hour };
   }
   async function flushSite(page: Page, siteId: string) {
@@ -330,6 +291,7 @@ export function createFlowContext() {
     seed,
     seedArchiveObject,
     seedHistoricalVisits,
+    seedGoalEvents,
     siteQueryPath,
     testSiteURL,
   };
