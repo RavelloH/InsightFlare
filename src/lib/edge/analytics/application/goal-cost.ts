@@ -7,7 +7,7 @@ import {
   normalizeReportingTimeZone,
 } from "@/lib/edge/analytics/contract";
 
-export const GOAL_TIMESERIES_MAX_BUCKETS = 2_000;
+export const GOAL_TIMESERIES_MAX_BUCKETS = 512;
 
 export type GoalInterval = "minute" | "hour" | "day" | "week" | "month";
 

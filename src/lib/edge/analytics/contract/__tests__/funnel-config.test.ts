@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
+import { FilterValidationError } from "@/lib/edge/analytics/contract/filters";
 import {
   decodeFunnelConfig,
   encodeFunnelConfig,
@@ -70,6 +71,44 @@ describe("funnel v2 config contract", () => {
     expect(parseFunnelStepFilter(config.steps[0]!)).toEqual(
       parseFilterDsl('page.path eq "/pricing"', analyticsFilterRegistry),
     );
+  });
+
+  it("accepts observation-backed page, event, and payload step filters", () => {
+    const config = writeConfig({
+      steps: [
+        step("page", 'page.path eq "/pricing"'),
+        step("event", 'event.name eq "purchase"'),
+        step("payload", 'event.payload("/plan") eq "pro"'),
+      ],
+    });
+
+    expect(() => validateFunnelConfigForWrite(config)).not.toThrow();
+    expect(() => parseFunnelStepFilter(config.steps[2]!)).not.toThrow();
+  });
+
+  it("rejects fact and observation/fact mixed step filters", () => {
+    for (const filterDsl of [
+      "session.durationMs gt 1000",
+      "visitor.sessions gte 2",
+      'page.path eq "/pricing" AND session.durationMs gt 1000',
+      'event.name eq "purchase" OR visitor.sessions gte 2',
+    ]) {
+      const config = writeConfig({
+        steps: [step("first", filterDsl), writeConfig().steps[1]!],
+      });
+      expect(() => validateFunnelConfigForWrite(config)).toThrow(
+        "funnel_filter_dsl_invalid:0",
+      );
+      try {
+        parseFunnelStepFilter(config.steps[0]!);
+        throw new Error(`Expected ${filterDsl} to be incompatible.`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(FilterValidationError);
+        expect((error as FilterValidationError).code).toBe(
+          "observation_incompatible",
+        );
+      }
+    }
   });
 
   it("allows historical over-limit reads but rejects every new over-limit write", () => {

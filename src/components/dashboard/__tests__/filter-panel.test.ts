@@ -130,6 +130,24 @@ describe("registry-driven editor metadata", () => {
     );
   });
 
+  it("limits observation-only fields to visit and event observations", () => {
+    const fields = allowedFields("private-dashboard", true);
+
+    expect(fields.map((field) => field.id)).toEqual(
+      allowedFields("private-dashboard")
+        .filter(
+          (field) =>
+            field.observationKinds.has("visit") ||
+            field.observationKinds.has("event"),
+        )
+        .map((field) => field.id),
+    );
+    expect(fields.map((field) => field.id)).not.toContain("session.views");
+    expect(fields.map((field) => field.id)).not.toContain("visitor.sessions");
+    expect(fields.map((field) => field.id)).toContain("event.name");
+    expect(fields.map((field) => field.id)).toContain("page.path");
+  });
+
   it("formats every system preset group with its localized prefix", () => {
     expect(systemPresetGroupLabel(getMessages("en"), "acquisition")).toBe(
       "System presets · Acquisition",

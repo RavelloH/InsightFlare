@@ -84,6 +84,7 @@ export interface FilterEditorProps {
   readonly expressionLabel?: string;
   readonly invalidFilterLabel?: string;
   readonly placeholder?: string;
+  readonly observationOnly?: boolean;
   readonly siteId?: string;
   readonly resolvedScope?: "event" | "session" | "visitor";
   readonly window?: TimeWindow;
@@ -119,6 +120,7 @@ export function FilterEditor({
   expressionLabel = messages.filterBuilder.expression,
   invalidFilterLabel = messages.filterBuilder.expressionInvalid,
   placeholder = messages.filterBuilder.expressionPlaceholder,
+  observationOnly = false,
   siteId,
   resolvedScope,
   window,
@@ -139,8 +141,14 @@ export function FilterEditor({
   const nextIdRef = useRef(conditionIdFactory());
   const createId = useCallback(() => nextIdRef.current(), []);
   const expressionRegistry = useMemo(
-    () => new Map(allowedFields(audience).map((field) => [field.id, field])),
-    [audience],
+    () =>
+      new Map(
+        allowedFields(audience, observationOnly).map((field) => [
+          field.id,
+          field,
+        ]),
+      ),
+    [audience, observationOnly],
   );
   const [root, setRoot] = useState<EditorGroup>(() => {
     try {
@@ -377,6 +385,7 @@ export function FilterEditor({
           group={renderedRoot}
           isRoot
           messages={messages}
+          observationOnly={observationOnly}
           path={[]}
           resolvedScope={resolvedScope}
           onAddCondition={addCondition}
@@ -505,6 +514,7 @@ export function FilterEditor({
       <FilterExpressionHelpDialog
         audience={audience}
         messages={messages}
+        observationOnly={observationOnly}
         open={expressionHelpOpen}
         onOpenChange={setExpressionHelpOpen}
       />

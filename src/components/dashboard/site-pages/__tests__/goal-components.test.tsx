@@ -14,6 +14,7 @@ vi.mock("@/components/dashboard/filter-editor", () => ({
     audience: string;
     initialFilterDsl: string;
     onApply?: (filterDsl: string, conditionCount: number) => void;
+    observationOnly?: boolean;
     resolvedScope?: string;
   }) =>
     createElement(
@@ -21,6 +22,7 @@ vi.mock("@/components/dashboard/filter-editor", () => ({
       {
         "data-audience": props.audience,
         "data-initial-filter-dsl": props.initialFilterDsl,
+        "data-observation-only": props.observationOnly ? "true" : "false",
         "data-resolved-scope": props.resolvedScope,
       },
       createElement(
@@ -34,6 +36,7 @@ vi.mock("@/components/dashboard/filter-editor", () => ({
     ),
 }));
 
+import { FunnelStepFilterDialog } from "@/components/dashboard/site-pages/funnel-step-filter-dialog";
 import {
   GoalCard,
   goalSummaryQueryKey,
@@ -43,6 +46,7 @@ import {
   goalTimeseriesQueryKey,
 } from "@/components/dashboard/site-pages/goal-detail";
 import { GoalEditor } from "@/components/dashboard/site-pages/goal-editor";
+import { goalDefinitionQueryKey } from "@/components/dashboard/site-pages/goals-client-page";
 import {
   fetchGoalSummary,
   fetchGoalTimeseries,
@@ -146,6 +150,7 @@ describe("Goal dashboard components", () => {
   });
 
   it("loads card summary near the viewport and never loads timeseries from a card", async () => {
+    const onOpen = vi.fn();
     const { container, root } = renderWithQueryClient(
       createElement(GoalCard, {
         goal,
@@ -157,7 +162,7 @@ describe("Goal dashboard components", () => {
         filters,
         filterKey: "empty",
         canManage: false,
-        onOpen: vi.fn(),
+        onOpen,
         onEdit: vi.fn(),
         onDelete: vi.fn(),
       }),
@@ -184,8 +189,31 @@ describe("Goal dashboard components", () => {
     expect(
       container.querySelector(`[aria-label="${labels.delete}"]`),
     ).toBeNull();
+    const openRegion = container.querySelector(
+      `[role="button"][aria-label="${labels.open}: ${goal.name}"]`,
+    );
+    expect(
+      container.querySelector('[data-slot="card"]')?.getAttribute("role"),
+    ).toBeNull();
+    expect(openRegion).not.toBeNull();
+    expect(openRegion?.querySelector('[role="button"]')).toBeNull();
+    act(() => {
+      openRegion?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    expect(onOpen).toHaveBeenCalledTimes(1);
     act(() => root.unmount());
     container.remove();
+  });
+
+  it("keeps deep-link definition keys independent of dashboard analysis state", () => {
+    expect(goalDefinitionQueryKey("site-1", "goal-1")).toEqual([
+      "dashboard",
+      "goal-definition",
+      "site-1",
+      "goal-1",
+    ]);
   });
 
   it("uses the same summary key in the detail view and only adds the timeseries query there", async () => {
@@ -208,6 +236,7 @@ describe("Goal dashboard components", () => {
         filters,
         filterKey: "empty",
         canManage: true,
+        actionPending: false,
         onEdit: vi.fn(),
         onDelete: vi.fn(),
       }),
@@ -246,6 +275,16 @@ describe("Goal dashboard components", () => {
         button.textContent?.includes(labels.delete),
       ),
     ).toBe(true);
+    expect(
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes(labels.edit),
+      )?.disabled,
+    ).toBe(false);
+    expect(
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes(labels.delete),
+      )?.disabled,
+    ).toBe(false);
     expect(container.textContent).toContain('Event name equals "purchase"');
     expect(container.textContent).not.toContain(goal.filterDsl);
     act(() => root.unmount());
@@ -308,6 +347,7 @@ describe("Goal dashboard components", () => {
         filters,
         filterKey: "empty",
         canManage: false,
+        actionPending: false,
         onEdit: vi.fn(),
         onDelete: vi.fn(),
       }),
@@ -325,6 +365,66 @@ describe("Goal dashboard components", () => {
       container.querySelector('[data-goal-series="visitors,sessions"]'),
     ).not.toBeNull();
     expect(container.querySelector('[role="tablist"]')).toBeNull();
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("disables detail actions only while a definition mutation is pending", () => {
+    vi.mocked(fetchGoalSummary).mockImplementation(
+      () => new Promise<GoalSummaryData>(() => {}),
+    );
+    vi.mocked(fetchGoalTimeseries).mockImplementation(
+      () => new Promise<GoalTimeseriesData>(() => {}),
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    const { container, root } = renderWithQueryClient(
+      createElement(GoalDetail, {
+        goal,
+        siteId: "site-1",
+        locale: "en",
+        labels,
+        window,
+        filters,
+        filterKey: "empty",
+        canManage: true,
+        actionPending: false,
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+      }),
+      client,
+    );
+    const findAction = (label: string) =>
+      Array.from(container.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes(label),
+      );
+    expect(findAction(labels.edit)?.disabled).toBe(false);
+    expect(findAction(labels.delete)?.disabled).toBe(false);
+
+    act(() => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(GoalDetail, {
+            goal,
+            siteId: "site-1",
+            locale: "en",
+            labels,
+            window,
+            filters,
+            filterKey: "empty",
+            canManage: true,
+            actionPending: true,
+            onEdit: vi.fn(),
+            onDelete: vi.fn(),
+          }),
+        ),
+      );
+    });
+    expect(findAction(labels.edit)?.disabled).toBe(true);
+    expect(findAction(labels.delete)?.disabled).toBe(true);
     act(() => root.unmount());
     container.remove();
   });
@@ -358,6 +458,7 @@ describe("Goal dashboard components", () => {
     );
     expect(filterEditor).not.toBeNull();
     expect(filterEditor?.getAttribute("data-resolved-scope")).toBe("event");
+    expect(filterEditor?.getAttribute("data-observation-only")).toBe("true");
     expect(filterEditor?.getAttribute("data-initial-filter-dsl")).toBe(rawDsl);
 
     const apply = Array.from(document.body.querySelectorAll("button")).find(
@@ -375,6 +476,29 @@ describe("Goal dashboard components", () => {
         filterDsl: rawDsl,
       }),
     );
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("uses observation-only filters for funnel steps", () => {
+    const { container, root } = renderWithQueryClient(
+      createElement(FunnelStepFilterDialog, {
+        open: true,
+        filterDsl: 'event.name eq "purchase"',
+        labels: messages.funnels,
+        messages,
+        onApply: vi.fn(),
+        onOpenChange: vi.fn(),
+        siteId: "site-1",
+        window,
+      }),
+    );
+
+    expect(
+      document.body
+        .querySelector('[data-audience="private-dashboard"]')
+        ?.getAttribute("data-observation-only"),
+    ).toBe("true");
     act(() => root.unmount());
     container.remove();
   });

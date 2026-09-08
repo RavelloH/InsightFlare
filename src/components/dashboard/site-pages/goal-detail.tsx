@@ -191,6 +191,7 @@ export function GoalDetail({
   filters,
   filterKey,
   canManage,
+  actionPending,
   onEdit,
   onDelete,
   loading = false,
@@ -208,6 +209,7 @@ export function GoalDetail({
   readonly filters: FilterDocument;
   readonly filterKey: string;
   readonly canManage: boolean;
+  readonly actionPending: boolean;
   readonly onEdit: () => void;
   readonly onDelete: () => void;
   readonly loading?: boolean;
@@ -267,7 +269,6 @@ export function GoalDetail({
     );
   }
 
-  const analysisLoading = summary.isPending || timeseries.isPending;
   const goalSummary = summary.data?.data.summary;
   const filterDescriptionMessages = messages ?? getMessages(locale);
 
@@ -288,7 +289,7 @@ export function GoalDetail({
             <Button
               type="button"
               variant="outline"
-              disabled={analysisLoading}
+              disabled={actionPending}
               onClick={onEdit}
             >
               <RiEditLine />
@@ -297,7 +298,7 @@ export function GoalDetail({
             <Button
               type="button"
               variant="destructive"
-              disabled={analysisLoading}
+              disabled={actionPending}
               onClick={onDelete}
             >
               <RiDeleteBinLine />

@@ -1,8 +1,14 @@
 import {
   analyticsFilterDefinition,
+  analyticsFilterRegistry,
   type FilterObservationKind,
 } from "./filter-registry";
-import type { FilterExpression } from "./filters";
+import {
+  type FilterDocument,
+  type FilterExpression,
+  FilterValidationError,
+  normalizeFilterDocument,
+} from "./filters";
 
 export type ObservationPredicatePlan =
   | { readonly kind: "all" }
@@ -16,6 +22,55 @@ export interface ObservationFilterPlan {
 
 const ALL: ObservationPredicatePlan = Object.freeze({ kind: "all" });
 const NONE: ObservationPredicatePlan = Object.freeze({ kind: "none" });
+
+/**
+ * Assert that every atomic filter condition can survive observation
+ * projection. Session/visitor facts are evaluated outside observations and
+ * therefore cannot be carried by either the visit or event predicate.
+ */
+export function assertObservationFilterCompatible(
+  document: FilterDocument,
+): void {
+  const normalized = normalizeFilterDocument(document, analyticsFilterRegistry);
+
+  const visit = (expression: FilterExpression | null, path: string): void => {
+    if (!expression) return;
+    if (expression.kind === "condition") {
+      const fieldId =
+        expression.target.kind === "field"
+          ? expression.target.field
+          : "event.payload";
+      const definition = analyticsFilterDefinition(fieldId);
+      if (!definition) {
+        throw new FilterValidationError(
+          "unknown_field",
+          `${path}.target`,
+          `Unknown filter field: ${fieldId}`,
+        );
+      }
+      if (
+        !definition.observationKinds.has("visit") &&
+        !definition.observationKinds.has("event")
+      ) {
+        throw new FilterValidationError(
+          "observation_incompatible",
+          path,
+          `Filter field is not supported by visit or event observations: ${fieldId}`,
+        );
+      }
+      return;
+    }
+    if (expression.kind === "not") {
+      visit(expression.child, `${path}.child`);
+      return;
+    }
+    expression.children.forEach((child, index) =>
+      visit(child, `${path}.children[${index}]`),
+    );
+  };
+
+  visit(normalized.root, "root");
+}
 
 function conditionApplies(
   expression: FilterExpression,

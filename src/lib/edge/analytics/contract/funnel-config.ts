@@ -8,7 +8,10 @@ import {
 import { compileFilterDocument } from "./filter-compiler";
 import { analyticsFilterRegistry } from "./filter-registry";
 import { assertFilterAudience, filterFingerprint } from "./filters";
-import { planObservationFilter } from "./observation-planner";
+import {
+  assertObservationFilterCompatible,
+  planObservationFilter,
+} from "./observation-planner";
 
 export const FUNNEL_CONFIG_VERSION = 2 as const;
 export const FUNNEL_FILTER_DSL_VERSION = 1 as const;
@@ -327,6 +330,7 @@ export function validateFunnelConfigForWrite(
         analyticsFilterRegistry,
         "private-dashboard",
       );
+      assertObservationFilterCompatible(document);
     } catch {
       throw new FunnelConfigValidationError(
         `funnel_filter_dsl_invalid:${index}`,
@@ -355,6 +359,7 @@ export function encodeFunnelConfig(
 export function parseFunnelStepFilter(step: FunnelStepV2) {
   const document = parseFilterDsl(step.filterDsl, analyticsFilterRegistry);
   assertFilterAudience(document, analyticsFilterRegistry, "private-dashboard");
+  assertObservationFilterCompatible(document);
   return document;
 }
 

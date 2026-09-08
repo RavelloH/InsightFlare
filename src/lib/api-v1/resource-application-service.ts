@@ -188,7 +188,7 @@ async function funnelResource(row: FunnelRow): Promise<FunnelResource> {
     updatedAt: iso(row.updated_at),
     links: {
       self: `/api/v1/sites/${row.site_id}/funnels/${row.id}`,
-      analysis: `/api/v1/sites/${row.site_id}/funnels/${row.id}/analysis`,
+      analysis: `/api/v1/sites/${row.site_id}/analytics/funnel-analysis`,
     },
   };
 }

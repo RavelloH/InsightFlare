@@ -7,6 +7,7 @@ import {
 
 import { analyticsFilterRegistry } from "./filter-registry";
 import { assertFilterAudience, filterFingerprint } from "./filters";
+import { assertObservationFilterCompatible } from "./observation-planner";
 
 export const GOAL_CONFIG_VERSION = 1 as const;
 export const GOAL_FILTER_DSL_VERSION = 1 as const;
@@ -65,6 +66,7 @@ function configFields(value: unknown): GoalConfigV1 {
 function parseAndAssertGoalFilter(filterDsl: string): FilterDocument {
   const document = parseFilterDsl(filterDsl, analyticsFilterRegistry);
   assertFilterAudience(document, analyticsFilterRegistry, "private-dashboard");
+  assertObservationFilterCompatible(document);
   return document;
 }
 

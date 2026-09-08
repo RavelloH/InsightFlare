@@ -3,10 +3,12 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
+import { GOAL_TIMESERIES_MAX_BUCKETS } from "@/lib/edge/analytics/application/goal-cost";
 import {
   analyticsFilterRegistry,
   type FilterDocument,
 } from "@/lib/edge/analytics/contract";
+import { buildTimeBuckets } from "@/lib/edge/analytics/providers/d1/internal/core-time";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
 import { queryGoalTimeseriesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
@@ -42,6 +44,16 @@ const window: QueryWindow = {
   timeZone: "UTC",
 };
 const empty: FilterDocument = { version: 1, root: null };
+
+function structuralWindow(bucketCount: number): QueryWindow {
+  const endExclusiveMs = bucketCount * 60_000;
+  return {
+    startMs: 0,
+    endExclusiveMs,
+    nowMs: endExclusiveMs,
+    timeZone: "UTC",
+  };
+}
 
 function goal(source: string): FilterDocument {
   return parseFilterDsl(source, analyticsFilterRegistry);
@@ -162,4 +174,62 @@ describe("Goal D1 performance fixture", () => {
       ).toBeLessThanOrEqual(4);
     }
   });
+
+  it.each([1, 100, 500, GOAL_TIMESERIES_MAX_BUCKETS])(
+    "keeps the %i-calendar-bucket Goal timeseries executable",
+    async (bucketCount) => {
+      const d1 = new ExplainableSqliteD1();
+      const fixtureWindow = structuralWindow(bucketCount);
+      const calendarBuckets = buildTimeBuckets(fixtureWindow, "minute");
+      const dataset = highCardinalityDataset();
+      const simple = goal('event.name eq "purchase"');
+      const complex = goal(
+        'event.name eq "purchase" AND event.payload("/plan") eq "pro"',
+      );
+
+      expect(calendarBuckets).toHaveLength(bucketCount);
+      expect(calendarBuckets[bucketCount - 1]?.index).toBe(bucketCount - 1);
+
+      const simpleRows = await queryGoalTimeseriesFromD1(
+        { DB: d1 } as never,
+        "site-1",
+        fixtureWindow,
+        "minute",
+        empty,
+        simple,
+        dataset,
+      );
+      const complexRows = await queryGoalTimeseriesFromD1(
+        { DB: d1 } as never,
+        "site-1",
+        fixtureWindow,
+        "minute",
+        empty,
+        complex,
+        dataset,
+      );
+
+      expect(simpleRows).toHaveLength(bucketCount);
+      expect(complexRows).toHaveLength(bucketCount);
+      expect(simpleRows.map((row) => row.bucket)).toEqual(
+        calendarBuckets.map((bucket) => bucket.index),
+      );
+      expect(complexRows.map((row) => row.bucket)).toEqual(
+        calendarBuckets.map((bucket) => bucket.index),
+      );
+      expect(d1.calls).toHaveLength(2);
+      expect(d1.calls[1]!.bindings.length).toBeGreaterThan(
+        d1.calls[0]!.bindings.length,
+      );
+
+      for (const call of d1.calls) {
+        expect(call.sql.length).toBeLessThan(300_000);
+        expect(call.sql.match(/\?/g)?.length ?? 0).toBe(call.bindings.length);
+        const plan = d1.database
+          .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
+          .all(...call.bindings);
+        expect(plan.length).toBeGreaterThan(0);
+      }
+    },
+  );
 });

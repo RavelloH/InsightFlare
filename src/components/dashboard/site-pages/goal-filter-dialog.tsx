@@ -50,6 +50,7 @@ export function GoalFilterDialog({
             audience="private-dashboard"
             initialFilterDsl={filterDsl}
             messages={messages}
+            observationOnly
             siteId={siteId}
             window={window}
             resolvedScope="event"

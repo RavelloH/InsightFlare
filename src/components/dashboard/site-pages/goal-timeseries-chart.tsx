@@ -101,7 +101,7 @@ function intervalStepMs(interval: DashboardInterval): number {
   return 30 * 24 * 60 * 60 * 1_000;
 }
 
-function normalizeGoalTimeseries(
+export function normalizeGoalTimeseries(
   points: readonly GoalTimeseriesPoint[],
   from: number,
   to: number,
@@ -109,18 +109,23 @@ function normalizeGoalTimeseries(
   timeZone: string,
 ): GoalChartPoint[] {
   const safeFrom = Number.isFinite(from) ? from : (points[0]?.timestampMs ?? 0);
+  const start = startOfZonedInterval(safeFrom, interval, timeZone);
   const safeTo = Number.isFinite(to)
     ? Math.max(safeFrom, to)
-    : (points.at(-1)?.timestampMs ?? safeFrom);
-  const start = startOfZonedInterval(safeFrom, interval, timeZone);
-  const end = startOfZonedInterval(safeTo, interval, timeZone);
+    : points.at(-1)?.timestampMs !== undefined
+      ? addZonedInterval(
+          startOfZonedInterval(points.at(-1)!.timestampMs, interval, timeZone),
+          interval,
+          timeZone,
+        )
+      : safeFrom;
   const pointByBucket = new Map<number, GoalChartPoint>();
 
   for (const point of points) {
     const timestampMs = Number(point.timestampMs);
     if (!Number.isFinite(timestampMs)) continue;
     const bucket = startOfZonedInterval(timestampMs, interval, timeZone);
-    if (bucket < start || bucket > end) continue;
+    if (bucket < start || bucket >= safeTo) continue;
     const previous = pointByBucket.get(bucket);
     const sessions = safeMetric(point.sessions);
     const visitors = safeMetric(point.visitors);
@@ -139,7 +144,7 @@ function normalizeGoalTimeseries(
   const normalized: GoalChartPoint[] = [];
   const hardLimit = 2_000;
   let current = start;
-  for (let index = 0; index < hardLimit && current <= end; index += 1) {
+  for (let index = 0; index < hardLimit && current < safeTo; index += 1) {
     normalized.push(
       pointByBucket.get(current) ?? createGoalChartPoint(current),
     );

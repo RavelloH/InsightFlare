@@ -301,7 +301,15 @@ describe("typed API v1 resource boundary", () => {
     expect(firstFunnels).toMatchObject({
       ok: true,
       value: {
-        items: [{ id: "funnel-1" }],
+        items: [
+          {
+            id: "funnel-1",
+            links: {
+              self: "/api/v1/sites/site-1/funnels/funnel-1",
+              analysis: "/api/v1/sites/site-1/analytics/funnel-analysis",
+            },
+          },
+        ],
         pagination: {
           returned: 1,
           hasMore: true,

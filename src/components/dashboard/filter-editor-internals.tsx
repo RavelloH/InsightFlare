@@ -644,15 +644,20 @@ function registryFieldGroups(
 export function FilterExpressionHelpDialog({
   audience,
   messages,
+  observationOnly = false,
   open,
   onOpenChange,
 }: {
   audience: FilterPanelAudience;
   messages: AppMessages;
+  observationOnly?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const fields = useMemo(() => allowedFields(audience), [audience]);
+  const fields = useMemo(
+    () => allowedFields(audience, observationOnly),
+    [audience, observationOnly],
+  );
   const fieldGroups = useMemo(() => {
     return registryFieldGroups(fields, messages);
   }, [fields, messages]);
@@ -686,7 +691,7 @@ export function FilterExpressionHelpDialog({
         </ResponsiveDialogHeader>
         <ResponsiveDialogBody className="flex flex-col overflow-hidden p-0">
           <VerticalScrollMask
-            syncKey={`${audience}:${fields.length}:${operators.length}`}
+            syncKey={`${audience}:${observationOnly}:${fields.length}:${operators.length}`}
             className="min-h-0 flex-1 max-h-[min(calc(80dvh-5rem),46rem)]"
           >
             <div className="space-y-6 p-4 sm:p-5">
@@ -810,9 +815,16 @@ export function FilterExpressionHelpDialog({
 
 export function allowedFields(
   audience: FilterPanelAudience,
+  observationOnly = false,
 ): readonly RegisteredFilterField[] {
   return [...analyticsFilterRegistry.values()]
-    .filter((field) => field.audiences.has(audience))
+    .filter(
+      (field) =>
+        field.audiences.has(audience) &&
+        (!observationOnly ||
+          field.observationKinds.has("visit") ||
+          field.observationKinds.has("event")),
+    )
     .sort(
       (left, right) =>
         analyticsFilterFieldDisplayOrder.get(left.id)! -
@@ -1605,6 +1617,7 @@ function ConditionEditor({
   document,
   eventName,
   messages,
+  observationOnly = false,
   path,
   resolvedScope,
   onChange,
@@ -1617,6 +1630,7 @@ function ConditionEditor({
   document: FilterDocument;
   eventName: string | undefined;
   messages: AppMessages;
+  observationOnly?: boolean;
   path: readonly number[];
   resolvedScope?: FilterScope;
   onChange: (update: (condition: EditorCondition) => EditorCondition) => void;
@@ -1625,7 +1639,10 @@ function ConditionEditor({
   window: TimeWindow | undefined;
 }) {
   const definition = analyticsFilterRegistry.get(condition.field);
-  const fields = useMemo(() => allowedFields(audience), [audience]);
+  const fields = useMemo(
+    () => allowedFields(audience, observationOnly),
+    [audience, observationOnly],
+  );
   const operators = useMemo(
     () => [...(definition?.operators ?? [])],
     [definition],
@@ -1923,6 +1940,7 @@ export function GroupEditor({
   group,
   isRoot,
   messages,
+  observationOnly = false,
   path,
   resolvedScope,
   onAddCondition,
@@ -1938,6 +1956,7 @@ export function GroupEditor({
   group: EditorGroup;
   isRoot: boolean;
   messages: AppMessages;
+  observationOnly?: boolean;
   path: readonly number[];
   resolvedScope?: FilterScope;
   onAddCondition: (groupId: string) => void;
@@ -2041,6 +2060,7 @@ export function GroupEditor({
                     document={document}
                     eventName={eventName}
                     messages={messages}
+                    observationOnly={observationOnly}
                     path={[...path, index + 1]}
                     resolvedScope={resolvedScope}
                     siteId={siteId}
@@ -2060,6 +2080,7 @@ export function GroupEditor({
                     group={child}
                     isRoot={false}
                     messages={messages}
+                    observationOnly={observationOnly}
                     path={[...path, index + 1]}
                     resolvedScope={resolvedScope}
                     onAddCondition={onAddCondition}

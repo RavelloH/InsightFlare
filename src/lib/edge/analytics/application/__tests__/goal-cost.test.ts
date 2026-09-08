@@ -8,6 +8,28 @@ import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 
 describe("goalQueryCost", () => {
+  it("keeps the Goal timeseries bucket ceiling at 512", () => {
+    expect(GOAL_TIMESERIES_MAX_BUCKETS).toBe(512);
+
+    const atLimit = goalQueryCost({
+      filters: EMPTY_FILTER_DOCUMENT,
+      startMs: 0,
+      endExclusiveMs: GOAL_TIMESERIES_MAX_BUCKETS * 60_000,
+      timeZone: "UTC",
+      interval: "minute",
+    });
+    const overLimit = goalQueryCost({
+      filters: EMPTY_FILTER_DOCUMENT,
+      startMs: 0,
+      endExclusiveMs: (GOAL_TIMESERIES_MAX_BUCKETS + 1) * 60_000,
+      timeZone: "UTC",
+      interval: "minute",
+    });
+
+    expect(atLimit.bucketCount).toBe(GOAL_TIMESERIES_MAX_BUCKETS);
+    expect(overLimit.bucketCount).toBe(GOAL_TIMESERIES_MAX_BUCKETS + 1);
+  });
+
   it("keeps global and persisted Goal matcher complexity separate", () => {
     const cost = goalQueryCost({
       filters: parseFilterDsl(

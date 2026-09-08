@@ -93,6 +93,18 @@ describe("goal v1 config contract", () => {
         filterDsl: 'page.query eq "utm_source=ad"',
       }),
     ).not.toThrow();
+    for (const filterDsl of [
+      "session.durationMs gt 1000",
+      "visitor.sessions gte 2",
+      'page.path eq "/pricing" AND session.durationMs gt 1000',
+      'event.name eq "purchase" OR visitor.sessions gte 2',
+    ]) {
+      const config = { ...validConfig, filterDsl };
+      expect(() => validateGoalConfigForWrite(config)).toThrow(
+        "goal_filter_dsl_invalid",
+      );
+      expect(() => parseGoalFilter(config)).toThrow("goal_filter_dsl_invalid");
+    }
     expect(() =>
       validateGoalConfigForWrite({
         ...validConfig,

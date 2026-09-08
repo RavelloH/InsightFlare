@@ -50,6 +50,7 @@ export function FunnelStepFilterDialog({
             audience="private-dashboard"
             initialFilterDsl={filterDsl}
             messages={messages}
+            observationOnly
             siteId={siteId}
             resolvedScope="event"
             window={timeWindow}

@@ -52,6 +52,10 @@ import { GoalCard, GoalCardSkeleton } from "./goal-card";
 import { GoalDetail } from "./goal-detail";
 import { GoalEditor } from "./goal-editor";
 
+export function goalDefinitionQueryKey(siteId: string, goalId: string) {
+  return ["dashboard", "goal-definition", siteId, goalId] as const;
+}
+
 function GoalListLoading({
   locale,
   labels,
@@ -120,18 +124,7 @@ export function GoalsClientPage({
   const goals = list.data?.pages.flatMap((page) => page.data.items) ?? [];
   const selected = goals.find((goal) => goal.id === detailId);
   const detailDefinition = useQuery({
-    queryKey: [
-      "dashboard",
-      "goal-definition",
-      siteId,
-      detailId,
-      window.from,
-      window.to,
-      window.timeZone,
-      window.interval,
-      filterKey,
-      "auto",
-    ],
+    queryKey: goalDefinitionQueryKey(siteId, detailId),
     queryFn: ({ signal }) => fetchGoalDefinition(siteId, detailId, { signal }),
     enabled: Boolean(detailId && !selected),
   });
@@ -170,11 +163,18 @@ export function GoalsClientPage({
         await queryClient.invalidateQueries({ queryKey: listKey });
         if (editing) {
           await queryClient.invalidateQueries({
-            queryKey: ["dashboard", "goal-summary", siteId, editing.id],
+            queryKey: goalDefinitionQueryKey(siteId, editing.id),
           });
-          await queryClient.invalidateQueries({
-            queryKey: ["dashboard", "goal-timeseries", siteId, editing.id],
-          });
+          if (
+            editing.semanticFingerprint !== result.data.goal.semanticFingerprint
+          ) {
+            await queryClient.invalidateQueries({
+              queryKey: ["dashboard", "goal-summary", siteId, editing.id],
+            });
+            await queryClient.invalidateQueries({
+              queryKey: ["dashboard", "goal-timeseries", siteId, editing.id],
+            });
+          }
         }
         setEditorOpen(false);
         setEditing(null);
@@ -362,6 +362,7 @@ export function GoalsClientPage({
             filters={filters}
             filterKey={filterKey}
             canManage={canManage}
+            actionPending={saving || deleting}
             onEdit={() => detailGoal && openEdit(detailGoal)}
             onDelete={() => detailGoal && setDeleteTarget(detailGoal)}
             loading={detailDefinition.isPending && !detailGoal}

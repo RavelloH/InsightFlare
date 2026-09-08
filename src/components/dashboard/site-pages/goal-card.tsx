@@ -158,24 +158,45 @@ export function GoalCard({
   });
   return (
     <div ref={ref} className="h-full min-w-0">
-      <Card
-        className="h-full min-w-0 cursor-pointer transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
-        role="button"
-        tabIndex={0}
-        aria-label={`${labels.open}: ${goal.name}`}
-        onClick={onOpen}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          onOpen();
-        }}
-      >
-        <CardHeader className="flex items-center justify-between gap-3 space-y-0">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <CardTitle className="min-w-0 truncate text-base">
-              {goal.name}
-            </CardTitle>
-          </div>
+      <Card className="relative h-full min-w-0">
+        <div
+          className="-my-4 flex min-h-0 min-w-0 flex-1 cursor-pointer flex-col space-y-4 py-4 transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
+          role="button"
+          tabIndex={0}
+          aria-label={`${labels.open}: ${goal.name}`}
+          onClick={onOpen}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            onOpen();
+          }}
+        >
+          <CardHeader className="flex items-center justify-between gap-3 space-y-0 pr-16">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <CardTitle className="min-w-0 truncate text-base">
+                {goal.name}
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4 line-clamp-2 text-sm text-muted-foreground">
+              {goalFilterSummary(goal, messages)}
+            </p>
+            {summary.isError ? (
+              <p className="text-sm text-muted-foreground">
+                {labels.detailLoadError}
+              </p>
+            ) : (
+              <GoalVisualization
+                summary={summary.data?.data.summary}
+                locale={locale}
+                labels={labels}
+                loading={summary.isFetching || !summary.data}
+              />
+            )}
+          </CardContent>
+        </div>
+        <div className="absolute right-4 top-4">
           <GoalActions
             labels={labels}
             canManage={canManage}
@@ -183,24 +204,7 @@ export function GoalCard({
             onEdit={onEdit}
             onDelete={onDelete}
           />
-        </CardHeader>
-        <CardContent>
-          <p className="mb-4 line-clamp-2 text-sm text-muted-foreground">
-            {goalFilterSummary(goal, messages)}
-          </p>
-          {summary.isError ? (
-            <p className="text-sm text-muted-foreground">
-              {labels.detailLoadError}
-            </p>
-          ) : (
-            <GoalVisualization
-              summary={summary.data?.data.summary}
-              locale={locale}
-              labels={labels}
-              loading={summary.isFetching || !summary.data}
-            />
-          )}
-        </CardContent>
+        </div>
       </Card>
     </div>
   );
