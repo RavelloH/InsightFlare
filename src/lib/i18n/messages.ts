@@ -644,6 +644,8 @@ export interface AppMessages {
     sessionId: string;
     visitor: string;
     anonymous: string;
+    userId: string;
+    userName: string;
     entryPage: string;
     exitPage: string;
     duration: string;
@@ -661,6 +663,8 @@ export interface AppMessages {
   };
   sessionDetail: {
     anonymous: string;
+    userId: string;
+    userName: string;
     back: string;
     missing: string;
     notFound: string;
@@ -896,6 +900,8 @@ export interface AppMessages {
     visitor: string;
     sessionId: string;
     anonymous: string;
+    userId: string;
+    userName: string;
     referrer: string;
     location: string;
     os: string;
@@ -912,6 +918,8 @@ export interface AppMessages {
   };
   visitorDetail: {
     anonymous: string;
+    userId: string;
+    userName: string;
     back: string;
     missing: string;
     notFound: string;
@@ -3519,6 +3527,8 @@ const enMessages = {
     sessionId: "Session ID",
     visitor: "Visitor",
     anonymous: "Anonymous",
+    userId: "User ID",
+    userName: "User name",
     entryPage: "Entry Page",
     exitPage: "Exit Page",
     duration: "Duration",
@@ -3536,6 +3546,8 @@ const enMessages = {
   },
   sessionDetail: {
     anonymous: "Anonymous",
+    userId: "User ID",
+    userName: "User name",
     back: "Back to sessions",
     missing: "Missing sessionId.",
     notFound: "Session not found.",
@@ -3784,6 +3796,8 @@ const enMessages = {
     visitor: "Visitor",
     sessionId: "Session ID",
     anonymous: "Anonymous",
+    userId: "User ID",
+    userName: "User name",
     referrer: "Referrer",
     location: "Location",
     os: "OS",
@@ -3800,6 +3814,8 @@ const enMessages = {
   },
   visitorDetail: {
     anonymous: "Anonymous",
+    userId: "User ID",
+    userName: "User name",
     back: "Back to visitors",
     missing: "Missing visitorId.",
     notFound: "Visitor not found.",
@@ -6594,6 +6610,8 @@ const zhMessages = {
     sessionId: "会话 ID",
     visitor: "访客",
     anonymous: "匿名访客",
+    userId: "用户 ID",
+    userName: "用户名",
     entryPage: "入口页面",
     exitPage: "出口页面",
     duration: "时长",
@@ -6611,6 +6629,8 @@ const zhMessages = {
   },
   sessionDetail: {
     anonymous: "匿名访客",
+    userId: "用户 ID",
+    userName: "用户名",
     back: "返回会话",
     missing: "缺少 sessionId。",
     notFound: "没有找到这个会话。",
@@ -6848,6 +6868,8 @@ const zhMessages = {
     visitor: "访客",
     sessionId: "会话 ID",
     anonymous: "匿名访客",
+    userId: "用户 ID",
+    userName: "用户名",
     referrer: "来源",
     location: "地区",
     os: "操作系统",
@@ -6864,6 +6886,8 @@ const zhMessages = {
   },
   visitorDetail: {
     anonymous: "匿名访客",
+    userId: "用户 ID",
+    userName: "用户名",
     back: "返回访客",
     missing: "缺少 visitorId。",
     notFound: "没有找到这个访客。",
@@ -9607,6 +9631,8 @@ const jaMessages = {
     sessionId: "セッション ID",
     visitor: "訪問者",
     anonymous: "匿名",
+    userId: "ユーザー ID",
+    userName: "ユーザー名",
     entryPage: "入口ページ",
     exitPage: "離脱ページ",
     duration: "滞在時間",
@@ -9624,6 +9650,8 @@ const jaMessages = {
   },
   sessionDetail: {
     anonymous: "匿名",
+    userId: "ユーザー ID",
+    userName: "ユーザー名",
     back: "セッションへ戻る",
     missing: "sessionId がありません。",
     notFound: "セッションが見つかりません。",
@@ -9873,6 +9901,8 @@ const jaMessages = {
     visitor: "訪問者",
     sessionId: "セッション ID",
     anonymous: "匿名",
+    userId: "ユーザー ID",
+    userName: "ユーザー名",
     referrer: "参照元",
     location: "地域",
     os: "OS",
@@ -9889,6 +9919,8 @@ const jaMessages = {
   },
   visitorDetail: {
     anonymous: "匿名",
+    userId: "ユーザー ID",
+    userName: "ユーザー名",
     back: "訪問者へ戻る",
     missing: "visitorId がありません。",
     notFound: "訪問者が見つかりません。",

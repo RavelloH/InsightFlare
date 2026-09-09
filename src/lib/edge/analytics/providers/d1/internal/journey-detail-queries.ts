@@ -473,6 +473,16 @@ function detailText(row: Record<string, unknown>, key: string): string {
   return String(row[key] ?? "");
 }
 
+function latestIdentityVisit(
+  visits: Record<string, unknown>[],
+): Record<string, unknown> | null {
+  for (let index = visits.length - 1; index >= 0; index -= 1) {
+    const visit = visits[index]!;
+    if (detailText(visit, "userId").trim() !== "") return visit;
+  }
+  return null;
+}
+
 function compareDetailVisits(
   left: Record<string, unknown>,
   right: Record<string, unknown>,
@@ -504,6 +514,8 @@ SELECT
   visit_id AS visitId,
   visitor_id AS visitorId,
   session_id AS sessionId,
+  user_id AS userId,
+  user_name AS userName,
   status,
   started_at AS startedAt,
   last_activity_at AS lastActivityAt,
@@ -543,6 +555,8 @@ SELECT
   visit_id AS visitId,
   visitor_id AS visitorId,
   session_id AS sessionId,
+  user_id AS userId,
+  user_name AS userName,
   NULL AS status,
   NULL AS startedAt,
   NULL AS lastActivityAt,
@@ -595,6 +609,7 @@ function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
   const customEvents = rows.filter((row) => row.sourceType === "custom");
   const firstVisit = visits[0]!;
   const latestVisit = visits.at(-1)!;
+  const identityVisit = latestIdentityVisit(visits);
   const sessionsById = new Map<string, Record<string, unknown>[]>();
   const eventCountBySession = new Map<string, number>();
 
@@ -617,6 +632,8 @@ function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
   const visitor = mapVisitorRow({
     visitorId: detailText(firstVisit, "visitorId"),
     sessionId: detailText(latestVisit, "sessionId"),
+    userId: identityVisit ? detailText(identityVisit, "userId") : "",
+    userName: identityVisit ? detailText(identityVisit, "userName") : "",
     firstSeenAt: detailNumber(firstVisit, "startedAt"),
     lastSeenAt: detailNumber(latestVisit, "startedAt"),
     views: visits.length,
@@ -641,6 +658,7 @@ function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
       sessionVisits.sort(compareDetailVisits);
       const first = sessionVisits[0]!;
       const latest = sessionVisits.at(-1)!;
+      const identityVisit = latestIdentityVisit(sessionVisits);
       const firstGeo = sessionVisits.find((visit) => {
         const latitude = Number(visit.latitude);
         const longitude = Number(visit.longitude);
@@ -654,6 +672,8 @@ function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
       return mapSessionRow({
         sessionId,
         visitorId: detailText(first, "visitorId"),
+        userId: identityVisit ? detailText(identityVisit, "userId") : "",
+        userName: identityVisit ? detailText(identityVisit, "userName") : "",
         startedAt: detailNumber(first, "startedAt"),
         endedAt: Math.max(
           ...sessionVisits.map((visit) =>

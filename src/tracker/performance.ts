@@ -173,6 +173,15 @@ export function createPerformanceTracker(options: {
       }
     }
     performanceObserverCleanups = [];
+    performanceCollectionStarted = false;
+    performanceVisitId = "";
+    performanceSampled = false;
+    performanceMetrics.ttfb = null;
+    performanceMetrics.fcp = null;
+    performanceMetrics.lcp = null;
+    performanceMetrics.cls = 0;
+    performanceMetrics.inp = 0;
+    interactionDurations.clear();
   }
 
   function buildPayload(): PerformancePayload | null {

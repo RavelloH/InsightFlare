@@ -35,6 +35,7 @@ import {
   OsMeta,
   ReferrerMeta,
   VisitorAvatar,
+  visitorDisplayName,
 } from "@/components/dashboard/journey-display";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import {
@@ -273,6 +274,9 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
 }) {
   const openDetail = () => onOpenDetail(row.visitorId);
   const visitorId = row.visitorId.trim();
+  const userId = String(row.userId || "").trim();
+  const userName = String(row.userName || "").trim();
+  const displayName = visitorDisplayName(userName, userId, labels.anonymous);
   const referrerHost = String(row.referrerHost || "").trim();
   const referrerUrl = String(row.referrerUrl || "").trim();
   const referrerDetails = {
@@ -323,6 +327,24 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
             request={{
               key: `visitor-id:${visitorId}`,
               items: [
+                ...(userName
+                  ? [
+                      {
+                        label: messages.visitorDetail.userName,
+                        value: userName,
+                        copyValue: userName,
+                      },
+                    ]
+                  : []),
+                ...(userId
+                  ? [
+                      {
+                        label: messages.visitorDetail.userId,
+                        value: userId,
+                        copyValue: userId,
+                      },
+                    ]
+                  : []),
                 {
                   label: messages.visitorDetail.visitorId,
                   value: visitorId || messages.common.unknown,
@@ -337,7 +359,7 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
               ],
             }}
           >
-            <span className="truncate">{labels.anonymous}</span>
+            <span className="truncate">{displayName}</span>
           </AnalyticsDetailsTooltipTarget>
         </div>
       </ClickableTableCell>

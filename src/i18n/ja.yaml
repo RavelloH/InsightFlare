@@ -661,6 +661,8 @@ sessions:
   sessionId: セッション ID
   visitor: 訪問者
   anonymous: 匿名
+  userId: ユーザー ID
+  userName: ユーザー名
   entryPage: 入口ページ
   exitPage: 離脱ページ
   duration: 滞在時間
@@ -677,6 +679,8 @@ sessions:
   empty: この時間範囲にセッションはありません。
 sessionDetail:
   anonymous: 匿名
+  userId: ユーザー ID
+  userName: ユーザー名
   back: セッションへ戻る
   missing: sessionId がありません。
   notFound: セッションが見つかりません。
@@ -910,6 +914,8 @@ visitors:
   visitor: 訪問者
   sessionId: セッション ID
   anonymous: 匿名
+  userId: ユーザー ID
+  userName: ユーザー名
   referrer: 参照元
   location: 地域
   os: OS
@@ -925,6 +931,8 @@ visitors:
   empty: この時間範囲に訪問者はいません。
 visitorDetail:
   anonymous: 匿名
+  userId: ユーザー ID
+  userName: ユーザー名
   back: 訪問者へ戻る
   missing: visitorId がありません。
   notFound: 訪問者が見つかりません。

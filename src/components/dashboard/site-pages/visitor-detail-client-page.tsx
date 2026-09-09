@@ -42,6 +42,7 @@ import {
   OsMeta,
   ReferrerMeta,
   VisitorAvatar,
+  visitorDisplayName,
 } from "@/components/dashboard/journey-display";
 import {
   JourneyGeoLocationCard,
@@ -143,6 +144,8 @@ function createVisitorDetailPlaceholder(visitorId: string): VisitorDetail {
   return {
     visitor: {
       visitorId,
+      userId: "",
+      userName: "",
       firstSeenAt: 0,
       lastSeenAt: 0,
       views: 0,
@@ -1124,6 +1127,11 @@ const VisitorMapHero = memo(function VisitorMapHero({
   const { resolvedTheme } = useTheme();
   const effectiveTheme: VisitorDetailMapTheme =
     resolvedTheme === "dark" ? "dark" : "light";
+  const displayName = visitorDisplayName(
+    visitor.userName,
+    visitor.userId,
+    labels.anonymous,
+  );
   const points = useMemo(
     () => (modalReady ? visitorLocationPoints(sessions) : []),
     [modalReady, sessions],
@@ -1191,7 +1199,7 @@ const VisitorMapHero = memo(function VisitorMapHero({
             <VisitorAvatar seed={visitor.visitorId} className="size-12" />
             <div className="min-w-0">
               <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
-                {labels.anonymous}
+                {displayName}
               </h1>
               <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
                 {labels.lastSeen}:{" "}
@@ -1232,6 +1240,23 @@ const VisitorMetaPanel = memo(function VisitorMetaPanel({
     <Card className="py-0">
       <CardContent className="p-0">
         <div className="grid grid-cols-2 gap-px overflow-hidden bg-border/70 text-xs text-muted-foreground xl:grid-cols-4">
+          <SummaryGridItem
+            label={labels.userName}
+            loading={loading}
+            value={visitor.userName || messages.common.unknown}
+          />
+          <SummaryGridItem
+            label={labels.userId}
+            mono
+            loading={loading}
+            value={visitor.userId || messages.common.unknown}
+          />
+          <SummaryGridItem
+            label={labels.visitorId}
+            mono
+            loading={loading}
+            value={visitor.visitorId || messages.common.unknown}
+          />
           <SummaryGridItem
             label={labels.totalDuration}
             prominent
@@ -2012,6 +2037,8 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
       sessionId: labels.sessionId,
       visitor: labels.visitor,
       anonymous: labels.anonymous,
+      userId: labels.userId,
+      userName: labels.userName,
       entryPage: labels.entryPath,
       exitPage: labels.exitPath,
       duration: labels.duration,

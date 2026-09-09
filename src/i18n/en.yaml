@@ -663,6 +663,8 @@ sessions:
   sessionId: Session ID
   visitor: Visitor
   anonymous: Anonymous
+  userId: User ID
+  userName: User name
   entryPage: Entry Page
   exitPage: Exit Page
   duration: Duration
@@ -679,6 +681,8 @@ sessions:
   empty: No sessions in this time range.
 sessionDetail:
   anonymous: Anonymous
+  userId: User ID
+  userName: User name
   back: Back to sessions
   missing: Missing sessionId.
   notFound: Session not found.
@@ -919,6 +923,8 @@ visitors:
   visitor: Visitor
   sessionId: Session ID
   anonymous: Anonymous
+  userId: User ID
+  userName: User name
   referrer: Referrer
   location: Location
   os: OS
@@ -934,6 +940,8 @@ visitors:
   empty: No visitors in this time range.
 visitorDetail:
   anonymous: Anonymous
+  userId: User ID
+  userName: User name
   back: Back to visitors
   missing: Missing visitorId.
   notFound: Visitor not found.

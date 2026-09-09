@@ -333,6 +333,8 @@ export interface ReferrerRadarRow {
 export interface VisitorRow {
   visitorId: string;
   sessionId?: string;
+  userId: string;
+  userName: string;
   firstSeenAt: number;
   lastSeenAt: number;
   views: number;
@@ -356,6 +358,8 @@ export interface VisitorRow {
 export interface SessionRow {
   sessionId: string;
   visitorId: string;
+  userId: string;
+  userName: string;
   startedAt: number;
   endedAt: number;
   durationMs: number;

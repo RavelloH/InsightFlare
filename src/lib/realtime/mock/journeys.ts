@@ -134,6 +134,7 @@ import {
   demoJourneyPercentile,
   demoReportingDateKey,
   demoVisitsBySession,
+  latestDemoIdentityVisit,
   parseDemoSessionSort,
   parseDemoVisitorSort,
   summarizeDemoActivity,
@@ -330,33 +331,40 @@ export function generateDemoVisitors(
   }
 
   const rows = Array.from(buckets.entries())
-    .map(([visitorId, bucket]) => ({
-      visitorId,
-      sessionId: bucket.latestVisit.sessionId,
-      firstSeenAt: bucket.firstSeenAt,
-      lastSeenAt: bucket.lastSeenAt,
-      views: Math.max(0, Math.round(bucket.views)),
-      sessions: Math.max(
-        0,
-        Math.round(weightedSessionCount(dataset, bucket.sessions)),
-      ),
-      events: bucket.events,
-      country: bucket.latestVisit.country,
-      region: bucket.latestVisit.regionName || bucket.latestVisit.region,
-      regionCode: bucket.latestVisit.regionCode,
-      city: bucket.latestVisit.cityName || bucket.latestVisit.city,
-      referrerHost: bucket.firstVisit.referrerHost,
-      referrerUrl: bucket.firstVisit.referrerUrl,
-      browser: bucket.latestVisit.browser,
-      browserVersion: bucket.latestVisit.browserVersion,
-      os: demoOperatingSystemLabel(bucket.latestVisit.osVersion),
-      osVersion: bucket.latestVisit.osVersion,
-      deviceType: bucket.latestVisit.deviceType,
-      screenWidth: parseDemoScreenSize(bucket.latestVisit.screenSize)
-        .screenWidth,
-      screenHeight: parseDemoScreenSize(bucket.latestVisit.screenSize)
-        .screenHeight,
-    }))
+    .map(([visitorId, bucket]) => {
+      const identityVisit = latestDemoIdentityVisit(
+        filtered.visits.filter((visit) => visit.visitorId === visitorId),
+      );
+      return {
+        visitorId,
+        sessionId: bucket.latestVisit.sessionId,
+        userId: identityVisit?.userId ?? "",
+        userName: identityVisit?.userName ?? "",
+        firstSeenAt: bucket.firstSeenAt,
+        lastSeenAt: bucket.lastSeenAt,
+        views: Math.max(0, Math.round(bucket.views)),
+        sessions: Math.max(
+          0,
+          Math.round(weightedSessionCount(dataset, bucket.sessions)),
+        ),
+        events: bucket.events,
+        country: bucket.latestVisit.country,
+        region: bucket.latestVisit.regionName || bucket.latestVisit.region,
+        regionCode: bucket.latestVisit.regionCode,
+        city: bucket.latestVisit.cityName || bucket.latestVisit.city,
+        referrerHost: bucket.firstVisit.referrerHost,
+        referrerUrl: bucket.firstVisit.referrerUrl,
+        browser: bucket.latestVisit.browser,
+        browserVersion: bucket.latestVisit.browserVersion,
+        os: demoOperatingSystemLabel(bucket.latestVisit.osVersion),
+        osVersion: bucket.latestVisit.osVersion,
+        deviceType: bucket.latestVisit.deviceType,
+        screenWidth: parseDemoScreenSize(bucket.latestVisit.screenSize)
+          .screenWidth,
+        screenHeight: parseDemoScreenSize(bucket.latestVisit.screenSize)
+          .screenHeight,
+      };
+    })
     .sort(
       (left, right) =>
         compareDemoNumericField(left, right, sort.key, sort.direction) ||
@@ -495,6 +503,7 @@ export function generateDemoVisitorDetail(
     [...detailVisits].sort(
       (left, right) => left.startedAt - right.startedAt,
     )[0] ?? detailVisits[0];
+  const identityVisit = latestDemoIdentityVisit(detailVisits);
   const firstSeenAt = Math.min(...detailVisits.map((visit) => visit.startedAt));
   const lastSeenAt = Math.max(...detailVisits.map((visit) => visit.startedAt));
   const screen = parseDemoScreenSize(latest.screenSize);
@@ -510,6 +519,8 @@ export function generateDemoVisitorDetail(
   ).size;
   const visitor = {
     visitorId,
+    userId: identityVisit?.userId ?? "",
+    userName: identityVisit?.userName ?? "",
     firstSeenAt,
     lastSeenAt,
     views: detailVisits.length,
@@ -781,6 +792,7 @@ export function generateDemoJourneyEventDetail(
   const country = String(event.country ?? "");
   const queryString = demoQueryStringForVisit(resolvedSourceVisit);
   const hash = demoHashFragmentForVisit(resolvedSourceVisit);
+  const identitySource = isBoundaryEvent ? session : resolvedSourceVisit;
 
   return {
     ok: true,
@@ -813,10 +825,8 @@ export function generateDemoJourneyEventDetail(
         visitId: String(event.visitId ?? ""),
         sessionId: resolvedSessionId,
         visitorId,
-        userId: visitorId ? `demo-user-${visitorId}` : "",
-        userName: visitorId
-          ? `Demo visitor ${visitorId.slice(-6).toUpperCase()}`
-          : "",
+        userId: String(identitySource.userId ?? ""),
+        userName: String(identitySource.userName ?? ""),
         pathname: String(event.pathname ?? ""),
         queryString,
         hash,

@@ -659,6 +659,8 @@ sessions:
   sessionId: 会话 ID
   visitor: 访客
   anonymous: 匿名访客
+  userId: 用户 ID
+  userName: 用户名
   entryPage: 入口页面
   exitPage: 出口页面
   duration: 时长
@@ -675,6 +677,8 @@ sessions:
   empty: 当前时间范围内没有会话。
 sessionDetail:
   anonymous: 匿名访客
+  userId: 用户 ID
+  userName: 用户名
   back: 返回会话
   missing: 缺少 sessionId。
   notFound: 没有找到这个会话。
@@ -906,6 +910,8 @@ visitors:
   visitor: 访客
   sessionId: 会话 ID
   anonymous: 匿名访客
+  userId: 用户 ID
+  userName: 用户名
   referrer: 来源
   location: 地区
   os: 操作系统
@@ -921,6 +927,8 @@ visitors:
   empty: 当前时间范围内没有访客。
 visitorDetail:
   anonymous: 匿名访客
+  userId: 用户 ID
+  userName: 用户名
   back: 返回访客
   missing: 缺少 visitorId。
   notFound: 没有找到这个访客。

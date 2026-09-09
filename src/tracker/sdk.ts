@@ -116,7 +116,7 @@ if (!IGNORE_DO_NOT_TRACK) {
 
 const scriptUrl = new URL(scriptEl.src);
 const collectUrl = new URL("/collect", scriptUrl.origin).toString();
-const visitorId = IS_EU_MODE ? "" : loadOrCreateVisitorId(VISITOR_KEY);
+let visitorId = IS_EU_MODE ? "" : loadOrCreateVisitorId(VISITOR_KEY);
 const performanceTracker = createPerformanceTracker({
   enabled: BUILD_PERFORMANCE,
   sampleRate: PERFORMANCE_SAMPLE_RATE,
@@ -152,6 +152,16 @@ function loadOrCreateVisitorId(visitorKey: string): string {
   const next = crypto.randomUUID();
   window.localStorage.setItem(visitorKey, next);
   return next;
+}
+
+function rotateVisitorId(): void {
+  window.localStorage.removeItem(VISITOR_KEY);
+  if (IS_EU_MODE) {
+    visitorId = "";
+    return;
+  }
+  visitorId = crypto.randomUUID();
+  window.localStorage.setItem(VISITOR_KEY, visitorId);
 }
 
 function pagePayloadBase(
@@ -276,7 +286,7 @@ function startVisit(
   );
 }
 
-function sendLeave(): void {
+function endCurrentVisit(exitReason: string, useBeacon: boolean): void {
   if (!currentVisit || leaveSent) return;
   leaveSent = true;
   pendingHiddenAt = 0;
@@ -290,16 +300,24 @@ function sendLeave(): void {
       kind: "leave",
       siteId: SITE_ID,
       visitId: currentVisit.id,
+      visitorId,
       timestamp: eventAt,
       durationMs: Math.max(0, eventAt - currentVisit.startedAt),
       pathname: url.pathname || "/",
       hostname: url.hostname || "",
-      exitReason: "pagehide",
+      exitReason,
+      ...(userIdentifiedId
+        ? { userId: userIdentifiedId, userName: userIdentifiedName }
+        : {}),
       ...(performancePayload || {}),
     },
-    true,
+    useBeacon,
   );
   if (BUILD_PERFORMANCE) performanceTracker.stop();
+}
+
+function sendLeave(): void {
+  endCurrentVisit("pagehide", true);
 }
 
 function sendVisibility(
@@ -313,10 +331,14 @@ function sendVisibility(
       kind: "visibility",
       siteId: SITE_ID,
       visitId: currentVisit.id,
+      visitorId,
       visibilityState,
       timestamp: eventAt,
       pathname: url.pathname || "/",
       hostname: url.hostname || "",
+      ...(userIdentifiedId
+        ? { userId: userIdentifiedId, userName: userIdentifiedName }
+        : {}),
     },
     true,
   );
@@ -407,7 +429,6 @@ function wrapHistoryMethod(methodName: "pushState" | "replaceState"): void {
 // ── Public API ──
 
 function identify(userId: string, opts?: { name?: string }): void {
-  if (!currentVisit) return;
   const id = String(userId || "")
     .trim()
     .slice(0, 255);
@@ -421,6 +442,7 @@ function identify(userId: string, opts?: { name?: string }): void {
     .slice(0, 255);
   userIdentifiedId = id;
   userIdentifiedName = name;
+  if (!currentVisit) return;
   if (debugEnabled) {
     console.log(
       "[InsightFlare]",
@@ -444,6 +466,18 @@ function identify(userId: string, opts?: { name?: string }): void {
     },
     false,
   );
+}
+
+function reset(): void {
+  flushPendingRouteChange();
+  if (currentVisit) {
+    endCurrentVisit("identity_reset", false);
+  }
+  userIdentifiedId = "";
+  userIdentifiedName = "";
+  rotateVisitorId();
+  if (!currentVisit) return;
+  startVisit(window.location.href, "", Date.now());
 }
 
 function setGlobalProperties(props: Record<string, unknown>): void {
@@ -564,6 +598,7 @@ const api = {
   siteId: SITE_ID,
   track,
   identify,
+  reset,
   setGlobalProperties,
   clearGlobalProperties,
   trackOnce,

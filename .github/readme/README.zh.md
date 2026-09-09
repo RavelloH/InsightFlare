@@ -279,6 +279,25 @@ InsightFlare 的前端 SDK 支持以手动调用的方式上报自定义事件�
 - `setGlobalProperties(props)`：为后续事件追加公共字段。
 - `clearGlobalProperties()`：清除公共字段。
 
+#### 用户身份识别
+
+使用 `identify` 将当前访问与登录用户关联，同时保留原有的匿名访客边界：
+
+```html
+<script>
+  window.insightflare.identify("user-123", { name: "Alice" });
+</script>
+```
+
+用户登录后调用 `identify`，即可将当前及后续访问按用户统一分析。首次页面访问前调用也受支持。用户退出登录时调用 `reset()`，结束当前身份、创建新的匿名访客边界，并避免后续事件继承旧账号：
+
+```js
+window.insightflare.reset();
+window.insightflare.identify("user-456", { name: "Bob" });
+```
+
+切换账号前请先调用 `reset()`。单独调用 `identify("user-456")` 不会创建新的访客边界。
+
 #### DOM 属性自动上报
 
 ```html

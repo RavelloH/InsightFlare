@@ -419,7 +419,7 @@ export function buildDemoFactDataset(
       const perfInpMs = hasPerformance
         ? Math.max(1, Math.round(durationMs * 0.06))
         : null;
-      const identified = sessionIndex % 5 === 0;
+      const identityMode = sessionIndex % 5;
 
       visits.push({
         visitId: `${sessionId}-v-${visitIndex.toString(36).padStart(3, "0")}`,
@@ -489,12 +489,14 @@ export function buildDemoFactDataset(
         perfLcpMs,
         perfCls,
         perfInpMs,
-        ...(identified
+        ...(identityMode === 0
           ? {
               userId: `demo-user-${visitorId}`,
               userName: `User ${visitorId.slice(-6)}`,
             }
-          : {}),
+          : identityMode === 1
+            ? { userId: `demo-user-${visitorId}` }
+            : {}),
       });
     }
 

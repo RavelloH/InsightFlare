@@ -603,6 +603,8 @@ describe("edge query core mappers", () => {
       mapVisitors([
         {
           visitorId: "visitor-1",
+          userId: "",
+          userName: "",
           firstSeenAt: 1,
           lastSeenAt: 2,
           views: 3,
@@ -612,6 +614,8 @@ describe("edge query core mappers", () => {
     ).toEqual([
       {
         visitorId: "visitor-1",
+        userId: "",
+        userName: "",
         sessionId: "",
         firstSeenAt: 1,
         lastSeenAt: 2,

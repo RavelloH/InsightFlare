@@ -1208,6 +1208,8 @@ describe("API v1 generated client", () => {
     const session = {
       sessionId: "session-1",
       visitorId: "visitor-1",
+      userId: "",
+      userName: "",
       startedAt: 1,
       endedAt: 2,
       durationMs: 1,
@@ -1240,6 +1242,8 @@ describe("API v1 generated client", () => {
           visitor: {
             visitorId: "visitor-1",
             sessionId: "session-1",
+            userId: "",
+            userName: "",
             firstSeenAt: 1,
             lastSeenAt: 2,
             views: 1,

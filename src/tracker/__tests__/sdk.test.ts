@@ -456,10 +456,247 @@ describe("Tracker Browser SDK Integration Suite", () => {
     expect(api.version).toBe("6");
     expect(api.track).toBeTypeOf("function");
     expect(api.identify).toBeTypeOf("function");
+    expect(api.reset).toBeTypeOf("function");
     expect(api.setGlobalProperties).toBeTypeOf("function");
     expect(api.clearGlobalProperties).toBeTypeOf("function");
     expect(api.trackOnce).toBeTypeOf("function");
     expect(api.debug).toBeTypeOf("function");
+  });
+
+  it("should store identify state before the first visit without sending an identify request", async () => {
+    Object.defineProperty(document, "readyState", {
+      value: "loading",
+      writable: true,
+      configurable: true,
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
+      );
+
+    await import("../sdk.ts");
+    const api = (window as any).__insightflare_tracker_v6__;
+
+    api.identify("  alice  ", { name: "  Alice  " });
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "readyState", {
+      value: "interactive",
+      writable: true,
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("DOMContentLoaded"));
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const body = decodeFetchBody(fetchSpy);
+    expect(body.kind).toBe("pageview");
+    expect(body.userId).toBe("alice");
+    expect(body.userName).toBe("Alice");
+  });
+
+  it("should rotate and clear state on reset before the first visit without sending a pageview", async () => {
+    Object.defineProperty(document, "readyState", {
+      value: "loading",
+      writable: true,
+      configurable: true,
+    });
+    vi.spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("visitor-before-reset")
+      .mockReturnValueOnce("visitor-after-reset")
+      .mockReturnValueOnce("visit-after-reset");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
+      );
+
+    await import("../sdk.ts");
+    const api = (window as any).__insightflare_tracker_v6__;
+    api.identify("alice", { name: "Alice" });
+    api.reset();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      window.localStorage.getItem("__insightflare_visitor_configured-site__"),
+    ).toBe("visitor-after-reset");
+
+    Object.defineProperty(document, "readyState", {
+      value: "interactive",
+      writable: true,
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("DOMContentLoaded"));
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const body = decodeFetchBody(fetchSpy);
+    expect(body).toMatchObject({
+      kind: "pageview",
+      visitId: "visit-after-reset",
+      visitorId: "visitor-after-reset",
+    });
+    expect(body.userId).toBeUndefined();
+    expect(body.userName).toBeUndefined();
+  });
+
+  it("should reset the current identity and rotate the visitor boundary", async () => {
+    const randomUuidSpy = vi
+      .spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("visitor-1")
+      .mockReturnValueOnce("visit-1")
+      .mockReturnValueOnce("visitor-2")
+      .mockReturnValueOnce("visit-2");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
+      );
+
+    await import("../sdk.ts");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const api = (window as any).__insightflare_tracker_v6__;
+    const oldVisitorId = window.localStorage.getItem(
+      "__insightflare_visitor_configured-site__",
+    );
+
+    fetchSpy.mockClear();
+    api.identify("alice", { name: "Alice" });
+    api.reset();
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    const bodies = fetchSpy.mock.calls.map(([, options]) =>
+      JSON.parse((options as RequestInit).body as string),
+    );
+    expect(bodies.map((body) => body.kind)).toEqual([
+      "identify",
+      "leave",
+      "pageview",
+    ]);
+    expect(bodies[0].visitorId).toBe(oldVisitorId);
+    expect(bodies[1]).toMatchObject({
+      exitReason: "identity_reset",
+      visitorId: oldVisitorId,
+      visitId: "visit-1",
+    });
+    expect(bodies[2]).toMatchObject({
+      kind: "pageview",
+      visitorId: "visitor-2",
+      visitId: "visit-2",
+    });
+    expect(bodies[2].userId).toBeUndefined();
+    expect(bodies[2].userName).toBeUndefined();
+    expect(
+      window.localStorage.getItem("__insightflare_visitor_configured-site__"),
+    ).toBe("visitor-2");
+    expect(randomUuidSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it("should keep account identities on separate visitors after reset", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("visitor-alice")
+      .mockReturnValueOnce("visit-alice")
+      .mockReturnValueOnce("visitor-bob")
+      .mockReturnValueOnce("visit-bob");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
+      );
+
+    await import("../sdk.ts");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const api = (window as any).__insightflare_tracker_v6__;
+    fetchSpy.mockClear();
+
+    api.identify("alice", { name: "Alice" });
+    api.reset();
+    api.identify("bob", { name: "Bob" });
+    api.track("after_switch");
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(5));
+    const bodies = fetchSpy.mock.calls.map(([, options]) =>
+      JSON.parse((options as RequestInit).body as string),
+    );
+    const bobBodies = bodies.filter((body) => body.userId === "bob");
+    expect(bobBodies.length).toBe(2);
+    expect(bobBodies.every((body) => body.visitorId === "visitor-bob")).toBe(
+      true,
+    );
+    const aliceBodies = bodies.filter((body) => body.userId === "alice");
+    expect(aliceBodies).toHaveLength(2);
+    expect(
+      aliceBodies.every((body) => body.visitorId === "visitor-alice"),
+    ).toBe(true);
+    expect(
+      window.localStorage.getItem("__insightflare_visitor_configured-site__"),
+    ).toBe("visitor-bob");
+  });
+
+  it("should switch direct identify state without rotating the visitor", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
+      );
+
+    await import("../sdk.ts");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const api = (window as any).__insightflare_tracker_v6__;
+    const visitorId = window.localStorage.getItem(
+      "__insightflare_visitor_configured-site__",
+    );
+    fetchSpy.mockClear();
+
+    api.identify("alice", { name: "Alice" });
+    api.identify("bob", { name: "Bob" });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const bodies = fetchSpy.mock.calls.map(([, options]) =>
+      JSON.parse((options as RequestInit).body as string),
+    );
+    expect(bodies[0]).toMatchObject({
+      kind: "identify",
+      userId: "alice",
+      visitorId,
+    });
+    expect(bodies[1]).toMatchObject({
+      kind: "identify",
+      userId: "bob",
+      userName: "Bob",
+      visitorId,
+    });
+    expect(
+      window.localStorage.getItem("__insightflare_visitor_configured-site__"),
+    ).toBe(visitorId);
+  });
+
+  it("should keep EU visitor ids empty through reset without persistent writes", async () => {
+    const setItemSpy = vi.spyOn(window.localStorage, "setItem");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
+      );
+
+    setRuntimeConfig({ isEuMode: true });
+    await import("../sdk.ts");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const api = (window as any).__insightflare_tracker_v6__;
+    fetchSpy.mockClear();
+
+    api.reset();
+
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    const bodies = fetchSpy.mock.calls.map(([, options]) =>
+      JSON.parse((options as RequestInit).body as string),
+    );
+    expect(bodies[0]).toMatchObject({
+      kind: "leave",
+      exitReason: "identity_reset",
+      visitorId: "",
+    });
+    expect(bodies[1]).toMatchObject({ kind: "pageview", visitorId: "" });
+    expect(setItemSpy).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
   });
 
   it("should send a custom_event when track() is called", async () => {

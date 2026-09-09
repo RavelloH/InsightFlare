@@ -9,6 +9,8 @@ export interface VisitorsData {
   data: PaginatedCollection<{
     visitorId: string;
     sessionId?: string;
+    userId: string;
+    userName: string;
     firstSeenAt: number;
     lastSeenAt: number;
     views: number;
@@ -33,6 +35,8 @@ export interface VisitorsData {
 export interface JourneySession {
   sessionId: string;
   visitorId: string;
+  userId: string;
+  userName: string;
   startedAt: number;
   endedAt: number;
   durationMs: number;

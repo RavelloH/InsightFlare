@@ -20,6 +20,11 @@ describe("query route policy", () => {
     expect(PUBLIC_QUERY_PATHS).not.toContain("overview-source-link");
     expect(PUBLIC_QUERY_PATHS).toContain("overview-source-channel");
     expect(PUBLIC_QUERY_PATHS).toContain("referrer-channel-dimension-trend");
+    expect(PUBLIC_QUERY_PATHS).not.toContain("visitors");
+    expect(PUBLIC_QUERY_PATHS).not.toContain("sessions");
+    expect(PUBLIC_QUERY_PATHS).not.toContain("visitor-detail");
+    expect(PUBLIC_QUERY_PATHS).not.toContain("session-detail");
+    expect(PUBLIC_QUERY_PATHS).not.toContain("event-record-detail");
     expect(DASHBOARD_QUERY_PATHS).toContain("event-record-detail");
     expect(DASHBOARD_QUERY_PATHS).toContain("funnels");
     expect(DASHBOARD_QUERY_PATHS).toContain("overview-source-channel");

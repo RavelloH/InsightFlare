@@ -15170,6 +15170,10 @@ paths:
                             type: string
                           sessionId:
                             type: string
+                          userId:
+                            type: string
+                          userName:
+                            type: string
                           firstSeenAt:
                             type: number
                           lastSeenAt:
@@ -15213,6 +15217,8 @@ paths:
                         required:
                           - visitorId
                           - sessionId
+                          - userId
+                          - userName
                           - firstSeenAt
                           - lastSeenAt
                           - views
@@ -15333,6 +15339,8 @@ paths:
                   visitor:
                     visitorId: example
                     sessionId: example
+                    userId: example
+                    userName: example
                     firstSeenAt: 0
                     lastSeenAt: 0
                     views: 0
@@ -15639,6 +15647,10 @@ paths:
                             type: string
                           visitorId:
                             type: string
+                          userId:
+                            type: string
+                          userName:
+                            type: string
                           startedAt:
                             type: number
                           endedAt:
@@ -15700,6 +15712,8 @@ paths:
                         required:
                           - sessionId
                           - visitorId
+                          - userId
+                          - userName
                           - startedAt
                           - endedAt
                           - durationMs
@@ -15803,6 +15817,8 @@ paths:
                   session:
                     sessionId: example
                     visitorId: example
+                    userId: example
+                    userName: example
                     startedAt: 0
                     endedAt: 0
                     durationMs: 0
@@ -16660,6 +16676,10 @@ paths:
                               type: string
                             sessionId:
                               type: string
+                            userId:
+                              type: string
+                            userName:
+                              type: string
                             firstSeenAt:
                               type: number
                             lastSeenAt:
@@ -16703,6 +16723,8 @@ paths:
                           required:
                             - visitorId
                             - sessionId
+                            - userId
+                            - userName
                             - firstSeenAt
                             - lastSeenAt
                             - views
@@ -16739,6 +16761,8 @@ paths:
                   items:
                     - visitorId: example
                       sessionId: example
+                      userId: example
+                      userName: example
                       firstSeenAt: 0
                       lastSeenAt: 0
                       views: 0
@@ -17127,12 +17151,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_ba7cd480cd06"
+                $ref: "#/components/schemas/SharedSchema_6fe692740c99"
               example:
                 data:
                   items:
                     - sessionId: example
                       visitorId: example
+                      userId: example
+                      userName: example
                       startedAt: 0
                       endedAt: 0
                       durationMs: 0
@@ -17894,12 +17920,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_ba7cd480cd06"
+                $ref: "#/components/schemas/SharedSchema_6fe692740c99"
               example:
                 data:
                   items:
                     - sessionId: example
                       visitorId: example
+                      userId: example
+                      userName: example
                       startedAt: 0
                       endedAt: 0
                       durationMs: 0
@@ -26031,11 +26059,11 @@ components:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_ba7cd480cd06:
+    SharedSchema_6fe692740c99:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_0b2825516561"
+          $ref: "#/components/schemas/SharedSchema_e48a9d9eb379"
         meta:
           $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
       required:
@@ -26406,11 +26434,11 @@ components:
         - interval
         - points
       additionalProperties: false
-    SharedSchema_0b2825516561:
+    SharedSchema_e48a9d9eb379:
       type: object
       properties:
         items:
-          $ref: "#/components/schemas/SharedSchema_ffd4d8b33e22"
+          $ref: "#/components/schemas/SharedSchema_051198d1a062"
         pagination:
           $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
       required:
@@ -27033,7 +27061,7 @@ components:
           - longitude
         additionalProperties: false
         description: Individual real-time event from a visitor
-    SharedSchema_ffd4d8b33e22:
+    SharedSchema_051198d1a062:
       type: array
       items:
         type: object
@@ -27041,6 +27069,10 @@ components:
           sessionId:
             type: string
           visitorId:
+            type: string
+          userId:
+            type: string
+          userName:
             type: string
           startedAt:
             type: number
@@ -27131,6 +27163,8 @@ components:
         required:
           - sessionId
           - visitorId
+          - userId
+          - userName
           - startedAt
           - endedAt
           - durationMs

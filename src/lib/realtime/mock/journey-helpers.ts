@@ -240,9 +240,12 @@ export function createDemoJourneySession(
   );
   const screen = parseDemoScreenSize(first.screenSize);
   const firstGeo = ordered.find(hasValidDemoCoordinate);
+  const identityVisit = latestDemoIdentityVisit(ordered);
   return {
     sessionId,
     visitorId: first.visitorId,
+    userId: identityVisit?.userId ?? "",
+    userName: identityVisit?.userName ?? "",
     startedAt: first.startedAt,
     endedAt,
     durationMs,
@@ -268,6 +271,17 @@ export function createDemoJourneySession(
     screenWidth: screen.screenWidth,
     screenHeight: screen.screenHeight,
   };
+}
+
+export function latestDemoIdentityVisit(
+  visits: DemoVisitFact[],
+): DemoVisitFact | null {
+  const ordered = [...visits].sort(
+    (left, right) =>
+      right.startedAt - left.startedAt ||
+      right.visitId.localeCompare(left.visitId),
+  );
+  return ordered.find((visit) => Boolean(visit.userId?.trim())) ?? null;
 }
 
 export function demoVisitsBySession(

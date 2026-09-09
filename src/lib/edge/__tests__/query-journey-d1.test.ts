@@ -835,8 +835,8 @@ describe("edge journey detail D1 queries", () => {
         .prepare(
           `INSERT INTO visits (
             visit_id, site_id, visitor_id, session_id, status, started_at,
-            last_activity_at, pathname, hostname
-          ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, ?)`,
+            last_activity_at, pathname, hostname, user_id, user_name
+          ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           "event-only-visit",
@@ -847,6 +847,8 @@ describe("edge journey detail D1 queries", () => {
           baseMs - 60 * 60 * 1000,
           "/event-only",
           "example.test",
+          "event-user",
+          "Event User",
         );
       sqlite.database
         .prepare(
@@ -897,6 +899,8 @@ describe("edge journey detail D1 queries", () => {
         views: 0,
         events: 1,
         bounce: false,
+        userId: "event-user",
+        userName: "Event User",
       });
       expect(sessionRows[0]?.startedAt).not.toBe(0);
       expect(visitorRows).toHaveLength(1);
@@ -907,8 +911,186 @@ describe("edge journey detail D1 queries", () => {
         views: 0,
         sessions: 1,
         events: 1,
+        userId: "event-user",
+        userName: "Event User",
       });
       expect(visitorRows[0]?.firstSeenAt).not.toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("keeps identity pairs consistent, ignores anonymous rows, and searches identity", async () => {
+    const sqlite = createSqliteDetailEnv();
+    const targetWindow = queryWindow();
+    try {
+      const insertVisit = sqlite.database.prepare(`
+        INSERT INTO visits (
+          visit_id, site_id, visitor_id, session_id, status, started_at,
+          last_activity_at, pathname, hostname, user_id, user_name
+        ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', ?, ?)
+      `);
+      const addVisit = (
+        visitId: string,
+        visitorId: string,
+        sessionId: string,
+        pathname: string,
+        offset: number,
+        userId: string,
+        userName: string,
+      ) => {
+        const startedAt = baseMs + offset;
+        insertVisit.run(
+          visitId,
+          siteId,
+          visitorId,
+          sessionId,
+          startedAt,
+          startedAt,
+          pathname,
+          userId,
+          userName,
+        );
+      };
+
+      addVisit(
+        "identity-first",
+        "identity-visitor",
+        "identity-session",
+        "/first",
+        1_000,
+        "user-z",
+        "Old User",
+      );
+      addVisit(
+        "identity-paired",
+        "identity-visitor",
+        "identity-session",
+        "/identified",
+        2_000,
+        "user-a",
+        "New User",
+      );
+      addVisit(
+        "identity-tie-a",
+        "identity-visitor",
+        "identity-session",
+        "/tie-a",
+        2_000,
+        "user-tie-a",
+        "Tie A",
+      );
+      addVisit(
+        "identity-tie-z",
+        "identity-visitor",
+        "identity-session",
+        "/tie-z",
+        2_000,
+        "user-tie-z",
+        "Tie Z",
+      );
+      addVisit(
+        "identity-latest-anonymous",
+        "identity-visitor",
+        "identity-session",
+        "/latest",
+        3_000,
+        "",
+        "Stale Name",
+      );
+      addVisit(
+        "anonymous-only",
+        "anonymous-visitor",
+        "anonymous-session",
+        "/anonymous",
+        4_000,
+        "",
+        "",
+      );
+
+      const visitors = await queryVisitorsFromD1(
+        sqlite.env,
+        siteId,
+        targetWindow,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      );
+      const sessions = await querySessionsFromD1(
+        sqlite.env,
+        siteId,
+        targetWindow,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      );
+      expect(visitors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            visitorId: "identity-visitor",
+            userId: "user-tie-z",
+            userName: "Tie Z",
+            firstSeenAt: baseMs + 1_000,
+            lastSeenAt: baseMs + 3_000,
+          }),
+          expect.objectContaining({
+            visitorId: "anonymous-visitor",
+            userId: "",
+            userName: "",
+          }),
+        ]),
+      );
+      expect(sessions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sessionId: "identity-session",
+            userId: "user-tie-z",
+            userName: "Tie Z",
+            entryPath: "/first",
+            exitPath: "/latest",
+          }),
+          expect.objectContaining({
+            sessionId: "anonymous-session",
+            userId: "",
+            userName: "",
+          }),
+        ]),
+      );
+
+      await expect(
+        queryVisitorsFromD1(
+          sqlite.env,
+          siteId,
+          targetWindow,
+          EMPTY_FILTER_DOCUMENT,
+          10,
+          undefined,
+          undefined,
+          "new user",
+        ),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          visitorId: "identity-visitor",
+          userId: "user-tie-z",
+          userName: "Tie Z",
+        }),
+      ]);
+      await expect(
+        querySessionsFromD1(
+          sqlite.env,
+          siteId,
+          targetWindow,
+          EMPTY_FILTER_DOCUMENT,
+          10,
+          undefined,
+          undefined,
+          "new user",
+        ),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          sessionId: "identity-session",
+          userId: "user-tie-z",
+          userName: "Tie Z",
+        }),
+      ]);
     } finally {
       sqlite.close();
     }

@@ -36,6 +36,8 @@ function session(overrides: Partial<SessionRow> = {}): SessionRow {
   return {
     sessionId: "session-1",
     visitorId: "visitor-1",
+    userId: "user-1",
+    userName: "Ada",
     startedAt: baseMs,
     endedAt: baseMs + 30_000,
     durationMs: 30_000,
@@ -126,8 +128,10 @@ describe("edge journey helper branches", () => {
     expect(buildJourneySearchSql("   ")).toBeNull();
     const search = buildJourneySearchSql("  50%_off\\now  ", "v");
     expect(search?.condition).toContain("v.visitor_id");
+    expect(search?.condition).toContain("v.user_id");
+    expect(search?.condition).toContain("v.user_name");
     expect(search?.condition).toContain("direct");
-    expect(search?.bindings).toHaveLength(21);
+    expect(search?.bindings).toHaveLength(23);
     expect(search?.bindings[0]).toBe("%50\\%\\_off\\\\now%");
 
     expect(directionSql("asc")).toBe("ASC");
@@ -153,6 +157,8 @@ describe("edge journey helper branches", () => {
       }),
     ).toMatchObject({
       visitorId: "123",
+      userId: "",
+      userName: "",
       sessionId: "",
       firstSeenAt: 10,
       lastSeenAt: 0,

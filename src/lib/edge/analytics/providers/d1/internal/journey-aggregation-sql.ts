@@ -163,7 +163,14 @@ ranked_visits AS (
     ROW_NUMBER() OVER (
       PARTITION BY fv.visitor_id
       ORDER BY fv.started_at DESC, fv.visit_id DESC
-    ) AS latest_rank
+    ) AS latest_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY fv.visitor_id
+      ORDER BY
+        CASE WHEN TRIM(COALESCE(fv.user_id, '')) != '' THEN 0 ELSE 1 END,
+        fv.started_at DESC,
+        fv.visit_id DESC
+    ) AS identity_rank
   FROM filtered_visits fv
   WHERE fv.visitor_id != ''
   ${options.searchWhere ?? ""}
@@ -172,6 +179,8 @@ visitor_metrics AS (
   SELECT
     visitor_id,
     MAX(CASE WHEN latest_rank = 1 THEN session_id END) AS sessionId,
+    MAX(CASE WHEN identity_rank = 1 THEN user_id END) AS userId,
+    MAX(CASE WHEN identity_rank = 1 THEN user_name END) AS userName,
     MIN(started_at) AS firstSeenAt,
     MAX(started_at) AS lastSeenAt,
     COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views,
@@ -201,6 +210,8 @@ event_counts AS (
 SELECT
   vm.visitor_id AS visitorId,
   COALESCE(vm.sessionId, '') AS sessionId,
+  COALESCE(vm.userId, '') AS userId,
+  COALESCE(vm.userName, '') AS userName,
   vm.firstSeenAt,
   vm.lastSeenAt,
   vm.views,
@@ -248,7 +259,14 @@ ranked_visits AS (
     ROW_NUMBER() OVER (
       PARTITION BY fv.session_id
       ORDER BY fv.started_at DESC, fv.visit_id DESC
-    ) AS latest_rank
+    ) AS latest_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY fv.session_id
+      ORDER BY
+        CASE WHEN TRIM(COALESCE(fv.user_id, '')) != '' THEN 0 ELSE 1 END,
+        fv.started_at DESC,
+        fv.visit_id DESC
+    ) AS identity_rank
   FROM filtered_visits fv
   WHERE fv.session_id != ''
   ${options.searchWhere ?? ""}
@@ -272,6 +290,8 @@ session_metrics AS (
   SELECT
     session_id,
     MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitorId,
+    MAX(CASE WHEN identity_rank = 1 THEN user_id END) AS userId,
+    MAX(CASE WHEN identity_rank = 1 THEN user_name END) AS userName,
     MIN(started_at) AS startedAt,
     MAX(COALESCE(ended_at, last_activity_at, started_at)) AS endedAt,
     SUM(COALESCE(duration_ms, 0)) AS totalDurationMs,
@@ -310,6 +330,8 @@ geo_first AS (
 SELECT
   sm.session_id AS sessionId,
   COALESCE(sm.visitorId, '') AS visitorId,
+  COALESCE(sm.userId, '') AS userId,
+  COALESCE(sm.userName, '') AS userName,
   sm.startedAt,
   sm.endedAt,
   sm.totalDurationMs,

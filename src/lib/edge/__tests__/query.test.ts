@@ -252,6 +252,19 @@ async function publicQuery(
 
 const windowParams = `from=${from}&to=${to}`;
 
+function expectPublicPayloadWithoutIdentity(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) expectPublicPayloadWithoutIdentity(item);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    expect(key).not.toBe("userId");
+    expect(key).not.toBe("userName");
+    expectPublicPayloadWithoutIdentity(child);
+  }
+}
+
 function privatePath(pathname: string, params = "") {
   const suffix = params ? `&${params}` : "";
   return `/api/private/${pathname}?siteId=site-1&${windowParams}${suffix}`;
@@ -2430,13 +2443,15 @@ describe("edge query handlers", () => {
 
     expect(overview.status).toBe(200);
     expect(overview.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await overview.json()).toMatchObject({
+    const overviewPayload = await overview.json();
+    expect(overviewPayload).toMatchObject({
       ok: true,
       data: {
         views: 20,
         sessions: 8,
       },
     });
+    expectPublicPayloadWithoutIdentity(overviewPayload);
     expect(statements[0].bind).toHaveBeenCalledWith("public-slug");
     expect(privateOnly.status).toBe(404);
     expect(await privateOnly.json()).toMatchObject({

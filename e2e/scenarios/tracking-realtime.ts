@@ -148,6 +148,211 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
     await saveManifest();
   });
 
+  test("10b. identify preserves a visitor and reset isolates the next account", async ({
+    browser,
+    page,
+  }: {
+    browser: Browser;
+    page: Page;
+  }) => {
+    test.setTimeout(60_000);
+    const siteA = seed.sites.siteA;
+    expect(siteA).toBeDefined();
+
+    const aliceId = `e2e-alice-${context.runId}`;
+    const bobId = `e2e-bob-${context.runId}`;
+    const identityPath = "/identity";
+    let aliceVisitorId = "";
+    let bobVisitorId = "";
+    const identityContext = await browser.newContext();
+    const identityPage = await identityContext.newPage();
+    const collectPayloads: Array<{
+      exitReason?: string;
+      kind?: string;
+      referrerUrl?: string;
+      userId?: string;
+      userName?: string;
+      visitorId?: string;
+      pathname?: string;
+    }> = [];
+    identityPage.on("request", (request) => {
+      if (!request.url().endsWith("/collect") || request.method() !== "POST")
+        return;
+      try {
+        collectPayloads.push(
+          JSON.parse(
+            request.postData() || "{}",
+          ) as (typeof collectPayloads)[number],
+        );
+      } catch {
+        // The response assertions below remain the authoritative evidence.
+      }
+    });
+
+    try {
+      const initialCollect = waitForCollectResponse(identityPage, {
+        kind: "pageview",
+        pathname: identityPath,
+      });
+      await identityPage.goto(
+        `${testSiteURL}${identityPath}?siteId=${encodeURIComponent(siteA?.id || "")}`,
+        { waitUntil: "domcontentloaded" },
+      );
+      expect((await initialCollect).status()).toBe(204);
+      const initialPageview = collectPayloads.find(
+        (payload) => payload.kind === "pageview",
+      );
+      expect(initialPageview?.userId).toBeUndefined();
+      expect(initialPageview?.userName).toBeUndefined();
+      expect(
+        collectPayloads.filter((payload) => payload.kind === "identify"),
+      ).toHaveLength(0);
+
+      const aliceIdentify = waitForCollectResponse(identityPage, {
+        kind: "identify",
+        pathname: identityPath,
+      });
+      await identityPage.evaluate(
+        ({ userId }) =>
+          (
+            window as Window & {
+              insightflare?: {
+                identify: (id: string, options?: { name?: string }) => void;
+              };
+            }
+          ).insightflare?.identify(userId, { name: "Alice" }),
+        { userId: aliceId },
+      );
+      expect((await aliceIdentify).status()).toBe(204);
+      aliceVisitorId = initialPageview?.visitorId || "";
+      expect(aliceVisitorId).toBeTruthy();
+      expect(collectPayloads.at(-1)).toMatchObject({
+        kind: "identify",
+        userId: aliceId,
+        userName: "Alice",
+        visitorId: aliceVisitorId,
+      });
+
+      const resetLeave = waitForCollectResponse(identityPage, {
+        kind: "leave",
+        pathname: identityPath,
+      });
+      const resetPageview = waitForCollectResponse(identityPage, {
+        kind: "pageview",
+        pathname: identityPath,
+      });
+      await identityPage.evaluate(() => {
+        (
+          window as Window & {
+            insightflare?: { reset: () => void };
+          }
+        ).insightflare?.reset();
+      });
+      expect((await resetLeave).status()).toBe(204);
+      expect((await resetPageview).status()).toBe(204);
+      const resetLeavePayload = collectPayloads.find(
+        (payload) =>
+          payload.kind === "leave" && payload.exitReason === "identity_reset",
+      );
+      const resetPageviewPayload = collectPayloads.find(
+        (payload, index) =>
+          index > 0 &&
+          payload.kind === "pageview" &&
+          payload.visitorId !== aliceVisitorId,
+      );
+      expect(resetLeavePayload).toMatchObject({
+        exitReason: "identity_reset",
+        userId: aliceId,
+        userName: "Alice",
+        visitorId: aliceVisitorId,
+      });
+      expect(resetPageviewPayload).toMatchObject({
+        referrerUrl: "",
+        visitorId: expect.any(String),
+      });
+      expect(resetPageviewPayload?.userId).toBeUndefined();
+      expect(resetPageviewPayload?.userName).toBeUndefined();
+      expect(resetPageviewPayload?.visitorId).not.toBe(aliceVisitorId);
+
+      const bobIdentify = waitForCollectResponse(identityPage, {
+        kind: "identify",
+        pathname: identityPath,
+      });
+      await identityPage.evaluate(
+        ({ userId }) =>
+          (
+            window as Window & {
+              insightflare?: {
+                identify: (id: string, options?: { name?: string }) => void;
+              };
+            }
+          ).insightflare?.identify(userId, { name: "Bob" }),
+        { userId: bobId },
+      );
+      expect((await bobIdentify).status()).toBe(204);
+      bobVisitorId = resetPageviewPayload?.visitorId || "";
+      expect(collectPayloads.at(-1)).toMatchObject({
+        kind: "identify",
+        userId: bobId,
+        userName: "Bob",
+        visitorId: bobVisitorId,
+      });
+      expect(bobVisitorId).not.toBe(aliceVisitorId);
+    } finally {
+      await identityContext.close();
+    }
+
+    await signIn(page, "owner-a", ownerAPassword);
+    await flushSite(page, siteA?.id || "");
+
+    const aliceVisitors = await apiRequest<{
+      items: Array<{ userId: string; userName: string; visitorId: string }>;
+    }>(
+      page,
+      "GET",
+      `${siteQueryPath(siteA?.id || "", "visitors")}&search=${encodeURIComponent(aliceId)}`,
+      undefined,
+      "no-store",
+    );
+    expect(aliceVisitors.status).toBe(200);
+    expect(aliceVisitors.payload.data?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userId: aliceId,
+          userName: "Alice",
+          visitorId: aliceVisitorId,
+        }),
+      ]),
+    );
+
+    const bobSessions = await apiRequest<{
+      items: Array<{ userId: string; userName: string; visitorId: string }>;
+    }>(
+      page,
+      "GET",
+      `${siteQueryPath(siteA?.id || "", "sessions")}&search=${encodeURIComponent(bobId)}`,
+      undefined,
+      "no-store",
+    );
+    expect(bobSessions.status).toBe(200);
+    expect(bobSessions.payload.data?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userId: bobId,
+          userName: "Bob",
+          visitorId: bobVisitorId,
+        }),
+      ]),
+    );
+
+    if (seed.tracker?.siteA) {
+      seed.tracker.siteA.pageviews.push(identityPath);
+      seed.tracker.siteA.pageviews.push(identityPath);
+      seed.tracker.siteA.overview.views = seed.tracker.siteA.pageviews.length;
+      await saveManifest();
+    }
+  });
+
   test("11. realtime websocket receives a visitor before the durable object flush", async ({
     browser,
     page,

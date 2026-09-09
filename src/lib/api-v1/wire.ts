@@ -1189,6 +1189,8 @@ const AnalyticsVisitorSchema = z
   .object({
     visitorId: z.string(),
     sessionId: z.string(),
+    userId: z.string(),
+    userName: z.string(),
     firstSeenAt: z.number(),
     lastSeenAt: z.number(),
     views: z.number(),
@@ -1213,6 +1215,8 @@ const AnalyticsSessionSchema = z
   .object({
     sessionId: z.string(),
     visitorId: z.string(),
+    userId: z.string(),
+    userName: z.string(),
     startedAt: z.number(),
     endedAt: z.number(),
     durationMs: z.number(),

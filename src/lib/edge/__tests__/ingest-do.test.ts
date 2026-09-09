@@ -1634,7 +1634,7 @@ describe("IngestDurableObject", () => {
     ).toEqual({ status: "complete", dirty: 0 });
   });
 
-  it("applies identify updates to buffered visits, buffered events, and persisted D1 visits", async () => {
+  it("updates only the current buffered visit and preserves the persisted fallback", async () => {
     const ctx = createTestDo();
 
     await postIngest(ctx.object, envelope());
@@ -1648,6 +1648,20 @@ describe("IngestDurableObject", () => {
         sequence: 1,
       }),
     );
+    const currentSessionId =
+      localRows<{ session_id: string }>(
+        ctx.sql,
+        "SELECT session_id FROM buffered_visits WHERE visit_id = ?",
+        "visit-1",
+      )[0]?.session_id ?? "";
+    insertBufferedVisit(ctx.sql, {
+      visit_id: "prior-visit",
+      session_id: currentSessionId,
+      started_at: NOW - 3_000,
+      last_activity_at: NOW - 3_000,
+    });
+    ctx.d1.prepare.mockClear();
+
     await postIngest(
       ctx.object,
       envelope({
@@ -1702,7 +1716,14 @@ describe("IngestDurableObject", () => {
       "event-1",
     );
     expect(bufferedVisit).toEqual({ user_id: "user-1", user_name: "Ada" });
-    expect(bufferedEvent).toEqual({ user_id: "user-1" });
+    expect(bufferedEvent).toEqual({ user_id: "" });
+    expect(
+      localRows<{ user_id: string; user_name: string }>(
+        ctx.sql,
+        "SELECT user_id, user_name FROM buffered_visits WHERE visit_id = ?",
+        "prior-visit",
+      )[0],
+    ).toEqual({ user_id: "", user_name: "" });
 
     ctx.d1.insertVisit({ visit_id: "persisted-visit", user_id: "" });
     const persistedIdentify = await postIngest(
@@ -1722,6 +1743,16 @@ describe("IngestDurableObject", () => {
         "persisted-visit",
       )[0],
     ).toEqual({ user_id: "persisted-user", user_name: "Grace" });
+    const persistedQueries = ctx.d1.prepare.mock.calls.map(([query]) =>
+      String(query),
+    );
+    expect(
+      persistedQueries.some(
+        (query) =>
+          query.includes("session_id AS sessionId") &&
+          query.includes("visitor_id AS visitorId"),
+      ),
+    ).toBe(true);
   });
 
   it("buffers custom events waiting for a visit, rejects invalid data, and flushes event JSON paths", async () => {
@@ -2539,6 +2570,15 @@ describe("IngestDurableObject", () => {
     await postIngest(
       ctx.object,
       envelope({
+        kind: "identify",
+        visitId: "socket-visit",
+        userId: "socket-user",
+        userName: "Socket User",
+      }),
+    );
+    await postIngest(
+      ctx.object,
+      envelope({
         kind: "visibility",
         visitId: "socket-visit",
         visibilityState: "hidden",
@@ -2569,11 +2609,20 @@ describe("IngestDurableObject", () => {
     expect(eventMessages.map((message) => message.data.eventType)).toEqual([
       "visit",
       "Socket Event",
+      "identify",
       "visibility",
       "visibility",
       "__presence_leave",
     ]);
     expect(eventMessages[2]?.data).toMatchObject({
+      eventKind: "identify",
+      visitId: "socket-visit",
+      sessionId: expect.any(String),
+      visitorId: "socket-visitor",
+      userId: "socket-user",
+      userName: "Socket User",
+    });
+    expect(eventMessages[3]?.data).toMatchObject({
       eventKind: "visibility",
       visibilityState: "hidden",
       visitId: "socket-visit",
@@ -2586,7 +2635,7 @@ describe("IngestDurableObject", () => {
       os: "Windows",
       country: "US",
     });
-    expect(eventMessages[3]?.data).toMatchObject({
+    expect(eventMessages[4]?.data).toMatchObject({
       eventKind: "visibility",
       visibilityState: "visible",
       status: "open",
@@ -2602,7 +2651,7 @@ describe("IngestDurableObject", () => {
         visitId: "after-close",
       }),
     );
-    expect(healthyServer.sent).toHaveLength(6);
+    expect(healthyServer.sent).toHaveLength(7);
 
     const snapshot = await ctx.object.fetch(
       new Request("https://ingest.internal/snapshot?from=NaN&to=NaN&limit=NaN"),

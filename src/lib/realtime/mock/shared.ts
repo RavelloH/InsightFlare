@@ -173,6 +173,8 @@ export function demoVisitMatchesJourneySearch(
   return demoValuesIncludeSearch(search, [
     visit.visitorId,
     visit.sessionId,
+    visit.userId,
+    visit.userName,
     visit.pathname,
     demoQueryStringForVisit(visit),
     demoHashFragmentForVisit(visit),

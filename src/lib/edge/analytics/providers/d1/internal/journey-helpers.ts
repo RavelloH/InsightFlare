@@ -79,6 +79,8 @@ export function buildJourneySearchSql(
   const expressions = [
     `${prefix}visitor_id`,
     `${prefix}session_id`,
+    `${prefix}user_id`,
+    `${prefix}user_name`,
     `${prefix}pathname`,
     `${prefix}query_string`,
     `${prefix}hash_fragment`,
@@ -140,6 +142,8 @@ export function mapVisitorRow(row: Record<string, unknown>): VisitorRow {
   return {
     visitorId: String(row.visitorId ?? ""),
     sessionId: String(row.sessionId ?? ""),
+    userId: String(row.userId ?? ""),
+    userName: String(row.userName ?? ""),
     firstSeenAt: Number(row.firstSeenAt ?? 0),
     lastSeenAt: Number(row.lastSeenAt ?? 0),
     views: Number(row.views ?? 0),
@@ -170,6 +174,8 @@ export function mapSessionRow(row: Record<string, unknown>): SessionRow {
   return {
     sessionId: String(row.sessionId ?? ""),
     visitorId: String(row.visitorId ?? ""),
+    userId: String(row.userId ?? ""),
+    userName: String(row.userName ?? ""),
     startedAt,
     endedAt,
     durationMs: sessionDurationMs(

@@ -77,6 +77,17 @@ describe("mock/fact-builder", () => {
       expect(dataset.sessions.size).toBeGreaterThan(0);
       expect(dataset.visitors.size).toBeGreaterThan(0);
       expect(dataset.viewWeight).toBeGreaterThanOrEqual(1);
+      expect(dataset.visits.some((visit) => !visit.userId)).toBe(true);
+      expect(
+        dataset.visits.some(
+          (visit) => Boolean(visit.userId) && !visit.userName,
+        ),
+      ).toBe(true);
+      expect(
+        dataset.visits.some(
+          (visit) => Boolean(visit.userId) && Boolean(visit.userName),
+        ),
+      ).toBe(true);
       // visits should be sorted by startedAt
       for (let i = 1; i < dataset.visits.length; i += 1) {
         expect(dataset.visits[i].startedAt).toBeGreaterThanOrEqual(

@@ -22247,6 +22247,12 @@
                             "sessionId": {
                               "type": "string"
                             },
+                            "userId": {
+                              "type": "string"
+                            },
+                            "userName": {
+                              "type": "string"
+                            },
                             "firstSeenAt": {
                               "type": "number"
                             },
@@ -22319,6 +22325,8 @@
                           "required": [
                             "visitorId",
                             "sessionId",
+                            "userId",
+                            "userName",
                             "firstSeenAt",
                             "lastSeenAt",
                             "views",
@@ -22482,6 +22490,8 @@
                     "visitor": {
                       "visitorId": "example",
                       "sessionId": "example",
+                      "userId": "example",
+                      "userName": "example",
                       "firstSeenAt": 0,
                       "lastSeenAt": 0,
                       "views": 0,
@@ -22921,6 +22931,12 @@
                             "visitorId": {
                               "type": "string"
                             },
+                            "userId": {
+                              "type": "string"
+                            },
+                            "userName": {
+                              "type": "string"
+                            },
                             "startedAt": {
                               "type": "number"
                             },
@@ -23028,6 +23044,8 @@
                           "required": [
                             "sessionId",
                             "visitorId",
+                            "userId",
+                            "userName",
                             "startedAt",
                             "endedAt",
                             "durationMs",
@@ -23165,6 +23183,8 @@
                     "session": {
                       "sessionId": "example",
                       "visitorId": "example",
+                      "userId": "example",
+                      "userName": "example",
                       "startedAt": 0,
                       "endedAt": 0,
                       "durationMs": 0,
@@ -24370,6 +24390,12 @@
                               "sessionId": {
                                 "type": "string"
                               },
+                              "userId": {
+                                "type": "string"
+                              },
+                              "userName": {
+                                "type": "string"
+                              },
                               "firstSeenAt": {
                                 "type": "number"
                               },
@@ -24442,6 +24468,8 @@
                             "required": [
                               "visitorId",
                               "sessionId",
+                              "userId",
+                              "userName",
                               "firstSeenAt",
                               "lastSeenAt",
                               "views",
@@ -24490,6 +24518,8 @@
                       {
                         "visitorId": "example",
                         "sessionId": "example",
+                        "userId": "example",
+                        "userName": "example",
                         "firstSeenAt": 0,
                         "lastSeenAt": 0,
                         "views": 0,
@@ -25060,7 +25090,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SharedSchema_ba7cd480cd06"
+                  "$ref": "#/components/schemas/SharedSchema_6fe692740c99"
                 },
                 "example": {
                   "data": {
@@ -25068,6 +25098,8 @@
                       {
                         "sessionId": "example",
                         "visitorId": "example",
+                        "userId": "example",
+                        "userName": "example",
                         "startedAt": 0,
                         "endedAt": 0,
                         "durationMs": 0,
@@ -26174,7 +26206,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SharedSchema_ba7cd480cd06"
+                  "$ref": "#/components/schemas/SharedSchema_6fe692740c99"
                 },
                 "example": {
                   "data": {
@@ -26182,6 +26214,8 @@
                       {
                         "sessionId": "example",
                         "visitorId": "example",
+                        "userId": "example",
+                        "userName": "example",
                         "startedAt": 0,
                         "endedAt": 0,
                         "durationMs": 0,
@@ -38387,11 +38421,11 @@
         ],
         "additionalProperties": false
       },
-      "SharedSchema_ba7cd480cd06": {
+      "SharedSchema_6fe692740c99": {
         "type": "object",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/SharedSchema_0b2825516561"
+            "$ref": "#/components/schemas/SharedSchema_e48a9d9eb379"
           },
           "meta": {
             "$ref": "#/components/schemas/SharedSchema_72e5450ef6c5"
@@ -38910,11 +38944,11 @@
         ],
         "additionalProperties": false
       },
-      "SharedSchema_0b2825516561": {
+      "SharedSchema_e48a9d9eb379": {
         "type": "object",
         "properties": {
           "items": {
-            "$ref": "#/components/schemas/SharedSchema_ffd4d8b33e22"
+            "$ref": "#/components/schemas/SharedSchema_051198d1a062"
           },
           "pagination": {
             "$ref": "#/components/schemas/SharedSchema_84bd4e13bfb1"
@@ -39902,7 +39936,7 @@
           "description": "Individual real-time event from a visitor"
         }
       },
-      "SharedSchema_ffd4d8b33e22": {
+      "SharedSchema_051198d1a062": {
         "type": "array",
         "items": {
           "type": "object",
@@ -39911,6 +39945,12 @@
               "type": "string"
             },
             "visitorId": {
+              "type": "string"
+            },
+            "userId": {
+              "type": "string"
+            },
+            "userName": {
               "type": "string"
             },
             "startedAt": {
@@ -40080,6 +40120,8 @@
           "required": [
             "sessionId",
             "visitorId",
+            "userId",
+            "userName",
             "startedAt",
             "endedAt",
             "durationMs",

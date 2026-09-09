@@ -236,6 +236,8 @@ export function mapReferrers(rows: ReferrerRow[]) {
 export function mapVisitors(rows: VisitorRow[]) {
   return rows.map((row) => ({
     visitorId: row.visitorId,
+    userId: row.userId,
+    userName: row.userName,
     sessionId: row.sessionId ?? "",
     firstSeenAt: row.firstSeenAt,
     lastSeenAt: row.lastSeenAt,

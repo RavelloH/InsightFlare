@@ -80,11 +80,6 @@ function demoOperatingSystemName(osVersion: string): string {
   return osVersion.trim().split(/\s+/)[0] || "Linux";
 }
 
-function demoUserName(visitorId: string): string {
-  const suffix = visitorId.trim().slice(-6).toUpperCase() || "000000";
-  return `Demo visitor ${suffix}`;
-}
-
 function demoPostalCode(country: string, visitorId: string): string {
   const checksum = Array.from(visitorId).reduce(
     (sum, character) => sum + character.charCodeAt(0),
@@ -138,8 +133,8 @@ function demoRealtimeMetadata(
     utmCampaign: visit.utmCampaign ?? "",
     utmTerm: visit.utmSource ? `${visit.eventType}-intent` : "",
     utmContent: visit.utmSource ? "demo-cta" : "",
-    userId: `demo-user-${visit.visitorId}`,
-    userName: demoUserName(visit.visitorId),
+    userId: visit.userId ?? "",
+    userName: visit.userName ?? "",
     isEU: DEMO_EU_COUNTRIES.has(visit.country.trim().toUpperCase()),
     postalCode: demoPostalCode(visit.country, visit.visitorId),
     metroCode: `${visit.country}-${visit.regionCode || "global"}`,

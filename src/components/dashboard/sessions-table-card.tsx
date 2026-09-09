@@ -27,6 +27,7 @@ import {
   OsMeta,
   ReferrerMeta,
   VisitorAvatar,
+  visitorDisplayName,
 } from "@/components/dashboard/journey-display";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -305,6 +306,9 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
   const openSession = () => onOpenSession(row.sessionId);
   const sessionId = row.sessionId.trim();
   const visitorId = row.visitorId.trim();
+  const userId = row.userId.trim();
+  const userName = row.userName.trim();
+  const displayName = visitorDisplayName(userName, userId, labels.anonymous);
   const entryPath = formatPath(row.entryPath);
   const exitPath = formatPath(row.exitPath);
   const referrerHost = row.referrerHost.trim();
@@ -344,7 +348,11 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
   const cells: Record<SessionTableColumnId, ReactNode> = {
     visitor: (
       <ClickableTableCell
-        onClick={openSession}
+        onClick={
+          visitorId && onOpenVisitor
+            ? () => onOpenVisitor(visitorId)
+            : openSession
+        }
         className="w-32"
         buttonClassName="pl-4"
         focusable
@@ -358,6 +366,24 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
             request={{
               key: `session-visitor:${sessionId}:${visitorId}`,
               items: [
+                ...(userName
+                  ? [
+                      {
+                        label: messages.sessionDetail.userName,
+                        value: userName,
+                        copyValue: userName,
+                      },
+                    ]
+                  : []),
+                ...(userId
+                  ? [
+                      {
+                        label: messages.sessionDetail.userId,
+                        value: userId,
+                        copyValue: userId,
+                      },
+                    ]
+                  : []),
                 {
                   label: messages.sessionDetail.visitorId,
                   value: visitorId || messages.common.unknown,
@@ -373,7 +399,7 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
               ],
             }}
           >
-            <span className="truncate">{labels.anonymous}</span>
+            <span className="truncate">{displayName}</span>
           </AnalyticsDetailsTooltipTarget>
         </div>
       </ClickableTableCell>

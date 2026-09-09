@@ -1487,9 +1487,14 @@ export class IngestDurableObject extends DurableObject {
     const now = Date.now();
     const updatedAt = toUnixSeconds(now);
     const flushDueAt = now + D1_FLUSH_INTERVAL_MS;
-    const localVisit = this.sqlOne<{ sessionId: string | null }>(
+    const localVisit = this.sqlOne<{
+      sessionId: string | null;
+      visitorId: string | null;
+    }>(
       `
-        SELECT session_id AS sessionId
+        SELECT
+          session_id AS sessionId,
+          visitor_id AS visitorId
         FROM buffered_visits
         WHERE visit_id = ? AND site_id = ?
         LIMIT 1
@@ -1498,6 +1503,7 @@ export class IngestDurableObject extends DurableObject {
       record.siteId,
     );
     let serverSessionId = localVisit?.sessionId || "";
+    let serverVisitorId = localVisit?.visitorId || "";
 
     const rowsUpdated = this.sqlRun(
       `
@@ -1552,49 +1558,22 @@ export class IngestDurableObject extends DurableObject {
       record.userName || null,
     );
 
-    // Update buffered_custom_events for the same visit
-    this.sqlRun(
-      `
-        UPDATE buffered_custom_events
-        SET user_id = ?, dirty = 1,
-            flush_due_at = CASE
-              WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
-              ELSE flush_due_at
-            END,
-            next_due_at = CASE
-              WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
-              ELSE flush_due_at
-            END,
-            buffer_revision = buffer_revision + 1
-        WHERE visit_id = ?
-          AND site_id = ?
-          AND user_id IS NOT ?
-      `,
-      record.userId,
-      flushDueAt,
-      flushDueAt,
-      flushDueAt,
-      flushDueAt,
-      record.visitId,
-      record.siteId,
-      record.userId,
-    );
-
-    if (rowsUpdated === 0) {
-      if (!serverSessionId && !localVisit) {
-        const persistedVisit = await this.doEnv.DB.prepare(
-          `
-            SELECT session_id AS sessionId
-            FROM visits
-            WHERE visit_id = ? AND site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-            LIMIT 1
-          `,
-        )
-          .bind(record.visitId, record.siteId)
-          .first<{ sessionId: string }>()
-          .catch(() => null);
-        serverSessionId = persistedVisit?.sessionId || "";
-      }
+    if (rowsUpdated === 0 && !localVisit) {
+      const persistedVisit = await this.doEnv.DB.prepare(
+        `
+          SELECT
+            session_id AS sessionId,
+            visitor_id AS visitorId
+          FROM visits
+          WHERE visit_id = ? AND site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+          LIMIT 1
+        `,
+      )
+        .bind(record.visitId, record.siteId)
+        .first<{ sessionId: string; visitorId: string }>()
+        .catch(() => null);
+      serverSessionId = persistedVisit?.sessionId || "";
+      serverVisitorId = persistedVisit?.visitorId || "";
       await this.doEnv.DB.prepare(
         `
           UPDATE visits
@@ -1611,66 +1590,8 @@ export class IngestDurableObject extends DurableObject {
         .run()
         .catch(() => {});
     }
-
-    if (serverSessionId) {
-      this.sqlRun(
-        `
-          UPDATE buffered_visits
-          SET user_id = ?, user_name = ?, dirty = 1,
-              buffer_revision = buffer_revision + 1,
-              flush_due_at = CASE
-                WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
-                ELSE flush_due_at
-              END,
-              next_due_at = CASE
-                WHEN status = 'open' THEN MIN(
-                  CASE
-                    WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
-                    ELSE flush_due_at
-                  END,
-                  last_activity_at + ?
-                )
-                WHEN status = 'hidden_pending' THEN MIN(
-                  CASE
-                    WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
-                    ELSE flush_due_at
-                  END,
-                  COALESCE(hidden_at, last_activity_at) + ?
-                )
-                ELSE CASE
-                  WHEN dirty = 0 OR flush_due_at IS NULL OR flush_due_at > ? THEN ?
-                  ELSE flush_due_at
-                END
-              END,
-              updated_at = ?
-          WHERE session_id = ?
-            AND site_id = ?
-            AND visit_id != ?
-            AND (user_id = '' OR user_id IS NULL)
-            AND (user_id IS NOT ? OR user_name IS NOT ?)
-        `,
-        record.userId,
-        record.userName || null,
-        flushDueAt,
-        flushDueAt,
-        flushDueAt,
-        flushDueAt,
-        VISIT_TIMEOUT_MS,
-        flushDueAt,
-        flushDueAt,
-        HIDDEN_LEAVE_GRACE_MS,
-        flushDueAt,
-        flushDueAt,
-        updatedAt,
-        serverSessionId,
-        record.siteId,
-        record.visitId,
-        record.userId,
-        record.userName || null,
-      );
-    }
     logger.info(
-      rowsUpdated > 0
+      localVisit
         ? "do.ingest.identify_buffered"
         : "do.ingest.identify_persisted",
     );
@@ -1690,7 +1611,7 @@ export class IngestDurableObject extends DurableObject {
       hostname: "",
       referrerUrl: "",
       referrerHost: "",
-      visitorId: "",
+      visitorId: serverVisitorId,
       userId: record.userId,
       userName: record.userName,
       country: "",

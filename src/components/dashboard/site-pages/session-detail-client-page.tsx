@@ -37,6 +37,7 @@ import {
   OsMeta,
   ReferrerMeta,
   VisitorAvatar,
+  visitorDisplayName,
 } from "@/components/dashboard/journey-display";
 import {
   JourneyGeoLocationCard,
@@ -133,6 +134,8 @@ function createSessionDetailPlaceholder(sessionId: string): SessionDetail {
     session: {
       sessionId,
       visitorId: "",
+      userId: "",
+      userName: "",
       startedAt: 0,
       endedAt: 0,
       durationMs: 0,
@@ -979,6 +982,11 @@ const SessionMapHero = memo(function SessionMapHero({
   const effectiveTheme: SessionDetailMapTheme =
     resolvedTheme === "dark" ? "dark" : "light";
   const visitorId = session.visitorId.trim();
+  const displayName = visitorDisplayName(
+    session.userName,
+    session.userId,
+    labels.anonymous,
+  );
   const points = useMemo(
     () => (modalReady ? sessionLocationPoints(locationPoints, session) : []),
     [locationPoints, modalReady, session],
@@ -1064,7 +1072,7 @@ const SessionMapHero = memo(function SessionMapHero({
               <VisitorAvatar seed={session.visitorId} className="size-12" />
               <div className="min-w-0">
                 <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
-                  {labels.anonymous}
+                  {displayName}
                 </h1>
                 <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
                   {labels.visitorId}: {session.visitorId}
@@ -1081,7 +1089,7 @@ const SessionMapHero = memo(function SessionMapHero({
               <VisitorAvatar seed={session.visitorId} className="size-12" />
               <div className="min-w-0">
                 <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground">
-                  {labels.anonymous}
+                  {displayName}
                 </h1>
                 <p className="mt-1 truncate font-mono text-[11px] text-foreground/70">
                   {labels.visitorId}: {session.visitorId}
@@ -1140,6 +1148,23 @@ const MetaPanel = memo(function MetaPanel({
     <Card className="py-0">
       <CardContent className="p-0">
         <div className="grid grid-cols-2 gap-px overflow-hidden bg-border/70 text-xs text-muted-foreground xl:grid-cols-4">
+          <SummaryGridItem
+            label={labels.userName}
+            loading={loading}
+            value={session.userName || messages.common.unknown}
+          />
+          <SummaryGridItem
+            label={labels.userId}
+            mono
+            loading={loading}
+            value={session.userId || messages.common.unknown}
+          />
+          <SummaryGridItem
+            label={labels.visitorId}
+            mono
+            loading={loading}
+            value={session.visitorId || messages.common.unknown}
+          />
           <SummaryGridItem
             label={labels.duration}
             prominent

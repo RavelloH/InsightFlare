@@ -464,6 +464,75 @@ describe("realtime client", () => {
     ]);
   });
 
+  it("patches existing visits from identify events without creating traffic observations", async () => {
+    const client = await importClientWithEnv();
+    vi.stubGlobal("WebSocket", FakeSocket);
+    releases.push(client.acquireRealtimeChannel("site-identify"));
+    const socket = sockets[0]!;
+    socket.open();
+    const now = Date.now();
+
+    socket.message(
+      realtimeMessage("event", {
+        id: "identify-before-pageview",
+        eventType: "identify",
+        eventAt: now + 100,
+        eventKind: "identify",
+        visitId: "visit-identify",
+        sessionId: "session-identify",
+        visitorId: "visitor-identify",
+        userId: "user-ada",
+        userName: "Ada",
+      }),
+    );
+    socket.message(
+      realtimeMessage("event", {
+        id: "pageview-after-identify",
+        eventType: "pageview",
+        eventAt: now,
+        eventKind: "pageview",
+        visitId: "visit-identify",
+        sessionId: "session-identify",
+        visitorId: "visitor-identify",
+        pathname: "/account",
+      }),
+    );
+    socket.message(
+      realtimeMessage("event", {
+        id: "identify-unknown-visit",
+        eventType: "identify",
+        eventAt: now + 200,
+        eventKind: "identify",
+        visitId: "unknown-visit",
+        sessionId: "unknown-session",
+        visitorId: "unknown-visitor",
+        userId: "user-unknown",
+        userName: "Unknown",
+      }),
+    );
+    vi.advanceTimersByTime(80);
+
+    const state = client.getRealtimeChannelState("site-identify");
+    expect(state.events.map((event) => event.id)).toEqual([
+      "identify-unknown-visit",
+      "identify-before-pageview",
+      "pageview-after-identify",
+    ]);
+    expect(state.activeNow).toBe(1);
+    expect(state.visitorsLast30m).toBe(1);
+    expect(state.viewsLast30m).toBe(1);
+    expect(state.points).toEqual([]);
+    expect(state.visits).toMatchObject([
+      {
+        visitId: "visit-identify",
+        visitorId: "visitor-identify",
+        userId: "user-ada",
+        userName: "Ada",
+      },
+    ]);
+    expect(state.visits).toHaveLength(1);
+  });
+
   it("normalizes default event fields from non-string envelopes and prunes zero-time activity on recompute", async () => {
     const client = await importClientWithEnv();
     vi.stubGlobal("WebSocket", FakeSocket);

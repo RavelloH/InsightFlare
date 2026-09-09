@@ -278,6 +278,25 @@ Available methods:
 - `setGlobalProperties(props)`: Add shared properties to subsequent events.
 - `clearGlobalProperties()`: Clear shared properties.
 
+#### Identify Users
+
+Associate the current visit with a signed-in user without changing the anonymous visitor boundary:
+
+```html
+<script>
+  window.insightflare.identify("user-123", { name: "Alice" });
+</script>
+```
+
+Call `identify` after sign-in so the current and subsequent visits can be analyzed together. Calling it before the first page view is also supported. On logout, call `reset()` to end the current identity, create a new anonymous visitor boundary, and prevent later events from inheriting the old account:
+
+```js
+window.insightflare.reset();
+window.insightflare.identify("user-456", { name: "Bob" });
+```
+
+Use `reset()` before switching accounts. Calling `identify("user-456")` alone does not create a new visitor boundary.
+
 #### Automatic Reporting via DOM Attributes
 
 ```html

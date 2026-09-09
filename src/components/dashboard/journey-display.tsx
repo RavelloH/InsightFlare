@@ -51,6 +51,14 @@ const OS_APPLE_ICON_KEYS = new Set(["ios", "mac-os"]);
 const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+\-.]*:\/\//i;
 const RELATIVE_TIME_FORMATTERS = new Map<string, Intl.RelativeTimeFormat>();
 
+export function visitorDisplayName(
+  userName: string | undefined,
+  userId: string | undefined,
+  anonymousLabel: string,
+): string {
+  return userName?.trim() || userId?.trim() || anonymousLabel;
+}
+
 function getRelativeTimeFormatter(locale: Locale): Intl.RelativeTimeFormat {
   const key = intlLocale(locale);
   const cached = RELATIVE_TIME_FORMATTERS.get(key);

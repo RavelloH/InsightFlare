@@ -509,6 +509,10 @@ function buildDerivedState(
   const latestVisitorEvents = new Map<string, RealtimeEvent>();
   const latestVisitVisibility = new Map<string, "hidden" | "visible">();
   const visitsById = new Map<string, RealtimeVisit>();
+  const identityPatches = new Map<
+    string,
+    Pick<RealtimeEvent, "userId" | "userName">
+  >();
   const visitorsLast30m = new Set<string>();
   let viewsLast30m = 0;
 
@@ -524,9 +528,16 @@ function buildDerivedState(
       }
       continue;
     }
-    if (eventKind !== "identify") {
-      upsertRecentVisit(visitsById, event);
+    if (eventKind === "identify") {
+      if (event.visitId && !identityPatches.has(event.visitId)) {
+        identityPatches.set(event.visitId, {
+          userId: event.userId,
+          userName: event.userName,
+        });
+      }
+      continue;
     }
+    upsertRecentVisit(visitsById, event);
     if (event.visitorId) {
       visitorsLast30m.add(event.visitorId);
     }
@@ -537,7 +548,6 @@ function buildDerivedState(
     if (
       !event.visitorId ||
       event.eventAt < activeCutoff ||
-      eventKind === "identify" ||
       event.status === "hidden_pending" ||
       latestVisitVisibility.get(event.visitId) === "hidden"
     ) {
@@ -547,6 +557,13 @@ function buildDerivedState(
     if (!existing || compareRealtimeEventsDesc(event, existing) < 0) {
       latestVisitorEvents.set(event.visitorId, event);
     }
+  }
+
+  for (const [visitId, identity] of identityPatches) {
+    const visit = visitsById.get(visitId);
+    if (!visit) continue;
+    visit.userId = identity.userId;
+    visit.userName = identity.userName;
   }
 
   const points: RealtimeVisitorPoint[] = [];

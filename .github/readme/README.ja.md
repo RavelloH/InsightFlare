@@ -275,6 +275,25 @@ InsightFlare のフロントエンド SDK は、手動呼び出しと DOM 属性
 - `setGlobalProperties(props)`: 以降のイベントに共通プロパティを追加します。
 - `clearGlobalProperties()`: 共通プロパティをクリアします。
 
+#### ユーザー識別
+
+`identify` を使うと、匿名の訪問者境界を変えずに現在の訪問をログインユーザーへ関連付けられます。
+
+```html
+<script>
+  window.insightflare.identify("user-123", { name: "Alice" });
+</script>
+```
+
+ログイン後に `identify` を呼び出すと、現在および以後の訪問をユーザー単位で分析できます。最初のページビューより前に呼び出すこともできます。ログアウト時は `reset()` を呼び出して現在の識別情報を終了し、新しい匿名訪問者境界を作成して、以後のイベントが以前のアカウントを引き継がないようにします。
+
+```js
+window.insightflare.reset();
+window.insightflare.identify("user-456", { name: "Bob" });
+```
+
+アカウントを切り替える前に `reset()` を呼び出してください。`identify("user-456")` だけでは新しい訪問者境界は作成されません。
+
 #### DOM 属性による自動送信
 
 ```html

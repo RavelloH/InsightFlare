@@ -47,6 +47,8 @@ function session(overrides: Partial<SessionRow> = {}): SessionRow {
   return {
     sessionId: "session-1",
     visitorId: "visitor-1",
+    userId: "user-1",
+    userName: "Ada",
     startedAt: 1_700_000_000_000,
     endedAt: 1_700_000_060_000,
     durationMs: 60_000,
@@ -247,7 +249,7 @@ describe("journey SQL helpers", () => {
     expect(search?.condition).toContain(
       "CASE WHEN TRIM(COALESCE(fv.referrer_host, '')) = ''",
     );
-    expect(search?.bindings).toHaveLength(21);
+    expect(search?.bindings).toHaveLength(23);
     expect(new Set(search?.bindings)).toEqual(new Set(["%ref\\%\\_\\\\term%"]));
     expect(buildJourneySearchSql("   ")).toBeNull();
   });
@@ -260,7 +262,7 @@ describe("journey SQL helpers", () => {
     expect(search?.condition).toContain(
       "CASE WHEN TRIM(COALESCE(referrer_host, '')) = ''",
     );
-    expect(search?.bindings).toHaveLength(21);
+    expect(search?.bindings).toHaveLength(23);
     expect(new Set(search?.bindings)).toEqual(new Set(["%direct\\_100\\%%"]));
   });
 
