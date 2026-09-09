@@ -120,7 +120,6 @@ export interface AppMessages {
     last90d: string;
     last6m: string;
     last12m: string;
-    allTime: string;
     custom: string;
   };
   intervals: {
@@ -2911,7 +2910,6 @@ const enMessages = {
     last90d: "Last 90 days",
     last6m: "Last 6 months",
     last12m: "Last 12 months",
-    allTime: "All Time",
     custom: "Custom Range",
   },
   intervals: {
@@ -6001,7 +5999,6 @@ const zhMessages = {
     last90d: "最近 90 天",
     last6m: "最近 6 个月",
     last12m: "最近 12 个月",
-    allTime: "所有时间",
     custom: "自定义时间段",
   },
   intervals: {
@@ -8998,7 +8995,6 @@ const jaMessages = {
     last90d: "過去 90 日",
     last6m: "過去 6 か月",
     last12m: "過去 12 か月",
-    allTime: "全期間",
     custom: "カスタム範囲",
   },
   intervals: {

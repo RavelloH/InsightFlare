@@ -126,7 +126,6 @@ ranges:
   last90d: 最近 90 天
   last6m: 最近 6 个月
   last12m: 最近 12 个月
-  allTime: 所有时间
   custom: 自定义时间段
 intervals:
   minute: 分钟

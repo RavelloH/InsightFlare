@@ -77,7 +77,6 @@ describe("dashboard query-state helpers", () => {
       ["30m", now - 30 * MINUTE_MS, now, "minute"],
       ["1h", now - HOUR_MS, now, "minute"],
       ["24h", now - DAY_MS, now, "hour"],
-      ["all", 0, now, "month"],
     ] satisfies Array<[RangePreset, number, number, string]>)(
       "resolves %s bounds",
       (preset, from, to, interval) => {

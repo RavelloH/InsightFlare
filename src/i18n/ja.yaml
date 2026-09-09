@@ -126,7 +126,6 @@ ranges:
   last90d: 過去 90 日
   last6m: 過去 6 か月
   last12m: 過去 12 か月
-  allTime: 全期間
   custom: カスタム範囲
 intervals:
   minute: 分

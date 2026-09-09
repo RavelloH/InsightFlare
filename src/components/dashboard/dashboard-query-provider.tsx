@@ -212,7 +212,6 @@ function clampPresetForMaxDays(
   if (range === "thisYear" && maxRangeDays <= 90) {
     return "90d";
   }
-  if (range === "all") return "12m";
   return range;
 }
 

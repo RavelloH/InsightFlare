@@ -167,7 +167,6 @@ function rangeLabel(messages: AppMessages, range: RangePreset): string {
   if (range === "90d") return messages.ranges.last90d;
   if (range === "6m") return messages.ranges.last6m;
   if (range === "12m") return messages.ranges.last12m;
-  if (range === "all") return messages.ranges.allTime;
   if (range === "custom") return messages.ranges.custom;
   return messages.ranges.last30d;
 }
@@ -275,7 +274,7 @@ const RANGE_GROUPS: ReadonlyArray<{
   },
   {
     key: "advanced",
-    items: ["all", "custom"],
+    items: ["custom"],
   },
 ];
 
@@ -574,7 +573,6 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
         ...group,
         items: group.items.filter((item) => {
           if (!maxRangeDays) return true;
-          if (item === "all") return false;
           if (maxRangeDays <= 90) {
             return item !== "6m" && item !== "12m";
           }

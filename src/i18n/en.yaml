@@ -126,7 +126,6 @@ ranges:
   last90d: Last 90 days
   last6m: Last 6 months
   last12m: Last 12 months
-  allTime: All Time
   custom: Custom Range
 intervals:
   minute: Minute

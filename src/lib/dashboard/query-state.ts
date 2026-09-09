@@ -40,7 +40,6 @@ export type RangePreset =
   | "90d"
   | "6m"
   | "12m"
-  | "all"
   | "custom";
 
 export type DashboardInterval = "minute" | "hour" | "day" | "week" | "month";
@@ -74,7 +73,6 @@ const RANGE_PRESETS: readonly RangePreset[] = [
   "90d",
   "6m",
   "12m",
-  "all",
   "custom",
 ] as const;
 
@@ -184,9 +182,6 @@ function rangeBounds(
       from: startOfZonedMonth(subtractZonedMonths(now, 12, timeZone), timeZone),
       to: now,
     };
-  }
-  if (preset === "all") {
-    return { from: 0, to: now };
   }
   if (preset === "custom" && isValidCustomRange(customRange)) {
     return {
