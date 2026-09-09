@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
 import {
   RiArrowRightLine,
   RiDeleteBinLine,
   RiEditLine,
+  RiFileList3Line,
 } from "@remixicon/react";
 
+import { AnalysisJourneyTable } from "@/components/dashboard/site-pages/analysis-journey-table";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,18 +17,21 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Slider } from "@/components/ui/slider";
 import {
   intlLocale,
   numberFormat,
   percentFormat,
 } from "@/lib/dashboard/format";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   FunnelAnalysisStep,
   FunnelDefinition,
   FunnelDetailData,
 } from "@/lib/edge-client";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
-import type { AppMessages } from "@/lib/i18n/messages";
+import { type AppMessages, getMessages } from "@/lib/i18n/messages";
 
 import {
   funnelConvertedLabel,
@@ -115,6 +121,7 @@ function FunnelStepRow({
   index,
   metric,
   loading = false,
+  selected = false,
 }: {
   readonly locale: Locale;
   readonly labels: AppMessages["funnels"];
@@ -124,6 +131,7 @@ function FunnelStepRow({
   readonly index: number;
   readonly metric: "sessions" | "visitors";
   readonly loading?: boolean;
+  readonly selected?: boolean;
 }) {
   const stepRate = analysisStep?.progression.stepConversionRate ?? 0;
   const conversionRate = analysisStep?.progression.conversionRate ?? 0;
@@ -139,134 +147,139 @@ function FunnelStepRow({
       : `${Math.max(2, Math.min(100, conversionRate * 100))}%`;
 
   return (
-    <div className="flex min-w-0 gap-3 border-b p-4 last:border-b-0">
-      <div className="flex aspect-square min-h-8 shrink-0 self-stretch items-center justify-center border bg-muted/40 font-mono text-xs text-muted-foreground">
-        {numberFormat(locale, index + 1)}
-      </div>
-      <div className="grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_11rem_11rem]">
-        <div className="min-w-0 space-y-2">
-          <AutoTransition
-            initial={false}
-            transitionKey={loading ? "loading" : funnelStep.id}
-            duration={0.18}
-            type="fade"
-            presenceMode="wait"
-            className="h-5 min-w-0"
-          >
-            {loading ? (
-              <Skeleton key="loading" className="h-5 w-[min(22rem,72%)]" />
-            ) : (
-              <div
-                key="ready"
-                className="flex min-w-0 flex-wrap items-center gap-2"
+    <div
+      className={`block w-full min-w-0 border-b last:border-b-0 ${selected ? "bg-muted/50" : ""}`}
+      aria-current={selected ? "step" : undefined}
+    >
+      <div className="flex min-w-0 gap-3 p-4">
+        <div className="flex aspect-square min-h-8 shrink-0 self-stretch items-center justify-center border bg-muted/40 font-mono text-xs text-muted-foreground">
+          {numberFormat(locale, index + 1)}
+        </div>
+        <div className="grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_11rem_11rem]">
+          <div className="min-w-0 space-y-2">
+            <AutoTransition
+              initial={false}
+              transitionKey={loading ? "loading" : funnelStep.id}
+              duration={0.18}
+              type="fade"
+              presenceMode="wait"
+              className="h-5 min-w-0"
+            >
+              {loading ? (
+                <Skeleton key="loading" className="h-5 w-[min(22rem,72%)]" />
+              ) : (
+                <div
+                  key="ready"
+                  className="flex min-w-0 flex-wrap items-center gap-2"
+                >
+                  <span className="min-w-0 break-words font-medium">
+                    {funnelStepLabel(funnelStep, descriptionMessages)}
+                  </span>
+                </div>
+              )}
+            </AutoTransition>
+            <AutoTransition
+              initial={false}
+              transitionKey={loading ? "loading" : width}
+              duration={0.18}
+              type="fade"
+              presenceMode="wait"
+              className="h-3 overflow-hidden bg-muted"
+            >
+              {loading ? (
+                <Skeleton key="loading" className="h-full w-full" />
+              ) : (
+                <div
+                  key="ready"
+                  className="h-full bg-primary transition-[width]"
+                  style={{ width }}
+                />
+              )}
+            </AutoTransition>
+          </div>
+          <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
+            <div>
+              <p className="text-muted-foreground">
+                {funnelMetricLabel(labels, metric)}
+              </p>
+              <AutoTransition
+                initial={false}
+                transitionKey={loading ? "loading" : primaryCount}
+                duration={0.18}
+                type="fade"
+                presenceMode="wait"
+                className="mt-1 h-4"
               >
-                <span className="min-w-0 break-words font-medium">
-                  {funnelStepLabel(funnelStep, descriptionMessages)}
-                </span>
-              </div>
-            )}
-          </AutoTransition>
-          <AutoTransition
-            initial={false}
-            transitionKey={loading ? "loading" : width}
-            duration={0.18}
-            type="fade"
-            presenceMode="wait"
-            className="h-3 overflow-hidden bg-muted"
-          >
-            {loading ? (
-              <Skeleton key="loading" className="h-full w-full" />
-            ) : (
-              <div
-                key="ready"
-                className="h-full bg-primary transition-[width]"
-                style={{ width }}
-              />
-            )}
-          </AutoTransition>
-        </div>
-        <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
-          <div>
-            <p className="text-muted-foreground">
-              {funnelMetricLabel(labels, metric)}
-            </p>
-            <AutoTransition
-              initial={false}
-              transitionKey={loading ? "loading" : primaryCount}
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              className="mt-1 h-4"
-            >
-              {loading ? (
-                <Skeleton key="loading" className="h-4 w-14" />
-              ) : (
-                <p key="ready" className="font-mono">
-                  {numberFormat(locale, primaryCount)}
-                </p>
-              )}
-            </AutoTransition>
+                {loading ? (
+                  <Skeleton key="loading" className="h-4 w-14" />
+                ) : (
+                  <p key="ready" className="font-mono">
+                    {numberFormat(locale, primaryCount)}
+                  </p>
+                )}
+              </AutoTransition>
+            </div>
+            <div>
+              <p className="text-muted-foreground">
+                {funnelMetricLabel(labels, secondaryMetric)}
+              </p>
+              <AutoTransition
+                initial={false}
+                transitionKey={loading ? "loading" : secondaryCount}
+                duration={0.18}
+                type="fade"
+                presenceMode="wait"
+                className="mt-1 h-4"
+              >
+                {loading ? (
+                  <Skeleton key="loading" className="h-4 w-14" />
+                ) : (
+                  <p key="ready" className="font-mono">
+                    {numberFormat(locale, secondaryCount)}
+                  </p>
+                )}
+              </AutoTransition>
+            </div>
           </div>
-          <div>
-            <p className="text-muted-foreground">
-              {funnelMetricLabel(labels, secondaryMetric)}
-            </p>
-            <AutoTransition
-              initial={false}
-              transitionKey={loading ? "loading" : secondaryCount}
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              className="mt-1 h-4"
-            >
-              {loading ? (
-                <Skeleton key="loading" className="h-4 w-14" />
-              ) : (
-                <p key="ready" className="font-mono">
-                  {numberFormat(locale, secondaryCount)}
-                </p>
-              )}
-            </AutoTransition>
-          </div>
-        </div>
-        <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
-          <div>
-            <p className="text-muted-foreground">{labels.stepConversion}</p>
-            <AutoTransition
-              initial={false}
-              transitionKey={loading ? "loading" : stepRate}
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              className="mt-1 h-4"
-            >
-              {loading ? (
-                <Skeleton key="loading" className="h-4 w-14" />
-              ) : (
-                <p key="ready" className="font-mono">
-                  {percentFormat(locale, stepRate)}
-                </p>
-              )}
-            </AutoTransition>
-          </div>
-          <div>
-            <p className="text-muted-foreground">{labels.dropOff}</p>
-            <AutoTransition
-              initial={false}
-              transitionKey={loading ? "loading" : dropOffCount}
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              className="mt-1 h-4"
-            >
-              {loading ? (
-                <Skeleton key="loading" className="h-4 w-14" />
-              ) : (
-                <p key="ready" className="font-mono">
-                  {numberFormat(locale, dropOffCount)}
-                </p>
-              )}
-            </AutoTransition>
+          <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
+            <div>
+              <p className="text-muted-foreground">{labels.stepConversion}</p>
+              <AutoTransition
+                initial={false}
+                transitionKey={loading ? "loading" : stepRate}
+                duration={0.18}
+                type="fade"
+                presenceMode="wait"
+                className="mt-1 h-4"
+              >
+                {loading ? (
+                  <Skeleton key="loading" className="h-4 w-14" />
+                ) : (
+                  <p key="ready" className="font-mono">
+                    {percentFormat(locale, stepRate)}
+                  </p>
+                )}
+              </AutoTransition>
+            </div>
+            <div>
+              <p className="text-muted-foreground">{labels.dropOff}</p>
+              <AutoTransition
+                initial={false}
+                transitionKey={loading ? "loading" : dropOffCount}
+                duration={0.18}
+                type="fade"
+                presenceMode="wait"
+                className="mt-1 h-4"
+              >
+                {loading ? (
+                  <Skeleton key="loading" className="h-4 w-14" />
+                ) : (
+                  <p key="ready" className="font-mono">
+                    {numberFormat(locale, dropOffCount)}
+                  </p>
+                )}
+              </AutoTransition>
+            </div>
           </div>
         </div>
       </div>
@@ -283,6 +296,10 @@ function FunnelDetailContent({
   canManage,
   onEdit,
   onDelete,
+  siteId,
+  pathname,
+  window,
+  filters,
 }: {
   readonly locale: Locale;
   readonly labels: AppMessages["funnels"];
@@ -292,10 +309,28 @@ function FunnelDetailContent({
   readonly canManage: boolean;
   readonly onEdit: (funnel: FunnelDefinition) => void;
   readonly onDelete: (funnel: FunnelDefinition) => void;
+  readonly siteId: string;
+  readonly pathname: string;
+  readonly window: TimeWindow;
+  readonly filters: FilterDocument;
 }) {
   const { funnel, analysis } = payload.data;
   const firstStep = analysis.steps[0];
   const lastStep = analysis.steps.at(-1);
+  const defaultStepId = lastStep?.stepId ?? funnel.steps.at(-1)?.id ?? "";
+  const [selectedStepId, setSelectedStepId] = useState(defaultStepId);
+  useEffect(() => {
+    setSelectedStepId(defaultStepId);
+  }, [defaultStepId, funnel.id]);
+  const matchedStepIndex = funnel.steps.findIndex(
+    (step) => step.id === selectedStepId,
+  );
+  const selectedStepIndex =
+    matchedStepIndex >= 0
+      ? matchedStepIndex
+      : Math.max(0, funnel.steps.length - 1);
+  const selectedFunnelStep = funnel.steps[selectedStepIndex];
+  const selectedAnalysisStep = analysis.steps[selectedStepIndex];
   const metric = funnelMetricKey(analysis.progressionScope);
   const secondaryMetric = metric === "sessions" ? "visitors" : "sessions";
   const startingCount = firstStep?.progression.count ?? 0;
@@ -446,10 +481,68 @@ function FunnelDetailContent({
               index={index}
               metric={metric}
               loading={loading}
+              selected={step.id === selectedStepId}
             />
           ))}
         </CardContent>
       </Card>
+
+      {selectedFunnelStep ? (
+        <section className="min-w-0 space-y-3">
+          <div>
+            <h3 className="inline-flex items-center gap-2 text-sm font-medium">
+              <RiFileList3Line className="size-4 shrink-0" />
+              {labels.conversionRecords}
+            </h3>
+          </div>
+          <AnalysisJourneyTable
+            entity={metric === "visitors" ? "visitor" : "session"}
+            siteId={siteId}
+            pathname={pathname}
+            locale={locale}
+            messages={getMessages(locale)}
+            window={window}
+            filters={filters}
+            analysisContext={{
+              type: "funnel",
+              funnelId: funnel.id,
+              stepId: selectedFunnelStep.id,
+            }}
+            toolbarLeading={
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {labels.step}
+                </span>
+                <Slider
+                  min={0}
+                  max={Math.max(0, funnel.steps.length - 1)}
+                  step={1}
+                  value={[selectedStepIndex]}
+                  onValueChange={(value) => {
+                    const nextIndex = Math.round(value[0] ?? selectedStepIndex);
+                    const nextStep = funnel.steps[nextIndex];
+                    if (nextStep) setSelectedStepId(nextStep.id);
+                  }}
+                  aria-label={labels.step}
+                  disabled={loading || funnel.steps.length < 2}
+                  className="w-20 sm:w-28"
+                />
+                <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                  {numberFormat(locale, selectedStepIndex + 1)}/
+                  {numberFormat(locale, funnel.steps.length)}
+                </span>
+              </div>
+            }
+            enabled={!loading && Boolean(selectedFunnelStep.id)}
+          />
+          {selectedAnalysisStep ? (
+            <p className="text-xs text-muted-foreground">
+              {numberFormat(locale, selectedAnalysisStep.progression.count)}{" "}
+              {funnelMetricLabel(labels, metric)}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -545,6 +638,10 @@ export function FunnelDetail({
   canManage,
   onEdit,
   onDelete,
+  siteId,
+  pathname,
+  window,
+  filters,
 }: {
   readonly locale: Locale;
   readonly labels: AppMessages["funnels"];
@@ -556,6 +653,10 @@ export function FunnelDetail({
   readonly canManage: boolean;
   readonly onEdit: (funnel: FunnelDefinition) => void;
   readonly onDelete: (funnel: FunnelDefinition) => void;
+  readonly siteId: string;
+  readonly pathname: string;
+  readonly window: TimeWindow;
+  readonly filters: FilterDocument;
 }) {
   if (!payload && error) {
     return (
@@ -587,6 +688,10 @@ export function FunnelDetail({
           canManage={canManage}
           onEdit={onEdit}
           onDelete={onDelete}
+          siteId={siteId}
+          pathname={pathname}
+          window={window}
+          filters={filters}
         />
       ) : (
         <FunnelDetailSkeleton labels={labels} funnel={funnel} />

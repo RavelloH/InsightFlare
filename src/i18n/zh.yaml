@@ -793,6 +793,7 @@ funnels:
   subtitle: 衡量多步骤用户旅程的转化情况。
   listTitle: 漏斗定义
   listSubtitle: 构建可复用的步骤序列，并按当前看板时间窗查看转化。
+  conversionRecords: 转化记录
   open: 打开漏斗
   moreActions: 更多操作
   create: 新建漏斗
@@ -862,6 +863,7 @@ goals:
   subtitle: 使用一个可复用的事件或页面条件衡量转化。
   listTitle: 目标定义
   listSubtitle: 查看这段时间范围内的转化率变化情况
+  conversionRecords: 转化记录
   open: 打开目标
   moreActions: 更多操作
   create: 新建目标

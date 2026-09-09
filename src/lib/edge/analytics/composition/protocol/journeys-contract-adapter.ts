@@ -1,6 +1,9 @@
 import { resolveReportingTimeZone } from "@/lib/dashboard/time-zone";
 import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1";
-import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
+import {
+  type JourneyAnalysisContext,
+  parseFilterUrlForAudience,
+} from "@/lib/edge/analytics/contract";
 import { siteQueryContext } from "@/lib/edge/analytics/contract";
 import type { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
@@ -22,6 +25,23 @@ import type { Env } from "@/lib/edge/types";
 type JourneyCollectionPath =
   "visitor-events" | "visitor-sessions" | "session-events";
 
+function parseJourneyAnalysisContext(
+  url: URL,
+): JourneyAnalysisContext | undefined | null {
+  const type = url.searchParams.get("analysisType")?.trim();
+  const id = url.searchParams.get("analysisId")?.trim();
+  const stepId = url.searchParams.get("analysisStepId")?.trim();
+  if (!type && !id && !stepId) return undefined;
+  if (!type || !id) return null;
+  if (type === "goal" && !stepId) {
+    return { type: "goal", goalId: id };
+  }
+  if (type === "funnel" && stepId) {
+    return { type: "funnel", funnelId: id, stepId };
+  }
+  return null;
+}
+
 export async function handleVisitorsContract(
   env: Env,
   siteId: string,
@@ -35,6 +55,8 @@ export async function handleVisitorsContract(
   const sort = parseVisitorListSort(url);
   const rawCursor = url.searchParams.get("cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
+  const analysisContext = parseJourneyAnalysisContext(url);
+  if (analysisContext === null) return badRequest("Invalid analysis context");
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
     readonly items: ReturnType<typeof mapVisitors>;
     readonly pagination: {
@@ -50,6 +72,7 @@ export async function handleVisitorsContract(
     page: { limit, cursor: rawCursor },
     sort,
     search: parseListSearch(url) ?? "",
+    analysisContext,
   });
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
@@ -68,6 +91,8 @@ export async function handleSessionsContract(
   const sort = parseSessionListSort(url);
   const rawCursor = url.searchParams.get("cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
+  const analysisContext = parseJourneyAnalysisContext(url);
+  if (analysisContext === null) return badRequest("Invalid analysis context");
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<{
     readonly items: readonly unknown[];
     readonly pagination: {
@@ -83,6 +108,7 @@ export async function handleSessionsContract(
     page: { limit, cursor: rawCursor },
     sort,
     search: parseListSearch(url) ?? "",
+    analysisContext,
   });
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });

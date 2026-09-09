@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { fetchFunnelDetail } from "@/lib/dashboard/client-data";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FunnelDefinition } from "@/lib/edge-client";
@@ -15,6 +16,8 @@ import {
   type FunnelDescriptionMessages,
   FunnelVisualization,
 } from "./funnel-visualization";
+
+const noop = () => undefined;
 
 export function funnelDetailQueryKey(
   siteId: string,
@@ -62,6 +65,64 @@ function useNearViewport() {
     return () => observer.disconnect();
   }, [near]);
   return { ref, near };
+}
+
+function FunnelCardVisualizationSkeleton() {
+  return (
+    <div className="min-w-0 space-y-4">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        {Array.from({ length: 2 }, (_, index) => (
+          <div key={index} className="inline-flex items-center gap-1">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-12" />
+          </div>
+        ))}
+      </div>
+      <div className="space-y-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="min-w-0 space-y-2">
+            <div className="flex min-w-0 items-start gap-2">
+              <Skeleton className="h-4 w-3 shrink-0" />
+              <Skeleton className="h-4 min-w-0 flex-1" />
+              <Skeleton className="h-5 w-16 shrink-0" />
+            </div>
+            <Skeleton className="h-3 w-full" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function FunnelCardSkeleton({
+  labels,
+  canManage,
+}: {
+  readonly labels: AppMessages["funnels"];
+  readonly canManage: boolean;
+}) {
+  return (
+    <Card className="h-full min-w-0" data-funnel-card-skeleton="true">
+      <CardHeader className="flex items-center justify-between gap-3 space-y-0">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Skeleton className="h-5 w-44" />
+          <Skeleton className="h-5 w-16" />
+        </div>
+        <div className="pointer-events-none">
+          <FunnelActions
+            labels={labels}
+            canManage={canManage}
+            onOpen={noop}
+            onEdit={noop}
+            onDelete={noop}
+          />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <FunnelCardVisualizationSkeleton />
+      </CardContent>
+    </Card>
+  );
 }
 
 export function FunnelCard({

@@ -218,6 +218,23 @@ describe("fetchVisitors", () => {
     >;
     expect(params.search).toBeUndefined();
   });
+
+  it("serializes goal analysis context for visitor lists", async () => {
+    fetchPrivateJsonMock.mockResolvedValueOnce({ ok: true } as any);
+
+    await fetchVisitors("site-1", window, undefined, {
+      analysisContext: { type: "goal", goalId: "goal-1" },
+    });
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/visitors",
+      expect.objectContaining({ analysisType: "goal", analysisId: "goal-1" }),
+    );
+    expect(
+      (fetchPrivateJsonMock.mock.calls[0][1] as Record<string, unknown>)
+        .analysisStepId,
+    ).toBeUndefined();
+  });
 });
 
 describe("fetchSessions", () => {
@@ -252,6 +269,27 @@ describe("fetchSessions", () => {
 
     const result = await fetchSessions("site-1", window);
     expect(result).toEqual(emptySessions());
+  });
+
+  it("serializes funnel step analysis context for session lists", async () => {
+    fetchPrivateJsonMock.mockResolvedValueOnce({ ok: true } as any);
+
+    await fetchSessions("site-1", window, undefined, {
+      analysisContext: {
+        type: "funnel",
+        funnelId: "funnel-1",
+        stepId: "step-2",
+      },
+    });
+
+    expect(fetchPrivateJsonMock).toHaveBeenCalledWith(
+      "/api/private/sessions",
+      expect.objectContaining({
+        analysisType: "funnel",
+        analysisId: "funnel-1",
+        analysisStepId: "step-2",
+      }),
+    );
   });
 });
 

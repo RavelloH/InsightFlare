@@ -1,10 +1,15 @@
-import type { ScopedDatasetSql } from "@/lib/edge/analytics/contract";
+import {
+  createScopedFilterPlan,
+  EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
+  type FunnelConfigV2,
+  type ScopedDatasetSql,
+} from "@/lib/edge/analytics/contract";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
 import type { Env } from "@/lib/edge/types";
 import { pageResult } from "@/lib/pagination";
 
 import type {
-  FilterDocument,
   JourneyEventRow,
   ListSort,
   QueryWindow,
@@ -24,6 +29,7 @@ import {
   queryD1All,
   visitSourceBindings,
 } from "./core";
+import { buildFunnelMembershipSqlPlan } from "./funnel-planner";
 import {
   buildSessionAggregationSql,
   buildVisitorAggregationSql,
@@ -37,7 +43,20 @@ import {
   visitorListOrderBy,
   whereClauseWithTarget,
 } from "./journey-helpers";
-import { scopedDatasetFor } from "./scoped-dataset";
+import {
+  applyObservationFilterToScopedDataset,
+  compileScopedDatasetSql,
+  scopedDatasetFor,
+  scopedDatasetForUnpreparedReader,
+} from "./scoped-dataset";
+
+export type JourneyListAnalysis =
+  | { readonly type: "goal"; readonly filter: FilterDocument }
+  | {
+      readonly type: "funnel";
+      readonly config: FunnelConfigV2;
+      readonly stepIndex: number;
+    };
 
 export interface VisitorListCursor {
   sortValue: number;
@@ -188,6 +207,146 @@ function scopedAggregationFilteredVisitsCte(
   )
   ${eventTargetClause ? eventTargetClause.replace(/^WHERE\s+/i, "AND ") : ""}
 )`;
+}
+
+function baseAnalysisDataset(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  entity: "visitor" | "session",
+): ScopedDatasetSql {
+  const prepared = scopedDatasetFor(siteId, window, filters);
+  if (prepared) return prepared;
+
+  if (filters.root !== null) {
+    const compatibility = scopedDatasetForUnpreparedReader(
+      "goal-summary",
+      siteId,
+      window,
+      filters,
+      entity,
+    );
+    if (compatibility) return compatibility;
+  }
+
+  const plan = createScopedFilterPlan(
+    "goal-summary",
+    EMPTY_FILTER_DOCUMENT,
+    "event",
+  );
+  if (!plan) throw new Error("analysis_scope_unavailable");
+  return compileScopedDatasetSql({
+    filters: EMPTY_FILTER_DOCUMENT,
+    plan,
+    siteIds: [siteId],
+    window,
+  });
+}
+
+function analysisEntityDataset(
+  base: ScopedDatasetSql,
+  membership: {
+    readonly ctes: string;
+    readonly bindings: readonly { readonly value: string | number | null }[];
+    readonly relation: string;
+    readonly column: "session_id" | "visitor_id";
+  },
+): ScopedDatasetSql {
+  const prefix = "journey_analysis";
+  const ids = `${prefix}_entity_ids`;
+  const visits = `${prefix}_visits`;
+  const events = `${prefix}_events`;
+  const sessions = `${prefix}_sessions`;
+  const visitors = `${prefix}_visitors`;
+  const ctes = `
+${base.ctes},
+${membership.ctes},
+${ids} AS (
+  SELECT DISTINCT site_pk, ${membership.column} AS entity_id
+  FROM ${membership.relation}
+  WHERE site_pk IS NOT NULL
+    AND TRIM(COALESCE(${membership.column}, '')) != ''
+),
+${visits} AS (
+  SELECT source.*
+  FROM ${base.visitRelation} source
+  INNER JOIN ${ids} matching
+    ON matching.site_pk = source.site_pk
+   AND matching.entity_id = source.${membership.column}
+),
+${events} AS (
+  SELECT source.*
+  FROM ${base.eventRelation} source
+  INNER JOIN ${ids} matching
+    ON matching.site_pk = source.site_pk
+   AND matching.entity_id = source.${membership.column}
+),
+${sessions} AS (
+  SELECT DISTINCT site_pk, session_id
+  FROM ${visits}
+  WHERE TRIM(COALESCE(session_id, '')) != ''
+  UNION
+  SELECT DISTINCT site_pk, session_id
+  FROM ${events}
+  WHERE TRIM(COALESCE(session_id, '')) != ''
+),
+${visitors} AS (
+  SELECT DISTINCT site_pk, visitor_id
+  FROM ${visits}
+  WHERE TRIM(COALESCE(visitor_id, '')) != ''
+  UNION
+  SELECT DISTINCT site_pk, visitor_id
+  FROM ${events}
+  WHERE TRIM(COALESCE(visitor_id, '')) != ''
+)`;
+  return {
+    ctes,
+    bindings: [...base.bindings, ...membership.bindings],
+    visitRelation: visits,
+    eventRelation: events,
+    sessionRelation: sessions,
+    visitorRelation: visitors,
+    scope: base.scope,
+  };
+}
+
+function analysisDatasetFor(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  analysis: JourneyListAnalysis,
+  entity: "visitor" | "session",
+): ScopedDatasetSql {
+  const base = baseAnalysisDataset(siteId, window, filters, entity);
+  if (analysis.type === "goal") {
+    const matched = applyObservationFilterToScopedDataset(
+      base,
+      analysis.filter,
+      "journey_analysis_goal",
+    );
+    return analysisEntityDataset(base, {
+      ctes: matched.ctes,
+      bindings: matched.bindings,
+      relation:
+        entity === "visitor"
+          ? matched.visitorRelation
+          : matched.sessionRelation,
+      column: entity === "visitor" ? "visitor_id" : "session_id",
+    });
+  }
+
+  const funnel = buildFunnelMembershipSqlPlan(
+    analysis.config,
+    base,
+    analysis.stepIndex,
+    { allowHistoricalOverLimit: true },
+  );
+  return analysisEntityDataset(base, {
+    ctes: funnel.ctes,
+    bindings: funnel.bindings,
+    relation: funnel.relation,
+    column: funnel.identity,
+  });
 }
 
 /**
@@ -373,9 +532,12 @@ export async function queryVisitorListPageFromD1(
     sort: ListSort<VisitorListSortKey>;
     search?: string;
     cursor?: VisitorListCursor | null;
+    analysis?: JourneyListAnalysis;
   },
 ): Promise<VisitorListPage> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const scopedDataset = options.analysis
+    ? analysisDatasetFor(siteId, window, filters, options.analysis, "visitor")
+    : scopedDatasetFor(siteId, window, filters);
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
@@ -487,9 +649,12 @@ export async function querySessionListPageFromD1(
     search?: string;
     cursor?: SessionListCursor | null;
     target?: { readonly type: "visitor" | "session"; readonly value: string };
+    analysis?: JourneyListAnalysis;
   },
 ): Promise<SessionListPage> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const scopedDataset = options.analysis
+    ? analysisDatasetFor(siteId, window, filters, options.analysis, "session")
+    : scopedDatasetFor(siteId, window, filters);
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });

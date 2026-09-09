@@ -17,6 +17,7 @@ import { useReportingTimeZone } from "@/components/time-zone-provider";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { Badge } from "@/components/ui/badge";
 import { Clickable } from "@/components/ui/clickable";
+import { LayerPortal } from "@/components/ui/layer/layer-portal";
 import {
   Tooltip,
   TooltipContent,
@@ -635,13 +636,15 @@ export function AnalyticsTimeTooltipProvider({
         open={active !== null}
         onOpenChange={(open) => !open && scheduleHide()}
       >
-        <TooltipTrigger asChild>
-          <span
-            aria-hidden="true"
-            className="pointer-events-none fixed opacity-0"
-            style={anchorStyle}
-          />
-        </TooltipTrigger>
+        <LayerPortal slot="floating">
+          <TooltipTrigger asChild>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none fixed opacity-0"
+              style={anchorStyle}
+            />
+          </TooltipTrigger>
+        </LayerPortal>
         {content ? (
           <TooltipContent
             ref={tooltipContentRef}

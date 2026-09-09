@@ -266,6 +266,106 @@ describe("D1 journey list low-level query coverage", () => {
     expect(scopedPage.calls[0].bindings).toContain("visitor-1");
   });
 
+  it("covers goal and funnel analysis datasets for visitor and session lists", async () => {
+    const goalFilter = filterFixture({ path: "/docs" });
+
+    const goalVisitors = createD1Env([[visitorRow]]);
+    await expect(
+      queryVisitorListPageFromD1(
+        goalVisitors.env,
+        siteId,
+        queryWindow,
+        EMPTY_FILTER_DOCUMENT,
+        {
+          limit: 5,
+          sort: { key: "lastSeenAt", direction: "desc" },
+          analysis: { type: "goal", filter: goalFilter },
+        },
+      ),
+    ).resolves.toMatchObject({ rows: [{ visitorId: "visitor-1" }] });
+    expect(goalVisitors.calls[0].sql).toContain("journey_analysis_goal");
+
+    const goalVisitorsWithGlobalFilter = createD1Env([[visitorRow]]);
+    await queryVisitorListPageFromD1(
+      goalVisitorsWithGlobalFilter.env,
+      siteId,
+      queryWindow,
+      filterFixture({ country: "US" }),
+      {
+        limit: 5,
+        sort: { key: "lastSeenAt", direction: "desc" },
+        analysis: { type: "goal", filter: goalFilter },
+      },
+    );
+    expect(goalVisitorsWithGlobalFilter.calls[0].sql).toContain(
+      "scope_final_visits",
+    );
+
+    const goalSessions = createD1Env([[sessionRow]]);
+    await querySessionListPageFromD1(
+      goalSessions.env,
+      siteId,
+      queryWindow,
+      EMPTY_FILTER_DOCUMENT,
+      {
+        limit: 5,
+        sort: { key: "startedAt", direction: "desc" },
+        analysis: { type: "goal", filter: goalFilter },
+      },
+    );
+    expect(goalSessions.calls[0].sql).toContain("journey_analysis_goal");
+
+    const funnel = {
+      filterDslVersion: 1 as const,
+      progressionScope: "visitor" as const,
+      conversionWindowMs: 86_400_000,
+      steps: [
+        { id: "landing", filterDsl: 'page.path eq "/landing"' },
+        { id: "signup", filterDsl: 'event.name eq "signup"' },
+      ],
+    };
+    const funnelVisitors = createD1Env([[visitorRow]]);
+    await queryVisitorListPageFromD1(
+      funnelVisitors.env,
+      siteId,
+      queryWindow,
+      EMPTY_FILTER_DOCUMENT,
+      {
+        limit: 5,
+        sort: { key: "lastSeenAt", direction: "desc" },
+        analysis: { type: "funnel", config: funnel, stepIndex: 1 },
+      },
+    );
+    expect(funnelVisitors.calls[0].sql).toContain(
+      "journey_analysis_entity_ids",
+    );
+
+    const sessionFunnel = {
+      ...funnel,
+      progressionScope: "session" as const,
+      conversionWindowMs: null,
+    };
+    const funnelSessions = createD1Env([[sessionRow]]);
+    await querySessionListPageFromD1(
+      funnelSessions.env,
+      siteId,
+      queryWindow,
+      EMPTY_FILTER_DOCUMENT,
+      {
+        limit: 5,
+        sort: { key: "startedAt", direction: "desc" },
+        analysis: {
+          type: "funnel",
+          config: sessionFunnel,
+          stepIndex: 1,
+        },
+      },
+    );
+    expect(funnelSessions.calls[0].sql).toContain(
+      "journey_analysis_entity_ids",
+    );
+  });
+
   it("covers journey event pages for both targets, scopes, cursors, and result states", async () => {
     const visitor = createD1Env([
       [journeyRow, { ...journeyRow, id: "event-2", occurredAt: 10 }],

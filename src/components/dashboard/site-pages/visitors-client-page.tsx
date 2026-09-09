@@ -72,20 +72,23 @@ interface VisitorsClientPageProps {
   pathname: string;
 }
 
-type VisitorRow = VisitorsData["data"]["items"][number];
+export type VisitorRow = VisitorsData["data"]["items"][number];
 
-const VISITOR_PAGE_SIZE = 50;
-const VISITOR_SKELETON_ROWS = 25;
+export const VISITOR_PAGE_SIZE = 50;
+export const VISITOR_SKELETON_ROWS = 25;
+export const VISITOR_TABLE_COLUMNS_STORAGE_KEY =
+  "insightflare:analytics-table-columns:visitors";
 
-type SortDirection = "asc" | "desc";
-type VisitorSortKey = "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
+export type SortDirection = "asc" | "desc";
+export type VisitorSortKey =
+  "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
 
-interface VisitorSortState {
+export interface VisitorSortState {
   key: VisitorSortKey;
   direction: SortDirection;
 }
 
-type VisitorTableColumnId =
+export type VisitorTableColumnId =
   | "visitor"
   | "sessionId"
   | "firstSeen"
@@ -100,10 +103,31 @@ type VisitorTableColumnId =
   | "device"
   | "screenSize";
 
-const DEFAULT_VISITOR_SORT: VisitorSortState = {
+export const DEFAULT_VISITOR_SORT: VisitorSortState = {
   key: "lastSeenAt",
   direction: "desc",
 };
+
+export function createVisitorTableColumnDefinitions(
+  labels: AppMessages["visitors"],
+  visitorIdLabel: string,
+): readonly AnalyticsTableColumnDefinition<VisitorTableColumnId>[] {
+  return [
+    { id: "visitor", label: labels.visitor, required: true },
+    { id: "sessionId", label: visitorIdLabel },
+    { id: "firstSeen", label: labels.firstSeen },
+    { id: "lastSeen", label: labels.lastSeen },
+    { id: "sessions", label: labels.sessions },
+    { id: "pageViews", label: labels.pageViews },
+    { id: "customEvents", label: labels.customEvents },
+    { id: "referrer", label: labels.referrer },
+    { id: "location", label: labels.location },
+    { id: "os", label: labels.os },
+    { id: "browser", label: labels.browser },
+    { id: "device", label: labels.device },
+    { id: "screenSize", label: labels.screenSize },
+  ];
+}
 
 type NestedJourneyDetail = {
   kind: "session" | "visitor";
@@ -320,9 +344,10 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
         focusable
         ariaLabel={`${labels.visitor}: ${row.visitorId}`}
       >
-        <div className="flex w-28 items-center gap-2">
+        <div className="flex w-28 min-w-0 items-center gap-2">
           <VisitorAvatar seed={row.visitorId} className="size-6" />
           <AnalyticsDetailsTooltipTarget
+            className="min-w-0 flex-1 truncate"
             locale={locale}
             request={{
               key: `visitor-id:${visitorId}`,
@@ -555,7 +580,7 @@ function detailQueryTarget(
   return query ? `${pathname}?${query}` : pathname;
 }
 
-const VisitorAnalyticsTable = memo(function VisitorAnalyticsTable({
+export const VisitorAnalyticsTable = memo(function VisitorAnalyticsTable({
   locale,
   messages,
   labels,
@@ -736,28 +761,16 @@ export function VisitorsClientPage({
   pathname,
 }: VisitorsClientPageProps) {
   const labels = messages.visitors;
-  const visitorColumnDefinitions = useMemo<
-    readonly AnalyticsTableColumnDefinition<VisitorTableColumnId>[]
-  >(
-    () => [
-      { id: "visitor", label: labels.visitor, required: true },
-      { id: "sessionId", label: messages.visitorDetail.visitorId },
-      { id: "firstSeen", label: labels.firstSeen },
-      { id: "lastSeen", label: labels.lastSeen },
-      { id: "sessions", label: labels.sessions },
-      { id: "pageViews", label: labels.pageViews },
-      { id: "customEvents", label: labels.customEvents },
-      { id: "referrer", label: labels.referrer },
-      { id: "location", label: labels.location },
-      { id: "os", label: labels.os },
-      { id: "browser", label: labels.browser },
-      { id: "device", label: labels.device },
-      { id: "screenSize", label: labels.screenSize },
-    ],
+  const visitorColumnDefinitions = useMemo(
+    () =>
+      createVisitorTableColumnDefinitions(
+        labels,
+        messages.visitorDetail.visitorId,
+      ),
     [labels, messages.visitorDetail.visitorId],
   );
   const visitorColumns = useAnalyticsTableColumns({
-    storageKey: "insightflare:analytics-table-columns:visitors",
+    storageKey: VISITOR_TABLE_COLUMNS_STORAGE_KEY,
     columns: visitorColumnDefinitions,
   });
   const { filters, window: timeWindow } = useDashboardQuery() as {

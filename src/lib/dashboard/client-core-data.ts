@@ -20,6 +20,7 @@ import {
   emptyVisitors,
 } from "@/lib/dashboard/client-empty-data";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type { JourneyAnalysisContext } from "@/lib/edge/analytics/contract";
 import type {
   EventField,
   EventFieldValuesData,
@@ -179,6 +180,7 @@ export async function fetchVisitors(
     sortBy?: VisitorListSortKey;
     sortDir?: SortDirection;
     search?: string;
+    analysisContext?: JourneyAnalysisContext;
     signal?: AbortSignal;
   },
 ): Promise<VisitorsData> {
@@ -192,6 +194,16 @@ export async function fetchVisitors(
   params.limit = options?.limit ?? 100;
   if (options?.sortBy) params.sortBy = options.sortBy;
   if (options?.sortDir) params.sortDir = options.sortDir;
+  if (options?.analysisContext) {
+    params.analysisType = options.analysisContext.type;
+    params.analysisId =
+      options.analysisContext.type === "goal"
+        ? options.analysisContext.goalId
+        : options.analysisContext.funnelId;
+    if (options.analysisContext.type === "funnel") {
+      params.analysisStepId = options.analysisContext.stepId;
+    }
+  }
   const search = options?.search?.trim();
   if (search) params.search = search;
   const requestParams = withFilters(
@@ -302,6 +314,7 @@ export async function fetchSessions(
     sortBy?: SessionListSortKey;
     sortDir?: SortDirection;
     search?: string;
+    analysisContext?: JourneyAnalysisContext;
     signal?: AbortSignal;
   },
 ): Promise<SessionsData> {
@@ -315,6 +328,16 @@ export async function fetchSessions(
   params.limit = options?.limit ?? 100;
   if (options?.sortBy) params.sortBy = options.sortBy;
   if (options?.sortDir) params.sortDir = options.sortDir;
+  if (options?.analysisContext) {
+    params.analysisType = options.analysisContext.type;
+    params.analysisId =
+      options.analysisContext.type === "goal"
+        ? options.analysisContext.goalId
+        : options.analysisContext.funnelId;
+    if (options.analysisContext.type === "funnel") {
+      params.analysisStepId = options.analysisContext.stepId;
+    }
+  }
   const search = options?.search?.trim();
   if (search) params.search = search;
   const requestParams = withFilters(

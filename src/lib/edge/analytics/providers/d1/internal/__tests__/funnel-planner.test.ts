@@ -10,6 +10,7 @@ import {
 import {
   assertFunnelSqlShapeWithinBudget,
   assertFunnelStructuralBudget,
+  buildFunnelMembershipSqlPlan,
   buildFunnelSqlPlan,
   FUNNEL_SQL_CTES_PER_STEP,
   FUNNEL_SQL_STRUCTURAL_BUDGET,
@@ -119,6 +120,35 @@ describe("scoped observation filter primitive", () => {
 });
 
 describe("FunnelSqlPlan", () => {
+  it("builds a reusable membership relation for any funnel step", () => {
+    const membership = buildFunnelMembershipSqlPlan(
+      config([
+        step("landing", 'page.path eq "/landing"'),
+        step("signup", 'event.name eq "signup"'),
+      ]),
+      dataset,
+      1,
+    );
+    const database = new DatabaseSync(":memory:");
+    try {
+      const rows = database
+        .prepare(
+          `WITH ${dataset.ctes},${membership.ctes}
+           SELECT site_pk, session_id FROM ${membership.relation}
+           ORDER BY site_pk, session_id`,
+        )
+        .all(...membership.bindings.map((binding) => binding.value));
+      expect(rows).toEqual([
+        { site_pk: 1, session_id: "session-1" },
+        { site_pk: 2, session_id: "session-1" },
+      ]);
+    } finally {
+      database.close();
+    }
+    expect(membership.identity).toBe("session_id");
+    expect(membership.relation).toBe("reached_1");
+  });
+
   it("runs session progression in one non-recursive query", () => {
     const plan = buildFunnelSqlPlan(
       config([

@@ -1,4 +1,5 @@
 import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type { JourneyAnalysisContext } from "@/lib/edge/analytics/contract";
 import type {
   DashboardFilterOption,
   OverviewClientDimensionTabsData as OverviewClientDimensionTabsResponse,
@@ -32,6 +33,7 @@ export type SortDirection = "asc" | "desc";
 export type VisitorListSortKey =
   "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
 export type SessionListSortKey = "startedAt" | "durationMs" | "views";
+export type { JourneyAnalysisContext };
 export type EventRecordSortKey = "occurredAt" | "eventName" | "pathname";
 export type RetentionGranularity = TimeWindow["interval"];
 

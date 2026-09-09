@@ -7,6 +7,8 @@ vi.mock("@/lib/dashboard/client-data", () => ({
   fetchGoalDefinition: vi.fn(),
   fetchGoalSummary: vi.fn(),
   fetchGoalTimeseries: vi.fn(),
+  fetchSessions: vi.fn(),
+  fetchVisitors: vi.fn(),
 }));
 
 vi.mock("@/components/dashboard/filter-editor", () => ({
@@ -36,6 +38,18 @@ vi.mock("@/components/dashboard/filter-editor", () => ({
     ),
 }));
 
+vi.mock("@/components/dashboard/site-pages/analysis-journey-table", () => ({
+  AnalysisJourneyTable: (props: {
+    entity: string;
+    toolbarLeading?: ReactNode;
+  }) =>
+    createElement(
+      "div",
+      { "data-analysis-entity": props.entity },
+      props.toolbarLeading,
+    ),
+}));
+
 import { FunnelStepFilterDialog } from "@/components/dashboard/site-pages/funnel-step-filter-dialog";
 import {
   GoalCard,
@@ -47,10 +61,13 @@ import {
 } from "@/components/dashboard/site-pages/goal-detail";
 import { GoalEditor } from "@/components/dashboard/site-pages/goal-editor";
 import { goalDefinitionQueryKey } from "@/components/dashboard/site-pages/goals-client-page";
+import { TimeZoneProvider } from "@/components/time-zone-provider";
 import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import {
   fetchGoalSummary,
   fetchGoalTimeseries,
+  fetchSessions,
+  fetchVisitors,
 } from "@/lib/dashboard/client-data";
 import type {
   GoalDefinition,
@@ -125,7 +142,11 @@ function renderWithQueryClient(
       createElement(
         LayerManagerProvider,
         null,
-        createElement(QueryClientProvider, { client }, element),
+        createElement(
+          TimeZoneProvider,
+          null,
+          createElement(QueryClientProvider, { client }, element),
+        ),
       ),
     );
   });
@@ -140,6 +161,30 @@ describe("Goal dashboard components", () => {
     vi.clearAllMocks();
     vi.mocked(fetchGoalSummary).mockResolvedValue(summary);
     vi.mocked(fetchGoalTimeseries).mockResolvedValue(timeseries);
+    vi.mocked(fetchVisitors).mockResolvedValue({
+      ok: true,
+      data: {
+        items: [],
+        pagination: {
+          limit: 50,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    });
+    vi.mocked(fetchSessions).mockResolvedValue({
+      ok: true,
+      data: {
+        items: [],
+        pagination: {
+          limit: 50,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+    });
     vi.stubGlobal(
       "IntersectionObserver",
       class {
@@ -343,7 +388,7 @@ describe("Goal dashboard components", () => {
     ).not.toEqual(timeseriesKey);
   });
 
-  it("renders both visitor and session series without audience tabs", async () => {
+  it("renders both visitor and session series with journey tabs", async () => {
     const { container, root } = renderWithQueryClient(
       createElement(GoalDetail, {
         goal,
@@ -371,7 +416,7 @@ describe("Goal dashboard components", () => {
     expect(
       container.querySelector('[data-goal-series="visitors,sessions"]'),
     ).not.toBeNull();
-    expect(container.querySelector('[role="tablist"]')).toBeNull();
+    expect(container.querySelector('[role="tablist"]')).not.toBeNull();
     act(() => root.unmount());
     container.remove();
   });
@@ -415,21 +460,25 @@ describe("Goal dashboard components", () => {
           LayerManagerProvider,
           null,
           createElement(
-            QueryClientProvider,
-            { client },
-            createElement(GoalDetail, {
-              goal,
-              siteId: "site-1",
-              locale: "en",
-              labels,
-              window,
-              filters,
-              filterKey: "empty",
-              canManage: true,
-              actionPending: true,
-              onEdit: vi.fn(),
-              onDelete: vi.fn(),
-            }),
+            TimeZoneProvider,
+            null,
+            createElement(
+              QueryClientProvider,
+              { client },
+              createElement(GoalDetail, {
+                goal,
+                siteId: "site-1",
+                locale: "en",
+                labels,
+                window,
+                filters,
+                filterKey: "empty",
+                canManage: true,
+                actionPending: true,
+                onEdit: vi.fn(),
+                onDelete: vi.fn(),
+              }),
+            ),
           ),
         ),
       );

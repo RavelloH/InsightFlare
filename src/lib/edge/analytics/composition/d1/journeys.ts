@@ -1,6 +1,9 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  EMPTY_FILTER_DOCUMENT,
+  type JourneyAnalysisContext,
+} from "@/lib/edge/analytics/contract";
 import {
   queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
@@ -81,6 +84,8 @@ export function registerJourneyProviders(
           search: stringField(request, "search") || undefined,
           page: pageFromRequest(request, 80),
           audience: request.context.policy.audience,
+          analysisContext: request.analysisContext as
+            JourneyAnalysisContext | undefined,
         });
         return {
           value: {
@@ -103,6 +108,8 @@ export function registerJourneyProviders(
           search: stringField(request, "search") || undefined,
           page: pageFromRequest(request, 80),
           audience: request.context.policy.audience,
+          analysisContext: request.analysisContext as
+            JourneyAnalysisContext | undefined,
         });
         return {
           value: {

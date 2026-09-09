@@ -11,6 +11,7 @@ export * from "./funnel-config";
 export type * from "./goal";
 export * from "./goal-config";
 export * from "./helpers";
+export type * from "./journey-analysis";
 export * from "./observation-planner";
 export * from "./operations/index";
 export * from "./overview";

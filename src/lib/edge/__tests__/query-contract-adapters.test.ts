@@ -157,6 +157,54 @@ describe("typed query adapter validation branches", () => {
     );
   });
 
+  it("validates goal and funnel analysis list parameters", async () => {
+    const base = "https://edge.test/query?from=1767225600000&to=1767312000000";
+    const responses = await Promise.all([
+      handleVisitorsContract(env, siteId, new URL(`${base}&analysisType=goal`)),
+      handleSessionsContract(
+        env,
+        siteId,
+        new URL(`${base}&analysisId=funnel-1`),
+      ),
+      handleVisitorsContract(
+        env,
+        siteId,
+        new URL(
+          `${base}&analysisType=goal&analysisId=goal-1&analysisStepId=step-1`,
+        ),
+      ),
+      handleSessionsContract(
+        env,
+        siteId,
+        new URL(`${base}&analysisType=funnel&analysisId=funnel-1`),
+      ),
+      handleVisitorsContract(
+        env,
+        siteId,
+        new URL(`${base}&analysisType=unknown&analysisId=analysis-1`),
+      ),
+      handleVisitorsContract(
+        env,
+        siteId,
+        new URL(`${base}&analysisType=goal&analysisId=goal-1`),
+      ),
+      handleSessionsContract(
+        env,
+        siteId,
+        new URL(
+          `${base}&analysisType=funnel&analysisId=funnel-1&analysisStepId=step-1`,
+        ),
+      ),
+    ]);
+
+    expect(responses.slice(0, 5).map((response) => response.status)).toEqual([
+      400, 400, 400, 400, 400,
+    ]);
+    expect(
+      responses.slice(5).every((response) => response instanceof Response),
+    ).toBe(true);
+  });
+
   it("covers filter, page, and technology contract option branches", async () => {
     const base =
       "https://edge.test/query?from=1767225600000&to=1767312000000&dimension=browser&primaryDimension=browser&secondaryDimension=os";

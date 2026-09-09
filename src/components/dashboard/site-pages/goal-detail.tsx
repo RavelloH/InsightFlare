@@ -1,6 +1,13 @@
-import { RiDeleteBinLine, RiEditLine, RiLineChartLine } from "@remixicon/react";
+import { useState } from "react";
+import {
+  RiDeleteBinLine,
+  RiEditLine,
+  RiFileList3Line,
+  RiLineChartLine,
+} from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
+import { AnalysisJourneyTable } from "@/components/dashboard/site-pages/analysis-journey-table";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   fetchGoalSummary,
   fetchGoalTimeseries,
@@ -184,6 +192,7 @@ function GoalDetailSkeleton({ canManage }: { readonly canManage: boolean }) {
 export function GoalDetail({
   goal,
   siteId,
+  pathname = "",
   locale,
   labels,
   messages,
@@ -199,6 +208,7 @@ export function GoalDetail({
 }: {
   readonly goal?: GoalDefinition;
   readonly siteId: string;
+  readonly pathname?: string;
   readonly locale: Locale;
   readonly labels: AppMessages["goals"];
   readonly messages?: Pick<
@@ -216,6 +226,9 @@ export function GoalDetail({
   readonly loadError?: boolean;
 }) {
   const goalId = goal?.id ?? "";
+  const [journeyEntity, setJourneyEntity] = useState<"visitors" | "sessions">(
+    "visitors",
+  );
   const summary = useQuery({
     queryKey: goal
       ? goalSummaryQueryKey(siteId, goal, window, filterKey, "auto")
@@ -271,6 +284,7 @@ export function GoalDetail({
 
   const goalSummary = summary.data?.data.summary;
   const filterDescriptionMessages = messages ?? getMessages(locale);
+  const fullMessages = getMessages(locale);
 
   return (
     <div className="min-w-0 space-y-6 p-4 md:p-6">
@@ -374,6 +388,40 @@ export function GoalDetail({
           )}
         </CardContent>
       </Card>
+
+      <section className="min-w-0 space-y-3">
+        <div className="space-y-1">
+          <h3 className="inline-flex items-center gap-2 text-sm font-medium">
+            <RiFileList3Line className="size-4 shrink-0" />
+            {labels.conversionRecords}
+          </h3>
+        </div>
+        <Tabs
+          value={journeyEntity}
+          onValueChange={(value) => {
+            if (value === "visitors" || value === "sessions") {
+              setJourneyEntity(value);
+            }
+          }}
+        >
+          <AnalysisJourneyTable
+            entity={journeyEntity === "visitors" ? "visitor" : "session"}
+            siteId={siteId}
+            pathname={pathname}
+            locale={locale}
+            messages={fullMessages}
+            window={window}
+            filters={filters}
+            analysisContext={{ type: "goal", goalId: goal.id }}
+            toolbarLeading={
+              <TabsList aria-label={`${labels.visitors} / ${labels.sessions}`}>
+                <TabsTrigger value="visitors">{labels.visitors}</TabsTrigger>
+                <TabsTrigger value="sessions">{labels.sessions}</TabsTrigger>
+              </TabsList>
+            }
+          />
+        </Tabs>
+      </section>
     </div>
   );
 }

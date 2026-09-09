@@ -797,6 +797,7 @@ funnels:
   subtitle: 複数ステップのユーザージャーニーでコンバージョンを測定します。
   listTitle: ファネル定義
   listSubtitle: 再利用可能なシーケンスを作成し、現在のダッシュボード期間でコンバージョンを確認します。
+  conversionRecords: コンバージョン記録
   open: ファネルを開く
   moreActions: その他の操作
   create: 新規ファネル
@@ -866,6 +867,7 @@ goals:
   subtitle: 再利用可能なイベントまたはページ条件でコンバージョンを測定します。
   listTitle: 目標定義
   listSubtitle: この期間のコンバージョン率の変化を確認します。
+  conversionRecords: コンバージョン記録
   open: 目標を開く
   moreActions: その他の操作
   create: 新しい目標

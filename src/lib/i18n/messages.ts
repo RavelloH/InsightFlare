@@ -781,6 +781,7 @@ export interface AppMessages {
     subtitle: string;
     listTitle: string;
     listSubtitle: string;
+    conversionRecords: string;
     open: string;
     moreActions: string;
     create: string;
@@ -851,6 +852,7 @@ export interface AppMessages {
     subtitle: string;
     listTitle: string;
     listSubtitle: string;
+    conversionRecords: string;
     open: string;
     moreActions: string;
     create: string;
@@ -3671,6 +3673,7 @@ const enMessages = {
     listTitle: "Funnel definitions",
     listSubtitle:
       "Build a reusable sequence, then inspect conversion for the current dashboard window.",
+    conversionRecords: "Conversion records",
     open: "Open funnel",
     moreActions: "More actions",
     create: "New funnel",
@@ -3744,6 +3747,7 @@ const enMessages = {
       "Measure conversion from a single reusable event or page condition.",
     listTitle: "Goal definitions",
     listSubtitle: "View conversion rate changes across this time range.",
+    conversionRecords: "Conversion records",
     open: "Open goal",
     moreActions: "More actions",
     create: "New goal",
@@ -6749,6 +6753,7 @@ const zhMessages = {
     subtitle: "衡量多步骤用户旅程的转化情况。",
     listTitle: "漏斗定义",
     listSubtitle: "构建可复用的步骤序列，并按当前看板时间窗查看转化。",
+    conversionRecords: "转化记录",
     open: "打开漏斗",
     moreActions: "更多操作",
     create: "新建漏斗",
@@ -6819,6 +6824,7 @@ const zhMessages = {
     subtitle: "使用一个可复用的事件或页面条件衡量转化。",
     listTitle: "目标定义",
     listSubtitle: "查看这段时间范围内的转化率变化情况",
+    conversionRecords: "转化记录",
     open: "打开目标",
     moreActions: "更多操作",
     create: "新建目标",
@@ -9775,6 +9781,7 @@ const jaMessages = {
     listTitle: "ファネル定義",
     listSubtitle:
       "再利用可能なシーケンスを作成し、現在のダッシュボード期間でコンバージョンを確認します。",
+    conversionRecords: "コンバージョン記録",
     open: "ファネルを開く",
     moreActions: "その他の操作",
     create: "新規ファネル",
@@ -9850,6 +9857,7 @@ const jaMessages = {
       "再利用可能なイベントまたはページ条件でコンバージョンを測定します。",
     listTitle: "目標定義",
     listSubtitle: "この期間のコンバージョン率の変化を確認します。",
+    conversionRecords: "コンバージョン記録",
     open: "目標を開く",
     moreActions: "その他の操作",
     create: "新しい目標",

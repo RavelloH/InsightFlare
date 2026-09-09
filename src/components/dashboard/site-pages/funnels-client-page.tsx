@@ -27,7 +27,6 @@ import {
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import {
   pushUrlWithoutNavigation,
@@ -49,8 +48,11 @@ import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
-import { FunnelCard } from "./funnel-card";
-import { funnelDetailQueryKey } from "./funnel-card";
+import {
+  FunnelCard,
+  FunnelCardSkeleton,
+  funnelDetailQueryKey,
+} from "./funnel-card";
 import { FunnelDetail } from "./funnel-detail";
 import { FunnelEditor } from "./funnel-editor";
 
@@ -72,18 +74,17 @@ function detailTarget(
   return `${pathname}?${serializeDashboardSearchParams(params)}`;
 }
 
-function FunnelListLoading() {
+function FunnelListLoading({
+  labels,
+  canManage,
+}: {
+  readonly labels: AppMessages["funnels"];
+  readonly canManage: boolean;
+}) {
   return (
     <div className="grid min-w-0 gap-4 md:grid-cols-2">
       {Array.from({ length: 4 }, (_, index) => (
-        <Card key={index} className="h-full">
-          <CardContent className="space-y-4 p-5">
-            <Skeleton className="h-5 w-44" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-4/5" />
-            <Skeleton className="h-3 w-3/5" />
-          </CardContent>
-        </Card>
+        <FunnelCardSkeleton key={index} labels={labels} canManage={canManage} />
       ))}
     </div>
   );
@@ -94,6 +95,7 @@ function FunnelDetailDrawer({
   labels,
   descriptionMessages,
   siteId,
+  pathname,
   funnel,
   funnelId,
   window,
@@ -107,6 +109,7 @@ function FunnelDetailDrawer({
   readonly labels: AppMessages["funnels"];
   readonly descriptionMessages: AppMessages;
   readonly siteId: string;
+  readonly pathname: string;
   readonly funnel?: FunnelDefinition;
   readonly funnelId: string;
   readonly window: TimeWindow;
@@ -145,6 +148,10 @@ function FunnelDetailDrawer({
       canManage={canManage}
       onEdit={onEdit}
       onDelete={onDelete}
+      siteId={siteId}
+      pathname={pathname}
+      window={window}
+      filters={filters}
     />
   );
 }
@@ -331,7 +338,7 @@ export function FunnelsClientPage({
         className="min-w-0"
       >
         {list.isPending ? (
-          <FunnelListLoading />
+          <FunnelListLoading labels={labels} canManage={canManage} />
         ) : list.isError ? (
           <Card>
             <CardContent className="p-6 text-center text-muted-foreground">
@@ -411,6 +418,7 @@ export function FunnelsClientPage({
             labels={labels}
             descriptionMessages={messages}
             siteId={siteId}
+            pathname={pathname}
             funnel={selected}
             funnelId={detailId}
             window={timeWindow}

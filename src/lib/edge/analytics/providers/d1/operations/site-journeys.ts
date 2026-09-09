@@ -5,10 +5,15 @@ import {
   effectiveScopeForPagination,
   type FilterDocument,
   filterFingerprint,
+  type FunnelConfigV2,
+  type JourneyAnalysisContext,
+  parseGoalFilter,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
+import { queryFunnelDefinition } from "@/lib/edge/analytics/providers/d1/internal/funnels";
+import { queryGoalDefinition } from "@/lib/edge/analytics/providers/d1/internal/goals";
 import {
   queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
@@ -17,6 +22,7 @@ import {
   stripVisitorDetailCollections,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries";
 import {
+  type JourneyListAnalysis,
   queryJourneyEventsPageFromD1,
   queryJourneyTargetExistsFromD1,
   querySessionListPageFromD1,
@@ -43,6 +49,7 @@ interface JourneySearchInput extends JourneyDetailInput {
   readonly search?: string;
   readonly page: { readonly limit: number; readonly cursor?: string | null };
   readonly audience?: QueryAudience;
+  readonly analysisContext?: JourneyAnalysisContext;
 }
 
 type VisitorSort = {
@@ -69,9 +76,51 @@ async function cursorBinding(
     input.window.timeZone,
     filterFingerprint(input.filters, analyticsFilterRegistry),
     effectiveScopeForPagination(input.filters),
+    input.analysisContext ?? null,
     input.search?.trim().toLowerCase() ?? null,
     sort,
   ]);
+}
+
+async function resolveJourneyListAnalysis(
+  input: JourneySearchInput,
+  entity: "visitor" | "session",
+): Promise<JourneyListAnalysis | undefined> {
+  const context = input.analysisContext;
+  if (!context) return undefined;
+  if (context.type === "goal") {
+    const goal = await queryGoalDefinition(
+      input.env,
+      input.siteId,
+      context.goalId,
+    );
+    if (!goal) throw new Error("resource-not-found");
+    return { type: "goal", filter: parseGoalFilter(goal) };
+  }
+
+  const funnel = await queryFunnelDefinition(
+    input.env,
+    input.siteId,
+    context.funnelId,
+  );
+  if (!funnel) throw new Error("resource-not-found");
+  if (
+    (funnel.progressionScope === "visitor" && entity !== "visitor") ||
+    (funnel.progressionScope === "session" && entity !== "session")
+  ) {
+    throw new Error("analysis_entity_scope_mismatch");
+  }
+  const stepIndex = funnel.steps.findIndex(
+    (step) => step.id === context.stepId,
+  );
+  if (stepIndex < 0) throw new Error("funnel_step_not_found");
+  const config: FunnelConfigV2 = {
+    filterDslVersion: funnel.filterDslVersion,
+    progressionScope: funnel.progressionScope,
+    conversionWindowMs: funnel.conversionWindowMs,
+    steps: funnel.steps,
+  };
+  return { type: "funnel", config, stepIndex };
 }
 
 function cursorObject(value: unknown): Record<string, unknown> | null {
@@ -196,6 +245,7 @@ export async function readSiteVisitors(
     };
   },
 ) {
+  const analysis = await resolveJourneyListAnalysis(input, "visitor");
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
@@ -210,7 +260,13 @@ export async function readSiteVisitors(
     input.siteId,
     input.window,
     input.filters,
-    { limit: input.page.limit, sort, search: input.search, cursor },
+    {
+      limit: input.page.limit,
+      sort,
+      search: input.search,
+      cursor,
+      analysis,
+    },
   );
   return {
     items: mapVisitors(page.rows),
@@ -237,6 +293,7 @@ export async function readSiteSessions(
     };
   },
 ) {
+  const analysis = await resolveJourneyListAnalysis(input, "session");
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
@@ -251,7 +308,13 @@ export async function readSiteSessions(
     input.siteId,
     input.window,
     input.filters,
-    { limit: input.page.limit, sort, search: input.search, cursor },
+    {
+      limit: input.page.limit,
+      sort,
+      search: input.search,
+      cursor,
+      analysis,
+    },
   );
   return {
     items: page.rows,

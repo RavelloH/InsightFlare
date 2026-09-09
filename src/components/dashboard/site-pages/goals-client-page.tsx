@@ -355,6 +355,7 @@ export function GoalsClientPage({
           <GoalDetail
             goal={detailGoal}
             siteId={siteId}
+            pathname={pathname}
             locale={locale}
             labels={labels}
             messages={messages}

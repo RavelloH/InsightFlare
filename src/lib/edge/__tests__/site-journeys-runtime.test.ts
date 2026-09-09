@@ -21,7 +21,15 @@ vi.mock(
     queryVisitorListPageFromD1: vi.fn(),
   }),
 );
+vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
+  queryFunnelDefinition: vi.fn(),
+}));
+vi.mock("@/lib/edge/analytics/providers/d1/internal/goals", () => ({
+  queryGoalDefinition: vi.fn(),
+}));
 
+import { queryFunnelDefinition } from "@/lib/edge/analytics/providers/d1/internal/funnels";
+import { queryGoalDefinition } from "@/lib/edge/analytics/providers/d1/internal/goals";
 import {
   queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
@@ -253,6 +261,122 @@ describe("site journey detail runtime", () => {
     ).resolves.toMatchObject({
       pagination: { hasMore: false, nextCursor: null },
     });
+  });
+
+  it("resolves goal and funnel analysis contexts before reading lists", async () => {
+    vi.mocked(queryGoalDefinition).mockResolvedValue({
+      filterDslVersion: 1,
+      filterDsl: 'event.name eq "signup"',
+    } as never);
+    vi.mocked(queryFunnelDefinition).mockResolvedValue({
+      id: "funnel-1",
+      siteId: "site-1",
+      name: "Signup",
+      filterDslVersion: 1,
+      progressionScope: "session",
+      conversionWindowMs: 86_400_000,
+      semanticFingerprint: "funnel-v2:test",
+      steps: [
+        { id: "landing", filterDsl: 'page.path eq "/landing"' },
+        { id: "signup", filterDsl: 'event.name eq "signup"' },
+      ],
+      createdAt: 1,
+      updatedAt: 2,
+    } as never);
+    vi.mocked(queryVisitorListPageFromD1).mockResolvedValue({
+      rows: [],
+      nextCursor: null,
+    });
+    vi.mocked(querySessionListPageFromD1).mockResolvedValue({
+      rows: [],
+      nextCursor: null,
+    });
+
+    await readSiteVisitors({
+      ...base,
+      filters: { version: 1, root: null },
+      sort: { field: "lastSeenAt", direction: "desc" },
+      page: { limit: 20 },
+      analysisContext: { type: "goal", goalId: "goal-1" },
+    });
+    await readSiteSessions({
+      ...base,
+      filters: { version: 1, root: null },
+      sort: { field: "startedAt", direction: "desc" },
+      page: { limit: 20 },
+      analysisContext: {
+        type: "funnel",
+        funnelId: "funnel-1",
+        stepId: "signup",
+      },
+    });
+
+    expect(queryGoalDefinition).toHaveBeenCalledWith(
+      base.env,
+      base.siteId,
+      "goal-1",
+    );
+    expect(queryFunnelDefinition).toHaveBeenCalledWith(
+      base.env,
+      base.siteId,
+      "funnel-1",
+    );
+    expect(queryVisitorListPageFromD1).toHaveBeenCalledWith(
+      base.env,
+      base.siteId,
+      base.window,
+      { version: 1, root: null },
+      expect.objectContaining({
+        analysis: expect.objectContaining({ type: "goal" }),
+      }),
+    );
+    expect(querySessionListPageFromD1).toHaveBeenCalledWith(
+      base.env,
+      base.siteId,
+      base.window,
+      { version: 1, root: null },
+      expect.objectContaining({
+        analysis: {
+          type: "funnel",
+          config: expect.objectContaining({
+            progressionScope: "session",
+            conversionWindowMs: 86_400_000,
+          }),
+          stepIndex: 1,
+        },
+      }),
+    );
+  });
+
+  it("rejects missing or incompatible analysis definitions", async () => {
+    vi.mocked(queryGoalDefinition).mockResolvedValueOnce(null);
+    await expect(
+      readSiteVisitors({
+        ...base,
+        filters: { version: 1, root: null },
+        sort: { field: "lastSeenAt", direction: "desc" },
+        page: { limit: 20 },
+        analysisContext: { type: "goal", goalId: "missing" },
+      }),
+    ).rejects.toThrow("resource-not-found");
+
+    vi.mocked(queryFunnelDefinition).mockResolvedValueOnce({
+      progressionScope: "visitor",
+      steps: [{ id: "landing", filterDsl: 'page.path eq "/landing"' }],
+    } as never);
+    await expect(
+      readSiteSessions({
+        ...base,
+        filters: { version: 1, root: null },
+        sort: { field: "startedAt", direction: "desc" },
+        page: { limit: 20 },
+        analysisContext: {
+          type: "funnel",
+          funnelId: "funnel-1",
+          stepId: "landing",
+        },
+      }),
+    ).rejects.toThrow("analysis_entity_scope_mismatch");
   });
 
   it("checks the opaque target after receiving canonical filters", async () => {
