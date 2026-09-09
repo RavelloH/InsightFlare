@@ -65,6 +65,7 @@ import {
   AnalyticsTableColumnSettings,
   useAnalyticsTableColumns,
 } from "@/components/dashboard/analytics-table-column-settings";
+import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -237,17 +238,21 @@ describe("useAnalyticsTableColumns", () => {
     act(() =>
       root.render(
         createElement(
-          TooltipProvider,
+          LayerManagerProvider,
           null,
-          createElement(AnalyticsTableColumnSettings, {
-            columns,
-            orderedIds: ["id", "time", "site"],
-            visibleIds: ["id", "time", "site"],
-            onOrderChange,
-            onVisibilityChange,
-            onReset,
-            labels,
-          }),
+          createElement(
+            TooltipProvider,
+            null,
+            createElement(AnalyticsTableColumnSettings, {
+              columns,
+              orderedIds: ["id", "time", "site"],
+              visibleIds: ["id", "time", "site"],
+              onOrderChange,
+              onVisibilityChange,
+              onReset,
+              labels,
+            }),
+          ),
         ),
       ),
     );

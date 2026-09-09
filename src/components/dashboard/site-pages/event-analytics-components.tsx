@@ -55,7 +55,6 @@ import {
 } from "@/components/dashboard/journey-display";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/event-detail-drawer";
-import { EVENT_FILTER_DIALOG_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
 import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -2194,11 +2193,7 @@ export const EventFieldsCard = memo(function EventFieldsCard({
         open={payloadFilterDialogOpen}
         onOpenChange={setPayloadFilterDialogOpen}
       >
-        <ResponsiveDialogContent
-          data-dashboard-floating-layer="event-filter-dialog"
-          desktopClassName="max-w-xl"
-          style={{ zIndex: EVENT_FILTER_DIALOG_Z_INDEX }}
-        >
+        <ResponsiveDialogContent desktopClassName="max-w-xl">
           <ResponsiveDialogHeader>
             <ResponsiveDialogTitle icon={RiFilter3Line}>
               {labels.payloadFilterTitle}

@@ -27,6 +27,7 @@ interface Options {
   debug: boolean;
   headed: boolean;
   keep: boolean;
+  serve: boolean;
   ui: boolean;
   workers: number | undefined;
 }
@@ -129,6 +130,7 @@ function parseOptions(argv: string[]): Options {
     debug: argv.includes("--debug"),
     headed: argv.includes("--headed"),
     keep: argv.includes("--keep"),
+    serve: argv.includes("--serve"),
     ui: argv.includes("--ui"),
     workers: parseWorkers(argv),
   };
@@ -1171,6 +1173,13 @@ async function runPlaywright(
   });
 }
 
+function waitForShutdown(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
 async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   let worker: StartedProcess | null = null;
@@ -1282,6 +1291,27 @@ async function main(): Promise<void> {
     await writeRunManifest(activeEnvironment, options);
     rlog.progress(PREPARATION_PROGRESS_MAX, PREPARATION_PROGRESS_MAX);
     rlog.success("Test environment is ready.");
+    if (options.serve) {
+      rlog.info(
+        "Seeding the serving environment through the linear E2E flow...",
+      );
+      await runPlaywright(activeEnvironment, options, shutdown.signal);
+      throwIfAborted(shutdown.signal);
+      rlog.success("Serving environment has been seeded.");
+      const serveDetails = [
+        `Base URL: ${activeEnvironment.baseURL}`,
+        `Test site URL: ${activeEnvironment.testSiteURL}`,
+        "Admin username: admin",
+        `Admin password: ${activeEnvironment.adminPassword}`,
+        `Run directory: ${activeEnvironment.directory}`,
+      ].join("\n");
+      rlog.info(serveDetails);
+      console.log(serveDetails);
+      console.log("E2E environment is serving. Press Ctrl+C to stop.");
+      await waitForShutdown(shutdown.signal);
+      succeeded = true;
+      return;
+    }
     rlog.info("Running Playwright E2E...");
     await runPlaywright(activeEnvironment, options, shutdown.signal);
     throwIfAborted(shutdown.signal);
@@ -1298,7 +1328,7 @@ async function main(): Promise<void> {
     await stopTestSite(testSite);
     await stopProcess(worker);
     if (environment) {
-      if (succeeded && !options.keep) {
+      if (succeeded && !options.keep && !options.serve) {
         await fs.rm(environment.directory, { force: true, recursive: true });
       } else if (failure) {
         await writeFailureSummary(environment, failure);

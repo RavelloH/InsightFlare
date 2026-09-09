@@ -23,9 +23,7 @@ import { useDashboardQueryControls } from "@/components/dashboard/dashboard-quer
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { PageHeading } from "@/components/dashboard/page-heading";
-import { EVENT_RECORD_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
 import { TableActionButton } from "@/components/dashboard/table-action-button";
-import { AppOverlay, overlayZIndexFor } from "@/components/ui/app-overlay";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -611,28 +609,11 @@ function ScheduledTaskRunLogDrawer({
 
   return (
     <>
-      <AppOverlay
-        layerId="scheduled-task-run-drawer"
-        open={open}
-        portal
-        zIndex={overlayZIndexFor(EVENT_RECORD_DRAWER_Z_INDEX)}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onOpenChange(false);
-        }}
-      />
-      <Drawer
-        open={open}
-        onOpenChange={onOpenChange}
-        direction="right"
-        modal={false}
-      >
+      <Drawer open={open} onOpenChange={onOpenChange} direction="right">
         <DrawerContent
           data-dashboard-floating-layer="scheduled-task-run-drawer"
           className="!w-full !max-w-none sm:!w-[min(58vw,34rem)]"
           overlayClassName="hidden"
-          style={{ zIndex: EVENT_RECORD_DRAWER_Z_INDEX }}
         >
           <DrawerHeader className="border-b">
             <DrawerTitle>{labels.logTitle}</DrawerTitle>

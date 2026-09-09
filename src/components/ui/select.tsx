@@ -1,17 +1,13 @@
 import * as React from "react";
 import { RiArrowDownSLine, RiCheckLine } from "@remixicon/react";
 import { OverlayScrollbars } from "overlayscrollbars";
-import { Popover as PopoverPrimitive } from "radix-ui";
 
-import {
-  FLOATING_LAYER_Z_ATTR,
-  getFloatingLayerZIndexAbove,
-} from "@/components/ui/floating-layer";
 import {
   prepareNativeScrollbarHost,
   useNativeScrollbars,
   VERTICAL_SCROLLBAR_OPTIONS,
 } from "@/components/ui/overlay-scrollbar";
+import { Popover } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 type ItemMeta = {
@@ -217,9 +213,9 @@ function Select({
 
   return (
     <SelectContext.Provider value={ctxValue}>
-      <PopoverPrimitive.Root open={open} onOpenChange={handleOpenChange}>
+      <Popover.Root open={open} onOpenChange={handleOpenChange}>
         {children}
-      </PopoverPrimitive.Root>
+      </Popover.Root>
       {name ? (
         <input
           type="hidden"
@@ -249,7 +245,7 @@ function SelectTrigger({
   const hasValue = ctx.value !== undefined && ctx.value !== "";
 
   return (
-    <PopoverPrimitive.Trigger asChild>
+    <Popover.Trigger asChild>
       <button
         type="button"
         ref={ctx.triggerRef}
@@ -269,7 +265,7 @@ function SelectTrigger({
         {children}
         <RiArrowDownSLine className="pointer-events-none size-4 text-muted-foreground" />
       </button>
-    </PopoverPrimitive.Trigger>
+    </Popover.Trigger>
   );
 }
 
@@ -296,7 +292,7 @@ function SelectValue({
 }
 
 type SelectContentProps = Omit<
-  React.ComponentProps<typeof PopoverPrimitive.Content>,
+  React.ComponentProps<typeof Popover.Content>,
   "role"
 >;
 
@@ -313,7 +309,6 @@ function SelectContent({
   ...props
 }: SelectContentProps) {
   const ctx = useSelectContext("SelectContent");
-  const [, refreshFloatingLayer] = React.useState(0);
   const scrollHostRef = React.useRef<HTMLDivElement | null>(null);
   const [scrollHost, setScrollHost] = React.useState<HTMLDivElement | null>(
     null,
@@ -326,23 +321,6 @@ function SelectContent({
     scrollHostRef.current = node;
     setScrollHost(node);
   }, []);
-
-  React.useLayoutEffect(() => {
-    if (!ctx.open || typeof document === "undefined") return;
-
-    const observer = new MutationObserver(() => {
-      refreshFloatingLayer((revision) => revision + 1);
-    });
-    observer.observe(document.body, {
-      attributes: true,
-      attributeFilter: [FLOATING_LAYER_Z_ATTR],
-      childList: true,
-      subtree: true,
-    });
-    refreshFloatingLayer((revision) => revision + 1);
-
-    return () => observer.disconnect();
-  }, [ctx.open]);
 
   React.useEffect(() => {
     if (!scrollHost) return;
@@ -459,11 +437,9 @@ function SelectContent({
   const activeDescendantId = ctx.highlightedValue
     ? ctx.itemIdFor(ctx.highlightedValue)
     : undefined;
-  const contentZIndex = getFloatingLayerZIndexAbove();
-
   return (
-    <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Content
+    <Popover.Portal>
+      <Popover.Content
         ref={ctx.contentRef}
         role="listbox"
         aria-labelledby={ctx.triggerId}
@@ -476,9 +452,9 @@ function SelectContent({
         onWheel={handleWheel}
         onOpenAutoFocus={handleOpenAutoFocus}
         data-slot="select-content"
-        style={{ ...style, zIndex: contentZIndex }}
+        style={style}
         className={cn(
-          "relative z-50 min-w-(--radix-popover-trigger-width) origin-(--radix-popover-content-transform-origin) overflow-hidden rounded-none bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+          "relative min-w-(--radix-popover-trigger-width) origin-(--radix-popover-content-transform-origin) overflow-hidden rounded-none bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
         )}
         {...props}
       >
@@ -493,8 +469,8 @@ function SelectContent({
         >
           {children}
         </div>
-      </PopoverPrimitive.Content>
-    </PopoverPrimitive.Portal>
+      </Popover.Content>
+    </Popover.Portal>
   );
 }
 

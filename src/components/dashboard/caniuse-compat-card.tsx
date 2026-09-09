@@ -469,7 +469,7 @@ export const CanIUseCompatCard = memo(function CanIUseCompatCard({
                 onKeyDown={handleKeyDown}
               />
               {dropdownOpen && query.length >= 1 && (
-                <div className="absolute top-full left-0 z-50 mt-1 max-h-60 w-full overflow-auto border border-border bg-background shadow-lg">
+                <div className="absolute top-full left-0 z-10 mt-1 max-h-60 w-full overflow-auto border border-border bg-background shadow-lg">
                   {filteredSuggestions.length > 0 ? (
                     filteredSuggestions.map((item, i) => (
                       <button

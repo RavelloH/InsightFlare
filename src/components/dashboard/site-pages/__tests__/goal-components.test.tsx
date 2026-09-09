@@ -47,6 +47,7 @@ import {
 } from "@/components/dashboard/site-pages/goal-detail";
 import { GoalEditor } from "@/components/dashboard/site-pages/goal-editor";
 import { goalDefinitionQueryKey } from "@/components/dashboard/site-pages/goals-client-page";
+import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import {
   fetchGoalSummary,
   fetchGoalTimeseries,
@@ -120,7 +121,13 @@ function renderWithQueryClient(
   document.body.appendChild(container);
   const root = createRoot(container);
   act(() => {
-    root.render(createElement(QueryClientProvider, { client }, element));
+    root.render(
+      createElement(
+        LayerManagerProvider,
+        null,
+        createElement(QueryClientProvider, { client }, element),
+      ),
+    );
   });
   return { client, container, root };
 }
@@ -405,21 +412,25 @@ describe("Goal dashboard components", () => {
     act(() => {
       root.render(
         createElement(
-          QueryClientProvider,
-          { client },
-          createElement(GoalDetail, {
-            goal,
-            siteId: "site-1",
-            locale: "en",
-            labels,
-            window,
-            filters,
-            filterKey: "empty",
-            canManage: true,
-            actionPending: true,
-            onEdit: vi.fn(),
-            onDelete: vi.fn(),
-          }),
+          LayerManagerProvider,
+          null,
+          createElement(
+            QueryClientProvider,
+            { client },
+            createElement(GoalDetail, {
+              goal,
+              siteId: "site-1",
+              locale: "en",
+              labels,
+              window,
+              filters,
+              filterKey: "empty",
+              canManage: true,
+              actionPending: true,
+              onEdit: vi.fn(),
+              onDelete: vi.fn(),
+            }),
+          ),
         ),
       );
     });

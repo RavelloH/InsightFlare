@@ -10,8 +10,6 @@ import { Toaster as Sonner, type ToasterProps } from "sonner";
 import { useTheme } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
 
-const TOAST_LAYER_Z_INDEX = 2147483647;
-
 const Toaster = ({
   className,
   style,
@@ -41,7 +39,6 @@ const Toaster = ({
           "--normal-border": "var(--border)",
           "--border-radius": "0px",
           pointerEvents: "auto",
-          zIndex: TOAST_LAYER_Z_INDEX,
           ...style,
         } as React.CSSProperties
       }

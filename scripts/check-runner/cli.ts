@@ -68,6 +68,15 @@ function createTasks(fix: boolean): CheckTask[] {
 
   return [
     {
+      name: "Layer contract",
+      steps: [
+        {
+          name: "Layer contract",
+          args: ["run", "check:layer"],
+        },
+      ],
+    },
+    {
       name: "Tracker SDK",
       steps: [
         {

@@ -4,9 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  FLOATING_LAYER_Z_ATTR,
-  MODAL_LAYER_Z_INDEX,
-} from "@/components/ui/floating-layer";
+  LayerManagerProvider,
+  OverlayFrame,
+  useOverlayStackState,
+} from "@/components/ui/layer/layer-manager";
 import {
   Select,
   SelectContent,
@@ -37,6 +38,27 @@ function selectContent() {
   return document.querySelector<HTMLElement>('[data-slot="select-content"]');
 }
 
+function StackProbe({ id }: { id: string }) {
+  const { depth, framesAbove, framesBelow, isTopmost } =
+    useOverlayStackState(id);
+  return (
+    <output
+      data-stack-id={id}
+      data-depth={depth}
+      data-frames-above={framesAbove}
+      data-frames-below={framesBelow}
+      data-topmost={isTopmost}
+    />
+  );
+}
+
+async function render(element: React.ReactNode) {
+  await act(async () => {
+    root.render(element);
+    await Promise.resolve();
+  });
+}
+
 describe("Select floating layer", () => {
   beforeEach(() => {
     container = document.createElement("div");
@@ -49,37 +71,61 @@ describe("Select floating layer", () => {
     document.body.replaceChildren();
   });
 
-  it("keeps the default layer on ordinary pages", () => {
-    act(() => root.render(<SelectFixture />));
+  it("resolves ordinary page content to the page floating host", async () => {
+    await render(
+      <LayerManagerProvider>
+        <SelectFixture />
+      </LayerManagerProvider>,
+    );
 
-    expect(selectContent()?.style.zIndex).toBe(String(MODAL_LAYER_Z_INDEX));
+    expect(selectContent()?.closest("[data-layer-page-floating-host]")).toBe(
+      document.querySelector("[data-layer-page-floating-host]"),
+    );
   });
 
-  it("places content above nested modal and drawer layers", () => {
-    const outerLayer = document.createElement("div");
-    outerLayer.setAttribute(FLOATING_LAYER_Z_ATTR, "50");
-    const nestedLayer = document.createElement("div");
-    nestedLayer.setAttribute(FLOATING_LAYER_Z_ATTR, "1200");
-    document.body.appendChild(outerLayer);
-    document.body.appendChild(nestedLayer);
+  it("resolves content to the current frame floating host", async () => {
+    await render(
+      <LayerManagerProvider>
+        <OverlayFrame id="frame-a" kind="drawer" open>
+          <SelectFixture />
+        </OverlayFrame>
+      </LayerManagerProvider>,
+    );
 
-    act(() => root.render(<SelectFixture />));
-
-    expect(selectContent()?.style.zIndex).toBe("1201");
+    const content = selectContent();
+    const host = content?.closest<HTMLElement>("[data-layer-host]");
+    expect(host?.dataset.layerHost).toBe("floating");
+    expect(host?.dataset.layerFrameId).toBe("frame-a");
+    expect(content?.style.zIndex).toBe("");
   });
 
-  it("tracks a floating layer added while the menu is open", async () => {
-    act(() => root.render(<SelectFixture />));
-    expect(selectContent()?.style.zIndex).toBe(String(MODAL_LAYER_Z_INDEX));
+  it("reports stack state from frame order", async () => {
+    await render(
+      <LayerManagerProvider>
+        <OverlayFrame id="frame-a" kind="detail-drawer" open>
+          <StackProbe id="frame-a" />
+          <OverlayFrame id="frame-b" kind="detail-drawer" open>
+            <StackProbe id="frame-b" />
+          </OverlayFrame>
+        </OverlayFrame>
+      </LayerManagerProvider>,
+    );
 
-    const nestedLayer = document.createElement("div");
-    nestedLayer.setAttribute(FLOATING_LAYER_Z_ATTR, "1200");
-    document.body.appendChild(nestedLayer);
-
-    await act(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(document.querySelector('[data-stack-id="frame-a"]')).toMatchObject({
+      dataset: {
+        depth: "0",
+        framesAbove: "1",
+        framesBelow: "0",
+        topmost: "false",
+      },
     });
-
-    expect(selectContent()?.style.zIndex).toBe("1201");
+    expect(document.querySelector('[data-stack-id="frame-b"]')).toMatchObject({
+      dataset: {
+        depth: "1",
+        framesAbove: "0",
+        framesBelow: "1",
+        topmost: "true",
+      },
+    });
   });
 });

@@ -71,6 +71,7 @@ import {
   goalDefinitionQueryKey,
   GoalsClientPage,
 } from "@/components/dashboard/site-pages/goals-client-page";
+import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import { fetchGoals, updateGoal } from "@/lib/dashboard/client-data";
 import type {
   GoalDefinition,
@@ -120,15 +121,19 @@ function renderPage(client: QueryClient): {
   act(() => {
     root.render(
       createElement(
-        QueryClientProvider,
-        { client },
-        createElement(GoalsClientPage, {
-          locale: "en",
-          messages,
-          siteId: "site-1",
-          pathname: "/sites/site-1/goals",
-          canManage: true,
-        }),
+        LayerManagerProvider,
+        null,
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(GoalsClientPage, {
+            locale: "en",
+            messages,
+            siteId: "site-1",
+            pathname: "/sites/site-1/goals",
+            canManage: true,
+          }),
+        ),
       ),
     );
   });

@@ -61,7 +61,6 @@ import {
   useDetailDrawerReady,
 } from "@/components/dashboard/site-pages/detail-drawer";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/event-detail-drawer";
-import { NESTED_DETAIL_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
 import {
   OverviewPagesSection,
   type OverviewPagesSectionCardData,
@@ -2557,7 +2556,6 @@ function DetailContent({
           loading={eventDetailLoading}
           error={eventDetailError}
           eventKind={selectedEvent?.kind ?? "pageview"}
-          zIndex={NESTED_DETAIL_DRAWER_Z_INDEX + 100}
         />
       </div>
     </div>

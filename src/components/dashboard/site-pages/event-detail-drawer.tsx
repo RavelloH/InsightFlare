@@ -1,7 +1,5 @@
 import {
   memo,
-  type MouseEvent,
-  type PointerEvent,
   type ReactNode,
   useEffect,
   useMemo,
@@ -27,13 +25,8 @@ import {
 } from "@/components/dashboard/journey-display";
 import { JsonTreePanel } from "@/components/dashboard/json-tree";
 import { DetailDrawer } from "@/components/dashboard/site-pages/detail-drawer";
-import {
-  EVENT_RECORD_DRAWER_Z_INDEX,
-  NESTED_DETAIL_DRAWER_Z_INDEX,
-} from "@/components/dashboard/site-pages/floating-layer";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitor-detail-client-page";
-import { AppOverlay, overlayZIndexFor } from "@/components/ui/app-overlay";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -411,7 +404,6 @@ export interface EventDetailDrawerProps {
   loading: boolean;
   error: boolean;
   eventKind?: EventDetailDrawerKind;
-  zIndex?: number;
 }
 
 export const EventDetailDrawer = memo(function EventDetailDrawer({
@@ -427,7 +419,6 @@ export const EventDetailDrawer = memo(function EventDetailDrawer({
   loading,
   error,
   eventKind = "custom",
-  zIndex = EVENT_RECORD_DRAWER_Z_INDEX,
 }: EventDetailDrawerProps) {
   const detail = detailData ?? EVENT_DETAIL_SKELETON_DATA;
   const [nestedDetails, setNestedDetails] = useState<EventRecordNestedDetail[]>(
@@ -442,10 +433,6 @@ export const EventDetailDrawer = memo(function EventDetailDrawer({
   const visitorPathname = `${basePath}/visitors`;
   const sessionPathname = `${basePath}/sessions`;
   const nestedDetailOpen = nestedDetails.length > 0;
-  const nestedDrawerZIndex = Math.max(
-    NESTED_DETAIL_DRAWER_Z_INDEX,
-    zIndex + 100,
-  );
   const showPayload =
     eventKind === "custom" || detailData?.event.eventKind === "custom_event";
   const missingDetailLabel = messages.common.noData;
@@ -493,42 +480,12 @@ export const EventDetailDrawer = memo(function EventDetailDrawer({
     openNestedDetail("session", nextSessionId);
   };
 
-  const stopSideDrawerOverlayEvent = (
-    event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement>,
-  ) => {
-    event.stopPropagation();
-    event.nativeEvent.stopImmediatePropagation();
-  };
-
-  const closeSideDrawerFromOverlay = (event: MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    stopSideDrawerOverlayEvent(event);
-    if (!nestedDetailOpen) onOpenChange(false);
-  };
-
   return (
     <>
-      <AppOverlay
-        data-event-record-drawer-overlay=""
-        layerId="event-record-drawer"
-        open={open}
-        portal
-        zIndex={overlayZIndexFor(zIndex)}
-        onPointerDown={stopSideDrawerOverlayEvent}
-        onPointerUp={stopSideDrawerOverlayEvent}
-        onClick={closeSideDrawerFromOverlay}
-      />
-      <Drawer
-        open={open}
-        onOpenChange={onOpenChange}
-        direction="right"
-        modal={false}
-      >
+      <Drawer open={open} onOpenChange={onOpenChange} direction="right">
         <DrawerContent
           data-dashboard-floating-layer="event-record-drawer"
           className="!w-full !max-w-none sm:!w-[min(58vw,34rem)]"
-          overlayClassName="hidden"
-          style={{ zIndex }}
           onEscapeKeyDown={(event) => {
             if (nestedDetailOpen) event.preventDefault();
           }}
@@ -1276,7 +1233,6 @@ export const EventDetailDrawer = memo(function EventDetailDrawer({
           onOpenChange={(nextOpen) => {
             if (!nextOpen) closeNestedDetail(nestedDetail.stackKey);
           }}
-          zIndex={nestedDrawerZIndex}
         >
           {nestedDetail.kind === "visitor" ? (
             <VisitorDetailClientPage

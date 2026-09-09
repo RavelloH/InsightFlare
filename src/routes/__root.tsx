@@ -11,6 +11,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 
+import { LayerSystemFixture } from "@/components/dashboard/site-pages/layer-system-fixture";
 import { GlobalScrollbars } from "@/components/global-scrollbars";
 import { AppQueryProvider } from "@/components/query-client-provider";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -24,6 +25,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_NAME } from "@/lib/constants";
@@ -80,16 +82,19 @@ function RootDocument() {
         <ScriptOnce>{THEME_INIT_SCRIPT}</ScriptOnce>
         <GlobalScrollbars />
         <ScriptOnce>{ESBUILD_NAME_HELPER_SCRIPT}</ScriptOnce>
-        <AppQueryProvider>
-          <TimeZoneProvider>
-            <ThemeProvider>
-              <TooltipProvider>
-                <Outlet />
-              </TooltipProvider>
-              <Toaster />
-            </ThemeProvider>
-          </TimeZoneProvider>
-        </AppQueryProvider>
+        <LayerManagerProvider>
+          <LayerSystemFixture />
+          <AppQueryProvider>
+            <TimeZoneProvider>
+              <ThemeProvider>
+                <TooltipProvider>
+                  <Outlet />
+                </TooltipProvider>
+                <Toaster />
+              </ThemeProvider>
+            </TimeZoneProvider>
+          </AppQueryProvider>
+        </LayerManagerProvider>
         {import.meta.env.VITE_DEMO_MODE === "1" ? (
           <script defer src={DEMO_ANALYTICS_SCRIPT_SRC} />
         ) : null}

@@ -7,22 +7,17 @@ import {
   useEffect,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
-import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import type { PartialOptions } from "overlayscrollbars";
 import { OverlayScrollbars } from "overlayscrollbars";
 
-import {
-  DETAIL_DRAWER_Z_INDEX,
-  getDetailDrawerLayerSnapshot,
-  hasHigherFloatingLayer,
-  removeDetailDrawerLayer,
-  setDetailDrawerLayer,
-  subscribeDetailDrawerLayers,
-} from "@/components/dashboard/site-pages/floating-layer";
 import { AppOverlay } from "@/components/ui/app-overlay";
+import {
+  OverlayFrame,
+  useOverlayStackState,
+} from "@/components/ui/layer/layer-manager";
+import { LayerPortal } from "@/components/ui/layer/layer-portal";
 import { shouldUseNativeScrollbars } from "@/components/ui/overlay-scrollbar";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { cn } from "@/lib/utils";
@@ -61,7 +56,6 @@ interface DetailDrawerProps {
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
   rootClassName?: string;
-  zIndex?: number;
 }
 
 interface DetailModalProps {
@@ -99,7 +93,6 @@ export function DetailDrawer({
   onOpenChange,
   children,
   rootClassName,
-  zIndex,
 }: DetailDrawerProps) {
   const [isClosing, setIsClosing] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -129,23 +122,8 @@ export function DetailDrawer({
     layerIdRef.current = `detail-drawer-${nextDetailDrawerInstanceId}`;
   }
   const layerId = layerIdRef.current;
-  const baseLayerZIndex = zIndex ?? DETAIL_DRAWER_Z_INDEX;
-  const detailDrawerLayers = useSyncExternalStore(
-    subscribeDetailDrawerLayers,
-    getDetailDrawerLayerSnapshot,
-    getDetailDrawerLayerSnapshot,
-  );
-  const currentLayer = detailDrawerLayers.find((layer) => layer.id === layerId);
-  const layerZIndex = currentLayer?.effectiveZIndex ?? baseLayerZIndex;
-  const stackDepth = currentLayer
-    ? detailDrawerLayers.filter(
-        (layer) =>
-          layer.id !== layerId &&
-          (layer.effectiveZIndex > currentLayer.effectiveZIndex ||
-            (layer.effectiveZIndex === currentLayer.effectiveZIndex &&
-              layer.order > currentLayer.order)),
-      ).length
-    : 0;
+  const { framesAbove, isTopmost } = useOverlayStackState(layerId);
+  const stackDepth = framesAbove;
   const stackLift = -Math.min(stackDepth, MAX_STACK_LIFT_DEPTH) * STACK_LIFT_PX;
 
   const clearCloseScrollPending = useCallback(() => {
@@ -261,14 +239,6 @@ export function DetailDrawer({
   }, [isClosing, open, rendered, triggerCloseAnimation]);
 
   useEffect(() => {
-    if (!rendered) return;
-    setDetailDrawerLayer(layerId, baseLayerZIndex);
-    return () => {
-      removeDetailDrawerLayer(layerId);
-    };
-  }, [baseLayerZIndex, layerId, rendered]);
-
-  useEffect(() => {
     if (!open) return;
     setIsClosing(false);
     setIsReady(false);
@@ -348,7 +318,7 @@ export function DetailDrawer({
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        if (hasHigherFloatingLayer(layerZIndex)) return;
+        if (!isTopmost) return;
         handleClose();
       }
     };
@@ -361,7 +331,7 @@ export function DetailDrawer({
       document.body.style.overflow = previousBodyOverflow;
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [handleClose, isCloseInteractionDisabled, layerZIndex, rendered]);
+  }, [handleClose, isCloseInteractionDisabled, isTopmost, rendered]);
 
   useEffect(() => {
     if (!rendered || isCloseInteractionDisabled) return;
@@ -441,14 +411,14 @@ export function DetailDrawer({
   }, [isCloseInteractionDisabled, rendered]);
 
   const handleCloseFromOutside = useCallback(() => {
-    if (hasHigherFloatingLayer(layerZIndex)) return;
+    if (!isTopmost) return;
     if (pointerGestureRef.current?.moved) {
       pointerGestureRef.current = null;
       return;
     }
     pointerGestureRef.current = null;
     handleClose();
-  }, [handleClose, layerZIndex]);
+  }, [handleClose, isTopmost]);
 
   useEffect(() => {
     if (!isClosing) return;
@@ -491,87 +461,90 @@ export function DetailDrawer({
           width: "100vw",
         }
   ) as CSSProperties;
-  const rootStyle = { zIndex: layerZIndex } as const;
-
   const drawer = (
     <DetailDrawerCloseContext.Provider value={handleClose}>
       <DetailDrawerReadyContext.Provider value={isReady}>
         <div
-          data-dashboard-floating-layer="detail-drawer"
-          data-dashboard-floating-layer-z={layerZIndex}
+          data-layer-detail-drawer=""
           data-detail-drawer-root=""
-          className={cn("fixed inset-0 z-[96]", rootClassName)}
-          style={rootStyle}
+          className={cn("pointer-events-none fixed inset-0", rootClassName)}
         >
-          <AppOverlay
-            className="z-0 bg-black/50 backdrop-blur-sm"
-            layerId={layerId}
-            open={!isClosing}
-            zIndex={0}
-            onClick={handleCloseFromOutside}
-          />
-
-          <div className="fixed inset-y-0 z-10" style={contentAreaStyle}>
-            <VerticalScrollMask
-              hostRef={scrollContainerRef}
-              className="h-full min-h-0"
-              contentClassName="min-h-0 overscroll-contain"
-              scrollbarOptions={DETAIL_DRAWER_SCROLLBAR_OPTIONS}
+          <LayerPortal slot="backdrop">
+            <AppOverlay
+              className="bg-black/50 backdrop-blur-sm"
+              layerId={layerId}
+              open={!isClosing}
               onClick={handleCloseFromOutside}
-            >
-              <div className="pointer-events-none relative mx-auto flex max-w-[1400px] items-start gap-6 px-4 pb-[4em] pt-[8em] sm:px-5 md:px-6">
-                <motion.div
-                  ref={contentRef}
-                  initial={{
-                    top: 0,
-                    y: "112vh",
-                  }}
-                  animate={
-                    isClosing
-                      ? { top: 0, y: "112vh" }
-                      : { top: stackLift, y: "0vh" }
-                  }
-                  transition={
-                    isClosing
-                      ? { duration: 0.36, ease: [0.38, 0.05, 0.86, 0.28] }
-                      : {
-                          type: "spring",
-                          stiffness: 170,
-                          damping: 24,
-                          mass: 0.92,
-                        }
-                  }
-                  data-detail-drawer-stack-depth={stackDepth}
-                  className={cn(
-                    isCloseInteractionDisabled
-                      ? "pointer-events-none"
-                      : "pointer-events-auto",
-                    "relative min-h-[132vh] min-w-0 flex-1 transform-gpu overflow-hidden rounded-sm border border-border/80 bg-background shadow-[0_-24px_70px_rgba(0,0,0,0.35)]",
-                  )}
-                  style={{
-                    willChange: isClosing || !isReady ? "transform" : "auto",
-                  }}
-                  onAnimationComplete={() => {
-                    if (!isClosing) {
-                      setIsReady(true);
+            />
+          </LayerPortal>
+
+          <LayerPortal slot="surface">
+            <div className="fixed inset-y-0" style={contentAreaStyle}>
+              <VerticalScrollMask
+                hostRef={scrollContainerRef}
+                className="h-full min-h-0"
+                contentClassName="min-h-0 overscroll-contain"
+                scrollbarOptions={DETAIL_DRAWER_SCROLLBAR_OPTIONS}
+                onClick={handleCloseFromOutside}
+              >
+                <div className="pointer-events-none relative mx-auto flex max-w-[1400px] items-start gap-6 px-4 pb-[4em] pt-[8em] sm:px-5 md:px-6">
+                  <motion.div
+                    ref={contentRef}
+                    initial={{
+                      top: 0,
+                      y: "112vh",
+                    }}
+                    animate={
+                      isClosing
+                        ? { top: 0, y: "112vh" }
+                        : { top: stackLift, y: "0vh" }
                     }
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  role="dialog"
-                  aria-modal="true"
-                  aria-label={ariaLabel}
-                >
-                  <div className="relative h-full">{children}</div>
-                </motion.div>
-              </div>
-            </VerticalScrollMask>
-          </div>
+                    transition={
+                      isClosing
+                        ? { duration: 0.36, ease: [0.38, 0.05, 0.86, 0.28] }
+                        : {
+                            type: "spring",
+                            stiffness: 170,
+                            damping: 24,
+                            mass: 0.92,
+                          }
+                    }
+                    data-detail-drawer-stack-depth={stackDepth}
+                    className={cn(
+                      isCloseInteractionDisabled
+                        ? "pointer-events-none"
+                        : "pointer-events-auto",
+                      "relative min-h-[132vh] min-w-0 flex-1 transform-gpu overflow-hidden rounded-sm border border-border/80 bg-background shadow-[0_-24px_70px_rgba(0,0,0,0.35)]",
+                    )}
+                    style={{
+                      willChange: isClosing || !isReady ? "transform" : "auto",
+                    }}
+                    onAnimationComplete={() => {
+                      if (!isClosing) {
+                        setIsReady(true);
+                      }
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={ariaLabel}
+                  >
+                    <div className="relative h-full">{children}</div>
+                  </motion.div>
+                </div>
+              </VerticalScrollMask>
+            </div>
+          </LayerPortal>
         </div>
       </DetailDrawerReadyContext.Provider>
     </DetailDrawerCloseContext.Provider>
   );
 
-  return createPortal(drawer, document.body);
+  return (
+    <OverlayFrame id={layerId} kind="detail-drawer" open={rendered}>
+      {drawer}
+    </OverlayFrame>
+  );
 }
 
 export function DetailModal({

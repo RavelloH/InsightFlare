@@ -5,6 +5,8 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 
 import { AppOverlay } from "@/components/ui/app-overlay";
 import { Button } from "@/components/ui/button";
+import { OverlayFrame } from "@/components/ui/layer/layer-manager";
+import { LayerPortal } from "@/components/ui/layer/layer-portal";
 import { cn } from "@/lib/utils";
 
 const AlertDialogOpenContext = React.createContext(false);
@@ -46,11 +48,12 @@ function AlertDialogTrigger({
   );
 }
 
-function AlertDialogPortal({
-  ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {
+function AlertDialogPortal({ children }: { children: React.ReactNode }) {
+  const open = React.useContext(AlertDialogOpenContext);
   return (
-    <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
+    <OverlayFrame kind="alert-dialog" open={open}>
+      {children}
+    </OverlayFrame>
   );
 }
 
@@ -62,7 +65,7 @@ function AlertDialogOverlay({
 
   return (
     <AppOverlay
-      className={cn("z-50", className)}
+      className={cn(className)}
       data-slot="alert-dialog-overlay"
       layerId="alert-dialog-overlay"
       open={open}
@@ -80,16 +83,20 @@ function AlertDialogContent({
 }) {
   return (
     <AlertDialogPortal>
-      <AlertDialogOverlay />
-      <AlertDialogPrimitive.Content
-        data-slot="alert-dialog-content"
-        data-size={size}
-        className={cn(
-          "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 rounded-none bg-background p-4 ring-1 ring-foreground/10 duration-100 outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className,
-        )}
-        {...props}
-      />
+      <LayerPortal slot="backdrop">
+        <AlertDialogOverlay />
+      </LayerPortal>
+      <LayerPortal slot="surface">
+        <AlertDialogPrimitive.Content
+          data-slot="alert-dialog-content"
+          data-size={size}
+          className={cn(
+            "pointer-events-auto group/alert-dialog-content fixed top-1/2 left-1/2 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 rounded-none bg-background p-4 ring-1 ring-foreground/10 duration-100 outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            className,
+          )}
+          {...props}
+        />
+      </LayerPortal>
     </AlertDialogPortal>
   );
 }

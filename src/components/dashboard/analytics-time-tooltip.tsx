@@ -10,7 +10,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { RiSearchLine } from "@remixicon/react";
 import { toast } from "sonner";
 
@@ -405,9 +404,6 @@ export function AnalyticsTimeTooltipProvider({
   const [active, setActive] = useState<ActiveTooltip | null>(null);
   const [content, setContent] = useState<ActiveTooltip | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(
-    null,
-  );
   const activeRef = useRef<ActiveTooltip | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const pointerMoveFrameRef = useRef<number | null>(null);
@@ -421,10 +417,6 @@ export function AnalyticsTimeTooltipProvider({
   const { browserTimeZone } = useReportingTimeZone();
 
   activeRef.current = active;
-
-  useEffect(() => {
-    setPortalContainer(document.body);
-  }, []);
 
   const updateActive = useCallback(
     (
@@ -643,18 +635,13 @@ export function AnalyticsTimeTooltipProvider({
         open={active !== null}
         onOpenChange={(open) => !open && scheduleHide()}
       >
-        {portalContainer
-          ? createPortal(
-              <TooltipTrigger asChild>
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none fixed z-0 opacity-0"
-                  style={anchorStyle}
-                />
-              </TooltipTrigger>,
-              portalContainer,
-            )
-          : null}
+        <TooltipTrigger asChild>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none fixed opacity-0"
+            style={anchorStyle}
+          />
+        </TooltipTrigger>
         {content ? (
           <TooltipContent
             ref={tooltipContentRef}

@@ -2,8 +2,6 @@ import {
   Fragment,
   type KeyboardEvent,
   memo,
-  type MouseEvent,
-  type PointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -49,9 +47,7 @@ import {
   VisitorAvatar,
 } from "@/components/dashboard/journey-display";
 import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
-import { EVENT_RECORD_DRAWER_Z_INDEX } from "@/components/dashboard/site-pages/floating-layer";
 import type { TabbedDataTablePage } from "@/components/dashboard/tabbed-data-table-card";
-import { AppOverlay, overlayZIndexFor } from "@/components/ui/app-overlay";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Badge } from "@/components/ui/badge";
@@ -3233,41 +3229,13 @@ function BotRequestDetailDrawer({
   const eventId = event ? event.traceId || event.rayId : "";
   const subtitle = eventId || ui.detailSubtitle;
 
-  const stopSideDrawerOverlayEvent = (
-    event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement>,
-  ) => {
-    event.stopPropagation();
-    event.nativeEvent.stopImmediatePropagation();
-  };
-
-  const closeSideDrawerFromOverlay = (event: MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    stopSideDrawerOverlayEvent(event);
-    onOpenChange(false);
-  };
-
   return (
     <>
-      <AppOverlay
-        layerId="request-observation-drawer"
-        open={open}
-        portal
-        zIndex={overlayZIndexFor(EVENT_RECORD_DRAWER_Z_INDEX)}
-        onPointerDown={stopSideDrawerOverlayEvent}
-        onPointerUp={stopSideDrawerOverlayEvent}
-        onClick={closeSideDrawerFromOverlay}
-      />
-      <Drawer
-        open={open}
-        onOpenChange={onOpenChange}
-        direction="right"
-        modal={false}
-      >
+      <Drawer open={open} onOpenChange={onOpenChange} direction="right">
         <DrawerContent
           data-dashboard-floating-layer="request-observation-drawer"
           className="!w-full !max-w-none sm:!w-[min(58vw,34rem)]"
           overlayClassName="hidden"
-          style={{ zIndex: EVENT_RECORD_DRAWER_Z_INDEX }}
           onFocusOutside={(event) => {
             event.preventDefault();
           }}
@@ -3683,41 +3651,13 @@ function NormalRequestDetailDrawer({
   const continentLabel = copy.normalDetail.continent;
   const metadata = event ? metadataEntries(event.metadataJson) : [];
 
-  const stopSideDrawerOverlayEvent = (
-    event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement>,
-  ) => {
-    event.stopPropagation();
-    event.nativeEvent.stopImmediatePropagation();
-  };
-
-  const closeSideDrawerFromOverlay = (event: MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    stopSideDrawerOverlayEvent(event);
-    onOpenChange(false);
-  };
-
   return (
     <>
-      <AppOverlay
-        layerId="request-observation-normal-drawer"
-        open={open}
-        portal
-        zIndex={overlayZIndexFor(EVENT_RECORD_DRAWER_Z_INDEX)}
-        onPointerDown={stopSideDrawerOverlayEvent}
-        onPointerUp={stopSideDrawerOverlayEvent}
-        onClick={closeSideDrawerFromOverlay}
-      />
-      <Drawer
-        open={open}
-        onOpenChange={onOpenChange}
-        direction="right"
-        modal={false}
-      >
+      <Drawer open={open} onOpenChange={onOpenChange} direction="right">
         <DrawerContent
           data-dashboard-floating-layer="request-observation-normal-drawer"
           className="!w-full !max-w-none sm:!w-[min(58vw,34rem)]"
           overlayClassName="hidden"
-          style={{ zIndex: EVENT_RECORD_DRAWER_Z_INDEX }}
           onFocusOutside={(event) => {
             event.preventDefault();
           }}
