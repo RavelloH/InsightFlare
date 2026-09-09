@@ -333,14 +333,6 @@ window.insightflare.identify("user-456", { name: "Bob" });
   ...
 </form>
 
-<!-- 5. 元素进入视口时触发一次 -->
-<section
-  data-insightflare-event="pricing_viewed"
-  data-insightflare-event-trigger="enterviewport"
-  data-insightflare-event-plan="pro"
->
-  ...
-</section>
 ```
 
 ## 技术栈

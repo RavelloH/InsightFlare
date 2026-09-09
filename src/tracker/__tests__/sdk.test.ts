@@ -99,8 +99,6 @@ describe("Tracker Browser SDK Integration Suite", () => {
   let originalReplaceState: any;
   let originalDocAddEventListener: any;
   let originalWinAddEventListener: any;
-  let originalIntersectionObserver: any;
-  let originalMutationObserver: any;
   let originalPerformanceObserver: any;
   let registeredDocListeners: Array<
     [string, EventListenerOrEventListenerObject, any]
@@ -142,8 +140,6 @@ describe("Tracker Browser SDK Integration Suite", () => {
     // would otherwise leak across tests and cause stale closures to fire on later cases.
     originalDocAddEventListener = document.addEventListener;
     originalWinAddEventListener = window.addEventListener;
-    originalIntersectionObserver = (globalThis as any).IntersectionObserver;
-    originalMutationObserver = (globalThis as any).MutationObserver;
     originalPerformanceObserver = (globalThis as any).PerformanceObserver;
     registeredDocListeners = [];
     registeredWinListeners = [];
@@ -229,8 +225,6 @@ describe("Tracker Browser SDK Integration Suite", () => {
     // Restore history methods (SDK reassigns push/replaceState)
     history.pushState = originalPushState;
     history.replaceState = originalReplaceState;
-    (globalThis as any).IntersectionObserver = originalIntersectionObserver;
-    (globalThis as any).MutationObserver = originalMutationObserver;
     (globalThis as any).PerformanceObserver = originalPerformanceObserver;
 
     document.body.innerHTML = "";
@@ -1331,109 +1325,6 @@ describe("Tracker Browser SDK Integration Suite", () => {
     expect(customEventCalls.length).toBeGreaterThan(0);
   });
 
-  it("should handle observable IntersectionObserver visibility-trigger elements", async () => {
-    const observed: Element[] = [];
-    const unobserved: Element[] = [];
-    const observerCallbacks: Array<(entries: any[]) => void> = [];
-
-    (globalThis as any).IntersectionObserver = class {
-      constructor(cb: (entries: any[]) => void) {
-        observerCallbacks.push(cb);
-      }
-      observe(el: Element) {
-        observed.push(el);
-      }
-      unobserve(el: Element) {
-        unobserved.push(el);
-      }
-      disconnect() {}
-    };
-
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(() =>
-        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
-      );
-
-    const el = document.createElement("div");
-    el.setAttribute("data-insightflare-event", "card_visible");
-    el.setAttribute("data-insightflare-event-trigger", "enterviewport");
-    document.body.appendChild(el);
-
-    await import("../sdk.ts");
-    fetchSpy.mockClear();
-
-    expect(observed).toContain(el);
-    // Simulate intersection
-    observerCallbacks[0]([{ target: el, isIntersecting: true }]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(unobserved).toContain(el);
-
-    el.remove();
-    delete (globalThis as any).IntersectionObserver;
-  });
-
-  it("should ignore non-intersecting IntersectionObserver entries", async () => {
-    const observerCallbacks: Array<(entries: any[]) => void> = [];
-
-    (globalThis as any).IntersectionObserver = class {
-      constructor(cb: (entries: any[]) => void) {
-        observerCallbacks.push(cb);
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    };
-
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(() =>
-        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
-      );
-
-    const el = document.createElement("div");
-    el.setAttribute("data-insightflare-event", "off_screen");
-    el.setAttribute("data-insightflare-event-trigger", "enterviewport");
-    document.body.appendChild(el);
-
-    await import("../sdk.ts");
-    fetchSpy.mockClear();
-
-    observerCallbacks[0]([{ target: el, isIntersecting: false }]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-
-    el.remove();
-    delete (globalThis as any).IntersectionObserver;
-  });
-
-  it("should pick up dynamically added enterviewport elements via MutationObserver", async () => {
-    const observed: Element[] = [];
-    (globalThis as any).IntersectionObserver = class {
-      constructor() {}
-      observe(el: Element) {
-        observed.push(el);
-      }
-      unobserve() {}
-      disconnect() {}
-    };
-
-    await import("../sdk.ts");
-
-    const el = document.createElement("div");
-    el.setAttribute("data-insightflare-event", "lazy_card");
-    el.setAttribute("data-insightflare-event-trigger", "enterviewport");
-    document.body.appendChild(el);
-
-    // MutationObserver may fire asynchronously; allow a few ticks
-    await new Promise((r) => setTimeout(r, 50));
-    // Either dynamic detection succeeded OR no observation happened — both are acceptable
-    // depending on happy-dom's MutationObserver support; we just exercise the code path.
-    expect(Array.isArray(observed)).toBe(true);
-
-    el.remove();
-    delete (globalThis as any).IntersectionObserver;
-  });
-
   it("should include UA client hints when navigator.userAgentData exists", async () => {
     const uaData = {
       brands: [{ brand: "Chromium", version: "130" }],
@@ -1801,39 +1692,6 @@ describe("Tracker Browser SDK Integration Suite", () => {
     button.click();
 
     expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("should ignore visibility-trigger entries without an event name", async () => {
-    const observerCallbacks: Array<(entries: any[]) => void> = [];
-    const unobserved: Element[] = [];
-
-    (globalThis as any).IntersectionObserver = class {
-      constructor(cb: (entries: any[]) => void) {
-        observerCallbacks.push(cb);
-      }
-      observe() {}
-      unobserve(el: Element) {
-        unobserved.push(el);
-      }
-      disconnect() {}
-    };
-
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(() =>
-        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
-      );
-
-    const el = document.createElement("div");
-    el.setAttribute("data-insightflare-event-trigger", "enterviewport");
-    document.body.appendChild(el);
-
-    await import("../sdk.ts");
-    fetchSpy.mockClear();
-
-    observerCallbacks[0]([{ target: el, isIntersecting: true }]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(unobserved).toContain(el);
   });
 
   it("should swallow rejected fetch promises without breaking installation", async () => {
@@ -2214,58 +2072,6 @@ describe("Tracker Browser SDK Integration Suite", () => {
 
     expect((window as any).__insightflare_tracker_v6__).toBeDefined();
     expect(history.pushState).toBeUndefined();
-  });
-
-  it("should skip MutationObserver setup when the API is unavailable", async () => {
-    const originalMutationObserver = globalThis.MutationObserver;
-    (globalThis as any).MutationObserver = undefined;
-
-    try {
-      await import("../sdk.ts");
-      expect((window as any).__insightflare_tracker_v6__).toBeDefined();
-    } finally {
-      (globalThis as any).MutationObserver = originalMutationObserver;
-    }
-  });
-
-  it("should ignore non-element nodes added through MutationObserver", async () => {
-    const observed: Element[] = [];
-    (globalThis as any).IntersectionObserver = class {
-      constructor() {}
-      observe(el: Element) {
-        observed.push(el);
-      }
-      unobserve() {}
-      disconnect() {}
-    };
-
-    await import("../sdk.ts");
-
-    document.body.appendChild(document.createTextNode("not an element"));
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(observed).toEqual([]);
-    delete (globalThis as any).IntersectionObserver;
-  });
-
-  it("should skip viewport visibility setup when IntersectionObserver is unavailable", async () => {
-    (globalThis as any).IntersectionObserver = undefined;
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(() =>
-        Promise.resolve(new Response(JSON.stringify({ ok: true }))),
-      );
-
-    const el = document.createElement("div");
-    el.setAttribute("data-insightflare-event", "not_observed");
-    el.setAttribute("data-insightflare-event-trigger", "enterviewport");
-    document.body.appendChild(el);
-
-    await import("../sdk.ts");
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect((window as any).__insightflare_tracker_v6__).toBeDefined();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it("should extract auto-track JSON data when dataset is unavailable", async () => {

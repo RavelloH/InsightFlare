@@ -329,14 +329,6 @@ window.insightflare.identify("user-456", { name: "Bob" });
   ...
 </form>
 
-<!-- 5. 要素がビューポートに入ったとき一度だけ発火 -->
-<section
-  data-insightflare-event="pricing_viewed"
-  data-insightflare-event-trigger="enterviewport"
-  data-insightflare-event-plan="pro"
->
-  ...
-</section>
 ```
 
 ## 技術スタック

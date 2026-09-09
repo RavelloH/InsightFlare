@@ -31,28 +31,6 @@ function extractEventData(el: Element): Record<string, unknown> {
 }
 
 export function initAutoTrack(options: AutoTrackOptions): void {
-  let visibilityObserver: IntersectionObserver | null = null;
-  function observeVisibility(root: ParentNode): void {
-    if (typeof IntersectionObserver !== "function") return;
-    if (!visibilityObserver) {
-      visibilityObserver = new IntersectionObserver((entries) => {
-        for (let i = 0; i < entries.length; i++) {
-          if (!entries[i].isIntersecting) continue;
-          const el = entries[i].target;
-          const eventName = el.getAttribute("data-insightflare-event");
-          if (eventName) options.track(eventName, extractEventData(el));
-          visibilityObserver!.unobserve(el);
-        }
-      });
-    }
-    const candidates = (root || document).querySelectorAll(
-      '[data-insightflare-event][data-insightflare-event-trigger="enterviewport"]',
-    );
-    for (let i = 0; i < candidates.length; i++) {
-      visibilityObserver.observe(candidates[i]);
-    }
-  }
-
   document.addEventListener(
     "click",
     (e) => {
@@ -95,8 +73,6 @@ export function initAutoTrack(options: AutoTrackOptions): void {
     );
   }
 
-  observeVisibility(document);
-
   document.addEventListener(
     "submit",
     (e) => {
@@ -110,20 +86,4 @@ export function initAutoTrack(options: AutoTrackOptions): void {
     },
     true,
   );
-
-  if (typeof MutationObserver === "function") {
-    new MutationObserver((mutations) => {
-      for (let i = 0; i < mutations.length; i++) {
-        const addedNodes = mutations[i].addedNodes;
-        for (let j = 0; j < addedNodes.length; j++) {
-          if (addedNodes[j].nodeType === 1) {
-            observeVisibility(addedNodes[j] as ParentNode);
-          }
-        }
-      }
-    }).observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
-  }
 }

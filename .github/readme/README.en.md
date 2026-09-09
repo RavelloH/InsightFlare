@@ -332,14 +332,6 @@ Use `reset()` before switching accounts. Calling `identify("user-456")` alone do
   ...
 </form>
 
-<!-- 5. Trigger once when an element enters the viewport -->
-<section
-  data-insightflare-event="pricing_viewed"
-  data-insightflare-event-trigger="enterviewport"
-  data-insightflare-event-plan="pro"
->
-  ...
-</section>
 ```
 
 ## Tech Stack
