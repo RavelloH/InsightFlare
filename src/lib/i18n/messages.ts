@@ -40,7 +40,6 @@ export interface AppMessages {
     entryPage: string;
     exitPage: string;
     referrer: string;
-    startedAt: string;
     event: string;
     location: string;
     browser: string;
@@ -132,7 +131,6 @@ export interface AppMessages {
   dashboardHeader: {
     range: string;
     interval: string;
-    filters: string;
     filterButton: string;
     filterButtonEvent: string;
     filterButtonSession: string;
@@ -157,10 +155,6 @@ export interface AppMessages {
     customSelectionSummary: string;
   };
   filters: {
-    country: string;
-    device: string;
-    browser: string;
-    all: string;
     clear: string;
   };
   conditionDescription: {
@@ -485,7 +479,6 @@ export interface AppMessages {
     viewPage: string;
     customEvent: string;
     detailsTitle: string;
-    detailsSection: string;
     browsingSection: string;
     geographySection: string;
     sourceSection: string;
@@ -507,23 +500,17 @@ export interface AppMessages {
     visitorHistorySubtitle: string;
     visitorHistoryRange: string;
     visitorHistoryEmpty: string;
-    visitorMapSection: string;
-    visitorMapSubtitle: string;
     visitorMapUnavailable: string;
     visitorId: string;
     sessionId: string;
     visitId: string;
-    eventType: string;
     eventTime: string;
     eventKind: string;
     eventName: string;
-    eventId: string;
     siteId: string;
     traceId: string;
-    sequence: string;
     receivedAt: string;
     startedAt: string;
-    previousVisitId: string;
     previousVisitStartedAt: string;
     userId: string;
     userName: string;
@@ -537,20 +524,15 @@ export interface AppMessages {
     browserVersion: string;
     osVersion: string;
     userAgent: string;
-    screenWidth: string;
-    screenHeight: string;
     postalCode: string;
     metroCode: string;
     status: string;
     visibilityState: string;
-    hiddenAt: string;
     endedAt: string;
-    finalizedAt: string;
     duration: string;
     durationSource: string;
     exitReason: string;
     leaveAt: string;
-    performanceVisitId: string;
   };
   overview: {
     title: string;
@@ -644,8 +626,6 @@ export interface AppMessages {
     sessionId: string;
     visitor: string;
     anonymous: string;
-    userId: string;
-    userName: string;
     entryPage: string;
     exitPage: string;
     duration: string;
@@ -850,22 +830,17 @@ export interface AppMessages {
   goals: {
     title: string;
     subtitle: string;
-    listTitle: string;
     listSubtitle: string;
     conversionRecords: string;
     open: string;
     moreActions: string;
     create: string;
     createTitle: string;
-    createDescription: string;
     nameLabel: string;
     namePlaceholder: string;
     filter: string;
     apply: string;
     cancel: string;
-    expression: string;
-    filterPlaceholder: string;
-    invalidFilter: string;
     save: string;
     saveEdit: string;
     edit: string;
@@ -875,14 +850,12 @@ export interface AppMessages {
     deleteTitle: string;
     deleteDescription: string;
     deleteConfirm: string;
-    deleting: string;
     empty: string;
     emptyHint: string;
     loadError: string;
     detailLoadError: string;
     invalidGoal: string;
     created: string;
-    createFailed: string;
     updatedSuccess: string;
     saveFailed: string;
     deleted: string;
@@ -900,10 +873,7 @@ export interface AppMessages {
     subtitle: string;
     search: string;
     visitor: string;
-    sessionId: string;
     anonymous: string;
-    userId: string;
-    userName: string;
     referrer: string;
     location: string;
     os: string;
@@ -1659,8 +1629,6 @@ export interface AppMessages {
     invalidCredentials: string;
   };
   accountLinks: {
-    noSites: string;
-    siteNotFound: string;
     invite: {
       title: string;
       subtitle: string;
@@ -1709,8 +1677,6 @@ export interface AppMessages {
   };
   empty: {
     noTeams: string;
-    noSites: string;
-    siteNotFound: string;
   };
   errorPage: {
     notFoundEyebrow: string;
@@ -1899,10 +1865,6 @@ export interface AppMessages {
       scheduleInterval: string;
       scheduleCustom: string;
       conditionReport: string;
-      conditionMilestone: string;
-      conditionThreshold: string;
-      conditionChange: string;
-      conditionHealth: string;
       summaryWhenConditions: string;
       summaryWhenSingleCondition: string;
       summaryConditionThreshold: string;
@@ -2428,39 +2390,23 @@ export interface AppMessages {
   };
   requestObservation: {
     title: string;
-    subtitle: string;
     tabs: {
       overview: string;
-      abnormal: string;
-      normal: string;
       blocked: string;
       included: string;
     };
     refresh: string;
     loadFailed: string;
-    samplingNotice: string;
     notConfiguredTitle: string;
     notConfiguredDescription: string;
     analyticsEngineDisabledTitle: string;
     analyticsEngineDisabledDescription: string;
     openAnalyticsEngine: string;
     openSettings: string;
-    highThreatBots: string;
-    botRequests: string;
-    suspectedBotRequests: string;
-    blockedRequests: string;
-    includedRequests: string;
-    customBlockedRequests: string;
     affectedSites: string;
     uniqueCountries: string;
     noData: string;
     trendTitle: string;
-    trendDescription: string;
-    recentTitle: string;
-    recentDescription: string;
-    recentLoadedAll: string;
-    detailTitle: string;
-    detailSubtitle: string;
     client: string;
     edge: string;
     identifiers: string;
@@ -2476,10 +2422,6 @@ export interface AppMessages {
     ip: string;
     userAgent: string;
     category: string;
-    blocked: string;
-    included: string;
-    disposition: string;
-    highThreatRequests: string;
     emptyValue: string;
     kind: string;
     botScore: string;
@@ -2530,17 +2472,6 @@ export interface AppMessages {
       identify: string;
     };
     overviewLabels: {
-      totalRequests: string;
-      includedRequests: string;
-      blockedRequests: string;
-      normalRequests: string;
-      suspectedBotRequests: string;
-      botRequests: string;
-      customBlockedRequests: string;
-      botRequestRatio: string;
-      blockedRequestRatio: string;
-      abnormalRequests: string;
-      abnormalRatio: string;
       p50Latency: string;
       p75Latency: string;
       p99Latency: string;
@@ -2549,39 +2480,21 @@ export interface AppMessages {
       pageviews: string;
       customEvents: string;
       overviewTrendTitle: string;
-      overviewTrendDescription: string;
       trafficCompositionTitle: string;
       trafficCompositionDescription: string;
       categoryShareTitle: string;
-      normalTrafficShare: string;
-      suspectedBotTraffic: string;
-      botTraffic: string;
-      mediumThreatTraffic: string;
-      highThreatTraffic: string;
-      customBlockedTraffic: string;
       latencyTitle: string;
       latencyDescription: string;
-      abnormalSubtitle: string;
-      normalSubtitle: string;
-      blockedSubtitle: string;
-      includedSubtitle: string;
       requests: string;
       windowDays: string;
       latencyMilliseconds: string;
     };
     normalDetail: {
-      title: string;
-      subtitle: string;
       requestMethod: string;
       edgeLatency: string;
       eventAt: string;
       receivedAt: string;
       continent: string;
-      coordinates: string;
-    };
-    recentNormal: {
-      title: string;
-      description: string;
     };
   };
   systemSettings: {
@@ -2825,7 +2738,6 @@ const enMessages = {
     entryPage: "Entry Page",
     exitPage: "Exit Page",
     referrer: "Referrer",
-    startedAt: "Started",
     event: "Event",
     location: "Location",
     browser: "Browser",
@@ -2932,7 +2844,6 @@ const enMessages = {
   dashboardHeader: {
     range: "Time Range",
     interval: "Interval",
-    filters: "Filters",
     filterButton: "Filter",
     filterButtonEvent: "Filter (Event)",
     filterButtonSession: "Filter (Session)",
@@ -2960,10 +2871,6 @@ const enMessages = {
     customSelectionSummary: "Selected range: {from} to {to} ({days} days)",
   },
   filters: {
-    country: "Country",
-    device: "Device",
-    browser: "Browser",
-    all: "All",
     clear: "Clear",
   },
   conditionDescription: {
@@ -3031,7 +2938,7 @@ const enMessages = {
       "client.deviceType": "Device type",
       "client.language": "Language",
       "client.screenSize": "Screen size",
-      "geo.country": "Country",
+      "geo.country": "Country / Region",
       "geo.region": "Region",
       "geo.city": "City",
       "geo.continent": "Continent",
@@ -3366,7 +3273,6 @@ const enMessages = {
     viewPage: "View page",
     customEvent: "Custom event",
     detailsTitle: "Event details",
-    detailsSection: "Information",
     browsingSection: "Browsing",
     geographySection: "Geography",
     sourceSection: "Source",
@@ -3390,24 +3296,17 @@ const enMessages = {
     visitorHistoryRange: "Activity range",
     visitorHistoryEmpty:
       "No additional records are available for this visitor yet.",
-    visitorMapSection: "Visitor location",
-    visitorMapSubtitle:
-      "Approximate location inferred from this event's coordinates.",
     visitorMapUnavailable: "This event does not include usable coordinates.",
     visitorId: "Visitor ID",
     sessionId: "Session ID",
     visitId: "Visit ID",
-    eventType: "Event type",
     eventTime: "Event time",
     eventKind: "Event kind",
     eventName: "Event name",
-    eventId: "Event ID",
     siteId: "Site ID",
     traceId: "Trace ID",
-    sequence: "Sequence",
     receivedAt: "Received at",
     startedAt: "Started at",
-    previousVisitId: "Previous visit ID",
     previousVisitStartedAt: "Previous visit started at",
     userId: "User ID",
     userName: "User name",
@@ -3421,24 +3320,19 @@ const enMessages = {
     browserVersion: "Browser version",
     osVersion: "OS version",
     userAgent: "User agent",
-    screenWidth: "Screen width",
-    screenHeight: "Screen height",
     postalCode: "Postal code",
     metroCode: "Metro code",
     status: "Status",
     visibilityState: "Visibility state",
-    hiddenAt: "Hidden at",
     endedAt: "Ended at",
-    finalizedAt: "Finalized at",
     duration: "Duration",
     durationSource: "Duration source",
     exitReason: "Exit reason",
     leaveAt: "Left at",
-    performanceVisitId: "Performance visit ID",
   },
   overview: {
     title: "Traffic Overview",
-    subtitle: "Monitor high-level performance and audience behavior.",
+    subtitle: "View core metrics and traffic trends.",
     trendTitle: "Traffic Trend",
     sourceTab: "Source",
     sourceDomainColumn: "Source (Domain)",
@@ -3529,8 +3423,6 @@ const enMessages = {
     sessionId: "Session ID",
     visitor: "Visitor",
     anonymous: "Anonymous",
-    userId: "User ID",
-    userName: "User name",
     entryPage: "Entry Page",
     exitPage: "Exit Page",
     duration: "Duration",
@@ -3745,23 +3637,17 @@ const enMessages = {
     title: "Goals",
     subtitle:
       "Measure conversion from a single reusable event or page condition.",
-    listTitle: "Goal definitions",
     listSubtitle: "View conversion rate changes across this time range.",
     conversionRecords: "Conversion records",
     open: "Open goal",
     moreActions: "More actions",
     create: "New goal",
     createTitle: "Create goal",
-    createDescription:
-      "Define the event or page condition that counts as a conversion.",
     nameLabel: "Name",
     namePlaceholder: "Purchase completed",
     filter: "Conversion condition",
     apply: "Apply",
     cancel: "Cancel",
-    expression: "Filter expression",
-    filterPlaceholder: 'e.g. event.name eq "purchase"',
-    invalidFilter: "Invalid filter",
     save: "Create",
     saveEdit: "Save changes",
     edit: "Edit",
@@ -3772,7 +3658,6 @@ const enMessages = {
     deleteDescription:
       "This removes the saved goal definition. Historical analytics data is not deleted.",
     deleteConfirm: "Delete goal",
-    deleting: "Deleting...",
     empty: "No goals yet.",
     emptyHint:
       "Create a goal from a page condition or custom event to track conversion.",
@@ -3780,7 +3665,6 @@ const enMessages = {
     detailLoadError: "Unable to load goal analysis.",
     invalidGoal: "Add a name and a complete conversion condition.",
     created: "Goal created.",
-    createFailed: "Unable to create goal.",
     updatedSuccess: "Goal updated.",
     saveFailed: "Unable to save goal.",
     deleted: "Goal deleted.",
@@ -3798,10 +3682,7 @@ const enMessages = {
     subtitle: "Visitor-level breakdown and recency.",
     search: "Search visitors...",
     visitor: "Visitor",
-    sessionId: "Session ID",
     anonymous: "Anonymous",
-    userId: "User ID",
-    userName: "User name",
     referrer: "Referrer",
     location: "Location",
     os: "OS",
@@ -3905,7 +3786,7 @@ const enMessages = {
     title: "Location Analysis",
     subtitle: "Analyze traffic performance by location.",
     mapTitle: "Request Geo Distribution",
-    countryLabel: "Country",
+    countryLabel: "Country / Region",
     regionLabel: "Region",
     cityLabel: "City",
     back: "Back",
@@ -3916,7 +3797,7 @@ const enMessages = {
     ipNotice:
       "Estimated location via IP. Coordinates are approximate and do not pinpoint a precise address.",
     multipleNotice:
-      "Estimated locations via IP. Multi-session journeys may span multiple cities.",
+      "This visitor's journey across different sessions may span multiple cities.",
     investigation: {
       countryScopedLabel: "Country's {label}",
       capital: "Capital",
@@ -4063,7 +3944,7 @@ const enMessages = {
       "Great: {good} or lower; needs improvement: {good} to {poor}; poor: above {poor}.",
     scoreThresholdText:
       "Great: above 90; needs improvement: 50 to 90; poor: below 50.",
-    countryHealthTitle: "Country Health",
+    countryHealthTitle: "Country and Region Health",
     countryHealthSubtitle:
       "Boundary fill shows {metric} health by country or region.",
     pathsTitle: "Path Performance",
@@ -4156,7 +4037,7 @@ const enMessages = {
       searchInputPlaceholder: "Search by name or code",
       searchCountryLabel: "Country / region",
       searchRegionLabel: "State / province",
-      searchBack: "Change country",
+      searchBack: "Change country / region",
       searchLoading: "Loading locations...",
       searchNoResults: "No matching locations.",
       searchLoadError: "Locations could not be loaded. Try again later.",
@@ -4665,8 +4546,6 @@ const enMessages = {
     invalidCredentials: "Invalid username or password.",
   },
   accountLinks: {
-    noSites: "No site is available under this team.",
-    siteNotFound: "Team or site not found.",
     invite: {
       title: "Team invitation",
       subtitle: "Accept the invitation to join this team.",
@@ -4716,8 +4595,6 @@ const enMessages = {
   },
   empty: {
     noTeams: "No team available yet.",
-    noSites: "No site is available under this team.",
-    siteNotFound: "Team or site not found.",
   },
   errorPage: {
     notFoundEyebrow: "Page not found",
@@ -4915,10 +4792,6 @@ const enMessages = {
       scheduleInterval: "Every {minutes} min",
       scheduleCustom: "Custom",
       conditionReport: "{period} report",
-      conditionMilestone: "{metric} every {step}",
-      conditionThreshold: "{window} {metric} {operator} {value}",
-      conditionChange: "{window} {metric} change {operator} {value}",
-      conditionHealth: "No data for {hours}h",
       summaryWhenConditions:
         "When {combinator} of the following conditions match, send a {type} notification:",
       summaryWhenSingleCondition:
@@ -5359,7 +5232,8 @@ const enMessages = {
         },
         database_maintenance: {
           name: "Database maintenance",
-          description: "Removes expired operational records and optimizes D1.",
+          description:
+            "Removes expired run data and notifications, and optimizes D1 query statistics.",
           schedule: "Every day",
         },
       },
@@ -5466,19 +5340,13 @@ const enMessages = {
   },
   requestObservation: {
     title: "Request Observability",
-    subtitle:
-      "Monitor total requests, anomaly routing, and the normal collection pipeline from Analytics Engine.",
     tabs: {
       overview: "Overview",
-      abnormal: "Blocked Requests",
-      normal: "Included Requests",
       blocked: "Blocked Requests",
       included: "Included Requests",
     },
     refresh: "Refresh",
     loadFailed: "Failed to load request observability data.",
-    samplingNotice:
-      "Counts are corrected for Analytics Engine sampling; detailed rows are representative samples and distinct values are approximate.",
     notConfiguredTitle: "Analytics Engine reader is not configured",
     notConfiguredDescription:
       "Add a Cloudflare Account ID and API token in System Settings to read the request-observation Analytics Engine datasets.",
@@ -5487,25 +5355,10 @@ const enMessages = {
       "This deployment was published without the Analytics Engine binding because the Cloudflare account has not enabled Analytics Engine. Enable it in Cloudflare, then redeploy to collect request-observation data.",
     openAnalyticsEngine: "Open Analytics Engine",
     openSettings: "Open settings",
-    highThreatBots: "Bot Requests",
-    botRequests: "Bot Requests",
-    suspectedBotRequests: "Suspected Bot Requests",
-    blockedRequests: "Blocked Requests",
-    includedRequests: "Included Requests",
-    customBlockedRequests: "Custom-blocked Requests",
     affectedSites: "Affected Sites",
-    uniqueCountries: "Countries",
+    uniqueCountries: "Countries / Regions",
     noData: "No request data in this window.",
     trendTitle: "Routing Trend",
-    trendDescription:
-      "Request categories, dispositions, and ratios by interval.",
-    recentTitle: "Recent Blocked Requests",
-    recentDescription:
-      "Detailed records read from the unified Request Analytics Engine dataset.",
-    recentLoadedAll: "All records loaded",
-    detailTitle: "Request Detail",
-    detailSubtitle:
-      "Inspect detection signals, network context, and client data for this abnormal request.",
     client: "Client",
     edge: "Edge",
     identifiers: "Identifiers",
@@ -5521,10 +5374,6 @@ const enMessages = {
     ip: "IP",
     userAgent: "User agent",
     category: "Category",
-    blocked: "Blocked",
-    included: "Included in statistics",
-    disposition: "Disposition",
-    highThreatRequests: "High-threat Requests",
     emptyValue: "Unknown",
     kind: "Type",
     botScore: "Bot Score",
@@ -5535,7 +5384,7 @@ const enMessages = {
     origin: "Origin",
     asOrganization: "ASN Organization",
     asn: "ASN",
-    country: "Country",
+    country: "Country / Region",
     region: "Region",
     city: "City",
     colo: "Colo",
@@ -5575,17 +5424,6 @@ const enMessages = {
       identify: "Identify",
     },
     overviewLabels: {
-      totalRequests: "Total requests",
-      includedRequests: "Included requests",
-      blockedRequests: "Blocked requests",
-      normalRequests: "Normal requests",
-      suspectedBotRequests: "Suspected bot requests",
-      botRequests: "Bot requests",
-      customBlockedRequests: "Custom-blocked requests",
-      botRequestRatio: "Bot request ratio",
-      blockedRequestRatio: "Blocked request ratio",
-      abnormalRequests: "Blocked requests",
-      abnormalRatio: "Blocked request ratio",
       p50Latency: "P50 Worker processing time",
       p75Latency: "P75 Worker processing time",
       p99Latency: "P99 Worker processing time",
@@ -5594,48 +5432,23 @@ const enMessages = {
       pageviews: "Pageviews",
       customEvents: "Custom events",
       overviewTrendTitle: "Request routing trend",
-      overviewTrendDescription:
-        "Request categories and blocked ratio bucketed by the top-bar interval.",
       trafficCompositionTitle: "Business request composition",
       trafficCompositionDescription:
         "Counts normal collection events by type over time, including pageviews, leaves, visibility changes, custom events, and identifications.",
       categoryShareTitle: "Request category breakdown",
-      normalTrafficShare: "Normal traffic",
-      suspectedBotTraffic: "Suspected bot traffic",
-      botTraffic: "Bot traffic",
-      mediumThreatTraffic: "Suspected bot traffic",
-      highThreatTraffic: "Bot traffic",
-      customBlockedTraffic: "Custom-blocked traffic",
       latencyTitle: "Worker processing time trend",
       latencyDescription:
         "P50 / P75 / P95 / P99 Worker processing time recorded when normal requests are written to AE.",
-      abnormalSubtitle:
-        "Focus on blocked requests. Category labels retain the detection result for each request.",
-      normalSubtitle:
-        "Focus on requests included in statistics. This can include normal and suspected bot traffic.",
-      blockedSubtitle:
-        "Focus on requests that were blocked by custom rules or protection settings.",
-      includedSubtitle:
-        "Focus on requests included in statistics, including normal and suspected bot traffic.",
       requests: "Requests",
       windowDays: "Last {days} days",
       latencyMilliseconds: "{value} ms",
     },
     normalDetail: {
-      title: "Normal Request Detail",
-      subtitle:
-        "Inspect pipeline, location, and Worker processing time fields recorded for a normal request in AE.",
       requestMethod: "Request method",
       edgeLatency: "Worker processing time",
       eventAt: "Event time",
       receivedAt: "Received at",
       continent: "Continent",
-      coordinates: "Coordinates",
-    },
-    recentNormal: {
-      title: "Recent Normal Requests",
-      description:
-        "Detailed records read from the unified Request Analytics Engine dataset.",
     },
   },
   systemSettings: {
@@ -5924,7 +5737,6 @@ const zhMessages = {
     entryPage: "入口页面",
     exitPage: "出口页面",
     referrer: "来源",
-    startedAt: "开始时间",
     event: "事件",
     location: "地区",
     browser: "浏览器",
@@ -6031,7 +5843,6 @@ const zhMessages = {
   dashboardHeader: {
     range: "时间范围",
     interval: "时间间隔",
-    filters: "筛选",
     filterButton: "筛选",
     filterButtonEvent: "筛选 (事件)",
     filterButtonSession: "筛选 (会话)",
@@ -6056,10 +5867,6 @@ const zhMessages = {
     customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）",
   },
   filters: {
-    country: "国家",
-    device: "设备",
-    browser: "浏览器",
-    all: "全部",
     clear: "清除",
   },
   conditionDescription: {
@@ -6455,7 +6262,6 @@ const zhMessages = {
     viewPage: "访问页面",
     customEvent: "自定义事件",
     detailsTitle: "事件详情",
-    detailsSection: "信息",
     browsingSection: "浏览",
     geographySection: "地理位置",
     sourceSection: "来源",
@@ -6477,23 +6283,17 @@ const zhMessages = {
     visitorHistorySubtitle: "查看该访客在当前实时窗口内的全部访问记录。",
     visitorHistoryRange: "浏览时间",
     visitorHistoryEmpty: "当前还没有更多该访客的访问记录。",
-    visitorMapSection: "访客位置",
-    visitorMapSubtitle: "根据当前事件里的经纬度展示该访客的大致位置。",
     visitorMapUnavailable: "当前事件没有可用的定位坐标。",
     visitorId: "访客 ID",
     sessionId: "会话 ID",
     visitId: "访问 ID",
-    eventType: "事件类型",
     eventTime: "事件时间",
     eventKind: "事件种类",
     eventName: "事件名称",
-    eventId: "事件 ID",
     siteId: "站点 ID",
     traceId: "追踪 ID",
-    sequence: "序号",
     receivedAt: "接收时间",
     startedAt: "开始时间",
-    previousVisitId: "上一次访问 ID",
     previousVisitStartedAt: "上一次访问开始时间",
     userId: "用户 ID",
     userName: "用户名",
@@ -6507,20 +6307,15 @@ const zhMessages = {
     browserVersion: "浏览器版本",
     osVersion: "操作系统版本",
     userAgent: "User-Agent",
-    screenWidth: "屏幕宽度",
-    screenHeight: "屏幕高度",
     postalCode: "邮政编码",
     metroCode: "都会区编码",
     status: "状态",
     visibilityState: "可见性状态",
-    hiddenAt: "隐藏时间",
     endedAt: "结束时间",
-    finalizedAt: "最终确定时间",
     duration: "持续时间",
     durationSource: "持续时间来源",
     exitReason: "退出原因",
     leaveAt: "离开时间",
-    performanceVisitId: "性能访问 ID",
   },
   overview: {
     title: "访问总览",
@@ -6614,8 +6409,6 @@ const zhMessages = {
     sessionId: "会话 ID",
     visitor: "访客",
     anonymous: "匿名访客",
-    userId: "用户 ID",
-    userName: "用户名",
     entryPage: "入口页面",
     exitPage: "出口页面",
     duration: "时长",
@@ -6822,22 +6615,17 @@ const zhMessages = {
   goals: {
     title: "目标分析",
     subtitle: "使用一个可复用的事件或页面条件衡量转化。",
-    listTitle: "目标定义",
     listSubtitle: "查看这段时间范围内的转化率变化情况",
     conversionRecords: "转化记录",
     open: "打开目标",
     moreActions: "更多操作",
     create: "新建目标",
     createTitle: "创建目标",
-    createDescription: "定义计为转化的事件或页面条件。",
     nameLabel: "名称",
     namePlaceholder: "完成购买",
     filter: "转化条件",
     apply: "应用",
     cancel: "取消",
-    expression: "筛选表达式",
-    filterPlaceholder: '例如 event.name eq "purchase"',
-    invalidFilter: "筛选无效",
     save: "创建",
     saveEdit: "保存修改",
     edit: "编辑",
@@ -6847,14 +6635,12 @@ const zhMessages = {
     deleteTitle: "删除目标",
     deleteDescription: "这会移除已保存的目标定义，不会删除历史分析数据。",
     deleteConfirm: "删除目标",
-    deleting: "删除中...",
     empty: "暂无目标。",
     emptyHint: "使用页面条件或自定义事件创建目标来跟踪转化。",
     loadError: "无法加载目标。",
     detailLoadError: "无法加载目标分析。",
     invalidGoal: "请填写名称，并补全转化条件。",
     created: "目标已创建。",
-    createFailed: "创建目标失败。",
     updatedSuccess: "目标已更新。",
     saveFailed: "保存目标失败。",
     deleted: "目标已删除。",
@@ -6872,10 +6658,7 @@ const zhMessages = {
     subtitle: "访客级别明细与最近活跃情况。",
     search: "搜索访客...",
     visitor: "访客",
-    sessionId: "会话 ID",
     anonymous: "匿名访客",
-    userId: "用户 ID",
-    userName: "用户名",
     referrer: "来源",
     location: "地区",
     os: "操作系统",
@@ -7208,7 +6991,7 @@ const zhMessages = {
       helpButton: "帮助",
       searchButton: "搜索",
       searchTitle: "搜索地区",
-      searchDescription: "按名称或代码搜索，选择结果后将其添加到此 Card。",
+      searchDescription: "按名称或代码搜索，选择结果后将其添加到此卡片。",
       searchInputLabel: "搜索",
       searchInputPlaceholder: "按名称或代码搜索",
       searchCountryLabel: "国家 / 地区",
@@ -7238,7 +7021,7 @@ const zhMessages = {
       errorInvalidPattern: "第 {line} 行的规则格式无效。",
       testTitle: "测试规则",
       testDescription:
-        "输入请求值以测试当前 Card 中的规则，未保存的编辑内容也会参与测试。",
+        "输入请求值以测试当前卡片中的规则，未保存的编辑内容也会参与测试。",
       testRun: "执行测试",
       testClose: "关闭",
       testInvalidRules: "请先修复无效规则，然后再进行测试。",
@@ -7262,7 +7045,7 @@ const zhMessages = {
         examples: ["*", "-example.com", "-*.example.com", "admin.example.com"],
         exampleDescription:
           "这段配置先屏蔽所有域名，再允许 example.com 及其子域名，最后重新屏蔽精确匹配的 admin.example.com。",
-        testLabel: "Hostname",
+        testLabel: "主机名",
         testPlaceholder: "www.example.com",
         testHint: "输入页面 hostname，不要包含协议或路径。",
       },
@@ -7473,9 +7256,9 @@ const zhMessages = {
     preferredLanguageDescription: "选择定时通知邮件使用的语言。",
     preferredLanguageLabel: "邮件语言",
     preferredLanguageDefault: "默认",
-    preferredLanguageEnglish: "English",
+    preferredLanguageEnglish: "英语",
     preferredLanguageChinese: "中文",
-    preferredLanguageJapanese: "日本語",
+    preferredLanguageJapanese: "日语",
     preferredLanguageSaved: "通知语言已保存。",
     preferredLanguageSaveFailed: "保存通知语言失败。",
     timeZoneTitle: "报表时区",
@@ -7706,8 +7489,6 @@ const zhMessages = {
     invalidCredentials: "用户名或密码错误。",
   },
   accountLinks: {
-    noSites: "该团队下暂无可访问站点。",
-    siteNotFound: "未找到对应团队或站点。",
     invite: {
       title: "团队邀请",
       subtitle: "接受邀请后加入该团队。",
@@ -7756,8 +7537,6 @@ const zhMessages = {
   },
   empty: {
     noTeams: "当前账号还没有可访问的团队。",
-    noSites: "该团队下暂无可访问站点。",
-    siteNotFound: "未找到对应团队或站点。",
   },
   errorPage: {
     notFoundEyebrow: "页面未找到",
@@ -7840,7 +7619,7 @@ const zhMessages = {
       invalidTransferTarget: "请选择新的所有者。",
     },
     sites: {
-      title: "仪表盘",
+      title: "站点仪表盘",
       subtitle: "聚合查看该团队下所有站点的访问表现。",
       aggregateTitle: "总访问量",
       pagesPerSession: "每会话页面数",
@@ -7879,10 +7658,6 @@ const zhMessages = {
       ruleInfoSection: "规则信息",
       scheduleSection: "计划",
       sendScheduleSection: "发送时间",
-      conditionMilestone: "{metric} 每 {step} 触发",
-      conditionThreshold: "{window} {metric} {operator} {value}",
-      conditionChange: "{window} {metric} 变化 {operator} {value}",
-      conditionHealth: "{hours} 小时无数据",
       checkSection: "检查频率",
       conditionSection: "条件",
       deliverySection: "投递",
@@ -8486,18 +8261,13 @@ const zhMessages = {
   },
   requestObservation: {
     title: "请求观测",
-    subtitle: "基于 Analytics Engine 观察整体请求、异常分流与正常采集链路。",
     tabs: {
       overview: "总览",
-      abnormal: "拦截请求",
-      normal: "统计请求",
       blocked: "拦截请求",
       included: "统计请求",
     },
     refresh: "刷新",
     loadFailed: "加载请求观测数据失败。",
-    samplingNotice:
-      "请求计数已按 Analytics Engine 采样权重校正；明细行仅代表采样样本，去重指标为近似值。",
     notConfiguredTitle: "尚未配置 Analytics Engine 读取凭据",
     notConfiguredDescription:
       "请先在系统设置中填写 Cloudflare Account ID 和 API Token，用于读取请求观测 Analytics Engine 数据集。",
@@ -8506,23 +8276,10 @@ const zhMessages = {
       "当前部署未绑定 Analytics Engine，因为 Cloudflare 账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。",
     openAnalyticsEngine: "打开 Analytics Engine",
     openSettings: "打开设置",
-    highThreatBots: "机器人请求",
-    botRequests: "机器人请求",
-    suspectedBotRequests: "疑似机器人请求",
-    blockedRequests: "拦截请求",
-    includedRequests: "统计请求",
-    customBlockedRequests: "自定义拦截请求",
     affectedSites: "受影响站点",
     uniqueCountries: "国家/地区",
     noData: "当前时间窗口内没有请求数据。",
     trendTitle: "分流趋势",
-    trendDescription: "按时间间隔显示请求分类、处理结果和比例。",
-    recentTitle: "最近拦截请求",
-    recentDescription:
-      "这些详细记录从统一的 Request Analytics Engine 数据集中读取。",
-    recentLoadedAll: "已加载全部记录",
-    detailTitle: "请求详情",
-    detailSubtitle: "查看这次异常请求的检测信号、网络和客户端上下文。",
     client: "客户端",
     edge: "边缘",
     identifiers: "标识符",
@@ -8538,10 +8295,6 @@ const zhMessages = {
     ip: "IP",
     userAgent: "User-Agent",
     category: "分类",
-    blocked: "拦截",
-    included: "已计入统计",
-    disposition: "处理结果",
-    highThreatRequests: "高威胁请求",
     emptyValue: "未知",
     kind: "类型",
     botScore: "Bot 分数",
@@ -8592,17 +8345,6 @@ const zhMessages = {
       identify: "用户识别",
     },
     overviewLabels: {
-      totalRequests: "总请求数",
-      includedRequests: "统计请求数",
-      blockedRequests: "拦截请求数",
-      normalRequests: "正常请求",
-      suspectedBotRequests: "疑似机器人请求",
-      botRequests: "机器人请求",
-      customBlockedRequests: "自定义拦截请求",
-      botRequestRatio: "机器人请求比例",
-      blockedRequestRatio: "拦截请求比例",
-      abnormalRequests: "拦截请求",
-      abnormalRatio: "拦截请求比例",
       p50Latency: "P50 Worker 处理耗时",
       p75Latency: "P75 Worker 处理耗时",
       p99Latency: "P99 Worker 处理耗时",
@@ -8611,45 +8353,23 @@ const zhMessages = {
       pageviews: "页面浏览",
       customEvents: "自定义事件",
       overviewTrendTitle: "请求分流趋势",
-      overviewTrendDescription:
-        "按顶栏时间间隔分桶显示请求分类和拦截请求比例。",
       trafficCompositionTitle: "业务请求构成",
       trafficCompositionDescription:
         "按时间显示正常采集链路中页面浏览、离开、可见性、自定义事件和用户识别的数量。",
       categoryShareTitle: "请求分类占比",
-      normalTrafficShare: "正常流量",
-      suspectedBotTraffic: "疑似机器人流量",
-      botTraffic: "机器人流量",
-      mediumThreatTraffic: "疑似机器人流量",
-      highThreatTraffic: "机器人流量",
-      customBlockedTraffic: "自定义屏蔽流量",
       latencyTitle: "Worker 处理耗时趋势",
       latencyDescription:
         "正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 Worker 处理耗时。",
-      abnormalSubtitle:
-        "聚焦实际被拦截的请求；分类标签保留每个请求的检测结果。",
-      normalSubtitle:
-        "聚焦计入统计的请求，其中可能包含正常请求和疑似机器人请求。",
-      blockedSubtitle: "聚焦被自定义规则或防护设置拦截的请求。",
-      includedSubtitle: "聚焦计入统计的请求，包括正常请求和疑似机器人请求。",
       requests: "请求数",
       windowDays: "最近 {days} 天",
       latencyMilliseconds: "{value} 毫秒",
     },
     normalDetail: {
-      title: "正常请求详情",
-      subtitle: "查看正常请求 AE 记录的链路、位置和 Worker 处理耗时字段。",
       requestMethod: "请求方法",
       edgeLatency: "Worker 处理耗时",
       eventAt: "事件时间",
       receivedAt: "接收时间",
       continent: "大洲",
-      coordinates: "坐标",
-    },
-    recentNormal: {
-      title: "最近正常请求",
-      description:
-        "这些详细记录从统一的 Request Analytics Engine 数据集中读取。",
     },
   },
   systemSettings: {
@@ -8930,7 +8650,6 @@ const jaMessages = {
     entryPage: "入口ページ",
     exitPage: "離脱ページ",
     referrer: "参照元",
-    startedAt: "開始",
     event: "イベント",
     location: "地域",
     browser: "ブラウザー",
@@ -9037,7 +8756,6 @@ const jaMessages = {
   dashboardHeader: {
     range: "期間",
     interval: "間隔",
-    filters: "フィルター",
     filterButton: "フィルター",
     filterButtonEvent: "フィルター（イベント）",
     filterButtonSession: "フィルター（セッション）",
@@ -9064,10 +8782,6 @@ const jaMessages = {
     customSelectionSummary: "選択範囲：{from} から {to}（{days} 日）",
   },
   filters: {
-    country: "国",
-    device: "デバイス",
-    browser: "ブラウザー",
-    all: "すべて",
     clear: "クリア",
   },
   conditionDescription: {
@@ -9460,18 +9174,6 @@ const jaMessages = {
   realtime: {
     title: "リアルタイム",
     subtitle: "直近 30 分間のトラフィックを確認します。",
-    detailsSection: "情報",
-    visitorMapSection: "訪問者の地域",
-    visitorMapSubtitle: "このイベントの座標から推定したおおよその地域です。",
-    eventType: "イベント種別",
-    eventId: "イベント ID",
-    sequence: "シーケンス",
-    previousVisitId: "前回の訪問 ID",
-    screenWidth: "画面の幅",
-    screenHeight: "画面の高さ",
-    hiddenAt: "非表示時刻",
-    finalizedAt: "確定時刻",
-    performanceVisitId: "パフォーマンス訪問 ID",
     logTitleSeparator: ":",
     activeNow: "現在アクティブ",
     liveMetrics:
@@ -9544,7 +9246,7 @@ const jaMessages = {
   },
   overview: {
     title: "トラフィック概要",
-    subtitle: "高レベルのパフォーマンスとオーディエンス行動を監視します。",
+    subtitle: "主要指標とトラフィックの推移を確認します。",
     trendTitle: "トラフィック推移",
     sourceTab: "ソース",
     sourceDomainColumn: "ソース（ドメイン）",
@@ -9637,8 +9339,6 @@ const jaMessages = {
     sessionId: "セッション ID",
     visitor: "訪問者",
     anonymous: "匿名",
-    userId: "ユーザー ID",
-    userName: "ユーザー名",
     entryPage: "入口ページ",
     exitPage: "離脱ページ",
     duration: "滞在時間",
@@ -9855,23 +9555,17 @@ const jaMessages = {
     title: "目標",
     subtitle:
       "再利用可能なイベントまたはページ条件でコンバージョンを測定します。",
-    listTitle: "目標定義",
     listSubtitle: "この期間のコンバージョン率の変化を確認します。",
     conversionRecords: "コンバージョン記録",
     open: "目標を開く",
     moreActions: "その他の操作",
     create: "新しい目標",
     createTitle: "目標を作成",
-    createDescription:
-      "コンバージョンとして数えるイベントまたはページ条件を定義します。",
     nameLabel: "名前",
     namePlaceholder: "購入完了",
     filter: "コンバージョン条件",
     apply: "適用",
     cancel: "キャンセル",
-    expression: "フィルター式",
-    filterPlaceholder: '例 event.name eq "purchase"',
-    invalidFilter: "無効なフィルター",
     save: "作成",
     saveEdit: "変更を保存",
     edit: "編集",
@@ -9882,14 +9576,12 @@ const jaMessages = {
     deleteDescription:
       "保存した目標定義を削除します。過去の分析データは削除されません。",
     deleteConfirm: "目標を削除",
-    deleting: "削除中...",
     empty: "目標はまだありません。",
     emptyHint: "ページ条件またはカスタムイベントから目標を作成します。",
     loadError: "目標を読み込めません。",
     detailLoadError: "目標分析を読み込めません。",
     invalidGoal: "名前と完全なコンバージョン条件を入力してください。",
     created: "目標を作成しました。",
-    createFailed: "目標を作成できません。",
     updatedSuccess: "目標を更新しました。",
     saveFailed: "目標を保存できません。",
     deleted: "目標を削除しました。",
@@ -9907,10 +9599,7 @@ const jaMessages = {
     subtitle: "訪問者単位の内訳と直近状況です。",
     search: "訪問者を検索...",
     visitor: "訪問者",
-    sessionId: "セッション ID",
     anonymous: "匿名",
-    userId: "ユーザー ID",
-    userName: "ユーザー名",
     referrer: "参照元",
     location: "地域",
     os: "OS",
@@ -10014,7 +9703,7 @@ const jaMessages = {
     title: "地域分析",
     subtitle: "地域別にトラフィックパフォーマンスを分析します。",
     mapTitle: "リクエスト地域分布",
-    countryLabel: "国",
+    countryLabel: "国 / 地域",
     regionLabel: "地域",
     cityLabel: "都市",
     back: "戻る",
@@ -10026,7 +9715,7 @@ const jaMessages = {
     ipNotice:
       "IP から推定した地域です。座標は概算であり、正確な住所を示すものではありません。",
     multipleNotice:
-      "IP から推定した地域です。複数セッションのジャーニーは複数都市にまたがる場合があります。",
+      "この訪問者は、異なるセッションで複数の都市を訪れる場合があります。",
     investigation: {
       countryScopedLabel: "所属国の{label}",
       capital: "首都",
@@ -10170,7 +9859,7 @@ const jaMessages = {
     metricThresholdText:
       "良好：{good} 以下、要改善：{good} から {poor}、不良：{poor} 超。",
     scoreThresholdText: "良好：90 超、要改善：50 から 90、不良：50 未満。",
-    countryHealthTitle: "国・地域別の状態",
+    countryHealthTitle: "国・地域の状態",
     countryHealthSubtitle:
       "国または地域ごとの {metric} の状態を境界色で示します。",
     pathsTitle: "パスパフォーマンス",
@@ -10289,7 +9978,7 @@ const jaMessages = {
       errorInvalidPattern: "{line} 行目のルール形式が無効です。",
       testTitle: "ルールをテスト",
       testDescription:
-        "この Card の現在のルールに対してリクエスト値をテストします。未保存の編集内容も使用されます。",
+        "このカードの現在のルールに対してリクエスト値をテストします。未保存の編集内容も使用されます。",
       testRun: "テストを実行",
       testClose: "閉じる",
       testInvalidRules: "テストする前に無効なルールを修正してください。",
@@ -10314,7 +10003,7 @@ const jaMessages = {
         examples: ["*", "-example.com", "-*.example.com", "admin.example.com"],
         exampleDescription:
           "この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する admin.example.com を再びブロックします。",
-        testLabel: "Hostname",
+        testLabel: "ホスト名",
         testPlaceholder: "www.example.com",
         testHint: "スキームやパスを含めず、ページの hostname を入力します。",
       },
@@ -10772,8 +10461,6 @@ const jaMessages = {
     invalidCredentials: "ユーザー名またはパスワードが正しくありません。",
   },
   accountLinks: {
-    noSites: "このチームには利用可能なサイトがありません。",
-    siteNotFound: "チームまたはサイトが見つかりません。",
     invite: {
       title: "チーム招待",
       subtitle: "招待を承認してこのチームに参加します。",
@@ -10824,8 +10511,6 @@ const jaMessages = {
   },
   empty: {
     noTeams: "利用可能なチームはまだありません。",
-    noSites: "このチームには利用可能なサイトがありません。",
-    siteNotFound: "チームまたはサイトが見つかりません。",
   },
   errorPage: {
     notFoundEyebrow: "ページが見つかりません",
@@ -10948,10 +10633,6 @@ const jaMessages = {
       ruleInfoSection: "ルール情報",
       scheduleSection: "スケジュール",
       sendScheduleSection: "送信時刻",
-      conditionMilestone: "{metric} が {step} ごと",
-      conditionThreshold: "{window} {metric} {operator} {value}",
-      conditionChange: "{window} {metric} 変化 {operator} {value}",
-      conditionHealth: "{hours}h データなし",
       checkSection: "チェック頻度",
       conditionSection: "条件",
       deliverySection: "配信",
@@ -11199,7 +10880,7 @@ const jaMessages = {
       expiration90: "90 日",
       expiration180: "180 日",
       expiration365: "365 日",
-      expirationNever: "なし",
+      expirationNever: "無期限",
       oneTimeSecretTitle: "今すぐこのキーをコピー",
       oneTimeSecretDescription:
         "完全なキーは一度だけ表示されます。このダイアログを閉じる前に保存してください。",
@@ -11575,19 +11256,13 @@ const jaMessages = {
   },
   requestObservation: {
     title: "リクエスト監視",
-    subtitle:
-      "Analytics Engine をもとに、リクエスト全体、異常ルーティング、通常の収集経路を監視します。",
     tabs: {
       overview: "概要",
-      abnormal: "ブロック済みリクエスト",
-      normal: "統計対象リクエスト",
       blocked: "ブロック済みリクエスト",
       included: "統計対象リクエスト",
     },
     refresh: "更新",
     loadFailed: "リクエスト監視データを読み込めません。",
-    samplingNotice:
-      "リクエスト数は Analytics Engine のサンプル重みで補正されています。詳細行は代表サンプルで、重複除外値は近似値です。",
     notConfiguredTitle: "Analytics Engine リーダーが設定されていません",
     notConfiguredDescription:
       "リクエスト監視用の Analytics Engine データセットを読むには、システム設定で Cloudflare Account ID と API トークンを追加してください。",
@@ -11596,24 +11271,10 @@ const jaMessages = {
       "Cloudflare アカウントで Analytics Engine が有効化されていないため、このデプロイは Analytics Engine バインディングなしで公開されました。Cloudflare で有効化してから再デプロイすると、リクエスト監視データを収集できます。",
     openAnalyticsEngine: "Analytics Engine を開く",
     openSettings: "設定を開く",
-    highThreatBots: "ボットリクエスト",
-    botRequests: "ボットリクエスト",
-    suspectedBotRequests: "疑わしいボットリクエスト",
-    blockedRequests: "ブロック済みリクエスト",
-    includedRequests: "統計対象リクエスト",
-    customBlockedRequests: "カスタムブロック済みリクエスト",
     affectedSites: "影響サイト",
-    uniqueCountries: "国",
+    uniqueCountries: "国 / 地域",
     noData: "この期間にリクエストデータはありません。",
     trendTitle: "ルーティング推移",
-    trendDescription: "リクエストの分類、処置、比率を間隔ごとに表示します。",
-    recentTitle: "最近のブロック済みリクエスト",
-    recentDescription:
-      "統合された Request Analytics Engine データセットから読み取った詳細記録です。",
-    recentLoadedAll: "すべての記録を読み込みました",
-    detailTitle: "リクエスト詳細",
-    detailSubtitle:
-      "この異常リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。",
     client: "クライアント",
     edge: "エッジ",
     identifiers: "識別子",
@@ -11629,10 +11290,6 @@ const jaMessages = {
     ip: "IP",
     userAgent: "User-Agent",
     category: "カテゴリ",
-    blocked: "ブロック済み",
-    included: "統計に含める",
-    disposition: "処理結果",
-    highThreatRequests: "高脅威リクエスト",
     emptyValue: "不明",
     kind: "種別",
     botScore: "Bot スコア",
@@ -11643,7 +11300,7 @@ const jaMessages = {
     origin: "オリジン",
     asOrganization: "ASN 組織",
     asn: "ASN",
-    country: "国",
+    country: "国 / 地域",
     region: "地域",
     city: "都市",
     colo: "データセンター",
@@ -11655,7 +11312,7 @@ const jaMessages = {
       ua_too_long: "User-Agent が長すぎます",
       ua_isbot: "User-Agent が Bot と一致",
       script_ua: "スクリプトクライアント User-Agent",
-      cf_bot_score_low: "Cloudflare Bot スコア低",
+      cf_bot_score_low: "Cloudflare Bot スコアが低い",
       cf_verified_bot_category: "Cloudflare 認証済み Bot カテゴリ",
       hosting_asn: "ホスティング ASN",
       network_service_asn: "ネットワークサービス ASN",
@@ -11683,17 +11340,6 @@ const jaMessages = {
       identify: "ユーザー識別",
     },
     overviewLabels: {
-      totalRequests: "総リクエスト数",
-      includedRequests: "統計対象リクエスト数",
-      blockedRequests: "ブロック済みリクエスト数",
-      normalRequests: "通常リクエスト",
-      suspectedBotRequests: "疑わしいボットリクエスト数",
-      botRequests: "ボットリクエスト数",
-      customBlockedRequests: "カスタムブロック済みリクエスト数",
-      botRequestRatio: "ボットリクエスト比率",
-      blockedRequestRatio: "ブロック済みリクエスト比率",
-      abnormalRequests: "ブロック済みリクエスト",
-      abnormalRatio: "ブロック済みリクエスト比率",
       p50Latency: "P50 Worker 処理時間",
       p75Latency: "P75 Worker 処理時間",
       p99Latency: "P99 Worker 処理時間",
@@ -11702,48 +11348,23 @@ const jaMessages = {
       pageviews: "ページビュー",
       customEvents: "カスタムイベント",
       overviewTrendTitle: "リクエストルーティング推移",
-      overviewTrendDescription:
-        "リクエスト分類とブロック済み比率をトップバーの間隔ごとに集計します。",
       trafficCompositionTitle: "ビジネスリクエスト構成",
       trafficCompositionDescription:
         "ページビュー、離脱、可視性の変化、カスタムイベント、ユーザー識別など、通常の収集イベントを種類別に時系列で表示します。",
       categoryShareTitle: "リクエストカテゴリの内訳",
-      normalTrafficShare: "通常トラフィック",
-      suspectedBotTraffic: "疑わしいボットトラフィック",
-      botTraffic: "ボットトラフィック",
-      mediumThreatTraffic: "疑わしいボットトラフィック",
-      highThreatTraffic: "ボットトラフィック",
-      customBlockedTraffic: "カスタムブロックトラフィック",
       latencyTitle: "Worker 処理時間の推移",
       latencyDescription:
         "通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 Worker 処理時間です。",
-      abnormalSubtitle:
-        "実際にブロックされたリクエストに絞り込み、分類ラベルには検出結果を表示します。",
-      normalSubtitle:
-        "統計に含まれるリクエストに絞り込みます。通常リクエストと疑わしいボットリクエストを含みます。",
-      blockedSubtitle:
-        "カスタムルールまたは保護設定でブロックされたリクエストに絞り込みます。",
-      includedSubtitle:
-        "統計に含めるリクエストに絞り込みます。通常リクエストと疑わしいボットリクエストを含みます。",
       requests: "リクエスト数",
       windowDays: "過去 {days} 日",
       latencyMilliseconds: "{value} ミリ秒",
     },
     normalDetail: {
-      title: "通常リクエスト詳細",
-      subtitle:
-        "通常リクエストの AE 記録フィールド、地域、Worker 処理時間を確認します。",
       requestMethod: "リクエストメソッド",
       edgeLatency: "Worker 処理時間",
       eventAt: "イベント時刻",
       receivedAt: "受信時刻",
       continent: "大陸",
-      coordinates: "座標",
-    },
-    recentNormal: {
-      title: "最近の通常リクエスト",
-      description:
-        "統合された Request Analytics Engine データセットから読み取った詳細記録です。",
     },
   },
   systemSettings: {
@@ -11830,7 +11451,7 @@ const jaMessages = {
       "ログイン Turnstile 設定を削除しますか？ログイン保護は無効になります。",
     loginTurnstileLoadFailed: "ログイン Turnstile 設定を読み込めません。",
     loginTurnstilePrivacyNotice:
-      "Cloudflare Turnstile コンソールで Invisible ウィジェット を作成してください。セルフホスト環境では、プライバシーポリシーが Cloudflare Turnstile の要件に合っていることを確認してください。",
+      "Cloudflare Turnstile コンソールで Invisible ウィジェットを作成してください。 セルフホスト環境では、プライバシーポリシーが Cloudflare Turnstile の要件に合っていることを確認してください。",
     loginTurnstileGuideTitle: "Turnstile 認証情報を取得",
     loginTurnstileGuideDescription:
       "ログイン保護には Cloudflare Turnstile の Site Key と Secret Key が必要です。",

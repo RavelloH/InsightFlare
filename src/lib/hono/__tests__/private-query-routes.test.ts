@@ -343,6 +343,7 @@ describe("Hono private query routes", () => {
           tenantId: "team-1",
           route: "team-dashboard",
           audienceId: "user-1",
+          allowedSiteIds: ["site-1"],
         },
         request: expect.any(Request),
       }),

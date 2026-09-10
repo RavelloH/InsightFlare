@@ -503,7 +503,7 @@ describe("edge observability logger", () => {
     statement.bind.mockImplementation(() => statement);
     const result = {
       results: [],
-      meta: { rows_read: 1, changes: 2, total_attempts: 1 },
+      meta: { rows_read: 1, rows_written: 2, total_attempts: 1 },
     };
     const database: D1Database = {
       prepare: () => statement as D1PreparedStatement,

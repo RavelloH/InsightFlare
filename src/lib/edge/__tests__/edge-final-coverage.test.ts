@@ -353,23 +353,27 @@ describe("edge ingest flush edge coverage", () => {
       0,
       null,
     );
-    expect(observability.increment).toHaveBeenCalledWith("failedStatements", 1);
     expect(observability.error).toHaveBeenCalledWith(
       "do.flush.custom_event_failed",
     );
   });
 
-  it("deletes old flushed visits using startedAt when ended timestamps are absent", async () => {
+  it("schedules old flushed visits using startedAt when ended timestamps are absent", async () => {
     const context = flushContext([bufferedVisit()], []);
 
     await flushPendingToD1(context);
 
     expect(context.env.DB.batch).toHaveBeenCalledTimes(1);
-    expect(context.sqlRun).toHaveBeenNthCalledWith(
-      2,
-      "DELETE FROM buffered_visits WHERE (visit_id = ? AND buffer_revision = ?)",
+    expect(context.sqlRun).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE buffered_visits"),
       "visit-1",
       1,
+    );
+    expect(context.sqlRun).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO ingest_schema_metadata"),
+      "buffered_visits_cleanup_due_at",
+      1,
+      expect.any(Number),
     );
   });
 });

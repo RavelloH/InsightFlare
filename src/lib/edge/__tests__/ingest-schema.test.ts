@@ -289,7 +289,7 @@ describe("initializeIngestSqlSchema", () => {
     sql.updateCalls.length = 0;
     initializeIngestSqlSchema(sql);
 
-    expect(sql.updateCalls.map((call) => call.changes)).toEqual([0, 0]);
+    expect(sql.updateCalls.map((call) => call.changes)).toEqual([0]);
     expect(
       rows<{ name: string; seqno: number }>(
         sql,

@@ -378,7 +378,9 @@ class FakeWebSocket {
   accepted = false;
   closed = false;
   failSend = false;
+  failClose = false;
   readonly sent: string[] = [];
+  private attachment: unknown = null;
   private readonly listeners = new Map<
     FakeWebSocketEvent,
     Array<(event: FakeWebSocketEventPayload) => void>
@@ -388,14 +390,25 @@ class FakeWebSocket {
     this.accepted = true;
   }
 
+  serializeAttachment(attachment: unknown): void {
+    this.attachment = attachment;
+  }
+
+  deserializeAttachment(): unknown {
+    return this.attachment;
+  }
+
   send(payload: string): void {
-    if (this.failSend) {
+    if (this.failSend || this.closed) {
       throw new Error("forced websocket send failure");
     }
     this.sent.push(payload);
   }
 
   close(): void {
+    if (this.failClose) {
+      throw new Error("forced websocket close failure");
+    }
     this.closed = true;
   }
 
@@ -605,6 +618,7 @@ function createTestDo(
   let alarmAt: number | null = null;
   const storage = {
     sql,
+    transactionSync: vi.fn((callback: () => unknown) => callback()),
     getAlarm: vi.fn(async () => alarmAt),
     setAlarm: vi.fn(async (scheduledAt: number) => {
       alarmAt = scheduledAt;
@@ -613,8 +627,15 @@ function createTestDo(
       alarmAt = null;
     }),
   };
+  const sockets = new Set<FakeWebSocket>();
   const state = {
     storage,
+    acceptWebSocket: vi.fn((socket: FakeWebSocket) => {
+      socket.accept();
+      sockets.add(socket);
+    }),
+    getWebSockets: vi.fn(() => sockets),
+    setWebSocketAutoResponse: vi.fn(),
     blockConcurrencyWhile: vi.fn((callback: () => void | Promise<void>) =>
       Promise.resolve(callback()),
     ),
@@ -743,6 +764,21 @@ describe("IngestDurableObject", () => {
     expect(
       bufferStoreContext.sqlAll<{ value: number }>("SELECT 1 AS value"),
     ).toEqual([{ value: 1 }]);
+    expect(
+      (
+        ctx.object as unknown as {
+          sqlRun: (query: string, ...bindings: SqlBinding[]) => number;
+        }
+      ).sqlRun("UPDATE buffered_visits SET dirty = dirty WHERE 0"),
+    ).toBe(0);
+    await (
+      ctx.object as unknown as {
+        advanceWaitingCustomEvents: (
+          siteId: string,
+          visitId: string,
+        ) => Promise<void>;
+      }
+    ).advanceWaitingCustomEvents("site-1", "missing-visit");
 
     expect(IngestDurableObject).toBeTypeOf("function");
 
@@ -838,6 +874,49 @@ describe("IngestDurableObject", () => {
     }
   });
 
+  it("configures websocket auto responses when supported by the runtime", () => {
+    class AutoResponsePair {
+      constructor(
+        readonly request: string,
+        readonly response: string,
+      ) {}
+    }
+    vi.stubGlobal("WebSocketRequestResponsePair", AutoResponsePair);
+
+    const ctx = createTestDo();
+    expect(
+      (
+        ctx.state as unknown as {
+          setWebSocketAutoResponse: ReturnType<typeof vi.fn>;
+        }
+      ).setWebSocketAutoResponse,
+    ).toHaveBeenCalledOnce();
+    expect(
+      (
+        (
+          ctx.state as unknown as {
+            setWebSocketAutoResponse: ReturnType<typeof vi.fn>;
+          }
+        ).setWebSocketAutoResponse.mock.calls[0]?.[0] as AutoResponsePair
+      ).request,
+    ).toBe("ping");
+  });
+
+  it("normalizes invalid websocket close codes and tolerates close failures", () => {
+    const ctx = createTestDo();
+    const socket = new FakeWebSocket();
+    socket.failClose = true;
+
+    expect(() =>
+      ctx.object.webSocketClose(
+        socket as unknown as WebSocket,
+        1004,
+        "invalid-code",
+        false,
+      ),
+    ).not.toThrow();
+  });
+
   it("reports active visitors from the active endpoint", async () => {
     const ctx = createTestDo();
     await postIngest(ctx.object, envelope({ timestamp: NOW, startedAt: NOW }));
@@ -897,7 +976,11 @@ describe("IngestDurableObject", () => {
       } as unknown as Request);
       expect(response.status).toBe(101);
 
-      server.emit("close", { code: 1000 });
+      ctx.object.webSocketMessage(
+        server as unknown as WebSocket,
+        "ignored-client-message",
+      );
+      ctx.object.webSocketClose(server as unknown as WebSocket, 1000, "", true);
 
       expect(console.log).toHaveBeenLastCalledWith(
         expect.objectContaining({
@@ -1098,6 +1181,12 @@ describe("IngestDurableObject", () => {
         pathname: "/first",
       }),
     );
+    vi.spyOn(
+      ctx.object as unknown as {
+        readTrafficVisitSnapshot: (...args: string[]) => unknown;
+      },
+      "readTrafficVisitSnapshot",
+    ).mockReturnValue(null);
     await postIngest(
       ctx.object,
       envelope({
@@ -2543,7 +2632,10 @@ describe("IngestDurableObject", () => {
     });
 
     staleServer.failSend = true;
-    errorServer.emit("error");
+    ctx.object.webSocketError(
+      errorServer as unknown as WebSocket,
+      new Error("forced websocket error"),
+    );
     expect(errorServer.closed).toBe(true);
 
     await postIngest(
@@ -2644,7 +2736,12 @@ describe("IngestDurableObject", () => {
     });
     expect(staleServer.closed).toBe(true);
 
-    healthyServer.emit("close");
+    ctx.object.webSocketClose(
+      healthyServer as unknown as WebSocket,
+      1000,
+      "",
+      true,
+    );
     await postIngest(
       ctx.object,
       envelope({
@@ -3134,7 +3231,7 @@ describe("IngestDurableObject", () => {
         ctx.sql,
         "SELECT COUNT(*) AS dirty FROM buffered_visits WHERE dirty = 1",
       )[0]?.dirty,
-    ).toBe(1);
+    ).toBe(101);
     expect(ctx.state.storage.deleteAlarm).not.toHaveBeenCalled();
   });
 

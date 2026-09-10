@@ -35,7 +35,6 @@ common:
   entryPage: 入口页面
   exitPage: 出口页面
   referrer: 来源
-  startedAt: 开始时间
   event: 事件
   location: 地区
   browser: 浏览器
@@ -136,7 +135,6 @@ intervals:
 dashboardHeader:
   range: 时间范围
   interval: 时间间隔
-  filters: 筛选
   filterButton: 筛选
   filterButtonEvent: 筛选 (事件)
   filterButtonSession: 筛选 (会话)
@@ -160,10 +158,6 @@ dashboardHeader:
   nextPeriod: 下个周期
   customSelectionSummary: "当前选择：{from} 至 {to}（共 {days} 天）"
 filters:
-  country: 国家
-  device: 设备
-  browser: 浏览器
-  all: 全部
   clear: 清除
 conditionDescription:
   and: 且
@@ -508,7 +502,6 @@ realtime:
   viewPage: 访问页面
   customEvent: 自定义事件
   detailsTitle: 事件详情
-  detailsSection: 信息
   browsingSection: 浏览
   geographySection: 地理位置
   sourceSection: 来源
@@ -528,23 +521,17 @@ realtime:
   visitorHistorySubtitle: 查看该访客在当前实时窗口内的全部访问记录。
   visitorHistoryRange: 浏览时间
   visitorHistoryEmpty: 当前还没有更多该访客的访问记录。
-  visitorMapSection: 访客位置
-  visitorMapSubtitle: 根据当前事件里的经纬度展示该访客的大致位置。
   visitorMapUnavailable: 当前事件没有可用的定位坐标。
   visitorId: 访客 ID
   sessionId: 会话 ID
   visitId: 访问 ID
-  eventType: 事件类型
   eventTime: 事件时间
   eventKind: 事件种类
   eventName: 事件名称
-  eventId: 事件 ID
   siteId: 站点 ID
   traceId: 追踪 ID
-  sequence: 序号
   receivedAt: 接收时间
   startedAt: 开始时间
-  previousVisitId: 上一次访问 ID
   previousVisitStartedAt: 上一次访问开始时间
   userId: 用户 ID
   userName: 用户名
@@ -558,20 +545,15 @@ realtime:
   browserVersion: 浏览器版本
   osVersion: 操作系统版本
   userAgent: User-Agent
-  screenWidth: 屏幕宽度
-  screenHeight: 屏幕高度
   postalCode: 邮政编码
   metroCode: 都会区编码
   status: 状态
   visibilityState: 可见性状态
-  hiddenAt: 隐藏时间
   endedAt: 结束时间
-  finalizedAt: 最终确定时间
   duration: 持续时间
   durationSource: 持续时间来源
   exitReason: 退出原因
   leaveAt: 离开时间
-  performanceVisitId: 性能访问 ID
 overview:
   title: 访问总览
   subtitle: 查看核心指标与访问趋势。
@@ -659,8 +641,6 @@ sessions:
   sessionId: 会话 ID
   visitor: 访客
   anonymous: 匿名访客
-  userId: 用户 ID
-  userName: 用户名
   entryPage: 入口页面
   exitPage: 出口页面
   duration: 时长
@@ -861,22 +841,17 @@ funnels:
 goals:
   title: 目标分析
   subtitle: 使用一个可复用的事件或页面条件衡量转化。
-  listTitle: 目标定义
   listSubtitle: 查看这段时间范围内的转化率变化情况
   conversionRecords: 转化记录
   open: 打开目标
   moreActions: 更多操作
   create: 新建目标
   createTitle: 创建目标
-  createDescription: 定义计为转化的事件或页面条件。
   nameLabel: 名称
   namePlaceholder: 完成购买
   filter: 转化条件
   apply: 应用
   cancel: 取消
-  expression: 筛选表达式
-  filterPlaceholder: 例如 event.name eq "purchase"
-  invalidFilter: 筛选无效
   save: 创建
   saveEdit: 保存修改
   edit: 编辑
@@ -886,14 +861,12 @@ goals:
   deleteTitle: 删除目标
   deleteDescription: 这会移除已保存的目标定义，不会删除历史分析数据。
   deleteConfirm: 删除目标
-  deleting: 删除中...
   empty: 暂无目标。
   emptyHint: 使用页面条件或自定义事件创建目标来跟踪转化。
   loadError: 无法加载目标。
   detailLoadError: 无法加载目标分析。
   invalidGoal: 请填写名称，并补全转化条件。
   created: 目标已创建。
-  createFailed: 创建目标失败。
   updatedSuccess: 目标已更新。
   saveFailed: 保存目标失败。
   deleted: 目标已删除。
@@ -910,10 +883,7 @@ visitors:
   subtitle: 访客级别明细与最近活跃情况。
   search: 搜索访客...
   visitor: 访客
-  sessionId: 会话 ID
   anonymous: 匿名访客
-  userId: 用户 ID
-  userName: 用户名
   referrer: 来源
   location: 地区
   os: 操作系统
@@ -1212,7 +1182,7 @@ siteSettings:
     helpButton: 帮助
     searchButton: 搜索
     searchTitle: 搜索地区
-    searchDescription: 按名称或代码搜索，选择结果后将其添加到此 Card。
+    searchDescription: 按名称或代码搜索，选择结果后将其添加到此卡片。
     searchInputLabel: 搜索
     searchInputPlaceholder: 按名称或代码搜索
     searchCountryLabel: 国家 / 地区
@@ -1240,7 +1210,7 @@ siteSettings:
     errorTooManyLines: 规则行数过多。
     errorInvalidPattern: "第 {line} 行的规则格式无效。"
     testTitle: 测试规则
-    testDescription: 输入请求值以测试当前 Card 中的规则，未保存的编辑内容也会参与测试。
+    testDescription: 输入请求值以测试当前卡片中的规则，未保存的编辑内容也会参与测试。
     testRun: 执行测试
     testClose: 关闭
     testInvalidRules: 请先修复无效规则，然后再进行测试。
@@ -1273,7 +1243,7 @@ siteSettings:
         - "-*.example.com"
         - "admin.example.com"
       exampleDescription: 这段配置先屏蔽所有域名，再允许 example.com 及其子域名，最后重新屏蔽精确匹配的 admin.example.com。
-      testLabel: Hostname
+      testLabel: 主机名
       testPlaceholder: www.example.com
       testHint: 输入页面 hostname，不要包含协议或路径。
     paths:
@@ -1525,9 +1495,9 @@ accountSettings:
   preferredLanguageDescription: 选择定时通知邮件使用的语言。
   preferredLanguageLabel: 邮件语言
   preferredLanguageDefault: 默认
-  preferredLanguageEnglish: English
+  preferredLanguageEnglish: 英语
   preferredLanguageChinese: 中文
-  preferredLanguageJapanese: 日本語
+  preferredLanguageJapanese: 日语
   preferredLanguageSaved: 通知语言已保存。
   preferredLanguageSaveFailed: 保存通知语言失败。
   timeZoneTitle: 报表时区
@@ -1729,8 +1699,6 @@ login:
   signIn: 登录
   invalidCredentials: 用户名或密码错误。
 accountLinks:
-  noSites: 该团队下暂无可访问站点。
-  siteNotFound: 未找到对应团队或站点。
   invite:
     title: 团队邀请
     subtitle: 接受邀请后加入该团队。
@@ -1775,8 +1743,6 @@ accountLinks:
     passwordMismatch: 两次输入的密码不一致。
 empty:
   noTeams: 当前账号还没有可访问的团队。
-  noSites: 该团队下暂无可访问站点。
-  siteNotFound: 未找到对应团队或站点。
 errorPage:
   notFoundEyebrow: 页面未找到
   notFoundTitle: 找不到这个页面
@@ -1851,7 +1817,7 @@ teamManagement:
     ownerTransferFailed: 转移所有权失败。
     invalidTransferTarget: 请选择新的所有者。
   sites:
-    title: 仪表盘
+    title: 站点仪表盘
     subtitle: 聚合查看该团队下所有站点的访问表现。
     aggregateTitle: 总访问量
     pagesPerSession: 每会话页面数
@@ -1885,10 +1851,6 @@ teamManagement:
     ruleInfoSection: 规则信息
     scheduleSection: 计划
     sendScheduleSection: 发送时间
-    conditionMilestone: "{metric} 每 {step} 触发"
-    conditionThreshold: "{window} {metric} {operator} {value}"
-    conditionChange: "{window} {metric} 变化 {operator} {value}"
-    conditionHealth: "{hours} 小时无数据"
     checkSection: 检查频率
     conditionSection: 条件
     deliverySection: 投递
@@ -2446,40 +2408,23 @@ adminTeams:
     action: 操作
 requestObservation:
   title: 请求观测
-  subtitle: 基于 Analytics Engine 观察整体请求、异常分流与正常采集链路。
   tabs:
     overview: 总览
-    abnormal: 拦截请求
-    normal: 统计请求
     blocked: 拦截请求
     included: 统计请求
   refresh: 刷新
   loadFailed: 加载请求观测数据失败。
-  samplingNotice: 请求计数已按 Analytics Engine 采样权重校正；明细行仅代表采样样本，去重指标为近似值。
   notConfiguredTitle: 尚未配置 Analytics Engine 读取凭据
   notConfiguredDescription: 请先在系统设置中填写 Cloudflare Account ID 和 API Token，用于读取请求观测 Analytics Engine 数据集。
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用
-  analyticsEngineDisabledDescription:
-    当前部署未绑定 Analytics Engine，因为 Cloudflare
+  analyticsEngineDisabledDescription: 当前部署未绑定 Analytics Engine，因为 Cloudflare
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。
   openAnalyticsEngine: 打开 Analytics Engine
   openSettings: 打开设置
-  highThreatBots: 机器人请求
-  botRequests: 机器人请求
-  suspectedBotRequests: 疑似机器人请求
-  blockedRequests: 拦截请求
-  includedRequests: 统计请求
-  customBlockedRequests: 自定义拦截请求
   affectedSites: 受影响站点
   uniqueCountries: 国家/地区
   noData: 当前时间窗口内没有请求数据。
   trendTitle: 分流趋势
-  trendDescription: 按时间间隔显示请求分类、处理结果和比例。
-  recentTitle: 最近拦截请求
-  recentDescription: 这些详细记录从统一的 Request Analytics Engine 数据集中读取。
-  recentLoadedAll: 已加载全部记录
-  detailTitle: 请求详情
-  detailSubtitle: 查看这次异常请求的检测信号、网络和客户端上下文。
   client: 客户端
   edge: 边缘
   identifiers: 标识符
@@ -2495,10 +2440,6 @@ requestObservation:
   ip: IP
   userAgent: User-Agent
   category: 分类
-  blocked: 拦截
-  included: 已计入统计
-  disposition: 处理结果
-  highThreatRequests: 高威胁请求
   emptyValue: 未知
   kind: 类型
   botScore: Bot 分数
@@ -2547,17 +2488,6 @@ requestObservation:
     leave: 离开
     identify: 用户识别
   overviewLabels:
-    totalRequests: 总请求数
-    includedRequests: 统计请求数
-    blockedRequests: 拦截请求数
-    normalRequests: 正常请求
-    suspectedBotRequests: 疑似机器人请求
-    botRequests: 机器人请求
-    customBlockedRequests: 自定义拦截请求
-    botRequestRatio: 机器人请求比例
-    blockedRequestRatio: 拦截请求比例
-    abnormalRequests: 拦截请求
-    abnormalRatio: 拦截请求比例
     p50Latency: P50 Worker 处理耗时
     p75Latency: P75 Worker 处理耗时
     p99Latency: P99 Worker 处理耗时
@@ -2566,37 +2496,20 @@ requestObservation:
     pageviews: 页面浏览
     customEvents: 自定义事件
     overviewTrendTitle: 请求分流趋势
-    overviewTrendDescription: 按顶栏时间间隔分桶显示请求分类和拦截请求比例。
     trafficCompositionTitle: 业务请求构成
     trafficCompositionDescription: 按时间显示正常采集链路中页面浏览、离开、可见性、自定义事件和用户识别的数量。
     categoryShareTitle: 请求分类占比
-    normalTrafficShare: 正常流量
-    suspectedBotTraffic: 疑似机器人流量
-    botTraffic: 机器人流量
-    mediumThreatTraffic: 疑似机器人流量
-    highThreatTraffic: 机器人流量
-    customBlockedTraffic: 自定义屏蔽流量
     latencyTitle: Worker 处理耗时趋势
     latencyDescription: 正常请求写入 AE 时记录的 P50 / P75 / P95 / P99 Worker 处理耗时。
-    abnormalSubtitle: 聚焦实际被拦截的请求；分类标签保留每个请求的检测结果。
-    normalSubtitle: 聚焦计入统计的请求，其中可能包含正常请求和疑似机器人请求。
-    blockedSubtitle: 聚焦被自定义规则或防护设置拦截的请求。
-    includedSubtitle: 聚焦计入统计的请求，包括正常请求和疑似机器人请求。
     requests: 请求数
     windowDays: "最近 {days} 天"
     latencyMilliseconds: "{value} 毫秒"
   normalDetail:
-    title: 正常请求详情
-    subtitle: 查看正常请求 AE 记录的链路、位置和 Worker 处理耗时字段。
     requestMethod: 请求方法
     edgeLatency: Worker 处理耗时
     eventAt: 事件时间
     receivedAt: 接收时间
     continent: 大洲
-    coordinates: 坐标
-  recentNormal:
-    title: 最近正常请求
-    description: 这些详细记录从统一的 Request Analytics Engine 数据集中读取。
 systemSettings:
   title: 系统设置
   subtitle: 管理当前 InsightFlare 实例的全站配置。
@@ -2612,8 +2525,7 @@ systemSettings:
   analyticsEngineDeleteFailed: 删除分析引擎配置失败。
   analyticsEngineDeleteConfirm: 确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用
-  analyticsEngineDisabledDescription:
-    当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare
+  analyticsEngineDisabledDescription: 当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用 Analytics Engine，然后重新部署
     InsightFlare 以激活相关分析功能。
   analyticsEngineDisabledHint: 在启用 Analytics Engine 并重新部署 Worker 前，分析引擎设置不可修改。

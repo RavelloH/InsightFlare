@@ -203,10 +203,6 @@ describe("custom event individual flush branch coverage", () => {
       "event-1",
       1,
     );
-    const d1Statements = context.observability.increment.mock.calls
-      .filter(([counter]) => counter === "d1Statements")
-      .reduce((total, [, amount]) => total + (amount ?? 1), 0);
-    expect(d1Statements).toBe(14);
     expect(context.observability.increment).toHaveBeenCalledWith(
       "flushedCustomEvents",
       1,

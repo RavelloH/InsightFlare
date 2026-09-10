@@ -35,7 +35,6 @@ common:
   entryPage: 入口ページ
   exitPage: 離脱ページ
   referrer: 参照元
-  startedAt: 開始
   event: イベント
   location: 地域
   browser: ブラウザー
@@ -136,7 +135,6 @@ intervals:
 dashboardHeader:
   range: 期間
   interval: 間隔
-  filters: フィルター
   filterButton: フィルター
   filterButtonEvent: フィルター（イベント）
   filterButtonSession: フィルター（セッション）
@@ -160,10 +158,6 @@ dashboardHeader:
   nextPeriod: 次の期間
   customSelectionSummary: "選択範囲：{from} から {to}（{days} 日）"
 filters:
-  country: 国
-  device: デバイス
-  browser: ブラウザー
-  all: すべて
   clear: クリア
 conditionDescription:
   and: かつ
@@ -312,8 +306,7 @@ filterBuilder:
   expressionHelpSyntax: 構文
   expressionHelpLogicDescription: AND は OR より優先されます。ネストには括弧を使用し、AND(...) と OR(...) は明示的な単一条件グループを保持します。
   expressionHelpValues: 値
-  expressionHelpValuesDescription:
-    文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値]
+  expressionHelpValuesDescription: 文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値]
     を使い、between には順序付きの値を 2 つ指定します。
   expressionHelpOperators: 利用可能な演算子
   expressionHelpUnaryOperators: 値を取らない演算子
@@ -497,18 +490,6 @@ filterBuilder:
 realtime:
   title: リアルタイム
   subtitle: 直近 30 分間のトラフィックを確認します。
-  detailsSection: 情報
-  visitorMapSection: 訪問者の地域
-  visitorMapSubtitle: このイベントの座標から推定したおおよその地域です。
-  eventType: イベント種別
-  eventId: イベント ID
-  sequence: シーケンス
-  previousVisitId: 前回の訪問 ID
-  screenWidth: 画面の幅
-  screenHeight: 画面の高さ
-  hiddenAt: 非表示時刻
-  finalizedAt: 確定時刻
-  performanceVisitId: パフォーマンス訪問 ID
   logTitleSeparator: ":"
   activeNow: 現在アクティブ
   liveMetrics: 現在アクティブ / 過去30分の訪問者数 / 過去30分のページビュー数
@@ -576,7 +557,7 @@ realtime:
   leaveAt: 離脱時刻
 overview:
   title: トラフィック概要
-  subtitle: 高レベルのパフォーマンスとオーディエンス行動を監視します。
+  subtitle: 主要指標とトラフィックの推移を確認します。
   trendTitle: トラフィック推移
   sourceTab: ソース
   sourceDomainColumn: ソース（ドメイン）
@@ -661,8 +642,6 @@ sessions:
   sessionId: セッション ID
   visitor: 訪問者
   anonymous: 匿名
-  userId: ユーザー ID
-  userName: ユーザー名
   entryPage: 入口ページ
   exitPage: 離脱ページ
   duration: 滞在時間
@@ -865,22 +844,17 @@ funnels:
 goals:
   title: 目標
   subtitle: 再利用可能なイベントまたはページ条件でコンバージョンを測定します。
-  listTitle: 目標定義
   listSubtitle: この期間のコンバージョン率の変化を確認します。
   conversionRecords: コンバージョン記録
   open: 目標を開く
   moreActions: その他の操作
   create: 新しい目標
   createTitle: 目標を作成
-  createDescription: コンバージョンとして数えるイベントまたはページ条件を定義します。
   nameLabel: 名前
   namePlaceholder: 購入完了
   filter: コンバージョン条件
   apply: 適用
   cancel: キャンセル
-  expression: フィルター式
-  filterPlaceholder: 例 event.name eq "purchase"
-  invalidFilter: 無効なフィルター
   save: 作成
   saveEdit: 変更を保存
   edit: 編集
@@ -890,14 +864,12 @@ goals:
   deleteTitle: 目標を削除
   deleteDescription: 保存した目標定義を削除します。過去の分析データは削除されません。
   deleteConfirm: 目標を削除
-  deleting: 削除中...
   empty: 目標はまだありません。
   emptyHint: ページ条件またはカスタムイベントから目標を作成します。
   loadError: 目標を読み込めません。
   detailLoadError: 目標分析を読み込めません。
   invalidGoal: 名前と完全なコンバージョン条件を入力してください。
   created: 目標を作成しました。
-  createFailed: 目標を作成できません。
   updatedSuccess: 目標を更新しました。
   saveFailed: 目標を保存できません。
   deleted: 目標を削除しました。
@@ -914,10 +886,7 @@ visitors:
   subtitle: 訪問者単位の内訳と直近状況です。
   search: 訪問者を検索...
   visitor: 訪問者
-  sessionId: セッション ID
   anonymous: 匿名
-  userId: ユーザー ID
-  userName: ユーザー名
   referrer: 参照元
   location: 地域
   os: OS
@@ -1015,7 +984,7 @@ geo:
   title: 地域分析
   subtitle: 地域別にトラフィックパフォーマンスを分析します。
   mapTitle: リクエスト地域分布
-  countryLabel: 国
+  countryLabel: 国 / 地域
   regionLabel: 地域
   cityLabel: 都市
   back: 戻る
@@ -1024,7 +993,7 @@ geo:
   timezoneDeltaVsLocal: "現地時刻との差：{delta}"
   visitorCoordinates: 訪問者座標
   ipNotice: IP から推定した地域です。座標は概算であり、正確な住所を示すものではありません。
-  multipleNotice: IP から推定した地域です。複数セッションのジャーニーは複数都市にまたがる場合があります。
+  multipleNotice: この訪問者は、異なるセッションで複数の都市を訪れる場合があります。
   investigation:
     countryScopedLabel: 所属国の{label}
     capital: 首都
@@ -1149,12 +1118,11 @@ performance:
   poor: 不良
   datasetTitle: データセット概要
   interpretationTitle: 現在の読み取り
-  currentReading:
-    "{metric} の P75 は {value}、{samples} 件のサンプルに基づく体験スコアは {score}
+  currentReading: "{metric} の P75 は {value}、{samples} 件のサンプルに基づく体験スコアは {score}
     です。現在の判定：{status}。"
   metricThresholdText: "良好：{good} 以下、要改善：{good} から {poor}、不良：{poor} 超。"
   scoreThresholdText: "良好：90 超、要改善：50 から 90、不良：50 未満。"
-  countryHealthTitle: 国・地域別の状態
+  countryHealthTitle: 国・地域の状態
   countryHealthSubtitle: 国または地域ごとの {metric} の状態を境界色で示します。
   pathsTitle: パスパフォーマンス
   pathsAnalyzedLabel: 分析対象パス
@@ -1246,7 +1214,7 @@ siteSettings:
     errorTooManyLines: ルールの行数が多すぎます。
     errorInvalidPattern: "{line} 行目のルール形式が無効です。"
     testTitle: ルールをテスト
-    testDescription: この Card の現在のルールに対してリクエスト値をテストします。未保存の編集内容も使用されます。
+    testDescription: このカードの現在のルールに対してリクエスト値をテストします。未保存の編集内容も使用されます。
     testRun: テストを実行
     testClose: 閉じる
     testInvalidRules: テストする前に無効なルールを修正してください。
@@ -1278,10 +1246,9 @@ siteSettings:
         - "-example.com"
         - "-*.example.com"
         - "admin.example.com"
-      exampleDescription:
-        この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する
+      exampleDescription: この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する
         admin.example.com を再びブロックします。
-      testLabel: Hostname
+      testLabel: ホスト名
       testPlaceholder: www.example.com
       testHint: スキームやパスを含めず、ページの hostname を入力します。
     paths:
@@ -1343,8 +1310,7 @@ siteSettings:
         - "*.example.com"
         - "social.example.com"
         - "-trusted.example.com"
-      exampleDescription:
-        この設定は example.com の参照元ドメインと social.example.com
+      exampleDescription: この設定は example.com の参照元ドメインと social.example.com
         をブロックし、trusted.example.com を許可します。
       testLabel: 参照元
       testPlaceholder: https://social.example.com/article
@@ -1722,8 +1688,7 @@ runtimeConfigError:
   title: ランタイム設定が必要です
   eyebrow: デプロイを一時停止中
   heading: UI を読み込む前に、InsightFlare にはランタイムシークレットが 1 つ必要です。
-  description:
-    アプリは起動していますが、現在のランタイム環境で必須の root secret
+  description: アプリは起動していますが、現在のランタイム環境で必須の root secret
     を取得できないため、ダッシュボードへのアクセスを一時的にブロックしています。
   requiredTitle: 必須のランタイムシークレット
   requiredDescription: Cloudflare のランタイムシークレットに、次の値のいずれかを少なくとも 1 つ設定してください。
@@ -1741,8 +1706,6 @@ login:
   signIn: サインイン
   invalidCredentials: ユーザー名またはパスワードが正しくありません。
 accountLinks:
-  noSites: このチームには利用可能なサイトがありません。
-  siteNotFound: チームまたはサイトが見つかりません。
   invite:
     title: チーム招待
     subtitle: 招待を承認してこのチームに参加します。
@@ -1787,8 +1750,6 @@ accountLinks:
     passwordMismatch: パスワードが一致しません。
 empty:
   noTeams: 利用可能なチームはまだありません。
-  noSites: このチームには利用可能なサイトがありません。
-  siteNotFound: チームまたはサイトが見つかりません。
 errorPage:
   notFoundEyebrow: ページが見つかりません
   notFoundTitle: お探しのページが見つかりません
@@ -1897,10 +1858,6 @@ teamManagement:
     ruleInfoSection: ルール情報
     scheduleSection: スケジュール
     sendScheduleSection: 送信時刻
-    conditionMilestone: "{metric} が {step} ごと"
-    conditionThreshold: "{window} {metric} {operator} {value}"
-    conditionChange: "{window} {metric} 変化 {operator} {value}"
-    conditionHealth: "{hours}h データなし"
     checkSection: チェック頻度
     conditionSection: 条件
     deliverySection: 配信
@@ -2127,7 +2084,7 @@ teamManagement:
     expiration90: 90 日
     expiration180: 180 日
     expiration365: 365 日
-    expirationNever: なし
+    expirationNever: 無期限
     oneTimeSecretTitle: 今すぐこのキーをコピー
     oneTimeSecretDescription: 完全なキーは一度だけ表示されます。このダイアログを閉じる前に保存してください。
     copySecret: キーをコピー
@@ -2458,19 +2415,14 @@ adminTeams:
     action: 操作
 requestObservation:
   title: リクエスト監視
-  subtitle: Analytics Engine をもとに、リクエスト全体、異常ルーティング、通常の収集経路を監視します。
   tabs:
     overview: 概要
-    abnormal: ブロック済みリクエスト
-    normal: 統計対象リクエスト
     blocked: ブロック済みリクエスト
     included: 統計対象リクエスト
   refresh: 更新
   loadFailed: リクエスト監視データを読み込めません。
-  samplingNotice: リクエスト数は Analytics Engine のサンプル重みで補正されています。詳細行は代表サンプルで、重複除外値は近似値です。
   notConfiguredTitle: Analytics Engine リーダーが設定されていません
-  notConfiguredDescription:
-    リクエスト監視用の Analytics Engine データセットを読むには、システム設定で
+  notConfiguredDescription: リクエスト監視用の Analytics Engine データセットを読むには、システム設定で
     Cloudflare Account ID と API トークンを追加してください。
   analyticsEngineDisabledTitle: Analytics Engine が有効ではありません
   analyticsEngineDisabledDescription: Cloudflare アカウントで Analytics Engine
@@ -2478,22 +2430,10 @@ requestObservation:
     で有効化してから再デプロイすると、リクエスト監視データを収集できます。
   openAnalyticsEngine: Analytics Engine を開く
   openSettings: 設定を開く
-  highThreatBots: ボットリクエスト
-  botRequests: ボットリクエスト
-  suspectedBotRequests: 疑わしいボットリクエスト
-  blockedRequests: ブロック済みリクエスト
-  includedRequests: 統計対象リクエスト
-  customBlockedRequests: カスタムブロック済みリクエスト
   affectedSites: 影響サイト
-  uniqueCountries: 国
+  uniqueCountries: 国 / 地域
   noData: この期間にリクエストデータはありません。
   trendTitle: ルーティング推移
-  trendDescription: リクエストの分類、処置、比率を間隔ごとに表示します。
-  recentTitle: 最近のブロック済みリクエスト
-  recentDescription: 統合された Request Analytics Engine データセットから読み取った詳細記録です。
-  recentLoadedAll: すべての記録を読み込みました
-  detailTitle: リクエスト詳細
-  detailSubtitle: この異常リクエストの検出シグナル、ネットワークコンテキスト、クライアントデータを確認します。
   client: クライアント
   edge: エッジ
   identifiers: 識別子
@@ -2509,10 +2449,6 @@ requestObservation:
   ip: IP
   userAgent: User-Agent
   category: カテゴリ
-  blocked: ブロック済み
-  included: 統計に含める
-  disposition: 処理結果
-  highThreatRequests: 高脅威リクエスト
   emptyValue: 不明
   kind: 種別
   botScore: Bot スコア
@@ -2523,7 +2459,7 @@ requestObservation:
   origin: オリジン
   asOrganization: ASN 組織
   asn: ASN
-  country: 国
+  country: 国 / 地域
   region: 地域
   city: 都市
   colo: データセンター
@@ -2535,7 +2471,7 @@ requestObservation:
     ua_too_long: User-Agent が長すぎます
     ua_isbot: User-Agent が Bot と一致
     script_ua: スクリプトクライアント User-Agent
-    cf_bot_score_low: Cloudflare Bot スコア低
+    cf_bot_score_low: Cloudflare Bot スコアが低い
     cf_verified_bot_category: Cloudflare 認証済み Bot カテゴリ
     hosting_asn: ホスティング ASN
     network_service_asn: ネットワークサービス ASN
@@ -2561,17 +2497,6 @@ requestObservation:
     leave: 離脱
     identify: ユーザー識別
   overviewLabels:
-    totalRequests: 総リクエスト数
-    includedRequests: 統計対象リクエスト数
-    blockedRequests: ブロック済みリクエスト数
-    normalRequests: 通常リクエスト
-    suspectedBotRequests: 疑わしいボットリクエスト数
-    botRequests: ボットリクエスト数
-    customBlockedRequests: カスタムブロック済みリクエスト数
-    botRequestRatio: ボットリクエスト比率
-    blockedRequestRatio: ブロック済みリクエスト比率
-    abnormalRequests: ブロック済みリクエスト
-    abnormalRatio: ブロック済みリクエスト比率
     p50Latency: P50 Worker 処理時間
     p75Latency: P75 Worker 処理時間
     p99Latency: P99 Worker 処理時間
@@ -2580,37 +2505,20 @@ requestObservation:
     pageviews: ページビュー
     customEvents: カスタムイベント
     overviewTrendTitle: リクエストルーティング推移
-    overviewTrendDescription: リクエスト分類とブロック済み比率をトップバーの間隔ごとに集計します。
     trafficCompositionTitle: ビジネスリクエスト構成
     trafficCompositionDescription: ページビュー、離脱、可視性の変化、カスタムイベント、ユーザー識別など、通常の収集イベントを種類別に時系列で表示します。
     categoryShareTitle: リクエストカテゴリの内訳
-    normalTrafficShare: 通常トラフィック
-    suspectedBotTraffic: 疑わしいボットトラフィック
-    botTraffic: ボットトラフィック
-    mediumThreatTraffic: 疑わしいボットトラフィック
-    highThreatTraffic: ボットトラフィック
-    customBlockedTraffic: カスタムブロックトラフィック
     latencyTitle: Worker 処理時間の推移
     latencyDescription: 通常リクエストが AE に書き込まれる際に記録された P50 / P75 / P95 / P99 Worker 処理時間です。
-    abnormalSubtitle: 実際にブロックされたリクエストに絞り込み、分類ラベルには検出結果を表示します。
-    normalSubtitle: 統計に含まれるリクエストに絞り込みます。通常リクエストと疑わしいボットリクエストを含みます。
-    blockedSubtitle: カスタムルールまたは保護設定でブロックされたリクエストに絞り込みます。
-    includedSubtitle: 統計に含めるリクエストに絞り込みます。通常リクエストと疑わしいボットリクエストを含みます。
     requests: リクエスト数
     windowDays: 過去 {days} 日
     latencyMilliseconds: "{value} ミリ秒"
   normalDetail:
-    title: 通常リクエスト詳細
-    subtitle: 通常リクエストの AE 記録フィールド、地域、Worker 処理時間を確認します。
     requestMethod: リクエストメソッド
     edgeLatency: Worker 処理時間
     eventAt: イベント時刻
     receivedAt: 受信時刻
     continent: 大陸
-    coordinates: 座標
-  recentNormal:
-    title: 最近の通常リクエスト
-    description: 統合された Request Analytics Engine データセットから読み取った詳細記録です。
 systemSettings:
   title: システム設定
   subtitle: この InsightFlare デプロイ全体の設定を管理します。
@@ -2663,8 +2571,7 @@ systemSettings:
   retentionSaved: 保持期間を保存しました。
   retentionSaveFailed: 保持期間を保存できません。
   loginTurnstileTitle: ログイン Turnstile 保護
-  loginTurnstileDescription:
-    有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile
+  loginTurnstileDescription: 有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile
     Invisible 検証を実行し、サーバー側のサインイン処理で強制します。
   loginTurnstileEnabledLabel: ログイン保護を有効化
   loginTurnstileSiteKeyLabel: Site Key
@@ -2684,9 +2591,9 @@ systemSettings:
   loginTurnstileDeleteFailed: ログイン Turnstile 設定を削除できません。
   loginTurnstileDeleteConfirm: ログイン Turnstile 設定を削除しますか？ログイン保護は無効になります。
   loginTurnstileLoadFailed: ログイン Turnstile 設定を読み込めません。
-  loginTurnstilePrivacyNotice:
-    Cloudflare Turnstile コンソールで Invisible ウィジェット
-    を作成してください。セルフホスト環境では、プライバシーポリシーが Cloudflare Turnstile の要件に合っていることを確認してください。
+  loginTurnstilePrivacyNotice: Cloudflare Turnstile コンソールで Invisible
+    ウィジェットを作成してください。 セルフホスト環境では、プライバシーポリシーが Cloudflare Turnstile
+    の要件に合っていることを確認してください。
   loginTurnstileGuideTitle: Turnstile 認証情報を取得
   loginTurnstileGuideDescription: ログイン保護には Cloudflare Turnstile の Site Key と Secret Key が必要です。
   loginTurnstileGuideSteps:
@@ -2806,8 +2713,7 @@ systemPerformance:
   doDiagnosticSiteNextDueHidden: 非表示フォールバック
   doDiagnosticSiteNextDueTimeout: 訪問タイムアウト
   doDiagnosticSiteResponseMs: 応答時間
-  doDiagnosticThresholdsHint:
-    "しきい値：stale {stale}、timeout {timeout}、hardAged
+  doDiagnosticThresholdsHint: "しきい値：stale {stale}、timeout {timeout}、hardAged
     {hardAged}、stuck flush_attempts ≥ {stuck}"
   doDiagnosticHealthy: 異常なバッファ行は検出されませんでした。
 loginForm:

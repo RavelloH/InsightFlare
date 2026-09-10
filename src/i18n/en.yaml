@@ -35,7 +35,6 @@ common:
   entryPage: Entry Page
   exitPage: Exit Page
   referrer: Referrer
-  startedAt: Started
   event: Event
   location: Location
   browser: Browser
@@ -136,7 +135,6 @@ intervals:
 dashboardHeader:
   range: Time Range
   interval: Interval
-  filters: Filters
   filterButton: Filter
   filterButtonEvent: Filter (Event)
   filterButtonSession: Filter (Session)
@@ -160,10 +158,6 @@ dashboardHeader:
   nextPeriod: Next period
   customSelectionSummary: "Selected range: {from} to {to} ({days} days)"
 filters:
-  country: Country
-  device: Device
-  browser: Browser
-  all: All
   clear: Clear
 conditionDescription:
   and: and
@@ -228,7 +222,7 @@ filterBuilder:
     client.deviceType: Device type
     client.language: Language
     client.screenSize: Screen size
-    geo.country: Country
+    geo.country: Country / Region
     geo.region: Region
     geo.city: City
     geo.continent: Continent
@@ -310,8 +304,7 @@ filterBuilder:
   expressionHelpTitle: Filter expression syntax
   expressionHelpDescription: Available fields and operators are generated from the active filter contract.
   expressionHelpSyntax: Syntax
-  expressionHelpLogicDescription:
-    AND binds more tightly than OR. Use parentheses
+  expressionHelpLogicDescription: AND binds more tightly than OR. Use parentheses
     for nesting; AND(...) and OR(...) preserve an explicit one-condition group.
   expressionHelpValues: Values
   expressionHelpValuesDescription: Strings use JSON double quotes. Numbers and
@@ -512,7 +505,6 @@ realtime:
   viewPage: View page
   customEvent: Custom event
   detailsTitle: Event details
-  detailsSection: Information
   browsingSection: Browsing
   geographySection: Geography
   sourceSection: Source
@@ -532,23 +524,17 @@ realtime:
   visitorHistorySubtitle: All records for this visitor in the current realtime window.
   visitorHistoryRange: Activity range
   visitorHistoryEmpty: No additional records are available for this visitor yet.
-  visitorMapSection: Visitor location
-  visitorMapSubtitle: Approximate location inferred from this event's coordinates.
   visitorMapUnavailable: This event does not include usable coordinates.
   visitorId: Visitor ID
   sessionId: Session ID
   visitId: Visit ID
-  eventType: Event type
   eventTime: Event time
   eventKind: Event kind
   eventName: Event name
-  eventId: Event ID
   siteId: Site ID
   traceId: Trace ID
-  sequence: Sequence
   receivedAt: Received at
   startedAt: Started at
-  previousVisitId: Previous visit ID
   previousVisitStartedAt: Previous visit started at
   userId: User ID
   userName: User name
@@ -562,23 +548,18 @@ realtime:
   browserVersion: Browser version
   osVersion: OS version
   userAgent: User agent
-  screenWidth: Screen width
-  screenHeight: Screen height
   postalCode: Postal code
   metroCode: Metro code
   status: Status
   visibilityState: Visibility state
-  hiddenAt: Hidden at
   endedAt: Ended at
-  finalizedAt: Finalized at
   duration: Duration
   durationSource: Duration source
   exitReason: Exit reason
   leaveAt: Left at
-  performanceVisitId: Performance visit ID
 overview:
   title: Traffic Overview
-  subtitle: Monitor high-level performance and audience behavior.
+  subtitle: View core metrics and traffic trends.
   trendTitle: Traffic Trend
   sourceTab: Source
   sourceDomainColumn: Source (Domain)
@@ -663,8 +644,6 @@ sessions:
   sessionId: Session ID
   visitor: Visitor
   anonymous: Anonymous
-  userId: User ID
-  userName: User name
   entryPage: Entry Page
   exitPage: Exit Page
   duration: Duration
@@ -712,8 +691,7 @@ sessionDetail:
   customEvent: Custom event
   eventTitleSeparator: ": "
   visitDetailsTitle: Visit details
-  visitDetailsSubtitle:
-    Session start, pageviews, exits, and custom events in the
+  visitDetailsSubtitle: Session start, pageviews, exits, and custom events in the
     order they happened.
   location: Location
   visitorId: Visitor ID
@@ -802,8 +780,7 @@ funnels:
   title: Funnels
   subtitle: Measure conversion through multi-step user journeys.
   listTitle: Funnel definitions
-  listSubtitle:
-    Build a reusable sequence, then inspect conversion for the current
+  listSubtitle: Build a reusable sequence, then inspect conversion for the current
     dashboard window.
   conversionRecords: Conversion records
   open: Open funnel
@@ -874,22 +851,17 @@ funnels:
 goals:
   title: Goals
   subtitle: Measure conversion from a single reusable event or page condition.
-  listTitle: Goal definitions
   listSubtitle: View conversion rate changes across this time range.
   conversionRecords: Conversion records
   open: Open goal
   moreActions: More actions
   create: New goal
   createTitle: Create goal
-  createDescription: Define the event or page condition that counts as a conversion.
   nameLabel: Name
   namePlaceholder: Purchase completed
   filter: Conversion condition
   apply: Apply
   cancel: Cancel
-  expression: Filter expression
-  filterPlaceholder: e.g. event.name eq "purchase"
-  invalidFilter: Invalid filter
   save: Create
   saveEdit: Save changes
   edit: Edit
@@ -897,16 +869,15 @@ goals:
   creating: Creating...
   delete: Delete
   deleteTitle: Delete goal
-  deleteDescription: This removes the saved goal definition. Historical analytics data is not deleted.
+  deleteDescription: This removes the saved goal definition. Historical analytics
+    data is not deleted.
   deleteConfirm: Delete goal
-  deleting: Deleting...
   empty: No goals yet.
   emptyHint: Create a goal from a page condition or custom event to track conversion.
   loadError: Unable to load goals.
   detailLoadError: Unable to load goal analysis.
   invalidGoal: Add a name and a complete conversion condition.
   created: Goal created.
-  createFailed: Unable to create goal.
   updatedSuccess: Goal updated.
   saveFailed: Unable to save goal.
   deleted: Goal deleted.
@@ -923,10 +894,7 @@ visitors:
   subtitle: Visitor-level breakdown and recency.
   search: Search visitors...
   visitor: Visitor
-  sessionId: Session ID
   anonymous: Anonymous
-  userId: User ID
-  userName: User name
   referrer: Referrer
   location: Location
   os: OS
@@ -1015,8 +983,7 @@ retention:
   legendHigh: High
   periodZero: Initial
   empty: Not enough return data in this time range.
-  emptyHint:
-    Use a wider range or choose a coarser interval from the top selector
+  emptyHint: Use a wider range or choose a coarser interval from the top selector
     to reveal the retention shape sooner.
   loadError: Unable to load retention data.
   unavailableCell: This cohort has not reached this period yet.
@@ -1028,7 +995,7 @@ geo:
   title: Location Analysis
   subtitle: Analyze traffic performance by location.
   mapTitle: Request Geo Distribution
-  countryLabel: Country
+  countryLabel: Country / Region
   regionLabel: Region
   cityLabel: City
   back: Back
@@ -1038,7 +1005,7 @@ geo:
   visitorCoordinates: Visitor Coordinates
   ipNotice: Estimated location via IP. Coordinates are approximate and do not
     pinpoint a precise address.
-  multipleNotice: Estimated locations via IP. Multi-session journeys may span multiple cities.
+  multipleNotice: This visitor's journey across different sessions may span multiple cities.
   investigation:
     countryScopedLabel: "Country's {label}"
     capital: Capital
@@ -1148,8 +1115,7 @@ performance:
   lcp: Largest Contentful Paint
   cls: Cumulative Layout Shift
   inp: Interaction to Next Paint
-  ttfbDescription:
-    Measures how long the browser waits before receiving the first
+  ttfbDescription: Measures how long the browser waits before receiving the first
     byte from the server. It reflects backend latency, network delay, and cache
     effectiveness.
   fcpDescription: Measures when the first text or image is painted. It reflects
@@ -1158,15 +1124,13 @@ performance:
     rendering. It is the main loading speed signal for perceived page readiness.
   clsDescription: Measures unexpected layout movement during the page lifecycle.
     Lower values mean the page is visually stable.
-  inpDescription:
-    Measures the latency of user interactions before the next paint.
+  inpDescription: Measures the latency of user interactions before the next paint.
     It reflects how responsive the page feels after loading.
   msUnit: ms
   secondsUnit: s
   clsUnit: score
   score: Experience Score
-  scoreDescription:
-    Combines P75 loading, stability, and interaction metrics into
+  scoreDescription: Combines P75 loading, stability, and interaction metrics into
     a 0 to 100 experience score. Higher is better.
   great: Great
   needsImprovement: Needs Improvement
@@ -1178,7 +1142,7 @@ performance:
   metricThresholdText: "Great: {good} or lower; needs improvement: {good} to
     {poor}; poor: above {poor}."
   scoreThresholdText: "Great: above 90; needs improvement: 50 to 90; poor: below 50."
-  countryHealthTitle: Country Health
+  countryHealthTitle: Country and Region Health
   countryHealthSubtitle: Boundary fill shows {metric} health by country or region.
   pathsTitle: Path Performance
   pathsAnalyzedLabel: Paths analyzed
@@ -1200,7 +1164,8 @@ siteSettings:
       description: Filter collection by request context before events reach storage.
     protection:
       title: Request Protection
-      description: Control how detected bots and hosting or proxy traffic are handled before requests enter analytics.
+      description: Control how detected bots and hosting or proxy traffic are handled
+        before requests enter analytics.
     danger:
       title: Danger Zone
       description: Destructive actions and operationally sensitive settings.
@@ -1232,9 +1197,11 @@ siteSettings:
     count the same visitor multiple times across visits and make retention
     impossible.
   botProtectionEnabledLabel: Block detected bots
-  botProtectionEnabledHint: High-confidence bot requests are blocked when this is enabled; otherwise they remain included in statistics.
+  botProtectionEnabledHint: High-confidence bot requests are blocked when this is
+    enabled; otherwise they remain included in statistics.
   hostingProxyBlockingEnabledLabel: Block hosting and proxy traffic
-  hostingProxyBlockingEnabledHint: Block suspected bot requests from hosting or proxy networks. This is disabled by default.
+  hostingProxyBlockingEnabledHint: Block suspected bot requests from hosting or
+    proxy networks. This is disabled by default.
   queryHashGroupTitle: Query and Hash Tracking
   queryHashGroupDescription: Control how query strings, URL hashes, and Do Not Track are handled.
   trackQueryParamsLabel: Track Query Parameters
@@ -1251,7 +1218,7 @@ siteSettings:
     searchInputPlaceholder: Search by name or code
     searchCountryLabel: Country / region
     searchRegionLabel: State / province
-    searchBack: Change country
+    searchBack: Change country / region
     searchLoading: Loading locations...
     searchNoResults: No matching locations.
     searchLoadError: Locations could not be loaded. Try again later.
@@ -1261,8 +1228,7 @@ siteSettings:
     syntaxTitle: Syntax
     examplesTitle: Example configuration
     actionsTitle: Rule actions
-    actionsDescription:
-      A normal line blocks a match. Prefix a rule with - to allow
+    actionsDescription: A normal line blocks a match. Prefix a rule with - to allow
       it. If multiple lines match, the last matching line wins.
     actionBlock: Blocks when {example} matches
     actionAllow: Allows when {example} matches
@@ -1276,8 +1242,7 @@ siteSettings:
     errorTooManyLines: Too many rule lines.
     errorInvalidPattern: Line {line} has an invalid rule pattern.
     testTitle: Test Rules
-    testDescription:
-      Enter a request value to evaluate the current contents of this
+    testDescription: Enter a request value to evaluate the current contents of this
       card. Unsaved edits are included.
     testRun: Run Test
     testClose: Close
@@ -1310,8 +1275,7 @@ siteSettings:
         - "-example.com"
         - "-*.example.com"
         - "admin.example.com"
-      exampleDescription:
-        This configuration first blocks every domain, then allows
+      exampleDescription: This configuration first blocks every domain, then allows
         example.com and its subdomains, and finally blocks the exact
         admin.example.com domain again.
       testLabel: Hostname
@@ -1334,8 +1298,7 @@ siteSettings:
         - "/admin/*"
         - "/checkout/*/confirm"
         - "-/admin/health"
-      exampleDescription:
-        This configuration blocks paths under /admin/ and paths
+      exampleDescription: This configuration blocks paths under /admin/ and paths
         matching /checkout/*/confirm, while allowing /admin/health.
       testLabel: URL path
       testPlaceholder: /admin/settings
@@ -1357,8 +1320,7 @@ siteSettings:
         - "utm_*"
         - "utm_source=*"
         - "-utm_source=trusted"
-      exampleDescription:
-        This configuration blocks keys beginning with utm_ and any
+      exampleDescription: This configuration blocks keys beginning with utm_ and any
         value of utm_source, while allowing utm_source=trusted.
       testLabel: Query string
       testPlaceholder: utm_source=internal&utm_campaign=spring
@@ -1402,8 +1364,7 @@ siteSettings:
         - "*bot*"
         - "Mozilla/*"
         - "-Googlebot"
-      exampleDescription:
-        This configuration blocks User-Agent values containing bot
+      exampleDescription: This configuration blocks User-Agent values containing bot
         and values beginning with Mozilla/, while allowing Googlebot.
       testLabel: User-Agent
       testPlaceholder: Mozilla/5.0 (compatible; ExampleBot/1.0)
@@ -1452,8 +1413,7 @@ siteSettings:
         - "64500"
         - "*"
         - "-64501"
-      exampleDescription:
-        This configuration blocks ASN 64500 and any ASN, while the
+      exampleDescription: This configuration blocks ASN 64500 and any ASN, while the
         final rule allows ASN 64501.
       testLabel: ASN
       testPlaceholder: "64500"
@@ -1475,8 +1435,7 @@ siteSettings:
         - "DE"
         - "*"
         - "-US"
-      exampleDescription:
-        This configuration blocks DE and any country, while the
+      exampleDescription: This configuration blocks DE and any country, while the
         final rule allows US.
       testLabel: Country code
       testPlaceholder: DE
@@ -1498,8 +1457,7 @@ siteSettings:
         - "DE-BE"
         - "*"
         - "-US-CA"
-      exampleDescription:
-        This configuration blocks DE-BE and any region, while the
+      exampleDescription: This configuration blocks DE-BE and any region, while the
         final rule allows US-CA.
       testLabel: Region code
       testPlaceholder: US-CA
@@ -1513,8 +1471,7 @@ siteSettings:
   performanceGroupTitle: Performance Tracking
   performanceGroupDescription: Control Web performance metric collection with a sampling rate.
   performanceSampleRateLabel: Performance Sample Rate (%)
-  performanceSampleRateHint:
-    A sampled visit records TTFB, FCP, LCP, CLS, and INP
+  performanceSampleRateHint: A sampled visit records TTFB, FCP, LCP, CLS, and INP
     on leave. Use 0 to disable sampling or 100 for full coverage.
   booleanOn: On
   booleanOff: Off
@@ -1591,8 +1548,7 @@ accountSettings:
   preferredLanguageSaved: Notification language saved.
   preferredLanguageSaveFailed: Failed to save notification language.
   timeZoneTitle: Reporting Time Zone
-  timeZoneDescription:
-    Calendar ranges and aggregation buckets use this time zone
+  timeZoneDescription: Calendar ranges and aggregation buckets use this time zone
     across the dashboard.
   activeTimeZone: Active time zone
   browserTimeZone: Browser time zone
@@ -1687,8 +1643,7 @@ notificationCenter:
   allTypes: All types
   allSeverities: All severities
   preferencesTitle: Notification preferences
-  preferencesDescription:
-    These settings control email delivery and which messages
+  preferencesDescription: These settings control email delivery and which messages
     remain unread for attention.
   emailNotificationsLabel: Email notifications
   emailNotificationsDescription: Send email when a rule triggers.
@@ -1739,8 +1694,7 @@ notificationEmail:
     subject: InsightFlare notification test
     title: InsightFlare notification test
     summary: This is a test notification from InsightFlare.
-    body:
-      This is a test notification from InsightFlare. If email is configured and
+    body: This is a test notification from InsightFlare. If email is configured and
       enabled, it also verifies Resend delivery.
   report:
     subject: "{site} {periodLabel} traffic report"
@@ -1771,8 +1725,7 @@ notificationEmail:
   health:
     subject: "{site} has not received traffic data for {hours} hours"
     title: "{site} has not received traffic data for {hours} hours"
-    noHistory:
-      No historical traffic data is available. Check whether the tracking
+    noHistory: No historical traffic data is available. Check whether the tracking
       script is installed correctly.
   change:
     subject: "{site} traffic change alert"
@@ -1782,19 +1735,16 @@ runtimeConfigError:
   title: Runtime configuration required
   eyebrow: Deployment paused
   heading: InsightFlare needs one runtime secret before the dashboard can load.
-  description:
-    The app has started, but the current runtime environment could not
+  description: The app has started, but the current runtime environment could not
     read the required root secret, so dashboard access is temporarily blocked.
   requiredTitle: Required runtime secret
   requiredDescription: Set at least one of the following values in your Cloudflare runtime secrets.
-  secretHint:
-    MAIN_SECRET is recommended. Existing deployments can continue using
+  secretHint: MAIN_SECRET is recommended. Existing deployments can continue using
     DAILY_SALT_SECRET.
   commandTitle: Cloudflare command
   commandDescription: Use the project helper command to write the recommended
     secret, then redeploy.
-  quickStartHint:
-    Or see the Quick Start section in the GitHub README to configure
+  quickStartHint: Or see the Quick Start section in the GitHub README to configure
     this variable.
   docsLabel: Open GitHub
   homeLabel: Retry dashboard
@@ -1806,8 +1756,6 @@ login:
   signIn: Sign in
   invalidCredentials: Invalid username or password.
 accountLinks:
-  noSites: No site is available under this team.
-  siteNotFound: Team or site not found.
   invite:
     title: Team invitation
     subtitle: Accept the invitation to join this team.
@@ -1852,8 +1800,6 @@ accountLinks:
     passwordMismatch: Passwords do not match.
 empty:
   noTeams: No team available yet.
-  noSites: No site is available under this team.
-  siteNotFound: Team or site not found.
 errorPage:
   notFoundEyebrow: Page not found
   notFoundTitle: We couldn't find that page
@@ -1944,8 +1890,7 @@ teamManagement:
     subtitle: Manage notification rules for this team.
     empty: This team has no notification rules yet.
     forbiddenTitle: Notification rules are managed by team admins
-    forbiddenDescription:
-      You can still view your own notifications and update your
+    forbiddenDescription: You can still view your own notifications and update your
       personal notification preferences.
     rulesTitle: Notification Rules
     enabledCount: "{count} enabled rules in this team."
@@ -2037,10 +1982,6 @@ teamManagement:
     scheduleInterval: Every {minutes} min
     scheduleCustom: Custom
     conditionReport: "{period} report"
-    conditionMilestone: "{metric} every {step}"
-    conditionThreshold: "{window} {metric} {operator} {value}"
-    conditionChange: "{window} {metric} change {operator} {value}"
-    conditionHealth: No data for {hours}h
     summaryWhenConditions: "When {combinator} of the following conditions match,
       send a {type} notification:"
     summaryWhenSingleCondition: "When this condition matches, send a {type} notification:"
@@ -2259,15 +2200,13 @@ teamManagement:
     deleting: Deleting...
     deleteConfirm: Delete this team and all its data? This action cannot be undone.
     transferTitle: Transfer Ownership
-    transferSubtitle:
-      Transfer team ownership to another member. The current owner
+    transferSubtitle: Transfer team ownership to another member. The current owner
       will be demoted to admin.
     transferTargetLabel: New Owner
     transferTargetPlaceholder: Choose a team member
     transfer: Transfer ownership
     transferring: Transferring...
-    transferConfirm:
-      This action cannot be undone. You will lose ownership but keep
+    transferConfirm: This action cannot be undone. You will lose ownership but keep
       admin access. Continue?
     noTransferableMembers: No other members are available to transfer to. Add a member first.
   members:
@@ -2296,8 +2235,7 @@ teamManagement:
     siteAccessAll: All sites
     siteAccessRestricted: Restricted
     siteAccessSelected: "Selected {count} sites"
-    siteAccessDescription:
-      Leave this set to all sites, or choose the specific sites
+    siteAccessDescription: Leave this set to all sites, or choose the specific sites
       this member can access.
     siteAccessAdmins: Admins can access every site in this team.
     siteAccessDialogTitle: Edit site access
@@ -2431,8 +2369,7 @@ managementPages:
     taskDefinitions:
       visit_hourly_rollup:
         name: Hourly visit aggregation
-        description:
-          Aggregates closed visit rows into hourly rollups for dashboard
+        description: Aggregates closed visit rows into hourly rollups for dashboard
           counters and trends.
         schedule: Every hour
       notification_tick:
@@ -2441,14 +2378,14 @@ managementPages:
         schedule: Every 30 minutes
       database_maintenance:
         name: Database maintenance
-        description: Removes expired operational records and optimizes D1.
+        description: Removes expired run data and notifications, and optimizes D1 query
+          statistics.
         schedule: Every day
 adminUsers:
   title: User Management
   subtitle: Only system admins can create and manage dashboard users.
   createTitle: Create User
-  createTeamNotice:
-    Creating a user here will also create a new Team owned by that
+  createTeamNotice: Creating a user here will also create a new Team owned by that
     user. To add someone to an existing team, create an invite link from that
     team's settings.
   username: Username
@@ -2540,18 +2477,12 @@ adminTeams:
     action: Action
 requestObservation:
   title: Request Observability
-  subtitle: Monitor total requests, anomaly routing, and the normal collection
-    pipeline from Analytics Engine.
   tabs:
     overview: Overview
-    abnormal: Blocked Requests
-    normal: Included Requests
     blocked: Blocked Requests
     included: Included Requests
   refresh: Refresh
   loadFailed: Failed to load request observability data.
-  samplingNotice: Counts are corrected for Analytics Engine sampling; detailed
-    rows are representative samples and distinct values are approximate.
   notConfiguredTitle: Analytics Engine reader is not configured
   notConfiguredDescription: Add a Cloudflare Account ID and API token in System
     Settings to read the request-observation Analytics Engine datasets.
@@ -2562,24 +2493,10 @@ requestObservation:
     request-observation data.
   openAnalyticsEngine: Open Analytics Engine
   openSettings: Open settings
-  highThreatBots: Bot Requests
-  botRequests: Bot Requests
-  suspectedBotRequests: Suspected Bot Requests
-  blockedRequests: Blocked Requests
-  includedRequests: Included Requests
-  customBlockedRequests: Custom-blocked Requests
   affectedSites: Affected Sites
-  uniqueCountries: Countries
+  uniqueCountries: Countries / Regions
   noData: No request data in this window.
   trendTitle: Routing Trend
-  trendDescription: Request categories, dispositions, and ratios by interval.
-  recentTitle: Recent Blocked Requests
-  recentDescription: Detailed records read from the unified Request Analytics Engine dataset.
-  recentLoadedAll: All records loaded
-  detailTitle: Request Detail
-  detailSubtitle:
-    Inspect detection signals, network context, and client data for
-    this abnormal request.
   client: Client
   edge: Edge
   identifiers: Identifiers
@@ -2595,10 +2512,6 @@ requestObservation:
   ip: IP
   userAgent: User agent
   category: Category
-  blocked: Blocked
-  included: Included in statistics
-  disposition: Disposition
-  highThreatRequests: High-threat Requests
   emptyValue: Unknown
   kind: Type
   botScore: Bot Score
@@ -2609,7 +2522,7 @@ requestObservation:
   origin: Origin
   asOrganization: ASN Organization
   asn: ASN
-  country: Country
+  country: Country / Region
   region: Region
   city: City
   colo: Colo
@@ -2647,17 +2560,6 @@ requestObservation:
     leave: Leave
     identify: Identify
   overviewLabels:
-    totalRequests: Total requests
-    includedRequests: Included requests
-    blockedRequests: Blocked requests
-    normalRequests: Normal requests
-    suspectedBotRequests: Suspected bot requests
-    botRequests: Bot requests
-    customBlockedRequests: Custom-blocked requests
-    botRequestRatio: Bot request ratio
-    blockedRequestRatio: Blocked request ratio
-    abnormalRequests: Blocked requests
-    abnormalRatio: Blocked request ratio
     p50Latency: P50 Worker processing time
     p75Latency: P75 Worker processing time
     p99Latency: P99 Worker processing time
@@ -2666,48 +2568,23 @@ requestObservation:
     pageviews: Pageviews
     customEvents: Custom events
     overviewTrendTitle: Request routing trend
-    overviewTrendDescription:
-      Request categories and blocked ratio bucketed by the
-      top-bar interval.
     trafficCompositionTitle: Business request composition
     trafficCompositionDescription: Counts normal collection events by type over
       time, including pageviews, leaves, visibility changes, custom events, and
       identifications.
     categoryShareTitle: Request category breakdown
-    normalTrafficShare: Normal traffic
-    suspectedBotTraffic: Suspected bot traffic
-    botTraffic: Bot traffic
-    mediumThreatTraffic: Suspected bot traffic
-    highThreatTraffic: Bot traffic
-    customBlockedTraffic: Custom-blocked traffic
     latencyTitle: Worker processing time trend
-    latencyDescription:
-      P50 / P75 / P95 / P99 Worker processing time recorded when
+    latencyDescription: P50 / P75 / P95 / P99 Worker processing time recorded when
       normal requests are written to AE.
-    abnormalSubtitle: Focus on blocked requests. Category labels retain the
-      detection result for each request.
-    normalSubtitle: Focus on requests included in statistics. This can include
-      normal and suspected bot traffic.
-    blockedSubtitle: Focus on requests that were blocked by custom rules or protection settings.
-    includedSubtitle: Focus on requests included in statistics, including normal and suspected bot traffic.
     requests: Requests
     windowDays: "Last {days} days"
     latencyMilliseconds: "{value} ms"
   normalDetail:
-    title: Normal Request Detail
-    subtitle:
-      Inspect pipeline, location, and Worker processing time fields recorded
-      for a normal request in AE.
     requestMethod: Request method
     edgeLatency: Worker processing time
     eventAt: Event time
     receivedAt: Received at
     continent: Continent
-    coordinates: Coordinates
-  recentNormal:
-    title: Recent Normal Requests
-    description: Detailed records read from the unified Request Analytics Engine
-      dataset.
 systemSettings:
   title: System Settings
   subtitle: Manage instance-wide configuration for this InsightFlare deployment.
@@ -2749,8 +2626,7 @@ systemSettings:
   notificationEmailTitle: Email Notifications
   notificationEmailDescription: Configure the email service used for reports, alerts, and test messages.
   notificationEmailGuideTitle: Get Resend email settings
-  notificationEmailGuideDescription:
-    To send system email through Resend, prepare
+  notificationEmailGuideDescription: To send system email through Resend, prepare
     a verified sender domain and an API key.
   notificationEmailGuideSteps:
     - Open the Resend Dashboard and confirm the sender domain has passed DNS
@@ -2761,8 +2637,7 @@ systemSettings:
     - Enter the sender name, sender email, Reply-To, and Resend API key here.
     - Save the configuration, then send a test email to confirm delivery works.
   retentionTitle: Operational data retention
-  retentionDescription:
-    Configure how long task runs, task logs, and notification
+  retentionDescription: Configure how long task runs, task logs, and notification
     messages remain available. Changes affect new records only.
   scheduledTaskLogsDaysLabel: Scheduled task logs and runs (days)
   notificationTestDaysLabel: Test notifications (days)
@@ -2866,8 +2741,7 @@ systemPerformance:
   customEvents: Custom Events
   anomalyBucket: Anomaly bucket
   openVisitHealth: Open Visit Backlog
-  openVisitHealthDescription:
-    Open rows that have not been closed by leave, route
+  openVisitHealthDescription: Open rows that have not been closed by leave, route
     change, or timeout finalization.
   open: Open
   stale: Stale
