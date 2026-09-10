@@ -23,6 +23,8 @@ export interface IngestFlushContext extends SqlWriter {
   pushRealtimeRecord(record: RealtimeSnapshotRecord): Promise<void>;
   writeTrafficVisitFinalizedFact?: (input: TrafficVisitFinalizedInput) => void;
   writeTrafficSessionEndedFact?: (input: TrafficSessionEndedInput) => void;
+  getVisitCleanupDueAt?: () => number | null | undefined;
+  setVisitCleanupDueAt?: (dueAt: number | null) => void;
   /**
    * Owned by the DO invocation boundary.  Flush helpers only report stable
    * aggregate counters and event codes; they never emit their own logs.
@@ -46,7 +48,6 @@ export async function resolveSitePk(
   const cached = context.sitePks.get(siteId);
   if (cached !== undefined) return cached;
 
-  recordFlushCounter(context, "d1Statements");
   const existing = await context.env.DB.prepare(
     `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
   )
@@ -58,14 +59,12 @@ export async function resolveSitePk(
     return existingPk;
   }
 
-  recordFlushCounter(context, "d1Statements");
   await context.env.DB.prepare(
     `INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)`,
   )
     .bind(siteId)
     .run();
 
-  recordFlushCounter(context, "d1Statements");
   const created = await context.env.DB.prepare(
     `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
   )

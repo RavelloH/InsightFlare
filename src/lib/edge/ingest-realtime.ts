@@ -12,9 +12,7 @@ import {
 import type { SqlBinding } from "./ingest-sql";
 import type { SqlReader, VisitRow } from "./ingest-types";
 
-interface RealtimeContext extends SqlReader {
-  sockets: Set<WebSocket>;
-}
+type RealtimeContext = Pick<SqlReader, "sqlAll">;
 
 export function snapshotQueryParams(url: URL): {
   fromMs: number;
@@ -515,17 +513,8 @@ export async function pushInitialRealtimeSnapshot(
       Math.max(0, Date.now() - RECENT_EVENT_RETENTION_MS),
       Date.now(),
     );
-    const activeNow =
-      context.sqlOne<{ count: number }>(
-        `
-        SELECT count(DISTINCT visitor_id) AS count
-        FROM buffered_visits
-        WHERE status = 'open'
-          AND last_activity_at >= ?
-      `,
-        cutoffMs,
-      )?.count ?? 0;
     const visits = readActiveRealtimeVisits(context, cutoffMs);
+    const activeNow = countActiveRealtimeVisitors(visits);
 
     socket.send(
       JSON.stringify({
@@ -544,10 +533,11 @@ export async function pushInitialRealtimeSnapshot(
 }
 
 export async function pushRealtimeRecordToSockets(
-  sockets: Set<WebSocket>,
+  sockets: Iterable<WebSocket>,
   record: RealtimeSnapshotRecord,
 ): Promise<void> {
-  if (sockets.size === 0) {
+  const activeSockets = [...sockets];
+  if (activeSockets.length === 0) {
     return;
   }
 
@@ -558,7 +548,7 @@ export async function pushRealtimeRecordToSockets(
   const staleSockets: WebSocket[] = [];
   let sent = 0;
 
-  for (const socket of sockets) {
+  for (const socket of activeSockets) {
     try {
       socket.send(payload);
       sent += 1;
@@ -568,7 +558,10 @@ export async function pushRealtimeRecordToSockets(
   }
 
   for (const socket of staleSockets) {
-    sockets.delete(socket);
+    const maybeDelete = sockets as Iterable<WebSocket> & {
+      delete?: (value: WebSocket) => boolean;
+    };
+    maybeDelete.delete?.(socket);
     try {
       socket.close();
     } catch {
@@ -577,3 +570,18 @@ export async function pushRealtimeRecordToSockets(
   }
   void sent;
 }
+
+function countActiveRealtimeVisitors(
+  visits: readonly Record<string, unknown>[],
+): number {
+  const visitors = new Set<unknown>();
+  for (const visit of visits) {
+    const visitorId = visit.visitorId;
+    if (visitorId !== null && visitorId !== undefined) {
+      visitors.add(visitorId);
+    }
+  }
+  return visitors.size;
+}
+
+export { countActiveRealtimeVisitors };

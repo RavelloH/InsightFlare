@@ -16,6 +16,8 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 2_000;
 const CONNECT_WATCHDOG_MS = 4_000;
 const RECORD_RECOMPUTE_INTERVAL_MS = 5_000;
+const REALTIME_HEARTBEAT_INTERVAL_MS = 30_000;
+const REALTIME_HEARTBEAT_MESSAGE = "ping";
 const EVENT_BATCH_INTERVAL_MS = 80;
 const CHANNEL_IDLE_GRACE_MS = 30_000;
 const MAX_RENDERABLE_POINTS = 800;
@@ -35,6 +37,7 @@ interface ChannelContext {
   socket: RealtimeSocketLike | null;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   cleanupTimer: ReturnType<typeof setInterval> | null;
+  heartbeatTimer: ReturnType<typeof setInterval> | null;
   connectWatchdog: ReturnType<typeof setTimeout> | null;
   reconnectFailures: number;
   state: RealtimeChannelState;
@@ -132,6 +135,7 @@ function getOrCreateChannel(siteId: string): ChannelContext {
     socket: null,
     reconnectTimer: null,
     cleanupTimer: null,
+    heartbeatTimer: null,
     connectWatchdog: null,
     reconnectFailures: 0,
     state: createIdleRealtimeChannelState(),
@@ -189,6 +193,7 @@ function stopChannel(channel: ChannelContext): void {
     clearInterval(channel.cleanupTimer);
     channel.cleanupTimer = null;
   }
+  stopHeartbeat(channel);
   if (channel.connectWatchdog) {
     clearTimeout(channel.connectWatchdog);
     channel.connectWatchdog = null;
@@ -255,6 +260,7 @@ function attachSocketHandlers(channel: ChannelContext): void {
     channel.reconnectFailures = 0;
     channel.state.hasConnected = true;
     setChannelStatus(channel, "connected");
+    startHeartbeat(channel);
   };
 
   channel.socket.onmessage = (message) => {
@@ -282,6 +288,7 @@ function attachSocketHandlers(channel: ChannelContext): void {
       clearTimeout(channel.connectWatchdog);
       channel.connectWatchdog = null;
     }
+    stopHeartbeat(channel);
     channel.socket = null;
     if (channel.refCount <= 0) return;
 
@@ -302,6 +309,33 @@ function attachSocketHandlers(channel: ChannelContext): void {
       connect(channel);
     }, RECONNECT_DELAY_MS);
   };
+}
+
+function startHeartbeat(channel: ChannelContext): void {
+  stopHeartbeat(channel);
+  channel.heartbeatTimer = setInterval(() => {
+    const socket = channel.socket;
+    if (
+      channel.refCount <= 0 ||
+      !socket ||
+      socket.readyState !== SOCKET_STATE.OPEN ||
+      typeof socket.send !== "function"
+    ) {
+      return;
+    }
+    try {
+      socket.send(REALTIME_HEARTBEAT_MESSAGE);
+    } catch {
+      // The close/error handler owns reconnect state; a stale socket can race
+      // this timer during teardown.
+    }
+  }, REALTIME_HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat(channel: ChannelContext): void {
+  if (!channel.heartbeatTimer) return;
+  clearInterval(channel.heartbeatTimer);
+  channel.heartbeatTimer = null;
 }
 
 function applySnapshot(channel: ChannelContext, payload: unknown): void {

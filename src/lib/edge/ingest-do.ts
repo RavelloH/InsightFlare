@@ -73,6 +73,43 @@ import type {
 } from "./types";
 import { resolveSessionWindowMinutes } from "./utils";
 
+interface SqlCursorLike {
+  toArray(): unknown[];
+  readonly rowsRead?: unknown;
+  readonly rowsWritten?: unknown;
+}
+
+interface SqlExecutionResult<T> {
+  readonly rows: T[];
+  readonly rowsRead?: number;
+  readonly rowsWritten?: number;
+}
+
+const WEBSOCKET_ATTACHMENT_VERSION = 1;
+
+interface WebSocketAttachment {
+  version: typeof WEBSOCKET_ATTACHMENT_VERSION;
+  connectedAtMs: number;
+}
+
+function sqlMetric(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.trunc(value)
+    : undefined;
+}
+
+function websocketCloseCode(code: number): number {
+  if (
+    code === 1000 ||
+    (code >= 1001 && code <= 1003) ||
+    (code >= 1007 && code <= 1011) ||
+    (code >= 3000 && code <= 4999)
+  ) {
+    return code;
+  }
+  return 1000;
+}
+
 function pageviewTrafficSnapshot(
   record: NormalizedPageview,
   visitId = record.visitId,
@@ -124,12 +161,22 @@ export class IngestDurableObject extends DurableObject {
   private readonly schemaReady: Promise<void>;
   private readonly dictionaryIds = new Map<string, number>();
   private readonly sitePks = new Map<string, number>();
-  private sockets = new Set<WebSocket>();
+  private activeNowCache: {
+    readonly cutoffBucket: number;
+    readonly expiresAtMs: number;
+    readonly activeNow: number;
+  } | null = null;
+  private visitCleanupDueAt: number | null | undefined;
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
     this.doState = state;
     this.doEnv = env;
+    // Auto responses are Durable Object state configuration rather than
+    // per-connection state. Register them during reconstruction so an
+    // application-level heartbeat remains handled while the object hibernates
+    // and after the constructor runs again.
+    this.configureWebSocketAutoResponse();
     this.schemaReady = this.doState.blockConcurrencyWhile(async () => {
       this.initializeSqlSchema();
     });
@@ -293,6 +340,10 @@ export class IngestDurableObject extends DurableObject {
       });
     }
 
+    // Any accepted record can change the active visitor projection. The
+    // one-second /active cache is only a derived read optimization.
+    this.activeNowCache = null;
+
     if (record.kind === "pageview") {
       await logger.measure("do.ingest.pageview", () =>
         this.handlePageview(record, logger),
@@ -339,9 +390,11 @@ export class IngestDurableObject extends DurableObject {
     const client = pair[0];
     const server = pair[1];
 
-    server.accept();
-    this.sockets.add(server);
-    const connectedAt = performance.now();
+    this.doState.acceptWebSocket(server);
+    server.serializeAttachment({
+      version: WEBSOCKET_ATTACHMENT_VERSION,
+      connectedAtMs: Date.now(),
+    } satisfies WebSocketAttachment);
     logger.info("do.websocket.connected");
     if (
       await logger.measure("do.websocket.initial_snapshot", () =>
@@ -353,26 +406,95 @@ export class IngestDurableObject extends DurableObject {
       logger.error("do.websocket.snapshot_failed");
     }
 
-    server.addEventListener("close", (event) => {
-      this.sockets.delete(server);
-      this.emitWebSocketLifecycle("do.websocket.closed", connectedAt, {
-        code: event.code,
-      });
-    });
-    server.addEventListener("error", () => {
-      this.sockets.delete(server);
-      this.emitWebSocketLifecycle("do.websocket.error", connectedAt);
-      try {
-        server.close();
-      } catch {
-        // no-op
-      }
-    });
-
     return new Response(null, {
       status: 101,
       webSocket: client,
     });
+  }
+
+  private configureWebSocketAutoResponse(): void {
+    const setAutoResponse = this.doState.setWebSocketAutoResponse;
+    const pairConstructor = (
+      globalThis as typeof globalThis & {
+        WebSocketRequestResponsePair?: new (
+          request: string,
+          response: string,
+        ) => unknown;
+      }
+    ).WebSocketRequestResponsePair;
+    if (
+      typeof setAutoResponse !== "function" ||
+      typeof pairConstructor !== "function"
+    ) {
+      return;
+    }
+    setAutoResponse.call(
+      this.doState,
+      new pairConstructor("ping", "pong") as WebSocketRequestResponsePair,
+    );
+  }
+
+  webSocketMessage(_socket: WebSocket, _message: string | ArrayBuffer): void {
+    // The realtime channel is server-to-client only. Handling the event is
+    // intentionally a no-op so client messages cannot keep the object awake.
+  }
+
+  webSocketClose(
+    socket: WebSocket,
+    code: number,
+    reason: string,
+    _wasClean: boolean,
+  ): void {
+    this.emitWebSocketLifecycle(
+      "do.websocket.closed",
+      this.webSocketConnectedAt(socket),
+      { code },
+    );
+    // The project's compatibility date predates the runtime's automatic
+    // Close-frame reply. Complete the handshake explicitly so an otherwise
+    // clean peer close is not surfaced as an abnormal 1006 close.
+    try {
+      socket.close(websocketCloseCode(code), reason);
+    } catch {
+      // The runtime may already have closed the socket by the time the
+      // hibernation callback is delivered, or the reason may exceed the
+      // WebSocket close-frame limit. Try the runtime's default normal close.
+      try {
+        socket.close();
+      } catch {
+        // no-op
+      }
+    }
+  }
+
+  webSocketError(socket: WebSocket, _error: unknown): void {
+    this.emitWebSocketLifecycle(
+      "do.websocket.error",
+      this.webSocketConnectedAt(socket),
+    );
+    try {
+      socket.close();
+    } catch {
+      // no-op
+    }
+  }
+
+  private webSocketConnectedAt(socket: WebSocket): number {
+    try {
+      const attachment =
+        socket.deserializeAttachment() as Partial<WebSocketAttachment> | null;
+      if (
+        attachment?.version === WEBSOCKET_ATTACHMENT_VERSION &&
+        typeof attachment.connectedAtMs === "number" &&
+        Number.isFinite(attachment.connectedAtMs)
+      ) {
+        return attachment.connectedAtMs;
+      }
+    } catch {
+      // Older connections may not have an attachment. Use a zero-duration
+      // fallback rather than making lifecycle logging break close handling.
+    }
+    return Date.now();
   }
 
   private emitWebSocketLifecycle(
@@ -388,10 +510,7 @@ export class IngestDurableObject extends DurableObject {
       outcome: event === "do.websocket.error" ? "error" : "ok",
     });
     logger.setPerformance({
-      webSocketDurationMs: Math.max(
-        0,
-        Math.round(performance.now() - connectedAt),
-      ),
+      webSocketDurationMs: Math.max(0, Math.round(Date.now() - connectedAt)),
     });
     if (event === "do.websocket.error") {
       logger.error(event);
@@ -407,21 +526,6 @@ export class IngestDurableObject extends DurableObject {
   ): Promise<Response> {
     const { fromMs, toMs, limit } = snapshotQueryParams(url);
     const cutoffMs = Date.now() - ACTIVE_NOW_WINDOW_MS;
-    const activeNow = await logger.measure(
-      "do.snapshot.active_count",
-      async () =>
-        this.measuredSqlOne<{ count: number }>(
-          logger,
-          `
-        SELECT count(DISTINCT visitor_id) AS count
-        FROM buffered_visits
-        WHERE status = 'open'
-          AND last_activity_at >= ?
-      `,
-          cutoffMs,
-        )?.count ?? 0,
-    );
-
     const events = await logger.measure(
       "do.snapshot.realtime_events",
       async () =>
@@ -446,6 +550,11 @@ export class IngestDurableObject extends DurableObject {
           cutoffMs,
         ),
     );
+    const activeNow = new Set(
+      visits
+        .map((visit) => visit.visitorId)
+        .filter((visitorId) => visitorId !== null && visitorId !== undefined),
+    ).size;
 
     return jsonResponse({
       ok: true,
@@ -457,21 +566,35 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private async handleActive(logger: InvocationLogger): Promise<Response> {
-    const cutoffMs = Date.now() - ACTIVE_NOW_WINDOW_MS;
-    const activeNow = await logger.measure(
-      "do.active.count",
-      async () =>
-        this.measuredSqlOne<{ count: number }>(
-          logger,
-          `
-        SELECT count(DISTINCT visitor_id) AS count
-        FROM buffered_visits
-        WHERE status = 'open'
-          AND last_activity_at >= ?
-      `,
-          cutoffMs,
-        )?.count ?? 0,
-    );
+    const now = Date.now();
+    const cutoffMs = now - ACTIVE_NOW_WINDOW_MS;
+    const cutoffBucket = Math.floor(cutoffMs / 1000);
+    const cached = this.activeNowCache;
+    const activeNow =
+      cached && cached.cutoffBucket === cutoffBucket && now < cached.expiresAtMs
+        ? cached.activeNow
+        : await logger.measure("do.active.visits", async () => {
+            const visits = readActiveRealtimeVisits(
+              {
+                sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
+                  this.measuredSqlAll<T>(logger, query, ...bindings),
+              },
+              cutoffMs,
+            );
+            const value = new Set(
+              visits
+                .map((visit) => visit.visitorId)
+                .filter(
+                  (visitorId) => visitorId !== null && visitorId !== undefined,
+                ),
+            ).size;
+            this.activeNowCache = {
+              cutoffBucket,
+              expiresAtMs: now + 1_000,
+              activeNow: value,
+            };
+            return value;
+          });
 
     return jsonResponse({ ok: true, activeNow });
   }
@@ -483,13 +606,39 @@ export class IngestDurableObject extends DurableObject {
           this.measuredSqlAll<T>(logger, query, ...bindings),
         sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
           this.measuredSqlOne<T>(logger, query, ...bindings),
-        getAlarm: () => this.doState.storage.getAlarm(),
+        getAlarm: () => this.getAlarm(logger),
       }),
     );
   }
 
+  private async getAlarm(logger: InvocationLogger): Promise<number | null> {
+    logger.increment("doAlarmOperations");
+    logger.increment("doAlarmGets");
+    return this.doState.storage.getAlarm();
+  }
+
+  private async setAlarm(logger: InvocationLogger, at: number): Promise<void> {
+    logger.increment("doAlarmOperations");
+    logger.increment("doAlarmSets");
+    await this.doState.storage.setAlarm(at);
+  }
+
+  private async deleteAlarm(logger: InvocationLogger): Promise<void> {
+    logger.increment("doAlarmOperations");
+    logger.increment("doAlarmDeletes");
+    await this.doState.storage.deleteAlarm();
+  }
+
   private initializeSqlSchema(): void {
-    initializeIngestSqlSchema(this.doState.storage.sql);
+    const storage = this.doState.storage;
+    initializeIngestSqlSchema(
+      storage.sql,
+      typeof storage.transactionSync === "function"
+        ? {
+            transactionSync: (closure) => storage.transactionSync(closure),
+          }
+        : undefined,
+    );
   }
 
   private sqlAll<T>(query: string, ...bindings: SqlBinding[]): T[] {
@@ -499,7 +648,30 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private rawSqlAll<T>(query: string, ...bindings: SqlBinding[]): T[] {
-    return this.doState.storage.sql.exec(query, ...bindings).toArray() as T[];
+    return this.rawSqlAllWithMetrics<T>(query, ...bindings).rows;
+  }
+
+  private rawSqlAllWithMetrics<T>(
+    query: string,
+    ...bindings: SqlBinding[]
+  ): SqlExecutionResult<T> {
+    const cursor = this.doState.storage.sql.exec(
+      query,
+      ...bindings,
+    ) as unknown as SqlCursorLike;
+    // A DO cursor's resource counters are only final after its result has
+    // been fully consumed. Keep this as the single execution boundary so a
+    // metrics read can never issue a second SQL statement.
+    const rows = cursor.toArray() as T[];
+    return {
+      rows,
+      ...(sqlMetric(cursor.rowsRead) !== undefined
+        ? { rowsRead: sqlMetric(cursor.rowsRead) }
+        : {}),
+      ...(sqlMetric(cursor.rowsWritten) !== undefined
+        ? { rowsWritten: sqlMetric(cursor.rowsWritten) }
+        : {}),
+    };
   }
 
   private sqlOne<T>(query: string, ...bindings: SqlBinding[]): T | null {
@@ -514,7 +686,29 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private rawSqlRun(query: string, ...bindings: SqlBinding[]): number {
-    return this.doState.storage.sql.exec(query, ...bindings).rowsWritten;
+    return this.rawSqlRunWithMetrics(query, ...bindings).rowsWritten ?? 0;
+  }
+
+  private rawSqlRunWithMetrics(
+    query: string,
+    ...bindings: SqlBinding[]
+  ): SqlExecutionResult<never> {
+    const cursor = this.doState.storage.sql.exec(
+      query,
+      ...bindings,
+    ) as unknown as SqlCursorLike;
+    // Consume write cursors as well: UPDATE/DELETE may scan rows even when
+    // their mutation count is zero, and rowsRead is finalized on consumption.
+    cursor.toArray();
+    return {
+      rows: [],
+      ...(sqlMetric(cursor.rowsRead) !== undefined
+        ? { rowsRead: sqlMetric(cursor.rowsRead) }
+        : {}),
+      ...(sqlMetric(cursor.rowsWritten) !== undefined
+        ? { rowsWritten: sqlMetric(cursor.rowsWritten) }
+        : {}),
+    };
   }
 
   private measuredSqlAll<T>(
@@ -532,10 +726,16 @@ export class IngestDurableObject extends DurableObject {
     });
     logger.increment("doSqlStatements");
     try {
-      const rows = this.rawSqlAll<T>(query, ...bindings);
-      logger.increment("doSqlRowsRead", rows.length);
-      span.end({ rowCount: rows.length });
-      return rows;
+      const result = this.rawSqlAllWithMetrics<T>(query, ...bindings);
+      logger.recordDoSqlOperation(result);
+      span.end({
+        rowCount: result.rows.length,
+        ...(result.rowsRead !== undefined ? { rowsRead: result.rowsRead } : {}),
+        ...(result.rowsWritten !== undefined
+          ? { rowsWritten: result.rowsWritten }
+          : {}),
+      });
+      return result.rows;
     } catch (error) {
       span.fail(errorLogData(error));
       throw error;
@@ -565,9 +765,13 @@ export class IngestDurableObject extends DurableObject {
     });
     logger.increment("doSqlStatements");
     try {
-      const rowsWritten = this.rawSqlRun(query, ...bindings);
-      logger.increment("doSqlRowsWritten", rowsWritten);
-      span.end({ rowsWritten });
+      const result = this.rawSqlRunWithMetrics(query, ...bindings);
+      logger.recordDoSqlOperation(result);
+      const rowsWritten = result.rowsWritten ?? 0;
+      span.end({
+        rowsWritten,
+        ...(result.rowsRead !== undefined ? { rowsRead: result.rowsRead } : {}),
+      });
       return rowsWritten;
     } catch (error) {
       span.fail(errorLogData(error));
@@ -576,8 +780,9 @@ export class IngestDurableObject extends DurableObject {
   }
 
   private bufferStoreContext() {
+    const logger = currentInvocationLogger();
     return {
-      env: this.doEnv,
+      env: logger ? instrumentEnv(this.doEnv, logger) : this.doEnv,
       sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
         this.sqlAll<T>(query, ...bindings),
       sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
@@ -842,7 +1047,7 @@ export class IngestDurableObject extends DurableObject {
         },
         logger,
       );
-      if (this.sockets.size === 0) continue;
+      if (this.webSockets().length === 0) continue;
       await this.pushRealtimeRecord({
         id: pending.eventId,
         eventType: pending.eventName,
@@ -1559,7 +1764,8 @@ export class IngestDurableObject extends DurableObject {
     );
 
     if (rowsUpdated === 0 && !localVisit) {
-      const persistedVisit = await this.doEnv.DB.prepare(
+      const instrumentedEnv = instrumentEnv(this.doEnv, logger);
+      const persistedVisit = await instrumentedEnv.DB.prepare(
         `
           SELECT
             session_id AS sessionId,
@@ -1574,7 +1780,7 @@ export class IngestDurableObject extends DurableObject {
         .catch(() => null);
       serverSessionId = persistedVisit?.sessionId || "";
       serverVisitorId = persistedVisit?.visitorId || "";
-      await this.doEnv.DB.prepare(
+      await instrumentedEnv.DB.prepare(
         `
           UPDATE visits
           SET user_id = ?, user_name = ?
@@ -1762,7 +1968,31 @@ export class IngestDurableObject extends DurableObject {
   private async pushRealtimeRecord(
     record: RealtimeSnapshotRecord,
   ): Promise<void> {
-    await pushRealtimeRecordToSockets(this.sockets, record);
+    await pushRealtimeRecordToSockets(this.webSockets(), record);
+  }
+
+  private webSockets(): WebSocket[] {
+    return typeof this.doState.getWebSockets === "function"
+      ? this.doState.getWebSockets()
+      : [];
+  }
+
+  private loadVisitCleanupDueAt(): number | null {
+    const row = this.sqlOne<{ metadataValue: number | null }>(
+      `
+        SELECT metadata_value AS metadataValue
+        FROM ingest_schema_metadata
+        WHERE metadata_key = 'buffered_visits_cleanup_due_at'
+          AND version = 1
+        LIMIT 1
+      `,
+    );
+    const dueAt = row?.metadataValue;
+    this.visitCleanupDueAt =
+      typeof dueAt === "number" && Number.isFinite(dueAt)
+        ? Math.trunc(dueAt)
+        : null;
+    return this.visitCleanupDueAt;
   }
 
   private async reconcileAlarm(
@@ -1772,15 +2002,22 @@ export class IngestDurableObject extends DurableObject {
     retryOnFailure = false,
   ): Promise<void> {
     const now = Date.now();
-    const nextDue = getEarliestDueWork({
-      sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
-        this.sqlOne<T>(query, ...bindings),
-    });
-    const current = await this.doState.storage.getAlarm();
+    const cleanupDueAt =
+      this.visitCleanupDueAt === undefined
+        ? this.loadVisitCleanupDueAt()
+        : this.visitCleanupDueAt;
+    const nextDue = getEarliestDueWork(
+      {
+        sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
+          this.sqlOne<T>(query, ...bindings),
+      },
+      cleanupDueAt,
+    );
+    const current = await this.getAlarm(logger);
 
     if (nextDue.nextDueAt === null) {
       if (current !== null) {
-        await this.doState.storage.deleteAlarm();
+        await this.deleteAlarm(logger);
         logger.info("do.alarm.reconciled", {
           action: "deleted",
           previousAlarmAt: current,
@@ -1818,7 +2055,7 @@ export class IngestDurableObject extends DurableObject {
     const isOverdueRetry = isOverdue && afterMaintenance;
 
     if (current === null) {
-      await this.doState.storage.setAlarm(target);
+      await this.setAlarm(logger, target);
       logger.info("do.alarm.reconciled", {
         action: "set",
         previousAlarmAt: null,
@@ -1840,7 +2077,7 @@ export class IngestDurableObject extends DurableObject {
       (retryOnFailure && current <= now) ||
       isOverdueAlarmRepair
     ) {
-      await this.doState.storage.setAlarm(target);
+      await this.setAlarm(logger, target);
       logger.info("do.alarm.reconciled", {
         action: "set",
         previousAlarmAt: current,
@@ -1898,9 +2135,6 @@ export class IngestDurableObject extends DurableObject {
       {
         sqlAll: <T>(query: string, ...bindings: SqlBinding[]) =>
           this.measuredSqlAll<T>(logger, query, ...bindings),
-        sqlOne: <T>(query: string, ...bindings: SqlBinding[]) =>
-          this.measuredSqlOne<T>(logger, query, ...bindings),
-        sockets: this.sockets,
       },
       socket,
     );
@@ -1918,6 +2152,10 @@ export class IngestDurableObject extends DurableObject {
         this.measuredSqlOne<T>(logger, query, ...bindings),
       sqlRun: (query: string, ...bindings: SqlBinding[]) =>
         this.measuredSqlRun(logger, query, ...bindings),
+      getVisitCleanupDueAt: () => this.visitCleanupDueAt,
+      setVisitCleanupDueAt: (dueAt: number | null) => {
+        this.visitCleanupDueAt = dueAt;
+      },
       readPersistedVisitRow: this.readPersistedVisitRow.bind(this),
       insertBufferedVisitRow: this.insertBufferedVisitRow.bind(this),
       hasOpenVisitsForVisitor: this.hasOpenVisitsForVisitor.bind(this),
@@ -1951,6 +2189,7 @@ export class IngestDurableObject extends DurableObject {
     logger: InvocationLogger,
     forceFlush = false,
   ): Promise<void> {
+    this.activeNowCache = null;
     await logger.measure("do.flush_timeouts", () => this.flushTimeouts(logger));
     await logger.measure("do.flush_pending", () =>
       this.flushPendingToD1(logger, forceFlush),

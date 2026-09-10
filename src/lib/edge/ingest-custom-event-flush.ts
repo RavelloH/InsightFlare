@@ -56,7 +56,6 @@ export async function flushCustomEventRowIndividually(
       ids,
       sitePk,
     );
-    recordFlushCounter(context, "d1Statements", statements.length);
     await context.env.DB.batch(statements);
     if (!(await hasPersistedCustomEvent(context, row.eventId))) {
       context.observability?.warn("do.flush.custom_event_insert_not_confirmed");
@@ -72,7 +71,6 @@ export async function flushCustomEventRowIndividually(
       400,
     );
     void message;
-    recordFlushCounter(context, "failedStatements");
     context.observability?.error("do.flush.custom_event_failed");
     markCustomEventRowsFailed(context, [row], message);
     return false;
@@ -197,7 +195,6 @@ async function resolveDictionaryId(
   if (cached !== undefined) return cached;
 
   const spec = dictionarySql(kind);
-  recordFlushCounter(context, "d1Statements");
   await context.env.DB.prepare(
     `
       INSERT INTO ${spec.table} (site_id, site_pk, ${spec.column}, created_at, last_seen_at)
@@ -209,7 +206,6 @@ async function resolveDictionaryId(
     .bind(siteId, sitePk, value, seenAt, seenAt)
     .run();
 
-  recordFlushCounter(context, "d1Statements");
   const row = await context.env.DB.prepare(
     `
       SELECT id
@@ -283,7 +279,6 @@ async function hasPersistedVisit(
   sitePk: number,
   visitId: string,
 ): Promise<boolean> {
-  recordFlushCounter(context, "d1Statements");
   const persisted = await context.env.DB.prepare(
     `
       SELECT 1 AS ok
@@ -301,7 +296,6 @@ async function hasPersistedCustomEvent(
   context: IngestFlushContext,
   eventId: string,
 ): Promise<boolean> {
-  recordFlushCounter(context, "d1Statements");
   const persisted = await context.env.DB.prepare(
     `
       SELECT 1 AS ok

@@ -20,7 +20,12 @@ import {
   recordFlushCounter,
   resolveSitePk,
 } from "./ingest-flush-types";
-import { visitBindings, visitUpsertSql } from "./ingest-sql";
+import {
+  visitBindings,
+  visitDetailBindings,
+  visitDetailsUpdateSql,
+  visitStateUpsertSql,
+} from "./ingest-sql";
 import { toUnixSeconds } from "./ingest-time";
 import type { BufferedCustomEventRow, BufferedVisitRow } from "./ingest-types";
 import { clampString } from "./utils";
@@ -34,6 +39,30 @@ interface FlushBufferFields {
 type BufferedVisitFlushRow = BufferedVisitRow & Partial<FlushBufferFields>;
 type BufferedCustomEventFlushRow = BufferedCustomEventRow &
   Partial<FlushBufferFields>;
+
+// A visit flush is a two-statement D1 group. Keep the existing D1 batch and
+// alarm budgets expressed in physical statements rather than buffered rows.
+const VISIT_FLUSH_STATEMENT_GROUP_SIZE = 2;
+const VISIT_FLUSH_ROW_BATCH_SIZE = Math.max(
+  1,
+  Math.floor(D1_FLUSH_BATCH_SIZE / VISIT_FLUSH_STATEMENT_GROUP_SIZE),
+);
+const VISIT_CLEANUP_META_KEY = "buffered_visits_cleanup_due_at";
+const VISIT_CLEANUP_META_VERSION = 1;
+// The CAS delete expands to four bound variables per candidate. Keep the
+// batch below the Durable Object SQLite host-parameter limit while retaining
+// a bounded cleanup pass.
+const VISIT_CLEANUP_BATCH_SIZE = 20;
+const VISIT_CLEANUP_RETRY_MS = 60 * 1000;
+
+interface VisitCleanupMetadataRow {
+  metadataValue?: number | null;
+}
+
+interface VisitCleanupCandidate {
+  visitId: string;
+  bufferRevision: number;
+}
 
 const FLUSH_RETRY_DELAYS_MS = [
   60 * 1000,
@@ -285,7 +314,7 @@ export async function flushPendingToD1(
         LIMIT ?
       `,
       ...(force ? [] : [now]),
-      D1_FLUSH_BATCH_SIZE,
+      VISIT_FLUSH_ROW_BATCH_SIZE,
     );
     const eventRows = context.sqlAll<BufferedCustomEventFlushRow>(
       `
@@ -328,20 +357,19 @@ export async function flushPendingToD1(
         for (const siteId of new Set(visitRows.map((row) => row.siteId))) {
           sitePkById.set(siteId, await resolveSitePk(context, siteId));
         }
-        recordFlushCounter(context, "d1Statements", visitRows.length);
-        const preparedVisits = visitRows.map((row) => {
+        const preparedVisitGroups = visitRows.map((row) => {
           const sitePk = sitePkById.get(row.siteId);
           if (sitePk === undefined) {
             throw new Error(`Missing site identity for ${row.siteId}`);
           }
-          return prepareVisitStatement(context, row, sitePk);
+          return prepareVisitStatements(context, row, sitePk);
         });
+        const preparedVisits = preparedVisitGroups.flat();
         await context.env.DB.batch(preparedVisits);
         recordFlushCounter(context, "flushedVisits", visitRows.length);
         markVisitRowsFlushed(context, visitRows);
       } catch (error) {
         void error;
-        recordFlushCounter(context, "failedStatements", visitRows.length);
         context.observability?.error("do.flush.visit_batch_failed");
         await flushRowsIndividually(context, visitRows, []);
       }
@@ -359,7 +387,7 @@ export async function flushPendingToD1(
     }
 
     if (
-      visitRows.length < D1_FLUSH_BATCH_SIZE &&
+      visitRows.length < VISIT_FLUSH_ROW_BATCH_SIZE &&
       eventRows.length < D1_FLUSH_CUSTOM_EVENT_BATCH_SIZE
     ) {
       return;
@@ -374,27 +402,64 @@ export async function cleanupBufferedRows(
   const visitCutoff = now - FLUSHED_BUFFER_RETENTION_MS;
   const hiddenFallbackCutoff = now - VISIT_TIMEOUT_MS;
   const eventCutoff = visitCutoff;
-  const deletedVisits = context.sqlRun(
-    `
-      DELETE FROM buffered_visits
-      WHERE dirty = 0
-        AND (
-          status = 'timeout'
-          OR (
-            status NOT IN ('open', 'hidden_pending')
-            AND (COALESCE(duration_source, '') = 'hidden' OR COALESCE(exit_reason, '') = 'hidden_timeout')
-            AND COALESCE(finalized_at, ended_at, started_at) < ?
-          )
-          OR (
-            status NOT IN ('open', 'hidden_pending')
-            AND NOT (COALESCE(duration_source, '') = 'hidden' OR COALESCE(exit_reason, '') = 'hidden_timeout')
-            AND COALESCE(finalized_at, ended_at, started_at) < ?
-          )
+  const storedCleanupDueAt = context.getVisitCleanupDueAt?.();
+  const cleanupDueAt =
+    storedCleanupDueAt === undefined
+      ? readVisitCleanupDueAt(context)
+      : storedCleanupDueAt;
+  const normalizedCleanupDueAt = cleanupDueAt ?? null;
+  const nextCleanupDueAt =
+    normalizedCleanupDueAt === null
+      ? findEarliestVisitCleanupDueAt(context, now)
+      : normalizedCleanupDueAt;
+  if (normalizedCleanupDueAt === null && nextCleanupDueAt !== null) {
+    writeVisitCleanupDueAt(context, nextCleanupDueAt);
+  } else if (normalizedCleanupDueAt === null && nextCleanupDueAt === null) {
+    context.setVisitCleanupDueAt?.(null);
+  }
+
+  let deletedVisits = 0;
+  if (nextCleanupDueAt !== null && nextCleanupDueAt <= now) {
+    const candidates = context.sqlAll<VisitCleanupCandidate>(
+      `
+        SELECT visit_id AS visitId, buffer_revision AS bufferRevision
+        FROM buffered_visits
+        WHERE ${visitCleanupEligibilitySql()}
+        ORDER BY COALESCE(finalized_at, ended_at, started_at) ASC, visit_id ASC
+        LIMIT ?
+      `,
+      hiddenFallbackCutoff,
+      visitCutoff,
+      VISIT_CLEANUP_BATCH_SIZE,
+    );
+    if (candidates.length > 0) {
+      const conditions = candidates
+        .map(
+          () =>
+            "(visit_id = ? AND buffer_revision = ? AND dirty = 0 AND (status = 'timeout' OR (status NOT IN ('open', 'hidden_pending') AND ((COALESCE(duration_source, '') = 'hidden' OR COALESCE(exit_reason, '') = 'hidden_timeout') AND COALESCE(finalized_at, ended_at, started_at) < ?) OR (NOT (COALESCE(duration_source, '') = 'hidden' OR COALESCE(exit_reason, '') = 'hidden_timeout') AND COALESCE(finalized_at, ended_at, started_at) < ?))))",
         )
-    `,
-    hiddenFallbackCutoff,
-    visitCutoff,
-  );
+        .join(" OR ");
+      const bindings = candidates.flatMap((candidate) => [
+        candidate.visitId,
+        candidate.bufferRevision,
+        hiddenFallbackCutoff,
+        visitCutoff,
+      ]);
+      deletedVisits = context.sqlRun(
+        `DELETE FROM buffered_visits WHERE ${conditions}`,
+        ...bindings,
+      );
+    }
+    const recomputedDueAt = findEarliestVisitCleanupDueAt(context, now);
+    const nextDueAt =
+      recomputedDueAt === null
+        ? null
+        : candidates.length >= VISIT_CLEANUP_BATCH_SIZE &&
+            recomputedDueAt <= now
+          ? Math.min(recomputedDueAt, now + VISIT_CLEANUP_RETRY_MS)
+          : recomputedDueAt;
+    writeVisitCleanupDueAt(context, nextDueAt);
+  }
   if (deletedVisits > 0) {
     context.observability?.info("do.cleanup.visit_rows_deleted");
   }
@@ -410,6 +475,97 @@ export async function cleanupBufferedRows(
     context.observability?.info("do.cleanup.custom_event_rows_deleted");
   }
   await cleanupOrphanedCustomEvents(context, now);
+}
+
+function visitCleanupEligibilitySql(): string {
+  return `
+    dirty = 0
+    AND (
+      status = 'timeout'
+      OR (
+        status NOT IN ('open', 'hidden_pending')
+        AND (
+          (COALESCE(duration_source, '') = 'hidden'
+            OR COALESCE(exit_reason, '') = 'hidden_timeout')
+          AND COALESCE(finalized_at, ended_at, started_at) < ?
+        )
+        OR (
+          NOT (COALESCE(duration_source, '') = 'hidden'
+            OR COALESCE(exit_reason, '') = 'hidden_timeout')
+          AND COALESCE(finalized_at, ended_at, started_at) < ?
+        )
+      )
+    )
+  `;
+}
+
+function readVisitCleanupDueAt(
+  context: IngestFlushContext,
+): number | null | undefined {
+  const row = context.sqlOne<VisitCleanupMetadataRow>(
+    `
+      SELECT metadata_value AS metadataValue
+      FROM ingest_schema_metadata
+      WHERE metadata_key = ? AND version = ?
+      LIMIT 1
+    `,
+    VISIT_CLEANUP_META_KEY,
+    VISIT_CLEANUP_META_VERSION,
+  );
+  if (!row) return null;
+  const value = row.metadataValue;
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.trunc(value)
+    : null;
+}
+
+function writeVisitCleanupDueAt(
+  context: IngestFlushContext,
+  dueAt: number | null,
+): void {
+  context.sqlRun(
+    `
+      INSERT INTO ingest_schema_metadata (
+        metadata_key, version, metadata_value
+      ) VALUES (?, ?, ?)
+      ON CONFLICT(metadata_key) DO UPDATE SET
+        version = excluded.version,
+        metadata_value = excluded.metadata_value
+    `,
+    VISIT_CLEANUP_META_KEY,
+    VISIT_CLEANUP_META_VERSION,
+    dueAt,
+  );
+  context.setVisitCleanupDueAt?.(dueAt);
+}
+
+function findEarliestVisitCleanupDueAt(
+  context: IngestFlushContext,
+  now: number,
+): number | null {
+  const row = context.sqlOne<{ cleanupDueAt: number | null }>(
+    `
+      SELECT MIN(
+        CASE
+          WHEN status = 'timeout' THEN ?
+          WHEN COALESCE(duration_source, '') = 'hidden'
+            OR COALESCE(exit_reason, '') = 'hidden_timeout'
+            THEN COALESCE(finalized_at, ended_at, started_at) + ?
+          ELSE COALESCE(finalized_at, ended_at, started_at) + ?
+        END
+      ) AS cleanupDueAt
+      FROM buffered_visits
+      WHERE dirty = 0
+        AND status NOT IN ('open', 'hidden_pending')
+    `,
+    now,
+    VISIT_TIMEOUT_MS,
+    FLUSHED_BUFFER_RETENTION_MS,
+  );
+  const value = row?.cleanupDueAt;
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.trunc(value)
+    : null;
 }
 
 export async function flushTimeouts(
@@ -744,11 +900,63 @@ function markVisitRowsFlushed(
     .join(" OR ");
   const bindings = rows.flatMap((row) => [row.visitId, bufferRevisionOf(row)]);
   const updated = context.sqlRun(
-    `UPDATE buffered_visits SET dirty = 0, flush_attempts = 0, last_flush_error = NULL, flush_due_at = NULL, next_due_at = CASE WHEN next_due_at = flush_due_at THEN NULL ELSE next_due_at END WHERE ${conditions}`,
+    `
+      UPDATE buffered_visits
+      SET
+        dirty = 0,
+        flush_attempts = 0,
+        last_flush_error = NULL,
+        flush_due_at = NULL,
+        next_due_at = CASE
+          WHEN status = 'open' THEN last_activity_at + ${VISIT_TIMEOUT_MS}
+          WHEN status = 'hidden_pending' THEN
+            COALESCE(hidden_at, last_activity_at) +
+            CASE
+              WHEN hidden_at IS NULL THEN ${VISIT_TIMEOUT_MS}
+              ELSE ${HIDDEN_LEAVE_GRACE_MS}
+            END
+          ELSE NULL
+        END
+      WHERE ${conditions}
+    `,
     ...bindings,
   );
   void updated;
-  deleteFlushedVisitRows(context, rows);
+  scheduleVisitCleanupForRows(context, rows, Date.now());
+}
+
+function scheduleVisitCleanupForRows(
+  context: IngestFlushContext,
+  rows: readonly BufferedVisitFlushRow[],
+  now: number,
+): void {
+  let candidateDueAt: number | null = null;
+  for (const row of rows) {
+    if (row.status === "open" || row.status === "hidden_pending") continue;
+    const eventAt = row.finalizedAt ?? row.endedAt ?? row.startedAt;
+    const dueAt =
+      row.status === "timeout"
+        ? now
+        : eventAt +
+          (row.durationSource === "hidden" ||
+          row.exitReason === "hidden_timeout"
+            ? VISIT_TIMEOUT_MS
+            : FLUSHED_BUFFER_RETENTION_MS);
+    candidateDueAt =
+      candidateDueAt === null ? dueAt : Math.min(candidateDueAt, dueAt);
+  }
+  if (candidateDueAt === null) return;
+
+  const knownDueAt = context.getVisitCleanupDueAt?.();
+  const currentDueAt =
+    knownDueAt === undefined ? readVisitCleanupDueAt(context) : knownDueAt;
+  const normalizedCurrentDueAt = currentDueAt ?? null;
+  if (
+    normalizedCurrentDueAt !== null &&
+    normalizedCurrentDueAt <= candidateDueAt
+  )
+    return;
+  writeVisitCleanupDueAt(context, candidateDueAt);
 }
 
 function markVisitRowsFailed(
@@ -802,63 +1010,19 @@ function nextDueAtAfterRetry(
   return Math.min(row.nextDueAt, retryAt);
 }
 
-function prepareVisitStatement(
+function prepareVisitStatements(
   context: IngestFlushContext,
   row: BufferedVisitRow,
   sitePk: number,
-): D1PreparedStatement {
-  return context.env.DB.prepare(visitUpsertSql(row.status)).bind(
-    ...visitBindings(row, sitePk),
-  );
-}
-
-function deleteFlushedVisitRows(
-  context: IngestFlushContext,
-  rows: BufferedVisitFlushRow[],
-): void {
-  const now = Date.now();
-  const cutoffMs = now - FLUSHED_BUFFER_RETENTION_MS;
-  const hiddenFallbackCutoffMs = now - VISIT_TIMEOUT_MS;
-  const eligibleRows = rows.filter(
-    (row) =>
-      row.status === "timeout" ||
-      visitEndedBeforeRealtimeCutoff(row, cutoffMs, hiddenFallbackCutoffMs),
-  );
-  if (eligibleRows.length === 0) return;
-  const conditions = eligibleRows
-    .map(() => "(visit_id = ? AND buffer_revision = ?)")
-    .join(" OR ");
-  const bindings = eligibleRows.flatMap((row) => [
-    row.visitId,
-    bufferRevisionOf(row),
-  ]);
-  const deleted = context.sqlRun(
-    `DELETE FROM buffered_visits WHERE ${conditions}`,
-    ...bindings,
-  );
-  void deleted;
-  void cutoffMs;
-}
-
-function visitEndedBeforeRealtimeCutoff(
-  row: Pick<
-    BufferedVisitRow,
-    | "status"
-    | "startedAt"
-    | "endedAt"
-    | "finalizedAt"
-    | "durationSource"
-    | "exitReason"
-  >,
-  cutoffMs: number,
-  hiddenFallbackCutoffMs: number,
-): boolean {
-  if (row.status === "open" || row.status === "hidden_pending") return false;
-  const eventAt = row.finalizedAt ?? row.endedAt ?? row.startedAt;
-  if (row.durationSource === "hidden" || row.exitReason === "hidden_timeout") {
-    return eventAt < hiddenFallbackCutoffMs;
-  }
-  return eventAt < cutoffMs;
+): D1PreparedStatement[] {
+  return [
+    context.env.DB.prepare(visitStateUpsertSql(row.status)).bind(
+      ...visitBindings(row, sitePk),
+    ),
+    context.env.DB.prepare(visitDetailsUpdateSql(row.status)).bind(
+      ...visitDetailBindings(row),
+    ),
+  ];
 }
 
 async function flushRowsIndividually(
@@ -879,9 +1043,8 @@ async function flushVisitRowIndividually(
   row: BufferedVisitRow,
 ): Promise<void> {
   try {
-    recordFlushCounter(context, "d1Statements");
     const sitePk = await resolveSitePk(context, row.siteId);
-    await context.env.DB.batch([prepareVisitStatement(context, row, sitePk)]);
+    await context.env.DB.batch(prepareVisitStatements(context, row, sitePk));
     recordFlushCounter(context, "flushedVisits");
     markVisitRowsFlushed(context, [row]);
   } catch (error) {
@@ -889,7 +1052,6 @@ async function flushVisitRowIndividually(
       String(error instanceof Error ? error.message : error),
       400,
     );
-    recordFlushCounter(context, "failedStatements");
     context.observability?.error("do.flush.visit_failed");
     markVisitRowsFailed(context, [row], message);
   }

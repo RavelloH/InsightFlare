@@ -9,6 +9,38 @@ interface DurableObjectSqlStorage {
   ): {
     toArray(): unknown[];
   };
+  /**
+   * Durable Object SQLite exposes transactionSync on the storage object.  The
+   * local SQL test doubles can provide the same method directly, while older
+   * doubles may omit it and use the non-transactional compatibility path.
+   */
+  transactionSync?<T>(closure: () => T): T;
+}
+
+export interface IngestSchemaOptions {
+  transactionSync?<T>(closure: () => T): T;
+}
+
+const VISIT_DEADLINE_REPAIR_KEY = "buffered_visits_next_due_at";
+const VISIT_DEADLINE_REPAIR_VERSION = 1;
+
+interface SchemaMetadataRow {
+  version?: number;
+  metadataValue?: number | null;
+}
+
+function transactionSync<T>(
+  sql: DurableObjectSqlStorage,
+  closure: () => T,
+  options?: IngestSchemaOptions,
+): T {
+  if (typeof sql.transactionSync === "function") {
+    return sql.transactionSync(closure);
+  }
+  if (typeof options?.transactionSync === "function") {
+    return options.transactionSync(closure);
+  }
+  return closure();
 }
 
 interface TableColumnInfo {
@@ -184,7 +216,139 @@ function migrateLegacyBufferedCustomEvents(sql: DurableObjectSqlStorage): void {
   }
 }
 
-export function initializeIngestSqlSchema(sql: DurableObjectSqlStorage): void {
+function repairMissingVisitDeadlines(
+  sql: DurableObjectSqlStorage,
+  now: number,
+  options?: IngestSchemaOptions,
+): void {
+  sql.exec(`
+      CREATE TABLE IF NOT EXISTS ingest_schema_metadata (
+        metadata_key TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
+        metadata_value INTEGER
+      )
+    `);
+  if (!tableColumnNames(sql, "ingest_schema_metadata").has("metadata_value")) {
+    sql.exec(
+      "ALTER TABLE ingest_schema_metadata ADD COLUMN metadata_value INTEGER",
+    );
+  }
+
+  const marker = sql
+    .exec(
+      `
+        SELECT version
+        FROM ingest_schema_metadata
+        WHERE metadata_key = ?
+        LIMIT 1
+      `,
+      VISIT_DEADLINE_REPAIR_KEY,
+    )
+    .toArray()[0] as SchemaMetadataRow | undefined;
+  if (marker?.version === VISIT_DEADLINE_REPAIR_VERSION) return;
+
+  transactionSync(
+    sql,
+    () => {
+      // Re-check inside the transaction so a retry or a future concurrent
+      // initializer cannot run an already-completed repair a second time.
+      const currentMarker = sql
+        .exec(
+          `
+          SELECT version
+          FROM ingest_schema_metadata
+          WHERE metadata_key = ?
+          LIMIT 1
+        `,
+          VISIT_DEADLINE_REPAIR_KEY,
+        )
+        .toArray()[0] as SchemaMetadataRow | undefined;
+      if (currentMarker?.version === VISIT_DEADLINE_REPAIR_VERSION) return;
+
+      // Rows created before deadline scheduling may have neither due column.
+      // Keep the existing flush deadline precedence, but only repair rows whose
+      // next deadline is absent.  The marker is written only after this UPDATE
+      // succeeds, so a failed transaction can be retried on the next startup.
+      sql.exec(
+        `
+        UPDATE buffered_visits
+        SET
+          flush_due_at = CASE
+            WHEN dirty = 1 AND flush_due_at IS NULL THEN ?
+            ELSE flush_due_at
+          END,
+          next_due_at = CASE
+            WHEN dirty = 1 AND flush_due_at IS NULL THEN ?
+            WHEN flush_due_at IS NULL THEN
+              CASE
+                WHEN status = 'open' THEN last_activity_at + ?
+                WHEN status = 'hidden_pending' THEN
+                  COALESCE(hidden_at, last_activity_at, 0) +
+                  CASE
+                    WHEN hidden_at IS NULL THEN ?
+                    ELSE ?
+                  END
+                ELSE NULL
+              END
+            WHEN status = 'open' THEN
+              CASE
+                WHEN flush_due_at <= last_activity_at + ?
+                  THEN flush_due_at
+                ELSE last_activity_at + ?
+              END
+            WHEN status = 'hidden_pending' THEN
+              CASE
+                WHEN flush_due_at <= COALESCE(hidden_at, last_activity_at, 0) +
+                  CASE
+                    WHEN hidden_at IS NULL THEN ?
+                    ELSE ?
+                  END
+                  THEN flush_due_at
+                ELSE COALESCE(hidden_at, last_activity_at, 0) +
+                  CASE
+                    WHEN hidden_at IS NULL THEN ?
+                    ELSE ?
+                  END
+              END
+            ELSE flush_due_at
+          END
+        WHERE next_due_at IS NULL
+          AND (
+            dirty = 1
+            OR flush_due_at IS NOT NULL
+            OR status IN ('open', 'hidden_pending')
+          )
+      `,
+        now,
+        now,
+        VISIT_TIMEOUT_MS,
+        VISIT_TIMEOUT_MS,
+        HIDDEN_LEAVE_GRACE_MS,
+        VISIT_TIMEOUT_MS,
+        VISIT_TIMEOUT_MS,
+        VISIT_TIMEOUT_MS,
+        HIDDEN_LEAVE_GRACE_MS,
+        VISIT_TIMEOUT_MS,
+        HIDDEN_LEAVE_GRACE_MS,
+      );
+      sql.exec(
+        `
+        INSERT INTO ingest_schema_metadata (metadata_key, version)
+        VALUES (?, ?)
+        ON CONFLICT(metadata_key) DO UPDATE SET version = excluded.version
+      `,
+        VISIT_DEADLINE_REPAIR_KEY,
+        VISIT_DEADLINE_REPAIR_VERSION,
+      );
+    },
+    options,
+  );
+}
+
+export function initializeIngestSqlSchema(
+  sql: DurableObjectSqlStorage,
+  options?: IngestSchemaOptions,
+): void {
   const now = Date.now();
   sql.exec(`
       CREATE TABLE IF NOT EXISTS buffered_visits (
@@ -270,55 +434,7 @@ export function initializeIngestSqlSchema(sql: DurableObjectSqlStorage): void {
   // Rows created before due-time scheduling have NULL due columns.  Make
   // legacy dirty rows immediately eligible and restore lifecycle deadlines
   // for clean open/hidden visits without touching already-scheduled rows.
-  sql.exec(`
-      UPDATE buffered_visits
-      SET
-        flush_due_at = CASE
-          WHEN dirty = 1 AND flush_due_at IS NULL THEN ${now}
-          ELSE flush_due_at
-        END,
-        next_due_at = CASE
-          WHEN dirty = 1 AND flush_due_at IS NULL THEN ${now}
-          WHEN flush_due_at IS NULL THEN
-            CASE
-              WHEN status = 'open' THEN last_activity_at + ${VISIT_TIMEOUT_MS}
-              WHEN status = 'hidden_pending' THEN
-                COALESCE(hidden_at, last_activity_at, 0) +
-                CASE
-                  WHEN hidden_at IS NULL THEN ${VISIT_TIMEOUT_MS}
-                  ELSE ${HIDDEN_LEAVE_GRACE_MS}
-                END
-              ELSE NULL
-            END
-          WHEN status = 'open' THEN
-            CASE
-              WHEN flush_due_at <= last_activity_at + ${VISIT_TIMEOUT_MS}
-                THEN flush_due_at
-              ELSE last_activity_at + ${VISIT_TIMEOUT_MS}
-            END
-          WHEN status = 'hidden_pending' THEN
-            CASE
-              WHEN flush_due_at <= COALESCE(hidden_at, last_activity_at, 0) +
-                CASE
-                  WHEN hidden_at IS NULL THEN ${VISIT_TIMEOUT_MS}
-                  ELSE ${HIDDEN_LEAVE_GRACE_MS}
-                END
-                THEN flush_due_at
-              ELSE COALESCE(hidden_at, last_activity_at, 0) +
-                CASE
-                  WHEN hidden_at IS NULL THEN ${VISIT_TIMEOUT_MS}
-                  ELSE ${HIDDEN_LEAVE_GRACE_MS}
-                END
-            END
-          ELSE flush_due_at
-        END
-      WHERE next_due_at IS NULL
-        AND (
-          dirty = 1
-          OR flush_due_at IS NOT NULL
-          OR status IN ('open', 'hidden_pending')
-        )
-    `);
+  repairMissingVisitDeadlines(sql, now, options);
 
   // These indexes were useful for broad historical scans, but they are not
   // part of the hot ingest/flush paths.  In a Durable Object every UPDATE of

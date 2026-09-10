@@ -75,6 +75,7 @@ privateQueryRoutes.all("/team-dashboard", async (c) => {
         tenantId: team.teamId,
         route: "team-dashboard",
         audienceId: session.userId,
+        allowedSiteIds: team.allowedSiteIds,
       },
       request: c.req.raw,
     },

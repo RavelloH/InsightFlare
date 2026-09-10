@@ -13,6 +13,7 @@ export type InvocationLogLevel = "info" | "warn" | "error";
 export type InvocationOutcome = "ok" | "error" | "canceled";
 export type InvocationCacheState = "HIT" | "MISS" | "BYPASS";
 export type InvocationDataSource = "raw" | "rollup" | "mixed";
+export type InvocationD1RowsCoverage = "complete" | "partial" | "unavailable";
 
 export interface InvocationRequest {
   route: string;
@@ -29,8 +30,10 @@ export interface InvocationPerformance {
   /** Legacy handler-reported value; compare with binding-level total when present. */
   handlerD1RowsRead?: number;
   d1RowsReadAvailable?: boolean;
+  d1RowsReadCoverage?: InvocationD1RowsCoverage;
   d1Statements?: number;
   d1RowsWritten?: number;
+  d1RowsWrittenCoverage?: InvocationD1RowsCoverage;
   failedStatements?: number;
   flushedVisits?: number;
   flushedCustomEvents?: number;
@@ -39,7 +42,15 @@ export interface InvocationPerformance {
   d1Retries?: number;
   doSqlStatements?: number;
   doSqlRowsRead?: number;
+  doSqlRowsReadAvailable?: boolean;
+  doSqlRowsReadCoverage?: InvocationD1RowsCoverage;
   doSqlRowsWritten?: number;
+  doSqlRowsWrittenAvailable?: boolean;
+  doSqlRowsWrittenCoverage?: InvocationD1RowsCoverage;
+  doAlarmOperations?: number;
+  doAlarmGets?: number;
+  doAlarmSets?: number;
+  doAlarmDeletes?: number;
   kvOperations?: number;
   r2Operations?: number;
   doCalls?: number;
@@ -67,6 +78,10 @@ export type InvocationPerformanceCounter =
   | "doSqlStatements"
   | "doSqlRowsRead"
   | "doSqlRowsWritten"
+  | "doAlarmOperations"
+  | "doAlarmGets"
+  | "doAlarmSets"
+  | "doAlarmDeletes"
   | "kvOperations"
   | "r2Operations"
   | "doCalls"
@@ -132,6 +147,11 @@ export interface InvocationD1OperationMetrics {
   rowsReadAvailable: boolean;
 }
 
+export interface InvocationDoSqlMetrics {
+  rowsRead?: number;
+  rowsWritten?: number;
+}
+
 export interface InvocationLogEvent {
   timeMs: number;
   level: InvocationLogLevel;
@@ -179,6 +199,14 @@ function toCounterValue(value: number): number | null {
   return Math.trunc(value);
 }
 
+function rowsCoverage(
+  available: number,
+  completed: number,
+): InvocationD1RowsCoverage {
+  if (available === 0) return "unavailable";
+  return available === completed ? "complete" : "partial";
+}
+
 function resolveMaxEvents(value: number | undefined): number {
   if (value === undefined) return MAX_INVOCATION_LOG_EVENTS;
   if (!Number.isInteger(value) || value < 1) return MAX_INVOCATION_LOG_EVENTS;
@@ -220,6 +248,7 @@ export interface InvocationLogger {
     operation: string,
     metrics: InvocationD1OperationMetrics,
   ): void;
+  recordDoSqlOperation(metrics: InvocationDoSqlMetrics): void;
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
   emitWhenComplete(): Promise<InvocationLogRecord>;
@@ -278,6 +307,9 @@ export function createInvocationLogger(
   let traceId = options.traceId;
   let request: InvocationRequest | undefined;
   let performance: InvocationPerformancePatch = {};
+  let doSqlCompleted = 0;
+  let doSqlRowsReadAvailable = 0;
+  let doSqlRowsWrittenAvailable = 0;
   let logsTruncated = false;
   let emitted: InvocationLogRecord | undefined;
   const background = new Set<Promise<unknown>>();
@@ -466,6 +498,39 @@ export function createInvocationLogger(
             d1RowsReadAvailable: rowsReadAvailable,
           },
         },
+      };
+    },
+    recordDoSqlOperation(metrics) {
+      doSqlCompleted += 1;
+      const rowsRead = toCounterValue(metrics.rowsRead ?? 0);
+      const rowsWritten = toCounterValue(metrics.rowsWritten ?? 0);
+      if (metrics.rowsRead !== undefined) {
+        doSqlRowsReadAvailable += 1;
+      }
+      if (metrics.rowsWritten !== undefined) {
+        doSqlRowsWrittenAvailable += 1;
+      }
+      performance = {
+        ...performance,
+        ...(rowsRead !== null
+          ? { doSqlRowsRead: (performance.doSqlRowsRead ?? 0) + rowsRead }
+          : {}),
+        ...(rowsWritten !== null
+          ? {
+              doSqlRowsWritten:
+                (performance.doSqlRowsWritten ?? 0) + rowsWritten,
+            }
+          : {}),
+        doSqlRowsReadAvailable: doSqlRowsReadAvailable > 0,
+        doSqlRowsWrittenAvailable: doSqlRowsWrittenAvailable > 0,
+        doSqlRowsReadCoverage: rowsCoverage(
+          doSqlRowsReadAvailable,
+          doSqlCompleted,
+        ),
+        doSqlRowsWrittenCoverage: rowsCoverage(
+          doSqlRowsWrittenAvailable,
+          doSqlCompleted,
+        ),
       };
     },
     build,

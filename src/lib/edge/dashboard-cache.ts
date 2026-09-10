@@ -57,6 +57,18 @@ export interface DashboardCacheIdentity {
    * subset of a tenant's sites, such as the team dashboard.
    */
   audienceId?: string;
+  /**
+   * Canonicalized into the cache key for team dashboards whose audience is
+   * restricted to a subset of the team's sites.
+   */
+  allowedSiteIds?: readonly string[];
+}
+
+function allowedSiteIdsFingerprint(
+  allowedSiteIds: readonly string[] | undefined,
+): string | undefined {
+  if (allowedSiteIds === undefined) return undefined;
+  return JSON.stringify([...new Set(allowedSiteIds)].sort());
 }
 
 function semanticFilterFingerprint(url: URL): string | undefined {
@@ -119,6 +131,10 @@ function buildCacheKeyRequest(
     filterKey ? (key) => key.startsWith("filter[") : undefined,
   );
   if (filterKey) cacheUrl.searchParams.set("filterFingerprint", filterKey);
+  const allowedSiteIdsKey = allowedSiteIdsFingerprint(identity.allowedSiteIds);
+  if (allowedSiteIdsKey !== undefined) {
+    cacheUrl.searchParams.set("allowedSiteIdsFingerprint", allowedSiteIdsKey);
+  }
   return new Request(cacheUrl.toString(), { method: "GET" });
 }
 

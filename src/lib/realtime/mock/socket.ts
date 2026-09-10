@@ -24,7 +24,10 @@ type RealtimeSocketMessage =
 export type RealtimeSocketLike = Pick<
   WebSocket,
   "readyState" | "onopen" | "onmessage" | "onerror" | "onclose" | "close"
->;
+> & {
+  /** Optional because the deterministic demo socket does not need transport heartbeats. */
+  send?: WebSocket["send"];
+};
 
 interface MockRealtimeSocketOptions {
   siteId: string;

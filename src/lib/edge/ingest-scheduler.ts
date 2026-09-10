@@ -2,7 +2,7 @@ import { HIDDEN_LEAVE_GRACE_MS, VISIT_TIMEOUT_MS } from "./ingest-constants";
 import type { SqlReader } from "./ingest-types";
 
 export type ScheduleReason =
-  "flush" | "hidden_fallback" | "visit_timeout" | "session_timeout";
+  "flush" | "hidden_fallback" | "visit_timeout" | "session_timeout" | "cleanup";
 
 export interface NextDueWork {
   nextDueAt: number | null;
@@ -79,6 +79,7 @@ function classifyVisitReason(row: ScheduledVisitRow): ScheduleReason {
 
 export function getEarliestDueWork(
   context: Pick<SqlReader, "sqlOne">,
+  cleanupDueAt: number | null = null,
 ): NextDueWork {
   const visit = context.sqlOne<ScheduledVisitRow>(
     `
@@ -121,40 +122,47 @@ export function getEarliestDueWork(
 
   const session = sessionRow?.sessionId ? sessionRow : null;
 
+  let next: NextDueWork;
   if (!visit && !event && !session) {
-    return { nextDueAt: null, reason: null, entity: null };
-  }
-  if (!event && !session) {
-    return {
+    next = { nextDueAt: null, reason: null, entity: null };
+  } else if (!event && !session) {
+    next = {
       nextDueAt: visit!.nextDueAt ?? null,
       reason: classifyVisitReason(visit!),
       entity: "visit",
     };
-  }
-  if (
+  } else if (
     visit &&
     (visit.nextDueAt ?? Infinity) <= (event?.nextDueAt ?? Infinity) &&
     (visit.nextDueAt ?? Infinity) <= (session?.nextDueAt ?? Infinity)
   ) {
-    return {
+    next = {
       nextDueAt: visit.nextDueAt ?? null,
       reason: classifyVisitReason(visit),
       entity: "visit",
     };
-  }
-  if (
+  } else if (
     session &&
     (session.nextDueAt ?? Infinity) <= (event?.nextDueAt ?? Infinity)
   ) {
-    return {
+    next = {
       nextDueAt: session.nextDueAt ?? null,
       reason: "session_timeout",
       entity: "session",
     };
+  } else {
+    next = {
+      nextDueAt: event!.nextDueAt ?? null,
+      reason: "flush",
+      entity: "custom_event",
+    };
   }
-  return {
-    nextDueAt: event!.nextDueAt ?? null,
-    reason: "flush",
-    entity: "custom_event",
-  };
+
+  if (
+    cleanupDueAt !== null &&
+    (next.nextDueAt === null || cleanupDueAt < next.nextDueAt)
+  ) {
+    return { nextDueAt: cleanupDueAt, reason: "cleanup", entity: "visit" };
+  }
+  return next;
 }

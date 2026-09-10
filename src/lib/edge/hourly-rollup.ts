@@ -58,6 +58,7 @@ interface AggregationCandidateRow {
   siteId: string;
   sitePk: number;
   aggregatedUntilHour: number | null;
+  lastError: string | null;
 }
 
 interface AggregationStateRow {
@@ -1096,7 +1097,8 @@ async function listAggregationCandidates(
       SELECT
         s.id AS siteId,
         si.site_pk AS sitePk,
-        st.aggregated_until_hour AS aggregatedUntilHour
+        st.aggregated_until_hour AS aggregatedUntilHour,
+        st.last_error AS lastError
       FROM sites s
       INNER JOIN site_identities si
         ON si.site_id = s.id
@@ -1122,6 +1124,10 @@ async function listAggregationCandidates(
       row.aggregatedUntilHour === null || row.aggregatedUntilHour === undefined
         ? null
         : Number(row.aggregatedUntilHour),
+    lastError:
+      row.lastError === null || row.lastError === undefined
+        ? null
+        : String(row.lastError),
   }));
 }
 
@@ -1538,6 +1544,15 @@ export async function runHourlyAggregation(
 
   for (const site of candidates) {
     if (!site.siteId) continue;
+    if (
+      site.aggregatedUntilHour !== null &&
+      Number.isFinite(site.aggregatedUntilHour) &&
+      site.aggregatedUntilHour >= endHour &&
+      site.lastError === null
+    ) {
+      summary.sitesAlreadyCurrent += 1;
+      continue;
+    }
     const firstClosedHour = await readFirstClosedHour(
       env,
       site.sitePk,

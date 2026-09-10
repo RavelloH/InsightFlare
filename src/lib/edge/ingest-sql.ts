@@ -132,6 +132,31 @@ const ACTIVE_VISIT_UPDATE_COLUMNS = [
   "perf_inp_ms",
 ] as const satisfies readonly VisitD1Column[];
 
+const ACTIVE_VISIT_STATE_UPDATE_COLUMNS = [
+  "status",
+  "last_activity_at",
+] as const satisfies readonly VisitD1Column[];
+
+const FINALIZED_VISIT_STATE_UPDATE_COLUMNS = [
+  "status",
+  "last_activity_at",
+  "ended_at",
+  "finalized_at",
+  "duration_ms",
+  "duration_source",
+  "exit_reason",
+] as const satisfies readonly VisitD1Column[];
+
+const VISIT_DETAIL_UPDATE_COLUMNS = [
+  "user_id",
+  "user_name",
+  "perf_ttfb_ms",
+  "perf_fcp_ms",
+  "perf_lcp_ms",
+  "perf_cls",
+  "perf_inp_ms",
+] as const satisfies readonly VisitD1Column[];
+
 const FINALIZED_VISIT_UPDATE_COLUMNS = [
   "status",
   "last_activity_at",
@@ -188,10 +213,71 @@ export const UPSERT_FINALIZED_VISIT_SQL = buildVisitUpsertSql(
   FINALIZED_VISIT_UPDATE_COLUMNS,
 );
 
+function buildVisitDetailUpdateSql(
+  updateColumns: readonly VisitD1Column[],
+  conflictGuard?: string,
+): string {
+  const assignments = updateColumns
+    .map((column) => `    ${column} = ?`)
+    .join(",\n");
+  const changes = updateColumns
+    .map((column) => `      visits.${column} IS NOT ?`)
+    .join("\n      OR ");
+  const guard = conflictGuard ? `\n    AND ${conflictGuard}` : "";
+
+  return `
+  UPDATE visits
+  SET
+${assignments},
+    updated_at = ?
+  WHERE visit_id = ?${guard}
+    AND (
+${changes}
+    )
+`;
+}
+
+/**
+ * The first statement in a visit flush group.  It keeps the full insert
+ * shape, while an existing row only receives lifecycle/index-sensitive
+ * changes.  The legacy UPSERT_* constants below intentionally remain the
+ * combined compatibility statements used by direct callers and tests.
+ */
+export const UPSERT_ACTIVE_VISIT_STATE_SQL = buildVisitUpsertSql(
+  ACTIVE_VISIT_STATE_UPDATE_COLUMNS,
+  "visits.status IN ('open', 'hidden_pending')",
+);
+
+export const UPSERT_FINALIZED_VISIT_STATE_SQL = buildVisitUpsertSql(
+  FINALIZED_VISIT_STATE_UPDATE_COLUMNS,
+);
+
+/** The second statement in a visit flush group. */
+export const UPDATE_ACTIVE_VISIT_DETAILS_SQL = buildVisitDetailUpdateSql(
+  VISIT_DETAIL_UPDATE_COLUMNS,
+  "visits.status IN ('open', 'hidden_pending')",
+);
+
+export const UPDATE_FINALIZED_VISIT_DETAILS_SQL = buildVisitDetailUpdateSql(
+  VISIT_DETAIL_UPDATE_COLUMNS,
+);
+
 export function visitUpsertSql(status: string): string {
   return status === "open" || status === "hidden_pending"
     ? UPSERT_ACTIVE_VISIT_SQL
     : UPSERT_FINALIZED_VISIT_SQL;
+}
+
+export function visitStateUpsertSql(status: string): string {
+  return status === "open" || status === "hidden_pending"
+    ? UPSERT_ACTIVE_VISIT_STATE_SQL
+    : UPSERT_FINALIZED_VISIT_STATE_SQL;
+}
+
+export function visitDetailsUpdateSql(status: string): string {
+  return status === "open" || status === "hidden_pending"
+    ? UPDATE_ACTIVE_VISIT_DETAILS_SQL
+    : UPDATE_FINALIZED_VISIT_DETAILS_SQL;
 }
 
 export const CREATE_BUFFERED_CUSTOM_EVENTS_SQL = `
@@ -277,4 +363,17 @@ export function visitBindings(
     row.createdAt,
     row.updatedAt,
   ];
+}
+
+export function visitDetailBindings(row: VisitBindingRow): SqlBinding[] {
+  const details = [
+    row.userId || null,
+    row.userName || null,
+    row.perfTtfbMs,
+    row.perfFcpMs,
+    row.perfLcpMs,
+    row.perfCls,
+    row.perfInpMs,
+  ];
+  return [...details, row.updatedAt, row.visitId, ...details];
 }
