@@ -135,6 +135,21 @@ intervals:
 dashboardHeader:
   range: 时间范围
   interval: 时间间隔
+  compareButton: 对比
+  compareTitle: 对比设置
+  compareSubtitle: 选择对比周期和筛选条件。
+  compareTimeLabel: 对比时间
+  compareCurrentPeriod: 当前周期
+  compareCurrentPeriodDescription: 使用当前选定的时间范围。
+  comparePreviousPeriod: 上一周期
+  comparePreviousPeriodDescription: 使用当前周期之前的同等长度时间范围。
+  compareFilterLabel: 对比筛选
+  compareFollowCurrentFilter: 跟随当前筛选
+  compareFollowCurrentFilterDescription: 使用当前页面的筛选条件。
+  compareCustomFilter: 自定义筛选
+  compareCustomFilterDescription: 为对比单独设置筛选条件。
+  compareApply: 应用对比
+  compareCancel: 取消
   filterButton: 筛选
   filterButtonEvent: 筛选 (事件)
   filterButtonSession: 筛选 (会话)

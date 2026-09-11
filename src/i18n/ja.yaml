@@ -135,6 +135,21 @@ intervals:
 dashboardHeader:
   range: 期間
   interval: 間隔
+  compareButton: 比較
+  compareTitle: 比較設定
+  compareSubtitle: 比較する期間とフィルター条件を選択します。
+  compareTimeLabel: 比較期間
+  compareCurrentPeriod: 現在の期間
+  compareCurrentPeriodDescription: 現在選択されている期間を使用します。
+  comparePreviousPeriod: 前の期間
+  comparePreviousPeriodDescription: 現在の期間と同じ長さの直前の期間を使用します。
+  compareFilterLabel: 比較フィルター
+  compareFollowCurrentFilter: 現在のフィルターに従う
+  compareFollowCurrentFilterDescription: このページで現在適用されているフィルターを使用します。
+  compareCustomFilter: カスタムフィルター
+  compareCustomFilterDescription: 比較用に別のフィルター条件を設定します。
+  compareApply: 比較を適用
+  compareCancel: キャンセル
   filterButton: フィルター
   filterButtonEvent: フィルター（イベント）
   filterButtonSession: フィルター（セッション）

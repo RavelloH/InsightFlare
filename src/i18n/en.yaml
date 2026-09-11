@@ -135,6 +135,21 @@ intervals:
 dashboardHeader:
   range: Time Range
   interval: Interval
+  compareButton: Compare
+  compareTitle: Comparison settings
+  compareSubtitle: Choose a comparison period and filter conditions.
+  compareTimeLabel: Comparison period
+  compareCurrentPeriod: Current period
+  compareCurrentPeriodDescription: Use the currently selected time range.
+  comparePreviousPeriod: Previous period
+  comparePreviousPeriodDescription: Use the same-length range before the current period.
+  compareFilterLabel: Comparison filter
+  compareFollowCurrentFilter: Follow current filter
+  compareFollowCurrentFilterDescription: Use the filters currently applied to this page.
+  compareCustomFilter: Custom filter
+  compareCustomFilterDescription: Set separate filter conditions for the comparison.
+  compareApply: Apply comparison
+  compareCancel: Cancel
   filterButton: Filter
   filterButtonEvent: Filter (Event)
   filterButtonSession: Filter (Session)

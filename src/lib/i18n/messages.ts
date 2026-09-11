@@ -131,6 +131,21 @@ export interface AppMessages {
   dashboardHeader: {
     range: string;
     interval: string;
+    compareButton: string;
+    compareTitle: string;
+    compareSubtitle: string;
+    compareTimeLabel: string;
+    compareCurrentPeriod: string;
+    compareCurrentPeriodDescription: string;
+    comparePreviousPeriod: string;
+    comparePreviousPeriodDescription: string;
+    compareFilterLabel: string;
+    compareFollowCurrentFilter: string;
+    compareFollowCurrentFilterDescription: string;
+    compareCustomFilter: string;
+    compareCustomFilterDescription: string;
+    compareApply: string;
+    compareCancel: string;
     filterButton: string;
     filterButtonEvent: string;
     filterButtonSession: string;
@@ -2844,6 +2859,24 @@ const enMessages = {
   dashboardHeader: {
     range: "Time Range",
     interval: "Interval",
+    compareButton: "Compare",
+    compareTitle: "Comparison settings",
+    compareSubtitle: "Choose a comparison period and filter conditions.",
+    compareTimeLabel: "Comparison period",
+    compareCurrentPeriod: "Current period",
+    compareCurrentPeriodDescription: "Use the currently selected time range.",
+    comparePreviousPeriod: "Previous period",
+    comparePreviousPeriodDescription:
+      "Use the same-length range before the current period.",
+    compareFilterLabel: "Comparison filter",
+    compareFollowCurrentFilter: "Follow current filter",
+    compareFollowCurrentFilterDescription:
+      "Use the filters currently applied to this page.",
+    compareCustomFilter: "Custom filter",
+    compareCustomFilterDescription:
+      "Set separate filter conditions for the comparison.",
+    compareApply: "Apply comparison",
+    compareCancel: "Cancel",
     filterButton: "Filter",
     filterButtonEvent: "Filter (Event)",
     filterButtonSession: "Filter (Session)",
@@ -5843,6 +5876,21 @@ const zhMessages = {
   dashboardHeader: {
     range: "时间范围",
     interval: "时间间隔",
+    compareButton: "对比",
+    compareTitle: "对比设置",
+    compareSubtitle: "选择对比周期和筛选条件。",
+    compareTimeLabel: "对比时间",
+    compareCurrentPeriod: "当前周期",
+    compareCurrentPeriodDescription: "使用当前选定的时间范围。",
+    comparePreviousPeriod: "上一周期",
+    comparePreviousPeriodDescription: "使用当前周期之前的同等长度时间范围。",
+    compareFilterLabel: "对比筛选",
+    compareFollowCurrentFilter: "跟随当前筛选",
+    compareFollowCurrentFilterDescription: "使用当前页面的筛选条件。",
+    compareCustomFilter: "自定义筛选",
+    compareCustomFilterDescription: "为对比单独设置筛选条件。",
+    compareApply: "应用对比",
+    compareCancel: "取消",
     filterButton: "筛选",
     filterButtonEvent: "筛选 (事件)",
     filterButtonSession: "筛选 (会话)",
@@ -8756,6 +8804,23 @@ const jaMessages = {
   dashboardHeader: {
     range: "期間",
     interval: "間隔",
+    compareButton: "比較",
+    compareTitle: "比較設定",
+    compareSubtitle: "比較する期間とフィルター条件を選択します。",
+    compareTimeLabel: "比較期間",
+    compareCurrentPeriod: "現在の期間",
+    compareCurrentPeriodDescription: "現在選択されている期間を使用します。",
+    comparePreviousPeriod: "前の期間",
+    comparePreviousPeriodDescription:
+      "現在の期間と同じ長さの直前の期間を使用します。",
+    compareFilterLabel: "比較フィルター",
+    compareFollowCurrentFilter: "現在のフィルターに従う",
+    compareFollowCurrentFilterDescription:
+      "このページで現在適用されているフィルターを使用します。",
+    compareCustomFilter: "カスタムフィルター",
+    compareCustomFilterDescription: "比較用に別のフィルター条件を設定します。",
+    compareApply: "比較を適用",
+    compareCancel: "キャンセル",
     filterButton: "フィルター",
     filterButtonEvent: "フィルター（イベント）",
     filterButtonSession: "フィルター（セッション）",

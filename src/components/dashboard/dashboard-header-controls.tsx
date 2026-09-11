@@ -5,6 +5,7 @@ import {
   RiArrowDownSLine,
   RiArrowLeftSLine,
   RiArrowRightSLine,
+  RiBarChartGroupedLine,
   RiCalendarLine,
   RiCheckLine,
   RiCloseLine,
@@ -12,7 +13,13 @@ import {
   RiTimeLine,
 } from "@remixicon/react";
 
+import {
+  ComparisonPanel,
+  ComparisonPanelTitle,
+  type ComparisonSettings,
+} from "@/components/dashboard/comparison-panel";
 import { useDashboardQueryControls } from "@/components/dashboard/dashboard-query-provider";
+import { FilterActiveCountBadge } from "@/components/dashboard/filter-active-count-badge";
 import { FilterPanel } from "@/components/dashboard/filter-panel";
 import {
   RealtimeStatusDot,
@@ -353,47 +360,6 @@ function RealtimeActiveBadge({
   );
 }
 
-function FilterActiveCountBadge({ count }: { count: number }) {
-  const hasCount = count > 0;
-
-  return (
-    <AutoResizer
-      initial
-      animateWidth
-      animateHeight={false}
-      className="inline-flex shrink-0 items-center"
-    >
-      <AutoTransition
-        className="inline-block"
-        duration={0.2}
-        type="fade"
-        initial={false}
-        presenceMode="wait"
-        customVariants={{
-          initial: { opacity: 0 },
-          animate: { opacity: 1 },
-          exit: { opacity: 0 },
-        }}
-      >
-        {hasCount ? (
-          <span
-            key={`active-filter-count-${count}`}
-            className="inline-flex min-w-5 items-center justify-center rounded-full border border-primary/40 bg-primary/15 px-1.5 text-[11px] leading-4 font-semibold text-primary"
-          >
-            {count}
-          </span>
-        ) : (
-          <span
-            key="active-filter-count-empty"
-            className="inline-flex w-0 overflow-hidden"
-            aria-hidden
-          />
-        )}
-      </AutoTransition>
-    </AutoResizer>
-  );
-}
-
 function FilterTrigger({
   activeFilterCount,
   className,
@@ -429,6 +395,7 @@ function FilterTrigger({
             variant="outline"
             className={className}
             disabled={disabled}
+            aria-label={filterButtonLabel}
             onClick={onClick}
             style={style}
           >
@@ -442,11 +409,11 @@ function FilterTrigger({
               initial
               animateWidth
               animateHeight={false}
-              className="inline-flex min-w-0 items-center"
+              className="-ml-2 inline-flex min-w-0 items-center sm:ml-0"
             >
               <AutoTransition
                 as="span"
-                className="inline-block whitespace-nowrap"
+                className="hidden whitespace-nowrap sm:inline-block"
                 duration={0.2}
                 initial={false}
                 presenceMode="wait"
@@ -466,6 +433,31 @@ function FilterTrigger({
         </TooltipContent>
       ) : null}
     </Tooltip>
+  );
+}
+
+function CompareTrigger({
+  className,
+  messages,
+  onClick,
+}: {
+  className: string;
+  messages: AppMessages;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className={className}
+      aria-label={messages.dashboardHeader.compareButton}
+      onClick={onClick}
+    >
+      <RiBarChartGroupedLine className="size-4 text-muted-foreground" />
+      <span className="hidden sm:inline">
+        {messages.dashboardHeader.compareButton}
+      </span>
+    </Button>
   );
 }
 
@@ -515,8 +507,10 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   const filterSuggestionScope =
     resolvedScope ?? (filterDisabled ? undefined : "event");
   const hasActiveFilters = activeFilterCount > 0;
+  const headerTriggerClassName =
+    "gap-2 transition-[color,background-color,border-color,opacity]";
   const filterTriggerClassName = cn(
-    "gap-2 transition-[color,background-color,border-color,opacity]",
+    headerTriggerClassName,
     hasActiveFilters &&
       "!border-primary/60 !bg-primary/10 !text-primary hover:!bg-primary/15 hover:!text-primary aria-expanded:!bg-primary/15 dark:!border-primary/60 dark:!bg-primary/20 dark:hover:!bg-primary/25",
   );
@@ -533,6 +527,8 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     [customRange?.from, customRange?.to, timeZone],
   );
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
+  const [mobileCompareDrawerOpen, setMobileCompareDrawerOpen] = useState(false);
+  const [desktopCompareSheetOpen, setDesktopCompareSheetOpen] = useState(false);
   const [mobileFilterDrawerOpen, setMobileFilterDrawerOpen] = useState(false);
   const [desktopFilterSheetOpen, setDesktopFilterSheetOpen] = useState(false);
   const [mobileTimeDrawerOpen, setMobileTimeDrawerOpen] = useState(false);
@@ -545,6 +541,12 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   const [pendingCustomRange, setPendingCustomRange] = useState<
     DateRange | undefined
   >(selectedDateRange);
+  const [comparisonSettings, setComparisonSettings] =
+    useState<ComparisonSettings>(() => ({
+      period: "previous",
+      filterMode: "current",
+      filterDsl: uiFilterDsl ?? "",
+    }));
   const realtimeSiteId =
     siteId || (USE_REALTIME_MOCK ? "local-mock-site" : undefined);
   const showRealtimeBadge =
@@ -675,6 +677,17 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     [livePathname, queryDocument, searchParams, setScopePreference],
   );
 
+  const handleComparisonApply = (settings: ComparisonSettings) => {
+    setComparisonSettings(settings);
+    setMobileCompareDrawerOpen(false);
+    setDesktopCompareSheetOpen(false);
+  };
+
+  const handleComparisonCancel = () => {
+    setMobileCompareDrawerOpen(false);
+    setDesktopCompareSheetOpen(false);
+  };
+
   useEffect(() => {
     setPeriodForwardStack([]);
   }, [siteId]);
@@ -780,6 +793,38 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               label={messages.realtime.activeNow}
               messages={messages}
             />
+          ) : null}
+          {showFilterSheet ? (
+            <Drawer
+              open={mobileCompareDrawerOpen}
+              onOpenChange={setMobileCompareDrawerOpen}
+            >
+              <CompareTrigger
+                className={headerTriggerClassName}
+                messages={messages}
+                onClick={() => setMobileCompareDrawerOpen(true)}
+              />
+              <DrawerContent className="h-[80dvh] max-h-[80dvh] min-h-0 flex flex-col overflow-hidden">
+                <DrawerHeader className="shrink-0">
+                  <DrawerTitle>
+                    <ComparisonPanelTitle messages={messages} />
+                  </DrawerTitle>
+                  <DrawerDescription>
+                    {messages.dashboardHeader.compareSubtitle}
+                  </DrawerDescription>
+                </DrawerHeader>
+                <ComparisonPanel
+                  currentFilterDsl={uiFilterDsl ?? ""}
+                  initialSettings={comparisonSettings}
+                  messages={messages}
+                  onApply={handleComparisonApply}
+                  onCancel={handleComparisonCancel}
+                  resolvedScope={resolvedScope ?? "event"}
+                  siteId={siteId}
+                  timeWindow={window}
+                />
+              </DrawerContent>
+            </Drawer>
           ) : null}
           {showFilterSheet ? (
             <Drawer
@@ -970,6 +1015,42 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
           {showFilterSheet ? (
             <Sheet
               modal={false}
+              open={desktopCompareSheetOpen}
+              onOpenChange={setDesktopCompareSheetOpen}
+            >
+              <CompareTrigger
+                className={headerTriggerClassName}
+                messages={messages}
+                onClick={() => setDesktopCompareSheetOpen(true)}
+              />
+              <SheetContent
+                side="right"
+                className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden sm:max-w-md"
+              >
+                <SheetHeader className="shrink-0">
+                  <SheetTitle>
+                    <ComparisonPanelTitle messages={messages} />
+                  </SheetTitle>
+                  <SheetDescription>
+                    {messages.dashboardHeader.compareSubtitle}
+                  </SheetDescription>
+                </SheetHeader>
+                <ComparisonPanel
+                  currentFilterDsl={uiFilterDsl ?? ""}
+                  initialSettings={comparisonSettings}
+                  messages={messages}
+                  onApply={handleComparisonApply}
+                  onCancel={handleComparisonCancel}
+                  resolvedScope={resolvedScope ?? "event"}
+                  siteId={siteId}
+                  timeWindow={window}
+                />
+              </SheetContent>
+            </Sheet>
+          ) : null}
+          {showFilterSheet ? (
+            <Sheet
+              modal={false}
               open={desktopFilterSheetOpen}
               onOpenChange={setDesktopFilterSheetOpen}
             >
@@ -1054,7 +1135,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
-                className="min-w-[156px] justify-between bg-background"
+                className="min-w-[156px] justify-between"
               >
                 <span className="inline-flex items-center gap-2">
                   <RiCalendarLine className="size-4 text-muted-foreground" />
@@ -1091,7 +1172,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
-                className="min-w-[96px] justify-between bg-background"
+                className="min-w-[96px] justify-between"
               >
                 <span className="inline-flex items-center gap-2">
                   <RiTimeLine className="size-4 text-muted-foreground" />
