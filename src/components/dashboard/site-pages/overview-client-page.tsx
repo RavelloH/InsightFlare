@@ -68,6 +68,10 @@ import {
   fetchTrend,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
+import {
+  type DashboardComparisonQuery,
+  resolveDashboardComparisonQuery,
+} from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
   type DashboardFilterControlKey,
@@ -178,6 +182,7 @@ function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
 }
 
 const METRIC_AREA_COLOR = "var(--color-chart-1)";
+const COMPARISON_AREA_COLOR = "var(--color-compare-chart-1)";
 const MAX_TREND_PLACEHOLDER_POINTS = 120;
 
 function trendStepMs(interval: TimeWindow["interval"]): number {
@@ -3293,12 +3298,133 @@ interface OverviewDataSectionProps {
   filters: FilterDocument;
 }
 
+type OverviewMetricKey =
+  | "views"
+  | "visitors"
+  | "sessions"
+  | "bounceRate"
+  | "pagesPerSession"
+  | "avgDuration";
+
+type OverviewMetricSeries = Record<
+  OverviewMetricKey,
+  ReadonlyArray<MetricAreaPoint>
+>;
+
+function buildOverviewMetricSeries(
+  detailSeries: TrendData["data"],
+): OverviewMetricSeries {
+  const views: MetricAreaPoint[] = [];
+  const visitors: MetricAreaPoint[] = [];
+  const sessions: MetricAreaPoint[] = [];
+  const bounceRate: MetricAreaPoint[] = [];
+  const pagesPerSession: MetricAreaPoint[] = [];
+  const avgDuration: MetricAreaPoint[] = [];
+
+  for (const point of detailSeries) {
+    const { timestampMs } = point;
+    views.push({ timestampMs, value: point.views });
+    visitors.push({ timestampMs, value: point.visitors });
+    sessions.push({ timestampMs, value: point.sessions });
+
+    if (point.sessions > 0) {
+      bounceRate.push({
+        timestampMs,
+        value: point.bounces / point.sessions,
+      });
+      pagesPerSession.push({
+        timestampMs,
+        value: point.views / point.sessions,
+      });
+    }
+
+    if (point.views > 0) {
+      avgDuration.push({ timestampMs, value: point.avgDurationMs });
+    }
+  }
+
+  return {
+    views,
+    visitors,
+    sessions,
+    bounceRate,
+    pagesPerSession,
+    avgDuration,
+  };
+}
+
+function useOverviewComparisonQuery(
+  timeWindow: TimeWindow,
+  filters: FilterDocument,
+): DashboardComparisonQuery | null {
+  const searchParams = useLiveSearchParams();
+  const searchParamsKey = searchParams.toString();
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+
+  return useMemo(
+    () =>
+      resolveDashboardComparisonQuery(
+        new URLSearchParams(searchParamsKey),
+        timeWindow,
+        filters,
+      ),
+    [
+      filters,
+      filtersKey,
+      searchParamsKey,
+      timeWindow.from,
+      timeWindow.interval,
+      timeWindow.timeZone,
+      timeWindow.to,
+    ],
+  );
+}
+
 function useOverviewSummaryQuery({
   siteId,
   window: timeWindow,
   filters,
-}: Pick<OverviewDataSectionProps, "siteId" | "window" | "filters">) {
+  comparisonQuery,
+}: Pick<OverviewDataSectionProps, "siteId" | "window" | "filters"> & {
+  comparisonQuery: DashboardComparisonQuery | null;
+}) {
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
+    [comparisonQuery],
+  );
+  const comparisonKey = comparisonQuery
+    ? [
+        comparisonQuery.mode,
+        comparisonQuery.window.from,
+        comparisonQuery.window.to,
+        comparisonQuery.window.interval,
+        comparisonQuery.window.timeZone,
+        comparisonFiltersKey,
+      ]
+    : ["none"];
+
+  const resolveTrendData = async (
+    overview: OverviewData,
+    trendWindow: TimeWindow,
+    trendFilters: FilterDocument,
+    signal: AbortSignal,
+  ): Promise<TrendData> => {
+    if (overview.detail) {
+      return {
+        ok: overview.ok,
+        interval: overview.detail.interval,
+        data: overview.detail.data,
+      };
+    }
+
+    return fetchTrend(siteId, trendWindow, trendFilters, { signal }).catch(
+      (error) =>
+        fallbackUnlessAborted(error, () =>
+          emptyTrendData(trendWindow.interval),
+        ),
+    );
+  };
 
   return useQuery({
     queryKey: [
@@ -3310,8 +3436,53 @@ function useOverviewSummaryQuery({
       timeWindow.interval,
       timeWindow.timeZone,
       filtersKey,
+      "comparison",
+      ...comparisonKey,
     ],
     queryFn: async ({ signal }) => {
+      if (comparisonQuery) {
+        const [current, comparison] = await Promise.all([
+          fetchOverview(siteId, timeWindow, filters, {
+            includeChange: false,
+            includeDetail: true,
+            signal,
+          }).catch((error) => fallbackUnlessAborted(error, emptyOverviewData)),
+          fetchOverview(
+            siteId,
+            comparisonQuery.window,
+            comparisonQuery.filters,
+            {
+              includeChange: false,
+              includeDetail: true,
+              signal,
+            },
+          ).catch((error) => fallbackUnlessAborted(error, emptyOverviewData)),
+        ]);
+        const [trend, comparisonTrend] = await Promise.all([
+          resolveTrendData(current, timeWindow, filters, signal),
+          resolveTrendData(
+            comparison,
+            comparisonQuery.window,
+            comparisonQuery.filters,
+            signal,
+          ),
+        ]);
+
+        return {
+          overview: current,
+          previousOverview: emptyOverviewData(),
+          trendData: trend,
+          comparisonOverview: comparison,
+          comparisonTrendData: comparisonTrend,
+          dataWindow: {
+            from: timeWindow.from,
+            to: timeWindow.to,
+            interval: timeWindow.interval,
+            timeZone: timeWindow.timeZone,
+          },
+        };
+      }
+
       const current = await fetchOverview(siteId, timeWindow, filters, {
         includeChange: true,
         includeDetail: true,
@@ -3373,15 +3544,24 @@ export function OverviewMetricsSection({
   window,
   filters,
 }: OverviewDataSectionProps) {
+  const comparisonQuery = useOverviewComparisonQuery(window, filters);
   const {
     data: metricsData,
     isFetching,
     isPending,
-  } = useOverviewSummaryQuery({ siteId, window, filters });
+  } = useOverviewSummaryQuery({
+    siteId,
+    window,
+    filters,
+    comparisonQuery,
+  });
   const loading = isPending || isFetching;
   const overview = metricsData?.overview ?? emptyOverviewData();
   const previousOverview = metricsData?.previousOverview ?? emptyOverviewData();
   const detailSeries = metricsData?.trendData.data ?? EMPTY_TREND_POINTS;
+  const comparisonOverview = metricsData?.comparisonOverview;
+  const comparisonDetailSeries =
+    metricsData?.comparisonTrendData?.data ?? EMPTY_TREND_POINTS;
 
   const pagesPerSessionFormatter = useMemo(
     () =>
@@ -3398,108 +3578,111 @@ export function OverviewMetricsSection({
   const previousPagesPerSession =
     previous.sessions > 0 ? previous.views / previous.sessions : 0;
 
-  const metricSeries = useMemo(() => {
-    const views: MetricAreaPoint[] = [];
-    const visitors: MetricAreaPoint[] = [];
-    const sessions: MetricAreaPoint[] = [];
-    const bounceRate: MetricAreaPoint[] = [];
-    const pagesPerSession: MetricAreaPoint[] = [];
-    const avgDuration: MetricAreaPoint[] = [];
-
-    for (const point of detailSeries) {
-      const { timestampMs } = point;
-      views.push({ timestampMs, value: point.views });
-      visitors.push({ timestampMs, value: point.visitors });
-      sessions.push({ timestampMs, value: point.sessions });
-
-      if (point.sessions > 0) {
-        bounceRate.push({
-          timestampMs,
-          value: point.bounces / point.sessions,
-        });
-        pagesPerSession.push({
-          timestampMs,
-          value: point.views / point.sessions,
-        });
-      }
-
-      if (point.views > 0) {
-        avgDuration.push({ timestampMs, value: point.avgDurationMs });
-      }
-    }
-
-    return {
-      views,
-      visitors,
-      sessions,
-      bounceRate,
-      pagesPerSession,
-      avgDuration,
-    };
-  }, [detailSeries]);
+  const metricSeries = useMemo(
+    () => buildOverviewMetricSeries(detailSeries),
+    [detailSeries],
+  );
+  const comparisonMetricSeries = useMemo(
+    () => buildOverviewMetricSeries(comparisonDetailSeries),
+    [comparisonDetailSeries],
+  );
+  const comparison = comparisonOverview?.data ?? emptyOverviewData().data;
+  const comparisonPagesPerSession =
+    comparison.sessions > 0 ? comparison.views / comparison.sessions : 0;
   const metricChartAnimationKey = useMemo(() => {
     const firstTimestamp = detailSeries[0]?.timestampMs ?? 0;
     const lastTimestamp =
       detailSeries[detailSeries.length - 1]?.timestampMs ?? 0;
-    return `${detailSeries.length}:${firstTimestamp}:${lastTimestamp}`;
-  }, [detailSeries]);
+    const comparisonFirstTimestamp =
+      comparisonDetailSeries[0]?.timestampMs ?? 0;
+    const comparisonLastTimestamp =
+      comparisonDetailSeries[comparisonDetailSeries.length - 1]?.timestampMs ??
+      0;
+    return `${detailSeries.length}:${firstTimestamp}:${lastTimestamp}:${comparisonQuery?.mode ?? "none"}:${comparisonDetailSeries.length}:${comparisonFirstTimestamp}:${comparisonLastTimestamp}`;
+  }, [comparisonDetailSeries, comparisonQuery?.mode, detailSeries]);
+  const comparisonLabel =
+    comparisonQuery?.mode === "previous" && !comparisonQuery.filters.root
+      ? messages.dashboardHeader.previousPeriod
+      : messages.dashboardHeader.compareButton;
+  const hasComparisonData = Boolean(
+    comparisonQuery &&
+    metricsData?.comparisonOverview &&
+    metricsData.comparisonTrendData,
+  );
+  const reference = comparisonQuery ? comparison : previous;
+  const referencePagesPerSession = comparisonQuery
+    ? comparisonPagesPerSession
+    : previousPagesPerSession;
 
   const metrics = useMemo(
     () => [
       {
+        key: "views" as const,
         label: messages.common.views,
         value: numberFormat(locale, overview.data.views),
-        delta: toDeltaPercent(overview.data.views, previous.views),
+        delta: toDeltaPercent(overview.data.views, reference.views),
         trend: metricSeries.views,
+        comparisonTrend: comparisonMetricSeries.views,
         formatTrendValue: (value: number) =>
           numberFormat(locale, Math.round(value)),
       },
       {
+        key: "visitors" as const,
         label: messages.common.visitors,
         value: numberFormat(locale, overview.data.visitors),
-        delta: toDeltaPercent(overview.data.visitors, previous.visitors),
+        delta: toDeltaPercent(overview.data.visitors, reference.visitors),
         trend: metricSeries.visitors,
+        comparisonTrend: comparisonMetricSeries.visitors,
         formatTrendValue: (value: number) =>
           numberFormat(locale, Math.round(value)),
       },
       {
+        key: "sessions" as const,
         label: messages.common.sessions,
         value: numberFormat(locale, overview.data.sessions),
-        delta: toDeltaPercent(overview.data.sessions, previous.sessions),
+        delta: toDeltaPercent(overview.data.sessions, reference.sessions),
         trend: metricSeries.sessions,
+        comparisonTrend: comparisonMetricSeries.sessions,
         formatTrendValue: (value: number) =>
           numberFormat(locale, Math.round(value)),
       },
       {
+        key: "bounceRate" as const,
         label: messages.common.bounceRate,
         value: percentFormat(locale, overview.data.bounceRate),
-        delta: toDeltaPercent(overview.data.bounceRate, previous.bounceRate),
+        delta: toDeltaPercent(overview.data.bounceRate, reference.bounceRate),
         lowerIsBetter: true,
         trend: metricSeries.bounceRate,
+        comparisonTrend: comparisonMetricSeries.bounceRate,
         formatTrendValue: (value: number) => percentFormat(locale, value),
       },
       {
+        key: "pagesPerSession" as const,
         label: messages.teamManagement.sites.pagesPerSession,
         value: pagesPerSessionFormatter.format(currentPagesPerSession),
-        delta: toDeltaPercent(currentPagesPerSession, previousPagesPerSession),
+        delta: toDeltaPercent(currentPagesPerSession, referencePagesPerSession),
         trend: metricSeries.pagesPerSession,
+        comparisonTrend: comparisonMetricSeries.pagesPerSession,
         formatTrendValue: (value: number) =>
           pagesPerSessionFormatter.format(value),
       },
       {
+        key: "avgDuration" as const,
         label: messages.common.avgDuration,
         value: durationFormat(locale, overview.data.avgDurationMs),
         delta: toDeltaPercent(
           overview.data.avgDurationMs,
-          previous.avgDurationMs,
+          reference.avgDurationMs,
         ),
         trend: metricSeries.avgDuration,
+        comparisonTrend: comparisonMetricSeries.avgDuration,
         formatTrendValue: (value: number) =>
           durationFormat(locale, Math.max(0, Math.round(value))),
       },
     ],
     [
       currentPagesPerSession,
+      comparisonMetricSeries,
       locale,
       messages.common.avgDuration,
       messages.common.bounceRate,
@@ -3514,12 +3697,12 @@ export function OverviewMetricsSection({
       overview.data.visitors,
       overview.data.views,
       pagesPerSessionFormatter,
-      previous.avgDurationMs,
-      previous.bounceRate,
-      previous.sessions,
-      previous.visitors,
-      previous.views,
-      previousPagesPerSession,
+      reference.avgDurationMs,
+      reference.bounceRate,
+      reference.sessions,
+      reference.visitors,
+      reference.views,
+      referencePagesPerSession,
     ],
   );
 
@@ -3531,6 +3714,9 @@ export function OverviewMetricsSection({
             const hasDelta =
               typeof item.delta === "number" && Number.isFinite(item.delta);
             const effectiveDelta = hasDelta ? (item.delta ?? 0) : null;
+            const comparisonPoints = hasComparisonData
+              ? item.comparisonTrend
+              : undefined;
 
             return (
               <div key={item.label} className={metricCellBorderClasses(index)}>
@@ -3545,6 +3731,9 @@ export function OverviewMetricsSection({
                       label={item.label}
                       formatValue={item.formatTrendValue}
                       animationKey={metricChartAnimationKey}
+                      comparisonPoints={comparisonPoints}
+                      comparisonColor={COMPARISON_AREA_COLOR}
+                      comparisonLabel={comparisonLabel}
                     />
                   </div>
                   <div className="pointer-events-none relative z-10 flex min-h-[74px] min-w-0 flex-col justify-between px-3 py-2.5">
@@ -3594,6 +3783,7 @@ export function OverviewTrendSection({
   window,
   filters,
 }: OverviewDataSectionProps) {
+  const comparisonQuery = useOverviewComparisonQuery(window, filters);
   const currentDataWindow = useMemo(
     () => ({
       from: window.from,
@@ -3607,7 +3797,12 @@ export function OverviewTrendSection({
     data: trendQueryData,
     isFetching,
     isPending,
-  } = useOverviewSummaryQuery({ siteId, window, filters });
+  } = useOverviewSummaryQuery({
+    siteId,
+    window,
+    filters,
+    comparisonQuery,
+  });
   const loading = isPending || isFetching;
   const trendData =
     trendQueryData?.trendData ?? emptyTrendData(window.interval);

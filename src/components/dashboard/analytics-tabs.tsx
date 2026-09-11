@@ -140,6 +140,8 @@ function globalNavigationSearchParams(
   for (const [key, value] of searchParams) {
     if (
       key.startsWith("filter[") ||
+      key === "compare" ||
+      key.startsWith("compareFilter[") ||
       key === "range" ||
       key === "interval" ||
       key === "timeZone" ||
