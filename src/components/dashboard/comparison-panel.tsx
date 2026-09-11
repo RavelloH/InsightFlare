@@ -7,8 +7,10 @@ import {
   RiCloseLine,
   RiFilter2Line,
 } from "@remixicon/react";
+import { useQuery } from "@tanstack/react-query";
 
 import { FilterEditor } from "@/components/dashboard/filter-editor";
+import { SavedFilterSelect } from "@/components/dashboard/filter-panel";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
@@ -29,12 +31,13 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/ui/responsive-dialog";
+import { fetchSavedFilters } from "@/lib/dashboard/client-data";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterScope } from "@/lib/filter-contract";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
-export type ComparisonPeriod = "current" | "previous";
+export type ComparisonPeriod = "same" | "previous";
 export type ComparisonFilterMode = "current" | "custom";
 
 export interface ComparisonSettings {
@@ -73,6 +76,32 @@ function ComparisonFilterDialog({
   readonly siteId?: string;
   readonly timeWindow: TimeWindow;
 }) {
+  const [draftFilterDsl, setDraftFilterDsl] = React.useState(filterDsl);
+  const savedFiltersQuery = useQuery({
+    queryKey: ["saved-filters", siteId],
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      fetchSavedFilters(siteId!, { signal }),
+    enabled: open && Boolean(siteId),
+    staleTime: 60_000,
+  });
+  const savedFilters = savedFiltersQuery.data?.items ?? [];
+  const matchedSavedFilter = React.useMemo(
+    () => savedFilters.find((filter) => filter.filterDsl === draftFilterDsl),
+    [draftFilterDsl, savedFilters],
+  );
+  const savedFilterTriggerLabel = savedFiltersQuery.isFetching
+    ? messages.filterBuilder.savedFiltersLoading
+    : (matchedSavedFilter?.name ?? messages.filterBuilder.noSavedFilter);
+  const savedFilterTriggerKey = savedFiltersQuery.isFetching
+    ? "loading"
+    : matchedSavedFilter
+      ? `saved:${matchedSavedFilter.id}`
+      : "none";
+
+  React.useEffect(() => {
+    if (open) setDraftFilterDsl(filterDsl);
+  }, [filterDsl, open]);
+
   return (
     <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
       <ResponsiveDialogContent
@@ -94,7 +123,7 @@ function ComparisonFilterDialog({
           <FilterEditor
             className="min-h-0 flex-1"
             audience="private-dashboard"
-            initialFilterDsl={filterDsl}
+            initialFilterDsl={draftFilterDsl}
             messages={messages}
             observationOnly
             onApply={onApply}
@@ -104,6 +133,26 @@ function ComparisonFilterDialog({
             resolvedScope={resolvedScope}
             siteId={siteId}
             window={timeWindow}
+            headerContent={
+              <div className="mb-4 border-b border-border pb-4">
+                <SavedFilterSelect
+                  audience="private-dashboard"
+                  matchedSavedFilter={matchedSavedFilter}
+                  messages={messages}
+                  savedFilterTriggerKey={savedFilterTriggerKey}
+                  savedFilterTriggerLabel={savedFilterTriggerLabel}
+                  savedFilters={savedFilters}
+                  savedFiltersLoading={savedFiltersQuery.isFetching}
+                  onApplySavedFilter={(filter) =>
+                    setDraftFilterDsl(filter.filterDsl)
+                  }
+                  onApplySystemPreset={(preset) =>
+                    setDraftFilterDsl(preset.filterDsl)
+                  }
+                  onClearSavedFilter={() => setDraftFilterDsl("")}
+                />
+              </div>
+            }
           />
         </ResponsiveDialogBody>
       </ResponsiveDialogContent>
@@ -164,6 +213,25 @@ export function ComparisonPanel({
   const [customFilterDsl, setCustomFilterDsl] = React.useState(
     initialSettings.filterDsl || currentFilterDsl,
   );
+  const preserveCustomFilterDraftRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (customFilterDialogOpen) return;
+    if (preserveCustomFilterDraftRef.current) {
+      preserveCustomFilterDraftRef.current = false;
+      return;
+    }
+    setPeriod(initialSettings.period);
+    setFilterMode(initialSettings.filterMode);
+    setCustomFilterDsl(initialSettings.filterDsl || currentFilterDsl);
+  }, [
+    currentFilterDsl,
+    customFilterDialogOpen,
+    initialSettings.filterDsl,
+    initialSettings.filterMode,
+    initialSettings.period,
+  ]);
+
   const options = (
     <div className="flex flex-col gap-6 pb-4">
       <section className="flex flex-col gap-2">
@@ -176,12 +244,12 @@ export function ComparisonPanel({
         >
           <ComparisonOption
             id="comparison-period-current"
-            value="current"
+            value="same"
             label={messages.dashboardHeader.compareCurrentPeriod}
             description={
               messages.dashboardHeader.compareCurrentPeriodDescription
             }
-            selected={period === "current"}
+            selected={period === "same"}
           />
           <ComparisonOption
             id="comparison-period-previous"
@@ -282,6 +350,7 @@ export function ComparisonPanel({
         filterDsl={customFilterDsl}
         messages={messages}
         onApply={(filterDsl) => {
+          preserveCustomFilterDraftRef.current = true;
           setCustomFilterDsl(filterDsl);
           setCustomFilterDialogOpen(false);
         }}

@@ -4,7 +4,9 @@ import {
   dashboardFilterDocumentFromPresentation,
   dashboardFilterPresentation,
   dashboardFilterValue,
+  parseDashboardComparisonSearchParams,
   serializeDashboardSearchParams,
+  withDashboardComparisonSearchParams,
   withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
 import type { RangePreset } from "@/lib/dashboard/query-state";
@@ -400,6 +402,64 @@ describe("dashboard query-state helpers", () => {
 
       expect(next.get("range")).toBe("7d");
       expect(next.get("scope")).toBeNull();
+    });
+  });
+
+  describe("dashboard comparison search params", () => {
+    it("keeps a previous-period comparison without a comparison filter", () => {
+      const next = withDashboardComparisonSearchParams(
+        new URLSearchParams("range=7d&filter[client.browser]=Chrome"),
+        "previous",
+      );
+
+      expect(next.get("range")).toBe("7d");
+      expect(next.get("filter[client.browser]")).toBe("Chrome");
+      expect(next.get("compare")).toBe("previous");
+      expect(
+        [...next.keys()].some((key) => key.startsWith("compareFilter[")),
+      ).toBe(false);
+      expect(parseDashboardComparisonSearchParams(next).mode).toBe("previous");
+    });
+
+    it("requires a comparison filter for a same-period comparison", () => {
+      const next = withDashboardComparisonSearchParams(
+        new URLSearchParams("range=7d"),
+        "same",
+      );
+
+      expect(next.get("compare")).toBeNull();
+      expect(parseDashboardComparisonSearchParams(next).mode).toBeUndefined();
+    });
+
+    it("serializes comparison filters with the shared filter codec", () => {
+      const filterDocument = dashboardFilterDocumentFromPresentation({
+        path: "/pricing",
+        browser: "Chrome",
+      });
+      const next = withDashboardComparisonSearchParams(
+        new URLSearchParams("range=7d&filter[client.browser]=Safari"),
+        "same",
+        filterDocument,
+      );
+
+      expect(next.get("compare")).toBe("same");
+      expect(next.get("compareFilter[page.path]")).toBe("/pricing");
+      expect(next.get("compareFilter[client.browser]")).toBe("Chrome");
+      expect(next.get("filter[client.browser]")).toBe("Safari");
+      expect(
+        dashboardFilterPresentation(
+          parseDashboardComparisonSearchParams(next).filterDocument,
+        ),
+      ).toMatchObject({ path: "/pricing", browser: "Chrome" });
+    });
+
+    it("ignores same-period comparisons without valid comparison filters", () => {
+      const state = parseDashboardComparisonSearchParams(
+        new URLSearchParams("compare=same"),
+      );
+
+      expect(state.mode).toBeUndefined();
+      expect(state.filterDocument.root).toBeNull();
     });
   });
 

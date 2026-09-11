@@ -30,6 +30,12 @@
   --chart-3: oklch(0.7 0.15 162);
   --chart-4: oklch(0.6 0.13 163);
   --chart-5: oklch(0.51 0.1 166);
+  --compare-chart-1: oklch(0.85 0.15 82);
+  --compare-chart-2: oklch(0.77 0.16 78);
+  --compare-chart-3: oklch(0.7 0.16 75);
+  --compare-chart-4: oklch(0.6 0.14 70);
+  --compare-chart-5: oklch(0.51 0.11 66);
+  --compare-primary: oklch(0.6 0.14 70);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -67,6 +73,12 @@
   --chart-3: oklch(0.7 0.15 162);
   --chart-4: oklch(0.6 0.13 163);
   --chart-5: oklch(0.51 0.1 166);
+  --compare-chart-1: oklch(0.85 0.15 82);
+  --compare-chart-2: oklch(0.77 0.16 78);
+  --compare-chart-3: oklch(0.7 0.16 75);
+  --compare-chart-4: oklch(0.6 0.14 70);
+  --compare-chart-5: oklch(0.51 0.11 66);
+  --compare-primary: oklch(0.7 0.16 75);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.77 0.15 163);
@@ -98,6 +110,12 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-compare-chart-5: var(--compare-chart-5);
+  --color-compare-chart-4: var(--compare-chart-4);
+  --color-compare-chart-3: var(--compare-chart-3);
+  --color-compare-chart-2: var(--compare-chart-2);
+  --color-compare-chart-1: var(--compare-chart-1);
+  --color-compare-primary: var(--compare-primary);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);

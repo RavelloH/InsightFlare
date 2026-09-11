@@ -184,6 +184,147 @@ export function systemPresetMatchesScope(
   return preset.scope === "preserve" || preset.scope === currentScope;
 }
 
+export function SavedFilterSelect({
+  audience,
+  matchedSavedFilter,
+  matchedSystemPreset,
+  messages,
+  savedFilterTriggerKey,
+  savedFilterTriggerLabel,
+  savedFilters,
+  savedFiltersLoading,
+  onApplySavedFilter,
+  onApplySystemPreset,
+  onClearSavedFilter,
+}: {
+  readonly audience: FilterPanelAudience;
+  readonly matchedSavedFilter?: SavedFilter;
+  readonly matchedSystemPreset?: SystemFilterPreset;
+  readonly messages: AppMessages;
+  readonly savedFilterTriggerKey: string;
+  readonly savedFilterTriggerLabel: string;
+  readonly savedFilters: readonly SavedFilter[];
+  readonly savedFiltersLoading: boolean;
+  readonly onApplySavedFilter: (filter: SavedFilter) => void;
+  readonly onApplySystemPreset: (preset: SystemFilterPreset) => void;
+  readonly onClearSavedFilter: () => void;
+}) {
+  const visibleSystemPresets = SYSTEM_FILTER_PRESETS.filter((preset) =>
+    systemFilterPresetAvailableForAudience(preset, audience),
+  );
+  const systemPresetGroups = visibleSystemPresets.reduce<
+    Array<{ category: string; presets: SystemFilterPreset[] }>
+  >((groups, preset) => {
+    const existing = groups.find((group) => group.category === preset.category);
+    if (existing) {
+      existing.presets.push(preset);
+    } else {
+      groups.push({ category: preset.category, presets: [preset] });
+    }
+    return groups;
+  }, []);
+
+  return (
+    <Select
+      value={
+        matchedSavedFilter?.id ??
+        (matchedSystemPreset
+          ? systemFilterPresetOptionValue(matchedSystemPreset.id)
+          : NO_SAVED_FILTER_VALUE)
+      }
+      disabled={savedFiltersLoading}
+      onValueChange={(value) => {
+        if (value === NO_SAVED_FILTER_VALUE) {
+          onClearSavedFilter();
+          return;
+        }
+        const preset = systemFilterPresetFromOptionValue(value);
+        if (preset) {
+          onApplySystemPreset(preset);
+          return;
+        }
+        const filter = savedFilters.find((item) => item.id === value);
+        if (filter) onApplySavedFilter(filter);
+      }}
+    >
+      <SelectTrigger className="w-full">
+        <SelectValue>
+          <AutoTransition
+            transitionKey={savedFilterTriggerKey}
+            type="fade"
+            duration={0.18}
+            initial={false}
+          >
+            <span>{savedFilterTriggerLabel}</span>
+          </AutoTransition>
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectGroup>
+          <SelectItem value={NO_SAVED_FILTER_VALUE}>
+            {messages.filterBuilder.noSavedFilter}
+          </SelectItem>
+        </SelectGroup>
+        {audience === "private-dashboard" &&
+        savedFilters.some((filter) => filter.isOwner) ? (
+          <>
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectLabel>
+                {messages.filterBuilder.savedFiltersPersonal}
+              </SelectLabel>
+              {savedFilters
+                .filter((filter) => filter.isOwner)
+                .map((filter) => (
+                  <SelectItem key={filter.id} value={filter.id}>
+                    {filter.name}
+                  </SelectItem>
+                ))}
+            </SelectGroup>
+          </>
+        ) : null}
+        {audience === "private-dashboard" &&
+        savedFilters.some((filter) => !filter.isOwner) ? (
+          <>
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectLabel>
+                {messages.filterBuilder.savedFiltersTeam}
+              </SelectLabel>
+              {savedFilters
+                .filter((filter) => !filter.isOwner)
+                .map((filter) => (
+                  <SelectItem key={filter.id} value={filter.id}>
+                    {filter.name}
+                  </SelectItem>
+                ))}
+            </SelectGroup>
+          </>
+        ) : null}
+        <SelectSeparator />
+        {systemPresetGroups.map((group, index) => (
+          <Fragment key={group.category}>
+            {index > 0 ? <SelectSeparator /> : null}
+            <SelectGroup>
+              <SelectLabel>
+                {systemPresetGroupLabel(messages, group.category)}
+              </SelectLabel>
+              {group.presets.map((preset) => (
+                <SelectItem
+                  key={preset.id}
+                  value={systemFilterPresetOptionValue(preset.id)}
+                >
+                  {systemPresetItem(messages, preset).name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </Fragment>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 interface FilterPanelProps {
   readonly audience: FilterPanelAudience;
   readonly document: FilterDocument;
@@ -327,121 +468,22 @@ function FilterPanelHeader({
   onClearSavedFilter: () => void;
   onScopeChange: (preference: FilterScopePreference) => void;
 }) {
-  const visibleSystemPresets = SYSTEM_FILTER_PRESETS.filter((preset) =>
-    systemFilterPresetAvailableForAudience(preset, audience),
-  );
-  const systemPresetGroups = visibleSystemPresets.reduce<
-    Array<{ category: string; presets: SystemFilterPreset[] }>
-  >((groups, preset) => {
-    const existing = groups.find((group) => group.category === preset.category);
-    if (existing) {
-      existing.presets.push(preset);
-    } else {
-      groups.push({ category: preset.category, presets: [preset] });
-    }
-    return groups;
-  }, []);
-
   return (
     <>
       <div className="mb-4 border-b border-border pb-4">
-        <Select
-          value={
-            matchedSavedFilter?.id ??
-            (matchedSystemPreset
-              ? systemFilterPresetOptionValue(matchedSystemPreset.id)
-              : NO_SAVED_FILTER_VALUE)
-          }
-          disabled={savedFiltersLoading}
-          onValueChange={(value) => {
-            if (value === NO_SAVED_FILTER_VALUE) {
-              onClearSavedFilter();
-              return;
-            }
-            const preset = systemFilterPresetFromOptionValue(value);
-            if (preset) {
-              onApplySystemPreset(preset);
-              return;
-            }
-            const filter = savedFilters.find((item) => item.id === value);
-            if (filter) onApplySavedFilter(filter);
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue>
-              <AutoTransition
-                transitionKey={savedFilterTriggerKey}
-                type="fade"
-                duration={0.18}
-                initial={false}
-              >
-                <span>{savedFilterTriggerLabel}</span>
-              </AutoTransition>
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value={NO_SAVED_FILTER_VALUE}>
-                {messages.filterBuilder.noSavedFilter}
-              </SelectItem>
-            </SelectGroup>
-            {audience === "private-dashboard" &&
-            savedFilters.some((filter) => filter.isOwner) ? (
-              <>
-                <SelectSeparator />
-                <SelectGroup>
-                  <SelectLabel>
-                    {messages.filterBuilder.savedFiltersPersonal}
-                  </SelectLabel>
-                  {savedFilters
-                    .filter((filter) => filter.isOwner)
-                    .map((filter) => (
-                      <SelectItem key={filter.id} value={filter.id}>
-                        {filter.name}
-                      </SelectItem>
-                    ))}
-                </SelectGroup>
-              </>
-            ) : null}
-            {audience === "private-dashboard" &&
-            savedFilters.some((filter) => !filter.isOwner) ? (
-              <>
-                <SelectSeparator />
-                <SelectGroup>
-                  <SelectLabel>
-                    {messages.filterBuilder.savedFiltersTeam}
-                  </SelectLabel>
-                  {savedFilters
-                    .filter((filter) => !filter.isOwner)
-                    .map((filter) => (
-                      <SelectItem key={filter.id} value={filter.id}>
-                        {filter.name}
-                      </SelectItem>
-                    ))}
-                </SelectGroup>
-              </>
-            ) : null}
-            <SelectSeparator />
-            {systemPresetGroups.map((group, index) => (
-              <Fragment key={group.category}>
-                {index > 0 ? <SelectSeparator /> : null}
-                <SelectGroup>
-                  <SelectLabel>
-                    {systemPresetGroupLabel(messages, group.category)}
-                  </SelectLabel>
-                  {group.presets.map((preset) => (
-                    <SelectItem
-                      key={preset.id}
-                      value={systemFilterPresetOptionValue(preset.id)}
-                    >
-                      {systemPresetItem(messages, preset).name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </Fragment>
-            ))}
-          </SelectContent>
-        </Select>
+        <SavedFilterSelect
+          audience={audience}
+          matchedSavedFilter={matchedSavedFilter}
+          matchedSystemPreset={matchedSystemPreset}
+          messages={messages}
+          savedFilterTriggerKey={savedFilterTriggerKey}
+          savedFilterTriggerLabel={savedFilterTriggerLabel}
+          savedFilters={savedFilters}
+          savedFiltersLoading={savedFiltersLoading}
+          onApplySavedFilter={onApplySavedFilter}
+          onApplySystemPreset={onApplySystemPreset}
+          onClearSavedFilter={onClearSavedFilter}
+        />
 
         <AutoResizer initial={false} duration={0.18}>
           <AutoTransition

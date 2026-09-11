@@ -79,7 +79,10 @@ import {
   useLiveSearchParams,
 } from "@/lib/client-history";
 import {
+  type DashboardComparisonSearchState,
+  parseDashboardComparisonSearchParams,
   serializeDashboardSearchParams,
+  withDashboardComparisonSearchParams,
   withDashboardFilterSearchParams,
 } from "@/lib/dashboard/filter-state";
 import { intlLocale } from "@/lib/dashboard/format";
@@ -100,6 +103,8 @@ import {
   type FilterScope,
   type FilterScopePreference,
   filterScopePreferenceFromDocument,
+  formatFilterDsl,
+  parseFilterDsl,
   serializeFilterParams,
 } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -437,10 +442,12 @@ function FilterTrigger({
 }
 
 function CompareTrigger({
+  active,
   className,
   messages,
   onClick,
 }: {
+  active: boolean;
   className: string;
   messages: AppMessages;
   onClick: () => void;
@@ -453,12 +460,27 @@ function CompareTrigger({
       aria-label={messages.dashboardHeader.compareButton}
       onClick={onClick}
     >
-      <RiBarChartGroupedLine className="size-4 text-muted-foreground" />
+      <RiBarChartGroupedLine
+        className={cn("size-4", !active && "text-muted-foreground")}
+      />
       <span className="hidden sm:inline">
         {messages.dashboardHeader.compareButton}
       </span>
     </Button>
   );
+}
+
+function comparisonSettingsFromSearchState(
+  state: DashboardComparisonSearchState,
+  currentFilterDsl: string,
+): ComparisonSettings {
+  return {
+    period: state.mode ?? "previous",
+    filterMode: state.filterDocument.root ? "custom" : "current",
+    filterDsl: state.filterDocument.root
+      ? formatFilterDsl(state.filterDocument)
+      : currentFilterDsl,
+  };
 }
 
 export const DashboardHeaderControls = memo(function DashboardHeaderControls({
@@ -500,6 +522,13 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
       parseFilterScopeFromSearchParams(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
+  const comparisonSearchState = useMemo(
+    () =>
+      parseDashboardComparisonSearchParams(
+        new URLSearchParams(searchParamsKey),
+      ),
+    [searchParamsKey],
+  );
   const activeFilterCount = useMemo(
     () => serializeFilterParams(queryDocument, analyticsFilterRegistry).size,
     [queryDocument],
@@ -513,6 +542,12 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     headerTriggerClassName,
     hasActiveFilters &&
       "!border-primary/60 !bg-primary/10 !text-primary hover:!bg-primary/15 hover:!text-primary aria-expanded:!bg-primary/15 dark:!border-primary/60 dark:!bg-primary/20 dark:hover:!bg-primary/25",
+  );
+  const hasActiveComparison = comparisonSearchState.mode !== undefined;
+  const comparisonTriggerClassName = cn(
+    headerTriggerClassName,
+    hasActiveComparison &&
+      "!border-compare-primary/60 !bg-compare-primary/10 !text-compare-primary hover:!bg-compare-primary/15 hover:!text-compare-primary aria-expanded:!bg-compare-primary/15 dark:!border-compare-primary/60 dark:!bg-compare-primary/20 dark:hover:!bg-compare-primary/25",
   );
   const filterTriggerStyle = hasActiveFilters
     ? {
@@ -542,11 +577,12 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     DateRange | undefined
   >(selectedDateRange);
   const [comparisonSettings, setComparisonSettings] =
-    useState<ComparisonSettings>(() => ({
-      period: "previous",
-      filterMode: "current",
-      filterDsl: uiFilterDsl ?? "",
-    }));
+    useState<ComparisonSettings>(() =>
+      comparisonSettingsFromSearchState(
+        comparisonSearchState,
+        uiFilterDsl ?? "",
+      ),
+    );
   const realtimeSiteId =
     siteId || (USE_REALTIME_MOCK ? "local-mock-site" : undefined);
   const showRealtimeBadge =
@@ -661,6 +697,15 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     }
   }, [scopePreference, setScopePreference, urlScopePreference]);
 
+  useEffect(() => {
+    setComparisonSettings(
+      comparisonSettingsFromSearchState(
+        comparisonSearchState,
+        uiFilterDsl ?? "",
+      ),
+    );
+  }, [comparisonSearchState, uiFilterDsl]);
+
   const handleScopeChange = useCallback(
     (next: FilterScopePreference) => {
       setScopePreference(next);
@@ -677,11 +722,42 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     [livePathname, queryDocument, searchParams, setScopePreference],
   );
 
-  const handleComparisonApply = (settings: ComparisonSettings) => {
-    setComparisonSettings(settings);
-    setMobileCompareDrawerOpen(false);
-    setDesktopCompareSheetOpen(false);
-  };
+  const handleComparisonApply = useCallback(
+    (settings: ComparisonSettings) => {
+      let comparisonFilter: FilterDocument | undefined;
+      if (settings.filterMode === "custom" && settings.filterDsl.trim()) {
+        try {
+          comparisonFilter = parseFilterDsl(
+            settings.filterDsl,
+            analyticsFilterRegistry,
+          );
+        } catch {
+          comparisonFilter = undefined;
+        }
+      }
+
+      const params = withDashboardComparisonSearchParams(
+        searchParams,
+        settings.period,
+        comparisonFilter,
+      );
+      const updated = serializeDashboardSearchParams(params);
+      const current = serializeDashboardSearchParams(searchParams);
+      if (updated !== current) {
+        const target = updated ? `${livePathname}?${updated}` : livePathname;
+        replaceUrlWithoutNavigation(target);
+      }
+      setComparisonSettings(
+        comparisonSettingsFromSearchState(
+          parseDashboardComparisonSearchParams(params),
+          uiFilterDsl ?? "",
+        ),
+      );
+      setMobileCompareDrawerOpen(false);
+      setDesktopCompareSheetOpen(false);
+    },
+    [livePathname, searchParams, uiFilterDsl],
+  );
 
   const handleComparisonCancel = () => {
     setMobileCompareDrawerOpen(false);
@@ -800,7 +876,8 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               onOpenChange={setMobileCompareDrawerOpen}
             >
               <CompareTrigger
-                className={headerTriggerClassName}
+                active={hasActiveComparison}
+                className={comparisonTriggerClassName}
                 messages={messages}
                 onClick={() => setMobileCompareDrawerOpen(true)}
               />
@@ -1019,7 +1096,8 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               onOpenChange={setDesktopCompareSheetOpen}
             >
               <CompareTrigger
-                className={headerTriggerClassName}
+                active={hasActiveComparison}
+                className={comparisonTriggerClassName}
                 messages={messages}
                 onClick={() => setDesktopCompareSheetOpen(true)}
               />
