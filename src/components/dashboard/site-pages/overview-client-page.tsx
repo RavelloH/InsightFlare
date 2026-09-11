@@ -3353,6 +3353,15 @@ function buildOverviewMetricSeries(
   };
 }
 
+function comparisonLabelForQuery(
+  messages: AppMessages,
+  comparisonQuery: DashboardComparisonQuery | null,
+): string {
+  return comparisonQuery?.mode === "previous" && !comparisonQuery.filters.root
+    ? messages.dashboardHeader.previousPeriod
+    : messages.dashboardHeader.compareButton;
+}
+
 function useOverviewComparisonQuery(
   timeWindow: TimeWindow,
   filters: FilterDocument,
@@ -3600,10 +3609,7 @@ export function OverviewMetricsSection({
       0;
     return `${detailSeries.length}:${firstTimestamp}:${lastTimestamp}:${comparisonQuery?.mode ?? "none"}:${comparisonDetailSeries.length}:${comparisonFirstTimestamp}:${comparisonLastTimestamp}`;
   }, [comparisonDetailSeries, comparisonQuery?.mode, detailSeries]);
-  const comparisonLabel =
-    comparisonQuery?.mode === "previous" && !comparisonQuery.filters.root
-      ? messages.dashboardHeader.previousPeriod
-      : messages.dashboardHeader.compareButton;
+  const comparisonLabel = comparisonLabelForQuery(messages, comparisonQuery);
   const hasComparisonData = Boolean(
     comparisonQuery &&
     metricsData?.comparisonOverview &&
@@ -3823,6 +3829,16 @@ export function OverviewTrendSection({
     isPending,
     trendData.data,
   ]);
+  const comparisonTrendDisplayData = useMemo(() => {
+    if (!comparisonQuery || !trendQueryData?.comparisonTrendData) {
+      return undefined;
+    }
+    return normalizeTrendData(
+      comparisonQuery.window,
+      trendQueryData.comparisonTrendData.data,
+    );
+  }, [comparisonQuery, trendQueryData?.comparisonTrendData]);
+  const comparisonLabel = comparisonLabelForQuery(messages, comparisonQuery);
   return (
     <Card className="overflow-visible">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -3848,6 +3864,11 @@ export function OverviewTrendSection({
             showLegend
             loading={loading}
             className="h-[280px]"
+            range={comparisonQuery ? window : undefined}
+            comparisonData={comparisonTrendDisplayData}
+            comparisonRange={comparisonQuery?.window}
+            currentPeriodLabel={messages.dashboardHeader.compareCurrentPeriod}
+            comparisonLabel={comparisonLabel}
           />
         </div>
       </CardContent>

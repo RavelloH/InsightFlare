@@ -117,7 +117,7 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
     ],
     server: {
-      host: "127.0.0.1",
+      host: process.env.INSIGHTFLARE_HOST || "127.0.0.1",
       hmr: isE2E ? false : undefined,
       port: Number.isInteger(port) && port > 0 ? port : 3000,
       strictPort: true,

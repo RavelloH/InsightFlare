@@ -20,6 +20,14 @@ export interface TrafficPairChartPoint extends TrafficPairDataPoint {
   nonVisitorViews: number;
 }
 
+export interface TrafficPairComparisonChartPoint extends TrafficPairChartPoint {
+  currentVisitors: number;
+  currentNonVisitorViews: number;
+  comparisonViews: number;
+  comparisonVisitors: number;
+  comparisonNonVisitorViews: number;
+}
+
 export interface TrafficPairRange {
   from: number;
   to: number;
@@ -80,6 +88,72 @@ export function createTrafficPairChartData(
   });
 }
 
+export function createTrafficPairComparisonChartData(
+  data: ReadonlyArray<TrafficPairDataPoint>,
+  comparisonData: ReadonlyArray<TrafficPairDataPoint>,
+  interval: DashboardInterval,
+  timeZone: string,
+  maxPoints?: number,
+  range?: TrafficPairRange,
+  comparisonRange?: TrafficPairRange,
+  dataIsComplete = false,
+): TrafficPairComparisonChartPoint[] {
+  const current = createTrafficPairChartData(
+    data,
+    interval,
+    timeZone,
+    maxPoints,
+    range,
+    dataIsComplete,
+  );
+  const comparison = createTrafficPairChartData(
+    comparisonData,
+    interval,
+    timeZone,
+    maxPoints,
+    comparisonRange ?? range,
+    dataIsComplete,
+  );
+
+  return current.map((point, index) => {
+    const comparisonPoint = comparison[index];
+    return {
+      ...point,
+      currentVisitors: point.visitors,
+      currentNonVisitorViews: point.nonVisitorViews,
+      comparisonViews: comparisonPoint?.views ?? 0,
+      comparisonVisitors: comparisonPoint?.visitors ?? 0,
+      comparisonNonVisitorViews: comparisonPoint?.nonVisitorViews ?? 0,
+    };
+  });
+}
+
+export function createTrafficPairComparisonChartConfig(
+  currentPeriodLabel: string,
+  comparisonLabel: string,
+  viewsLabel: string,
+  visitorsLabel: string,
+): ChartConfig {
+  return {
+    comparisonVisitors: {
+      label: `${comparisonLabel} · ${visitorsLabel}`,
+      color: "var(--color-compare-chart-3)",
+    },
+    comparisonNonVisitorViews: {
+      label: `${comparisonLabel} · ${viewsLabel}`,
+      color: "var(--color-compare-chart-1)",
+    },
+    currentVisitors: {
+      label: `${currentPeriodLabel} · ${visitorsLabel}`,
+      color: "var(--color-chart-3)",
+    },
+    currentNonVisitorViews: {
+      label: `${currentPeriodLabel} · ${viewsLabel}`,
+      color: "var(--color-chart-1)",
+    },
+  };
+}
+
 export function TrafficPairTooltip({
   active,
   payload,
@@ -124,6 +198,81 @@ export function TrafficPairTooltip({
             </span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+export function TrafficPairComparisonTooltip({
+  active,
+  payload,
+  label,
+  currentPeriodLabel,
+  comparisonLabel,
+  viewsLabel,
+  visitorsLabel,
+  tooltipFormatter,
+  countFormatter,
+}: TooltipProps<number, string> & {
+  currentPeriodLabel: string;
+  comparisonLabel: string;
+  viewsLabel: string;
+  visitorsLabel: string;
+  tooltipFormatter: Intl.DateTimeFormat;
+  countFormatter: Intl.NumberFormat;
+}) {
+  if (!active || !payload?.length) return null;
+
+  const point = payload[0]
+    ?.payload as Partial<TrafficPairComparisonChartPoint> | null;
+  const timestamp = Number(point?.timestampMs ?? label ?? 0);
+  const views = safeChartCount(Number(point?.views ?? 0));
+  const visitors = safeChartCount(Number(point?.visitors ?? 0));
+  const comparisonViews = safeChartCount(Number(point?.comparisonViews ?? 0));
+  const comparisonVisitors = safeChartCount(
+    Number(point?.comparisonVisitors ?? 0),
+  );
+
+  const rows = [
+    {
+      label: `${currentPeriodLabel} · ${viewsLabel}`,
+      color: "var(--color-chart-1)",
+      value: views,
+    },
+    {
+      label: `${currentPeriodLabel} · ${visitorsLabel}`,
+      color: "var(--color-chart-3)",
+      value: visitors,
+    },
+    {
+      label: `${comparisonLabel} · ${viewsLabel}`,
+      color: "var(--color-compare-chart-1)",
+      value: comparisonViews,
+    },
+    {
+      label: `${comparisonLabel} · ${visitorsLabel}`,
+      color: "var(--color-compare-chart-3)",
+      value: comparisonVisitors,
+    },
+  ];
+
+  return (
+    <div className="grid min-w-[220px] items-start gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+      <div className="font-medium">
+        {tooltipFormatter.format(new Date(timestamp))}
+      </div>
+      <div className="grid gap-1.5">
+        {rows.map((row) => (
+          <div key={row.label} className="flex w-full items-center gap-2">
+            <ChartTooltipIndicator color={row.color} />
+            <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+              <span className="text-muted-foreground">{row.label}</span>
+              <span className="font-mono font-medium tabular-nums text-foreground">
+                {countFormatter.format(row.value)}
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
