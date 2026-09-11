@@ -137,6 +137,33 @@ describe("blocking rules parser", () => {
     );
   });
 
+  it("accepts localhost as a special domain value in v1 and v2", () => {
+    const legacy = parseBlockingRules({
+      domainWhitelist: ["LOCALHOST"],
+    });
+    expect(legacy.ok).toBe(true);
+    expect(legacy.fields.domains.lines).toEqual(["*", "-localhost"]);
+
+    const versioned = parseBlockingRules({
+      blockingRules: [
+        {
+          version: 2,
+          data: {
+            domains: ["LOCALHOST"],
+          },
+        },
+      ],
+    });
+
+    expect(versioned.ok).toBe(true);
+    expect(versioned.fields.domains.rules[0]).toMatchObject({
+      normalizedPattern: "localhost",
+    });
+    expect(
+      matchBlockingRules(versioned, { hostname: "LOCALHOST" }).allowed,
+    ).toBe(false);
+  });
+
   it("serializes canonical v2 arrays while retaining comments and blank lines", () => {
     expect(
       serializeBlockingRulesV2({

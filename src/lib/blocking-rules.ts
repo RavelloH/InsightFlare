@@ -298,7 +298,9 @@ function normalizeDomainPattern(pattern: string): string | null {
   if (!/^[a-z0-9*.-]+$/u.test(value) || !/[a-z0-9*]/u.test(value)) {
     return null;
   }
-  if (value !== "*" && !value.includes(".")) return null;
+  if (value !== "*" && !value.includes(".") && value !== "localhost") {
+    return null;
+  }
   if (value.length > 253) return null;
   const labels = value.split(".");
   if (
