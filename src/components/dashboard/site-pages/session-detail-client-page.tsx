@@ -81,6 +81,7 @@ import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import { buildPageDetailHref } from "@/lib/dashboard/page-detail";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
 import dynamic from "@/lib/dynamic";
 import type {
   JourneyEvent,
@@ -1711,15 +1712,20 @@ const SessionDetailBottomCards = memo(function SessionDetailBottomCards({
   );
   const eventLoader = useMemo<AsyncDimensionBreakdownLoader<"event">>(
     () =>
-      async ({ limit }) => ({
-        items: eventRows,
-        pagination: {
+      async ({ cursor, limit, search, sort }) =>
+        loadLocalTablePage({
+          rows: eventRows,
+          sort,
+          columns: [
+            { key: "views", getValue: (row) => row.views },
+            { key: "visitors", getValue: (row) => row.visitors },
+          ],
+          tab: "event",
           limit,
-          returned: eventRows.length,
-          hasMore: false,
-          nextCursor: null,
-        },
-      }),
+          cursor,
+          search,
+          getSearchText: (row) => row.label,
+        }),
     [eventRows],
   );
 

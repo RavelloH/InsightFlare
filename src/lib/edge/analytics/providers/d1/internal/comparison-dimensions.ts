@@ -32,6 +32,7 @@ import { scopedDatasetFor } from "./scoped-dataset";
 export interface ComparisonDimensionCursor {
   readonly sortClass: number;
   readonly primary: number;
+  readonly secondary: number;
   readonly key: string;
 }
 
@@ -40,11 +41,18 @@ function decodeComparisonCursor(
 ): ComparisonDimensionCursor | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
-  return hasExactKeys(candidate, ["sortClass", "primary", "key"]) &&
+  return hasExactKeys(candidate, [
+    "sortClass",
+    "primary",
+    "secondary",
+    "key",
+  ]) &&
     typeof candidate.sortClass === "number" &&
     Number.isFinite(candidate.sortClass) &&
     typeof candidate.primary === "number" &&
     Number.isFinite(candidate.primary) &&
+    typeof candidate.secondary === "number" &&
+    Number.isFinite(candidate.secondary) &&
     typeof candidate.key === "string"
     ? (candidate as unknown as ComparisonDimensionCursor)
     : null;
@@ -112,20 +120,26 @@ function comparisonOrdering(
         ? "change_relative"
         : `current_${metricColumn}`;
   if (sortBy !== "change") {
+    const secondary =
+      sortBy === "reference"
+        ? `current_${metricColumn}`
+        : `reference_${metricColumn}`;
     const operator = direction === "asc" ? ">" : "<";
     return {
-      expression: `${source} ${direction}, key ASC`,
-      cursorPredicate: `(${source} ${operator} ? OR (${source} = ? AND key > ?))`,
+      expression: `${source} ${direction}, ${secondary} ${direction}, key ASC`,
+      cursorPredicate: `(
+        ${source} ${operator} ?
+        OR (${source} = ? AND ${secondary} ${operator} ?)
+        OR (${source} = ? AND ${secondary} = ? AND key > ?)
+      )`,
     };
   }
 
+  const classDirection = direction === "asc" ? "asc" : "desc";
   const classOperator = direction === "asc" ? ">" : "<";
   const valueOperator = direction === "asc" ? ">" : "<";
   return {
-    expression:
-      direction === "asc"
-        ? "change_class ASC, change_relative ASC, key ASC"
-        : "change_class ASC, change_relative DESC, key ASC",
+    expression: `change_class ${classDirection}, change_relative ${classDirection}, key ASC`,
     cursorPredicate: `(
       change_class ${classOperator} ?
       OR (change_class = ? AND (
@@ -287,7 +301,7 @@ export async function queryComparisonDimensionPageFromD1(
   const metricReference =
     options.metric === "visitors" ? referenceVisitors : referenceViews;
   const changeRelative = relativeSql(metricCurrent, metricReference);
-  const changeClass = `CASE WHEN ${metricReference} = 0 AND ${metricCurrent} > 0 THEN 0 ELSE 1 END`;
+  const changeClass = `CASE WHEN ${metricReference} = 0 AND ${metricCurrent} > 0 THEN 1 ELSE 0 END`;
   const sql = `
 WITH
 ${currentSide.ctes},
@@ -359,7 +373,14 @@ LIMIT ?
           cursor.primary,
           cursor.key,
         ]
-      : [cursor.primary, cursor.primary, cursor.key]
+      : [
+          cursor.primary,
+          cursor.primary,
+          cursor.secondary,
+          cursor.primary,
+          cursor.secondary,
+          cursor.key,
+        ]
     : [];
   const rows = await queryD1All<Record<string, unknown>>(
     env,
@@ -425,8 +446,8 @@ LIMIT ?
               ? Number(
                   page.last.reference[options.metric] === 0 &&
                     page.last[options.metric] > 0
-                    ? 0
-                    : 1,
+                    ? 1
+                    : 0,
                 )
               : 0,
           primary:
@@ -435,6 +456,12 @@ LIMIT ?
               : options.sortBy === "change"
                 ? (page.last.change[options.metric].relative ?? 0)
                 : page.last[options.metric],
+          secondary:
+            options.sortBy === "current"
+              ? page.last.reference[options.metric]
+              : options.sortBy === "reference"
+                ? page.last[options.metric]
+                : 0,
           key: page.last.key,
         })
       : null;
@@ -497,7 +524,7 @@ export async function queryComparisonSessionPathPageFromD1(
   const referenceColumn =
     options.metric === "visitors" ? "reference_visitors" : "reference_views";
   const changeRelative = relativeSql(currentColumn, referenceColumn);
-  const changeClass = `CASE WHEN ${referenceColumn} = 0 AND ${currentColumn} > 0 THEN 0 ELSE 1 END`;
+  const changeClass = `CASE WHEN ${referenceColumn} = 0 AND ${currentColumn} > 0 THEN 1 ELSE 0 END`;
   const sql = `
 WITH
 ${currentSide.ctes},
@@ -572,7 +599,14 @@ LIMIT ?
           cursor.primary,
           cursor.key,
         ]
-      : [cursor.primary, cursor.primary, cursor.key]
+      : [
+          cursor.primary,
+          cursor.primary,
+          cursor.secondary,
+          cursor.primary,
+          cursor.secondary,
+          cursor.key,
+        ]
     : [];
   const rows = await queryD1All<Record<string, unknown>>(
     env,
@@ -633,8 +667,8 @@ LIMIT ?
             options.sortBy === "change"
               ? page.last.reference[options.metric] === 0 &&
                 page.last[options.metric] > 0
-                ? 0
-                : 1
+                ? 1
+                : 0
               : 0,
           primary:
             options.sortBy === "reference"
@@ -642,6 +676,12 @@ LIMIT ?
               : options.sortBy === "change"
                 ? (page.last.change[options.metric].relative ?? 0)
                 : page.last[options.metric],
+          secondary:
+            options.sortBy === "current"
+              ? page.last.reference[options.metric]
+              : options.sortBy === "reference"
+                ? page.last[options.metric]
+                : 0,
           key: page.last.key,
         })
       : null;

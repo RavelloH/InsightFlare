@@ -76,7 +76,15 @@ describe("paginated dashboard client requests", () => {
       publicDashboardSiteId("team site/one"),
       window,
       undefined,
-      { limit: 9, cursor: "referrer-cursor", signal, fullUrl: true },
+      {
+        limit: 9,
+        cursor: "referrer-cursor",
+        search: "  google  ",
+        sort: "visitors",
+        direction: "asc",
+        signal,
+        fullUrl: true,
+      },
     );
 
     const pagesUrl = new URL(
@@ -102,6 +110,9 @@ describe("paginated dashboard client requests", () => {
     );
     expect(referrersUrl.searchParams.get("limit")).toBe("9");
     expect(referrersUrl.searchParams.get("cursor")).toBe("referrer-cursor");
+    expect(referrersUrl.searchParams.get("search")).toBe("google");
+    expect(referrersUrl.searchParams.get("sort")).toBe("visitors");
+    expect(referrersUrl.searchParams.get("direction")).toBe("asc");
     expect(referrersUrl.searchParams.get("fullUrl")).toBe("1");
     expect(referrersUrl.searchParams.has("siteId")).toBe(false);
     expect(fetchMock.mock.calls[1][1]).toMatchObject({

@@ -531,6 +531,18 @@ export function registerSiteContractProviders(
               : numberField(request, "limit", 20);
           const cursorText =
             typeof pageRequest.cursor === "string" ? pageRequest.cursor : null;
+          const sortRecord =
+            request.sort && typeof request.sort === "object"
+              ? (request.sort as { key?: unknown; direction?: unknown })
+              : null;
+          const sortBy =
+            sortRecord?.key === "sessions" || sortRecord?.key === "visitors"
+              ? sortRecord.key
+              : "views";
+          const sortDirection =
+            sortRecord?.direction === "asc" ? "asc" : "desc";
+          const search =
+            typeof request.search === "string" ? request.search : undefined;
           const selectExpr = dimensionExpression(
             stringField(request, "dimension"),
           );
@@ -540,9 +552,11 @@ export function registerSiteContractProviders(
             window,
             filters,
             selectExpr,
-            undefined,
+            search,
             cursorText,
             request.context.policy.audience,
+            sortBy,
+            sortDirection,
           );
           if (cursorText && !cursor) throw new InvalidCursorError("dimension");
           const page = await queryDimensionPageFromD1(
@@ -552,7 +566,12 @@ export function registerSiteContractProviders(
             filters,
             limit,
             selectExpr,
-            { excludeEmpty: false },
+            {
+              excludeEmpty: false,
+              search,
+              sortBy,
+              sortDirection,
+            },
             cursor,
             undefined,
             request.context.policy.audience,
@@ -592,42 +611,7 @@ export function registerSiteContractProviders(
       typedQueryProvider<unknown>(async (input) => {
         const request = query(input!);
         if (request.tab === "source.channel") {
-          const window = timeWindow(request.time);
-          const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
-          const limit = numberField(request, "limit", 100);
-          const cursorText = stringField(request, "cursor") || null;
-          const selectExpr = buildTrafficChannelSqlExpression();
-          const cursor = await decodeDimensionCursor(
-            options.env,
-            options.siteId,
-            window,
-            filters,
-            selectExpr,
-            undefined,
-            cursorText,
-            request.context.policy.audience,
-          );
-          if (cursorText && !cursor) throw new InvalidCursorError("channels");
-          const page = await queryDimensionPageFromD1(
-            options.env,
-            options.siteId,
-            window,
-            filters,
-            limit,
-            selectExpr,
-            { excludeEmpty: true },
-            cursor,
-            undefined,
-            request.context.policy.audience,
-          );
-          return {
-            value: {
-              data: {
-                items: mapTabs([...page.items]),
-                pagination: page.pagination,
-              },
-            },
-          };
+          return { value: await overviewTabData(options, request) };
         }
         const rows = await queryChannelAggregate(
           options.env,

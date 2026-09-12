@@ -202,12 +202,12 @@ describe("TabbedDataTableCard loader contract", () => {
     expect(renderedLabels(container!)).toEqual(["low", "high"]);
   });
 
-  it("starts a new sort request from the first cursor", async () => {
+  it("sorts locally after the complete result has loaded", async () => {
     const loader = vi.fn(
       async (_options: TabbedDataTableLoaderOptions<TestTab, TestSortKey>) =>
         page([
-          { key: "first", value: 1 },
-          { key: "second", value: 2 },
+          { key: "high", value: 10 },
+          { key: "low", value: 1 },
         ]),
     );
     ({ client, container, root } = renderTable(loader));
@@ -220,11 +220,8 @@ describe("TabbedDataTableCard loader contract", () => {
     });
     await settle();
 
-    expect(loader).toHaveBeenCalledTimes(2);
-    expect(loader.mock.calls[1]?.[0]).toMatchObject({
-      cursor: null,
-      sort: { key: "value", direction: "asc" },
-    });
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(renderedLabels(container!)).toEqual(["low", "high"]);
   });
 
   it("appends pages without changing their loader order", async () => {

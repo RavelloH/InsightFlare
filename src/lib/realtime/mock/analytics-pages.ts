@@ -1,4 +1,8 @@
 import {
+  buildDemoComparisonRows,
+  resolveDemoComparison,
+} from "@/lib/realtime/mock/comparison";
+import {
   aggregateDimensionRowsFromVisits,
   aggregateOverviewMetrics,
   applyDemoFilters,
@@ -378,8 +382,56 @@ export function generateDemoDimension(
       };
     })
     .sort((a, b) => b.views - a.views || a.value.localeCompare(b.value));
+  const comparison = resolveDemoComparison(params, filters);
+  const comparisonItems = comparison
+    ? (() => {
+        const referenceDataset = buildDemoFactDataset(
+          siteId,
+          comparison.from,
+          comparison.to,
+        );
+        const referenceFilters =
+          dimensionType === "countries"
+            ? withoutDemoGeoFilter(comparison.filters)
+            : comparison.filters;
+        const referenceFiltered = applyDemoFilters(
+          referenceDataset,
+          referenceFilters,
+        );
+        const referenceRows = aggregateDimensionRowsFromVisits(
+          referenceDataset,
+          referenceFiltered.visits,
+          Math.max(1, referenceFiltered.visits.length),
+          (visit) => {
+            if (dimensionType === "countries") return visit.country;
+            if (dimensionType === "devices") return visit.deviceType;
+            if (dimensionType === "page-hash") {
+              return demoHashFragmentForVisit(visit) || DEMO_EMPTY_HASH_VALUE;
+            }
+            if (dimensionType === "page-query") {
+              return demoQueryStringForVisit(visit) || DEMO_EMPTY_QUERY_VALUE;
+            }
+            return visit.eventType === "pageview" ? "" : visit.eventType;
+          },
+        ).map((row) => {
+          const value =
+            row.label === DEMO_EMPTY_HASH_VALUE ||
+            row.label === DEMO_EMPTY_QUERY_VALUE
+              ? ""
+              : row.label;
+          return {
+            value,
+            label: value,
+            views: row.views,
+            sessions: row.sessions,
+            visitors: row.visitors,
+          };
+        });
+        return buildDemoComparisonRows(items, referenceRows, params);
+      })()
+    : items;
   const page = demoPage(
-    items,
+    comparisonItems,
     params,
     {
       operation: "dimension",
@@ -388,6 +440,9 @@ export function generateDemoDimension(
       from,
       to,
       filters,
+      compare: params.compare ?? null,
+      metric: params.metric ?? null,
+      sortBy: params.sortBy ?? null,
       search: String(params.search ?? "")
         .trim()
         .toLowerCase(),

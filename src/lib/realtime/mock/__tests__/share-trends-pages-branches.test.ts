@@ -5,6 +5,7 @@ import {
   generateDemoPages,
   generateDemoPagesDashboard,
   generateDemoReferrers,
+  generateDemoReferrerSummary,
 } from "@/lib/realtime/mock/analytics-pages";
 import type * as FactBuilder from "@/lib/realtime/mock/fact-builder";
 import {
@@ -371,6 +372,65 @@ describe("mock/analytics-pages branch coverage", () => {
         },
       },
     });
+    expect(generateDemoReferrerSummary(SITE_ID, { topN: 1 })).toMatchObject({
+      ok: true,
+      data: {
+        totalViews: 2,
+        directViews: 1,
+        uniqueDomains: 1,
+        uniqueLinks: 1,
+        topSources: [{ referrer: "search.example", views: 1 }],
+      },
+    });
+  });
+
+  it("keeps comparison dimensions aligned with the demo comparison contract", () => {
+    setFacts([
+      makeVisit({
+        pathname: "/pricing",
+        title: "Pricing",
+        eventType: "signup",
+        country: "DE",
+        deviceType: "Mobile",
+      }),
+    ]);
+
+    const comparisonParams = {
+      from: BASE_TIME,
+      to: BASE_TIME + 3_600_000,
+      compare: "same",
+      "compareFilter[page.path]": "/pricing",
+      metric: "visitors",
+      sortBy: "reference",
+      direction: "asc",
+      limit: 5,
+    } as const;
+
+    for (const dimension of [
+      "countries",
+      "devices",
+      "page-hash",
+      "page-query",
+      "event-types",
+    ]) {
+      const result = generateDemoDimension(
+        SITE_ID,
+        dimension,
+        comparisonParams,
+      ) as { data: { items: Array<Record<string, unknown>> } };
+      expect(result.data.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ reference: expect.any(Object) }),
+        ]),
+      );
+    }
+
+    expect(
+      generateDemoPages(SITE_ID, {
+        ...comparisonParams,
+        details: "true",
+      }),
+    ).toMatchObject({ ok: true, data: { items: expect.any(Array) } });
   });
 
   it("paginates page dashboards and reports previous-window changes", () => {

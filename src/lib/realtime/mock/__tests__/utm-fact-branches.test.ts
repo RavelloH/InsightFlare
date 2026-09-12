@@ -17,6 +17,9 @@ import {
 } from "@/lib/realtime/mock/utm-dimensions";
 import {
   generateDemoGeoPoints,
+  generateDemoOverviewClientTab,
+  generateDemoOverviewGeoTab,
+  generateDemoOverviewPageTab,
   generateDemoOverviewSourceTab,
 } from "@/lib/realtime/mock/utm-overview";
 
@@ -303,6 +306,66 @@ describe("mock UTM and fact branch coverage", () => {
     expect(result.cityCounts).toEqual([]);
   });
 
+  it("aggregates geo points and drilldown buckets for matching coordinates", () => {
+    setFacts([
+      makeVisit({
+        visitId: "geo-1",
+        region: "US::CA::California",
+        regionCode: "CA",
+        regionName: "California",
+        city: "US::CA::California::San Francisco",
+        cityName: "San Francisco",
+        latitude: 37.77491,
+        longitude: -122.41941,
+      }),
+      makeVisit({
+        visitId: "geo-2",
+        sessionId: "s2",
+        visitorId: "u2",
+        region: "US::CA::California",
+        regionCode: "CA",
+        regionName: "California",
+        city: "US::CA::California::San Francisco",
+        cityName: "San Francisco",
+        latitude: 37.77492,
+        longitude: -122.41942,
+      }),
+    ]);
+
+    const pointResult = generateDemoGeoPoints("demo-site-001", {
+      from: BASE_TIME,
+      to: BASE_TIME + 3_600_000,
+      applyGeoFilter: "true",
+      "filter[geo.country]": "US",
+      "filter[geo.region]": "CA",
+      "filter[geo.city]": "San Francisco",
+    }) as {
+      data: Array<{ pointCount: number }>;
+      regionCounts: Array<{ value: string }>;
+      cityCounts: Array<{ value: string }>;
+    };
+
+    expect(pointResult.data).toEqual([
+      expect.objectContaining({ pointCount: 2 }),
+    ]);
+    expect(pointResult.regionCounts).toEqual([]);
+    expect(pointResult.cityCounts).toEqual([
+      expect.objectContaining({ value: "US::CA::California::San Francisco" }),
+    ]);
+
+    const regionResult = generateDemoGeoPoints("demo-site-001", {
+      from: BASE_TIME,
+      to: BASE_TIME + 3_600_000,
+      applyGeoFilter: "true",
+      "filter[geo.country]": "US",
+    }) as {
+      regionCounts: Array<{ value: string }>;
+    };
+    expect(regionResult.regionCounts).toEqual([
+      expect.objectContaining({ value: "US::CA::California" }),
+    ]);
+  });
+
   it("normalizes nullish referrer rows in overview source tabs", () => {
     setFacts([makeVisit()]);
     mockCollectReferrerRows.mockReturnValue([
@@ -342,6 +405,63 @@ describe("mock UTM and fact branch coverage", () => {
         { label: "organic_search", views: 1, sessions: 1, visitors: 1 },
         { label: "social", views: 1, sessions: 1, visitors: 1 },
       ],
+    });
+  });
+
+  it("generates comparison rows for source, client, and geo tabs", () => {
+    setFacts([
+      makeVisit({
+        referrerHost: "google.com",
+        browser: "Chrome",
+        country: "US",
+      }),
+    ]);
+    mockCollectReferrerRows.mockReturnValue([
+      { referrer: "google.com", views: 4, sessions: 3, visitors: 2 },
+    ]);
+
+    const params = {
+      from: BASE_TIME,
+      to: BASE_TIME + 3_600_000,
+      compare: "same",
+      "compareFilter[page.path]": "/home",
+      metric: "visitors",
+      sortBy: "change",
+      direction: "asc",
+      limit: 5,
+    } as const;
+
+    for (const tab of ["channel", "domain", "link"] as const) {
+      expect(
+        generateDemoOverviewSourceTab("demo-site-001", params, tab),
+      ).toMatchObject({
+        ok: true,
+        data: [expect.objectContaining({ reference: expect.any(Object) })],
+      });
+    }
+    expect(
+      generateDemoOverviewClientTab("demo-site-001", params, "browser"),
+    ).toMatchObject({
+      ok: true,
+      data: expect.arrayContaining([
+        expect.objectContaining({ reference: expect.any(Object) }),
+      ]),
+    });
+    expect(
+      generateDemoOverviewGeoTab("demo-site-001", params, "country"),
+    ).toMatchObject({
+      ok: true,
+      data: expect.arrayContaining([
+        expect.objectContaining({ reference: expect.any(Object) }),
+      ]),
+    });
+    expect(
+      generateDemoOverviewPageTab("demo-site-001", params, "path"),
+    ).toMatchObject({
+      ok: true,
+      data: expect.arrayContaining([
+        expect.objectContaining({ reference: expect.any(Object) }),
+      ]),
     });
   });
 });

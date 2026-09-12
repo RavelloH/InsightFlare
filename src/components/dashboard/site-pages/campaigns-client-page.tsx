@@ -61,14 +61,21 @@ export function CampaignsClientPage({
       "views" | "sessions"
     >
   >(
-    async ({ tab, signal, limit }) => {
+    async ({ tab, cursor, limit, search, signal, sort }) => {
       try {
         const payload = await fetchUtmDimension(
           siteId,
           requestWindow,
           tab,
           requestFilters,
-          { signal },
+          {
+            cursor,
+            direction: sort.direction,
+            limit,
+            search,
+            signal,
+            sort: sort.key,
+          },
         );
         const items = buildCampaignRows(
           payload.items,
@@ -80,8 +87,8 @@ export function CampaignsClientPage({
           pagination: {
             limit,
             returned: items.length,
-            hasMore: false,
-            nextCursor: null,
+            hasMore: payload.pagination.hasMore,
+            nextCursor: payload.pagination.nextCursor,
           },
         };
       } catch (error) {

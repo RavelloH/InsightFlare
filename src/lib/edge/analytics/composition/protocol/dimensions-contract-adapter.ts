@@ -9,6 +9,7 @@ import {
   badRequest,
   jsonResponseWith,
   parseLimit,
+  parseListSearch,
   parseWindow,
   queryErrorResponse,
   type ResponseContext,
@@ -43,14 +44,35 @@ export async function handleSimpleDimensionContract(
   );
   const filters =
     dimension === "country" ? withoutGeoFilter(rawFilters) : rawFilters;
+  const rawSort = url.searchParams.get("sort");
+  if (
+    rawSort !== null &&
+    rawSort !== "views" &&
+    rawSort !== "sessions" &&
+    rawSort !== "visitors"
+  ) {
+    return badRequest("Invalid sort", "invalid-input");
+  }
+  const rawDirection = url.searchParams.get("direction");
+  if (
+    rawDirection !== null &&
+    rawDirection !== "asc" &&
+    rawDirection !== "desc"
+  ) {
+    return badRequest("Invalid direction", "invalid-input");
+  }
   const limit = parseLimit(url, 20, 200);
   const cursor = url.searchParams.get("cursor");
+  const sort = rawSort ?? "views";
+  const direction = rawDirection ?? "desc";
   const query = {
     context: queryContext,
     time: toQueryTime(window),
     filters,
     dimension,
     limit,
+    search: parseListSearch(url),
+    sort: { key: sort, direction },
     page: { limit, ...(cursor ? { cursor } : {}) },
   } satisfies DimensionQuery;
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<

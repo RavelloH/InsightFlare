@@ -11,8 +11,10 @@ import {
   RiArrowDownLine,
   RiArrowRightUpLine,
   RiArrowUpLine,
+  RiBarChartLine,
   RiLineChartLine,
   RiSearchLine,
+  RiUserLine,
 } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
@@ -43,7 +45,6 @@ import {
 import { TrafficChannelIcon } from "@/components/dashboard/traffic-channel-icon";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clickable } from "@/components/ui/clickable";
 import { Spinner } from "@/components/ui/spinner";
@@ -102,6 +103,7 @@ import {
   normalizePagePath,
 } from "@/lib/dashboard/page-detail";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
 import {
   addZonedInterval,
   startOfZonedInterval,
@@ -367,6 +369,7 @@ const ChangeRateInline = memo(function ChangeRateInline({
 });
 
 type PageCardTab = "path" | "query" | "title" | "hostname" | "entry" | "exit";
+type OverviewComparisonMetric = "views" | "visitors";
 type PageCardSortKey =
   "views" | "visitors" | "current" | "reference" | "change";
 type PageCardNavigableTab = "path" | "query" | "hostname" | "entry" | "exit";
@@ -394,6 +397,31 @@ function overviewTabData(
       nextCursor: null,
     },
   };
+}
+
+function loadLocalOverviewTablePage(
+  rows: readonly OverviewTabRows[number][],
+  sort: { key: PageCardSortKey; direction: "asc" | "desc" },
+  tab: string,
+  limit: number,
+  cursor: string | null,
+  search: string,
+): OverviewTabData["data"] {
+  const metric = sort.key === "visitors" ? "visitors" : "views";
+  const page = loadLocalTablePage({
+    rows: [...rows],
+    sort: { key: metric, direction: sort.direction },
+    columns: [
+      { key: "views", getValue: (row) => row.views },
+      { key: "visitors", getValue: (row) => row.visitors },
+    ],
+    tab,
+    limit,
+    cursor,
+    search,
+    getSearchText: (row) => row.label,
+  });
+  return { ...page, items: [...page.items] };
 }
 
 export interface OverviewPagesSectionCardData {
@@ -517,6 +545,96 @@ interface PageCardRow {
   };
 }
 
+function createOverviewComparisonColumns(
+  metric: OverviewComparisonMetric,
+  comparisonLabel: string,
+  locale: Locale,
+  messages: AppMessages,
+): readonly TabbedDataTableColumn<PageCardRow, PageCardSortKey, string>[] {
+  return [
+    {
+      key: "reference",
+      label: comparisonLabel,
+      getValue: (row) => row.reference?.[metric] ?? 0,
+      sortValue: (row) => row.reference?.[metric] ?? 0,
+      format: (value) => numberFormat(locale, value),
+    },
+    {
+      key: "current",
+      label:
+        metric === "views" ? messages.common.views : messages.common.visitors,
+      getValue: (row) => row[metric],
+      sortValue: (row) => row[metric],
+      format: (value) => numberFormat(locale, value),
+    },
+    {
+      key: "change",
+      label: messages.common.change,
+      getValue: (row) => row.change?.[metric].absolute ?? 0,
+      sortValue: (row) => row.change?.[metric].relative ?? Infinity,
+      format: (_value, row) => {
+        const change = row.change?.[metric];
+        if (!change) {
+          return <span className="text-muted-foreground">—</span>;
+        }
+        if (change.relative === null) {
+          return (
+            <span className={changeRateClass(row[metric] > 0 ? 100 : null)}>
+              {row[metric] > 0 ? messages.common.new : "—"}
+            </span>
+          );
+        }
+        const percentage = change.relative * 100;
+        return (
+          <span className={changeRateClass(percentage)}>
+            {formatChangeRate(percentage) ?? "0.0%"}
+          </span>
+        );
+      },
+    },
+  ];
+}
+
+const ComparisonMetricToggle = memo(function ComparisonMetricToggle({
+  metric,
+  messages,
+  onMetricChange,
+}: {
+  metric: OverviewComparisonMetric;
+  messages: AppMessages;
+  onMetricChange: (metric: OverviewComparisonMetric) => void;
+}) {
+  const nextMetric: OverviewComparisonMetric =
+    metric === "views" ? "visitors" : "views";
+  const label =
+    metric === "views" ? messages.common.views : messages.common.visitors;
+  const Icon = metric === "views" ? RiBarChartLine : RiUserLine;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Clickable
+          className="size-6 text-muted-foreground hover:text-foreground"
+          aria-label={label}
+          onClick={() => onMetricChange(nextMetric)}
+        >
+          <AutoTransition
+            as="span"
+            type="crossFade"
+            duration={0.18}
+            initial={false}
+            transitionKey={metric}
+            className="inline-flex size-4 items-center justify-center"
+          >
+            <Icon key={metric} className="size-4" aria-hidden="true" />
+          </AutoTransition>
+        </Clickable>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+});
+
 interface SourceCardRow {
   key: string;
   label: string;
@@ -587,7 +705,10 @@ function buildSourceCardExportRows(
       };
     }
 
-    const domain = tab === "domain" ? sanitizeHostname(raw) : "";
+    const domain =
+      tab === "domain" && raw !== DIRECT_REFERRER_FILTER_VALUE
+        ? sanitizeHostname(raw)
+        : "";
     const targetUrl = tab === "link" && raw ? toAbsoluteHttpsUrl(raw) : null;
     const filterValue =
       tab === "domain"
@@ -2385,73 +2506,73 @@ export function OverviewPagesSection({
     },
     [router],
   );
-  const [comparisonMetric, setComparisonMetric] = useState<
-    "views" | "visitors"
-  >("views");
+  const [pageComparisonMetric, setPageComparisonMetric] =
+    useState<OverviewComparisonMetric>("views");
+  const [sourceComparisonMetric, setSourceComparisonMetric] =
+    useState<OverviewComparisonMetric>("views");
+  const [clientComparisonMetric, setClientComparisonMetric] =
+    useState<OverviewComparisonMetric>("views");
+  const [geoComparisonMetric, setGeoComparisonMetric] =
+    useState<OverviewComparisonMetric>("views");
   const comparisonLabel = comparisonLabelForQuery(messages, comparisonQuery);
-  const comparisonColumns = useMemo<
-    readonly TabbedDataTableColumn<PageCardRow, PageCardSortKey, string>[]
-  >(
-    () => [
-      {
-        key: "reference",
-        label: comparisonLabel,
-        getValue: (row) => row.reference?.[comparisonMetric] ?? 0,
-        sortValue: (row) => row.reference?.[comparisonMetric] ?? 0,
-        format: (value) => numberFormat(locale, value),
-      },
-      {
-        key: "current",
-        label: messages.dashboardHeader.compareCurrentPeriod,
-        getValue: (row) => row[comparisonMetric],
-        sortValue: (row) => row[comparisonMetric],
-        format: (value) => numberFormat(locale, value),
-      },
-      {
-        key: "change",
-        label: messages.common.change,
-        getValue: (row) => row.change?.[comparisonMetric].absolute ?? 0,
-        sortValue: (row) =>
-          row.change?.[comparisonMetric].relative ?? -Infinity,
-        format: (_value, row) => {
-          const change = row.change?.[comparisonMetric];
-          if (!change) return "—";
-          if (change.relative === null) {
-            return row[comparisonMetric] > 0 ? messages.common.new : "—";
-          }
-          return formatChangeRate(change.relative * 100) ?? "0.0%";
-        },
-      },
-    ],
-    [comparisonLabel, comparisonMetric, locale, messages],
+  const pageComparisonColumns = useMemo(
+    () =>
+      createOverviewComparisonColumns(
+        pageComparisonMetric,
+        comparisonLabel,
+        locale,
+        messages,
+      ),
+    [comparisonLabel, locale, messages, pageComparisonMetric],
+  );
+  const sourceComparisonColumns = useMemo(
+    () =>
+      createOverviewComparisonColumns(
+        sourceComparisonMetric,
+        comparisonLabel,
+        locale,
+        messages,
+      ),
+    [comparisonLabel, locale, messages, sourceComparisonMetric],
+  );
+  const clientComparisonColumns = useMemo(
+    () =>
+      createOverviewComparisonColumns(
+        clientComparisonMetric,
+        comparisonLabel,
+        locale,
+        messages,
+      ),
+    [clientComparisonMetric, comparisonLabel, locale, messages],
+  );
+  const geoComparisonColumns = useMemo(
+    () =>
+      createOverviewComparisonColumns(
+        geoComparisonMetric,
+        comparisonLabel,
+        locale,
+        messages,
+      ),
+    [comparisonLabel, geoComparisonMetric, locale, messages],
   );
   const overviewMetricColumns = useMemo<
     readonly TabbedDataTableColumn<PageCardRow, PageCardSortKey, string>[]
   >(
-    () =>
-      comparisonQuery
-        ? comparisonColumns
-        : [
-            {
-              key: "views",
-              label: resolvedPrimaryMetricLabel,
-              getValue: (row) => row.views,
-              format: (value) => numberFormat(locale, value),
-            },
-            {
-              key: "visitors",
-              label: messages.common.visitors,
-              getValue: (row) => row.visitors,
-              format: (value) => numberFormat(locale, value),
-            },
-          ],
-    [
-      comparisonColumns,
-      comparisonQuery,
-      locale,
-      messages.common.visitors,
-      resolvedPrimaryMetricLabel,
+    () => [
+      {
+        key: "views",
+        label: resolvedPrimaryMetricLabel,
+        getValue: (row) => row.views,
+        format: (value) => numberFormat(locale, value),
+      },
+      {
+        key: "visitors",
+        label: messages.common.visitors,
+        getValue: (row) => row.visitors,
+        format: (value) => numberFormat(locale, value),
+      },
     ],
+    [locale, messages.common.visitors, resolvedPrimaryMetricLabel],
   );
   const pageCardMetricColumns = useMemo<
     (
@@ -2463,7 +2584,7 @@ export function OverviewPagesSection({
     >[]
   >(
     () => (tab) => {
-      if (comparisonQuery) return comparisonColumns;
+      if (comparisonQuery) return pageComparisonColumns;
       const viewsColumn = {
         key: "views" as const,
         label:
@@ -2483,35 +2604,15 @@ export function OverviewPagesSection({
       ];
     },
     [
-      comparisonColumns,
       comparisonQuery,
       locale,
       messages.common.visitors,
       pageCardShowVisitors,
       pageCardTabMeta,
+      pageComparisonColumns,
       resolvedPrimaryMetricLabel,
     ],
   );
-  const comparisonMetricControl = comparisonQuery ? (
-    <div className="inline-flex items-center border border-border/60">
-      <Button
-        type="button"
-        size="xs"
-        variant={comparisonMetric === "views" ? "secondary" : "ghost"}
-        onClick={() => setComparisonMetric("views")}
-      >
-        {messages.common.views}
-      </Button>
-      <Button
-        type="button"
-        size="xs"
-        variant={comparisonMetric === "visitors" ? "secondary" : "ghost"}
-        onClick={() => setComparisonMetric("visitors")}
-      >
-        {messages.common.visitors}
-      </Button>
-    </div>
-  ) : null;
   const pageCardTableTabs = useMemo(
     () =>
       (resolvedPageCardTabs.length > 0
@@ -2569,7 +2670,7 @@ export function OverviewPagesSection({
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
       const requestMetric = comparisonQuery
-        ? comparisonMetric
+        ? pageComparisonMetric
         : sort.key === "visitors"
           ? "visitors"
           : "views";
@@ -2580,49 +2681,59 @@ export function OverviewPagesSection({
           sort.key === "change")
           ? sort.key
           : undefined;
-      const rawPage = cardDataOverride
-        ? cardDataOverride.page[tab]
-        : await (
-            pageCardFetchers?.[tab] ??
-            ((
-              requestedSiteId: string,
-              requestedWindow: TimeWindow,
-              requestedFilters: FilterDocument,
-              scope?: FilterScope,
-              options?: {
-                limit?: number;
-                cursor?: string | null;
-                search?: string;
-                sort?: "views" | "visitors" | "sessions";
-                direction?: "asc" | "desc";
-                comparisonMetric?: "views" | "visitors";
-                comparisonSortBy?: "current" | "reference" | "change";
-                comparison?: {
-                  mode: "same" | "previous";
-                  window: TimeWindow;
-                  filters: FilterDocument;
-                } | null;
-                signal?: AbortSignal;
-              },
-            ) =>
-              fetchOverviewPageCardTab(
-                requestedSiteId,
-                requestedWindow,
-                tab,
-                requestedFilters,
-                { ...options, resolvedScope: scope },
-              ))
-          )(siteId, window, filters, resolvedScope, {
-            limit,
-            cursor,
-            search,
-            sort: requestMetric,
-            direction: sort.direction,
-            comparison: comparisonQuery,
-            comparisonMetric: comparisonQuery ? comparisonMetric : undefined,
-            comparisonSortBy,
-            signal,
-          });
+      const rawPage =
+        cardDataOverride && !comparisonQuery
+          ? loadLocalOverviewTablePage(
+              cardDataOverride.page[tab],
+              sort,
+              tab,
+              limit,
+              cursor,
+              search,
+            )
+          : await (
+              pageCardFetchers?.[tab] ??
+              ((
+                requestedSiteId: string,
+                requestedWindow: TimeWindow,
+                requestedFilters: FilterDocument,
+                scope?: FilterScope,
+                options?: {
+                  limit?: number;
+                  cursor?: string | null;
+                  search?: string;
+                  sort?: "views" | "visitors" | "sessions";
+                  direction?: "asc" | "desc";
+                  comparisonMetric?: "views" | "visitors";
+                  comparisonSortBy?: "current" | "reference" | "change";
+                  comparison?: {
+                    mode: "same" | "previous";
+                    window: TimeWindow;
+                    filters: FilterDocument;
+                  } | null;
+                  signal?: AbortSignal;
+                },
+              ) =>
+                fetchOverviewPageCardTab(
+                  requestedSiteId,
+                  requestedWindow,
+                  tab,
+                  requestedFilters,
+                  { ...options, resolvedScope: scope },
+                ))
+            )(siteId, window, filters, resolvedScope, {
+              limit,
+              cursor,
+              search,
+              sort: requestMetric,
+              direction: sort.direction,
+              comparison: comparisonQuery,
+              comparisonMetric: comparisonQuery
+                ? pageComparisonMetric
+                : undefined,
+              comparisonSortBy,
+              signal,
+            });
       const page = overviewTabData(rawPage);
       const fallbackLabel =
         pageCardTabMeta[tab].label === messages.pages.hashTab
@@ -2645,7 +2756,7 @@ export function OverviewPagesSection({
       pageCardFetchers,
       pageCardTabMeta,
       comparisonQuery,
-      comparisonMetric,
+      pageComparisonMetric,
       resolvedScope,
       siteId,
       window,
@@ -2656,7 +2767,7 @@ export function OverviewPagesSection({
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
       const requestMetric = comparisonQuery
-        ? comparisonMetric
+        ? sourceComparisonMetric
         : sort.key === "visitors"
           ? "visitors"
           : "views";
@@ -2667,49 +2778,59 @@ export function OverviewPagesSection({
           sort.key === "change")
           ? sort.key
           : undefined;
-      const rawPage = cardDataOverride
-        ? (cardDataOverride.source[tab] ?? [])
-        : await (
-            sourceCardFetchers?.[tab] ??
-            ((
-              requestedSiteId: string,
-              requestedWindow: TimeWindow,
-              requestedFilters: FilterDocument,
-              scope?: FilterScope,
-              options?: {
-                limit?: number;
-                cursor?: string | null;
-                search?: string;
-                sort?: "views" | "visitors" | "sessions";
-                direction?: "asc" | "desc";
-                comparisonMetric?: "views" | "visitors";
-                comparisonSortBy?: "current" | "reference" | "change";
-                comparison?: {
-                  mode: "same" | "previous";
-                  window: TimeWindow;
-                  filters: FilterDocument;
-                } | null;
-                signal?: AbortSignal;
-              },
-            ) =>
-              fetchOverviewSourceCardTab(
-                requestedSiteId,
-                requestedWindow,
-                tab,
-                requestedFilters,
-                { ...options, resolvedScope: scope },
-              ))
-          )(siteId, window, filters, resolvedScope, {
-            limit,
-            cursor,
-            search,
-            sort: requestMetric,
-            direction: sort.direction,
-            comparison: comparisonQuery,
-            comparisonMetric: comparisonQuery ? comparisonMetric : undefined,
-            comparisonSortBy,
-            signal,
-          });
+      const rawPage =
+        cardDataOverride && !comparisonQuery
+          ? loadLocalOverviewTablePage(
+              cardDataOverride.source[tab] ?? [],
+              sort,
+              tab,
+              limit,
+              cursor,
+              search,
+            )
+          : await (
+              sourceCardFetchers?.[tab] ??
+              ((
+                requestedSiteId: string,
+                requestedWindow: TimeWindow,
+                requestedFilters: FilterDocument,
+                scope?: FilterScope,
+                options?: {
+                  limit?: number;
+                  cursor?: string | null;
+                  search?: string;
+                  sort?: "views" | "visitors" | "sessions";
+                  direction?: "asc" | "desc";
+                  comparisonMetric?: "views" | "visitors";
+                  comparisonSortBy?: "current" | "reference" | "change";
+                  comparison?: {
+                    mode: "same" | "previous";
+                    window: TimeWindow;
+                    filters: FilterDocument;
+                  } | null;
+                  signal?: AbortSignal;
+                },
+              ) =>
+                fetchOverviewSourceCardTab(
+                  requestedSiteId,
+                  requestedWindow,
+                  tab,
+                  requestedFilters,
+                  { ...options, resolvedScope: scope },
+                ))
+            )(siteId, window, filters, resolvedScope, {
+              limit,
+              cursor,
+              search,
+              sort: requestMetric,
+              direction: sort.direction,
+              comparison: comparisonQuery,
+              comparisonMetric: comparisonQuery
+                ? sourceComparisonMetric
+                : undefined,
+              comparisonSortBy,
+              signal,
+            });
       const page = overviewTabData(rawPage);
       return {
         items: buildSourceCardExportRows(
@@ -2726,7 +2847,7 @@ export function OverviewPagesSection({
       filters,
       messages.overview.channelLabels,
       comparisonQuery,
-      comparisonMetric,
+      sourceComparisonMetric,
       resolvedScope,
       siteId,
       sourceCardDirectLabel,
@@ -2739,7 +2860,7 @@ export function OverviewPagesSection({
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
       const requestMetric = comparisonQuery
-        ? comparisonMetric
+        ? clientComparisonMetric
         : sort.key === "visitors"
           ? "visitors"
           : "views";
@@ -2750,49 +2871,59 @@ export function OverviewPagesSection({
           sort.key === "change")
           ? sort.key
           : undefined;
-      const rawPage = cardDataOverride
-        ? cardDataOverride.client[tab]
-        : await (
-            clientCardFetchers?.[tab] ??
-            ((
-              requestedSiteId: string,
-              requestedWindow: TimeWindow,
-              requestedFilters: FilterDocument,
-              scope?: FilterScope,
-              options?: {
-                limit?: number;
-                cursor?: string | null;
-                search?: string;
-                sort?: "views" | "visitors" | "sessions";
-                direction?: "asc" | "desc";
-                comparisonMetric?: "views" | "visitors";
-                comparisonSortBy?: "current" | "reference" | "change";
-                comparison?: {
-                  mode: "same" | "previous";
-                  window: TimeWindow;
-                  filters: FilterDocument;
-                } | null;
-                signal?: AbortSignal;
-              },
-            ) =>
-              fetchOverviewClientDimensionTab(
-                requestedSiteId,
-                requestedWindow,
-                tab,
-                requestedFilters,
-                { ...options, resolvedScope: scope },
-              ))
-          )(siteId, window, filters, resolvedScope, {
-            limit,
-            cursor,
-            search,
-            sort: requestMetric,
-            direction: sort.direction,
-            comparison: comparisonQuery,
-            comparisonMetric: comparisonQuery ? comparisonMetric : undefined,
-            comparisonSortBy,
-            signal,
-          });
+      const rawPage =
+        cardDataOverride && !comparisonQuery
+          ? loadLocalOverviewTablePage(
+              cardDataOverride.client[tab],
+              sort,
+              tab,
+              limit,
+              cursor,
+              search,
+            )
+          : await (
+              clientCardFetchers?.[tab] ??
+              ((
+                requestedSiteId: string,
+                requestedWindow: TimeWindow,
+                requestedFilters: FilterDocument,
+                scope?: FilterScope,
+                options?: {
+                  limit?: number;
+                  cursor?: string | null;
+                  search?: string;
+                  sort?: "views" | "visitors" | "sessions";
+                  direction?: "asc" | "desc";
+                  comparisonMetric?: "views" | "visitors";
+                  comparisonSortBy?: "current" | "reference" | "change";
+                  comparison?: {
+                    mode: "same" | "previous";
+                    window: TimeWindow;
+                    filters: FilterDocument;
+                  } | null;
+                  signal?: AbortSignal;
+                },
+              ) =>
+                fetchOverviewClientDimensionTab(
+                  requestedSiteId,
+                  requestedWindow,
+                  tab,
+                  requestedFilters,
+                  { ...options, resolvedScope: scope },
+                ))
+            )(siteId, window, filters, resolvedScope, {
+              limit,
+              cursor,
+              search,
+              sort: requestMetric,
+              direction: sort.direction,
+              comparison: comparisonQuery,
+              comparisonMetric: comparisonQuery
+                ? clientComparisonMetric
+                : undefined,
+              comparisonSortBy,
+              signal,
+            });
       const page = overviewTabData(rawPage);
       return {
         items: buildClientDimensionRows(tab, page.items, locale, messages),
@@ -2806,7 +2937,7 @@ export function OverviewPagesSection({
       locale,
       messages,
       comparisonQuery,
-      comparisonMetric,
+      clientComparisonMetric,
       resolvedScope,
       siteId,
       window,
@@ -2817,7 +2948,7 @@ export function OverviewPagesSection({
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
       const requestMetric = comparisonQuery
-        ? comparisonMetric
+        ? geoComparisonMetric
         : sort.key === "visitors"
           ? "visitors"
           : "views";
@@ -2828,49 +2959,59 @@ export function OverviewPagesSection({
           sort.key === "change")
           ? sort.key
           : undefined;
-      const rawPage = cardDataOverride
-        ? cardDataOverride.geo[tab]
-        : await (
-            geoCardFetchers?.[tab] ??
-            ((
-              requestedSiteId: string,
-              requestedWindow: TimeWindow,
-              requestedFilters: FilterDocument,
-              scope?: FilterScope,
-              options?: {
-                limit?: number;
-                cursor?: string | null;
-                search?: string;
-                sort?: "views" | "visitors" | "sessions";
-                direction?: "asc" | "desc";
-                comparisonMetric?: "views" | "visitors";
-                comparisonSortBy?: "current" | "reference" | "change";
-                comparison?: {
-                  mode: "same" | "previous";
-                  window: TimeWindow;
-                  filters: FilterDocument;
-                } | null;
-                signal?: AbortSignal;
-              },
-            ) =>
-              fetchOverviewGeoDimensionTabPage(
-                requestedSiteId,
-                requestedWindow,
-                tab,
-                requestedFilters,
-                { ...options, resolvedScope: scope },
-              ))
-          )(siteId, window, filters, resolvedScope, {
-            limit,
-            cursor,
-            search,
-            sort: requestMetric,
-            direction: sort.direction,
-            comparison: comparisonQuery,
-            comparisonMetric: comparisonQuery ? comparisonMetric : undefined,
-            comparisonSortBy,
-            signal,
-          });
+      const rawPage =
+        cardDataOverride && !comparisonQuery
+          ? loadLocalOverviewTablePage(
+              cardDataOverride.geo[tab],
+              sort,
+              tab,
+              limit,
+              cursor,
+              search,
+            )
+          : await (
+              geoCardFetchers?.[tab] ??
+              ((
+                requestedSiteId: string,
+                requestedWindow: TimeWindow,
+                requestedFilters: FilterDocument,
+                scope?: FilterScope,
+                options?: {
+                  limit?: number;
+                  cursor?: string | null;
+                  search?: string;
+                  sort?: "views" | "visitors" | "sessions";
+                  direction?: "asc" | "desc";
+                  comparisonMetric?: "views" | "visitors";
+                  comparisonSortBy?: "current" | "reference" | "change";
+                  comparison?: {
+                    mode: "same" | "previous";
+                    window: TimeWindow;
+                    filters: FilterDocument;
+                  } | null;
+                  signal?: AbortSignal;
+                },
+              ) =>
+                fetchOverviewGeoDimensionTabPage(
+                  requestedSiteId,
+                  requestedWindow,
+                  tab,
+                  requestedFilters,
+                  { ...options, resolvedScope: scope },
+                ))
+            )(siteId, window, filters, resolvedScope, {
+              limit,
+              cursor,
+              search,
+              sort: requestMetric,
+              direction: sort.direction,
+              comparison: comparisonQuery,
+              comparisonMetric: comparisonQuery
+                ? geoComparisonMetric
+                : undefined,
+              comparisonSortBy,
+              signal,
+            });
       const page = overviewTabData(rawPage);
       return {
         items: buildGeoDimensionRows(
@@ -2886,7 +3027,7 @@ export function OverviewPagesSection({
     [
       cardDataOverride,
       comparisonQuery,
-      comparisonMetric,
+      geoComparisonMetric,
       filters,
       geoCardFetchers,
       locale,
@@ -3414,7 +3555,12 @@ export function OverviewPagesSection({
             <TabbedDataTableCard<PageCardTab, PageCardRow, PageCardSortKey>
               tabs={pageCardTableTabs}
               loader={pageCardLoader}
-              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:page:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
+              defaultSort={
+                comparisonQuery
+                  ? { key: "current", direction: "desc" }
+                  : undefined
+              }
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:page:${pageComparisonMetric}:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
               columns={pageCardMetricColumns}
               rowAdapter={pageCardRowAdapter}
               filterRows={filterPageCardRows}
@@ -3425,7 +3571,15 @@ export function OverviewPagesSection({
               emptyLabel={noDataText}
               search={searchConfig}
               export={tableExport}
-              headerRight={comparisonMetricControl}
+              headerRight={
+                comparisonQuery ? (
+                  <ComparisonMetricToggle
+                    metric={pageComparisonMetric}
+                    messages={messages}
+                    onMetricChange={setPageComparisonMetric}
+                  />
+                ) : null
+              }
               className="h-full"
             />
           </div>
@@ -3436,8 +3590,17 @@ export function OverviewPagesSection({
             <TabbedDataTableCard<SourceCardTab, SourceCardRow, PageCardSortKey>
               tabs={sourceCardTableTabs}
               loader={sourceCardLoader}
-              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:source:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
-              columns={overviewMetricColumns}
+              defaultSort={
+                comparisonQuery
+                  ? { key: "current", direction: "desc" }
+                  : undefined
+              }
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:source:${sourceComparisonMetric}:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
+              columns={
+                comparisonQuery
+                  ? sourceComparisonColumns
+                  : overviewMetricColumns
+              }
               rowAdapter={sourceCardRowAdapter}
               filterRows={filterSourceCardRows}
               sortActionLabel={(label) =>
@@ -3447,7 +3610,15 @@ export function OverviewPagesSection({
               emptyLabel={noDataText}
               search={searchConfig}
               export={tableExport}
-              headerRight={comparisonMetricControl}
+              headerRight={
+                comparisonQuery ? (
+                  <ComparisonMetricToggle
+                    metric={sourceComparisonMetric}
+                    messages={messages}
+                    onMetricChange={setSourceComparisonMetric}
+                  />
+                ) : null
+              }
               className="h-full"
             />
           </div>
@@ -3462,8 +3633,17 @@ export function OverviewPagesSection({
             >
               tabs={clientDimensionCardTableTabs}
               loader={clientDimensionCardLoader}
-              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:client:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
-              columns={overviewMetricColumns}
+              defaultSort={
+                comparisonQuery
+                  ? { key: "current", direction: "desc" }
+                  : undefined
+              }
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:client:${clientComparisonMetric}:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
+              columns={
+                comparisonQuery
+                  ? clientComparisonColumns
+                  : overviewMetricColumns
+              }
               rowAdapter={clientDimensionCardRowAdapter}
               filterRows={filterClientDimensionCardRows}
               sortActionLabel={(label) =>
@@ -3473,7 +3653,15 @@ export function OverviewPagesSection({
               emptyLabel={noDataText}
               search={searchConfig}
               export={tableExport}
-              headerRight={comparisonMetricControl}
+              headerRight={
+                comparisonQuery ? (
+                  <ComparisonMetricToggle
+                    metric={clientComparisonMetric}
+                    messages={messages}
+                    onMetricChange={setClientComparisonMetric}
+                  />
+                ) : null
+              }
               className="h-full"
             />
           </div>
@@ -3488,8 +3676,15 @@ export function OverviewPagesSection({
             >
               tabs={geoDimensionCardTableTabs}
               loader={geoDimensionCardLoader}
-              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:geo:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
-              columns={overviewMetricColumns}
+              defaultSort={
+                comparisonQuery
+                  ? { key: "current", direction: "desc" }
+                  : undefined
+              }
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:geo:${geoComparisonMetric}:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
+              columns={
+                comparisonQuery ? geoComparisonColumns : overviewMetricColumns
+              }
               rowAdapter={geoDimensionCardRowAdapter}
               filterRows={filterGeoDimensionCardRows}
               sortActionLabel={(label) =>
@@ -3499,7 +3694,15 @@ export function OverviewPagesSection({
               emptyLabel={noDataText}
               search={searchConfig}
               export={tableExport}
-              headerRight={comparisonMetricControl}
+              headerRight={
+                comparisonQuery ? (
+                  <ComparisonMetricToggle
+                    metric={geoComparisonMetric}
+                    messages={messages}
+                    onMetricChange={setGeoComparisonMetric}
+                  />
+                ) : null
+              }
               className="h-full"
             />
           </div>

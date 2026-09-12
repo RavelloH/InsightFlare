@@ -128,7 +128,12 @@ describe("comparison dimension readers", () => {
       "current",
       "desc",
     );
-    expect(cursor).toEqual({ sortClass: 0, primary: 10, key: "alpha" });
+    expect(cursor).toEqual({
+      sortClass: 0,
+      primary: 10,
+      secondary: 5,
+      key: "alpha",
+    });
   });
 
   it("supports reference sorting, escaped search, and change ordering", async () => {
@@ -170,6 +175,7 @@ describe("comparison dimension readers", () => {
       {
         sortClass: 0,
         primary: 0,
+        secondary: 0,
         key: "old",
       },
       "private-dashboard",
@@ -207,7 +213,7 @@ describe("comparison dimension readers", () => {
       1,
       "exit",
       { metric: "visitors", sortBy: "change", direction: "asc" },
-      { sortClass: 0, primary: 0, key: "/before" },
+      { sortClass: 0, primary: 0, secondary: 0, key: "/before" },
       "private-dashboard",
     );
 
@@ -247,7 +253,7 @@ describe("comparison dimension readers", () => {
         sortBy: "reference",
         direction: "desc",
       },
-      { sortClass: 0, primary: 99, key: "before" },
+      { sortClass: 0, primary: 99, secondary: 99, key: "before" },
       "private-dashboard",
     );
 
@@ -273,7 +279,7 @@ describe("comparison dimension readers", () => {
       1,
       "entry",
       { metric: "visitors", sortBy: "current", direction: "asc" },
-      { sortClass: 0, primary: 0, key: "/before" },
+      { sortClass: 0, primary: 0, secondary: 0, key: "/before" },
       "private-dashboard",
       undefined,
     );

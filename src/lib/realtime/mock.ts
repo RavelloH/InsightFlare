@@ -80,7 +80,10 @@ import {
   generateDemoEventTypeDetail,
   generateDemoEventTypeFieldValues,
 } from "@/lib/realtime/mock/events";
-import { parseDemoInterval } from "@/lib/realtime/mock/filters";
+import {
+  normalizeDemoSearch,
+  parseDemoInterval,
+} from "@/lib/realtime/mock/filters";
 import {
   createDemoFunnel,
   deleteDemoFunnel,
@@ -162,23 +165,120 @@ function paginateDemoEnvelope(
   }
   const record = result as Record<string, unknown>;
   if (!Array.isArray(record.data)) return result;
+  const comparisonEnabled =
+    params.compare === "same" || params.compare === "previous";
+  const comparisonMetric = params.metric === "visitors" ? "visitors" : "views";
+  const comparisonSortBy =
+    params.sortBy === "reference" || params.sortBy === "change"
+      ? params.sortBy
+      : "current";
+  const getRowValue = (row: unknown, key: string): number => {
+    if (!row || typeof row !== "object") return 0;
+    const value = (row as Record<string, unknown>)[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  };
+  const getComparisonMetric = (row: unknown, side: "current" | "reference") =>
+    getRowValue(
+      side === "reference" && row && typeof row === "object"
+        ? (row as Record<string, unknown>).reference
+        : row,
+      comparisonMetric,
+    );
+  const getComparisonChange = (row: unknown): number => {
+    if (!row || typeof row !== "object") return Number.NEGATIVE_INFINITY;
+    const change = (row as Record<string, unknown>).change;
+    if (!change || typeof change !== "object") return Number.NEGATIVE_INFINITY;
+    const metricChange = (change as Record<string, unknown>)[comparisonMetric];
+    if (!metricChange || typeof metricChange !== "object") {
+      return Number.NEGATIVE_INFINITY;
+    }
+    const relative = (metricChange as Record<string, unknown>).relative;
+    return typeof relative === "number" && Number.isFinite(relative)
+      ? relative
+      : Number.NEGATIVE_INFINITY;
+  };
+  const getRowLabel = (row: unknown): string => {
+    if (!row || typeof row !== "object") return "";
+    const record = row as Record<string, unknown>;
+    for (const key of [
+      "label",
+      "value",
+      "pathname",
+      "referrer",
+      "channel",
+      "key",
+    ]) {
+      const value = String(record[key] ?? "").trim();
+      if (value) return value;
+    }
+    return "";
+  };
+  const compareRows = (left: unknown, right: unknown): number => {
+    const direction = params.direction === "asc" ? 1 : -1;
+    const leftValue = comparisonEnabled
+      ? comparisonSortBy === "reference"
+        ? getComparisonMetric(left, "reference")
+        : comparisonSortBy === "change"
+          ? getComparisonChange(left)
+          : getComparisonMetric(left, "current")
+      : getRowValue(
+          left,
+          params.sort === "sessions" || params.sort === "visitors"
+            ? String(params.sort)
+            : "views",
+        );
+    const rightValue = comparisonEnabled
+      ? comparisonSortBy === "reference"
+        ? getComparisonMetric(right, "reference")
+        : comparisonSortBy === "change"
+          ? getComparisonChange(right)
+          : getComparisonMetric(right, "current")
+      : getRowValue(
+          right,
+          params.sort === "sessions" || params.sort === "visitors"
+            ? String(params.sort)
+            : "views",
+        );
+    if (comparisonEnabled && comparisonSortBy === "change") {
+      const leftNew =
+        getComparisonMetric(left, "reference") === 0 &&
+        getComparisonMetric(left, "current") > 0;
+      const rightNew =
+        getComparisonMetric(right, "reference") === 0 &&
+        getComparisonMetric(right, "current") > 0;
+      if (leftNew !== rightNew) {
+        return direction === 1 ? (leftNew ? 1 : -1) : leftNew ? -1 : 1;
+      }
+    }
+    return (
+      (leftValue - rightValue) * direction ||
+      getRowLabel(left).localeCompare(getRowLabel(right))
+    );
+  };
+  const requestBinding = Object.fromEntries(
+    Object.entries(params).filter(([key]) => key !== "cursor"),
+  );
   const page = demoPage(
     record.data,
     params,
     {
       operation,
-      siteId: params.siteId ?? null,
-      from: params.from ?? null,
-      to: params.to ?? null,
-      search: String(params.search ?? "")
-        .trim()
-        .toLowerCase(),
-      filterKey: params.filterKey ?? null,
-      tab: params.tab ?? null,
-      dimension: params.dimension ?? null,
+      request: requestBinding,
     },
     fallbackLimit,
     maxLimit,
+    true,
+    {
+      search: normalizeDemoSearch(params),
+      getSearchValues: (row) => [getRowLabel(row)],
+      compare:
+        comparisonEnabled ||
+        params.sort === "views" ||
+        params.sort === "sessions" ||
+        params.sort === "visitors"
+          ? compareRows
+          : undefined,
+    },
   );
   return {
     ...record,

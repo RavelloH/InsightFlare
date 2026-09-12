@@ -14,7 +14,11 @@ import type {
 import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
-import { normalizePaginatedCollection, withFilters } from "./client-utils";
+import {
+  normalizePaginatedCollection,
+  withFilters,
+  withPagination,
+} from "./client-utils";
 
 const utmPathMap: Record<UtmDimensionTab, string> = {
   source: "utm-source",
@@ -42,6 +46,9 @@ export async function fetchReferrers(
         timeZone: window.timeZone,
         limit: options?.limit ?? 100,
         ...(options?.cursor ? { cursor: options.cursor } : {}),
+        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+        ...(options?.sort ? { sort: options.sort } : {}),
+        ...(options?.direction ? { direction: options.direction } : {}),
         fullUrl: options?.fullUrl ? 1 : 0,
       },
       filters,
@@ -77,16 +84,22 @@ export async function fetchUtmDimension(
   window: TimeWindow,
   tab: UtmDimensionTab,
   filters?: FilterDocument,
-  options?: { signal?: AbortSignal },
+  options?: DashboardListRequestOptions,
 ): Promise<DimensionData["data"]> {
   const requestParams = withFilters(
-    {
-      siteId,
-      from: window.from,
-      to: window.to,
-      timeZone: window.timeZone,
-      limit: 100,
-    },
+    withPagination(
+      {
+        siteId,
+        from: window.from,
+        to: window.to,
+        timeZone: window.timeZone,
+        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+        ...(options?.sort ? { sort: options.sort } : {}),
+        ...(options?.direction ? { direction: options.direction } : {}),
+      },
+      options,
+      20,
+    ),
     filters,
   );
   const response = options?.signal

@@ -21,6 +21,107 @@ export class DemoInvalidCursorError extends Error {
   }
 }
 
+function defaultRowSearchValues<T>(row: T): readonly unknown[] {
+  if (!row || typeof row !== "object") return [row];
+  const record = row as Record<string, unknown>;
+  return [
+    record.label,
+    record.value,
+    record.pathname,
+    record.referrer,
+    record.channel,
+    record.key,
+  ];
+}
+
+function numericRowValue(row: unknown, key: string): number {
+  if (!row || typeof row !== "object") return 0;
+  const value = (row as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function defaultRowComparator<T>(
+  params: Record<string, string | number>,
+): ((left: T, right: T) => number) | undefined {
+  const comparisonEnabled =
+    params.compare === "same" || params.compare === "previous";
+  const normalSort =
+    params.sort === "sessions" ||
+    params.sort === "visitors" ||
+    params.sort === "views"
+      ? params.sort
+      : null;
+  if (!comparisonEnabled && !normalSort) return undefined;
+
+  const direction = params.direction === "asc" ? 1 : -1;
+  const metric = params.metric === "visitors" ? "visitors" : "views";
+  const sortBy =
+    params.sortBy === "reference" || params.sortBy === "change"
+      ? params.sortBy
+      : "current";
+  const comparisonValue = (row: T, side: "current" | "reference") => {
+    if (side === "current") return numericRowValue(row, metric);
+    if (!row || typeof row !== "object") return 0;
+    return numericRowValue((row as Record<string, unknown>).reference, metric);
+  };
+  const comparisonChange = (row: T) => {
+    if (!row || typeof row !== "object") return Number.NEGATIVE_INFINITY;
+    const change = (row as Record<string, unknown>).change;
+    if (!change || typeof change !== "object") return Number.NEGATIVE_INFINITY;
+    const metricChange = (change as Record<string, unknown>)[metric];
+    if (!metricChange || typeof metricChange !== "object") {
+      return Number.NEGATIVE_INFINITY;
+    }
+    const relative = (metricChange as Record<string, unknown>).relative;
+    return typeof relative === "number" && Number.isFinite(relative)
+      ? relative
+      : Number.NEGATIVE_INFINITY;
+  };
+  const rowLabel = (row: T) =>
+    String(
+      defaultRowSearchValues(row).find((value) => String(value ?? "").trim()) ??
+        "",
+    );
+
+  return (left, right) => {
+    if (comparisonEnabled) {
+      if (sortBy === "change") {
+        const leftNew =
+          comparisonValue(left, "reference") === 0 &&
+          comparisonValue(left, "current") > 0;
+        const rightNew =
+          comparisonValue(right, "reference") === 0 &&
+          comparisonValue(right, "current") > 0;
+        if (leftNew !== rightNew) {
+          return direction === 1 ? (leftNew ? 1 : -1) : leftNew ? -1 : 1;
+        }
+      }
+      const leftValue =
+        sortBy === "reference"
+          ? comparisonValue(left, "reference")
+          : sortBy === "change"
+            ? comparisonChange(left)
+            : comparisonValue(left, "current");
+      const rightValue =
+        sortBy === "reference"
+          ? comparisonValue(right, "reference")
+          : sortBy === "change"
+            ? comparisonChange(right)
+            : comparisonValue(right, "current");
+      return (
+        (leftValue - rightValue) * direction ||
+        rowLabel(left).localeCompare(rowLabel(right))
+      );
+    }
+
+    return (
+      (numericRowValue(left, normalSort!) -
+        numericRowValue(right, normalSort!)) *
+        direction || rowLabel(left).localeCompare(rowLabel(right))
+    );
+  };
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (!value || typeof value !== "object") return value;
@@ -122,6 +223,11 @@ export function demoPage<T>(
   defaultLimit: number,
   maxLimit = 500,
   zeroUsesFallback = true,
+  options?: {
+    search?: string;
+    getSearchValues?: (row: T) => readonly unknown[];
+    compare?: (left: T, right: T) => number;
+  },
 ): { items: T[]; pagination: DemoPagination } {
   const rawLimit = Number(params.limit ?? defaultLimit);
   const parsedLimit = Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : null;
@@ -134,6 +240,26 @@ export function demoPage<T>(
         : parsedLimit,
     ),
   );
+  const search =
+    options?.search?.trim().toLowerCase() ??
+    String(params.search ?? params.q ?? "")
+      .trim()
+      .toLowerCase();
+  const searchValues = options?.getSearchValues ?? defaultRowSearchValues;
+  const searchableRows = search
+    ? rows.filter((row) =>
+        searchValues(row).some((value) =>
+          String(value ?? "")
+            .trim()
+            .toLowerCase()
+            .includes(search),
+        ),
+      )
+    : [...rows];
+  const compare = options?.compare ?? defaultRowComparator<T>(params);
+  const orderedRows = compare
+    ? [...searchableRows].sort(compare)
+    : searchableRows;
   const cursor = decodeDemoCursor(
     params.cursor,
     binding,
@@ -147,7 +273,7 @@ export function demoPage<T>(
       ),
   );
   const start = cursor?.index ?? 0;
-  const requested = rows.slice(start, start + limit + 1);
+  const requested = orderedRows.slice(start, start + limit + 1);
   const items = requested.slice(0, limit);
   const hasMore = requested.length > limit;
   return {

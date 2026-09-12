@@ -386,6 +386,8 @@ export function generateDemoVisitors(
     },
     80,
     120,
+    true,
+    { search: "" },
   );
 
   return {
@@ -442,6 +444,8 @@ export function generateDemoSessions(
     },
     80,
     120,
+    true,
+    { search: "" },
   );
 
   return {

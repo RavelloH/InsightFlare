@@ -41,6 +41,10 @@ import {
 } from "@/lib/realtime/mock/admin";
 import { generateDemoPages } from "@/lib/realtime/mock/analytics";
 import {
+  buildDemoComparisonRows,
+  resolveDemoComparison,
+} from "@/lib/realtime/mock/comparison";
+import {
   buildCountryPool,
   buildReferrerPool,
   DEMO_CITIES_BY_COUNTRY,
@@ -436,17 +440,38 @@ export function generateDemoOverviewPageTab(
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
-  const filtered = applyDemoFilters(dataset, parseDemoFilters(params));
+  const filtered = applyDemoFilters(dataset, filters);
   const tabs = collectPageDataAndTabs(
     dataset,
     filtered,
     Math.max(1, filtered.visits.length),
   ).tabs;
   const data = tabs[tab] ?? [];
+  const comparison = resolveDemoComparison(params, filters);
+  const comparisonData = comparison
+    ? (() => {
+        const referenceDataset = buildDemoFactDataset(
+          siteId,
+          comparison.from,
+          comparison.to,
+        );
+        const referenceFiltered = applyDemoFilters(
+          referenceDataset,
+          comparison.filters,
+        );
+        const referenceTabs = collectPageDataAndTabs(
+          referenceDataset,
+          referenceFiltered,
+          Math.max(1, referenceFiltered.visits.length),
+        ).tabs;
+        return buildDemoComparisonRows(data, referenceTabs[tab] ?? [], params);
+      })()
+    : data;
   return {
     ok: true,
-    data,
+    data: comparisonData,
   };
 }
 
@@ -461,19 +486,58 @@ export function generateDemoOverviewSourceTab(
   const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
+  const comparison = resolveDemoComparison(params, filters);
   if (tab === "channel") {
     const rows = collectTrafficChannelRows(
       dataset,
       filtered,
       Math.max(1, filtered.visits.length),
     );
+    const comparisonRows = comparison
+      ? (() => {
+          const referenceDataset = buildDemoFactDataset(
+            siteId,
+            comparison.from,
+            comparison.to,
+          );
+          const referenceFiltered = applyDemoFilters(
+            referenceDataset,
+            comparison.filters,
+          );
+          return buildDemoComparisonRows(
+            rows.map((item) => ({
+              label: item.channel,
+              views: item.views,
+              sessions: item.sessions,
+              visitors: item.visitors,
+            })),
+            collectTrafficChannelRows(
+              referenceDataset,
+              referenceFiltered,
+              Math.max(1, referenceFiltered.visits.length),
+            ).map((item) => ({
+              label: item.channel,
+              views: item.views,
+              sessions: item.sessions,
+              visitors: item.visitors,
+            })),
+            params,
+          );
+        })()
+      : null;
     return {
       ok: true,
-      data: rows.map((item) => ({
-        label: item.channel,
-        views: item.views,
-        sessions: item.sessions,
-        visitors: item.visitors,
+      data: (comparisonRows ?? rows).map((item) => ({
+        label: String(
+          "label" in item ? (item.label ?? "") : (item.channel ?? ""),
+        ),
+        views: Number(item.views ?? 0),
+        sessions: Number(item.sessions ?? 0),
+        visitors: Number(item.visitors ?? 0),
+        ...("reference" in item && item.reference
+          ? { reference: item.reference }
+          : {}),
+        ...("change" in item && item.change ? { change: item.change } : {}),
       })),
     };
   }
@@ -486,13 +550,52 @@ export function generateDemoOverviewSourceTab(
       directValue: "",
     },
   );
+  const comparisonRows = comparison
+    ? (() => {
+        const referenceDataset = buildDemoFactDataset(
+          siteId,
+          comparison.from,
+          comparison.to,
+        );
+        const referenceFiltered = applyDemoFilters(
+          referenceDataset,
+          comparison.filters,
+        );
+        return buildDemoComparisonRows(
+          rows.map((item) => ({
+            label: item.referrer,
+            views: item.views,
+            sessions: item.sessions,
+            visitors: item.visitors,
+          })),
+          collectReferrerRows(
+            referenceDataset,
+            referenceFiltered,
+            Math.max(1, referenceFiltered.visits.length),
+            { includeFullUrl: tab === "link", directValue: "" },
+          ).map((item) => ({
+            label: item.referrer,
+            views: item.views,
+            sessions: item.sessions,
+            visitors: item.visitors,
+          })),
+          params,
+        );
+      })()
+    : null;
   return {
     ok: true,
-    data: rows.map((item) => ({
-      label: String(item.referrer ?? ""),
+    data: (comparisonRows ?? rows).map((item) => ({
+      label: String(
+        "label" in item ? (item.label ?? "") : (item.referrer ?? ""),
+      ),
       views: Number(item.views ?? 0),
       sessions: Number(item.sessions ?? 0),
       visitors: Number(item.visitors ?? 0),
+      ...("reference" in item && item.reference
+        ? { reference: item.reference }
+        : {}),
+      ...("change" in item && item.change ? { change: item.change } : {}),
     })),
   };
 }
@@ -504,17 +607,38 @@ export function generateDemoOverviewClientTab(
 ): Record<string, unknown> {
   const from = parseDemoNumber(params.from, 0);
   const to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
-  const filtered = applyDemoFilters(dataset, parseDemoFilters(params));
+  const filtered = applyDemoFilters(dataset, filters);
   const tabs = collectClientTabs(
     dataset,
     filtered,
     Math.max(1, filtered.visits.length),
   );
   const data = tabs[tab] ?? [];
+  const comparison = resolveDemoComparison(params, filters);
+  const comparisonData = comparison
+    ? (() => {
+        const referenceDataset = buildDemoFactDataset(
+          siteId,
+          comparison.from,
+          comparison.to,
+        );
+        const referenceFiltered = applyDemoFilters(
+          referenceDataset,
+          comparison.filters,
+        );
+        const referenceTabs = collectClientTabs(
+          referenceDataset,
+          referenceFiltered,
+          Math.max(1, referenceFiltered.visits.length),
+        );
+        return buildDemoComparisonRows(data, referenceTabs[tab] ?? [], params);
+      })()
+    : data;
   return {
     ok: true,
-    data,
+    data: comparisonData,
   };
 }
 
@@ -536,9 +660,33 @@ export function generateDemoOverviewGeoTab(
     Math.max(1, dataset.visits.length),
   );
   const data = tabs[tab] ?? [];
+  const comparison = resolveDemoComparison(params, rawFilters);
+  const comparisonData = comparison
+    ? (() => {
+        const referenceDataset = buildDemoFactDataset(
+          siteId,
+          comparison.from,
+          comparison.to,
+        );
+        const referenceFilters =
+          tab === "country"
+            ? withoutDemoGeoFilter(comparison.filters)
+            : comparison.filters;
+        const referenceFiltered = applyDemoFilters(
+          referenceDataset,
+          referenceFilters,
+        );
+        const referenceTabs = collectGeoTabs(
+          referenceDataset,
+          referenceFiltered,
+          Math.max(1, referenceFiltered.visits.length),
+        );
+        return buildDemoComparisonRows(data, referenceTabs[tab] ?? [], params);
+      })()
+    : data;
   return {
     ok: true,
-    data,
+    data: comparisonData,
   };
 }
 

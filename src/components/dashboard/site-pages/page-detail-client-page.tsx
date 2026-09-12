@@ -109,12 +109,18 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
         options?: {
           limit?: number;
           cursor?: string | null;
+          search?: string;
+          sort?: "views" | "visitors" | "sessions";
+          direction?: "asc" | "desc";
           signal?: AbortSignal;
         },
       ) =>
         fetchPageHashTab(requestedSiteId, requestedWindow, requestedFilters, {
           limit: options?.limit ?? 100,
           cursor: options?.cursor,
+          search: options?.search,
+          sort: options?.sort,
+          direction: options?.direction,
           signal: options?.signal,
         }),
       query: (
@@ -125,12 +131,18 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
         options?: {
           limit?: number;
           cursor?: string | null;
+          search?: string;
+          sort?: "views" | "visitors" | "sessions";
+          direction?: "asc" | "desc";
           signal?: AbortSignal;
         },
       ) =>
         fetchPageQueryTab(requestedSiteId, requestedWindow, requestedFilters, {
           limit: options?.limit ?? 100,
           cursor: options?.cursor,
+          search: options?.search,
+          sort: options?.sort,
+          direction: options?.direction,
           signal: options?.signal,
           resolvedScope:
             resolvedScope === "event" ||
@@ -246,9 +258,13 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
   );
   const eventLoader = useMemo<AsyncDimensionBreakdownLoader<"event">>(
     () =>
-      async ({ signal, limit }) => {
+      async ({ cursor, limit, search, signal, sort }) => {
         const page = await fetchEventTypesTab(siteId, window, detailFilters, {
+          cursor,
           limit,
+          search,
+          sort: sort.key === "visitors" ? "visitors" : "views",
+          direction: sort.direction,
           signal,
         });
         const items = mapOverviewRows(page.items, messages.common.unknown, {

@@ -360,7 +360,8 @@ export function prepareScopedQuery(
   if (
     (operation === "comparison" ||
       operation === "comparison-breakdown" ||
-      operation === "dimension") &&
+      operation === "dimension" ||
+      operation === "channels") &&
     isComparisonQuery(query)
   ) {
     return prepareScopedComparisonQuery(operation, query);

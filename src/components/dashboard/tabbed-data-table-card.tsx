@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/tooltip";
 import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { sortLocalTableRows } from "@/lib/dashboard/table-loader";
 import type { PaginationMeta } from "@/lib/pagination";
 import { cn } from "@/lib/utils";
 
@@ -518,9 +519,17 @@ function TabbedDataTableCardImpl<
       createTabRecord(tabs, (tab) => {
         const configured =
           controlledSortByTab?.[tab.value] ?? sortByTab[tab.value];
-        if (configured) return configured;
-
         const tabColumns = getColumnsForTab(columns, tab.value);
+        if (
+          configured &&
+          tabColumns.some(
+            (column) =>
+              column.key === configured.key && column.sortable !== false,
+          )
+        ) {
+          return configured;
+        }
+
         return {
           key:
             (tab.defaultSort?.key as TKey | undefined) ??
@@ -533,6 +542,25 @@ function TabbedDataTableCardImpl<
     [columns, controlledSortByTab, defaultSort, sortByTab, tabs],
   );
   const activeSort = effectiveSortByTab[activeTab];
+  const activeColumns = getColumnsForTab(columns, activeTab);
+  const localSortText = rowAdapter?.getSearchText ?? getRowSearchText;
+  const completedRowsByDatasetRef = useRef<Map<string, readonly TRow[]>>(
+    new Map(),
+  );
+  const datasetKey = useMemo(
+    () =>
+      JSON.stringify([
+        requestKey ?? "",
+        tabsKey,
+        activeTab,
+        deferredSearchTerm,
+      ]),
+    [activeTab, deferredSearchTerm, requestKey, tabsKey],
+  );
+  const completedRows =
+    completedRowsByDatasetRef.current.get(datasetKey) ?? null;
+  const querySortKey = completedRows ? "local" : activeSort.key;
+  const querySortDirection = completedRows ? "local" : activeSort.direction;
   const dataQuery = useInfiniteQuery({
     queryKey: [
       "dashboard",
@@ -540,8 +568,8 @@ function TabbedDataTableCardImpl<
       requestKey ?? "",
       tabsKey,
       activeTab,
-      activeSort.key,
-      activeSort.direction,
+      querySortKey,
+      querySortDirection,
       deferredSearchTerm,
     ],
     queryFn: ({ pageParam, signal }) =>
@@ -558,17 +586,43 @@ function TabbedDataTableCardImpl<
       lastPage.pagination.hasMore
         ? (lastPage.pagination.nextCursor ?? undefined)
         : undefined,
-    enabled: typeof window !== "undefined",
+    enabled: typeof window !== "undefined" && completedRows === null,
   });
   const { fetchNextPage, hasNextPage, isFetchingNextPage, isPending } =
     dataQuery;
 
-  const rawActiveRows = useMemo(
-    () =>
+  useEffect(() => {
+    const pages = dataQuery.data?.pages;
+    const lastPage = pages?.at(-1);
+    if (!pages || !lastPage || lastPage.pagination.hasMore) return;
+    completedRowsByDatasetRef.current.set(
+      datasetKey,
+      pages.flatMap((page) => page.items),
+    );
+  }, [dataQuery.data, datasetKey]);
+
+  const rawActiveRows = useMemo(() => {
+    if (completedRows) {
+      return sortLocalTableRows(
+        completedRows,
+        activeSort,
+        activeColumns,
+        activeTab,
+        localSortText,
+      );
+    }
+    return (
       dataQuery.data?.pages.flatMap((page) => page.items) ??
-      (null as readonly TRow[] | null),
-    [dataQuery.data],
-  );
+      (null as readonly TRow[] | null)
+    );
+  }, [
+    activeColumns,
+    activeSort,
+    activeTab,
+    completedRows,
+    dataQuery.data,
+    localSortText,
+  ]);
   const rawRowsByTab = useMemo(
     () =>
       createTabRecord(tabs, (tab) =>
@@ -586,8 +640,9 @@ function TabbedDataTableCardImpl<
     [activeTab, normalizeRows, rawActiveRows, tabs],
   );
 
-  // The loader owns row order. Keep normalization and any display-only filter
-  // as the only transformations applied before rendering.
+  // The loader owns row order while data is paginated. Once the complete
+  // result is cached locally, sortLocalTableRows owns the display order
+  // instead.
   const activeRows = useMemo(() => {
     const rows = resolvedRowsByTab[activeTab] ?? [];
     return filterRows ? filterRows(rows, activeTab) : rows;
@@ -630,9 +685,9 @@ function TabbedDataTableCardImpl<
   );
   const activeTabMeta = tabByValue.get(activeTab) ?? tabs[0];
   const activeSearchTabMeta = tabByValue.get(activeSearchTab) ?? activeTabMeta;
-  const activeLoading = isPending;
-  const searchLoading = activeSearchTab === activeTab ? isPending : false;
-  const activeColumns = getColumnsForTab(columns, activeTab);
+  const activeLoading = completedRows ? false : isPending;
+  const searchLoading =
+    activeSearchTab === activeTab ? (completedRows ? false : isPending) : false;
   const activeSearchColumns = getColumnsForTab(columns, activeSearchTab);
   const colSpan = 1 + activeColumns.length;
   const searchColSpan = 1 + activeSearchColumns.length;
@@ -1039,10 +1094,18 @@ function TabbedDataTableCardImpl<
 
     for (const tabMeta of selectedTabs) {
       const tab = tabMeta.value;
+      const tabSearchTerm =
+        tab === activeTab ? deferredSearchTerm : (searchTermsByTab[tab] ?? "");
+      const completedTabRows =
+        completedRowsByDatasetRef.current.get(
+          JSON.stringify([requestKey ?? "", tabsKey, tab, tabSearchTerm]),
+        ) ?? null;
       const tabPageData = tab === activeTab ? dataQuery.data : undefined;
       const loadedRawRows =
-        tabPageData?.pages.flatMap((page) => page.items) ?? [];
-      const lastPage = tabPageData?.pages.at(-1);
+        completedTabRows ??
+        tabPageData?.pages.flatMap((page) => page.items) ??
+        [];
+      const lastPage = completedTabRows ? undefined : tabPageData?.pages.at(-1);
       let rows =
         exportRows === "rawRows"
           ? [...loadedRawRows]
@@ -1055,11 +1118,10 @@ function TabbedDataTableCardImpl<
       ) {
         throw new Error("export_budget_exceeded");
       }
-      let hasMore =
-        tabPageData === undefined || Boolean(lastPage?.pagination.hasMore);
+      let hasMore = completedTabRows
+        ? false
+        : tabPageData === undefined || Boolean(lastPage?.pagination.hasMore);
       let cursor = lastPage?.pagination.nextCursor ?? null;
-      const tabSearchTerm =
-        tab === activeTab ? deferredSearchTerm : (searchTermsByTab[tab] ?? "");
 
       const seenCursors = new Set<string>();
       while (hasMore) {
