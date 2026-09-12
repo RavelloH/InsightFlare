@@ -46,6 +46,13 @@ const COMPARISON_CHART_COLORS = [
   "var(--muted-foreground)",
 ] as const;
 
+const CURRENT_PERIOD_STYLE = {
+  minHeight: "var(--share-trend-current-min-height)",
+} as const;
+const COMPARISON_PERIOD_STYLE = {
+  minHeight: "var(--share-trend-comparison-min-height)",
+} as const;
+
 export type ShareTrendFetcher = (
   siteId: string,
   window: TimeWindow,
@@ -413,7 +420,7 @@ export const ShareTrendChartCard = memo(function ShareTrendChartCard({
     : "hidden";
 
   return (
-    <Card className="overflow-visible">
+    <Card className="h-full overflow-visible">
       <CardHeader>
         <CardTitle className="inline-flex items-center gap-2">
           <RiLineChartLine className="size-4" />
@@ -431,89 +438,100 @@ export const ShareTrendChartCard = memo(function ShareTrendChartCard({
           initial={false}
         >
           <div className="grid gap-6">
-            <AutoResizer className="min-w-0" duration={0.2}>
-              <AutoTransition
-                initial={false}
-                transitionKey={shouldRenderChart ? "content" : "empty"}
-                duration={0.2}
-                type="crossFade"
-              >
-                {shouldRenderChart ? (
-                  <div key="current" className="grid gap-2">
-                    {hasComparison ? (
-                      <ShareTrendPeriodLabel label={currentPeriodLabel} />
-                    ) : null}
-                    <ShareTrendAreaChart
-                      data={chartData}
-                      series={chartSeries}
-                      locale={locale}
-                      timeZone={dataWindow.timeZone}
-                      interval={dataWindow.interval}
-                      axisDateFormat={
-                        dataWindow.interval === "minute" ||
-                        dataWindow.interval === "hour"
-                          ? "time"
-                          : "regular"
-                      }
-                      syncId={hasComparison ? syncId : undefined}
-                      loading={loading}
-                      showLegend
-                    />
-                  </div>
-                ) : (
-                  <div
-                    key="empty"
-                    className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground"
+            <div data-share-trend-period="current" style={CURRENT_PERIOD_STYLE}>
+              <div data-share-trend-period-content>
+                <AutoResizer className="min-w-0" duration={0.2}>
+                  <AutoTransition
+                    initial={false}
+                    transitionKey={shouldRenderChart ? "content" : "empty"}
+                    duration={0.2}
+                    type="crossFade"
                   >
-                    {messages.common.noData}
-                  </div>
-                )}
-              </AutoTransition>
-            </AutoResizer>
-
-            {hasComparison ? (
-              <AutoResizer className="min-w-0" duration={0.2}>
-                <AutoTransition
-                  initial={false}
-                  transitionKey={comparisonTransitionKey}
-                  duration={0.2}
-                  type="crossFade"
-                >
-                  <div
-                    key={`comparison-${comparisonTransitionKey}`}
-                    className="grid gap-2"
-                  >
-                    <ShareTrendPeriodLabel
-                      label={
-                        comparisonLabel ??
-                        messages.dashboardHeader.compareButton
-                      }
-                    />
-                    {hasComparisonContent && comparisonDataWindow ? (
-                      <ShareTrendAreaChart
-                        data={comparisonChartData}
-                        series={comparisonChartSeries}
-                        locale={locale}
-                        timeZone={comparisonDataWindow.timeZone}
-                        interval={comparisonDataWindow.interval}
-                        axisDateFormat={
-                          comparisonDataWindow.interval === "minute" ||
-                          comparisonDataWindow.interval === "hour"
-                            ? "time"
-                            : "regular"
-                        }
-                        syncId={syncId}
-                        loading={loading}
-                        showLegend
-                      />
+                    {shouldRenderChart ? (
+                      <div key="current" className="grid gap-2">
+                        {hasComparison ? (
+                          <ShareTrendPeriodLabel label={currentPeriodLabel} />
+                        ) : null}
+                        <ShareTrendAreaChart
+                          data={chartData}
+                          series={chartSeries}
+                          locale={locale}
+                          timeZone={dataWindow.timeZone}
+                          interval={dataWindow.interval}
+                          axisDateFormat={
+                            dataWindow.interval === "minute" ||
+                            dataWindow.interval === "hour"
+                              ? "time"
+                              : "regular"
+                          }
+                          syncId={hasComparison ? syncId : undefined}
+                          loading={loading}
+                          showLegend
+                        />
+                      </div>
                     ) : (
-                      <div className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground">
+                      <div
+                        key="empty"
+                        className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground"
+                      >
                         {messages.common.noData}
                       </div>
                     )}
-                  </div>
-                </AutoTransition>
-              </AutoResizer>
+                  </AutoTransition>
+                </AutoResizer>
+              </div>
+            </div>
+
+            {hasComparison ? (
+              <div
+                data-share-trend-period="comparison"
+                style={COMPARISON_PERIOD_STYLE}
+              >
+                <div data-share-trend-period-content>
+                  <AutoResizer className="min-w-0" duration={0.2}>
+                    <AutoTransition
+                      initial={false}
+                      transitionKey={comparisonTransitionKey}
+                      duration={0.2}
+                      type="crossFade"
+                    >
+                      <div
+                        key={`comparison-${comparisonTransitionKey}`}
+                        className="grid gap-2"
+                      >
+                        <ShareTrendPeriodLabel
+                          label={
+                            comparisonLabel ??
+                            messages.dashboardHeader.compareButton
+                          }
+                        />
+                        {hasComparisonContent && comparisonDataWindow ? (
+                          <ShareTrendAreaChart
+                            data={comparisonChartData}
+                            series={comparisonChartSeries}
+                            locale={locale}
+                            timeZone={comparisonDataWindow.timeZone}
+                            interval={comparisonDataWindow.interval}
+                            axisDateFormat={
+                              comparisonDataWindow.interval === "minute" ||
+                              comparisonDataWindow.interval === "hour"
+                                ? "time"
+                                : "regular"
+                            }
+                            syncId={syncId}
+                            loading={loading}
+                            showLegend
+                          />
+                        ) : (
+                          <div className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground">
+                            {messages.common.noData}
+                          </div>
+                        )}
+                      </div>
+                    </AutoTransition>
+                  </AutoResizer>
+                </div>
+              </div>
             ) : null}
           </div>
         </ContentSwitch>
