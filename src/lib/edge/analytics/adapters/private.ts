@@ -62,7 +62,6 @@ export interface PrivateTeamDashboardAdapterInput {
 
 const SIMPLE_DIMENSIONS: Readonly<Record<string, SimpleDimensionKey>> = {
   countries: "country",
-  "page-query": "page.query",
   "page-hash": "page.hash",
   "utm-source": "utm.source",
   "utm-medium": "utm.medium",
@@ -99,6 +98,7 @@ const TECHNOLOGY_HANDLERS: Readonly<Record<string, TechnologyHandlerName>> = {
 };
 
 const OVERVIEW_TABS: Readonly<Record<string, OverviewTab>> = {
+  "page-query": "page.query",
   "overview-page-path": "page.path",
   "overview-page-title": "page.title",
   "overview-page-hostname": "page.hostname",

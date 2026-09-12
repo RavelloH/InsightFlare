@@ -54,6 +54,7 @@ import { fetchPerformance } from "@/lib/dashboard/client-data";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
 import {
   addZonedInterval,
   startOfZonedInterval,
@@ -1858,16 +1859,19 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
   const loader = useCallback<
     TabbedDataTableLoader<typeof status, CountryHealthRow, PathSortKey>
   >(
-    async ({ limit }) => ({
-      items: displayRows,
-      pagination: {
+    async ({ cursor, limit, search, sort }) =>
+      loadLocalTablePage({
+        rows: displayRows,
+        sort,
+        columns,
+        tab: status,
         limit,
-        returned: displayRows.length,
-        hasMore: false,
-        nextCursor: null,
-      },
-    }),
-    [displayRows],
+        cursor,
+        search,
+        getText: (row) => row.label,
+        tieBreakText: false,
+      }),
+    [columns, displayRows, status],
   );
   const tableRequestKey = useMemo(
     () => `${activePanel}:${locale}:${JSON.stringify(displayRows)}`,
@@ -2072,16 +2076,19 @@ const PathStatusColumn = memo(function PathStatusColumn({
   const loader = useCallback<
     TabbedDataTableLoader<typeof status, PathPerformanceRow, PathSortKey>
   >(
-    async ({ limit }) => ({
-      items: displayRows,
-      pagination: {
+    async ({ cursor, limit, search, sort }) =>
+      loadLocalTablePage({
+        rows: displayRows,
+        sort,
+        columns,
+        tab: status,
         limit,
-        returned: displayRows.length,
-        hasMore: false,
-        nextCursor: null,
-      },
-    }),
-    [displayRows],
+        cursor,
+        search,
+        getText: (row) => row.pathname || "/",
+        tieBreakText: false,
+      }),
+    [columns, displayRows, status],
   );
   const tableRequestKey = useMemo(
     () => `${activePanel}:${locale}:${JSON.stringify(displayRows)}`,

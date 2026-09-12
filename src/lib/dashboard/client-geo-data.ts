@@ -1,4 +1,5 @@
 import type {
+  DashboardListRequestOptions,
   OverviewGeoDimensionTab,
   OverviewGeoTabRows,
 } from "@/lib/dashboard/client-data-types";
@@ -14,7 +15,11 @@ import type {
 import type { FilterDocument, FilterScope } from "@/lib/filter-contract";
 
 import { fetchPrivateJson } from "./client-request";
-import { normalizePaginatedCollection, withFilters } from "./client-utils";
+import {
+  normalizePaginatedCollection,
+  withComparison,
+  withFilters,
+} from "./client-utils";
 
 function emptyGeoPointsUnlessAborted(error: unknown): OverviewGeoPointsData {
   if (error instanceof Error && error.name === "AbortError") throw error;
@@ -47,26 +52,31 @@ export async function fetchOverviewGeoPoints(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: {
-    limit?: number;
+  options?: DashboardListRequestOptions & {
     applyGeoFilter?: boolean;
-    signal?: AbortSignal;
     resolvedScope?: FilterScope;
   },
 ): Promise<OverviewGeoPointsData> {
   return fetchPrivateJson<OverviewGeoPointsData>(
     "/api/private/overview-geo-points",
-    withFilters(
+    withComparison(
+      withFilters(
+        {
+          siteId,
+          from: window.from,
+          to: window.to,
+          timeZone: window.timeZone,
+          limit: options?.limit ?? 5000,
+          ...(options?.applyGeoFilter ? { applyGeoFilter: 1 } : {}),
+        },
+        filters,
+        options?.resolvedScope,
+      ),
+      options?.comparison,
       {
-        siteId,
-        from: window.from,
-        to: window.to,
-        timeZone: window.timeZone,
-        limit: options?.limit ?? 5000,
-        ...(options?.applyGeoFilter ? { applyGeoFilter: 1 } : {}),
+        metric: options?.comparisonMetric,
+        sortBy: options?.comparisonSortBy,
       },
-      filters,
-      options?.resolvedScope,
     ),
     { signal: options?.signal },
   )
@@ -130,33 +140,72 @@ export async function fetchOverviewGeoDimensionTab(
     limit?: number;
     signal?: AbortSignal;
     resolvedScope?: FilterScope;
+    comparison?: DashboardListRequestOptions["comparison"];
+    comparisonMetric?: DashboardListRequestOptions["comparisonMetric"];
+    comparisonSortBy?: DashboardListRequestOptions["comparisonSortBy"];
   },
 ): Promise<OverviewGeoTabRows> {
+  const page = await fetchOverviewGeoDimensionTabPage(
+    siteId,
+    window,
+    tab,
+    filters,
+    options,
+  );
+  return page.items as unknown as OverviewGeoTabRows;
+}
+
+/** Paginated form used by TabbedDataTableCard loaders. */
+export async function fetchOverviewGeoDimensionTabPage(
+  siteId: string,
+  window: TimeWindow,
+  tab: OverviewGeoDimensionTab,
+  filters?: FilterDocument,
+  options?: DashboardListRequestOptions & { resolvedScope?: FilterScope },
+): Promise<OverviewGeoTabData["data"]> {
   const payload = await fetchPrivateJson<OverviewGeoTabData>(
     `/api/private/overview-geo-${tab}`,
-    withFilters(
+    withComparison(
+      withFilters(
+        {
+          siteId,
+          from: window.from,
+          to: window.to,
+          timeZone: window.timeZone,
+          limit: options?.limit ?? 100,
+          ...(options?.cursor ? { cursor: options.cursor } : {}),
+          ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+          ...(options?.sort ? { sort: options.sort } : {}),
+          ...(options?.direction ? { direction: options.direction } : {}),
+        },
+        filters,
+        options?.resolvedScope,
+      ),
+      options?.comparison,
       {
-        siteId,
-        from: window.from,
-        to: window.to,
-        timeZone: window.timeZone,
-        limit: options?.limit ?? 100,
+        metric: options?.comparisonMetric,
+        sortBy: options?.comparisonSortBy,
       },
-      filters,
-      options?.resolvedScope,
     ),
     { signal: options?.signal },
   ).catch(emptyGeoTabUnlessAborted);
   const rows = normalizePaginatedCollection<
     OverviewGeoTabData["data"]["items"][number]
-  >(payload.data).items;
-  return rows.map((row) => ({
-    value:
-      String((row as { value?: unknown }).value ?? "").trim() ||
-      String((row as { label?: unknown }).label ?? "").trim(),
-    label: normalizeGeoDimensionLabel(tab, row as Record<string, unknown>),
-    views: Number((row as { views?: unknown }).views ?? 0),
-    sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
-    visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
-  }));
+  >(payload.data);
+  return {
+    ...rows,
+    items: rows.items.map((row) => ({
+      ...row,
+      value:
+        String((row as { value?: unknown }).value ?? "").trim() ||
+        String((row as { label?: unknown }).label ?? "").trim(),
+      label: normalizeGeoDimensionLabel(
+        tab,
+        row as unknown as Record<string, unknown>,
+      ),
+      views: Number((row as { views?: unknown }).views ?? 0),
+      sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
+      visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
+    })) as OverviewGeoTabRows,
+  };
 }

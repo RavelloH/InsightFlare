@@ -49,9 +49,32 @@ export interface DimensionAggregateCursor {
 export interface SessionPathDimensionCursor {
   readonly views: number;
   readonly value: string;
+  /** Present on cursors created for visitor-sorted session paths. */
+  readonly visitors?: number;
 }
 
-export type DimensionPageSortKey = "views" | "visitors";
+export type DimensionPageSortKey = "views" | "sessions" | "visitors";
+
+function dimensionSortKey(
+  value: DimensionPageSortKey | undefined,
+): DimensionPageSortKey {
+  return value === "visitors" || value === "sessions" ? value : "views";
+}
+
+function dimensionSortDirection(
+  value: "asc" | "desc" | undefined,
+): "asc" | "desc" {
+  return value === "asc" ? "asc" : "desc";
+}
+
+function dimensionSortColumns(sortBy: DimensionPageSortKey): {
+  primary: DimensionPageSortKey;
+  secondary: DimensionPageSortKey;
+} {
+  if (sortBy === "visitors") return { primary: "visitors", secondary: "views" };
+  if (sortBy === "sessions") return { primary: "sessions", secondary: "views" };
+  return { primary: "views", secondary: "sessions" };
+}
 
 function dimensionCursor(value: unknown): DimensionAggregateCursor | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -71,9 +94,19 @@ function sessionPathDimensionCursor(
 ): SessionPathDimensionCursor | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
-  return hasExactKeys(candidate, ["views", "value"]) &&
+  if (
+    hasExactKeys(candidate, ["views", "value"]) &&
     typeof candidate.views === "number" &&
     Number.isFinite(candidate.views) &&
+    typeof candidate.value === "string"
+  ) {
+    return candidate as unknown as SessionPathDimensionCursor;
+  }
+  return hasExactKeys(candidate, ["views", "visitors", "value"]) &&
+    typeof candidate.views === "number" &&
+    Number.isFinite(candidate.views) &&
+    typeof candidate.visitors === "number" &&
+    Number.isFinite(candidate.visitors) &&
     typeof candidate.value === "string"
     ? (candidate as unknown as SessionPathDimensionCursor)
     : null;
@@ -135,6 +168,9 @@ export async function queryDimensionFromD1(
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
+  const sortBy = dimensionSortKey(options?.sortBy);
+  const sortDirection = dimensionSortDirection(options?.sortDirection);
+  const { primary, secondary } = dimensionSortColumns(sortBy);
   const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const sql = `
 WITH
@@ -157,7 +193,7 @@ SELECT value, views, sessions, visitors
 FROM dimension_rollup
 ${options?.excludeEmpty ? "WHERE TRIM(value) != ''" : ""}
 ${options?.search ? `${options?.excludeEmpty ? "AND" : "WHERE"} LOWER(value) LIKE ? ESCAPE '\\'` : ""}
-ORDER BY views DESC, sessions DESC, value ASC
+ORDER BY ${primary} ${sortDirection}, ${secondary} ${sortDirection}, value ASC
 ${limitClause}
 `;
   return (
@@ -212,13 +248,12 @@ export async function queryDimensionPageFromD1(
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<DimensionRow>> {
   const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const sortBy = options?.sortBy === "visitors" ? "visitors" : "views";
+  const sortBy = dimensionSortKey(options?.sortBy);
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
-  const sortDirection = options?.sortDirection === "asc" ? "asc" : "desc";
-  const primary = sortBy === "visitors" ? "visitors" : "views";
-  const secondary = sortBy === "visitors" ? "views" : "sessions";
+  const sortDirection = dimensionSortDirection(options?.sortDirection);
+  const { primary, secondary } = dimensionSortColumns(sortBy);
   const operator = sortDirection === "asc" ? ">" : "<";
   const cursorClause = cursor
     ? `
@@ -314,9 +349,8 @@ LIMIT ?
   const nextCursor =
     page.hasMore && page.last
       ? await encodePageCursor(env, binding, {
-          primary: sortBy === "visitors" ? page.last.visitors : page.last.views,
-          secondary:
-            sortBy === "visitors" ? page.last.views : page.last.sessions,
+          primary: page.last[primary],
+          secondary: page.last[secondary],
           value: page.last.value,
         })
       : null;
@@ -371,6 +405,8 @@ export async function querySessionPathDimensionFromD1(
   kind: "entry" | "exit",
   diagnostics?: D1ReadDiagnostics,
   search?: string,
+  sortBy: DimensionPageSortKey = "views",
+  sortDirection: "asc" | "desc" = "desc",
 ): Promise<DimensionRow[]> {
   const scopedDataset =
     scopedVisitDataset(siteId, window, filters) ??
@@ -384,6 +420,10 @@ export async function querySessionPathDimensionFromD1(
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
+  const effectiveSortBy = dimensionSortKey(sortBy);
+  const effectiveSortDirection = sortDirection === "asc" ? "asc" : "desc";
+  const primary = effectiveSortBy;
+  const secondary = effectiveSortBy === "visitors" ? "views" : null;
   const limitClause = limit > 0 ? "\nLIMIT ?" : "";
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
   const visitSource = buildVisitSourceCte().replace(
@@ -436,7 +476,7 @@ FROM session_edges
 WHERE TRIM(value) != ''
 ${search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
 GROUP BY value
-ORDER BY views DESC, value ASC
+ORDER BY ${primary} ${effectiveSortDirection}, ${secondary ? `${secondary} ${effectiveSortDirection}, ` : ""}value ASC
 ${limitClause}
 `;
   return (
@@ -483,6 +523,8 @@ export async function querySessionPathDimensionPageFromD1(
   search?: string,
   cursor?: SessionPathDimensionCursor | null,
   audience: QueryAudience = "private-dashboard",
+  sortBy: DimensionPageSortKey = "views",
+  sortDirection: "asc" | "desc" = "desc",
 ): Promise<PageResult<DimensionRow>> {
   const scopedDataset =
     scopedVisitDataset(siteId, window, filters) ??
@@ -496,15 +538,29 @@ export async function querySessionPathDimensionPageFromD1(
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
+  const effectiveSortBy = dimensionSortKey(sortBy);
+  const effectiveSortDirection = sortDirection === "asc" ? "asc" : "desc";
   const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
     "visit_source AS MATERIALIZED (",
   );
   const searchClause = search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : "";
+  const operator = effectiveSortDirection === "asc" ? ">" : "<";
   const cursorClause = cursor
-    ? `AND (views < ? OR (views = ? AND value > ?))`
+    ? effectiveSortBy === "visitors"
+      ? `
+AND (
+  visitors ${operator} ?
+  OR (visitors = ? AND views ${operator} ?)
+  OR (visitors = ? AND views = ? AND value > ?)
+)`
+      : `AND (${effectiveSortBy} ${operator} ? OR (${effectiveSortBy} = ? AND value > ?))`
     : "";
+  const orderBy =
+    effectiveSortBy === "visitors"
+      ? `ORDER BY visitors ${effectiveSortDirection}, views ${effectiveSortDirection}, value ASC`
+      : `ORDER BY ${effectiveSortBy} ${effectiveSortDirection}, value ASC`;
   const sql = `
 WITH
 ${scopedDataset?.ctes ?? visitSource},
@@ -537,18 +593,27 @@ session_edges AS (
     MAX(CASE WHEN ${boundaryRank} = 1 THEN pathname END) AS value
   FROM ranked_session_visits
   GROUP BY session_id
+),
+session_path_rollup AS (
+  SELECT
+    value,
+    count(*) AS views,
+    count(*) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM session_edges
+  WHERE TRIM(value) != ''
+  GROUP BY value
 )
 SELECT
   value,
-  count(*) AS views,
-  count(*) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM session_edges
-WHERE TRIM(value) != ''
+  views,
+  sessions,
+  visitors
+FROM session_path_rollup
+WHERE 1 = 1
 ${searchClause}
 ${cursorClause}
-GROUP BY value
-ORDER BY views DESC, value ASC
+${orderBy}
 LIMIT ?
 `;
   const searchBindings = search
@@ -562,7 +627,16 @@ LIMIT ?
       ]
     : [];
   const cursorBindings = cursor
-    ? [cursor.views, cursor.views, cursor.value]
+    ? effectiveSortBy === "visitors"
+      ? [
+          cursor.visitors ?? cursor.views,
+          cursor.visitors ?? cursor.views,
+          cursor.views,
+          cursor.visitors ?? cursor.views,
+          cursor.views,
+          cursor.value,
+        ]
+      : [cursor.views, cursor.views, cursor.value]
     : [];
   const rows = await queryD1All<Record<string, unknown>>(
     env,
@@ -597,13 +671,22 @@ LIMIT ?
     effectiveScopeForPagination(filters),
     search?.trim().toLowerCase() ?? "",
     audience,
+    effectiveSortBy,
+    effectiveSortDirection,
   ]);
   const nextCursor =
     page.hasMore && page.last
-      ? await encodePageCursor(env, binding, {
-          views: page.last.views,
-          value: page.last.value,
-        })
+      ? await encodePageCursor(
+          env,
+          binding,
+          effectiveSortBy === "visitors"
+            ? {
+                views: page.last.views,
+                visitors: page.last.visitors,
+                value: page.last.value,
+              }
+            : { views: page.last.views, value: page.last.value },
+        )
       : null;
   return {
     items: page.rows,
@@ -625,8 +708,12 @@ export async function decodeSessionPathDimensionCursor(
   search?: string,
   cursor?: string | null,
   audience: QueryAudience = "private-dashboard",
+  sortBy: DimensionPageSortKey = "views",
+  sortDirection: "asc" | "desc" = "desc",
 ): Promise<SessionPathDimensionCursor | null> {
-  return decodePageCursor<SessionPathDimensionCursor>(
+  const effectiveSortBy = dimensionSortKey(sortBy);
+  const effectiveSortDirection = sortDirection === "asc" ? "asc" : "desc";
+  const decoded = await decodePageCursor<SessionPathDimensionCursor>(
     env,
     await paginationBindingForWindow(window, [
       `analytics-session-${kind}-v1`,
@@ -638,11 +725,18 @@ export async function decodeSessionPathDimensionCursor(
       effectiveScopeForPagination(filters),
       search?.trim().toLowerCase() ?? "",
       audience,
+      effectiveSortBy,
+      effectiveSortDirection,
     ]),
     cursor,
     "session-dimension",
     sessionPathDimensionCursor,
   );
+  return effectiveSortBy === "visitors" &&
+    decoded &&
+    decoded.visitors === undefined
+    ? null
+    : decoded;
 }
 
 export async function queryVisitDimensionFromD1(
@@ -652,7 +746,12 @@ export async function queryVisitDimensionFromD1(
   filters: FilterDocument,
   limit: number,
   selectExpr: string,
-  options?: { excludeEmpty?: boolean },
+  options?: {
+    excludeEmpty?: boolean;
+    search?: string;
+    sortBy?: DimensionPageSortKey;
+    sortDirection?: "asc" | "desc";
+  },
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
   return queryDimensionFromD1(
@@ -676,6 +775,8 @@ export async function querySessionBoundaryDimensionFromD1(
   kind: "entry" | "exit",
   diagnostics?: D1ReadDiagnostics,
   search?: string,
+  sortBy: DimensionPageSortKey = "views",
+  sortDirection: "asc" | "desc" = "desc",
 ): Promise<DimensionRow[]> {
   return querySessionPathDimensionFromD1(
     env,
@@ -686,6 +787,8 @@ export async function querySessionBoundaryDimensionFromD1(
     kind,
     diagnostics,
     search,
+    sortBy,
+    sortDirection,
   );
 }
 

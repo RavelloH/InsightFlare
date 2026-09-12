@@ -83,6 +83,8 @@ common:
   search: Search
   open: Open
   sortBy: Sort by {label}
+  change: Change
+  new: New
   tableExport:
     action: Export
     title: Export CSV

@@ -249,20 +249,6 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
       ? rows.filter((row) => row.filterValue === activeValue)
       : [...rows];
   };
-  const compareRows = (
-    left: ReferrerBreakdownRow,
-    right: ReferrerBreakdownRow,
-    { sort }: { sort: { key: ReferrerSortKey; direction: "asc" | "desc" } },
-  ) => {
-    const primary =
-      (left[sort.key] - right[sort.key]) * (sort.direction === "asc" ? 1 : -1);
-    if (primary !== 0) return primary;
-    if (right.views !== left.views) return right.views - left.views;
-    if (right.visitors !== left.visitors) return right.visitors - left.visitors;
-    return (left.displayLabel ?? left.label).localeCompare(
-      right.displayLabel ?? right.label,
-    );
-  };
   const search = {
     actionLabel: messages.common.search,
     placeholder: (activeTab: TabbedDataTableTab<ReferrerTab>) =>
@@ -283,7 +269,6 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
       columns={columns}
       rowAdapter={rowAdapter}
       filterRows={filterRows}
-      compareRows={compareRows}
       sortActionLabel={(label) =>
         formatI18nTemplate(messages.common.sortBy, { label })
       }

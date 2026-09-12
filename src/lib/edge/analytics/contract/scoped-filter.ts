@@ -358,7 +358,9 @@ export function prepareScopedQuery(
   query: QueryInput,
 ): QueryInput {
   if (
-    (operation === "comparison" || operation === "comparison-breakdown") &&
+    (operation === "comparison" ||
+      operation === "comparison-breakdown" ||
+      operation === "dimension") &&
     isComparisonQuery(query)
   ) {
     return prepareScopedComparisonQuery(operation, query);

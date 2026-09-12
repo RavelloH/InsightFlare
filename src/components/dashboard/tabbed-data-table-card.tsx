@@ -232,15 +232,6 @@ export interface TabbedDataTableCardProps<
   limit?: number;
   normalizeRows?: (rows: readonly TRow[], tab: TTab) => TRow[];
   filterRows?: (rows: readonly TRow[], tab: TTab) => TRow[];
-  compareRows?: (
-    left: TRow,
-    right: TRow,
-    context: {
-      tab: TTab;
-      sort: TabbedDataTableSortState<TKey>;
-      columns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[];
-    },
-  ) => number;
   value?: TTab;
   defaultValue?: TTab;
   onValueChange?: (value: TTab) => void;
@@ -280,8 +271,7 @@ export interface TabbedDataTableCardProps<
 function defaultNormalizeRows<TRow extends TabbedDataTableRowBase>(
   rows: readonly TRow[],
 ): TRow[] {
-  // Sorting always works on a copy, so the default path can preserve the
-  // external rows reference and avoid cloning every inactive tab.
+  // Preserve the loader-provided order and avoid cloning every inactive tab.
   return rows as TRow[];
 }
 
@@ -408,7 +398,6 @@ function TabbedDataTableCardImpl<
   limit = 100,
   normalizeRows = defaultNormalizeRows,
   filterRows,
-  compareRows,
   value,
   defaultValue,
   onValueChange,
@@ -597,68 +586,21 @@ function TabbedDataTableCardImpl<
     [activeTab, normalizeRows, rawActiveRows, tabs],
   );
 
-  const sortRowsForTab = useCallback(
-    (tabValue: TTab, sourceRows?: readonly TRow[]): TRow[] => {
-      const tabRows = sourceRows ?? resolvedRowsByTab[tabValue] ?? [];
-      const tabColumns = getColumnsForTab(columns, tabValue);
-      const sort = effectiveSortByTab[tabValue];
-      const sortColumn =
-        tabColumns.find((column) => column.key === sort.key) ?? tabColumns[0];
-      const direction = sort.direction === "asc" ? 1 : -1;
-      const sorted = [...tabRows].sort((left, right) => {
-        if (compareRows) {
-          const custom = compareRows(left, right, {
-            tab: tabValue,
-            sort,
-            columns: tabColumns,
-          });
-          if (custom !== 0) return custom;
-        }
-
-        const leftValue =
-          sortColumn.sortValue?.(left, tabValue) ??
-          sortColumn.getValue(left, tabValue);
-        const rightValue =
-          sortColumn.sortValue?.(right, tabValue) ??
-          sortColumn.getValue(right, tabValue);
-        const primary = (leftValue - rightValue) * direction;
-        if (primary !== 0) return primary;
-        const leftText =
-          rowAdapter?.getSearchText?.(left, tabValue) ??
-          getRowSearchText?.(left, tabValue) ??
-          left.key ??
-          "";
-        const rightText =
-          rowAdapter?.getSearchText?.(right, tabValue) ??
-          getRowSearchText?.(right, tabValue) ??
-          right.key ??
-          "";
-        return String(leftText).localeCompare(String(rightText));
-      });
-
-      return filterRows ? filterRows(sorted, tabValue) : sorted;
-    },
-    [
-      columns,
-      compareRows,
-      effectiveSortByTab,
-      filterRows,
-      getRowSearchText,
-      resolvedRowsByTab,
-      rowAdapter,
-    ],
-  );
-
-  const activeRows = useMemo(
-    () => sortRowsForTab(activeTab),
-    [activeTab, sortRowsForTab],
-  );
+  // The loader owns row order. Keep normalization and any display-only filter
+  // as the only transformations applied before rendering.
+  const activeRows = useMemo(() => {
+    const rows = resolvedRowsByTab[activeTab] ?? [];
+    return filterRows ? filterRows(rows, activeTab) : rows;
+  }, [activeTab, filterRows, resolvedRowsByTab]);
   const normalizedSearchTerm = deferredSearchTerm.trim().toLocaleLowerCase();
   const searchedRows = useMemo(() => {
+    const normalizedRows = resolvedRowsByTab[activeSearchTab] ?? [];
     const rows =
       activeSearchTab === activeTab
         ? activeRows
-        : sortRowsForTab(activeSearchTab);
+        : filterRows
+          ? filterRows(normalizedRows, activeSearchTab)
+          : normalizedRows;
     if (!normalizedSearchTerm) return rows;
     const getText =
       searchConfig?.getText ??
@@ -674,11 +616,12 @@ function TabbedDataTableCardImpl<
     activeSearchTab,
     activeTab,
     activeRows,
+    filterRows,
     getRowSearchText,
     normalizedSearchTerm,
+    resolvedRowsByTab,
     rowAdapter,
     searchConfig,
-    sortRowsForTab,
   ]);
 
   const tabByValue = useMemo(
@@ -1037,7 +980,9 @@ function TabbedDataTableCardImpl<
         : (resolvedRowsByTab[tab] ?? []);
     return exportRows === "rawRows"
       ? sourceRows
-      : sortRowsForTab(tab, sourceRows);
+      : filterRows
+        ? filterRows(sourceRows, tab)
+        : sourceRows;
   }
 
   function buildExportCsv(

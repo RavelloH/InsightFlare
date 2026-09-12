@@ -12,7 +12,6 @@ import {
   type TabbedDataTableLoader,
   type TabbedDataTableRowAdapter,
   type TabbedDataTableRowBase,
-  type TabbedDataTableSortState,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { numberFormat } from "@/lib/dashboard/format";
@@ -240,24 +239,6 @@ export const AsyncDimensionBreakdownCard = memo(
       }),
       [locale, resolvedEmptyLabel],
     );
-    const compareRows = useCallback(
-      (
-        left: AsyncDimensionBreakdownRow,
-        right: AsyncDimensionBreakdownRow,
-        { sort }: { sort: TabbedDataTableSortState<SortKey> },
-      ) => {
-        const primary =
-          (left[sort.key] - right[sort.key]) *
-          (sort.direction === "asc" ? 1 : -1);
-        if (primary !== 0) return primary;
-        if (right.views !== left.views) return right.views - left.views;
-        if (right.visitors !== left.visitors) {
-          return right.visitors - left.visitors;
-        }
-        return left.label.localeCompare(right.label);
-      },
-      [],
-    );
     const labelColumnLabel = useCallback(
       (tab: TabbedDataTableTab<T>) => tab.columnLabel ?? tab.label,
       [],
@@ -326,7 +307,6 @@ export const AsyncDimensionBreakdownCard = memo(
         loader={loader}
         normalizeRows={normalizeRows}
         rowAdapter={rowAdapter}
-        compareRows={compareRows}
         labelColumnLabel={labelColumnLabel}
         sortActionLabel={(label) =>
           formatI18nTemplate(messages.common.sortBy, { label })

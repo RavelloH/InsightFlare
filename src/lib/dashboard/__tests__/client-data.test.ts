@@ -51,6 +51,7 @@ import {
   toQueryString,
   withFilters,
 } from "@/lib/dashboard/client-data";
+import { withComparison } from "@/lib/dashboard/client-utils";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import { attachFilterScopePreference } from "@/lib/filter-contract";
 import { handleDemoRequest } from "@/lib/realtime/mock";
@@ -102,6 +103,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
       ];
       const result = normalizeOverviewRows(input as any);
       expect(result[0]).toEqual({
+        value: "Edge",
         label: "Edge",
         views: 0,
         sessions: 0,
@@ -115,6 +117,40 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(result[0].views).toBe(50);
       expect(result[0].sessions).toBe(0);
       expect(result[0].visitors).toBe(0);
+    });
+
+    it("should normalize comparison reference and change metrics", () => {
+      const result = normalizeOverviewRows([
+        {
+          key: "edge",
+          value: "Edge",
+          label: "Edge",
+          views: "10",
+          sessions: 5,
+          visitors: 4,
+          reference: { views: "8", sessions: null, visitors: undefined },
+          change: {
+            views: { absolute: "2", relative: 0.25 },
+            sessions: null,
+            visitors: { absolute: 1, relative: null },
+          },
+        },
+      ]);
+
+      expect(result[0]).toEqual({
+        key: "edge",
+        value: "Edge",
+        label: "Edge",
+        views: 10,
+        sessions: 5,
+        visitors: 4,
+        reference: { views: 8, sessions: 0, visitors: 0 },
+        change: {
+          views: { absolute: 2, relative: 0.25 },
+          sessions: { absolute: 0, relative: null },
+          visitors: { absolute: 1, relative: null },
+        },
+      });
     });
 
     it("should return empty array for non-array inputs", () => {
@@ -210,6 +246,47 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(withFilters({ siteId: "123" }, filters)).toEqual({
         siteId: "123",
       });
+    });
+
+    it("should serialize comparison filters without leaking stale parameters", () => {
+      const filters = dashboardFilterDocumentFromPresentation({
+        browser: "Chrome",
+        path: "/pricing",
+      });
+      const result = withComparison(
+        {
+          siteId: "123",
+          "compareFilter[page.path]": "/old",
+        },
+        {
+          mode: "same",
+          window: {
+            preset: "24h",
+            from: 100,
+            to: 200,
+            timeZone: "UTC",
+            interval: "hour",
+          },
+          filters,
+        },
+        { metric: "visitors", sortBy: "change" },
+      );
+
+      expect(result).toMatchObject({
+        siteId: "123",
+        compare: "same",
+        metric: "visitors",
+        sortBy: "change",
+        "compareFilter[client.browser]": "Chrome",
+        "compareFilter[page.path]": "/pricing",
+      });
+      expect(result["compareFilter[page.path]"]).toBe("/pricing");
+      expect(
+        withComparison(
+          { siteId: "123", "compareFilter[page.path]": "/old" },
+          null,
+        ),
+      ).toEqual({ siteId: "123" });
     });
   });
 

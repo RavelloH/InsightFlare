@@ -74,6 +74,8 @@ export interface AppMessages {
     search: string;
     open: string;
     sortBy: string;
+    change: string;
+    new: string;
     tableExport: {
       action: string;
       title: string;
@@ -2802,6 +2804,8 @@ const enMessages = {
     search: "Search",
     open: "Open",
     sortBy: "Sort by {label}",
+    change: "Change",
+    new: "New",
     tableExport: {
       action: "Export",
       title: "Export CSV",
@@ -5819,6 +5823,8 @@ const zhMessages = {
     search: "搜索",
     open: "打开",
     sortBy: "按 {label} 排序",
+    change: "变化",
+    new: "新增",
     tableExport: {
       action: "导出",
       title: "导出 CSV",
@@ -8747,6 +8753,8 @@ const jaMessages = {
     search: "検索",
     open: "開く",
     sortBy: "{label}で並べ替え",
+    change: "変化",
+    new: "新規",
     tableExport: {
       action: "エクスポート",
       title: "CSV をエクスポート",

@@ -22,9 +22,14 @@ import {
   decodeQueryLabel,
   normalizeOverviewRows,
   normalizePaginatedCollection,
+  withComparison,
   withFilters,
   withPagination,
 } from "./client-utils";
+
+type OverviewTableRequestOptions = DashboardListRequestOptions & {
+  resolvedScope?: FilterScope;
+};
 
 const clientPathByTab: Record<OverviewClientDimensionTab, string> = {
   browser: "browser",
@@ -44,12 +49,7 @@ export async function fetchOverviewPageCardTab(
   window: TimeWindow,
   tab: OverviewPageCardTab,
   filters?: FilterDocument,
-  options?: {
-    limit?: number;
-    cursor?: string | null;
-    signal?: AbortSignal;
-    resolvedScope?: FilterScope;
-  },
+  options?: OverviewTableRequestOptions,
 ): Promise<OverviewTabData["data"]> {
   const endpoint =
     tab === "query"
@@ -57,19 +57,31 @@ export async function fetchOverviewPageCardTab(
       : `/api/private/overview-page-${tab}`;
   const payload = await fetchPrivateJson<OverviewTabData>(
     endpoint,
-    withFilters(
-      withPagination(
-        {
-          siteId,
-          from: window.from,
-          to: window.to,
-          timeZone: window.timeZone,
-        },
-        options,
-        100,
+    withComparison(
+      withFilters(
+        withPagination(
+          {
+            siteId,
+            from: window.from,
+            to: window.to,
+            timeZone: window.timeZone,
+            ...(options?.search?.trim()
+              ? { search: options.search.trim() }
+              : {}),
+            ...(options?.sort ? { sort: options.sort } : {}),
+            ...(options?.direction ? { direction: options.direction } : {}),
+          },
+          options,
+          100,
+        ),
+        filters,
+        options?.resolvedScope,
       ),
-      filters,
-      options?.resolvedScope,
+      options?.comparison,
+      {
+        metric: options?.comparisonMetric,
+        sortBy: options?.comparisonSortBy,
+      },
     ),
     { signal: options?.signal },
   ).catch(emptyOverviewTabUnlessAborted);
@@ -93,7 +105,7 @@ export async function fetchPageHashTab(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: DashboardListRequestOptions,
+  options?: OverviewTableRequestOptions,
 ): Promise<OverviewTabData["data"]> {
   const payload = await fetchPrivateJson<OverviewTabData>(
     "/api/private/page-hash",
@@ -104,6 +116,9 @@ export async function fetchPageHashTab(
           from: window.from,
           to: window.to,
           timeZone: window.timeZone,
+          ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+          ...(options?.sort ? { sort: options.sort } : {}),
+          ...(options?.direction ? { direction: options.direction } : {}),
         },
         options,
         100,
@@ -128,12 +143,7 @@ export async function fetchPageQueryTab(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: {
-    limit?: number;
-    cursor?: string | null;
-    signal?: AbortSignal;
-    resolvedScope?: FilterScope;
-  },
+  options?: OverviewTableRequestOptions,
 ): Promise<OverviewTabData["data"]> {
   return fetchOverviewPageCardTab(siteId, window, "query", filters, options);
 }
@@ -143,34 +153,35 @@ export async function fetchOverviewSourceCardTab(
   window: TimeWindow,
   tab: OverviewSourceCardTab,
   filters?: FilterDocument,
-  options?: {
-    limit?: number;
-    cursor?: string | null;
-    search?: string;
-    sort?: "views" | "visitors";
-    direction?: "asc" | "desc";
-    signal?: AbortSignal;
-    resolvedScope?: FilterScope;
-  },
+  options?: OverviewTableRequestOptions,
 ): Promise<OverviewTabData["data"]> {
   const payload = await fetchPrivateJson<OverviewTabData>(
     `/api/private/overview-source-${tab}`,
-    withFilters(
-      withPagination(
-        {
-          siteId,
-          from: window.from,
-          to: window.to,
-          timeZone: window.timeZone,
-          ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
-          ...(options?.sort ? { sort: options.sort } : {}),
-          ...(options?.direction ? { direction: options.direction } : {}),
-        },
-        options,
-        100,
+    withComparison(
+      withFilters(
+        withPagination(
+          {
+            siteId,
+            from: window.from,
+            to: window.to,
+            timeZone: window.timeZone,
+            ...(options?.search?.trim()
+              ? { search: options.search.trim() }
+              : {}),
+            ...(options?.sort ? { sort: options.sort } : {}),
+            ...(options?.direction ? { direction: options.direction } : {}),
+          },
+          options,
+          100,
+        ),
+        filters,
+        options?.resolvedScope,
       ),
-      filters,
-      options?.resolvedScope,
+      options?.comparison,
+      {
+        metric: options?.comparisonMetric,
+        sortBy: options?.comparisonSortBy,
+      },
     ),
     { signal: options?.signal },
   ).catch(emptyOverviewTabUnlessAborted);
@@ -184,11 +195,7 @@ export async function fetchEventTypesTab(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: {
-    limit?: number;
-    cursor?: string | null;
-    signal?: AbortSignal;
-  },
+  options?: DashboardListRequestOptions,
 ): Promise<OverviewTabData["data"]> {
   const payload = await fetchPrivateJson<OverviewTabData>(
     "/api/private/event-types",
@@ -199,6 +206,9 @@ export async function fetchEventTypesTab(
           from: window.from,
           to: window.to,
           timeZone: window.timeZone,
+          ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+          ...(options?.sort ? { sort: options.sort } : {}),
+          ...(options?.direction ? { direction: options.direction } : {}),
         },
         options,
         100,
@@ -218,28 +228,35 @@ export async function fetchOverviewClientDimensionTab(
   window: TimeWindow,
   tab: OverviewClientDimensionTab,
   filters?: FilterDocument,
-  options?: {
-    limit?: number;
-    cursor?: string | null;
-    signal?: AbortSignal;
-    resolvedScope?: FilterScope;
-  },
+  options?: OverviewTableRequestOptions,
 ): Promise<OverviewTabData["data"]> {
   const payload = await fetchPrivateJson<OverviewTabData>(
     `/api/private/overview-client-${clientPathByTab[tab]}`,
-    withFilters(
-      withPagination(
-        {
-          siteId,
-          from: window.from,
-          to: window.to,
-          timeZone: window.timeZone,
-        },
-        options,
-        100,
+    withComparison(
+      withFilters(
+        withPagination(
+          {
+            siteId,
+            from: window.from,
+            to: window.to,
+            timeZone: window.timeZone,
+            ...(options?.search?.trim()
+              ? { search: options.search.trim() }
+              : {}),
+            ...(options?.sort ? { sort: options.sort } : {}),
+            ...(options?.direction ? { direction: options.direction } : {}),
+          },
+          options,
+          100,
+        ),
+        filters,
+        options?.resolvedScope,
       ),
-      filters,
-      options?.resolvedScope,
+      options?.comparison,
+      {
+        metric: options?.comparisonMetric,
+        sortBy: options?.comparisonSortBy,
+      },
     ),
     { signal: options?.signal },
   ).catch(emptyOverviewTabUnlessAborted);

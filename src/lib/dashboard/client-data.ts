@@ -75,6 +75,7 @@ export type {
 } from "./client-data-types";
 export {
   fetchOverviewGeoDimensionTab,
+  fetchOverviewGeoDimensionTabPage,
   fetchOverviewGeoPoints,
 } from "./client-geo-data";
 export {

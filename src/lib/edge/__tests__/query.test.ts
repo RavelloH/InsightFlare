@@ -2156,7 +2156,7 @@ describe("edge query handlers", () => {
     expect(await clientTab.json()).toMatchObject({
       ok: true,
       data: {
-        items: [{ label: "Chrome", views: 1, sessions: 1, visitors: 0 }],
+        items: [{ label: "Chrome", views: 1, sessions: 1, visitors: 1 }],
         pagination: expect.any(Object),
       },
     });

@@ -234,6 +234,22 @@ export interface ComparisonDatasetQuery {
   readonly scopePreference?: FilterScopePreference;
 }
 
+/**
+ * The table comparison contract is intentionally smaller than the public
+ * comparison-breakdown API.  Overview table endpoints keep their existing
+ * route and receive both concrete datasets in one request.
+ */
+export type OverviewTableMetric = "views" | "visitors";
+export type OverviewTableSortBy = "current" | "reference" | "change";
+
+export interface OverviewTableComparisonQuery {
+  readonly current: ComparisonDatasetQuery;
+  readonly reference: ComparisonDatasetQuery;
+  readonly metric: OverviewTableMetric;
+  readonly sortBy: OverviewTableSortBy;
+  readonly direction: SortDirection;
+}
+
 export interface ComparisonQuery {
   readonly context: QueryContext;
   readonly scopePreference?: FilterScopePreference;
@@ -357,6 +373,8 @@ export interface DimensionQuery extends BaseQuery {
   readonly limit?: number;
   readonly page?: PageRequest;
   readonly sort?: Sort;
+  readonly search?: string;
+  readonly comparison?: OverviewTableComparisonQuery;
 }
 
 export interface PageQuery extends BaseQuery {

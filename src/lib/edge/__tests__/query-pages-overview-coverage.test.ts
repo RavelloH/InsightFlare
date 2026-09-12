@@ -2828,7 +2828,7 @@ describe("edge overview D1 queries and handlers", () => {
     await expect(clientTab.json()).resolves.toEqual({
       ok: true,
       data: {
-        items: [{ label: "1440x900", views: 2, sessions: 2, visitors: 0 }],
+        items: [{ label: "1440x900", views: 2, sessions: 2, visitors: 2 }],
         pagination: {
           limit: 3,
           returned: 1,
@@ -2863,6 +2863,104 @@ describe("edge overview D1 queries and handlers", () => {
       expect(call.sql).toContain("GROUP BY value");
       expect(call.sql).toContain("TRIM(value) != ''");
     }
+  });
+
+  it("routes comparison requests for every dimension tab and validates controls", async () => {
+    const comparisonTabs = [
+      "page.path",
+      "page.query",
+      "page.title",
+      "page.hostname",
+      "page.entry",
+      "page.exit",
+      "source.domain",
+      "source.link",
+      "client.browser",
+      "client.osVersion",
+      "client.deviceType",
+      "client.language",
+      "client.screenSize",
+      "geo.country",
+      "geo.region",
+      "geo.city",
+      "geo.continent",
+      "geo.timezone",
+      "geo.organization",
+    ] as const;
+    const { env, calls } = createD1Env(
+      comparisonTabs.map((tab) => [
+        {
+          key: `${tab}-value`,
+          current_views: 4,
+          current_sessions: 2,
+          current_visitors: 2,
+          reference_views: 3,
+          reference_sessions: 1,
+          reference_visitors: 1,
+        },
+      ]),
+    );
+
+    for (const tab of comparisonTabs) {
+      const response = await handleOverviewTabContract(
+        env,
+        siteId,
+        url(`/overview/${tab}`, {
+          from: window.startMs,
+          to: window.endExclusiveMs,
+          compare: "previous",
+          sort: "visitors",
+          sortBy: "change",
+          direction: "asc",
+          search: "value",
+          limit: 1,
+        }),
+        tab,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ ok: true });
+    }
+
+    expect(calls).toHaveLength(comparisonTabs.length);
+    expect(calls.every((call) => call.sql.includes("reference_rollup"))).toBe(
+      true,
+    );
+
+    const invalidSort = await handleOverviewTabContract(
+      env,
+      siteId,
+      url("/overview/page.path", {
+        from: window.startMs,
+        to: window.endExclusiveMs,
+        sort: "sessions",
+      }),
+      "page.path",
+    );
+    expect(invalidSort.status).toBe(400);
+
+    const invalidDirection = await handleOverviewTabContract(
+      env,
+      siteId,
+      url("/overview/page.path", {
+        from: window.startMs,
+        to: window.endExclusiveMs,
+        direction: "sideways",
+      }),
+      "page.path",
+    );
+    expect(invalidDirection.status).toBe(400);
+
+    const invalidComparison = await handleOverviewTabContract(
+      env,
+      siteId,
+      url("/overview/page.path", {
+        from: window.startMs,
+        to: window.endExclusiveMs,
+        compare: "future",
+      }),
+      "page.path",
+    );
+    expect(invalidComparison.status).toBe(400);
   });
 
   it("maps filter option branches across page, source, client, geo, and scalar keys", async () => {

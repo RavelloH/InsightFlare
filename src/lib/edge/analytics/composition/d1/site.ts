@@ -3,12 +3,18 @@ import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application
 import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
 import type {
   FilterValuesResult,
+  OverviewTableComparisonQuery,
   PagesResult,
   ReferrersResult,
   ReferrerSummaryResult,
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
+import {
+  decodeComparisonDimensionCursor,
+  queryComparisonDimensionPageFromD1,
+  queryComparisonSessionPathPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/comparison-dimensions";
 import {
   geoTabLabel,
   mapDimensionRows,
@@ -18,6 +24,7 @@ import {
 import {
   cityValueExpr,
   clientDimensionDefinition,
+  referrerDomainDimensionDefinition,
   regionValueExpr,
   utmDimensionDefinition,
 } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
@@ -58,6 +65,30 @@ import {
   timeWindow,
 } from "./shared";
 
+function overviewTabExpression(tab: string): string | null {
+  if (tab === "page.path") return "TRIM(COALESCE(pathname, ''))";
+  if (tab === "page.query") return "TRIM(COALESCE(query_string, ''))";
+  if (tab === "page.title") return "TRIM(COALESCE(title, ''))";
+  if (tab === "page.hostname") return "TRIM(COALESCE(hostname, ''))";
+  if (tab === "source.domain")
+    return referrerDomainDimensionDefinition().labelExpr;
+  if (tab === "source.link") return "TRIM(COALESCE(referrer_url, ''))";
+  if (tab === "source.channel") return buildTrafficChannelSqlExpression();
+  if (tab.startsWith("client.")) {
+    return clientDimensionDefinition(
+      tab.slice("client.".length) as
+        "browser" | "osVersion" | "deviceType" | "language" | "screenSize",
+    ).labelExpr;
+  }
+  if (tab === "geo.country") return "TRIM(COALESCE(country, ''))";
+  if (tab === "geo.region") return regionValueExpr();
+  if (tab === "geo.city") return cityValueExpr();
+  if (tab === "geo.continent") return "TRIM(COALESCE(continent, ''))";
+  if (tab === "geo.timezone") return "TRIM(COALESCE(timezone, ''))";
+  if (tab === "geo.organization") return "TRIM(COALESCE(as_organization, ''))";
+  return null;
+}
+
 export async function overviewTabData(
   options: D1SiteQueryRuntimeOptions,
   request: RuntimeQuery,
@@ -76,6 +107,139 @@ export async function overviewTabData(
     stringField(request, "direction") === "asc" ? "asc" : "desc";
   const search = stringField(request, "search") || undefined;
   const kind = tab.split(".")[0];
+  const comparison =
+    request.comparison && typeof request.comparison === "object"
+      ? (request.comparison as OverviewTableComparisonQuery)
+      : null;
+  const comparisonCurrent =
+    request.current && typeof request.current === "object"
+      ? (request.current as RuntimeQuery)
+      : null;
+  const comparisonReference =
+    request.reference && typeof request.reference === "object"
+      ? (request.reference as RuntimeQuery)
+      : null;
+  if (
+    comparison &&
+    comparisonCurrent?.time &&
+    comparisonReference?.time &&
+    (tab === "page.entry" || tab === "page.exit")
+  ) {
+    const pageKind = tab === "page.entry" ? "entry" : "exit";
+    const currentWindow = timeWindow(comparisonCurrent.time);
+    const referenceWindow = timeWindow(comparisonReference.time);
+    const currentFilters = comparisonCurrent.filters ?? EMPTY_FILTER_DOCUMENT;
+    const referenceFilters =
+      comparisonReference.filters ?? EMPTY_FILTER_DOCUMENT;
+    const cursor = await decodeComparisonDimensionCursor(
+      options.env,
+      options.siteId,
+      currentWindow,
+      currentFilters,
+      referenceWindow,
+      referenceFilters,
+      `session.${pageKind}`,
+      search,
+      cursorText,
+      audience,
+      comparison.metric,
+      comparison.sortBy,
+      comparison.direction,
+    );
+    if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
+    const page = await queryComparisonSessionPathPageFromD1(
+      options.env,
+      options.siteId,
+      currentWindow,
+      currentFilters,
+      referenceWindow,
+      referenceFilters,
+      limit,
+      pageKind,
+      {
+        metric: comparison.metric,
+        sortBy: comparison.sortBy,
+        direction: comparison.direction,
+        search,
+      },
+      cursor,
+      audience,
+    );
+    return {
+      data: {
+        items: page.items.map((row) => ({
+          key: row.key,
+          value: row.key,
+          label: row.key,
+          views: row.views,
+          sessions: row.sessions,
+          visitors: row.visitors,
+          reference: row.reference,
+          change: row.change,
+        })),
+        pagination: page.pagination,
+      },
+    };
+  }
+  if (comparison && comparisonCurrent?.time && comparisonReference?.time) {
+    const expression = overviewTabExpression(tab);
+    if (expression) {
+      const currentWindow = timeWindow(comparisonCurrent.time);
+      const referenceWindow = timeWindow(comparisonReference.time);
+      const currentFilters = comparisonCurrent.filters ?? EMPTY_FILTER_DOCUMENT;
+      const referenceFilters =
+        comparisonReference.filters ?? EMPTY_FILTER_DOCUMENT;
+      const cursor = await decodeComparisonDimensionCursor(
+        options.env,
+        options.siteId,
+        currentWindow,
+        currentFilters,
+        referenceWindow,
+        referenceFilters,
+        expression,
+        search,
+        cursorText,
+        audience,
+        comparison.metric,
+        comparison.sortBy,
+        comparison.direction,
+      );
+      if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
+      const page = await queryComparisonDimensionPageFromD1(
+        options.env,
+        options.siteId,
+        currentWindow,
+        currentFilters,
+        referenceWindow,
+        referenceFilters,
+        limit,
+        expression,
+        {
+          metric: comparison.metric,
+          sortBy: comparison.sortBy,
+          direction: comparison.direction,
+          search,
+        },
+        cursor,
+        audience,
+      );
+      return {
+        data: {
+          items: page.items.map((row) => ({
+            key: row.key,
+            value: row.key,
+            label: row.key,
+            views: row.views,
+            sessions: row.sessions,
+            visitors: row.visitors,
+            reference: row.reference,
+            change: row.change,
+          })),
+          pagination: page.pagination,
+        },
+      };
+    }
+  }
   if (tab === "source.channel") {
     const selectExpr = buildTrafficChannelSqlExpression();
     const cursor = await decodeDimensionCursor(
@@ -158,7 +322,7 @@ export async function overviewTabData(
   }
   if (kind === "page") {
     const pageTab = tab.slice("page.".length) as
-      "path" | "title" | "hostname" | "entry" | "exit";
+      "path" | "query" | "title" | "hostname" | "entry" | "exit";
     if (pageTab === "entry" || pageTab === "exit") {
       const pageKind = pageTab === "entry" ? "entry" : "exit";
       const cursor = await decodeSessionPathDimensionCursor(
@@ -167,9 +331,11 @@ export async function overviewTabData(
         window,
         filters,
         pageKind,
-        undefined,
+        search,
         cursorText,
         audience,
+        sortBy,
+        sortDirection,
       );
       if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
       const page = await querySessionPathDimensionPageFromD1(
@@ -180,9 +346,11 @@ export async function overviewTabData(
         limit,
         pageKind,
         undefined,
-        undefined,
+        search,
         cursor,
         audience,
+        sortBy,
+        sortDirection,
       );
       return {
         data: {
@@ -193,6 +361,7 @@ export async function overviewTabData(
     }
     const selectExpr = {
       path: "pathname",
+      query: "query_string",
       title: "title",
       hostname: "hostname",
     }[pageTab]!;
@@ -202,9 +371,11 @@ export async function overviewTabData(
       window,
       filters,
       selectExpr,
-      undefined,
+      search,
       cursorText,
       audience,
+      sortBy,
+      sortDirection,
     );
     if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
     const page = await queryDimensionPageFromD1(
@@ -214,14 +385,22 @@ export async function overviewTabData(
       filters,
       limit,
       selectExpr,
-      { excludeEmpty: true },
+      { excludeEmpty: true, search, sortBy, sortDirection },
       cursor,
       undefined,
       audience,
     );
-    return {
-      data: { items: mapTabs([...page.items]), pagination: page.pagination },
-    };
+    const items =
+      pageTab === "query"
+        ? page.items.map((row) => ({
+            value: row.value,
+            label: row.value,
+            views: row.views,
+            sessions: row.sessions,
+            visitors: row.visitors,
+          }))
+        : mapTabs([...page.items]);
+    return { data: { items, pagination: page.pagination } };
   }
   if (kind === "client") {
     const clientTab = tab.slice("client.".length) as
@@ -233,9 +412,11 @@ export async function overviewTabData(
       window,
       filters,
       selectExpr,
-      undefined,
+      search,
       cursorText,
       audience,
+      sortBy,
+      sortDirection,
     );
     if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
     const page = await queryDimensionPageFromD1(
@@ -245,14 +426,14 @@ export async function overviewTabData(
       filters,
       limit,
       selectExpr,
-      { excludeEmpty: true },
+      { excludeEmpty: true, search, sortBy, sortDirection },
       cursor,
       undefined,
       audience,
     );
     return {
       data: {
-        items: mapTabs(page.items.map((row) => ({ ...row, visitors: 0 }))),
+        items: mapTabs([...page.items]),
         pagination: page.pagination,
       },
     };
@@ -273,9 +454,11 @@ export async function overviewTabData(
     window,
     filters,
     expression,
-    undefined,
+    search,
     cursorText,
     audience,
+    sortBy,
+    sortDirection,
   );
   if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
   const page = await queryDimensionPageFromD1(
@@ -285,7 +468,7 @@ export async function overviewTabData(
     filters,
     limit,
     expression,
-    { excludeEmpty: true },
+    { excludeEmpty: true, search, sortBy, sortDirection },
     cursor,
     undefined,
     audience,

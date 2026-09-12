@@ -83,6 +83,8 @@ common:
   search: 検索
   open: 開く
   sortBy: "{label}で並べ替え"
+  change: 変化
+  new: 新規
   tableExport:
     action: エクスポート
     title: CSV をエクスポート

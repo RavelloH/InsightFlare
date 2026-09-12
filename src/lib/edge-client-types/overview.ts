@@ -122,21 +122,30 @@ export interface OverviewGeoPointsData {
 
 export interface OverviewTabData {
   ok: boolean;
-  data: PaginatedCollection<{
-    label: string;
-    views: number;
-    sessions: number;
-    visitors: number;
-  }>;
+  data: PaginatedCollection<OverviewTableRow>;
 }
 
 export interface OverviewGeoTabData {
   ok: boolean;
-  data: PaginatedCollection<{
-    value: string;
-    label: string;
+  data: PaginatedCollection<OverviewTableRow & { value?: string }>;
+}
+
+export interface OverviewTableRow {
+  /** Canonical dimension key. Legacy responses may omit it. */
+  key?: string;
+  value?: string;
+  label: string;
+  views: number;
+  sessions: number;
+  visitors: number;
+  reference?: {
     views: number;
     sessions: number;
     visitors: number;
-  }>;
+  };
+  change?: {
+    views: { absolute: number; relative: number | null };
+    sessions: { absolute: number; relative: number | null };
+    visitors: { absolute: number; relative: number | null };
+  };
 }

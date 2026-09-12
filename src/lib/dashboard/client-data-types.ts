@@ -8,7 +8,10 @@ import type {
   PagesDashboardData,
   PagesData,
 } from "@/lib/edge-client";
-import type { AnalyticsFilterFieldId } from "@/lib/filter-contract";
+import type {
+  AnalyticsFilterFieldId,
+  FilterDocument,
+} from "@/lib/filter-contract";
 
 export type DashboardFilterOptionData = DashboardFilterOption;
 
@@ -25,6 +28,17 @@ export type OverviewGeoTabRows = Array<{
   views: number;
   sessions: number;
   visitors: number;
+  key?: string;
+  reference?: {
+    views: number;
+    sessions: number;
+    visitors: number;
+  };
+  change?: {
+    views: { absolute: number; relative: number | null };
+    sessions: { absolute: number; relative: number | null };
+    visitors: { absolute: number; relative: number | null };
+  };
 }>;
 export type PagesDashboardRows = PagesDashboardData["data"]["items"];
 export type PagesDashboardRow = PagesDashboardRows[number];
@@ -41,6 +55,16 @@ export type PrivateRequestParams = Record<string, string | number>;
 export type DashboardListRequestOptions = {
   limit?: number;
   cursor?: string | null;
+  search?: string;
+  sort?: "views" | "sessions" | "visitors";
+  direction?: SortDirection;
+  comparison?: {
+    mode: "same" | "previous";
+    window: TimeWindow;
+    filters: FilterDocument;
+  } | null;
+  comparisonMetric?: "views" | "visitors";
+  comparisonSortBy?: "current" | "reference" | "change";
   signal?: AbortSignal;
 };
 export type FetchPrivateJsonOptions = {

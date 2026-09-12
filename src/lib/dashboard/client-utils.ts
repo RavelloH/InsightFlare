@@ -18,6 +18,10 @@ import {
 
 import type { OverviewTabRows } from "./client-data-types";
 
+type DashboardComparisonRequest = NonNullable<
+  DashboardListRequestOptions["comparison"]
+>;
+
 function normalizedPagination(
   value: unknown,
   itemCount: number,
@@ -85,14 +89,45 @@ export function normalizeOverviewRows(
     | undefined,
 ): OverviewTabRows {
   if (!Array.isArray(rows)) return [];
-  return rows.map((row) => ({
-    label:
-      String((row as { label?: unknown }).label ?? "").trim() ||
-      String((row as { value?: unknown }).value ?? "").trim(),
-    views: Number((row as { views?: unknown }).views ?? 0),
-    sessions: Number((row as { sessions?: unknown }).sessions ?? 0),
-    visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
-  }));
+  return rows.map((row) => {
+    const record = row as Record<string, unknown>;
+    const normalized: OverviewTabRows[number] = {
+      ...(typeof record.key === "string" ? { key: record.key } : {}),
+      ...(typeof record.value === "string" ? { value: record.value } : {}),
+      label:
+        String(record.label ?? "").trim() || String(record.value ?? "").trim(),
+      views: Number(record.views ?? 0),
+      sessions: Number(record.sessions ?? 0),
+      visitors: Number(record.visitors ?? 0),
+    };
+    if (record.reference && typeof record.reference === "object") {
+      const reference = record.reference as Record<string, unknown>;
+      normalized.reference = {
+        views: Number(reference.views ?? 0),
+        sessions: Number(reference.sessions ?? 0),
+        visitors: Number(reference.visitors ?? 0),
+      };
+    }
+    if (record.change && typeof record.change === "object") {
+      const change = record.change as Record<string, unknown>;
+      const metricChange = (value: unknown) => {
+        const item = value as Record<string, unknown> | null;
+        return {
+          absolute: Number(item?.absolute ?? 0),
+          relative:
+            item?.relative === null || item?.relative === undefined
+              ? null
+              : Number(item.relative),
+        };
+      };
+      normalized.change = {
+        views: metricChange(change.views),
+        sessions: metricChange(change.sessions),
+        visitors: metricChange(change.visitors),
+      };
+    }
+    return normalized;
+  });
 }
 
 export function decodeHashLabel(value: string): string {
@@ -151,6 +186,32 @@ export function withFilters(
     next[key] = value;
   }
   return next;
+}
+
+/** Add the dashboard comparison state without changing the current filter. */
+export function withComparison(
+  params: PrivateRequestParams,
+  comparison?: DashboardComparisonRequest | null,
+  options?: {
+    metric?: "views" | "visitors";
+    sortBy?: "current" | "reference" | "change";
+  },
+): PrivateRequestParams {
+  const next = { ...params };
+  const cleanParams = Object.fromEntries(
+    Object.entries(next).filter(([key]) => !key.startsWith("compareFilter[")),
+  ) as PrivateRequestParams;
+  if (!comparison) return cleanParams;
+  cleanParams.compare = comparison.mode;
+  if (options?.metric) cleanParams.metric = options.metric;
+  if (options?.sortBy) cleanParams.sortBy = options.sortBy;
+  for (const [key, value] of serializeFilterParams(
+    comparison.filters,
+    analyticsFilterRegistry,
+  )) {
+    cleanParams[`compareFilter${key.slice("filter".length)}`] = value;
+  }
+  return cleanParams;
 }
 
 export function withPagination(

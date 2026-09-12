@@ -10,7 +10,6 @@ import {
   type TabbedDataTableColumn,
   type TabbedDataTableLoader,
   type TabbedDataTableRowAdapter,
-  type TabbedDataTableSortState,
   type TabbedDataTableTab,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { numberFormat } from "@/lib/dashboard/format";
@@ -147,24 +146,6 @@ export const CampaignBreakdownCard = memo(function CampaignBreakdownCard({
     }),
     [],
   );
-  const compareRows = useCallback(
-    (
-      left: CampaignBreakdownRow,
-      right: CampaignBreakdownRow,
-      { sort }: { sort: TabbedDataTableSortState<CampaignSortKey> },
-    ) => {
-      const primary =
-        (left[sort.key] - right[sort.key]) *
-        (sort.direction === "asc" ? 1 : -1);
-      if (primary !== 0) return primary;
-      if (right.views !== left.views) return right.views - left.views;
-      if (right.sessions !== left.sessions) {
-        return right.sessions - left.sessions;
-      }
-      return left.label.localeCompare(right.label);
-    },
-    [],
-  );
   const labelColumnLabel = useCallback(
     (tab: TabbedDataTableTab<CampaignTab>) => tab.columnLabel ?? tab.label,
     [],
@@ -208,7 +189,6 @@ export const CampaignBreakdownCard = memo(function CampaignBreakdownCard({
                 requestKey={`${requestKey}:${group.key}`}
                 columns={columns}
                 rowAdapter={rowAdapter}
-                compareRows={compareRows}
                 labelColumnLabel={labelColumnLabel}
                 sortActionLabel={(label) =>
                   formatI18nTemplate(messages.common.sortBy, { label })

@@ -12,7 +12,6 @@ import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
   type TabbedDataTableLoader,
-  type TabbedDataTableSortState,
 } from "@/components/dashboard/tabbed-data-table-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +33,7 @@ import {
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
 import type { BrowserTrendData, BrowserTrendSeries } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -232,37 +232,23 @@ function ScreenValueListCard({
     }),
     [],
   );
-  const compareRows = useCallback(
-    (
-      left: ScreenListItem,
-      right: ScreenListItem,
-      { sort }: { sort: TabbedDataTableSortState<ScreenSortKey> },
-    ) => {
-      const primary =
-        (left[sort.key] - right[sort.key]) *
-        (sort.direction === "asc" ? 1 : -1);
-      if (primary !== 0) return primary;
-      if (right.views !== left.views) return right.views - left.views;
-      if (right.sessions !== left.sessions) {
-        return right.sessions - left.sessions;
-      }
-      return left.displayLabel.localeCompare(right.displayLabel);
-    },
-    [],
-  );
   const loader = useCallback<
     TabbedDataTableLoader<ScreenListTab, ScreenListItem, ScreenSortKey>
   >(
-    async ({ limit }) => ({
-      items,
-      pagination: {
+    async ({ cursor, limit, search, sort }) =>
+      loadLocalTablePage({
+        rows: items,
+        sort,
+        columns,
+        tab: "screenSize",
         limit,
-        returned: items.length,
-        hasMore: false,
-        nextCursor: null,
-      },
-    }),
-    [items],
+        cursor,
+        search,
+        getText: (item) => item.displayLabel,
+        getSearchText: (item) => item.label,
+        tieBreakers: ["views", "sessions"],
+      }),
+    [columns, items],
   );
 
   return (
@@ -272,7 +258,6 @@ function ScreenValueListCard({
       requestKey={requestKey}
       columns={columns}
       rowAdapter={rowAdapter}
-      compareRows={compareRows}
       sortActionLabel={(label) =>
         formatI18nTemplate(messages.common.sortBy, { label })
       }
