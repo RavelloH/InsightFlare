@@ -1,5 +1,9 @@
 import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1";
-import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
+import {
+  type FilterDocument,
+  type OverviewTableComparisonQuery,
+  parseFilterUrlForAudience,
+} from "@/lib/edge/analytics/contract";
 import {
   type DimensionQuery,
   siteQueryContext,
@@ -11,6 +15,7 @@ import {
   parseLimit,
   parseListSearch,
   parseWindow,
+  previousComparableWindow,
   queryErrorResponse,
   type ResponseContext,
   withoutGeoFilter,
@@ -65,16 +70,90 @@ export async function handleSimpleDimensionContract(
   const cursor = url.searchParams.get("cursor");
   const sort = rawSort ?? "views";
   const direction = rawDirection ?? "desc";
+  const compare = url.searchParams.get("compare");
+  if (compare !== null && compare !== "same" && compare !== "previous") {
+    return badRequest("Invalid comparison", "invalid-input");
+  }
+  const compareFilterParams = new URLSearchParams();
+  for (const [key, value] of url.searchParams) {
+    if (key.startsWith("compareFilter[")) {
+      compareFilterParams.append(
+        `filter${key.slice("compareFilter".length)}`,
+        value,
+      );
+    }
+  }
+  let comparison: OverviewTableComparisonQuery | undefined;
+  if (
+    dimension.startsWith("utm.") &&
+    (compare === "same" || compare === "previous")
+  ) {
+    const referenceFilters: FilterDocument = compareFilterParams.size
+      ? parseFilterUrlForAudience(
+          queryContext.policy.audience,
+          compareFilterParams,
+        )
+      : compare === "previous"
+        ? filters
+        : ({ version: 1, root: null } as FilterDocument);
+    if (compare !== "same" || referenceFilters.root) {
+      const comparisonMetric = url.searchParams.get("metric");
+      const comparisonSortBy = url.searchParams.get("sortBy");
+      comparison = {
+        current: {
+          time: toQueryTime(window),
+          filters,
+        },
+        reference: {
+          time: toQueryTime(
+            compare === "previous" ? previousComparableWindow(window) : window,
+          ),
+          filters: referenceFilters,
+        },
+        metric:
+          comparisonMetric === "visitors"
+            ? "visitors"
+            : comparisonMetric === "sessions"
+              ? "sessions"
+              : "views",
+        sortBy:
+          comparisonSortBy === "reference"
+            ? "reference"
+            : comparisonSortBy === "change"
+              ? "change"
+              : "current",
+        direction,
+      };
+    }
+  }
   const query = {
     context: queryContext,
     time: toQueryTime(window),
     filters,
-    dimension,
-    limit,
-    search: parseListSearch(url),
-    sort: { key: sort, direction },
-    page: { limit, ...(cursor ? { cursor } : {}) },
-  } satisfies DimensionQuery;
+    ...(comparison
+      ? {
+          tab: dimension,
+          limit,
+          cursor: cursor ?? "",
+          search: parseListSearch(url),
+          sort,
+          direction,
+          comparison,
+          current: comparison.current,
+          reference: comparison.reference,
+        }
+      : {
+          dimension,
+          limit,
+          search: parseListSearch(url),
+          sort: { key: sort, direction },
+          page: { limit, ...(cursor ? { cursor } : {}) },
+        }),
+  } as DimensionQuery & {
+    readonly tab?: string;
+    readonly current?: OverviewTableComparisonQuery["current"];
+    readonly reference?: OverviewTableComparisonQuery["reference"];
+  };
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<
     | ReturnType<typeof mapDimensionRows>
     | {
@@ -83,5 +162,11 @@ export async function handleSimpleDimensionContract(
       }
   >("dimension", query);
   if (!result.ok) return queryErrorResponse(result.error);
+  if (comparison && result.data && typeof result.data === "object") {
+    return jsonResponseWith(ctx!, {
+      ok: true,
+      ...(result.data as { readonly data?: unknown }),
+    });
+  }
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }

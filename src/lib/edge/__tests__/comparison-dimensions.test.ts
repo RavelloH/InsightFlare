@@ -290,4 +290,47 @@ describe("comparison dimension readers", () => {
     });
     expect(sessionPage.pagination.nextCursor).toEqual(expect.any(String));
   });
+
+  it("supports session metrics for dimension and session-path comparisons", async () => {
+    const { env: dimensionEnv } = createEnv([[dimensionRow("alpha", 7, 3)]]);
+    const dimensionPage = await queryComparisonDimensionPageFromD1(
+      dimensionEnv,
+      "site-1",
+      current,
+      filters,
+      reference,
+      filters,
+      10,
+      "pathname",
+      { metric: "sessions", sortBy: "current", direction: "desc" },
+      null,
+      "private-dashboard",
+    );
+
+    const { env: sessionEnv } = createEnv([[sessionRow("/entry", 5, 2)]]);
+    const sessionPage = await queryComparisonSessionPathPageFromD1(
+      sessionEnv,
+      "site-1",
+      current,
+      filters,
+      reference,
+      filters,
+      10,
+      "entry",
+      { metric: "sessions", sortBy: "reference", direction: "desc" },
+      null,
+      "private-dashboard",
+    );
+
+    expect(dimensionPage.items[0]).toMatchObject({
+      sessions: 7,
+      reference: { sessions: 3 },
+      change: { sessions: { absolute: 4, relative: 4 / 3 } },
+    });
+    expect(sessionPage.items[0]).toMatchObject({
+      sessions: 5,
+      reference: { sessions: 2 },
+      change: { sessions: { absolute: 3, relative: 1.5 } },
+    });
+  });
 });

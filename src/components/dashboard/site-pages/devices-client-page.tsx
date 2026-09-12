@@ -77,6 +77,8 @@ export function DevicesClientPage({
         siteDomain={siteDomain}
         window={window}
         filters={filters}
+        comparisonQuery={comparisonQuery}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
       />
 
       <DeviceCrossBreakdownGrid

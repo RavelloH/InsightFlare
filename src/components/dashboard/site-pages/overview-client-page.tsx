@@ -2031,6 +2031,8 @@ interface OverviewPagesSectionProps extends OverviewClientPageProps {
   resolvedScope?: FilterScope;
   loading?: boolean;
   cardDataOverride?: OverviewPagesSectionCardData | null;
+  comparisonEnabled?: boolean;
+  tableContentTransitionKey?: string | number;
   visibleCards?: readonly OverviewPagesSectionCardKind[];
   pageCardTabs?: readonly PageCardTab[];
   pageCardTabMetaOverride?: Partial<
@@ -2069,6 +2071,8 @@ export function OverviewPagesSection({
   filters,
   resolvedScope,
   cardDataOverride,
+  comparisonEnabled = true,
+  tableContentTransitionKey,
   visibleCards,
   showSourceLinkTab = true,
   pageCardTabs,
@@ -2092,7 +2096,11 @@ export function OverviewPagesSection({
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
   const { window } = useDashboardQuery();
-  const comparisonQuery = useOverviewComparisonQuery(window, filters);
+  const comparisonQuery = useOverviewComparisonQuery(
+    window,
+    filters,
+    comparisonEnabled,
+  );
   const resolvedPageCardTabs = useMemo(
     () => pageCardTabs ?? PAGE_CARD_TABS,
     [pageCardTabs],
@@ -3555,6 +3563,7 @@ export function OverviewPagesSection({
             <TabbedDataTableCard<PageCardTab, PageCardRow, PageCardSortKey>
               tabs={pageCardTableTabs}
               loader={pageCardLoader}
+              contentTransitionKey={tableContentTransitionKey}
               defaultSort={
                 comparisonQuery
                   ? { key: "current", direction: "desc" }
@@ -3590,6 +3599,7 @@ export function OverviewPagesSection({
             <TabbedDataTableCard<SourceCardTab, SourceCardRow, PageCardSortKey>
               tabs={sourceCardTableTabs}
               loader={sourceCardLoader}
+              contentTransitionKey={tableContentTransitionKey}
               defaultSort={
                 comparisonQuery
                   ? { key: "current", direction: "desc" }
@@ -3633,6 +3643,7 @@ export function OverviewPagesSection({
             >
               tabs={clientDimensionCardTableTabs}
               loader={clientDimensionCardLoader}
+              contentTransitionKey={tableContentTransitionKey}
               defaultSort={
                 comparisonQuery
                   ? { key: "current", direction: "desc" }
@@ -3676,6 +3687,7 @@ export function OverviewPagesSection({
             >
               tabs={geoDimensionCardTableTabs}
               loader={geoDimensionCardLoader}
+              contentTransitionKey={tableContentTransitionKey}
               defaultSort={
                 comparisonQuery
                   ? { key: "current", direction: "desc" }
@@ -3787,6 +3799,7 @@ function comparisonLabelForQuery(
 function useOverviewComparisonQuery(
   timeWindow: TimeWindow,
   filters: FilterDocument,
+  enabled = true,
 ): DashboardComparisonQuery | null {
   const searchParams = useLiveSearchParams();
   const searchParamsKey = searchParams.toString();
@@ -3794,12 +3807,15 @@ function useOverviewComparisonQuery(
 
   return useMemo(
     () =>
-      resolveDashboardComparisonQuery(
-        new URLSearchParams(searchParamsKey),
-        timeWindow,
-        filters,
-      ),
+      enabled
+        ? resolveDashboardComparisonQuery(
+            new URLSearchParams(searchParamsKey),
+            timeWindow,
+            filters,
+          )
+        : null,
     [
+      enabled,
       filters,
       filtersKey,
       searchParamsKey,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
+import type { FilterFieldId } from "@/lib/filter-contract";
 import { attachFilterScopePreference } from "@/lib/filter-contract";
 
 const currentWindow = {
@@ -65,6 +66,32 @@ describe("resolveDashboardComparisonQuery", () => {
       ),
       currentWindow,
       parseFilterDocumentFromSearchParams(new URLSearchParams()),
+    );
+
+    expect(result?.filters.root).toMatchObject({
+      kind: "condition",
+      value: "/pricing",
+    });
+  });
+
+  it("falls back to auto scope when the current filter has no scope metadata", () => {
+    const result = resolveDashboardComparisonQuery(
+      new URLSearchParams(
+        "compare=previous&compareFilter%5Bpage.path%5D=%2Fpricing",
+      ),
+      currentWindow,
+      {
+        version: 1,
+        root: {
+          kind: "condition",
+          target: {
+            kind: "field",
+            field: "page.path" as FilterFieldId,
+          },
+          operator: "eq",
+          value: "/docs",
+        },
+      },
     );
 
     expect(result?.filters.root).toMatchObject({

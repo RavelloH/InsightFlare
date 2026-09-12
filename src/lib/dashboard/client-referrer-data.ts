@@ -16,6 +16,7 @@ import type { FilterDocument } from "@/lib/filter-contract";
 import { fetchPrivateJson } from "./client-request";
 import {
   normalizePaginatedCollection,
+  withComparison,
   withFilters,
   withPagination,
 } from "./client-utils";
@@ -86,21 +87,28 @@ export async function fetchUtmDimension(
   filters?: FilterDocument,
   options?: DashboardListRequestOptions,
 ): Promise<DimensionData["data"]> {
-  const requestParams = withFilters(
-    withPagination(
-      {
-        siteId,
-        from: window.from,
-        to: window.to,
-        timeZone: window.timeZone,
-        ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
-        ...(options?.sort ? { sort: options.sort } : {}),
-        ...(options?.direction ? { direction: options.direction } : {}),
-      },
-      options,
-      20,
+  const requestParams = withComparison(
+    withFilters(
+      withPagination(
+        {
+          siteId,
+          from: window.from,
+          to: window.to,
+          timeZone: window.timeZone,
+          ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+          ...(options?.sort ? { sort: options.sort } : {}),
+          ...(options?.direction ? { direction: options.direction } : {}),
+        },
+        options,
+        20,
+      ),
+      filters,
     ),
-    filters,
+    options?.comparison,
+    {
+      metric: options?.comparisonMetric,
+      sortBy: options?.comparisonSortBy,
+    },
   );
   const response = options?.signal
     ? fetchPrivateJson<DimensionData>(

@@ -15,7 +15,7 @@ import {
   RiDownloadLine,
   RiSearchLine,
 } from "@remixicon/react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
 import { AnimatedDataTableRow } from "@/components/dashboard/animated-data-table-row";
@@ -237,6 +237,8 @@ export interface TabbedDataTableCardProps<
   defaultValue?: TTab;
   onValueChange?: (value: TTab) => void;
   requestKey?: string | number;
+  /** Keeps the card-level content transition stable while the data refreshes. */
+  contentTransitionKey?: string | number;
   defaultSort?: TabbedDataTableSortState<TKey>;
   sortByTab?: Partial<Record<TTab, TabbedDataTableSortState<TKey>>>;
   onSortChange?: (tab: TTab, sort: TabbedDataTableSortState<TKey>) => void;
@@ -403,6 +405,7 @@ function TabbedDataTableCardImpl<
   defaultValue,
   onValueChange,
   requestKey,
+  contentTransitionKey,
   defaultSort,
   sortByTab: controlledSortByTab,
   onSortChange,
@@ -586,20 +589,36 @@ function TabbedDataTableCardImpl<
       lastPage.pagination.hasMore
         ? (lastPage.pagination.nextCursor ?? undefined)
         : undefined,
+    // A changing request key should refresh rows in place. In particular,
+    // realtime snapshots must not replace the whole table with a loading
+    // state before the next snapshot arrives.
+    placeholderData: keepPreviousData,
     enabled: typeof window !== "undefined" && completedRows === null,
   });
-  const { fetchNextPage, hasNextPage, isFetchingNextPage, isPending } =
-    dataQuery;
+  const {
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isPending,
+    isPlaceholderData,
+  } = dataQuery;
 
   useEffect(() => {
     const pages = dataQuery.data?.pages;
     const lastPage = pages?.at(-1);
-    if (!pages || !lastPage || lastPage.pagination.hasMore) return;
+    if (
+      isPlaceholderData ||
+      !pages ||
+      !lastPage ||
+      lastPage.pagination.hasMore
+    ) {
+      return;
+    }
     completedRowsByDatasetRef.current.set(
       datasetKey,
       pages.flatMap((page) => page.items),
     );
-  }, [dataQuery.data, datasetKey]);
+  }, [dataQuery.data, datasetKey, isPlaceholderData]);
 
   const rawActiveRows = useMemo(() => {
     if (completedRows) {
@@ -1451,7 +1470,7 @@ function TabbedDataTableCardImpl<
           footer={
             activeHasMore ? renderLoadMoreRows(activeTab, activeColumns) : null
           }
-          contentKey={`card-${requestKey ?? ""}-${activeTab}`}
+          contentKey={`card-${contentTransitionKey ?? requestKey ?? ""}-${activeTab}`}
         />
       </TabbedScrollMaskCard>
       {searchPanel}

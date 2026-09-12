@@ -121,7 +121,11 @@ export async function handleOverviewTabContract(
           filters: referenceComparisonFilters,
         },
         metric:
-          url.searchParams.get("metric") === "visitors" ? "visitors" : "views",
+          url.searchParams.get("metric") === "visitors"
+            ? "visitors"
+            : url.searchParams.get("metric") === "sessions"
+              ? "sessions"
+              : "views",
         sortBy:
           url.searchParams.get("sortBy") === "reference"
             ? "reference"

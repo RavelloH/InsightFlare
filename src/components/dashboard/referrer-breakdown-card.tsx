@@ -5,6 +5,11 @@ import {
   RiShareForwardLine,
 } from "@remixicon/react";
 
+import {
+  ComparisonMetricToggle,
+  type ComparisonTableMetric,
+  createComparisonTableColumns,
+} from "@/components/dashboard/comparison-table";
 import { InlineMeta } from "@/components/dashboard/journey-display";
 import {
   LabelWithOptionalIcon,
@@ -30,6 +35,7 @@ import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/client-history";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import {
   dashboardFilterValue,
   serializeDashboardSearchParams,
@@ -47,11 +53,22 @@ import { formatI18nTemplate } from "@/lib/i18n/template";
 import { usePathname } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
+export type ReferrerBreakdownGroupKey = "source" | "channel";
+
 interface ReferrerBreakdownCardProps {
   locale: Locale;
   messages: AppMessages;
   pathname: string;
   filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  comparisonLabel: string;
+  comparisonMetricByGroup: Readonly<
+    Record<ReferrerBreakdownGroupKey, ComparisonTableMetric>
+  >;
+  onComparisonMetricChange: (
+    group: ReferrerBreakdownGroupKey,
+    metric: ComparisonTableMetric,
+  ) => void;
   requestKey: string;
   loader: TabbedDataTableLoader<
     ReferrerTab,
@@ -66,6 +83,10 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
   messages,
   pathname,
   filters,
+  comparisonQuery,
+  comparisonLabel,
+  comparisonMetricByGroup,
+  onComparisonMetricChange,
   requestKey,
   loader,
   showSourceLinkTab = true,
@@ -99,7 +120,43 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
       messages.overview.sourceTab,
     ],
   );
-  const columns = useMemo<
+  const comparisonColumnsByGroup = useMemo(
+    () =>
+      Object.fromEntries(
+        (
+          Object.keys(comparisonMetricByGroup) as ReferrerBreakdownGroupKey[]
+        ).map((group) => {
+          const metric = comparisonMetricByGroup[group];
+          return [
+            group,
+            createComparisonTableColumns<ReferrerBreakdownRow, ReferrerTab>({
+              metric,
+              comparisonLabel,
+              locale,
+              messages,
+              getCurrent: (row) => row[metric],
+              getReference: (row) => row.reference?.[metric],
+              getChange: (row) => row.change?.[metric],
+            }),
+          ];
+        }),
+      ) as Record<
+        ReferrerBreakdownGroupKey,
+        readonly TabbedDataTableColumn<
+          ReferrerBreakdownRow,
+          ReferrerSortKey,
+          ReferrerTab
+        >[]
+      >,
+    [
+      comparisonLabel,
+      comparisonMetricByGroup.channel,
+      comparisonMetricByGroup.source,
+      locale,
+      messages,
+    ],
+  );
+  const currentColumns = useMemo<
     readonly TabbedDataTableColumn<
       ReferrerBreakdownRow,
       ReferrerSortKey,
@@ -108,16 +165,16 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
   >(
     () => [
       {
-        key: "views",
+        key: "views" as const,
         label: messages.common.views,
-        getValue: (row) => row.views,
-        format: (value) => numberFormat(locale, value),
+        getValue: (row: ReferrerBreakdownRow) => row.views,
+        format: (value: number) => numberFormat(locale, value),
       },
       {
-        key: "visitors",
+        key: "visitors" as const,
         label: messages.common.visitors,
-        getValue: (row) => row.visitors,
-        format: (value) => numberFormat(locale, value),
+        getValue: (row: ReferrerBreakdownRow) => row.visitors,
+        format: (value: number) => numberFormat(locale, value),
       },
     ],
     [locale, messages.common.views, messages.common.visitors],
@@ -257,6 +314,7 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
       }),
   };
   const renderTable = (
+    group: ReferrerBreakdownGroupKey,
     tabs: [
       TabbedDataTableTab<ReferrerTab>,
       ...TabbedDataTableTab<ReferrerTab>[],
@@ -265,8 +323,13 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
     <TabbedDataTableCard<ReferrerTab, ReferrerBreakdownRow, ReferrerSortKey>
       tabs={tabs}
       loader={loader}
-      requestKey={requestKey}
-      columns={columns}
+      requestKey={`${requestKey}:${group}:${comparisonMetricByGroup[group]}`}
+      defaultSort={
+        comparisonQuery ? { key: "current", direction: "desc" } : undefined
+      }
+      columns={
+        comparisonQuery ? comparisonColumnsByGroup[group] : currentColumns
+      }
       rowAdapter={rowAdapter}
       filterRows={filterRows}
       sortActionLabel={(label) =>
@@ -279,6 +342,16 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
       export={{
         labels: messages.common.tableExport,
       }}
+      headerRight={
+        comparisonQuery ? (
+          <ComparisonMetricToggle
+            metric={comparisonMetricByGroup[group]}
+            metrics={["views", "visitors"]}
+            messages={messages}
+            onMetricChange={(metric) => onComparisonMetricChange(group, metric)}
+          />
+        ) : null
+      }
     />
   );
 
@@ -292,8 +365,12 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
       </div>
 
       <div className="grid items-stretch gap-6 lg:grid-cols-2">
-        <div className="h-full min-w-0">{renderTable(sourceTabs)}</div>
-        <div className="h-full min-w-0">{renderTable(channelTabs)}</div>
+        <div className="h-full min-w-0">
+          {renderTable("source", sourceTabs)}
+        </div>
+        <div className="h-full min-w-0">
+          {renderTable("channel", channelTabs)}
+        </div>
       </div>
     </section>
   );

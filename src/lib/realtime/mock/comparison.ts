@@ -1,7 +1,7 @@
 import { parseDemoFilters, parseDemoNumber } from "@/lib/realtime/mock/filters";
 import type { DemoQueryFilters } from "@/lib/realtime/mock/types";
 
-export type DemoComparisonMetric = "views" | "visitors";
+export type DemoComparisonMetric = "views" | "visitors" | "sessions";
 
 export type DemoComparisonRow = {
   label: string;
@@ -81,7 +81,7 @@ export function resolveDemoComparison(
 }
 
 function metricValue(
-  row: Pick<DemoComparisonRow, "views" | "visitors"> | undefined,
+  row: Pick<DemoComparisonRow, "views" | "visitors" | "sessions"> | undefined,
   metric: DemoComparisonMetric,
 ): number {
   return Math.max(0, Number(row?.[metric] ?? 0));
@@ -165,7 +165,11 @@ export function buildDemoComparisonRows<TRow extends DemoComparisonRow>(
   );
 
   const metric: DemoComparisonMetric =
-    params.metric === "visitors" ? "visitors" : "views";
+    params.metric === "visitors"
+      ? "visitors"
+      : params.metric === "sessions"
+        ? "sessions"
+        : "views";
   const sortBy =
     params.sortBy === "reference" || params.sortBy === "change"
       ? params.sortBy

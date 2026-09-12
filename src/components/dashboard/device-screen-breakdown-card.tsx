@@ -7,6 +7,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { DonutChart } from "@/components/dashboard/charts/donut-chart";
+import {
+  ComparisonMetricToggle,
+  type ComparisonTableMetric,
+  createComparisonTableColumns,
+} from "@/components/dashboard/comparison-table";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import {
   TabbedDataTableCard,
@@ -23,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import {
   aggregateScreenBuckets,
   classifyScreenBucket,
@@ -49,7 +55,8 @@ const CHART_COLORS = [
   "var(--muted-foreground)",
 ] as const;
 
-type ScreenSortKey = "visitors" | "views" | "sessions";
+type ScreenSortKey =
+  "visitors" | "views" | "sessions" | "current" | "reference" | "change";
 type ScreenListTab = "screenSize";
 
 interface ScreenListItem extends BrowserTrendSeries {
@@ -58,6 +65,16 @@ interface ScreenListItem extends BrowserTrendSeries {
   share: number;
   parsed: ParsedScreenSize | null;
   bucket: ScreenBucketKey;
+  reference?: {
+    views: number;
+    sessions: number;
+    visitors: number;
+  };
+  change?: {
+    views: { absolute: number; relative: number | null };
+    sessions: { absolute: number; relative: number | null };
+    visitors: { absolute: number; relative: number | null };
+  };
 }
 
 const EMPTY_TREND: BrowserTrendData = {
@@ -66,6 +83,82 @@ const EMPTY_TREND: BrowserTrendData = {
   series: [],
   data: [],
 };
+
+function relativeChange(current: number, reference: number): number | null {
+  if (reference === 0) return current === 0 ? 0 : null;
+  return (current - reference) / reference;
+}
+
+function mergeScreenSeries(
+  current: readonly BrowserTrendSeries[],
+  reference: readonly BrowserTrendSeries[],
+  includeComparison: boolean,
+): BrowserTrendSeries[] {
+  const currentByKey = new Map(
+    current.map((series) => [series.key || series.label, series]),
+  );
+  const referenceByKey = new Map(
+    reference.map((series) => [series.key || series.label, series]),
+  );
+  const keys = [
+    ...current.map((series) => series.key || series.label),
+    ...reference
+      .map((series) => series.key || series.label)
+      .filter((key) => !currentByKey.has(key)),
+  ];
+
+  return keys.map((key) => {
+    const currentSeries = currentByKey.get(key);
+    const referenceSeries = referenceByKey.get(key);
+    return {
+      key,
+      label: currentSeries?.label ?? referenceSeries?.label ?? key,
+      views: currentSeries?.views ?? 0,
+      sessions: currentSeries?.sessions ?? 0,
+      visitors: currentSeries?.visitors ?? 0,
+      ...((currentSeries?.isOther ?? referenceSeries?.isOther)
+        ? { isOther: true }
+        : {}),
+      ...(includeComparison
+        ? {
+            reference: {
+              views: referenceSeries?.views ?? 0,
+              sessions: referenceSeries?.sessions ?? 0,
+              visitors: referenceSeries?.visitors ?? 0,
+            },
+            change: {
+              views: {
+                absolute:
+                  (currentSeries?.views ?? 0) - (referenceSeries?.views ?? 0),
+                relative: relativeChange(
+                  currentSeries?.views ?? 0,
+                  referenceSeries?.views ?? 0,
+                ),
+              },
+              sessions: {
+                absolute:
+                  (currentSeries?.sessions ?? 0) -
+                  (referenceSeries?.sessions ?? 0),
+                relative: relativeChange(
+                  currentSeries?.sessions ?? 0,
+                  referenceSeries?.sessions ?? 0,
+                ),
+              },
+              visitors: {
+                absolute:
+                  (currentSeries?.visitors ?? 0) -
+                  (referenceSeries?.visitors ?? 0),
+                relative: relativeChange(
+                  currentSeries?.visitors ?? 0,
+                  referenceSeries?.visitors ?? 0,
+                ),
+              },
+            },
+          }
+        : {}),
+    } as BrowserTrendSeries & Pick<ScreenListItem, "reference" | "change">;
+  });
+}
 
 function formatScreenLabel(label: string): string {
   const parsed = parseScreenSizeLabel(label);
@@ -167,12 +260,33 @@ function ScreenValueListCard({
   messages,
   items,
   requestKey,
+  comparisonQuery,
+  comparisonLabel,
+  comparisonMetric,
+  onComparisonMetricChange,
 }: {
   locale: Locale;
   messages: AppMessages;
   items: ScreenListItem[];
   requestKey: string;
+  comparisonQuery: DashboardComparisonQuery | null;
+  comparisonLabel: string;
+  comparisonMetric: ComparisonTableMetric;
+  onComparisonMetricChange: (metric: ComparisonTableMetric) => void;
 }) {
+  const comparisonColumns = useMemo(
+    () =>
+      createComparisonTableColumns<ScreenListItem, ScreenListTab>({
+        metric: comparisonMetric,
+        comparisonLabel,
+        locale,
+        messages,
+        getCurrent: (item) => item[comparisonMetric],
+        getReference: (item) => item.reference?.[comparisonMetric],
+        getChange: (item) => item.change?.[comparisonMetric],
+      }),
+    [comparisonLabel, comparisonMetric, locale, messages],
+  );
   const columns = useMemo<
     readonly TabbedDataTableColumn<
       ScreenListItem,
@@ -180,27 +294,32 @@ function ScreenValueListCard({
       ScreenListTab
     >[]
   >(
-    () => [
-      {
-        key: "visitors",
-        label: messages.common.visitors,
-        getValue: (item) => item.visitors,
-        format: (value) => numberFormat(locale, value),
-      },
-      {
-        key: "views",
-        label: messages.common.views,
-        getValue: (item) => item.views,
-        format: (value) => numberFormat(locale, value),
-      },
-      {
-        key: "sessions",
-        label: messages.common.sessions,
-        getValue: (item) => item.sessions,
-        format: (value) => numberFormat(locale, value),
-      },
-    ],
+    () =>
+      comparisonQuery
+        ? comparisonColumns
+        : [
+            {
+              key: "visitors" as const,
+              label: messages.common.visitors,
+              getValue: (item: ScreenListItem) => item.visitors,
+              format: (value: number) => numberFormat(locale, value),
+            },
+            {
+              key: "views" as const,
+              label: messages.common.views,
+              getValue: (item: ScreenListItem) => item.views,
+              format: (value: number) => numberFormat(locale, value),
+            },
+            {
+              key: "sessions" as const,
+              label: messages.common.sessions,
+              getValue: (item: ScreenListItem) => item.sessions,
+              format: (value: number) => numberFormat(locale, value),
+            },
+          ],
     [
+      comparisonColumns,
+      comparisonQuery,
       locale,
       messages.common.sessions,
       messages.common.views,
@@ -214,10 +333,13 @@ function ScreenValueListCard({
           value: "screenSize" as const,
           label: messages.common.screenSize,
           columnLabel: messages.common.screenSize,
-          defaultSort: { key: "visitors" as const, direction: "desc" as const },
+          defaultSort: {
+            key: (comparisonQuery ? "current" : "visitors") as ScreenSortKey,
+            direction: "desc" as const,
+          },
         },
       ] as const,
-    [messages.common.screenSize],
+    [comparisonQuery, messages.common.screenSize],
   );
   const rowAdapter = useMemo(
     () => ({
@@ -263,9 +385,19 @@ function ScreenValueListCard({
       }
       loadingLabel={messages.common.loading}
       emptyLabel={messages.common.noData}
-      headerHidden
+      headerHidden={!comparisonQuery}
       className="h-full"
       search={false}
+      headerRight={
+        comparisonQuery ? (
+          <ComparisonMetricToggle
+            metric={comparisonMetric}
+            metrics={["visitors", "views", "sessions"]}
+            messages={messages}
+            onMetricChange={onComparisonMetricChange}
+          />
+        ) : null
+      }
     />
   );
 }
@@ -448,6 +580,8 @@ interface DeviceScreenBreakdownCardProps {
   siteDomain: string;
   window: TimeWindow;
   filters: FilterDocument;
+  comparisonQuery?: DashboardComparisonQuery | null;
+  comparisonLabel?: string;
 }
 
 export const DeviceScreenBreakdownCard = memo(
@@ -458,7 +592,11 @@ export const DeviceScreenBreakdownCard = memo(
     siteDomain,
     window,
     filters,
+    comparisonQuery = null,
+    comparisonLabel = "",
   }: DeviceScreenBreakdownCardProps) {
+    const [comparisonMetric, setComparisonMetric] =
+      useState<ComparisonTableMetric>("visitors");
     const screenTrendQuery = useQuery({
       queryKey: [
         "dashboard",
@@ -469,25 +607,44 @@ export const DeviceScreenBreakdownCard = memo(
         window.timeZone,
         window.interval,
         filters,
+        comparisonQuery?.mode ?? "none",
+        comparisonQuery?.window.from ?? "none",
+        comparisonQuery?.window.to ?? "none",
+        comparisonQuery?.window.timeZone ?? "none",
+        comparisonQuery?.filters ?? null,
       ],
       queryFn: async ({ signal }) => {
         try {
-          return await fetchClientDimensionTrend(
-            siteId,
-            window,
-            "screenSize",
-            filters,
-            { limit: 10, signal },
-          );
+          const [current, comparison] = await Promise.all([
+            fetchClientDimensionTrend(siteId, window, "screenSize", filters, {
+              limit: 10,
+              signal,
+            }),
+            comparisonQuery
+              ? fetchClientDimensionTrend(
+                  siteId,
+                  comparisonQuery.window,
+                  "screenSize",
+                  comparisonQuery.filters,
+                  { limit: 10, signal },
+                )
+              : Promise.resolve(null),
+          ]);
+          return { current, comparison };
         } catch (error) {
           if (error instanceof Error && error.name === "AbortError")
             throw error;
-          return EMPTY_TREND;
+          return { current: EMPTY_TREND, comparison: null };
         }
       },
       enabled: typeof window !== "undefined",
     });
-    const screenTrend = screenTrendQuery.data ?? EMPTY_TREND;
+    const screenTrendData = screenTrendQuery.data ?? {
+      current: EMPTY_TREND,
+      comparison: null,
+    };
+    const screenTrend = screenTrendData.current;
+    const comparisonTrend = screenTrendData.comparison;
     const loading = screenTrendQuery.isPending;
     const totalVisitors = useMemo(
       () => screenTrend.series.reduce((sum, item) => sum + item.visitors, 0),
@@ -495,7 +652,11 @@ export const DeviceScreenBreakdownCard = memo(
     );
     const listItems = useMemo<ScreenListItem[]>(
       () =>
-        screenTrend.series.map((series) => {
+        mergeScreenSeries(
+          screenTrend.series,
+          comparisonTrend?.series ?? [],
+          Boolean(comparisonQuery),
+        ).map((series) => {
           const parsed = parseScreenSizeLabel(series.label);
           return {
             ...series,
@@ -508,7 +669,13 @@ export const DeviceScreenBreakdownCard = memo(
               : "unclassified",
           };
         }),
-      [messages, screenTrend.series, totalVisitors],
+      [
+        comparisonQuery,
+        comparisonTrend?.series,
+        messages,
+        screenTrend.series,
+        totalVisitors,
+      ],
     );
     const explicitItems = useMemo(
       () => listItems.filter((item) => item.parsed && !item.isOther),
@@ -516,11 +683,13 @@ export const DeviceScreenBreakdownCard = memo(
     );
     const requestKey = useMemo(
       () =>
-        `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${locale}:${filterQueryKey(filters)}:${JSON.stringify(explicitItems)}`,
+        `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${locale}:${filterQueryKey(filters)}:${comparisonQuery?.mode ?? "none"}:${comparisonQuery?.window.from ?? "none"}:${comparisonQuery?.window.to ?? "none"}:${comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"}:${comparisonMetric}:${JSON.stringify(explicitItems)}`,
       [
         explicitItems,
         filters,
         locale,
+        comparisonMetric,
+        comparisonQuery,
         siteId,
         window.from,
         window.interval,
@@ -569,6 +738,10 @@ export const DeviceScreenBreakdownCard = memo(
                 messages={messages}
                 items={explicitItems}
                 requestKey={requestKey}
+                comparisonQuery={comparisonQuery}
+                comparisonLabel={comparisonLabel}
+                comparisonMetric={comparisonMetric}
+                onComparisonMetricChange={setComparisonMetric}
               />
             </div>
 

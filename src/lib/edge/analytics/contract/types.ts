@@ -239,7 +239,7 @@ export interface ComparisonDatasetQuery {
  * comparison-breakdown API.  Overview table endpoints keep their existing
  * route and receive both concrete datasets in one request.
  */
-export type OverviewTableMetric = "views" | "visitors";
+export type OverviewTableMetric = "views" | "visitors" | "sessions";
 export type OverviewTableSortBy = "current" | "reference" | "change";
 
 export interface OverviewTableComparisonQuery {

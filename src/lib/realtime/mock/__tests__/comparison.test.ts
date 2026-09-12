@@ -232,6 +232,13 @@ describe("mock/comparison", () => {
           direction: "desc",
         }).map(({ label }) => label),
       ).toEqual(["alpha", "zero", "beta"]);
+      expect(
+        buildDemoComparisonRows(currentRows, referenceRows, {
+          metric: "sessions",
+          sortBy: "current",
+          direction: "desc",
+        }).map(({ label }) => label),
+      ).toEqual(["alpha", "beta", "zero"]);
     });
 
     it("handles zero deltas and stable label tie breaks", () => {

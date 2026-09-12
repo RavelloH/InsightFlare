@@ -1,15 +1,24 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { CampaignBreakdownCard } from "@/components/dashboard/campaign-breakdown-card";
+import {
+  CampaignBreakdownCard,
+  type CampaignBreakdownGroupKey,
+} from "@/components/dashboard/campaign-breakdown-card";
 import { CampaignShareTrendCard } from "@/components/dashboard/campaign-share-trend-card";
 import {
   buildCampaignRows,
   type CampaignRawRowsByTab,
+  type CampaignSortKey,
   type CampaignTab,
 } from "@/components/dashboard/campaign-utils";
+import type { ComparisonTableMetric } from "@/components/dashboard/comparison-table";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import type { TabbedDataTableLoader } from "@/components/dashboard/tabbed-data-table-card";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import { fetchUtmDimension } from "@/lib/dashboard/client-data";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -42,6 +51,23 @@ export function CampaignsClientPage({
     window: TimeWindow;
   };
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
+    [comparisonQuery],
+  );
+  const [comparisonMetricByGroup, setComparisonMetricByGroup] = useState<
+    Record<CampaignBreakdownGroupKey, ComparisonTableMetric>
+  >({ acquisition: "views", signals: "views" });
+  const handleComparisonMetricChange = useCallback(
+    (group: CampaignBreakdownGroupKey, metric: ComparisonTableMetric) => {
+      setComparisonMetricByGroup((current) => ({
+        ...current,
+        [group]: metric,
+      }));
+    },
+    [],
+  );
   const requestFilters = filters;
   const requestWindow = useMemo(
     () => ({
@@ -58,11 +84,15 @@ export function CampaignsClientPage({
     TabbedDataTableLoader<
       CampaignTab,
       ReturnType<typeof buildCampaignRows>[number],
-      "views" | "sessions"
+      CampaignSortKey
     >
   >(
     async ({ tab, cursor, limit, search, signal, sort }) => {
       try {
+        const comparisonMetric =
+          tab === "term" || tab === "content"
+            ? comparisonMetricByGroup.signals
+            : comparisonMetricByGroup.acquisition;
         const payload = await fetchUtmDimension(
           siteId,
           requestWindow,
@@ -74,7 +104,20 @@ export function CampaignsClientPage({
             limit,
             search,
             signal,
-            sort: sort.key,
+            sort:
+              sort.key === "current" ||
+              sort.key === "reference" ||
+              sort.key === "change"
+                ? comparisonMetric
+                : sort.key,
+            comparison: comparisonQuery,
+            comparisonMetric,
+            comparisonSortBy:
+              sort.key === "current" ||
+              sort.key === "reference" ||
+              sort.key === "change"
+                ? sort.key
+                : undefined,
           },
         );
         const items = buildCampaignRows(
@@ -108,9 +151,20 @@ export function CampaignsClientPage({
         };
       }
     },
-    [messages.campaigns.notSet, requestFilters, requestWindow, siteId],
+    [
+      comparisonMetricByGroup.acquisition,
+      comparisonMetricByGroup.signals,
+      comparisonQuery,
+      messages.campaigns.notSet,
+      requestFilters,
+      requestWindow,
+      siteId,
+    ],
   );
-  const requestKey = `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${locale}`;
+  const comparisonKey = comparisonQuery
+    ? `${comparisonQuery.mode}:${comparisonQuery.window.from}:${comparisonQuery.window.to}:${comparisonFiltersKey}`
+    : "none";
+  const requestKey = `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}`;
 
   return (
     <div className="space-y-6">
@@ -131,6 +185,10 @@ export function CampaignsClientPage({
         locale={locale}
         messages={messages}
         loader={loader}
+        comparisonQuery={comparisonQuery}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
+        comparisonMetricByGroup={comparisonMetricByGroup}
+        onComparisonMetricChange={handleComparisonMetricChange}
         requestKey={requestKey}
       />
     </div>

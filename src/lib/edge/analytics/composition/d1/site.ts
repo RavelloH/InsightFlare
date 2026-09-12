@@ -80,6 +80,12 @@ function overviewTabExpression(tab: string): string | null {
         "browser" | "osVersion" | "deviceType" | "language" | "screenSize",
     ).labelExpr;
   }
+  if (tab.startsWith("utm.")) {
+    return utmDimensionDefinition(
+      tab.slice("utm.".length) as
+        "source" | "medium" | "campaign" | "term" | "content",
+    ).labelExpr;
+  }
   if (tab === "geo.country") return "TRIM(COALESCE(country, ''))";
   if (tab === "geo.region") return regionValueExpr();
   if (tab === "geo.city") return cityValueExpr();
@@ -101,8 +107,9 @@ export async function overviewTabData(
   const limit = numberField(request, "limit", 100);
   const cursorText = stringField(request, "cursor") || null;
   const audience = request.context.policy.audience;
+  const sortValue = stringField(request, "sort");
   const sortBy =
-    stringField(request, "sort") === "visitors" ? "visitors" : "views";
+    sortValue === "visitors" || sortValue === "sessions" ? sortValue : "views";
   const sortDirection =
     stringField(request, "direction") === "asc" ? "asc" : "desc";
   const search = stringField(request, "search") || undefined;
@@ -281,6 +288,7 @@ export async function overviewTabData(
   }
   if (kind === "source") {
     const includeFullUrl = tab === "source.link";
+    const referrerSortBy = sortBy === "visitors" ? "visitors" : "views";
     const cursor = await decodeReferrersCursor(
       options.env,
       options.siteId,
@@ -290,7 +298,7 @@ export async function overviewTabData(
       search,
       cursorText,
       audience,
-      sortBy,
+      referrerSortBy,
       sortDirection,
     );
     if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
@@ -305,7 +313,7 @@ export async function overviewTabData(
       cursor,
       undefined,
       audience,
-      sortBy,
+      referrerSortBy,
       sortDirection,
     );
     return {
@@ -427,6 +435,53 @@ export async function overviewTabData(
       limit,
       selectExpr,
       { excludeEmpty: true, search, sortBy, sortDirection },
+      cursor,
+      undefined,
+      audience,
+    );
+    return {
+      data: {
+        items: mapTabs([...page.items]),
+        pagination: page.pagination,
+      },
+    };
+  }
+  if (kind === "utm") {
+    const expression = overviewTabExpression(tab);
+    if (!expression) {
+      return {
+        data: {
+          items: [],
+          pagination: {
+            limit,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      };
+    }
+    const cursor = await decodeDimensionCursor(
+      options.env,
+      options.siteId,
+      window,
+      filters,
+      expression,
+      search,
+      cursorText,
+      audience,
+      sortBy,
+      sortDirection,
+    );
+    if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
+    const page = await queryDimensionPageFromD1(
+      options.env,
+      options.siteId,
+      window,
+      filters,
+      limit,
+      expression,
+      { excludeEmpty: false, search, sortBy, sortDirection },
       cursor,
       undefined,
       audience,

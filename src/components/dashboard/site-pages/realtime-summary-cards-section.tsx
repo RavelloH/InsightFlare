@@ -445,6 +445,8 @@ export const RealtimeSummaryCardsSection = memo(
         pathname=""
         filters={filters}
         cardDataOverride={cardDataOverride}
+        comparisonEnabled={false}
+        tableContentTransitionKey="realtime"
       />
     );
   },

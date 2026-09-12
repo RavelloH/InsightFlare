@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { handleSimpleDimensionContract } from "@/lib/edge/analytics/composition/protocol/dimensions-contract-adapter";
 import {
   handleEventFieldValuesContract,
   handleEventRecordDetailContract,
@@ -60,6 +61,56 @@ const invalidWindow = new URL("https://edge.test/query?from=20&to=10");
 const context = undefined;
 
 describe("typed query adapter validation branches", () => {
+  it("validates and forwards comparison options for UTM dimensions", async () => {
+    const base = "https://edge.test/query?from=1767225600000&to=1767312000000";
+    const responses = await Promise.all([
+      handleSimpleDimensionContract(
+        env,
+        siteId,
+        new URL(`${base}&sort=invalid`),
+        "utm.source",
+      ),
+      handleSimpleDimensionContract(
+        env,
+        siteId,
+        new URL(`${base}&direction=invalid`),
+        "utm.source",
+      ),
+      handleSimpleDimensionContract(
+        env,
+        siteId,
+        new URL(`${base}&compare=invalid`),
+        "utm.source",
+      ),
+      handleSimpleDimensionContract(
+        env,
+        siteId,
+        new URL(`${base}&compare=same`),
+        "utm.medium",
+      ),
+      handleSimpleDimensionContract(
+        env,
+        siteId,
+        new URL(
+          `${base}&compare=previous&metric=sessions&sortBy=change&direction=asc&search=email`,
+        ),
+        "utm.source",
+      ),
+      handleSimpleDimensionContract(
+        env,
+        siteId,
+        new URL(
+          `${base}&compare=previous&metric=visitors&sortBy=reference&compareFilter%5Bpage.path%5D=%2Fpricing`,
+        ),
+        "utm.campaign",
+      ),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([
+      400, 400, 400, 200, 200, 200,
+    ]);
+  });
+
   it("enters event, journey, and funnel contract adapters before D1", async () => {
     const responses = await Promise.all([
       handleEventTypesContract(env, siteId, invalidWindow, context),

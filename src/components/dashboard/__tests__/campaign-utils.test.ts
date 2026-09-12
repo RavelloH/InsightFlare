@@ -95,4 +95,36 @@ describe("campaign breakdown utilities", () => {
       },
     ]);
   });
+
+  it("preserves comparison metrics when the API provides them", () => {
+    const rows = buildCampaignRowsByTab(
+      {
+        source: [
+          {
+            value: "google",
+            views: 12,
+            sessions: 4,
+            visitors: 3,
+            reference: { views: 8, sessions: 2, visitors: 2 },
+            change: {
+              views: { absolute: 4, relative: 0.5 },
+              sessions: { absolute: 2, relative: 1 },
+              visitors: { absolute: 1, relative: 0.5 },
+            },
+          },
+        ],
+      } as unknown as CampaignRawRowsByTab,
+      "(not set)",
+    );
+
+    expect(rows.source[0]).toMatchObject({
+      visitors: 3,
+      reference: { views: 8, sessions: 2, visitors: 2 },
+      change: {
+        views: { absolute: 4, relative: 0.5 },
+        sessions: { absolute: 2, relative: 1 },
+        visitors: { absolute: 1, relative: 0.5 },
+      },
+    });
+  });
 });

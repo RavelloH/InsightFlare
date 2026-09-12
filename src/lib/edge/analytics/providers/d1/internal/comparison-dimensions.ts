@@ -112,7 +112,12 @@ function comparisonOrdering(
   sortBy: OverviewTableSortBy,
   direction: SortDirection,
 ): { expression: string; cursorPredicate: string } {
-  const metricColumn = metric === "visitors" ? "visitors" : "views";
+  const metricColumn =
+    metric === "visitors"
+      ? "visitors"
+      : metric === "sessions"
+        ? "sessions"
+        : "views";
   const source =
     sortBy === "reference"
       ? `reference_${metricColumn}`
@@ -297,9 +302,17 @@ export async function queryComparisonDimensionPageFromD1(
   const currentSessions = "current_sessions";
   const referenceSessions = "reference_sessions";
   const metricCurrent =
-    options.metric === "visitors" ? currentVisitors : currentViews;
+    options.metric === "visitors"
+      ? currentVisitors
+      : options.metric === "sessions"
+        ? currentSessions
+        : currentViews;
   const metricReference =
-    options.metric === "visitors" ? referenceVisitors : referenceViews;
+    options.metric === "visitors"
+      ? referenceVisitors
+      : options.metric === "sessions"
+        ? referenceSessions
+        : referenceViews;
   const changeRelative = relativeSql(metricCurrent, metricReference);
   const changeClass = `CASE WHEN ${metricReference} = 0 AND ${metricCurrent} > 0 THEN 1 ELSE 0 END`;
   const sql = `
@@ -520,9 +533,17 @@ export async function queryComparisonSessionPathPageFromD1(
   );
   const cursorClause = cursor ? `AND ${ordering.cursorPredicate}` : "";
   const currentColumn =
-    options.metric === "visitors" ? "current_visitors" : "current_views";
+    options.metric === "visitors"
+      ? "current_visitors"
+      : options.metric === "sessions"
+        ? "current_sessions"
+        : "current_views";
   const referenceColumn =
-    options.metric === "visitors" ? "reference_visitors" : "reference_views";
+    options.metric === "visitors"
+      ? "reference_visitors"
+      : options.metric === "sessions"
+        ? "reference_sessions"
+        : "reference_views";
   const changeRelative = relativeSql(currentColumn, referenceColumn);
   const changeClass = `CASE WHEN ${referenceColumn} = 0 AND ${currentColumn} > 0 THEN 1 ELSE 0 END`;
   const sql = `

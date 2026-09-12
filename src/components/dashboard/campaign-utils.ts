@@ -2,6 +2,8 @@ import type { UtmDimensionTab } from "@/lib/dashboard/client-data";
 import type { DimensionRow } from "@/lib/edge-client";
 
 export type CampaignTab = UtmDimensionTab;
+export type CampaignSortKey =
+  "views" | "sessions" | "current" | "reference" | "change";
 
 export interface CampaignBreakdownRow {
   key: string;
@@ -9,6 +11,9 @@ export interface CampaignBreakdownRow {
   label: string;
   views: number;
   sessions: number;
+  visitors?: number;
+  reference?: DimensionRow["reference"];
+  change?: DimensionRow["change"];
   mono?: boolean;
 }
 
@@ -39,6 +44,11 @@ export function buildCampaignRows(
       views: Math.max(0, Number(row.views ?? 0)),
       sessions: Math.max(0, Number(row.sessions ?? 0)),
       mono: tab === "term" || tab === "content",
+      ...(row.visitors !== undefined
+        ? { visitors: Math.max(0, Number(row.visitors ?? 0)) }
+        : {}),
+      ...(row.reference ? { reference: row.reference } : {}),
+      ...(row.change ? { change: row.change } : {}),
     };
   });
 }

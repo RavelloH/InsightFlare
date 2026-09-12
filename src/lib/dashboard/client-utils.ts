@@ -193,7 +193,7 @@ export function withComparison(
   params: PrivateRequestParams,
   comparison?: DashboardComparisonRequest | null,
   options?: {
-    metric?: "views" | "visitors";
+    metric?: "views" | "visitors" | "sessions";
     sortBy?: "current" | "reference" | "change";
   },
 ): PrivateRequestParams {

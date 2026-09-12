@@ -8,7 +8,8 @@ import type { OverviewTabRows } from "@/lib/dashboard/client-data";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 
 export type ReferrerTab = "domain" | "link" | "channel";
-export type ReferrerSortKey = "views" | "visitors";
+export type ReferrerSortKey =
+  "views" | "visitors" | "current" | "reference" | "change";
 
 export interface ReferrerBreakdownRow {
   key: string;
@@ -17,7 +18,10 @@ export interface ReferrerBreakdownRow {
   filterValue: string;
   targetUrl: string | null;
   views: number;
+  sessions: number;
   visitors: number;
+  reference?: OverviewTabRows[number]["reference"];
+  change?: OverviewTabRows[number]["change"];
   mono: boolean;
   isDirect: boolean;
   channelId?: TrafficChannelId;
@@ -208,7 +212,10 @@ export function buildReferrerRowsByTab(
         filterValue,
         targetUrl: domain ? toAbsoluteHttpsUrl(domain) : null,
         views: Math.max(0, Number(item.views ?? 0)),
+        sessions: Math.max(0, Number(item.sessions ?? 0)),
         visitors: Math.max(0, Number(item.visitors ?? 0)),
+        reference: item.reference,
+        change: item.change,
         mono: true,
         isDirect: filterValue === DIRECT_REFERRER_FILTER_VALUE,
       };
@@ -225,7 +232,10 @@ export function buildReferrerRowsByTab(
         filterValue,
         targetUrl,
         views: Math.max(0, Number(item.views ?? 0)),
+        sessions: Math.max(0, Number(item.sessions ?? 0)),
         visitors: Math.max(0, Number(item.visitors ?? 0)),
+        reference: item.reference,
+        change: item.change,
         mono: true,
         isDirect: filterValue === DIRECT_REFERRER_FILTER_VALUE,
       };
@@ -242,7 +252,10 @@ export function buildReferrerRowsByTab(
         filterValue: channelId,
         targetUrl: null,
         views: Math.max(0, Number(item.views ?? 0)),
+        sessions: Math.max(0, Number(item.sessions ?? 0)),
         visitors: Math.max(0, Number(item.visitors ?? 0)),
+        reference: item.reference,
+        change: item.change,
         mono: false,
         isDirect: channelId === "direct",
         channelId,

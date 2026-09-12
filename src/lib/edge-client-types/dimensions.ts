@@ -6,6 +6,16 @@ export interface DimensionRow {
   views: number;
   sessions: number;
   visitors?: number;
+  reference?: {
+    views: number;
+    sessions: number;
+    visitors: number;
+  };
+  change?: {
+    views: { absolute: number; relative: number | null };
+    sessions: { absolute: number; relative: number | null };
+    visitors: { absolute: number; relative: number | null };
+  };
 }
 
 export interface DimensionData {

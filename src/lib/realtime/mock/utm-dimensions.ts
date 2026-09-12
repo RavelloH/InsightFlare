@@ -41,6 +41,10 @@ import {
 } from "@/lib/realtime/mock/admin";
 import { generateDemoPages } from "@/lib/realtime/mock/analytics";
 import {
+  buildDemoComparisonRows,
+  resolveDemoComparison,
+} from "@/lib/realtime/mock/comparison";
+import {
   buildCountryPool,
   buildReferrerPool,
   DEMO_CITIES_BY_COUNTRY,
@@ -335,11 +339,12 @@ function buildDemoUtmRows(
   tab: DemoUtmDimensionKey,
   params: Record<string, string | number>,
   limit: number,
+  override?: { from: number; to: number; filters: DemoQueryFilters },
 ): DemoDimensionRow[] {
   const cappedLimit = Math.max(1, Math.floor(limit));
-  const from = parseDemoNumber(params.from, 0);
-  const to = parseDemoNumber(params.to, Date.now());
-  const filters = parseDemoFilters(params);
+  const from = override?.from ?? parseDemoNumber(params.from, 0);
+  const to = override?.to ?? parseDemoNumber(params.to, Date.now());
+  const filters = override?.filters ?? parseDemoFilters(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
   const profile = findSiteProfile(siteId);
@@ -417,8 +422,21 @@ export function generateDemoUtmDimension(
     sessions: row.sessions,
     visitors: row.visitors,
   }));
+  const comparison = resolveDemoComparison(params, filters);
+  const comparisonRows = comparison
+    ? buildDemoComparisonRows(
+        rows,
+        buildDemoUtmRows(siteId, tab, params, 500, comparison).map((row) => ({
+          label: row.label,
+          views: row.views,
+          sessions: row.sessions,
+          visitors: row.visitors,
+        })),
+        params,
+      )
+    : null;
   const page = demoPage(
-    rows,
+    comparisonRows ?? rows,
     params,
     {
       operation: "utm-dimension",
@@ -435,6 +453,8 @@ export function generateDemoUtmDimension(
     },
     20,
     200,
+    true,
+    comparisonRows ? { compare: () => 0 } : undefined,
   );
   return {
     ok: true,

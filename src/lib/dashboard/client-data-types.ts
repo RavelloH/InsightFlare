@@ -63,7 +63,7 @@ export type DashboardListRequestOptions = {
     window: TimeWindow;
     filters: FilterDocument;
   } | null;
-  comparisonMetric?: "views" | "visitors";
+  comparisonMetric?: "views" | "visitors" | "sessions";
   comparisonSortBy?: "current" | "reference" | "change";
   signal?: AbortSignal;
 };

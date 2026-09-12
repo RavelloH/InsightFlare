@@ -1,8 +1,12 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import type { ComparisonTableMetric } from "@/components/dashboard/comparison-table";
 import { PageHeading } from "@/components/dashboard/page-heading";
-import { ReferrerBreakdownCard } from "@/components/dashboard/referrer-breakdown-card";
+import {
+  ReferrerBreakdownCard,
+  type ReferrerBreakdownGroupKey,
+} from "@/components/dashboard/referrer-breakdown-card";
 import { ReferrerPerformanceRadarCard } from "@/components/dashboard/referrer-performance-radar-card";
 import { ReferrerShareTrendCard } from "@/components/dashboard/referrer-share-trend-card";
 import { ReferrerSummarySection } from "@/components/dashboard/referrer-summary-section";
@@ -53,6 +57,18 @@ export function ReferrersClientPage({
     [comparisonQuery],
   );
   const requestFilters = filters;
+  const [comparisonMetricByGroup, setComparisonMetricByGroup] = useState<
+    Record<ReferrerBreakdownGroupKey, ComparisonTableMetric>
+  >({ source: "views", channel: "views" });
+  const handleComparisonMetricChange = useCallback(
+    (group: ReferrerBreakdownGroupKey, metric: ComparisonTableMetric) => {
+      setComparisonMetricByGroup((current) => ({
+        ...current,
+        [group]: metric,
+      }));
+    },
+    [],
+  );
   const requestWindow = useMemo(
     () => ({
       preset: window.preset,
@@ -63,7 +79,10 @@ export function ReferrersClientPage({
     }),
     [window.from, window.interval, window.preset, window.timeZone, window.to],
   );
-  const requestKey = `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${locale}:${filtersKey}`;
+  const comparisonKey = comparisonQuery
+    ? `${comparisonQuery.mode}:${comparisonQuery.window.from}:${comparisonQuery.window.to}:${comparisonFiltersKey}`
+    : "none";
+  const requestKey = `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${locale}:${filtersKey}:${comparisonKey}`;
   const summaryQuery = useQuery({
     queryKey: [
       "dashboard",
@@ -108,6 +127,10 @@ export function ReferrersClientPage({
     >
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
+      const comparisonMetric =
+        tab === "channel"
+          ? comparisonMetricByGroup.channel
+          : comparisonMetricByGroup.source;
       const page = await fetchOverviewSourceCardTab(
         siteId,
         requestWindow,
@@ -116,10 +139,23 @@ export function ReferrersClientPage({
         {
           limit,
           search,
-          sort: sort.key,
+          sort:
+            sort.key === "current" ||
+            sort.key === "reference" ||
+            sort.key === "change"
+              ? comparisonMetric
+              : sort.key,
           direction: sort.direction,
           cursor,
           signal,
+          comparison: comparisonQuery,
+          comparisonMetric,
+          comparisonSortBy:
+            sort.key === "current" ||
+            sort.key === "reference" ||
+            sort.key === "change"
+              ? sort.key
+              : undefined,
         },
       );
       const normalized = buildReferrerRowsByTab(
@@ -141,6 +177,9 @@ export function ReferrersClientPage({
       messages.overview.direct,
       requestFilters,
       requestWindow,
+      comparisonMetricByGroup.channel,
+      comparisonMetricByGroup.source,
+      comparisonQuery,
       siteId,
     ],
   );
@@ -183,6 +222,10 @@ export function ReferrersClientPage({
         messages={messages}
         pathname={pathname}
         filters={requestFilters}
+        comparisonQuery={comparisonQuery}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
+        comparisonMetricByGroup={comparisonMetricByGroup}
+        onComparisonMetricChange={handleComparisonMetricChange}
         requestKey={requestKey}
         loader={loader}
         showSourceLinkTab={showSourceLinkTab}
