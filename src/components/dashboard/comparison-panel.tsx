@@ -125,7 +125,6 @@ function ComparisonFilterDialog({
             audience="private-dashboard"
             initialFilterDsl={draftFilterDsl}
             messages={messages}
-            observationOnly
             onApply={onApply}
             onCancel={() => onOpenChange(false)}
             applyLabel={messages.filterBuilder.apply}
