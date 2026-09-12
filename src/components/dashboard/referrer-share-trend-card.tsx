@@ -3,6 +3,10 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { DIRECT_REFERRER_FILTER_VALUE } from "@/components/dashboard/referrer-utils";
 import { ShareTrendChartCard } from "@/components/dashboard/share-trend-card";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import type { TrafficChannelId } from "@/lib/analytics/traffic-channel-rules";
 import { fetchReferrerAndChannelTrend } from "@/lib/dashboard/client-referrer-data";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
@@ -26,6 +30,15 @@ function emptyTrendData(interval: TimeWindow["interval"]): BrowserTrendData {
     interval,
     series: [],
     data: [],
+  };
+}
+
+function emptyReferrerTrendData(interval: TimeWindow["interval"]) {
+  return {
+    ok: true as const,
+    interval,
+    source: emptyTrendData(interval),
+    channel: emptyTrendData(interval),
   };
 }
 
@@ -53,6 +66,11 @@ function ReferrerTrendPanel({
   filters,
 }: ReferrerShareTrendCardProps) {
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
+    [comparisonQuery],
+  );
   const currentDataWindow = useMemo(
     () => ({
       from: window.from,
@@ -63,13 +81,20 @@ function ReferrerTrendPanel({
     [window.from, window.interval, window.timeZone, window.to],
   );
   const fallbackTrendData = useMemo(
-    () => ({
-      ok: true as const,
-      interval: window.interval,
-      source: emptyTrendData(window.interval),
-      channel: emptyTrendData(window.interval),
-    }),
+    () => emptyReferrerTrendData(window.interval),
     [window.interval],
+  );
+  const comparisonDataWindow = useMemo(
+    () =>
+      comparisonQuery
+        ? {
+            from: comparisonQuery.window.from,
+            to: comparisonQuery.window.to,
+            interval: comparisonQuery.window.interval,
+            timeZone: comparisonQuery.window.timeZone,
+          }
+        : null,
+    [comparisonQuery],
   );
   const {
     data: trendQueryData,
@@ -85,23 +110,54 @@ function ReferrerTrendPanel({
       window.interval,
       window.timeZone,
       filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
       5,
     ],
-    queryFn: async ({ signal }) => ({
-      trendData: await fetchReferrerAndChannelTrend(siteId, window, filters, {
-        limit: 5,
-        signal,
-      }).catch((error) =>
-        fallbackUnlessAborted(error, () => fallbackTrendData),
-      ),
-      dataWindow: currentDataWindow,
-    }),
+    queryFn: async ({ signal }) => {
+      const fetchTrendData = (
+        requestedWindow: TimeWindow,
+        requestedFilters: FilterDocument,
+      ) =>
+        fetchReferrerAndChannelTrend(
+          siteId,
+          requestedWindow,
+          requestedFilters,
+          { limit: 5, signal },
+        ).catch((error) =>
+          fallbackUnlessAborted(error, () =>
+            emptyReferrerTrendData(requestedWindow.interval),
+          ),
+        );
+      const [trendData, comparisonTrendData] = await Promise.all([
+        fetchTrendData(window, filters),
+        comparisonQuery
+          ? fetchTrendData(comparisonQuery.window, comparisonQuery.filters)
+          : Promise.resolve(null),
+      ]);
+      return {
+        trendData,
+        comparisonTrendData,
+        dataWindow: currentDataWindow,
+        comparisonDataWindow,
+      };
+    },
     enabled: typeof window !== "undefined",
     placeholderData: keepPreviousData,
   });
   const loading = isPending || isFetching;
   const trendData = trendQueryData?.trendData ?? fallbackTrendData;
   const dataWindow = trendQueryData?.dataWindow ?? currentDataWindow;
+  const comparisonTrendData = comparisonQuery
+    ? trendQueryData?.comparisonTrendData
+    : undefined;
+  const resolvedComparisonDataWindow = comparisonQuery
+    ? (trendQueryData?.comparisonDataWindow ?? comparisonDataWindow)
+    : null;
   const hydrated = Boolean(trendQueryData);
   const sourceTrendData = useMemo(
     () => asBrowserTrendData(trendData.interval, trendData.source),
@@ -110,6 +166,26 @@ function ReferrerTrendPanel({
   const channelTrendData = useMemo(
     () => asBrowserTrendData(trendData.interval, trendData.channel),
     [trendData.channel, trendData.interval],
+  );
+  const comparisonSourceTrendData = useMemo(
+    () =>
+      comparisonTrendData
+        ? asBrowserTrendData(
+            comparisonTrendData.interval,
+            comparisonTrendData.source,
+          )
+        : null,
+    [comparisonTrendData],
+  );
+  const comparisonChannelTrendData = useMemo(
+    () =>
+      comparisonTrendData
+        ? asBrowserTrendData(
+            comparisonTrendData.interval,
+            comparisonTrendData.channel,
+          )
+        : null,
+    [comparisonTrendData],
   );
 
   const formatSourceLabel = useMemo(
@@ -134,6 +210,10 @@ function ReferrerTrendPanel({
         title={messages.overview.sourceTab}
         trendData={sourceTrendData}
         dataWindow={dataWindow}
+        comparisonTrendData={comparisonSourceTrendData}
+        comparisonDataWindow={resolvedComparisonDataWindow}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
+        syncId={`share-trend:${siteId}:referrer-source`}
         loading={loading}
         hydrated={hydrated}
         otherLabel={messages.referrers.longTail}
@@ -145,6 +225,10 @@ function ReferrerTrendPanel({
         title={messages.overview.channelTab}
         trendData={channelTrendData}
         dataWindow={dataWindow}
+        comparisonTrendData={comparisonChannelTrendData}
+        comparisonDataWindow={resolvedComparisonDataWindow}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
+        syncId={`share-trend:${siteId}:referrer-channel`}
         loading={loading}
         hydrated={hydrated}
         otherLabel={messages.referrers.channelLongTail}
