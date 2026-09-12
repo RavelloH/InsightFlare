@@ -11,6 +11,7 @@ import {
   type ChartConfig,
   ChartContainer,
   ChartTooltip,
+  ChartTooltipIndicator,
 } from "@/components/ui/chart";
 import {
   durationFormat,
@@ -43,6 +44,7 @@ interface PerformanceRadarPoint {
   metric: string;
   metricKey: PerformanceRadarMetricKey;
   value: number;
+  comparisonValue?: number;
 }
 
 export interface PerformanceRadarChartProps {
@@ -53,6 +55,9 @@ export interface PerformanceRadarChartProps {
   color: string;
   locale: Locale;
   className?: string;
+  comparisonMetrics?: PerformanceRadarMetrics;
+  comparisonColor?: string;
+  comparisonLabel?: string;
 }
 
 function formatRawMetric(
@@ -77,6 +82,7 @@ function buildNormalizedPoints(
   metrics: PerformanceRadarMetrics,
   maxByMetric: PerformanceRadarMetrics,
   metricLabels: PerformanceRadarMetricLabels,
+  comparisonMetrics?: PerformanceRadarMetrics,
 ): PerformanceRadarPoint[] {
   return PERFORMANCE_RADAR_METRIC_KEYS.map((key) => {
     const max = maxByMetric[key];
@@ -84,8 +90,87 @@ function buildNormalizedPoints(
       metric: metricLabels[key],
       metricKey: key,
       value: max > 0 ? Math.round((metrics[key] / max) * 100) : 0,
+      ...(comparisonMetrics
+        ? {
+            comparisonValue:
+              max > 0 ? Math.round((comparisonMetrics[key] / max) * 100) : 0,
+          }
+        : {}),
     };
   });
+}
+
+export function buildPerformanceRadarMaxByMetric(
+  metrics: readonly PerformanceRadarMetrics[],
+): PerformanceRadarMetrics {
+  const result = {} as PerformanceRadarMetrics;
+  for (const key of PERFORMANCE_RADAR_METRIC_KEYS) {
+    result[key] = Math.max(...metrics.map((item) => item[key]), 0);
+  }
+  return result;
+}
+
+function PerformanceRadarTooltip({
+  active,
+  payload,
+  itemLabel,
+  metrics,
+  comparisonMetrics,
+  comparisonLabel,
+  color,
+  comparisonColor,
+  locale,
+}: {
+  active?: boolean;
+  payload?: ReadonlyArray<{ payload?: unknown }>;
+  itemLabel: string;
+  metrics: PerformanceRadarMetrics;
+  comparisonMetrics?: PerformanceRadarMetrics;
+  comparisonLabel: string;
+  color: string;
+  comparisonColor: string;
+  locale: Locale;
+}) {
+  if (!active || !payload?.length) return null;
+
+  const point = payload[0]?.payload as PerformanceRadarPoint | undefined;
+  if (!point) return null;
+
+  return (
+    <div className="grid min-w-32 items-start gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+      <div className="font-medium">{point.metric}</div>
+      <div className="grid gap-1.5">
+        <div className="flex w-full items-center gap-2">
+          <ChartTooltipIndicator color={color} />
+          <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+            <span className="text-muted-foreground">{itemLabel}</span>
+            <span className="font-mono font-medium tabular-nums text-foreground">
+              {formatRawMetric(
+                locale,
+                point.metricKey,
+                metrics[point.metricKey],
+              )}
+            </span>
+          </div>
+        </div>
+        {comparisonMetrics ? (
+          <div className="flex w-full items-center gap-2">
+            <ChartTooltipIndicator color={comparisonColor} />
+            <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+              <span className="text-muted-foreground">{comparisonLabel}</span>
+              <span className="font-mono font-medium tabular-nums text-foreground">
+                {formatRawMetric(
+                  locale,
+                  point.metricKey,
+                  comparisonMetrics[point.metricKey],
+                )}
+              </span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export const PerformanceRadarChart = memo(function PerformanceRadarChart({
@@ -96,14 +181,33 @@ export const PerformanceRadarChart = memo(function PerformanceRadarChart({
   color,
   locale,
   className,
+  comparisonMetrics,
+  comparisonColor = "var(--color-compare-primary)",
+  comparisonLabel = "Comparison",
 }: PerformanceRadarChartProps) {
   const points = useMemo(
-    () => buildNormalizedPoints(metrics, maxByMetric, metricLabels),
-    [maxByMetric, metricLabels, metrics],
+    () =>
+      buildNormalizedPoints(
+        metrics,
+        maxByMetric,
+        metricLabels,
+        comparisonMetrics,
+      ),
+    [comparisonMetrics, maxByMetric, metricLabels, metrics],
   );
   const chartConfig = useMemo<ChartConfig>(
-    () => ({ value: { label: itemLabel, color } }),
-    [color, itemLabel],
+    () => ({
+      value: { label: itemLabel, color },
+      ...(comparisonMetrics
+        ? {
+            comparisonValue: {
+              label: comparisonLabel,
+              color: comparisonColor,
+            },
+          }
+        : {}),
+    }),
+    [color, comparisonColor, comparisonLabel, comparisonMetrics, itemLabel],
   );
 
   return (
@@ -125,30 +229,30 @@ export const PerformanceRadarChart = memo(function PerformanceRadarChart({
           dataKey="value"
           stroke={color}
           fill={color}
-          fillOpacity={0.15}
+          fillOpacity={comparisonMetrics ? 0.1 : 0.15}
         />
+        {comparisonMetrics ? (
+          <Radar
+            name={comparisonLabel}
+            dataKey="comparisonValue"
+            stroke={comparisonColor}
+            fill={comparisonColor}
+            fillOpacity={0.04}
+          />
+        ) : null}
         <ChartTooltip
-          content={({ active, label, payload }) => {
-            if (!active || !payload?.length) return null;
-            const point = points.find((entry) => entry.metric === label);
-            if (!point) return null;
-
-            return (
-              <div className="grid min-w-[8rem] gap-0.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-                <div className="font-medium">{label}</div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">{itemLabel}</span>
-                  <span className="font-mono font-medium tabular-nums">
-                    {formatRawMetric(
-                      locale,
-                      point.metricKey,
-                      metrics[point.metricKey],
-                    )}
-                  </span>
-                </div>
-              </div>
-            );
-          }}
+          cursor={false}
+          content={
+            <PerformanceRadarTooltip
+              itemLabel={itemLabel}
+              metrics={metrics}
+              comparisonMetrics={comparisonMetrics}
+              comparisonLabel={comparisonLabel}
+              color={color}
+              comparisonColor={comparisonColor}
+              locale={locale}
+            />
+          }
         />
       </RadarChart>
     </ChartContainer>

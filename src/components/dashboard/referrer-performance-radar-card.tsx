@@ -3,14 +3,18 @@ import { RiShareForwardLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
-  PERFORMANCE_RADAR_METRIC_KEYS,
+  buildPerformanceRadarMaxByMetric,
   PerformanceRadarChart,
-  type PerformanceRadarMetricKey,
 } from "@/components/dashboard/charts/performance-radar-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { fetchReferrerRadar } from "@/lib/dashboard/client-data";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 import type { ReferrerRadarItem } from "@/lib/edge-client";
@@ -24,6 +28,8 @@ const CHART_COLORS = [
   "var(--color-chart-3)",
   "var(--color-chart-4)",
 ] as const;
+
+const COMPARISON_CHART_COLOR = "var(--color-compare-primary)";
 
 interface ReferrerMetadata {
   finalUrl?: string;
@@ -327,6 +333,13 @@ export const ReferrerPerformanceRadarCard = memo(
     const [metadataByReferrer, setMetadataByReferrer] = useState<
       Record<string, ReferrerMetadata | null | undefined>
     >({});
+    const comparisonQuery = useDashboardComparisonQuery(tw, filters);
+    const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+    const comparisonFiltersKey = useMemo(
+      () =>
+        comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none",
+      [comparisonQuery],
+    );
     const radarQuery = useQuery({
       queryKey: [
         "dashboard",
@@ -335,25 +348,57 @@ export const ReferrerPerformanceRadarCard = memo(
         tw.from,
         tw.to,
         tw.timeZone,
-        filters,
+        filtersKey,
+        comparisonQuery?.mode ?? "none",
+        comparisonQuery?.window.from ?? "none",
+        comparisonQuery?.window.to ?? "none",
+        comparisonQuery?.window.interval ?? "none",
+        comparisonQuery?.window.timeZone ?? "none",
+        comparisonFiltersKey,
       ],
       queryFn: async ({ signal }) => {
-        try {
-          const response = await fetchReferrerRadar(siteId, tw, filters, {
-            limit: 24,
-            signal,
-          });
-          return Array.isArray(response.data) ? response.data.slice(0, 24) : [];
-        } catch (error) {
-          if (error instanceof Error && error.name === "AbortError")
-            throw error;
-          return [] as ReferrerRadarItem[];
-        }
+        const fetchRadarData = async (
+          requestedWindow: TimeWindow,
+          requestedFilters: FilterDocument,
+        ) => {
+          try {
+            const response = await fetchReferrerRadar(
+              siteId,
+              requestedWindow,
+              requestedFilters,
+              {
+                limit: 24,
+                signal,
+              },
+            );
+            return Array.isArray(response.data)
+              ? response.data.slice(0, 24)
+              : [];
+          } catch (error) {
+            if (error instanceof Error && error.name === "AbortError")
+              throw error;
+            return [] as ReferrerRadarItem[];
+          }
+        };
+
+        const [current, comparison] = await Promise.all([
+          fetchRadarData(tw, filters),
+          comparisonQuery
+            ? fetchRadarData(comparisonQuery.window, comparisonQuery.filters)
+            : Promise.resolve(null),
+        ]);
+        return { current, comparison };
       },
       enabled: typeof window !== "undefined",
     });
-    const data = radarQuery.data ?? [];
+    const data = radarQuery.data?.current ?? [];
+    const comparisonData = radarQuery.data?.comparison ?? [];
     const loading = radarQuery.isPending;
+    const comparisonLabel = dashboardComparisonLabel(messages, comparisonQuery);
+    const comparisonByReferrer = useMemo(
+      () => new Map(comparisonData.map((item) => [item.referrer, item])),
+      [comparisonData],
+    );
 
     useEffect(() => {
       let active = true;
@@ -408,12 +453,16 @@ export const ReferrerPerformanceRadarCard = memo(
     );
 
     const maxByMetric = useMemo(() => {
-      const result = {} as Record<PerformanceRadarMetricKey, number>;
-      for (const key of PERFORMANCE_RADAR_METRIC_KEYS) {
-        result[key] = Math.max(...data.map((item) => item.metrics[key]), 0);
-      }
-      return result;
-    }, [data]);
+      const metrics = data.flatMap((item) => [
+        item.metrics,
+        comparisonByReferrer.get(item.referrer)?.metrics,
+      ]);
+      return buildPerformanceRadarMaxByMetric(
+        metrics.filter((item): item is ReferrerRadarItem["metrics"] =>
+          Boolean(item),
+        ),
+      );
+    }, [comparisonByReferrer, data]);
 
     const hasContent = data.length > 0;
 
@@ -439,6 +488,7 @@ export const ReferrerPerformanceRadarCard = memo(
           <div className="grid gap-4 md:grid-cols-2">
             {data.map((item, index) => {
               const color = CHART_COLORS[index % CHART_COLORS.length];
+              const comparisonItem = comparisonByReferrer.get(item.referrer);
               const label = normalizeReferrerLabel(
                 item.referrer,
                 messages.overview.direct,
@@ -462,7 +512,7 @@ export const ReferrerPerformanceRadarCard = memo(
                       locale={locale}
                       messages={messages}
                     />
-                    <div className="flex min-w-0 items-center justify-center">
+                    <div className="flex min-w-0 flex-col items-center justify-center">
                       <div className="size-[152px] max-w-full sm:size-[220px]">
                         <PerformanceRadarChart
                           itemLabel={label}
@@ -471,8 +521,22 @@ export const ReferrerPerformanceRadarCard = memo(
                           metricLabels={metricLabels}
                           color={color}
                           locale={locale}
+                          comparisonMetrics={comparisonItem?.metrics}
+                          comparisonColor={COMPARISON_CHART_COLOR}
+                          comparisonLabel={comparisonLabel}
                         />
                       </div>
+                      {comparisonItem ? (
+                        <div className="flex items-center gap-1.5 text-xs">
+                          <span
+                            className="size-2.5 shrink-0 rounded-[2px]"
+                            style={{
+                              backgroundColor: COMPARISON_CHART_COLOR,
+                            }}
+                          />
+                          <span className="font-medium">{comparisonLabel}</span>
+                        </div>
+                      ) : null}
                     </div>
                   </CardContent>
                 </Card>

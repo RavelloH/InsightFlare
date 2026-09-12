@@ -3,11 +3,15 @@ import { RiPulseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
-  PERFORMANCE_RADAR_METRIC_KEYS,
+  buildPerformanceRadarMaxByMetric,
   PerformanceRadarChart,
   type PerformanceRadarMetricKey,
 } from "@/components/dashboard/charts/performance-radar-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchBrowserRadar } from "@/lib/dashboard/client-data";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
@@ -24,6 +28,8 @@ const CHART_COLORS = [
   "var(--color-chart-4)",
 ] as const;
 
+const COMPARISON_CHART_COLOR = "var(--color-compare-primary)";
+
 function emptyRadarUnlessAborted(error: unknown): BrowserRadarItem[] {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return [];
@@ -33,12 +39,16 @@ function emptyRadarUnlessAborted(error: unknown): BrowserRadarItem[] {
 
 function SingleBrowserRadar({
   item,
+  comparisonItem,
+  comparisonLabel,
   color,
   locale,
   maxByMetric,
   metricLabels,
 }: {
   item: BrowserRadarItem;
+  comparisonItem?: BrowserRadarItem;
+  comparisonLabel: string;
   color: string;
   locale: Locale;
   maxByMetric: Record<PerformanceRadarMetricKey, number>;
@@ -53,13 +63,27 @@ function SingleBrowserRadar({
         metricLabels={metricLabels}
         color={color}
         locale={locale}
+        comparisonMetrics={comparisonItem?.metrics}
+        comparisonColor={COMPARISON_CHART_COLOR}
+        comparisonLabel={comparisonLabel}
       />
-      <div className="flex items-center gap-1.5 text-xs">
-        <span
-          className="size-2.5 shrink-0 rounded-[2px]"
-          style={{ backgroundColor: color }}
-        />
-        <span className="font-medium">{item.browser}</span>
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
+        <div className="flex items-center gap-1.5">
+          <span
+            className="size-2.5 shrink-0 rounded-[2px]"
+            style={{ backgroundColor: color }}
+          />
+          <span className="font-medium">{item.browser}</span>
+        </div>
+        {comparisonItem ? (
+          <div className="flex items-center gap-1.5">
+            <span
+              className="size-2.5 shrink-0 rounded-[2px]"
+              style={{ backgroundColor: COMPARISON_CHART_COLOR }}
+            />
+            <span className="font-medium">{comparisonLabel}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -84,6 +108,12 @@ export const BrowserPerformanceRadarCard = memo(
     filters,
   }: BrowserPerformanceRadarCardProps) {
     const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+    const comparisonQuery = useDashboardComparisonQuery(tw, filters);
+    const comparisonFiltersKey = useMemo(
+      () =>
+        comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none",
+      [comparisonQuery],
+    );
     const { data: response, isPending: loading } = useQuery({
       queryKey: [
         "dashboard",
@@ -93,18 +123,45 @@ export const BrowserPerformanceRadarCard = memo(
         tw.to,
         tw.timeZone,
         filtersKey,
+        comparisonQuery?.mode ?? "none",
+        comparisonQuery?.window.from ?? "none",
+        comparisonQuery?.window.to ?? "none",
+        comparisonQuery?.window.interval ?? "none",
+        comparisonQuery?.window.timeZone ?? "none",
+        comparisonFiltersKey,
       ],
-      queryFn: ({ signal }) =>
-        fetchBrowserRadar(siteId, tw, filters, { signal })
-          .then((result) =>
-            Array.isArray(result.data)
-              ? result.data
-              : ([] as BrowserRadarItem[]),
-          )
-          .catch(emptyRadarUnlessAborted),
+      queryFn: async ({ signal }) => {
+        const fetchRadarData = (
+          requestedWindow: TimeWindow,
+          requestedFilters: FilterDocument,
+        ) =>
+          fetchBrowserRadar(siteId, requestedWindow, requestedFilters, {
+            signal,
+          })
+            .then((result) =>
+              Array.isArray(result.data)
+                ? result.data
+                : ([] as BrowserRadarItem[]),
+            )
+            .catch(emptyRadarUnlessAborted);
+
+        const [current, comparison] = await Promise.all([
+          fetchRadarData(tw, filters),
+          comparisonQuery
+            ? fetchRadarData(comparisonQuery.window, comparisonQuery.filters)
+            : Promise.resolve(null),
+        ]);
+        return { current, comparison };
+      },
       enabled: !import.meta.env.SSR,
     });
-    const data = response ?? [];
+    const data = response?.current ?? [];
+    const comparisonData = response?.comparison ?? [];
+    const comparisonLabel = dashboardComparisonLabel(messages, comparisonQuery);
+    const comparisonByBrowser = useMemo(
+      () => new Map(comparisonData.map((item) => [item.browser, item])),
+      [comparisonData],
+    );
 
     const metricLabels = useMemo(
       () => ({
@@ -119,12 +176,16 @@ export const BrowserPerformanceRadarCard = memo(
     );
 
     const maxByMetric = useMemo(() => {
-      const result = {} as Record<PerformanceRadarMetricKey, number>;
-      for (const key of PERFORMANCE_RADAR_METRIC_KEYS) {
-        result[key] = Math.max(...data.map((i) => i.metrics[key]), 0);
-      }
-      return result;
-    }, [data]);
+      const metrics = data.flatMap((item) => [
+        item.metrics,
+        comparisonByBrowser.get(item.browser)?.metrics,
+      ]);
+      return buildPerformanceRadarMaxByMetric(
+        metrics.filter((item): item is BrowserRadarItem["metrics"] =>
+          Boolean(item),
+        ),
+      );
+    }, [comparisonByBrowser, data]);
 
     const hasContent = data.length > 0;
 
@@ -154,6 +215,8 @@ export const BrowserPerformanceRadarCard = memo(
                   <SingleBrowserRadar
                     key={item.browser}
                     item={item}
+                    comparisonItem={comparisonByBrowser.get(item.browser)}
+                    comparisonLabel={comparisonLabel}
                     color={color}
                     locale={locale}
                     maxByMetric={maxByMetric}
