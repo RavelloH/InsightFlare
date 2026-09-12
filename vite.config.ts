@@ -8,7 +8,37 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { parse } from "yaml";
 
-import packageJson from "./package.json";
+import packageJson from "./package.json" with { type: "json" };
+
+// Vite watches the project root. Keep generated state, reports, and repository
+// metadata out of chokidar so Cloudflare/TanStack SSR restarts do not traverse
+// large local databases and historical test output.
+const DEV_WATCH_IGNORED = [
+  "**/node_modules/**",
+  "**/.git/**",
+  "**/.wrangler/**",
+  "**/.wrangler-xdg/**",
+  "**/.pnpm-store/**",
+  "**/.cache/**",
+  "**/.tanstack/**",
+  "**/.tmp/**",
+  "**/tmp/**",
+  "**/coverage/**",
+  "**/coverage-resource/**",
+  "**/logs/**",
+  "**/test-results/**",
+  "**/playwright-report/**",
+  "**/dist/**",
+  "**/plan/**",
+  "**/.agents/**",
+  "**/.claude/**",
+  "**/.github/**",
+  "**/.husky/**",
+  "**/.vscode/**",
+  "**/changelog/**",
+  "**/docs/**",
+  "**/migrations/**",
+];
 
 function resolveCommitSha(): string {
   const configured = process.env.COMMIT_SHA?.trim();
@@ -72,6 +102,11 @@ export default defineConfig(({ mode }) => {
         ? "./wrangler.dev.toml"
         : "./wrangler.toml");
   const persistencePath = process.env.INSIGHTFLARE_LOCAL_PERSISTENCE_PATH;
+  const persistState = persistencePath
+    ? { path: persistencePath }
+    : demoMode === "1"
+      ? false
+      : true;
   const port = Number(process.env.INSIGHTFLARE_PORT || "3000");
 
   return {
@@ -109,7 +144,7 @@ export default defineConfig(({ mode }) => {
       ssrMapStubs(),
       cloudflare({
         configPath,
-        persistState: persistencePath ? { path: persistencePath } : true,
+        persistState,
         viteEnvironment: { name: "ssr" },
       }),
       tanstackStart(),
@@ -122,7 +157,7 @@ export default defineConfig(({ mode }) => {
       port: Number.isInteger(port) && port > 0 ? port : 3000,
       strictPort: true,
       watch: {
-        ignored: ["**/.tmp/e2e/**"],
+        ignored: DEV_WATCH_IGNORED,
       },
     },
   };

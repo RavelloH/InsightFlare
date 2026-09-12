@@ -11,6 +11,7 @@
  * translation files takes effect in the running app without a restart.
  */
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import path from "node:path";
 
 import { createYamlWatcher } from "./i18n-check/watch";
@@ -24,8 +25,36 @@ const rlog = createScriptLogger({
 const ROOT = process.cwd();
 const VITE = localCli(ROOT, "vite", path.join("bin", "vite.js"));
 const TSCLI = localCli(ROOT, "tsx", "dist/cli.mjs");
+const TRACKER_INPUTS = [
+  path.join(ROOT, "src/tracker/sdk.ts"),
+  path.join(ROOT, "src/tracker/auto-track.ts"),
+  path.join(ROOT, "src/tracker/performance.ts"),
+  path.join(ROOT, "src/tracker/ua-client-hints.ts"),
+  path.join(ROOT, "scripts/build-tracker-sdk.ts"),
+];
+const TRACKER_OUTPUTS = [
+  path.join(ROOT, "src/tracker/sdk.min.ts"),
+  path.join(ROOT, "src/tracker/sdk.no-perf.min.ts"),
+];
+
+function trackerBuildIsFresh(): boolean {
+  try {
+    const newestInput = Math.max(
+      ...TRACKER_INPUTS.map((filePath) => statSync(filePath).mtimeMs),
+    );
+    return TRACKER_OUTPUTS.every(
+      (filePath) => statSync(filePath).mtimeMs >= newestInput,
+    );
+  } catch {
+    return false;
+  }
+}
 
 async function runBuildSdk(): Promise<void> {
+  if (trackerBuildIsFresh()) {
+    rlog.info("Tracker SDK is up to date; skipping build.");
+    return;
+  }
   rlog.info("Building tracker SDK...");
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
