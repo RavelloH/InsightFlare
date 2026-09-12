@@ -13,6 +13,8 @@ interface ReferrerSummarySectionProps {
   locale: Locale;
   messages: AppMessages;
   summary: ReferrerSummaryData["data"] | null;
+  comparisonSummary?: ReferrerSummaryData["data"] | null;
+  comparisonLabel?: string;
   loading: boolean;
   hideSummaryCard?: boolean;
 }
@@ -32,6 +34,8 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
   locale,
   messages,
   summary,
+  comparisonSummary = null,
+  comparisonLabel,
   loading,
   hideSummaryCard = false,
 }: ReferrerSummarySectionProps) {
@@ -114,6 +118,56 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
       topSource?.views,
     ],
   );
+  const comparisonShareItems = useMemo(() => {
+    if (!comparisonSummary) return null;
+
+    const comparisonTopSources = [...comparisonSummary.topSources].sort(
+      (left, right) => right.views - left.views,
+    );
+    const comparisonExternalViews = comparisonSummary.externalViews;
+    const comparisonTopSource = comparisonTopSources[0] ?? null;
+    const comparisonNextFourViews = comparisonTopSources
+      .slice(1, 5)
+      .reduce((sum, row) => sum + row.views, 0);
+    const comparisonLongTailViews = Math.max(
+      0,
+      comparisonExternalViews -
+        comparisonTopSources.reduce((sum, row) => sum + row.views, 0),
+    );
+
+    return {
+      splitItems: [
+        {
+          key: "direct",
+          label: messages.overview.direct,
+          value: comparisonSummary.directViews,
+        },
+        {
+          key: "external",
+          label: messages.referrers.externalLabel,
+          value: comparisonExternalViews,
+        },
+      ],
+      mixItems: [
+        {
+          key: "top",
+          label: comparisonTopSource?.referrer ?? messages.referrers.topSource,
+          value: comparisonTopSource?.views ?? 0,
+        },
+        {
+          key: "next",
+          label: messages.referrers.nextSources,
+          value: comparisonNextFourViews,
+        },
+        {
+          key: "tail",
+          label: messages.referrers.longTail,
+          value: comparisonLongTailViews,
+          isOther: true,
+        },
+      ],
+    };
+  }, [comparisonSummary, messages]);
 
   return (
     <section className="space-y-6">
@@ -195,6 +249,8 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
           <ShareRadialCard
             title={messages.referrers.splitTitle}
             items={splitItems}
+            comparisonItems={comparisonShareItems?.splitItems}
+            comparisonLabel={comparisonLabel}
             maxItems={2}
             locale={locale}
             loading={showInitialLoading}
@@ -203,6 +259,8 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
           <ShareRadialCard
             title={messages.referrers.chartTitle}
             items={mixItems}
+            comparisonItems={comparisonShareItems?.mixItems}
+            comparisonLabel={comparisonLabel}
             maxItems={3}
             locale={locale}
             loading={showInitialLoading}

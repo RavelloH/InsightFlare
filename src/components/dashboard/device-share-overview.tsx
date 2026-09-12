@@ -6,6 +6,7 @@ import { ShareRadialCard } from "@/components/dashboard/share-radial-card";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData } from "@/lib/edge-client";
@@ -36,6 +37,8 @@ interface DeviceShareOverviewProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  comparisonQuery?: DashboardComparisonQuery | null;
+  comparisonLabel?: string;
 }
 
 export const DeviceShareOverview = memo(function DeviceShareOverview({
@@ -44,8 +47,14 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
   siteId,
   window,
   filters,
+  comparisonQuery,
+  comparisonLabel,
 }: DeviceShareOverviewProps) {
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
+    [comparisonQuery],
+  );
   const { data, isFetching, isPending } = useQuery({
     queryKey: [
       "dashboard",
@@ -56,19 +65,43 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
       window.interval,
       window.timeZone,
       filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
     ],
     queryFn: async ({ signal }) => {
-      const [deviceTrend, osTrend] = await Promise.all([
-        fetchClientDimensionTrend(siteId, window, "deviceType", filters, {
-          limit: 5,
-          signal,
-        }).catch(emptyTrendUnlessAborted),
-        fetchClientDimensionTrend(siteId, window, "operatingSystem", filters, {
-          limit: 5,
-          signal,
-        }).catch(emptyTrendUnlessAborted),
+      const fetchShareData = async (
+        requestedWindow: TimeWindow,
+        requestedFilters: FilterDocument,
+      ) => {
+        const [deviceTrend, osTrend] = await Promise.all([
+          fetchClientDimensionTrend(
+            siteId,
+            requestedWindow,
+            "deviceType",
+            requestedFilters,
+            { limit: 5, signal },
+          ).catch(emptyTrendUnlessAborted),
+          fetchClientDimensionTrend(
+            siteId,
+            requestedWindow,
+            "operatingSystem",
+            requestedFilters,
+            { limit: 5, signal },
+          ).catch(emptyTrendUnlessAborted),
+        ]);
+        return { deviceTrend, osTrend };
+      };
+      const [current, comparison] = await Promise.all([
+        fetchShareData(window, filters),
+        comparisonQuery
+          ? fetchShareData(comparisonQuery.window, comparisonQuery.filters)
+          : Promise.resolve(null),
       ]);
-      return { deviceTrend, osTrend };
+      return { ...current, comparison };
     },
     enabled: !import.meta.env.SSR,
   });
@@ -77,6 +110,8 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
     [data?.deviceTrend],
   );
   const osTrend = useMemo(() => data?.osTrend ?? emptyTrend(), [data?.osTrend]);
+  const comparisonDeviceTrend = data?.comparison?.deviceTrend;
+  const comparisonOsTrend = data?.comparison?.osTrend;
   const deviceItems = useMemo(
     () =>
       deviceTrend.series.map((item) => {
@@ -110,6 +145,39 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
       })),
     [messages, osTrend.series],
   );
+  const comparisonDeviceItems = useMemo(
+    () =>
+      comparisonDeviceTrend?.series.map((item) => {
+        const deviceMeta = resolveDeviceTypeMeta(
+          item.label,
+          messages.common.deviceLabels,
+          messages.common.unknown,
+        );
+        return {
+          key: item.key,
+          label: item.isOther ? messages.devices.otherLabel : deviceMeta.label,
+          value: item.visitors,
+          isOther: item.isOther,
+          icon: item.isOther ? undefined : deviceMeta.Icon,
+        };
+      }),
+    [
+      comparisonDeviceTrend?.series,
+      messages.common.deviceLabels,
+      messages.common.unknown,
+      messages.devices.otherLabel,
+    ],
+  );
+  const comparisonOsItems = useMemo(
+    () =>
+      comparisonOsTrend?.series.map((item) => ({
+        key: item.key,
+        label: seriesLabel(item, messages),
+        value: item.visitors,
+        isOther: item.isOther,
+      })),
+    [comparisonOsTrend?.series, messages],
+  );
   const showOverlayLoading = isFetching && data !== undefined;
   const showInitialLoading = isPending;
 
@@ -119,6 +187,8 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
         <ShareRadialCard
           title={messages.devices.deviceShareTitle}
           items={deviceItems}
+          comparisonItems={comparisonDeviceItems}
+          comparisonLabel={comparisonLabel}
           maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}
@@ -128,6 +198,8 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
         <ShareRadialCard
           title={messages.devices.osShareTitle}
           items={osItems}
+          comparisonItems={comparisonOsItems}
+          comparisonLabel={comparisonLabel}
           maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}

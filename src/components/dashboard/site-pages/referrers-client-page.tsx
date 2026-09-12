@@ -14,6 +14,10 @@ import {
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import type { TabbedDataTableLoader } from "@/components/dashboard/tabbed-data-table-card";
 import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
+import {
   fetchOverviewSourceCardTab,
   fetchReferrerSummary,
 } from "@/lib/dashboard/client-data";
@@ -42,7 +46,12 @@ export function ReferrersClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
+    [comparisonQuery],
+  );
   const requestFilters = filters;
   const requestWindow = useMemo(
     () => ({
@@ -65,12 +74,30 @@ export function ReferrersClientPage({
       window.interval,
       window.timeZone,
       filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
     ],
-    queryFn: ({ signal }) =>
-      fetchReferrerSummary(siteId, requestWindow, requestFilters, {
-        topN: 5,
-        signal,
-      }),
+    queryFn: async ({ signal }) => {
+      const [current, comparison] = await Promise.all([
+        fetchReferrerSummary(siteId, requestWindow, requestFilters, {
+          topN: 5,
+          signal,
+        }),
+        comparisonQuery
+          ? fetchReferrerSummary(
+              siteId,
+              comparisonQuery.window,
+              comparisonQuery.filters,
+              { topN: 5, signal },
+            )
+          : Promise.resolve(null),
+      ]);
+      return { current, comparison };
+    },
     enabled: typeof window !== "undefined",
   });
   const loader = useCallback<
@@ -128,7 +155,9 @@ export function ReferrersClientPage({
       <ReferrerSummarySection
         locale={locale}
         messages={messages}
-        summary={summaryQuery.data?.data ?? null}
+        summary={summaryQuery.data?.current.data ?? null}
+        comparisonSummary={summaryQuery.data?.comparison?.data ?? null}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
         loading={summaryQuery.isFetching}
         hideSummaryCard
       />

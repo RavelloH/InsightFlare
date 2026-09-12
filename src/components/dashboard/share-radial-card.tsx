@@ -7,6 +7,7 @@ import {
   type ShareBarChartMaxItems,
   ShareBarChartSkeleton,
 } from "@/components/dashboard/charts/share-bar-chart";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +23,13 @@ const CHART_COLORS = [
   "var(--color-chart-5)",
   "var(--muted-foreground)",
 ] as const;
+const COMPARISON_CHART_COLORS = [
+  "var(--color-compare-chart-1)",
+  "var(--color-compare-chart-2)",
+  "var(--color-compare-chart-3)",
+  "var(--color-compare-chart-4)",
+  "var(--color-compare-chart-5)",
+] as const;
 
 export interface ShareRadialCardItem {
   key: string;
@@ -35,6 +43,8 @@ export interface ShareRadialCardItem {
 interface ShareRadialCardProps {
   title: string;
   items: ShareRadialCardItem[];
+  comparisonItems?: ShareRadialCardItem[];
+  comparisonLabel?: string;
   maxItems: ShareBarChartMaxItems;
   locale: Locale;
   valueLabel: string;
@@ -48,6 +58,7 @@ type ResolvedShareItem = ShareBarChartItem;
 function resolveShareItems(
   items: ShareRadialCardItem[],
   totalValue: number,
+  comparison = false,
 ): ResolvedShareItem[] {
   return items.map((item, index) => {
     const value = Math.max(0, Number(item.value ?? 0));
@@ -56,11 +67,14 @@ function resolveShareItems(
       ...item,
       value,
       share: totalValue > 0 ? value / totalValue : 0,
-      color:
-        item.color ??
-        (item.isOther
+      color: comparison
+        ? item.isOther
           ? "var(--muted-foreground)"
-          : CHART_COLORS[index % CHART_COLORS.length]),
+          : COMPARISON_CHART_COLORS[index % COMPARISON_CHART_COLORS.length]
+        : (item.color ??
+          (item.isOther
+            ? "var(--muted-foreground)"
+            : CHART_COLORS[index % CHART_COLORS.length])),
     };
   });
 }
@@ -68,6 +82,8 @@ function resolveShareItems(
 export const ShareRadialCard = memo(function ShareRadialCard({
   title,
   items,
+  comparisonItems,
+  comparisonLabel,
   maxItems,
   locale,
   valueLabel,
@@ -87,6 +103,21 @@ export const ShareRadialCard = memo(function ShareRadialCard({
     () => resolveShareItems(items, totalValue),
     [items, totalValue],
   );
+  const comparisonTotalValue = useMemo(
+    () =>
+      (comparisonItems ?? []).reduce(
+        (sum, item) => sum + Math.max(0, Number(item.value ?? 0)),
+        0,
+      ),
+    [comparisonItems],
+  );
+  const resolvedComparisonItems = useMemo(
+    () =>
+      comparisonItems
+        ? resolveShareItems(comparisonItems, comparisonTotalValue, true)
+        : undefined,
+    [comparisonItems, comparisonTotalValue],
+  );
   const ariaLabel = useMemo(
     () =>
       `${title}: ${resolvedItems
@@ -97,6 +128,7 @@ export const ShareRadialCard = memo(function ShareRadialCard({
         .join(", ")}`,
     [locale, resolvedItems, title, valueLabel],
   );
+  const comparisonHeaderKey = comparisonItems ? "comparison" : "current";
 
   return (
     <Card className={className}>
@@ -105,33 +137,61 @@ export const ShareRadialCard = memo(function ShareRadialCard({
           <RiDonutChartLine className="size-4" />
           {title}
         </CardTitle>
-        <AutoTransition
-          className="h-7"
-          initial={false}
-          transitionKey={loading ? "loading" : "ready"}
-          duration={0.2}
-          type="crossFade"
-        >
-          {loading ? (
-            <div key="loading" className="flex h-7 items-baseline gap-2">
-              <Skeleton className="h-7 w-20" />
-              <Skeleton className="h-4 w-14" />
-            </div>
-          ) : (
-            <div key="ready" className="flex h-7 items-baseline gap-2">
-              <span className="font-mono text-xl font-medium tabular-nums text-foreground">
-                {numberFormat(locale, totalValue)}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {valueLabel}
-              </span>
-            </div>
-          )}
-        </AutoTransition>
+        <AutoResizer className="w-full" duration={0.2}>
+          <AutoTransition
+            className="grid min-w-0 grid-cols-2 gap-4"
+            initial={false}
+            transitionKey={`${loading ? "loading" : "ready"}-${comparisonHeaderKey}`}
+            duration={0.2}
+            type="crossFade"
+          >
+            {loading ? (
+              <div
+                key="loading"
+                className="col-span-2 flex h-7 items-baseline gap-2"
+              >
+                <Skeleton className="h-7 w-20" />
+                <Skeleton className="h-4 w-14" />
+              </div>
+            ) : (
+              <>
+                <div
+                  key="current"
+                  className="flex min-w-0 items-baseline gap-2"
+                >
+                  <span className="font-mono text-xl font-medium tabular-nums text-foreground">
+                    {numberFormat(locale, totalValue)}
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {valueLabel}
+                  </span>
+                </div>
+                {resolvedComparisonItems ? (
+                  <div
+                    key="comparison"
+                    className="flex min-w-0 items-baseline justify-end gap-2"
+                  >
+                    <span className="truncate text-xs text-muted-foreground">
+                      {comparisonLabel}
+                    </span>
+                    <span className="font-mono text-xl font-medium tabular-nums text-foreground">
+                      {numberFormat(locale, comparisonTotalValue)}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {valueLabel}
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </AutoTransition>
+        </AutoResizer>
       </CardHeader>
       <CardContent>
         <ShareBarChart
           ariaLabel={ariaLabel}
+          comparisonItems={resolvedComparisonItems}
+          comparisonLabel={comparisonLabel}
           emptyLabel={emptyLabel}
           items={resolvedItems}
           loading={loading}

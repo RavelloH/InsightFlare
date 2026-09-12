@@ -4,6 +4,10 @@ import { DeviceScreenBreakdownCard } from "@/components/dashboard/device-screen-
 import { DeviceShareOverview } from "@/components/dashboard/device-share-overview";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -27,6 +31,7 @@ export function DevicesClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
 
   return (
     <div className="space-y-6">
@@ -41,6 +46,8 @@ export function DevicesClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        comparisonQuery={comparisonQuery}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
       />
 
       <DeviceDimensionTrendCard

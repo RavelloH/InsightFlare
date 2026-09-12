@@ -8,6 +8,7 @@ import {
   fetchBrowserEngineTrend,
   fetchBrowserTrend,
 } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData } from "@/lib/edge-client";
@@ -30,6 +31,8 @@ interface BrowserShareOverviewProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  comparisonQuery?: DashboardComparisonQuery | null;
+  comparisonLabel?: string;
 }
 
 export const BrowserShareOverview = memo(function BrowserShareOverview({
@@ -38,8 +41,14 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
   siteId,
   window: tw,
   filters,
+  comparisonQuery,
+  comparisonLabel,
 }: BrowserShareOverviewProps) {
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
+    [comparisonQuery],
+  );
   const { data, isFetching, isPending } = useQuery({
     queryKey: [
       "dashboard",
@@ -50,18 +59,37 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
       tw.interval,
       tw.timeZone,
       filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
     ],
     queryFn: async ({ signal }) => {
-      const [browserTrend, engineTrend] = await Promise.all([
-        fetchBrowserTrend(siteId, tw, filters, { limit: 5, signal }).catch(
-          emptyTrendUnlessAborted,
-        ),
-        fetchBrowserEngineTrend(siteId, tw, filters, {
-          limit: 5,
-          signal,
-        }).catch(emptyTrendUnlessAborted),
+      const fetchShareData = async (
+        requestedWindow: TimeWindow,
+        requestedFilters: FilterDocument,
+      ) => {
+        const [browserTrend, engineTrend] = await Promise.all([
+          fetchBrowserTrend(siteId, requestedWindow, requestedFilters, {
+            limit: 5,
+            signal,
+          }).catch(emptyTrendUnlessAborted),
+          fetchBrowserEngineTrend(siteId, requestedWindow, requestedFilters, {
+            limit: 5,
+            signal,
+          }).catch(emptyTrendUnlessAborted),
+        ]);
+        return { browserTrend, engineTrend };
+      };
+      const [current, comparison] = await Promise.all([
+        fetchShareData(tw, filters),
+        comparisonQuery
+          ? fetchShareData(comparisonQuery.window, comparisonQuery.filters)
+          : Promise.resolve(null),
       ]);
-      return { browserTrend, engineTrend };
+      return { ...current, comparison };
     },
     enabled: !import.meta.env.SSR,
   });
@@ -73,6 +101,8 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
     () => data?.engineTrend ?? emptyTrend(),
     [data?.engineTrend],
   );
+  const comparisonBrowserTrend = data?.comparison?.browserTrend;
+  const comparisonEngineTrend = data?.comparison?.engineTrend;
   const browserItems = useMemo(
     () =>
       browserTrend.series.map((item) => ({
@@ -93,6 +123,26 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
       })),
     [engineTrend.series],
   );
+  const comparisonBrowserItems = useMemo(
+    () =>
+      comparisonBrowserTrend?.series.map((item) => ({
+        key: item.key,
+        label: item.label,
+        value: item.visitors,
+        isOther: item.isOther,
+      })),
+    [comparisonBrowserTrend?.series],
+  );
+  const comparisonEngineItems = useMemo(
+    () =>
+      comparisonEngineTrend?.series.map((item) => ({
+        key: item.key,
+        label: item.label,
+        value: item.visitors,
+        isOther: item.isOther,
+      })),
+    [comparisonEngineTrend?.series],
+  );
   const showOverlayLoading = isFetching && data !== undefined;
   const showInitialLoading = isPending;
 
@@ -102,6 +152,8 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
         <ShareRadialCard
           title={messages.browsers.browserShareTitle}
           items={browserItems}
+          comparisonItems={comparisonBrowserItems}
+          comparisonLabel={comparisonLabel}
           maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}
@@ -111,6 +163,8 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
         <ShareRadialCard
           title={messages.browsers.engineShareTitle}
           items={engineItems}
+          comparisonItems={comparisonEngineItems}
+          comparisonLabel={comparisonLabel}
           maxItems={6}
           locale={locale}
           valueLabel={messages.common.visitors}
