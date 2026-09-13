@@ -529,7 +529,7 @@ export const ReferrerPerformanceRadarCard = memo(
                       {comparisonItem ? (
                         <div className="flex items-center gap-1.5 text-xs">
                           <span
-                            className="size-2.5 shrink-0 rounded-[2px]"
+                            className="size-2.5 shrink-0 rounded-none"
                             style={{
                               backgroundColor: COMPARISON_CHART_COLOR,
                             }}

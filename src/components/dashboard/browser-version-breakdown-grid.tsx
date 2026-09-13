@@ -1,8 +1,11 @@
-import { Fragment, memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { RiGlobalLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import { DonutChart } from "@/components/dashboard/charts/donut-chart";
+import {
+  DonutChart,
+  type DonutChartDataPoint,
+} from "@/components/dashboard/charts/donut-chart";
 import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
@@ -19,6 +22,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -40,6 +44,14 @@ const DONUT_COLORS = [
   "var(--color-chart-5)",
   "var(--muted-foreground)",
 ] as const;
+const COMPARISON_DONUT_COLORS = [
+  "var(--color-compare-chart-1)",
+  "var(--color-compare-chart-2)",
+  "var(--color-compare-chart-3)",
+  "var(--color-compare-chart-4)",
+  "var(--color-compare-chart-5)",
+  "var(--muted-foreground)",
+] as const;
 
 interface BrowserVersionBreakdownGridProps {
   locale: Locale;
@@ -47,6 +59,8 @@ interface BrowserVersionBreakdownGridProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  comparisonQuery?: DashboardComparisonQuery | null;
+  comparisonLabel?: string;
 }
 
 interface BrowserVersionSliceDisplay extends BrowserVersionSlice {
@@ -57,6 +71,11 @@ interface BrowserVersionSliceDisplay extends BrowserVersionSlice {
 
 interface BrowserVersionBrowserDisplay extends BrowserVersionBreakdownBrowser {
   versions: BrowserVersionSliceDisplay[];
+}
+
+interface BrowserVersionDonutPair {
+  current: DonutChartDataPoint;
+  comparison: DonutChartDataPoint;
 }
 
 function emptyBrowserVersionBreakdown(): BrowserVersionBreakdownData {
@@ -93,26 +112,81 @@ function buildVersionCardData(
   }));
 }
 
+function emptyBrowserDisplay(browser: string): BrowserVersionBrowserDisplay {
+  return {
+    browser,
+    views: 0,
+    visitors: 0,
+    sessions: 0,
+    versions: [],
+  };
+}
+
 const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
   locale,
   messages,
   browser,
+  comparisonBrowser,
+  currentLabel,
+  comparisonLabel,
 }: {
   locale: Locale;
   messages: AppMessages;
   browser: BrowserVersionBrowserDisplay;
+  comparisonBrowser?: BrowserVersionBrowserDisplay;
+  currentLabel: string;
+  comparisonLabel?: string;
 }) {
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+  const hasComparison = comparisonBrowser !== undefined;
+  const donutPairs = useMemo(() => {
+    const currentByKey = new Map(
+      browser.versions.map((version) => [version.key, version]),
+    );
+    const comparisonByKey = new Map(
+      (comparisonBrowser?.versions ?? []).map((version) => [
+        version.key,
+        version,
+      ]),
+    );
+    const keys = [
+      ...browser.versions.map((version) => version.key),
+      ...(comparisonBrowser?.versions ?? [])
+        .map((version) => version.key)
+        .filter((key) => !currentByKey.has(key)),
+    ];
+
+    return keys.map<BrowserVersionDonutPair>((key, index) => {
+      const current = currentByKey.get(key);
+      const comparison = comparisonByKey.get(key);
+      const label = current?.displayLabel ?? comparison?.displayLabel ?? key;
+
+      return {
+        current: {
+          key,
+          label,
+          value: current?.visitors ?? 0,
+          share: current?.share ?? 0,
+          color: DONUT_COLORS[index % DONUT_COLORS.length],
+        },
+        comparison: {
+          key,
+          label,
+          value: comparison?.visitors ?? 0,
+          share: comparison?.share ?? 0,
+          color:
+            COMPARISON_DONUT_COLORS[index % COMPARISON_DONUT_COLORS.length],
+        },
+      };
+    });
+  }, [browser.versions, comparisonBrowser?.versions]);
   const chartData = useMemo(
-    () =>
-      browser.versions.map((version) => ({
-        key: version.key,
-        label: version.displayLabel,
-        value: version.visitors,
-        share: version.share,
-        color: version.color,
-      })),
-    [browser.versions],
+    () => donutPairs.map((pair) => pair.current),
+    [donutPairs],
   );
+  const comparisonChartData = hasComparison
+    ? donutPairs.map((pair) => pair.comparison)
+    : undefined;
 
   return (
     <Card size="sm" className="overflow-visible">
@@ -123,20 +197,45 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
           </TooltipTrigger>
           <TooltipContent>{browser.browser}</TooltipContent>
         </Tooltip>
-        <CardDescription>
-          {numberFormat(locale, browser.visitors)} {messages.common.visitors}
-        </CardDescription>
+        {hasComparison ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="size-2 shrink-0 rounded-none"
+                style={{ backgroundColor: "var(--color-chart-1)" }}
+              />
+              {currentLabel}: {numberFormat(locale, browser.visitors)}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="size-2 shrink-0 rounded-none"
+                style={{ backgroundColor: "var(--color-compare-chart-1)" }}
+              />
+              {comparisonLabel}:{" "}
+              {numberFormat(locale, comparisonBrowser?.visitors ?? 0)}
+            </span>
+          </div>
+        ) : (
+          <CardDescription>
+            {numberFormat(locale, browser.visitors)} {messages.common.visitors}
+          </CardDescription>
+        )}
       </CardHeader>
       <CardContent>
         <div className="grid gap-4 sm:grid-cols-[156px_minmax(0,1fr)] sm:items-center">
           <div className="relative mx-auto flex size-[156px] items-center justify-center">
             <DonutChart
               data={chartData}
+              comparisonData={comparisonChartData}
+              currentLabel={currentLabel}
+              comparisonLabel={comparisonLabel}
+              highlightedKey={highlightedKey}
               locale={locale}
               valueLabel={messages.common.visitors}
               innerRadius={44}
               outerRadius={66}
               className="size-[156px]"
+              onHighlightChange={setHighlightedKey}
             />
 
             <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center">
@@ -149,31 +248,94 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
             </div>
           </div>
 
-          <div className="grid grid-cols-[minmax(0,1fr)_max-content_max-content] items-center gap-x-3 gap-y-2">
-            {browser.versions.map((version) => (
-              <Fragment key={version.key}>
-                <div className="inline-flex min-w-0 items-center gap-2 overflow-hidden">
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
-                    style={{ backgroundColor: version.color }}
-                  />
+          <div
+            className={cn(
+              "grid items-center gap-x-3 gap-y-2",
+              hasComparison
+                ? "grid-cols-[minmax(0,1fr)_repeat(4,max-content)]"
+                : "grid-cols-[minmax(0,1fr)_repeat(2,max-content)]",
+            )}
+          >
+            {donutPairs.map(({ current, comparison }) => {
+              const isDimmed =
+                highlightedKey !== null && highlightedKey !== current.key;
+
+              return (
+                <div key={current.key} className="contents">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="truncate text-muted-foreground">
-                        {version.displayLabel}
-                      </span>
+                      <button
+                        type="button"
+                        className={cn(
+                          "inline-flex min-w-0 items-center gap-2 overflow-hidden text-left transition-opacity motion-reduce:transition-none",
+                          isDimmed && "opacity-40",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        )}
+                        onPointerEnter={() => setHighlightedKey(current.key)}
+                        onPointerLeave={() => setHighlightedKey(null)}
+                        onFocus={() => setHighlightedKey(current.key)}
+                        onBlur={() => setHighlightedKey(null)}
+                      >
+                        <span className="inline-flex shrink-0 items-center gap-0.5">
+                          <span
+                            className="h-2.5 w-2.5 rounded-none"
+                            style={{ backgroundColor: current.color }}
+                          />
+                          {hasComparison ? (
+                            <span
+                              className="h-2.5 w-2.5 rounded-none"
+                              style={{ backgroundColor: comparison.color }}
+                            />
+                          ) : null}
+                        </span>
+                        <span className="truncate text-muted-foreground">
+                          {current.label}
+                        </span>
+                      </button>
                     </TooltipTrigger>
-                    <TooltipContent>{version.displayLabel}</TooltipContent>
+                    <TooltipContent>{current.label}</TooltipContent>
                   </Tooltip>
+                  <span
+                    className={cn(
+                      "justify-self-end font-mono text-foreground tabular-nums transition-opacity motion-reduce:transition-none",
+                      isDimmed && "opacity-40",
+                    )}
+                  >
+                    {numberFormat(locale, current.value)}
+                  </span>
+                  {hasComparison ? (
+                    <span
+                      className={cn(
+                        "justify-self-end font-mono text-compare-primary tabular-nums transition-opacity motion-reduce:transition-none",
+                        isDimmed && "opacity-40",
+                      )}
+                    >
+                      {numberFormat(locale, comparison.value)}
+                    </span>
+                  ) : null}
+                  <span
+                    className={cn(
+                      "justify-self-end text-right font-mono text-[11px] tabular-nums transition-opacity motion-reduce:transition-none",
+                      isDimmed && "opacity-40",
+                    )}
+                  >
+                    <span className="text-muted-foreground">
+                      {percentFormat(locale, current.share)}
+                    </span>
+                  </span>
+                  {hasComparison ? (
+                    <span
+                      className={cn(
+                        "justify-self-end text-right font-mono text-[11px] tabular-nums text-compare-primary transition-opacity motion-reduce:transition-none",
+                        isDimmed && "opacity-40",
+                      )}
+                    >
+                      {percentFormat(locale, comparison.share)}
+                    </span>
+                  ) : null}
                 </div>
-                <span className="text-right font-mono text-foreground tabular-nums">
-                  {numberFormat(locale, version.visitors)}
-                </span>
-                <span className="text-right font-mono text-[11px] text-muted-foreground tabular-nums">
-                  {percentFormat(locale, version.share)}
-                </span>
-              </Fragment>
-            ))}
+              );
+            })}
           </div>
         </div>
       </CardContent>
@@ -195,8 +357,15 @@ export const BrowserVersionBreakdownGrid = memo(
     siteId,
     window,
     filters,
+    comparisonQuery,
+    comparisonLabel,
   }: BrowserVersionBreakdownGridProps) {
     const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+    const comparisonFiltersKey = useMemo(
+      () =>
+        comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none",
+      [comparisonQuery],
+    );
     const { data, isFetching, isPending } = useQuery({
       queryKey: [
         "dashboard",
@@ -206,24 +375,78 @@ export const BrowserVersionBreakdownGrid = memo(
         window.to,
         window.timeZone,
         filtersKey,
+        comparisonQuery?.mode ?? "none",
+        comparisonQuery?.window.from ?? "none",
+        comparisonQuery?.window.to ?? "none",
+        comparisonQuery?.window.timeZone ?? "none",
+        comparisonFiltersKey,
       ],
-      queryFn: ({ signal }) =>
-        fetchBrowserVersionBreakdown(siteId, window, filters, {
-          browserLimit: 0,
-          versionLimit: 5,
-          signal,
-        }).catch(emptyBreakdownUnlessAborted),
+      queryFn: async ({ signal }) => {
+        const fetchBreakdown = (
+          requestedWindow: TimeWindow,
+          requestedFilters: FilterDocument,
+        ) =>
+          fetchBrowserVersionBreakdown(
+            siteId,
+            requestedWindow,
+            requestedFilters,
+            {
+              browserLimit: 0,
+              versionLimit: 5,
+              signal,
+            },
+          ).catch(emptyBreakdownUnlessAborted);
+
+        const [current, comparison] = await Promise.all([
+          fetchBreakdown(window, filters),
+          comparisonQuery
+            ? fetchBreakdown(comparisonQuery.window, comparisonQuery.filters)
+            : Promise.resolve(null),
+        ]);
+        return { current, comparison };
+      },
       enabled: !import.meta.env.SSR,
     });
     const breakdownData = useMemo(
-      () => data ?? emptyBrowserVersionBreakdown(),
-      [data],
+      () => data?.current ?? emptyBrowserVersionBreakdown(),
+      [data?.current],
+    );
+    const comparisonBreakdownData = useMemo(
+      () => data?.comparison ?? undefined,
+      [data?.comparison],
     );
 
     const browsers = useMemo(
       () => buildVersionCardData(breakdownData, messages),
       [breakdownData, messages],
     );
+    const comparisonBrowsers = useMemo(
+      () =>
+        comparisonBreakdownData
+          ? buildVersionCardData(comparisonBreakdownData, messages)
+          : undefined,
+      [comparisonBreakdownData, messages],
+    );
+    const browserPairs = useMemo(() => {
+      const currentByBrowser = new Map(
+        browsers.map((browser) => [browser.browser, browser]),
+      );
+      const comparisonByBrowser = new Map(
+        (comparisonBrowsers ?? []).map((browser) => [browser.browser, browser]),
+      );
+      const browserNames = [
+        ...browsers.map((browser) => browser.browser),
+        ...(comparisonBrowsers ?? [])
+          .map((browser) => browser.browser)
+          .filter((browser) => !currentByBrowser.has(browser)),
+      ];
+
+      return browserNames.map((browserName) => ({
+        browser:
+          currentByBrowser.get(browserName) ?? emptyBrowserDisplay(browserName),
+        comparisonBrowser: comparisonByBrowser.get(browserName),
+      }));
+    }, [browsers, comparisonBrowsers]);
     const showOverlayLoading = isFetching && data !== undefined;
 
     return (
@@ -237,19 +460,22 @@ export const BrowserVersionBreakdownGrid = memo(
 
         <ContentSwitch
           loading={isPending}
-          hasContent={browsers.length > 0}
+          hasContent={browserPairs.length > 0}
           loadingLabel={messages.common.loading}
           emptyContent={<p>{messages.common.noData}</p>}
           minHeightClassName="min-h-[240px]"
         >
           <div className="relative">
             <div className="grid gap-4 md:grid-cols-2">
-              {browsers.map((browser) => (
+              {browserPairs.map(({ browser, comparisonBrowser }) => (
                 <BrowserVersionDonutCard
                   key={browser.browser}
                   locale={locale}
                   messages={messages}
                   browser={browser}
+                  comparisonBrowser={comparisonBrowser}
+                  currentLabel={messages.dashboardHeader.compareCurrentPeriod}
+                  comparisonLabel={comparisonLabel}
                 />
               ))}
             </div>

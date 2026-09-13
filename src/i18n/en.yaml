@@ -152,6 +152,7 @@ dashboardHeader:
   compareCustomFilterDescription: Set separate filter conditions for the comparison.
   compareApply: Apply comparison
   compareCancel: Cancel
+  compareDisabled: Comparison is unavailable on this page.
   filterButton: Filter
   filterButtonEvent: Filter (Event)
   filterButtonSession: Filter (Session)

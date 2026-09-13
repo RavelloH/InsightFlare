@@ -6,7 +6,10 @@ import {
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import { DonutChart } from "@/components/dashboard/charts/donut-chart";
+import {
+  DonutChart,
+  type DonutChartDataPoint,
+} from "@/components/dashboard/charts/donut-chart";
 import {
   ComparisonMetricToggle,
   type ComparisonTableMetric,
@@ -35,6 +38,7 @@ import {
   type ParsedScreenSize,
   parseScreenSizeLabel,
   type ScreenBucketKey,
+  type ScreenBucketSummary,
 } from "@/lib/dashboard/device-insights";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
@@ -45,6 +49,7 @@ import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
+import { cn } from "@/lib/utils";
 
 const CHART_COLORS = [
   "var(--color-chart-1)",
@@ -52,6 +57,14 @@ const CHART_COLORS = [
   "var(--color-chart-3)",
   "var(--color-chart-4)",
   "var(--color-chart-5)",
+  "var(--muted-foreground)",
+] as const;
+const COMPARISON_CHART_COLORS = [
+  "var(--color-compare-chart-1)",
+  "var(--color-compare-chart-2)",
+  "var(--color-compare-chart-3)",
+  "var(--color-compare-chart-4)",
+  "var(--color-compare-chart-5)",
   "var(--muted-foreground)",
 ] as const;
 
@@ -199,25 +212,104 @@ function ScreenCategoryPieCard({
   locale,
   messages,
   bucketSummary,
+  comparisonBucketSummary,
+  comparisonLabel,
 }: {
   locale: Locale;
   messages: AppMessages;
-  bucketSummary: Array<{
-    key: ScreenBucketKey;
-    visitors: number;
-    share: number;
-  }>;
+  bucketSummary: ScreenBucketSummary[];
+  comparisonBucketSummary?: ScreenBucketSummary[];
+  comparisonLabel?: string;
 }) {
-  const chartData = useMemo(
-    () =>
-      bucketSummary.map((bucket, index) => ({
-        key: bucket.key,
-        label: bucketLabel(bucket.key, messages),
-        value: bucket.visitors,
-        share: bucket.share,
+  const donutData = useMemo(() => {
+    const currentByKey = new Map(
+      bucketSummary.map((bucket) => [bucket.key, bucket]),
+    );
+    const comparisonByKey = new Map(
+      (comparisonBucketSummary ?? []).map((bucket) => [bucket.key, bucket]),
+    );
+    const keys = [
+      ...bucketSummary.map((bucket) => bucket.key),
+      ...(comparisonBucketSummary ?? [])
+        .map((bucket) => bucket.key)
+        .filter((key) => !currentByKey.has(key)),
+    ];
+    const current = keys.map<DonutChartDataPoint>((key, index) => {
+      const bucket = currentByKey.get(key);
+      return {
+        key,
+        label: bucketLabel(key, messages),
+        value: bucket?.visitors ?? 0,
+        share: bucket?.share ?? 0,
         color: CHART_COLORS[index % CHART_COLORS.length],
-      })),
-    [bucketSummary, messages],
+      };
+    });
+    const comparison =
+      comparisonBucketSummary === undefined
+        ? undefined
+        : keys.map<DonutChartDataPoint>((key, index) => {
+            const bucket = comparisonByKey.get(key);
+            return {
+              key,
+              label: bucketLabel(key, messages),
+              value: bucket?.visitors ?? 0,
+              share: bucket?.share ?? 0,
+              color:
+                COMPARISON_CHART_COLORS[index % COMPARISON_CHART_COLORS.length],
+            };
+          });
+
+    return { current, comparison };
+  }, [bucketSummary, comparisonBucketSummary, messages]);
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+  const hasComparison = donutData.comparison !== undefined;
+  const chartData = donutData.current;
+
+  const renderLegend = () => (
+    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+      {chartData.map((item, index) => {
+        const comparisonItem = donutData.comparison?.[index];
+        const isDimmed = highlightedKey !== null && highlightedKey !== item.key;
+
+        return (
+          <button
+            key={item.key}
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1.5 text-xs transition-opacity motion-reduce:transition-none",
+              isDimmed && "opacity-40",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+            onPointerEnter={() => setHighlightedKey(item.key)}
+            onPointerLeave={() => setHighlightedKey(null)}
+            onFocus={() => setHighlightedKey(item.key)}
+            onBlur={() => setHighlightedKey(null)}
+          >
+            <span className="inline-flex shrink-0 items-center gap-0.5">
+              <span
+                className="size-2.5 rounded-none"
+                style={{ backgroundColor: item.color }}
+              />
+              {comparisonItem ? (
+                <span
+                  className="size-2.5 rounded-none"
+                  style={{ backgroundColor: comparisonItem.color }}
+                />
+              ) : null}
+            </span>
+            <span className="text-muted-foreground">{item.label}</span>
+            <span className="font-mono tabular-nums text-foreground">
+              {percentFormat(locale, item.share)}
+            </span>
+            {comparisonItem ? (
+              <span className="font-mono tabular-nums text-compare-primary">
+                {percentFormat(locale, comparisonItem.share)}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
   );
 
   return (
@@ -231,25 +323,34 @@ function ScreenCategoryPieCard({
       <CardContent className="flex flex-1 flex-col items-center justify-center gap-6">
         <DonutChart
           data={chartData}
+          comparisonData={donutData.comparison}
+          currentLabel={messages.dashboardHeader.compareCurrentPeriod}
+          comparisonLabel={comparisonLabel}
+          highlightedKey={highlightedKey}
           locale={locale}
           valueLabel={messages.common.visitors}
           className="max-w-[18rem]"
+          onHighlightChange={setHighlightedKey}
         />
-
-        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
-          {chartData.map((item) => (
-            <div key={item.key} className="flex items-center gap-1.5 text-xs">
+        {hasComparison ? (
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
               <span
-                className="size-2.5 shrink-0 rounded-[2px]"
-                style={{ backgroundColor: item.color }}
+                className="size-2 shrink-0 rounded-none"
+                style={{ backgroundColor: "var(--color-chart-1)" }}
               />
-              <span className="text-muted-foreground">{item.label}</span>
-              <span className="font-mono tabular-nums text-foreground">
-                {percentFormat(locale, item.share)}
-              </span>
-            </div>
-          ))}
-        </div>
+              {messages.dashboardHeader.compareCurrentPeriod}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="size-2 shrink-0 rounded-none"
+                style={{ backgroundColor: "var(--color-compare-chart-1)" }}
+              />
+              {comparisonLabel}
+            </span>
+          </div>
+        ) : null}
+        {renderLegend()}
       </CardContent>
     </Card>
   );
@@ -702,6 +803,14 @@ export const DeviceScreenBreakdownCard = memo(
       buckets.sort((left, right) => right.visitors - left.visitors);
       return buckets;
     }, [screenTrend.series]);
+    const comparisonBucketSummary = useMemo(() => {
+      if (!comparisonQuery) return undefined;
+      const buckets = [
+        ...aggregateScreenBuckets(comparisonTrend?.series ?? []).buckets,
+      ];
+      buckets.sort((left, right) => right.visitors - left.visitors);
+      return buckets;
+    }, [comparisonQuery, comparisonTrend?.series]);
     const previewUrl = useMemo(
       () => resolvePreviewUrl(siteDomain),
       [siteDomain],
@@ -732,6 +841,8 @@ export const DeviceScreenBreakdownCard = memo(
                 locale={locale}
                 messages={messages}
                 bucketSummary={bucketSummary}
+                comparisonBucketSummary={comparisonBucketSummary}
+                comparisonLabel={comparisonLabel}
               />
               <ScreenValueListCard
                 locale={locale}

@@ -124,6 +124,7 @@ interface DashboardHeaderControlsProps {
   siteId?: string;
   showControls: boolean;
   showFilterSheet: boolean;
+  comparisonDisabled?: boolean;
   filterDisabled?: boolean;
   filterAudience?: "private-dashboard" | "public-share";
   /** Concrete scope selected by the active dashboard page for Auto filters. */
@@ -444,29 +445,43 @@ function FilterTrigger({
 function CompareTrigger({
   active,
   className,
+  disabled,
   messages,
   onClick,
 }: {
   active: boolean;
   className: string;
+  disabled: boolean;
   messages: AppMessages;
   onClick: () => void;
 }) {
   return (
-    <Button
-      type="button"
-      variant="outline"
-      className={className}
-      aria-label={messages.dashboardHeader.compareButton}
-      onClick={onClick}
-    >
-      <RiBarChartGroupedLine
-        className={cn("size-4", !active && "text-muted-foreground")}
-      />
-      <span className="hidden sm:inline">
-        {messages.dashboardHeader.compareButton}
-      </span>
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={disabled ? 0 : undefined} className="inline-flex">
+          <Button
+            type="button"
+            variant="outline"
+            className={className}
+            disabled={disabled}
+            aria-label={messages.dashboardHeader.compareButton}
+            onClick={onClick}
+          >
+            <RiBarChartGroupedLine
+              className={cn("size-4", !active && "text-muted-foreground")}
+            />
+            <span className="hidden sm:inline">
+              {messages.dashboardHeader.compareButton}
+            </span>
+          </Button>
+        </span>
+      </TooltipTrigger>
+      {disabled ? (
+        <TooltipContent side="bottom">
+          {messages.dashboardHeader.compareDisabled}
+        </TooltipContent>
+      ) : null}
+    </Tooltip>
   );
 }
 
@@ -489,6 +504,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   siteId,
   showControls,
   showFilterSheet,
+  comparisonDisabled = false,
   filterDisabled = false,
   filterAudience = "private-dashboard",
   resolvedScope,
@@ -878,6 +894,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               <CompareTrigger
                 active={hasActiveComparison}
                 className={comparisonTriggerClassName}
+                disabled={comparisonDisabled}
                 messages={messages}
                 onClick={() => setMobileCompareDrawerOpen(true)}
               />
@@ -1098,6 +1115,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               <CompareTrigger
                 active={hasActiveComparison}
                 className={comparisonTriggerClassName}
+                disabled={comparisonDisabled}
                 messages={messages}
                 onClick={() => setDesktopCompareSheetOpen(true)}
               />

@@ -81,6 +81,8 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        comparisonQuery={comparisonQuery}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
       />
 
       <BrowserCrossBreakdownGrid

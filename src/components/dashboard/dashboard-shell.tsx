@@ -639,6 +639,11 @@ export function DashboardShell({
   const isRealtimeRoute = Boolean(
     hasActiveSite && activeSiteBase && mainSiteSection === "realtime",
   );
+  const isComparisonDisabledRoute = [
+    "realtime",
+    "sessions",
+    "visitors",
+  ].includes(mainSiteSection);
   const isRequestObservationRoute = Boolean(
     !liveActiveTeamSlug &&
     normalizeLocalePath(livePathname) === "/app/manage/request-observation",
@@ -1196,6 +1201,9 @@ export function DashboardShell({
                       Boolean(liveActiveTeamSlug) || isRequestObservationRoute
                     }
                     showFilterSheet={hasActiveSite}
+                    comparisonDisabled={
+                      hasActiveSite && isComparisonDisabledRoute
+                    }
                     filterDisabled={isRealtimeRoute}
                     showRealtimeBadge={!isRequestObservationRoute}
                   />

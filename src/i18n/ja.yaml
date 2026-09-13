@@ -152,6 +152,7 @@ dashboardHeader:
   compareCustomFilterDescription: 比較用に別のフィルター条件を設定します。
   compareApply: 比較を適用
   compareCancel: キャンセル
+  compareDisabled: このページでは比較を利用できません。
   filterButton: フィルター
   filterButtonEvent: フィルター（イベント）
   filterButtonSession: フィルター（セッション）

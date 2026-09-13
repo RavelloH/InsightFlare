@@ -70,7 +70,7 @@ function SingleBrowserRadar({
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
         <div className="flex items-center gap-1.5">
           <span
-            className="size-2.5 shrink-0 rounded-[2px]"
+            className="size-2.5 shrink-0 rounded-none"
             style={{ backgroundColor: color }}
           />
           <span className="font-medium">{item.browser}</span>
@@ -78,7 +78,7 @@ function SingleBrowserRadar({
         {comparisonItem ? (
           <div className="flex items-center gap-1.5">
             <span
-              className="size-2.5 shrink-0 rounded-[2px]"
+              className="size-2.5 shrink-0 rounded-none"
               style={{ backgroundColor: COMPARISON_CHART_COLOR }}
             />
             <span className="font-medium">{comparisonLabel}</span>

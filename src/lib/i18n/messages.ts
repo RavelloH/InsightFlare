@@ -148,6 +148,7 @@ export interface AppMessages {
     compareCustomFilterDescription: string;
     compareApply: string;
     compareCancel: string;
+    compareDisabled: string;
     filterButton: string;
     filterButtonEvent: string;
     filterButtonSession: string;
@@ -2881,6 +2882,7 @@ const enMessages = {
       "Set separate filter conditions for the comparison.",
     compareApply: "Apply comparison",
     compareCancel: "Cancel",
+    compareDisabled: "Comparison is unavailable on this page.",
     filterButton: "Filter",
     filterButtonEvent: "Filter (Event)",
     filterButtonSession: "Filter (Session)",
@@ -5897,6 +5899,7 @@ const zhMessages = {
     compareCustomFilterDescription: "为对比单独设置筛选条件。",
     compareApply: "应用对比",
     compareCancel: "取消",
+    compareDisabled: "当前页面中对比不可用。",
     filterButton: "筛选",
     filterButtonEvent: "筛选 (事件)",
     filterButtonSession: "筛选 (会话)",
@@ -8829,6 +8832,7 @@ const jaMessages = {
     compareCustomFilterDescription: "比較用に別のフィルター条件を設定します。",
     compareApply: "比較を適用",
     compareCancel: "キャンセル",
+    compareDisabled: "このページでは比較を利用できません。",
     filterButton: "フィルター",
     filterButtonEvent: "フィルター（イベント）",
     filterButtonSession: "フィルター（セッション）",

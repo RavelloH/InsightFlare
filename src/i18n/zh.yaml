@@ -152,6 +152,7 @@ dashboardHeader:
   compareCustomFilterDescription: 为对比单独设置筛选条件。
   compareApply: 应用对比
   compareCancel: 取消
+  compareDisabled: 当前页面中对比不可用。
   filterButton: 筛选
   filterButtonEvent: 筛选 (事件)
   filterButtonSession: 筛选 (会话)
