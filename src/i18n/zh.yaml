@@ -848,7 +848,6 @@ funnels:
   convertedSessions: 转化会话数
   convertedVisitors: 转化访客数
   largestDropOff: 最大流失
-  largestDropOffStep: 最大损失步骤
   noDropOff: 无流失
   step: 步骤
   sessions: 会话

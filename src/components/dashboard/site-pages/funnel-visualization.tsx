@@ -1,5 +1,4 @@
 import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { describeFilterExpression } from "@/lib/dashboard/filter-description";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
@@ -103,15 +102,6 @@ export function FunnelVisualization({
   const summary = analysis?.summary;
   const convertedProgressions = summary?.convertedProgressions ?? 0;
   const totalProgressions = summary?.totalProgressions ?? 0;
-  const largestDropOffRate = analysis
-    ? analysis.steps.reduce(
-        (largest, step, index) =>
-          index === 0
-            ? largest
-            : Math.max(largest, step.progression.dropOffRate),
-        0,
-      )
-    : 0;
 
   return (
     <div className={compact ? "min-w-0 space-y-4" : "min-w-0 space-y-5"}>
@@ -180,8 +170,6 @@ export function FunnelVisualization({
         );
         const dropOffLabel =
           index === 0 ? "—" : `-${percentFormat(locale, dropOffRate)}`;
-        const isLargestDropOff =
-          index > 0 && dropOffRate > 0 && dropOffRate === largestDropOffRate;
         const primaryCount = result?.progression.count ?? 0;
         const secondaryCount = result
           ? funnelMetricValue(result, secondaryMetric)
@@ -207,20 +195,32 @@ export function FunnelVisualization({
               <div className={compact ? "min-w-0 space-y-2" : "min-w-0 flex-1"}>
                 <div className="flex min-w-0 items-start gap-2">
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span
-                      className={
-                        compact
-                          ? "min-w-0 flex-1 truncate font-medium"
-                          : "min-w-0 flex-1 break-words font-medium"
-                      }
+                    <AutoTransition
+                      initial={false}
+                      transitionKey={loading ? "loading" : step.id}
+                      duration={0.18}
+                      type="fade"
+                      presenceMode="wait"
+                      className="h-5 min-w-0 flex-1"
                     >
-                      {funnelStepLabel(step, descriptionMessages)}
-                    </span>
-                    {compact && isLargestDropOff ? (
-                      <Badge variant="secondary">
-                        {labels.largestDropOffStep}
-                      </Badge>
-                    ) : null}
+                      {loading ? (
+                        <Skeleton
+                          key="loading"
+                          className="h-5 w-[min(22rem,72%)]"
+                        />
+                      ) : (
+                        <span
+                          key="ready"
+                          className={
+                            compact
+                              ? "block min-w-0 truncate font-medium"
+                              : "block min-w-0 break-words font-medium"
+                          }
+                        >
+                          {funnelStepLabel(step, descriptionMessages)}
+                        </span>
+                      )}
+                    </AutoTransition>
                   </div>
                   <AutoTransition
                     initial={false}
@@ -235,7 +235,7 @@ export function FunnelVisualization({
                     ) : (
                       <span
                         key="ready"
-                        className={`shrink-0 pt-0.5 font-mono text-xs text-muted-foreground ${isLargestDropOff ? "font-bold" : "font-medium"}`}
+                        className="shrink-0 pt-0.5 font-mono text-xs font-medium text-muted-foreground"
                       >
                         {dropOffLabel}
                       </span>

@@ -858,7 +858,6 @@ funnels:
   convertedSessions: Converted sessions
   convertedVisitors: Converted visitors
   largestDropOff: Largest drop-off
-  largestDropOffStep: Largest drop-off step
   noDropOff: No drop-off
   step: Step
   sessions: Sessions

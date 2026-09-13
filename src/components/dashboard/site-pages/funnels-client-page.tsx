@@ -75,16 +75,26 @@ function detailTarget(
 }
 
 function FunnelListLoading({
+  locale,
   labels,
+  descriptionMessages,
   canManage,
 }: {
+  readonly locale: Locale;
   readonly labels: AppMessages["funnels"];
+  readonly descriptionMessages: AppMessages;
   readonly canManage: boolean;
 }) {
   return (
     <div className="grid min-w-0 gap-4 md:grid-cols-2">
       {Array.from({ length: 4 }, (_, index) => (
-        <FunnelCardSkeleton key={index} labels={labels} canManage={canManage} />
+        <FunnelCardSkeleton
+          key={index}
+          locale={locale}
+          labels={labels}
+          descriptionMessages={descriptionMessages}
+          canManage={canManage}
+        />
       ))}
     </div>
   );
@@ -338,7 +348,12 @@ export function FunnelsClientPage({
         className="min-w-0"
       >
         {list.isPending ? (
-          <FunnelListLoading labels={labels} canManage={canManage} />
+          <FunnelListLoading
+            locale={locale}
+            labels={labels}
+            descriptionMessages={messages}
+            canManage={canManage}
+          />
         ) : list.isError ? (
           <Card>
             <CardContent className="p-6 text-center text-muted-foreground">
