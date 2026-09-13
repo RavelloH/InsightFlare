@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
+  RiArrowDownLine,
+  RiArrowUpLine,
   RiDeleteBinLine,
   RiEditLine,
   RiFileList3Line,
@@ -8,6 +10,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { AnalysisJourneyTable } from "@/components/dashboard/site-pages/analysis-journey-table";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +26,8 @@ import {
   fetchGoalSummary,
   fetchGoalTimeseries,
 } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
   intlLocale,
   numberFormat,
@@ -73,17 +78,74 @@ function updatedLabel(
   }).format(date)}`;
 }
 
+function formatChangeRate(value: number | null): string | null {
+  if (value === null) return null;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function changeRateClass(value: number | null): string {
+  if (value === null) return "text-muted-foreground";
+  return value >= 0 ? "text-emerald-600" : "text-rose-600";
+}
+
+function conversionRateChange(
+  current?: GoalSummary["sessions"],
+  comparison?: GoalSummary["sessions"],
+): number | null {
+  const currentRate = Number(current?.conversionRate);
+  const comparisonRate = Number(comparison?.conversionRate);
+  if (
+    !Number.isFinite(currentRate) ||
+    !Number.isFinite(comparisonRate) ||
+    comparisonRate === 0
+  ) {
+    return null;
+  }
+  return ((currentRate - comparisonRate) / comparisonRate) * 100;
+}
+
+function ChangeRateInline({ value }: { readonly value: number | null }) {
+  if (value === null) return null;
+  const Icon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
+  return (
+    <span
+      className={`inline-flex shrink-0 items-end gap-0.5 font-mono text-xs leading-none ${changeRateClass(value)}`}
+    >
+      <Icon className="size-3.5" />
+      {formatChangeRate(value)}
+    </span>
+  );
+}
+
 function GoalMetric({
   label,
   value,
   detail,
+  comparisonLabel,
+  comparisonDetail,
+  comparisonChange = null,
+  comparisonLoading = false,
   loading = false,
 }: {
   readonly label: string;
   readonly value: string;
-  readonly detail?: string;
+  readonly detail?: ReactNode;
+  readonly comparisonLabel?: string;
+  readonly comparisonDetail?: ReactNode;
+  readonly comparisonChange?: number | null;
+  readonly comparisonLoading?: boolean;
   readonly loading?: boolean;
 }) {
+  const showComparison = Boolean(
+    comparisonLabel &&
+    (comparisonLoading ||
+      (comparisonDetail !== undefined && comparisonDetail !== null)),
+  );
+  const detailTransitionKey = loading
+    ? "loading"
+    : showComparison
+      ? `comparison:${String(comparisonDetail ?? "")}:${comparisonChange ?? ""}`
+      : `current:${String(detail ?? "")}`;
   return (
     <div className="min-w-0 bg-card p-4">
       <p className="truncate text-[11px] uppercase text-muted-foreground">
@@ -108,25 +170,37 @@ function GoalMetric({
           </p>
         )}
       </AutoTransition>
-      <AutoTransition
-        className="mt-3 h-4"
-        initial={false}
-        transitionKey={loading ? "loading" : (detail ?? "")}
-        duration={0.18}
-        type="fade"
-        presenceMode="wait"
-      >
-        {loading ? (
-          <Skeleton key="loading" className="h-3 w-32" />
-        ) : (
-          <p
-            key="detail"
-            className="truncate text-[11px] text-muted-foreground"
-          >
-            {detail}
-          </p>
-        )}
-      </AutoTransition>
+      <AutoResizer className="mt-3 min-w-0" duration={0.2}>
+        <AutoTransition
+          className="min-h-4"
+          initial={false}
+          transitionKey={detailTransitionKey}
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+        >
+          {loading || (showComparison && comparisonLoading) ? (
+            <Skeleton key="loading" className="h-3 w-32" />
+          ) : showComparison ? (
+            <p
+              key="comparison"
+              className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+            >
+              <span className="min-w-0 truncate">
+                {comparisonLabel}: {comparisonDetail}
+              </span>
+              <ChangeRateInline value={comparisonChange} />
+            </p>
+          ) : (
+            <p
+              key="detail"
+              className="truncate text-[11px] text-muted-foreground"
+            >
+              {detail}
+            </p>
+          )}
+        </AutoTransition>
+      </AutoResizer>
     </div>
   );
 }
@@ -199,6 +273,8 @@ export function GoalDetail({
   window,
   filters,
   filterKey,
+  comparisonQuery,
+  comparisonLabel,
   canManage,
   actionPending,
   onEdit,
@@ -218,6 +294,8 @@ export function GoalDetail({
   readonly window: TimeWindow;
   readonly filters: FilterDocument;
   readonly filterKey: string;
+  readonly comparisonQuery?: DashboardComparisonQuery | null;
+  readonly comparisonLabel?: string;
   readonly canManage: boolean;
   readonly actionPending: boolean;
   readonly onEdit: () => void;
@@ -229,6 +307,9 @@ export function GoalDetail({
   const [journeyEntity, setJourneyEntity] = useState<"visitors" | "sessions">(
     "visitors",
   );
+  const comparisonFilterKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
   const summary = useQuery({
     queryKey: goal
       ? goalSummaryQueryKey(siteId, goal, window, filterKey, "auto")
@@ -248,6 +329,34 @@ export function GoalDetail({
         ...(goal ? { goalSemanticFingerprint: goal.semanticFingerprint } : {}),
       }),
     enabled: Boolean(goalId),
+  });
+  const comparisonSummary = useQuery({
+    queryKey:
+      goal && comparisonQuery
+        ? goalSummaryQueryKey(
+            siteId,
+            goal,
+            comparisonQuery.window,
+            comparisonFilterKey,
+            "auto",
+          )
+        : ["dashboard", "goal-summary-comparison-disabled", siteId, goalId],
+    queryFn: ({ signal }) => {
+      if (!goal || !comparisonQuery) {
+        throw new Error("Comparison query is not enabled");
+      }
+      return fetchGoalSummary(
+        siteId,
+        goalId,
+        comparisonQuery.window,
+        comparisonQuery.filters,
+        {
+          signal,
+          goalSemanticFingerprint: goal.semanticFingerprint,
+        },
+      );
+    },
+    enabled: Boolean(goalId && goal && comparisonQuery),
   });
   const timeseries = useQuery({
     queryKey: goal
@@ -270,6 +379,34 @@ export function GoalDetail({
       }),
     enabled: Boolean(goalId),
   });
+  const comparisonTimeseries = useQuery({
+    queryKey:
+      goal && comparisonQuery
+        ? goalTimeseriesQueryKey(
+            siteId,
+            goal,
+            comparisonQuery.window,
+            comparisonFilterKey,
+            "auto",
+          )
+        : ["dashboard", "goal-timeseries-comparison-disabled", siteId, goalId],
+    queryFn: ({ signal }) => {
+      if (!goal || !comparisonQuery) {
+        throw new Error("Comparison query is not enabled");
+      }
+      return fetchGoalTimeseries(
+        siteId,
+        goalId,
+        comparisonQuery.window,
+        comparisonQuery.filters,
+        {
+          signal,
+          goalSemanticFingerprint: goal.semanticFingerprint,
+        },
+      );
+    },
+    enabled: Boolean(goalId && goal && comparisonQuery),
+  });
 
   if (!goal) {
     if (loading && !loadError) {
@@ -283,6 +420,10 @@ export function GoalDetail({
   }
 
   const goalSummary = summary.data?.data.summary;
+  const comparisonGoalSummary = comparisonSummary.data?.data.summary;
+  const comparisonLoading =
+    Boolean(comparisonQuery) &&
+    (comparisonSummary.isFetching || !comparisonSummary.data);
   const filterDescriptionMessages = messages ?? getMessages(locale);
   const fullMessages = getMessages(locale);
 
@@ -336,24 +477,68 @@ export function GoalDetail({
                 label={labels.visitors}
                 value={goalMetricValue(goalSummary, "visitors", locale)}
                 detail={`${labels.converted} / ${labels.total}`}
+                comparisonLabel={
+                  comparisonGoalSummary ? comparisonLabel : undefined
+                }
+                comparisonDetail={
+                  comparisonGoalSummary
+                    ? goalMetricValue(comparisonGoalSummary, "visitors", locale)
+                    : undefined
+                }
+                comparisonLoading={comparisonLoading}
                 loading={summary.isFetching || !summary.data}
               />
               <GoalMetric
                 label={labels.sessions}
                 value={goalMetricValue(goalSummary, "sessions", locale)}
                 detail={`${labels.converted} / ${labels.total}`}
+                comparisonLabel={
+                  comparisonGoalSummary ? comparisonLabel : undefined
+                }
+                comparisonDetail={
+                  comparisonGoalSummary
+                    ? goalMetricValue(comparisonGoalSummary, "sessions", locale)
+                    : undefined
+                }
+                comparisonLoading={comparisonLoading}
                 loading={summary.isFetching || !summary.data}
               />
               <GoalMetric
                 label={`${labels.visitors} ${labels.conversion}`}
                 value={goalMetricRate(goalSummary, "visitors", locale)}
                 detail={goalMetricValue(goalSummary, "visitors", locale)}
+                comparisonLabel={
+                  comparisonGoalSummary ? comparisonLabel : undefined
+                }
+                comparisonDetail={
+                  comparisonGoalSummary
+                    ? goalMetricRate(comparisonGoalSummary, "visitors", locale)
+                    : undefined
+                }
+                comparisonChange={conversionRateChange(
+                  goalSummary?.visitors,
+                  comparisonGoalSummary?.visitors,
+                )}
+                comparisonLoading={comparisonLoading}
                 loading={summary.isFetching || !summary.data}
               />
               <GoalMetric
                 label={`${labels.sessions} ${labels.conversion}`}
                 value={goalMetricRate(goalSummary, "sessions", locale)}
                 detail={goalMetricValue(goalSummary, "sessions", locale)}
+                comparisonLabel={
+                  comparisonGoalSummary ? comparisonLabel : undefined
+                }
+                comparisonDetail={
+                  comparisonGoalSummary
+                    ? goalMetricRate(comparisonGoalSummary, "sessions", locale)
+                    : undefined
+                }
+                comparisonChange={conversionRateChange(
+                  goalSummary?.sessions,
+                  comparisonGoalSummary?.sessions,
+                )}
+                comparisonLoading={comparisonLoading}
                 loading={summary.isFetching || !summary.data}
               />
             </div>
@@ -377,12 +562,16 @@ export function GoalDetail({
           ) : (
             <GoalTimeseriesChart
               points={timeseries.data?.data.timeseries ?? []}
+              comparisonPoints={comparisonTimeseries.data?.data.timeseries}
               locale={locale}
               labels={labels}
               from={window.from}
               to={window.to}
               timeZone={window.timeZone}
               interval={window.interval}
+              comparisonFrom={comparisonQuery?.window.from}
+              comparisonTo={comparisonQuery?.window.to}
+              comparisonLabel={comparisonLabel}
               loading={timeseries.isFetching || !timeseries.data}
             />
           )}

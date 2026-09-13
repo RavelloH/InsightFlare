@@ -13,6 +13,10 @@ import {
   DetailDrawer,
 } from "@/components/dashboard/site-pages/detail-query-modal";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import {
   AlertDialog,
@@ -100,6 +104,8 @@ export function GoalsClientPage({
   const searchParams = useLiveSearchParams();
   const detailId = searchParams.get(DETAIL_QUERY_PARAM)?.trim() ?? "";
   const filterKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
+  const comparisonLabel = dashboardComparisonLabel(messages, comparisonQuery);
   const queryClient = useQueryClient();
   const listKey = useMemo(
     () => ["dashboard", "goals", siteId] as const,
@@ -318,6 +324,7 @@ export function GoalsClientPage({
                 window={window}
                 filters={filters}
                 filterKey={filterKey}
+                comparisonQuery={comparisonQuery}
                 canManage={canManage}
                 onOpen={() => openDetail(goal.id)}
                 onEdit={() => openEdit(goal)}
@@ -362,6 +369,8 @@ export function GoalsClientPage({
             window={window}
             filters={filters}
             filterKey={filterKey}
+            comparisonQuery={comparisonQuery}
+            comparisonLabel={comparisonLabel}
             canManage={canManage}
             actionPending={saving || deleting}
             onEdit={() => detailGoal && openEdit(detailGoal)}

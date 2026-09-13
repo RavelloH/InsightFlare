@@ -7,6 +7,7 @@ import type {
   GoalTimeseriesData,
 } from "@/lib/edge-client";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import { fnv1a } from "@/lib/realtime/demo-utils";
 import { demoBadRequest, demoNotFound } from "@/lib/realtime/mock/envelope";
 import { demoPage } from "@/lib/realtime/mock/pagination";
 import {
@@ -97,21 +98,55 @@ function metric(total: number, converted: number) {
   };
 }
 
-function summaryFor(goal: GoalDefinition): GoalSummaryData {
-  const totalSessions = goal.id.includes("purchase") ? 2_450 : 3_180;
-  const totalVisitors = goal.id.includes("purchase") ? 1_960 : 2_720;
-  const converted = goal.id.includes("payload")
+function demoAnalyticsFactor(params: Record<string, string | number> = {}): {
+  total: number;
+  conversion: number;
+} {
+  const range = `${String(params.from ?? "")}::${String(params.to ?? "")}`;
+  const filter = Object.entries(params)
+    .filter(([key]) => key.startsWith("filter["))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join("&");
+  if (!range.replace(/:/g, "") && !filter) {
+    return { total: 1, conversion: 1 };
+  }
+
+  const hash = Math.abs(fnv1a(`${range}::${filter}`));
+  return {
+    total: 0.84 + (hash % 25) / 100,
+    conversion: 0.86 + ((hash >>> 8) % 25) / 100,
+  };
+}
+
+function summaryFor(
+  goal: GoalDefinition,
+  params: Record<string, string | number> = {},
+): GoalSummaryData {
+  const factor = demoAnalyticsFactor(params);
+  const baseTotalSessions = goal.id.includes("purchase") ? 2_450 : 3_180;
+  const baseTotalVisitors = goal.id.includes("purchase") ? 1_960 : 2_720;
+  const baseConverted = goal.id.includes("payload")
     ? 280
     : goal.id.includes("purchase")
       ? 640
       : 920;
+  const totalSessions = Math.round(baseTotalSessions * factor.total);
+  const totalVisitors = Math.round(baseTotalVisitors * factor.total);
+  const converted = Math.min(
+    totalSessions,
+    Math.round(baseConverted * factor.total * factor.conversion),
+  );
   return {
     ok: true,
     data: {
       goal,
       summary: {
         sessions: metric(totalSessions, converted),
-        visitors: metric(totalVisitors, Math.round(converted * 0.86)),
+        visitors: metric(
+          totalVisitors,
+          Math.min(totalVisitors, Math.round(converted * 0.86)),
+        ),
       },
     },
   };
@@ -180,7 +215,7 @@ function timeseriesFor(
     parseDemoTimeZone(params),
   );
   const count = Math.max(1, buckets.length);
-  const base = summaryFor(goal).data.summary;
+  const base = summaryFor(goal, params).data.summary;
   const conversions = conversionBuckets(goal);
   const totalSessions = distribute(base.sessions.total, count);
   const totalVisitors = distribute(base.visitors.total, count);
@@ -276,7 +311,7 @@ export function generateDemoGoals(
   if (!goal) return demoNotFound();
   return params.operation === "goal-timeseries" || String(params.interval ?? "")
     ? timeseriesFor(goal, params)
-    : summaryFor(goal);
+    : summaryFor(goal, params);
 }
 
 function input(body: unknown): { name: string; filterDsl: string } | null {

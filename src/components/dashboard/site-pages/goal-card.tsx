@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchGoalSummary } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { describeFilterExpression } from "@/lib/dashboard/filter-description";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { GoalDefinition } from "@/lib/edge-client";
 import {
@@ -125,6 +127,7 @@ export function GoalCard({
   window,
   filters,
   filterKey,
+  comparisonQuery,
   canManage,
   onOpen,
   onEdit,
@@ -141,12 +144,16 @@ export function GoalCard({
   readonly window: TimeWindow;
   readonly filters: FilterDocument;
   readonly filterKey: string;
+  readonly comparisonQuery?: DashboardComparisonQuery | null;
   readonly canManage: boolean;
   readonly onOpen: () => void;
   readonly onEdit: () => void;
   readonly onDelete: () => void;
 }) {
   const { ref, near } = useNearViewport();
+  const comparisonFilterKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
   const summary = useQuery({
     queryKey: goalSummaryQueryKey(siteId, goal, window, filterKey, "auto"),
     queryFn: ({ signal }) =>
@@ -155,6 +162,33 @@ export function GoalCard({
         goalSemanticFingerprint: goal.semanticFingerprint,
       }),
     enabled: near,
+  });
+  const comparisonSummary = useQuery({
+    queryKey: comparisonQuery
+      ? goalSummaryQueryKey(
+          siteId,
+          goal,
+          comparisonQuery.window,
+          comparisonFilterKey,
+          "auto",
+        )
+      : ["dashboard", "goal-summary-comparison-disabled", siteId, goal.id],
+    queryFn: ({ signal }) => {
+      if (!comparisonQuery) {
+        throw new Error("Comparison query is not enabled");
+      }
+      return fetchGoalSummary(
+        siteId,
+        goal.id,
+        comparisonQuery.window,
+        comparisonQuery.filters,
+        {
+          signal,
+          goalSemanticFingerprint: goal.semanticFingerprint,
+        },
+      );
+    },
+    enabled: near && Boolean(comparisonQuery),
   });
   return (
     <div ref={ref} className="h-full min-w-0">
@@ -189,9 +223,14 @@ export function GoalCard({
             ) : (
               <GoalVisualization
                 summary={summary.data?.data.summary}
+                comparisonSummary={comparisonSummary.data?.data.summary}
                 locale={locale}
                 labels={labels}
                 loading={summary.isFetching || !summary.data}
+                comparisonLoading={
+                  Boolean(comparisonQuery) &&
+                  (comparisonSummary.isFetching || !comparisonSummary.data)
+                }
               />
             )}
           </CardContent>

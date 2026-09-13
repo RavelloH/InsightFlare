@@ -14,6 +14,7 @@ import {
   ChartLegend,
   ChartLegendContent,
   ChartTooltip,
+  ChartTooltipIndicator,
 } from "@/components/ui/chart";
 import { Spinner } from "@/components/ui/spinner";
 import {
@@ -43,6 +44,13 @@ interface GoalChartPoint {
   timestampMs: number;
   visitors: GoalChartMetric;
   visitorsRate: number;
+}
+
+interface GoalComparisonChartPoint extends GoalChartPoint {
+  comparisonSessions: GoalChartMetric;
+  comparisonSessionsRate: number;
+  comparisonVisitors: GoalChartMetric;
+  comparisonVisitorsRate: number;
 }
 
 function safeCount(value: number): number {
@@ -99,6 +107,22 @@ function intervalStepMs(interval: DashboardInterval): number {
   if (interval === "day") return 24 * 60 * 60 * 1_000;
   if (interval === "week") return 7 * 24 * 60 * 60 * 1_000;
   return 30 * 24 * 60 * 60 * 1_000;
+}
+
+function createGoalComparisonChartData(
+  current: readonly GoalChartPoint[],
+  comparison: readonly GoalChartPoint[],
+): GoalComparisonChartPoint[] {
+  return current.map((point, index) => {
+    const comparisonPoint = comparison[index] ?? createGoalChartPoint(0);
+    return {
+      ...point,
+      comparisonSessions: comparisonPoint.sessions,
+      comparisonSessionsRate: comparisonPoint.sessionsRate,
+      comparisonVisitors: comparisonPoint.visitors,
+      comparisonVisitorsRate: comparisonPoint.visitorsRate,
+    };
+  });
 }
 
 export function normalizeGoalTimeseries(
@@ -163,22 +187,36 @@ function GoalTimeseriesTooltip({
   labels,
   locale,
   payload,
+  comparisonLabel,
   timeZone,
 }: TooltipProps<number, string> & {
   interval: DashboardInterval;
   labels: AppMessages["goals"];
   locale: Locale;
+  comparisonLabel?: string;
   timeZone: string;
 }) {
   if (!active || !payload?.length) return null;
-  const point = payload[0]?.payload as GoalChartPoint | undefined;
+  const point = payload[0]?.payload as
+    | (GoalChartPoint &
+        Partial<
+          Pick<
+            GoalComparisonChartPoint,
+            "comparisonVisitors" | "comparisonSessions"
+          >
+        >)
+    | undefined;
   if (!point) return null;
   const dateFormatter = createChartTooltipDateFormatter(
     locale,
     interval,
     timeZone,
   );
-  const audiences = [
+  const audiences: Array<{
+    color: string;
+    label: string;
+    metric: GoalChartMetric;
+  }> = [
     {
       color: "var(--color-visitorsRate)",
       label: labels.visitors,
@@ -190,6 +228,20 @@ function GoalTimeseriesTooltip({
       metric: point.sessions,
     },
   ];
+  if (comparisonLabel && point.comparisonVisitors && point.comparisonSessions) {
+    audiences.push(
+      {
+        color: "var(--color-comparisonVisitorsRate)",
+        label: `${comparisonLabel} · ${labels.visitors}`,
+        metric: point.comparisonVisitors,
+      },
+      {
+        color: "var(--color-comparisonSessionsRate)",
+        label: `${comparisonLabel} · ${labels.sessions}`,
+        metric: point.comparisonSessions,
+      },
+    );
+  }
 
   return (
     <div className="grid min-w-[18rem] items-start gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
@@ -200,11 +252,7 @@ function GoalTimeseriesTooltip({
         {audiences.map(({ color, label, metric }) => (
           <div key={label} className="flex w-full items-center gap-3">
             <span className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-              <span
-                aria-hidden="true"
-                className="h-2.5 w-2.5 shrink-0 rounded-none"
-                style={{ backgroundColor: color }}
-              />
+              <ChartTooltipIndicator color={color} />
               <span className="truncate text-muted-foreground">{label}</span>
             </span>
             <span className="ml-auto min-w-[10.5rem] shrink-0 whitespace-nowrap text-right font-mono text-foreground tabular-nums">
@@ -228,6 +276,10 @@ export function GoalTimeseriesChart({
   timeZone,
   interval,
   loading = false,
+  comparisonPoints,
+  comparisonFrom,
+  comparisonTo,
+  comparisonLabel,
 }: {
   readonly points: readonly GoalTimeseriesPoint[];
   readonly locale: Locale;
@@ -237,19 +289,46 @@ export function GoalTimeseriesChart({
   readonly timeZone: string;
   readonly interval: DashboardInterval;
   readonly loading?: boolean;
+  readonly comparisonPoints?: readonly GoalTimeseriesPoint[];
+  readonly comparisonFrom?: number;
+  readonly comparisonTo?: number;
+  readonly comparisonLabel?: string;
 }) {
   const gradientId = useId().replace(/:/g, "");
-  const chartData = useMemo(
-    () =>
-      normalizeGoalTimeseries(
-        loading ? [] : points,
-        from,
-        to,
-        interval,
-        timeZone,
-      ),
-    [from, interval, loading, points, timeZone, to],
-  );
+  const hasComparison =
+    comparisonPoints !== undefined &&
+    comparisonFrom !== undefined &&
+    comparisonTo !== undefined;
+  const chartData = useMemo(() => {
+    const current = normalizeGoalTimeseries(
+      loading ? [] : points,
+      from,
+      to,
+      interval,
+      timeZone,
+    );
+    if (!hasComparison) return current;
+
+    const comparison = normalizeGoalTimeseries(
+      loading ? [] : (comparisonPoints ?? []),
+      comparisonFrom,
+      comparisonTo,
+      interval,
+      timeZone,
+    );
+    return createGoalComparisonChartData(current, comparison);
+  }, [
+    comparisonFrom,
+    comparisonPoints,
+    comparisonTo,
+    from,
+    hasComparison,
+    interval,
+    loading,
+    points,
+    timeZone,
+    to,
+  ]);
   const axisFormatter = useMemo(
     () => createChartAxisDateFormatter(locale, interval, timeZone, "regular"),
     [interval, locale, timeZone],
@@ -282,6 +361,18 @@ export function GoalTimeseriesChart({
               label: labels.visitors,
               color: "var(--color-chart-3)",
             },
+            ...(hasComparison
+              ? {
+                  comparisonSessionsRate: {
+                    label: `${comparisonLabel ?? "Comparison"} · ${labels.sessions}`,
+                    color: "var(--color-compare-chart-1)",
+                  },
+                  comparisonVisitorsRate: {
+                    label: `${comparisonLabel ?? "Comparison"} · ${labels.visitors}`,
+                    color: "var(--color-compare-chart-3)",
+                  },
+                }
+              : {}),
           }}
         >
           <AreaChart
@@ -355,6 +446,7 @@ export function GoalTimeseriesChart({
                   interval={interval}
                   labels={labels}
                   locale={locale}
+                  comparisonLabel={hasComparison ? comparisonLabel : undefined}
                   timeZone={timeZone}
                 />
               }
@@ -385,6 +477,32 @@ export function GoalTimeseriesChart({
                 fill: "var(--color-sessionsRate)",
               }}
             />
+            {hasComparison
+              ? [
+                  <Area
+                    key="comparisonVisitorsRate"
+                    dataKey="comparisonVisitorsRate"
+                    type="linear"
+                    stroke="var(--color-comparisonVisitorsRate)"
+                    fill="none"
+                    strokeWidth={1.5}
+                    dot={false}
+                    activeDot={false}
+                    connectNulls
+                  />,
+                  <Area
+                    key="comparisonSessionsRate"
+                    dataKey="comparisonSessionsRate"
+                    type="linear"
+                    stroke="var(--color-comparisonSessionsRate)"
+                    fill="none"
+                    strokeWidth={1.5}
+                    dot={false}
+                    activeDot={false}
+                    connectNulls
+                  />,
+                ]
+              : null}
             <ChartLegend
               content={
                 <ChartLegendContent className="pt-2 flex-wrap justify-center gap-x-4 gap-y-2 [&>div>div]:h-2.5 [&>div>div]:w-2.5 [&>div>div]:shrink-0 [&>div>div]:rounded-none" />

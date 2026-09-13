@@ -26,18 +26,33 @@ describe("Goal demo provider", () => {
       ]),
     );
 
-    const summary = generateDemoGoals("demo-site-001", {
+    const summaryParams = {
       id: "demo-goal-purchase",
-    }) as GoalSummaryData;
-    const trend = generateDemoGoals("demo-site-001", {
-      id: "demo-goal-purchase",
-      operation: "goal-timeseries",
       from: 1_000,
       to: 7 * 86_400_000 + 1_000,
+    };
+    const summary = generateDemoGoals(
+      "demo-site-001",
+      summaryParams,
+    ) as GoalSummaryData;
+    const comparisonSummary = generateDemoGoals("demo-site-001", {
+      id: "demo-goal-purchase",
+      from: 8 * 86_400_000 + 1_000,
+      to: 15 * 86_400_000 + 1_000,
+    }) as GoalSummaryData;
+    const trend = generateDemoGoals("demo-site-001", {
+      ...summaryParams,
+      operation: "goal-timeseries",
       interval: "day",
     }) as GoalTimeseriesData;
     expect(summary.data.summary.sessions).toBeDefined();
     expect(summary.data.summary.visitors).toBeDefined();
+    expect(comparisonSummary.data.summary.sessions.total).not.toBe(
+      summary.data.summary.sessions.total,
+    );
+    expect(comparisonSummary.data.summary.sessions.conversionRate).not.toBe(
+      summary.data.summary.sessions.conversionRate,
+    );
     expect(
       trend.data.timeseries.reduce(
         (total, point) => total + point.sessions.converted,
