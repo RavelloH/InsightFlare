@@ -780,6 +780,8 @@ export interface AppMessages {
     listTitle: string;
     listSubtitle: string;
     conversionRecords: string;
+    converted: string;
+    dropped: string;
     open: string;
     moreActions: string;
     create: string;
@@ -3605,6 +3607,8 @@ const enMessages = {
     listSubtitle:
       "Build a reusable sequence, then inspect conversion for the current dashboard window.",
     conversionRecords: "Conversion records",
+    converted: "Converted",
+    dropped: "Dropped off",
     open: "Open funnel",
     moreActions: "More actions",
     create: "New funnel",
@@ -6604,6 +6608,8 @@ const zhMessages = {
     listTitle: "漏斗定义",
     listSubtitle: "构建可复用的步骤序列，并按当前看板时间窗查看转化。",
     conversionRecords: "转化记录",
+    converted: "已转化",
+    dropped: "已流失",
     open: "打开漏斗",
     moreActions: "更多操作",
     create: "新建漏斗",
@@ -9559,6 +9565,8 @@ const jaMessages = {
     listSubtitle:
       "再利用可能なシーケンスを作成し、現在のダッシュボード期間でコンバージョンを確認します。",
     conversionRecords: "コンバージョン記録",
+    converted: "コンバージョン済み",
+    dropped: "離脱",
     open: "ファネルを開く",
     moreActions: "その他の操作",
     create: "新規ファネル",

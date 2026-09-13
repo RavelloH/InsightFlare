@@ -120,7 +120,12 @@ async function resolveJourneyListAnalysis(
     conversionWindowMs: funnel.conversionWindowMs,
     steps: funnel.steps,
   };
-  return { type: "funnel", config, stepIndex };
+  return {
+    type: "funnel",
+    config,
+    stepIndex,
+    ...(context.outcome ? { outcome: context.outcome } : {}),
+  };
 }
 
 function cursorObject(value: unknown): Record<string, unknown> | null {

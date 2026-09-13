@@ -187,6 +187,73 @@ describe("mock events and journeys branch coverage", () => {
     ]);
   });
 
+  it("partitions demo journey records by funnel outcome", () => {
+    setFacts(
+      Array.from({ length: 6 }, (_, index) =>
+        makeVisit({
+          visitId: `visit-${index}`,
+          sessionId: `session-${index}`,
+          visitorId: `visitor-${index}`,
+          startedAt: index * 1_000,
+        }),
+      ),
+    );
+    const baseAnalysis = {
+      analysisType: "funnel",
+      analysisId: "funnel-1",
+      analysisStepId: "step-2",
+    } as const;
+    const items = (result: Record<string, unknown>) =>
+      (result.data as { items: Array<Record<string, unknown>> }).items;
+
+    const converted = items(
+      generateDemoVisitors("site", {
+        ...baseAnalysis,
+        analysisOutcome: "converted",
+      }) as Record<string, unknown>,
+    );
+    const defaulted = items(
+      generateDemoVisitors("site", baseAnalysis) as Record<string, unknown>,
+    );
+    const dropped = items(
+      generateDemoVisitors("site", {
+        ...baseAnalysis,
+        analysisOutcome: "dropoff",
+      }) as Record<string, unknown>,
+    );
+
+    expect(defaulted.map((row) => row.visitorId)).toEqual(
+      converted.map((row) => row.visitorId),
+    );
+    const droppedVisitorIds = new Set(
+      dropped.map((row) => String(row.visitorId)),
+    );
+    expect(
+      converted.some((row) => droppedVisitorIds.has(String(row.visitorId))),
+    ).toBe(false);
+
+    const convertedSessions = items(
+      generateDemoSessions("site", {
+        ...baseAnalysis,
+        analysisOutcome: "converted",
+      }) as Record<string, unknown>,
+    );
+    const droppedSessions = items(
+      generateDemoSessions("site", {
+        ...baseAnalysis,
+        analysisOutcome: "dropoff",
+      }) as Record<string, unknown>,
+    );
+    const droppedSessionIds = new Set(
+      droppedSessions.map((row) => String(row.sessionId)),
+    );
+    expect(
+      convertedSessions.some((row) =>
+        droppedSessionIds.has(String(row.sessionId)),
+      ),
+    ).toBe(false);
+  });
+
   it("paginates visitors and filters search matches before building rows", () => {
     setFacts([
       makeVisit({

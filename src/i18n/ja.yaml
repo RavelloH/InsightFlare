@@ -795,6 +795,8 @@ funnels:
   listTitle: ファネル定義
   listSubtitle: 再利用可能なシーケンスを作成し、現在のダッシュボード期間でコンバージョンを確認します。
   conversionRecords: コンバージョン記録
+  converted: コンバージョン済み
+  dropped: 離脱
   open: ファネルを開く
   moreActions: その他の操作
   create: 新規ファネル

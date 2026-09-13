@@ -12,4 +12,5 @@ export type JourneyAnalysisContext =
       readonly type: "funnel";
       readonly funnelId: string;
       readonly stepId: string;
+      readonly outcome?: "converted" | "dropoff";
     };

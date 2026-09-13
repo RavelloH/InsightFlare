@@ -202,6 +202,7 @@ export async function fetchVisitors(
         : options.analysisContext.funnelId;
     if (options.analysisContext.type === "funnel") {
       params.analysisStepId = options.analysisContext.stepId;
+      params.analysisOutcome = options.analysisContext.outcome ?? "converted";
     }
   }
   const search = options?.search?.trim();
@@ -336,6 +337,7 @@ export async function fetchSessions(
         : options.analysisContext.funnelId;
     if (options.analysisContext.type === "funnel") {
       params.analysisStepId = options.analysisContext.stepId;
+      params.analysisOutcome = options.analysisContext.outcome ?? "converted";
     }
   }
   const search = options?.search?.trim();

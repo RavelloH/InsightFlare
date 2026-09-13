@@ -31,13 +31,21 @@ function parseJourneyAnalysisContext(
   const type = url.searchParams.get("analysisType")?.trim();
   const id = url.searchParams.get("analysisId")?.trim();
   const stepId = url.searchParams.get("analysisStepId")?.trim();
-  if (!type && !id && !stepId) return undefined;
+  const outcome = url.searchParams.get("analysisOutcome")?.trim();
+  if (!type && !id && !stepId) return outcome ? null : undefined;
   if (!type || !id) return null;
+  if (outcome && outcome !== "converted" && outcome !== "dropoff") return null;
   if (type === "goal" && !stepId) {
+    if (outcome) return null;
     return { type: "goal", goalId: id };
   }
   if (type === "funnel" && stepId) {
-    return { type: "funnel", funnelId: id, stepId };
+    return {
+      type: "funnel",
+      funnelId: id,
+      stepId,
+      ...(outcome ? { outcome: outcome as "converted" | "dropoff" } : {}),
+    };
   }
   return null;
 }

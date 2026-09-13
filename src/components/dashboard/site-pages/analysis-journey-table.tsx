@@ -126,6 +126,7 @@ export function AnalysisJourneyTable({
             analysisContext.type,
             analysisContext.funnelId,
             analysisContext.stepId,
+            analysisContext.outcome ?? "converted",
           ],
     [analysisContext],
   );

@@ -149,6 +149,55 @@ describe("FunnelSqlPlan", () => {
     expect(membership.relation).toBe("reached_1");
   });
 
+  it("builds a drop-off relation from the previous reached step", () => {
+    const dropoffDataset: ScopedDatasetSql = {
+      ...dataset,
+      ctes: `
+scope_final_visits(site_pk, session_id, visitor_id, started_at, visit_id, pathname) AS (
+  VALUES
+    (1, 'session-1', 'visitor-1', 100, 'visit-1', '/landing'),
+    (2, 'session-2', 'visitor-2', 100, 'visit-2', '/landing')
+),
+scope_final_events(event_pk, event_id, site_pk, session_id, visitor_id, occurred_at, sequence, event_name, pathname) AS (
+  VALUES
+    (1, 'event-1', 1, 'session-1', 'visitor-1', 160, 0, 'signup', '/landing')
+)`,
+    };
+    const membership = buildFunnelMembershipSqlPlan(
+      config([
+        step("landing", 'page.path eq "/landing"'),
+        step("signup", 'event.name eq "signup"'),
+      ]),
+      dropoffDataset,
+      1,
+      { outcome: "dropoff" },
+    );
+    const database = new DatabaseSync(":memory:");
+    try {
+      const rows = database
+        .prepare(
+          `WITH ${dropoffDataset.ctes},${membership.ctes}
+           SELECT site_pk, session_id FROM ${membership.relation}
+           ORDER BY site_pk, session_id`,
+        )
+        .all(...membership.bindings.map((binding) => binding.value));
+      expect(rows).toEqual([{ site_pk: 2, session_id: "session-2" }]);
+    } finally {
+      database.close();
+    }
+
+    const firstStepDropoff = buildFunnelMembershipSqlPlan(
+      config([
+        step("landing", 'page.path eq "/landing"'),
+        step("signup", 'event.name eq "signup"'),
+      ]),
+      dropoffDataset,
+      0,
+      { outcome: "dropoff" },
+    );
+    expect(firstStepDropoff.relation).toContain("WHERE 1 = 0");
+  });
+
   it("runs session progression in one non-recursive query", () => {
     const plan = buildFunnelSqlPlan(
       config([

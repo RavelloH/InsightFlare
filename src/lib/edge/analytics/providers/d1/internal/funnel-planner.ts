@@ -522,7 +522,10 @@ export function buildFunnelMembershipSqlPlan(
   config: FunnelConfigV2,
   dataset: ScopedDatasetSql,
   stepIndex: number,
-  options: { readonly allowHistoricalOverLimit?: boolean } = {},
+  options: {
+    readonly allowHistoricalOverLimit?: boolean;
+    readonly outcome?: "converted" | "dropoff";
+  } = {},
 ): FunnelMembershipSqlPlan {
   const parts = buildFunnelCteParts(config, dataset, options);
   if (
@@ -532,7 +535,22 @@ export function buildFunnelMembershipSqlPlan(
   ) {
     throw new Error("funnel_step_not_found");
   }
-  const relation = parts.steps[stepIndex]!.reachedRelation;
+  const reachedRelation = parts.steps[stepIndex]!.reachedRelation;
+  const relation =
+    options.outcome === "dropoff"
+      ? stepIndex === 0
+        ? `(SELECT reached_0.*
+            FROM reached_0
+            WHERE 1 = 0)`
+        : `(SELECT previous.*
+            FROM reached_${stepIndex - 1} previous
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM ${reachedRelation} current
+              WHERE current.site_pk = previous.site_pk
+                AND current.${parts.identity} = previous.${parts.identity}
+            ))`
+      : reachedRelation;
   const sql = `${dataset.ctes.trim()},\n${parts.funnelCtes.join(",\n")}`;
   const shape = measureFunnelSqlShape({
     sql: `${sql}\nSELECT * FROM ${relation}`,

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import {
   intlLocale,
   numberFormat,
@@ -465,9 +466,15 @@ function FunnelDetailContent({
     analysis.steps.at(-1);
   const defaultStepId = lastStep?.stepId ?? funnel.steps.at(-1)?.id ?? "";
   const [selectedStepId, setSelectedStepId] = useState(defaultStepId);
+  const [recordOutcome, setRecordOutcome] = useState<"converted" | "dropoff">(
+    "converted",
+  );
   useEffect(() => {
     setSelectedStepId(defaultStepId);
   }, [defaultStepId, funnel.id]);
+  useEffect(() => {
+    setRecordOutcome("converted");
+  }, [funnel.id]);
   const matchedStepIndex = funnel.steps.findIndex(
     (step) => step.id === selectedStepId,
   );
@@ -740,9 +747,10 @@ function FunnelDetailContent({
               type: "funnel",
               funnelId: funnel.id,
               stepId: selectedFunnelStep.id,
+              outcome: recordOutcome,
             }}
             toolbarLeading={
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="shrink-0 text-xs text-muted-foreground">
                   {labels.step}
                 </span>
@@ -764,6 +772,36 @@ function FunnelDetailContent({
                   {numberFormat(locale, selectedStepIndex + 1)}/
                   {numberFormat(locale, funnel.steps.length)}
                 </span>
+                <div
+                  className="inline-flex shrink-0 items-center gap-1.5"
+                  aria-label={labels.conversionRecords}
+                >
+                  <span
+                    className={
+                      recordOutcome === "dropoff"
+                        ? "text-xs text-foreground"
+                        : "text-xs text-muted-foreground"
+                    }
+                  >
+                    {labels.dropped}
+                  </span>
+                  <Switch
+                    checked={recordOutcome === "converted"}
+                    onCheckedChange={(checked) =>
+                      setRecordOutcome(checked ? "converted" : "dropoff")
+                    }
+                    aria-label={`${labels.converted} / ${labels.dropped}`}
+                  />
+                  <span
+                    className={
+                      recordOutcome === "converted"
+                        ? "text-xs text-foreground"
+                        : "text-xs text-muted-foreground"
+                    }
+                  >
+                    {labels.converted}
+                  </span>
+                </div>
               </div>
             }
             enabled={!loading && Boolean(selectedFunnelStep.id)}

@@ -227,6 +227,20 @@ function fallbackDemoVisitorId(
   return isDemoVisitorIdForSite(siteId, visitorId) ? visitorId : null;
 }
 
+function demoFunnelOutcomeMatches(
+  siteId: string,
+  identity: string,
+  params: Record<string, string | number>,
+): boolean {
+  if (String(params.analysisType ?? "") !== "funnel") return true;
+  const outcome = String(params.analysisOutcome ?? "converted");
+  const funnelId = String(params.analysisId ?? "");
+  const stepId = String(params.analysisStepId ?? "");
+  const converted =
+    fnv1a(`${siteId}::${funnelId}::${stepId}::${identity}`) % 5 < 3;
+  return outcome === "dropoff" ? !converted : converted;
+}
+
 function createFallbackDemoVisit(
   siteId: string,
   visitorId: string,
@@ -283,9 +297,12 @@ export function generateDemoVisitors(
   const search = normalizeDemoSearch(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
+  const analysisVisits = filtered.visits.filter((visit) =>
+    demoFunnelOutcomeMatches(siteId, visit.visitorId, params),
+  );
   const matchedVisitorIds = search
     ? new Set(
-        filtered.visits
+        analysisVisits
           .filter((visit) =>
             demoVisitMatchesJourneySearch(dataset, visit, search),
           )
@@ -305,7 +322,7 @@ export function generateDemoVisitors(
       latestVisit: DemoVisitFact;
     }
   >();
-  for (const visit of filtered.visits) {
+  for (const visit of analysisVisits) {
     if (matchedVisitorIds && !matchedVisitorIds.has(visit.visitorId)) continue;
     const bucket = buckets.get(visit.visitorId) ?? {
       firstSeenAt: visit.startedAt,
@@ -333,7 +350,7 @@ export function generateDemoVisitors(
   const rows = Array.from(buckets.entries())
     .map(([visitorId, bucket]) => {
       const identityVisit = latestDemoIdentityVisit(
-        filtered.visits.filter((visit) => visit.visitorId === visitorId),
+        analysisVisits.filter((visit) => visit.visitorId === visitorId),
       );
       return {
         visitorId,
@@ -407,16 +424,19 @@ export function generateDemoSessions(
   const search = normalizeDemoSearch(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
+  const analysisVisits = filtered.visits.filter((visit) =>
+    demoFunnelOutcomeMatches(siteId, visit.sessionId, params),
+  );
   const matchedSessionIds = search
     ? new Set(
-        filtered.visits
+        analysisVisits
           .filter((visit) =>
             demoVisitMatchesJourneySearch(dataset, visit, search),
           )
           .map((visit) => visit.sessionId),
       )
     : null;
-  const rows = Array.from(demoVisitsBySession(filtered.visits).entries())
+  const rows = Array.from(demoVisitsBySession(analysisVisits).entries())
     .filter(([sessionId]) =>
       matchedSessionIds ? matchedSessionIds.has(sessionId) : true,
     )

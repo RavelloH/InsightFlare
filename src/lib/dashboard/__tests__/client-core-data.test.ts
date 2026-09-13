@@ -279,6 +279,7 @@ describe("fetchSessions", () => {
         type: "funnel",
         funnelId: "funnel-1",
         stepId: "step-2",
+        outcome: "dropoff",
       },
     });
 
@@ -288,6 +289,7 @@ describe("fetchSessions", () => {
         analysisType: "funnel",
         analysisId: "funnel-1",
         analysisStepId: "step-2",
+        analysisOutcome: "dropoff",
       }),
     );
   });

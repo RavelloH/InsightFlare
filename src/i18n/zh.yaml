@@ -792,6 +792,8 @@ funnels:
   listTitle: 漏斗定义
   listSubtitle: 构建可复用的步骤序列，并按当前看板时间窗查看转化。
   conversionRecords: 转化记录
+  converted: 已转化
+  dropped: 已流失
   open: 打开漏斗
   moreActions: 更多操作
   create: 新建漏斗

@@ -56,6 +56,7 @@ export type JourneyListAnalysis =
       readonly type: "funnel";
       readonly config: FunnelConfigV2;
       readonly stepIndex: number;
+      readonly outcome?: "converted" | "dropoff";
     };
 
 export interface VisitorListCursor {
@@ -339,7 +340,10 @@ function analysisDatasetFor(
     analysis.config,
     base,
     analysis.stepIndex,
-    { allowHistoricalOverLimit: true },
+    {
+      allowHistoricalOverLimit: true,
+      outcome: analysis.outcome,
+    },
   );
   return analysisEntityDataset(base, {
     ctes: funnel.ctes,

@@ -308,6 +308,7 @@ describe("site journey detail runtime", () => {
         type: "funnel",
         funnelId: "funnel-1",
         stepId: "signup",
+        outcome: "dropoff",
       },
     });
 
@@ -343,6 +344,7 @@ describe("site journey detail runtime", () => {
             conversionWindowMs: 86_400_000,
           }),
           stepIndex: 1,
+          outcome: "dropoff",
         },
       }),
     );

@@ -801,6 +801,8 @@ funnels:
   listSubtitle: Build a reusable sequence, then inspect conversion for the current
     dashboard window.
   conversionRecords: Conversion records
+  converted: Converted
+  dropped: Dropped off
   open: Open funnel
   moreActions: More actions
   create: New funnel

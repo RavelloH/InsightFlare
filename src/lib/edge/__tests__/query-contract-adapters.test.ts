@@ -156,6 +156,13 @@ describe("typed query adapter validation branches", () => {
       handleEventRecordDetailContract(env, siteId, valid),
       handleVisitorsContract(env, siteId, valid),
       handleSessionsContract(env, siteId, valid),
+      handleVisitorsContract(
+        env,
+        siteId,
+        new URL(
+          `${valid}&analysisType=funnel&analysisId=funnel-1&analysisStepId=step-1&analysisOutcome=dropoff`,
+        ),
+      ),
       handleVisitorDetailContract(env, siteId, valid),
       handleSessionDetailContract(env, siteId, valid),
       handleJourneyCollectionContract(
@@ -168,7 +175,7 @@ describe("typed query adapter validation branches", () => {
       handleFunnelAnalysisContract(env, siteId, valid),
     ]);
 
-    expect(responses).toHaveLength(16);
+    expect(responses).toHaveLength(17);
     expect(responses.every((response) => response instanceof Response)).toBe(
       true,
     );
