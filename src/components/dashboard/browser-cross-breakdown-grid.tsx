@@ -16,6 +16,7 @@ import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchBrowserCrossBreakdown } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -41,6 +42,7 @@ interface BrowserCrossBreakdownGridProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  comparisonQuery?: DashboardComparisonQuery | null;
 }
 
 interface BrowserCrossDisplayItem extends BrowserCrossBreakdownItem {
@@ -142,6 +144,7 @@ const BrowserCrossStackedBarCard = memo(function BrowserCrossStackedBarCard({
   messages,
   title,
   dimension,
+  comparisonDimension,
   loading,
   hydrated,
 }: {
@@ -149,10 +152,14 @@ const BrowserCrossStackedBarCard = memo(function BrowserCrossStackedBarCard({
   messages: AppMessages;
   title: string;
   dimension: BrowserCrossDisplayDimension;
+  comparisonDimension?: BrowserCrossDisplayDimension;
   loading: boolean;
   hydrated: boolean;
 }) {
-  const hasContent = dimension.rows.length > 0 && dimension.columns.length > 0;
+  const hasContent =
+    (dimension.rows.length > 0 && dimension.columns.length > 0) ||
+    ((comparisonDimension?.rows.length ?? 0) > 0 &&
+      (comparisonDimension?.columns.length ?? 0) > 0);
   const showOverlayLoading = loading && hydrated;
 
   const chartSeries = useMemo<StackedBreakdownBarSeries[]>(
@@ -177,16 +184,39 @@ const BrowserCrossStackedBarCard = memo(function BrowserCrossStackedBarCard({
       })),
     [dimension.rows],
   );
+  const comparisonChartSeries = useMemo<
+    StackedBreakdownBarSeries[] | undefined
+  >(
+    () =>
+      comparisonDimension?.columns.map((column) => ({
+        key: column.key,
+        label: column.displayLabel,
+        color: column.color,
+        icon: column.Icon,
+      })),
+    [comparisonDimension?.columns],
+  );
+  const comparisonChartRows = useMemo<StackedBreakdownBarRow[] | undefined>(
+    () =>
+      comparisonDimension?.rows.map((row) => ({
+        key: row.key,
+        label: row.displayLabel,
+        values: Object.fromEntries(
+          row.cells.map((cell) => [cell.key, cell.visitors]),
+        ),
+      })),
+    [comparisonDimension?.rows],
+  );
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="h-full overflow-hidden">
       <CardHeader>
         <CardTitle className="inline-flex items-center gap-2">
           <RiBarChartBoxLine className="size-4" />
           {title}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex min-h-0 flex-1 flex-col">
         <ContentSwitch
           loading={loading && !hydrated}
           hasContent={hasContent}
@@ -198,8 +228,9 @@ const BrowserCrossStackedBarCard = memo(function BrowserCrossStackedBarCard({
             <StackedBreakdownBarChart
               rows={chartRows}
               series={chartSeries}
+              comparisonRows={comparisonChartRows}
+              comparisonSeries={comparisonChartSeries}
               locale={locale}
-              categoryAxisWidth={104}
               maxCategoryLabelLength={18}
               stackId="browser-cross"
               className="w-full aspect-auto"
@@ -246,8 +277,14 @@ export const BrowserCrossBreakdownGrid = memo(
     siteId,
     window,
     filters,
+    comparisonQuery,
   }: BrowserCrossBreakdownGridProps) {
     const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+    const comparisonFiltersKey = useMemo(
+      () =>
+        comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none",
+      [comparisonQuery],
+    );
     const { data, isFetching, isPending } = useQuery({
       queryKey: [
         "dashboard",
@@ -255,19 +292,46 @@ export const BrowserCrossBreakdownGrid = memo(
         siteId,
         window.from,
         window.to,
+        window.interval,
         window.timeZone,
         filtersKey,
+        comparisonQuery?.mode ?? "none",
+        comparisonQuery?.window.from ?? "none",
+        comparisonQuery?.window.to ?? "none",
+        comparisonQuery?.window.interval ?? "none",
+        comparisonQuery?.window.timeZone ?? "none",
+        comparisonFiltersKey,
       ],
-      queryFn: ({ signal }) =>
-        fetchBrowserCrossBreakdown(siteId, window, filters, { signal }).catch(
-          emptyBreakdownUnlessAborted,
-        ),
+      queryFn: async ({ signal }) => {
+        const fetchBreakdown = (
+          requestedWindow: TimeWindow,
+          requestedFilters: FilterDocument,
+        ) =>
+          fetchBrowserCrossBreakdown(
+            siteId,
+            requestedWindow,
+            requestedFilters,
+            { signal },
+          ).catch(emptyBreakdownUnlessAborted);
+
+        const [current, comparison] = await Promise.all([
+          fetchBreakdown(window, filters),
+          comparisonQuery
+            ? fetchBreakdown(comparisonQuery.window, comparisonQuery.filters)
+            : Promise.resolve(null),
+        ]);
+
+        return { current, comparison };
+      },
       enabled: !import.meta.env.SSR,
     });
     const breakdownData = useMemo(
-      () => data ?? emptyBrowserCrossBreakdown(),
-      [data],
+      () => data?.current ?? emptyBrowserCrossBreakdown(),
+      [data?.current],
     );
+    const comparisonBreakdownData = comparisonQuery
+      ? (data?.comparison ?? emptyBrowserCrossBreakdown())
+      : undefined;
     const loading = isPending || isFetching;
     const hydrated = data !== undefined;
 
@@ -293,14 +357,49 @@ export const BrowserCrossBreakdownGrid = memo(
         }),
       [breakdownData.deviceType, messages],
     );
+    const comparisonOperatingSystem = useMemo(
+      () =>
+        comparisonBreakdownData
+          ? buildCrossDisplayDimension(
+              comparisonBreakdownData.operatingSystem,
+              messages,
+            )
+          : undefined,
+      [comparisonBreakdownData?.operatingSystem, messages],
+    );
+    const comparisonDeviceType = useMemo(
+      () =>
+        comparisonBreakdownData
+          ? buildCrossDisplayDimension(
+              comparisonBreakdownData.deviceType,
+              messages,
+              {
+                formatColumnLabel: (value) =>
+                  resolveDeviceTypeMeta(
+                    value,
+                    messages.common.deviceLabels,
+                    messages.common.unknown,
+                  ).label,
+                resolveColumnIcon: (value) =>
+                  resolveDeviceTypeMeta(
+                    value,
+                    messages.common.deviceLabels,
+                    messages.common.unknown,
+                  ).Icon,
+              },
+            )
+          : undefined,
+      [comparisonBreakdownData?.deviceType, messages],
+    );
 
     return (
-      <section className="grid gap-4 2xl:grid-cols-2">
+      <section className="grid items-stretch gap-4 2xl:grid-cols-2">
         <BrowserCrossStackedBarCard
           locale={locale}
           messages={messages}
           title={messages.browsers.osBreakdownTitle}
           dimension={operatingSystem}
+          comparisonDimension={comparisonOperatingSystem}
           loading={loading}
           hydrated={hydrated}
         />
@@ -309,6 +408,7 @@ export const BrowserCrossBreakdownGrid = memo(
           messages={messages}
           title={messages.browsers.deviceTypeBreakdownTitle}
           dimension={deviceType}
+          comparisonDimension={comparisonDeviceType}
           loading={loading}
           hydrated={hydrated}
         />

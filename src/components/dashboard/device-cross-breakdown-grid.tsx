@@ -11,6 +11,8 @@ import { ContentSwitch } from "@/components/dashboard/content-switch";
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journey-display";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchClientCrossBreakdown } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserCrossBreakdownDimensionData,
@@ -35,6 +37,7 @@ interface DeviceCrossBreakdownGridProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  comparisonQuery?: DashboardComparisonQuery | null;
 }
 
 interface CrossDisplayItem extends BrowserCrossBreakdownItem {
@@ -61,6 +64,18 @@ function emptyDimension(): BrowserCrossBreakdownDimensionData {
     columns: [],
     rows: [],
     totalVisitors: 0,
+  };
+}
+
+interface CrossBreakdownResponse {
+  browserData: BrowserCrossBreakdownDimensionData;
+  osData: BrowserCrossBreakdownDimensionData;
+}
+
+function emptyCrossBreakdownResponse(): CrossBreakdownResponse {
+  return {
+    browserData: emptyDimension(),
+    osData: emptyDimension(),
   };
 }
 
@@ -117,12 +132,14 @@ const CrossBreakdownCard = memo(function CrossBreakdownCard({
   messages,
   title,
   dimension,
+  comparisonDimension,
   loading,
 }: {
   locale: Locale;
   messages: AppMessages;
   title: string;
   dimension: CrossDisplayDimension;
+  comparisonDimension?: CrossDisplayDimension;
   loading: boolean;
 }) {
   const chartRows = useMemo<StackedBreakdownBarRow[]>(
@@ -148,19 +165,46 @@ const CrossBreakdownCard = memo(function CrossBreakdownCard({
       })),
     [dimension.columns],
   );
+  const comparisonChartRows = useMemo<StackedBreakdownBarRow[] | undefined>(
+    () =>
+      comparisonDimension?.rows.map((row) => ({
+        key: row.key,
+        label: row.displayLabel,
+        values: row.cells.reduce<Record<string, number>>((result, cell) => {
+          result[cell.key] = cell.visitors;
+          return result;
+        }, {}),
+      })),
+    [comparisonDimension?.rows],
+  );
+  const comparisonChartSeries = useMemo<
+    StackedBreakdownBarSeries[] | undefined
+  >(
+    () =>
+      comparisonDimension?.columns.map((column) => ({
+        key: column.key,
+        label: column.displayLabel,
+        color: column.color,
+      })),
+    [comparisonDimension?.columns],
+  );
+  const hasContent =
+    (dimension.rows.length > 0 && dimension.columns.length > 0) ||
+    ((comparisonDimension?.rows.length ?? 0) > 0 &&
+      (comparisonDimension?.columns.length ?? 0) > 0);
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="h-full overflow-hidden">
       <CardHeader>
         <CardTitle className="inline-flex items-center gap-2">
           <RiBarChartBoxLine className="size-4" />
           {title}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex min-h-0 flex-1 flex-col">
         <ContentSwitch
           loading={loading}
-          hasContent={dimension.rows.length > 0 && dimension.columns.length > 0}
+          hasContent={hasContent}
           loadingLabel={messages.common.loading}
           emptyContent={<p>{messages.common.noData}</p>}
           minHeightClassName="min-h-[320px]"
@@ -168,6 +212,8 @@ const CrossBreakdownCard = memo(function CrossBreakdownCard({
           <StackedBreakdownBarChart
             rows={chartRows}
             series={chartSeries}
+            comparisonRows={comparisonChartRows}
+            comparisonSeries={comparisonChartSeries}
             locale={locale}
             stackId={title}
             className="w-full aspect-auto"
@@ -184,7 +230,13 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
   siteId,
   window,
   filters,
+  comparisonQuery,
 }: DeviceCrossBreakdownGridProps) {
+  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
+    [comparisonQuery],
+  );
   const crossBreakdownQuery = useQuery({
     queryKey: [
       "dashboard",
@@ -192,31 +244,54 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
       siteId,
       window.from,
       window.to,
+      window.interval,
       window.timeZone,
-      filters,
+      filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
     ],
     queryFn: async ({ signal }) => {
-      const fetchDimension = (
-        secondaryDimension: "browser" | "operatingSystem",
-      ) =>
-        fetchClientCrossBreakdown(
-          siteId,
-          window,
-          "deviceType",
-          secondaryDimension,
-          filters,
-          { primaryLimit: 5, secondaryLimit: 6, signal },
-        );
-      try {
-        const [browserData, osData] = await Promise.all([
-          fetchDimension("browser"),
-          fetchDimension("operatingSystem"),
-        ]);
-        return { browserData, osData };
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") throw error;
-        return { browserData: emptyDimension(), osData: emptyDimension() };
-      }
+      const fetchBreakdowns = async (
+        requestedWindow: TimeWindow,
+        requestedFilters: FilterDocument,
+      ): Promise<CrossBreakdownResponse> => {
+        const fetchDimension = (
+          secondaryDimension: "browser" | "operatingSystem",
+        ) =>
+          fetchClientCrossBreakdown(
+            siteId,
+            requestedWindow,
+            "deviceType",
+            secondaryDimension,
+            requestedFilters,
+            { primaryLimit: 5, secondaryLimit: 6, signal },
+          );
+
+        try {
+          const [browserData, osData] = await Promise.all([
+            fetchDimension("browser"),
+            fetchDimension("operatingSystem"),
+          ]);
+          return { browserData, osData };
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError")
+            throw error;
+          return emptyCrossBreakdownResponse();
+        }
+      };
+
+      const [current, comparison] = await Promise.all([
+        fetchBreakdowns(window, filters),
+        comparisonQuery
+          ? fetchBreakdowns(comparisonQuery.window, comparisonQuery.filters)
+          : Promise.resolve(null),
+      ]);
+
+      return { ...current, comparison };
     },
     enabled: !import.meta.env.SSR,
   });
@@ -228,6 +303,12 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
     () => crossBreakdownQuery.data?.osData ?? emptyDimension(),
     [crossBreakdownQuery.data?.osData],
   );
+  const comparisonBrowserData = comparisonQuery
+    ? (crossBreakdownQuery.data?.comparison?.browserData ?? emptyDimension())
+    : undefined;
+  const comparisonOsData = comparisonQuery
+    ? (crossBreakdownQuery.data?.comparison?.osData ?? emptyDimension())
+    : undefined;
   const loading = crossBreakdownQuery.isPending;
 
   const browserDimension = useMemo(
@@ -254,14 +335,43 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
       }),
     [messages, osData],
   );
+  const comparisonBrowserDimension = useMemo(
+    () =>
+      comparisonBrowserData
+        ? buildDisplayDimension(comparisonBrowserData, messages, {
+            formatRowLabel: (value) =>
+              resolveDeviceTypeMeta(
+                value,
+                messages.common.deviceLabels,
+                messages.common.unknown,
+              ).label,
+          })
+        : undefined,
+    [comparisonBrowserData, messages],
+  );
+  const comparisonOsDimension = useMemo(
+    () =>
+      comparisonOsData
+        ? buildDisplayDimension(comparisonOsData, messages, {
+            formatRowLabel: (value) =>
+              resolveDeviceTypeMeta(
+                value,
+                messages.common.deviceLabels,
+                messages.common.unknown,
+              ).label,
+          })
+        : undefined,
+    [comparisonOsData, messages],
+  );
 
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid items-stretch gap-4 xl:grid-cols-2">
       <CrossBreakdownCard
         locale={locale}
         messages={messages}
         title={messages.devices.browserByDeviceTitle}
         dimension={browserDimension}
+        comparisonDimension={comparisonBrowserDimension}
         loading={loading}
       />
       <CrossBreakdownCard
@@ -269,6 +379,7 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
         messages={messages}
         title={messages.devices.osByDeviceTitle}
         dimension={osDimension}
+        comparisonDimension={comparisonOsDimension}
         loading={loading}
       />
     </div>

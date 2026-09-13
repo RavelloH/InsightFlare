@@ -91,6 +91,7 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        comparisonQuery={comparisonQuery}
       />
 
       <CanIUseCompatCard

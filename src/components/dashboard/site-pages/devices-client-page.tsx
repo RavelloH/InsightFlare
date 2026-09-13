@@ -87,6 +87,7 @@ export function DevicesClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        comparisonQuery={comparisonQuery}
       />
     </div>
   );
