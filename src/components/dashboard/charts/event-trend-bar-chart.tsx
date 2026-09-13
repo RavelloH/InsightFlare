@@ -478,7 +478,6 @@ export const EventTrendLegend = memo(function EventTrendLegend({
   hoveredPoint,
   comparisonData,
   comparisonSeries,
-  hoveredComparisonPoint,
   loading = false,
   cumulativeLabel,
   totalLabel,
@@ -501,24 +500,6 @@ export const EventTrendLegend = memo(function EventTrendLegend({
     }
     return nextTotals;
   }, [data, series]);
-  const comparisonTotals = useMemo(() => {
-    const nextTotals: Record<string, number> = {};
-    for (const item of comparisonSeries ?? []) {
-      nextTotals[item.key] = 0;
-    }
-    for (const point of comparisonData ?? []) {
-      for (const item of comparisonSeries ?? []) {
-        nextTotals[item.key] =
-          (nextTotals[item.key] ?? 0) +
-          Math.max(0, Number(point[item.key] ?? 0));
-      }
-    }
-    return nextTotals;
-  }, [comparisonData, comparisonSeries]);
-  const comparisonSeriesByKey = useMemo(
-    () => new Map((comparisonSeries ?? []).map((item) => [item.key, item])),
-    [comparisonSeries],
-  );
   const hasComparison = Boolean(comparisonData && comparisonSeries?.length);
 
   return (
@@ -584,12 +565,6 @@ export const EventTrendLegend = memo(function EventTrendLegend({
               const currentValue = hoveredPoint
                 ? Math.max(0, Number(hoveredPoint[item.key] ?? 0))
                 : Math.max(0, Number(totals[item.key] ?? 0));
-              const comparisonItem = comparisonSeriesByKey.get(item.key);
-              const comparisonValue = comparisonItem
-                ? hoveredComparisonPoint
-                  ? Math.max(0, Number(hoveredComparisonPoint[item.key] ?? 0))
-                  : Math.max(0, Number(comparisonTotals[item.key] ?? 0))
-                : null;
               const clickable = !item.isOther && Boolean(onSelectEvent);
 
               return (
@@ -619,18 +594,10 @@ export const EventTrendLegend = memo(function EventTrendLegend({
                   </div>
                   <AutoTransition>
                     <span
-                      key={`${item.key}/${currentValue}/${comparisonValue ?? "none"}`}
-                      className={cn(
-                        "font-mono text-xs font-semibold tabular-nums text-foreground",
-                        hasComparison && "grid grid-cols-2 gap-x-2 text-right",
-                      )}
+                      key={`${item.key}/${currentValue}`}
+                      className="font-mono text-xs font-semibold tabular-nums text-foreground"
                     >
-                      <span>{numberFormat(locale, currentValue)}</span>
-                      {hasComparison ? (
-                        <span className="text-compare-primary">
-                          {numberFormat(locale, comparisonValue ?? 0)}
-                        </span>
-                      ) : null}
+                      {numberFormat(locale, currentValue)}
                     </span>
                   </AutoTransition>
                 </button>

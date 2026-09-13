@@ -24,7 +24,11 @@ import {
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client-data";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
-import { numberFormat, percentFormat } from "@/lib/dashboard/format";
+import {
+  numberFormat,
+  percentFormat,
+  percentFormatWithOneDecimal,
+} from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   BrowserVersionBreakdownBrowser,
@@ -120,6 +124,28 @@ function emptyBrowserDisplay(browser: string): BrowserVersionBrowserDisplay {
     sessions: 0,
     versions: [],
   };
+}
+
+function relativeChange(current: number, comparison: number): number | null {
+  if (!Number.isFinite(current) || !Number.isFinite(comparison)) return null;
+  if (comparison === 0) return current === 0 ? 0 : null;
+  return (current - comparison) / comparison;
+}
+
+function percentageChangeFormat(
+  locale: Locale,
+  current: number,
+  comparison: number,
+): string {
+  const change = relativeChange(current, comparison);
+  if (change === null) return "—";
+  return `${change >= 0 ? "+" : ""}${percentFormatWithOneDecimal(locale, change)}`;
+}
+
+function percentageChangeClass(current: number, comparison: number): string {
+  const change = relativeChange(current, comparison);
+  if (change === null) return "text-muted-foreground";
+  return change >= 0 ? "text-emerald-600" : "text-rose-600";
 }
 
 const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
@@ -306,11 +332,16 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
                   {hasComparison ? (
                     <span
                       className={cn(
-                        "justify-self-end font-mono text-compare-primary tabular-nums transition-opacity motion-reduce:transition-none",
+                        "justify-self-end font-mono tabular-nums transition-opacity motion-reduce:transition-none",
+                        percentageChangeClass(current.value, comparison.value),
                         isDimmed && "opacity-40",
                       )}
                     >
-                      {numberFormat(locale, comparison.value)}
+                      {percentageChangeFormat(
+                        locale,
+                        current.value,
+                        comparison.value,
+                      )}
                     </span>
                   ) : null}
                   <span
@@ -326,11 +357,16 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
                   {hasComparison ? (
                     <span
                       className={cn(
-                        "justify-self-end text-right font-mono text-[11px] tabular-nums text-compare-primary transition-opacity motion-reduce:transition-none",
+                        "justify-self-end text-right font-mono text-[11px] tabular-nums transition-opacity motion-reduce:transition-none",
+                        percentageChangeClass(current.share, comparison.share),
                         isDimmed && "opacity-40",
                       )}
                     >
-                      {percentFormat(locale, comparison.share)}
+                      {percentageChangeFormat(
+                        locale,
+                        current.share,
+                        comparison.share,
+                      )}
                     </span>
                   ) : null}
                 </div>
