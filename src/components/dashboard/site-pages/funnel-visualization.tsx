@@ -106,59 +106,41 @@ export function FunnelVisualization({
   return (
     <div className={compact ? "min-w-0 space-y-4" : "min-w-0 space-y-5"}>
       {compact ? (
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1 text-xs text-muted-foreground">
-          <span className="inline-flex items-baseline gap-x-2">
-            <AutoTransition
-              initial={false}
-              transitionKey={
-                loading ? "loading" : summary?.overallConversionRate
-              }
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              className="inline-flex h-7 items-center"
+        <AutoTransition
+          initial={false}
+          transitionKey={
+            loading || !summary
+              ? "loading"
+              : `${summary.overallConversionRate}:${convertedProgressions}/${totalProgressions}`
+          }
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+          className="min-h-7"
+        >
+          {loading || !summary ? (
+            <Skeleton key="loading" className="h-7 w-52 max-w-full" />
+          ) : (
+            <div
+              key="ready"
+              className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1 text-xs text-muted-foreground"
             >
-              {loading || !summary ? (
-                <Skeleton key="loading" className="h-7 w-16" />
-              ) : (
-                <span
-                  key="ready"
-                  className="font-mono text-xl font-semibold leading-7 text-foreground"
-                >
+              <span className="inline-flex items-baseline gap-x-2">
+                <span className="font-mono text-xl font-semibold leading-7 text-foreground">
                   {percentFormat(locale, summary.overallConversionRate)}
                 </span>
-              )}
-            </AutoTransition>
-            <span>{labels.overallConversion}</span>
-          </span>
-          <span className="inline-flex items-baseline gap-x-2">
-            <AutoTransition
-              initial={false}
-              transitionKey={
-                loading
-                  ? "loading"
-                  : `${convertedProgressions}/${totalProgressions}`
-              }
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              className="inline-flex h-7 items-center"
-            >
-              {loading || !summary ? (
-                <Skeleton key="loading" className="h-7 w-24" />
-              ) : (
-                <span
-                  key="ready"
-                  className="font-mono text-lg font-semibold leading-7 text-muted-foreground"
-                >
+                <span>{labels.overallConversion}</span>
+              </span>
+              <span className="inline-flex items-baseline gap-x-2">
+                <span className="font-mono text-lg font-semibold leading-7 text-muted-foreground">
                   {numberFormat(locale, convertedProgressions)}/
                   {numberFormat(locale, totalProgressions)}
                 </span>
-              )}
-            </AutoTransition>
-            <span>{convertedLabel}</span>
-          </span>
-        </div>
+                <span>{convertedLabel}</span>
+              </span>
+            </div>
+          )}
+        </AutoTransition>
       ) : null}
       {funnel.steps.map((step, index) => {
         const result = analysis?.steps[index];

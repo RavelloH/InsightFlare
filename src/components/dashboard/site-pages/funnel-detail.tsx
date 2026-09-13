@@ -548,33 +548,13 @@ function FunnelDetailContent({
 }
 
 function FunnelDetailSkeleton({
-  locale,
   labels,
-  descriptionMessages,
   funnel,
-  siteId,
-  pathname,
-  window,
-  filters,
 }: {
-  locale: Locale;
   labels: AppMessages["funnels"];
-  descriptionMessages: FunnelDescriptionMessages;
   funnel?: FunnelDefinition;
-  siteId: string;
-  pathname: string;
-  window: TimeWindow;
-  filters: FilterDocument;
 }) {
   const metric = funnel ? funnelMetricKey(funnel.progressionScope) : "sessions";
-  const skeletonSteps: FunnelDefinition["steps"] = funnel?.steps.length
-    ? funnel.steps
-    : Array.from({ length: 4 }, (_, index) => ({
-        id: `funnel-skeleton-step-${index}`,
-        filterDsl: "",
-      }));
-  const selectedStep = skeletonSteps.at(-1);
-  const selectedStepIndex = Math.max(0, skeletonSteps.length - 1);
 
   return (
     <div className="min-w-0 space-y-6 p-4 md:p-6">
@@ -614,59 +594,35 @@ function FunnelDetailSkeleton({
           <Skeleton className="h-4 w-64 max-w-full" />
         </CardHeader>
         <CardContent className="px-0 py-0">
-          {skeletonSteps.map((step, index) => (
-            <FunnelStepRow
-              key={step.id}
-              locale={locale}
-              labels={labels}
-              descriptionMessages={descriptionMessages}
-              funnelStep={step}
-              index={index}
-              metric={metric}
-              loading
-            />
-          ))}
+          <div className="flex min-w-0 gap-3 border-b p-4">
+            <Skeleton className="aspect-square min-h-8 shrink-0 self-stretch" />
+            <div className="grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_11rem_11rem]">
+              <div className="min-w-0 space-y-2">
+                <Skeleton className="h-5 w-[min(22rem,72%)]" />
+                <Skeleton className="h-3 w-full" />
+              </div>
+              <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
+                <div className="space-y-1">
+                  <span className="text-muted-foreground">
+                    {labels.sessions}
+                  </span>
+                  <Skeleton className="h-4 w-14" />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-muted-foreground">
+                    {labels.visitors}
+                  </span>
+                  <Skeleton className="h-4 w-14" />
+                </div>
+              </div>
+              <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
+                <Skeleton className="h-4 w-14" />
+                <Skeleton className="h-4 w-14" />
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
-
-      {selectedStep ? (
-        <section className="min-w-0 space-y-3">
-          <div>
-            <h3 className="inline-flex items-center gap-2 text-sm font-medium">
-              <RiFileList3Line className="size-4 shrink-0" />
-              {labels.conversionRecords}
-            </h3>
-          </div>
-          <AnalysisJourneyTable
-            entity={metric === "visitors" ? "visitor" : "session"}
-            siteId={siteId}
-            pathname={pathname}
-            locale={locale}
-            messages={getMessages(locale)}
-            window={window}
-            filters={filters}
-            analysisContext={{
-              type: "funnel",
-              funnelId: funnel?.id ?? "funnel-skeleton",
-              stepId: selectedStep.id,
-            }}
-            toolbarLeading={
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {labels.step}
-                </span>
-                <Skeleton className="h-4 w-20 sm:w-28" />
-                <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-                  {numberFormat(locale, selectedStepIndex + 1)}/
-                  {numberFormat(locale, skeletonSteps.length)}
-                </span>
-              </div>
-            }
-            enabled={false}
-          />
-          <Skeleton className="h-4 w-24" />
-        </section>
-      ) : null}
     </div>
   );
 }
@@ -738,16 +694,7 @@ export function FunnelDetail({
           filters={filters}
         />
       ) : (
-        <FunnelDetailSkeleton
-          locale={locale}
-          labels={labels}
-          descriptionMessages={descriptionMessages}
-          funnel={funnel}
-          siteId={siteId}
-          pathname={pathname}
-          window={window}
-          filters={filters}
-        />
+        <FunnelDetailSkeleton labels={labels} funnel={funnel} />
       )}
     </AutoTransition>
   );
