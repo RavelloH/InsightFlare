@@ -851,6 +851,7 @@ funnels:
   convertedSessions: コンバージョンセッション数
   convertedVisitors: コンバージョン訪問者数
   largestDropOff: 最大離脱
+  largestDropOffStep: 最大離脱ステップ
   noDropOff: 離脱なし
   step: ステップ
   sessions: セッション

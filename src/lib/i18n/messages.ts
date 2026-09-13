@@ -836,6 +836,7 @@ export interface AppMessages {
     convertedSessions: string;
     convertedVisitors: string;
     largestDropOff: string;
+    largestDropOffStep: string;
     noDropOff: string;
     step: string;
     sessions: string;
@@ -3663,6 +3664,7 @@ const enMessages = {
     convertedSessions: "Converted sessions",
     convertedVisitors: "Converted visitors",
     largestDropOff: "Largest drop-off",
+    largestDropOffStep: "Largest drop-off step",
     noDropOff: "No drop-off",
     step: "Step",
     sessions: "Sessions",
@@ -6660,6 +6662,7 @@ const zhMessages = {
     convertedSessions: "转化会话数",
     convertedVisitors: "转化访客数",
     largestDropOff: "最大流失",
+    largestDropOffStep: "最大损失步骤",
     noDropOff: "无流失",
     step: "步骤",
     sessions: "会话",
@@ -9619,6 +9622,7 @@ const jaMessages = {
     convertedSessions: "コンバージョンセッション数",
     convertedVisitors: "コンバージョン訪問者数",
     largestDropOff: "最大離脱",
+    largestDropOffStep: "最大離脱ステップ",
     noDropOff: "離脱なし",
     step: "ステップ",
     sessions: "セッション",

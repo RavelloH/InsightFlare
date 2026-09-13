@@ -70,23 +70,28 @@ function useNearViewport() {
 function FunnelCardVisualizationSkeleton() {
   return (
     <div className="min-w-0 space-y-4">
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-1 text-xs">
         {Array.from({ length: 2 }, (_, index) => (
-          <div key={index} className="inline-flex items-center gap-1">
+          <div key={index} className="inline-flex items-baseline gap-x-2">
+            <Skeleton className={index === 0 ? "h-7 w-16" : "h-7 w-24"} />
             <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-3 w-12" />
           </div>
         ))}
       </div>
       <div className="space-y-4">
         {Array.from({ length: 4 }, (_, index) => (
           <div key={index} className="min-w-0 space-y-2">
-            <div className="flex min-w-0 items-start gap-2">
-              <Skeleton className="h-4 w-3 shrink-0" />
-              <Skeleton className="h-4 min-w-0 flex-1" />
-              <Skeleton className="h-5 w-16 shrink-0" />
+            <div className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-2">
+              <Skeleton className="h-8 w-7" />
+              <div className="min-w-0 space-y-2">
+                <div className="flex min-w-0 items-start gap-2">
+                  <Skeleton className="h-5 min-w-0 flex-1" />
+                  <Skeleton className="h-5 w-20 shrink-0" />
+                  <Skeleton className="h-5 w-16 shrink-0" />
+                </div>
+                <Skeleton className="h-4 w-full" />
+              </div>
             </div>
-            <Skeleton className="h-3 w-full" />
           </div>
         ))}
       </div>
