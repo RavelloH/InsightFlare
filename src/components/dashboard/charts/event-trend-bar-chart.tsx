@@ -31,6 +31,8 @@ import { cn } from "@/lib/utils";
 export const EVENT_TREND_MAX_SERIES = 18;
 
 const MAX_INITIAL_CHART_POINTS = 2_000;
+const COMPARISON_DATA_PREFIX = "comparison:";
+const COMPARISON_PATTERN_PREFIX = "event-comparison-pattern-";
 
 export interface EventTrendChartSeries extends EventTrendSeries {
   displayLabel: string;
@@ -43,15 +45,24 @@ export interface EventTrendChartDataPoint {
   [seriesKey: string]: number;
 }
 
+interface EventTrendComparisonChartDataPoint extends EventTrendChartDataPoint {
+  comparisonTimestampMs: number;
+  comparisonTotalEvents: number;
+}
+
 export interface EventTrendLegendProps {
   data: ReadonlyArray<EventTrendChartDataPoint>;
   series: ReadonlyArray<EventTrendChartSeries>;
   hoveredPoint: EventTrendChartDataPoint | null;
+  comparisonData?: ReadonlyArray<EventTrendChartDataPoint>;
+  comparisonSeries?: ReadonlyArray<EventTrendChartSeries>;
+  hoveredComparisonPoint?: EventTrendChartDataPoint | null;
   loading?: boolean;
   cumulativeLabel: string;
   totalLabel: string;
   locale: Locale;
   dateFormatter: Intl.DateTimeFormat;
+  comparisonLabel?: string;
   onSelectEvent?: (eventName: string) => void;
 }
 
@@ -67,6 +78,12 @@ export interface EventTrendBarChartProps {
   emptyLabel: string;
   cumulativeLabel: string;
   totalLabel: string;
+  currentPeriodLabel?: string;
+  comparisonData?: ReadonlyArray<EventTrendChartDataPoint>;
+  comparisonSeries?: ReadonlyArray<EventTrendChartSeries>;
+  comparisonFrom?: number;
+  comparisonTo?: number;
+  comparisonLabel?: string;
   onSelectEvent?: (eventName: string) => void;
   className?: string;
 }
@@ -99,6 +116,72 @@ export function createEventTrendChartSeries(
       color,
     };
   });
+}
+
+export function createEventTrendComparisonChartSeries(
+  currentSeries: ReadonlyArray<EventTrendSeries>,
+  comparisonSeries: ReadonlyArray<EventTrendSeries>,
+  otherLabel: string,
+): { current: EventTrendChartSeries[]; comparison: EventTrendChartSeries[] } {
+  const currentByKey = new Map(currentSeries.map((item) => [item.key, item]));
+  const comparisonByKey = new Map(
+    comparisonSeries.map((item) => [item.key, item]),
+  );
+  const keys = [
+    ...currentSeries.map((item) => item.key),
+    ...comparisonSeries
+      .map((item) => item.key)
+      .filter((key) => !currentByKey.has(key)),
+  ];
+  const entries = keys.map((key) => {
+    const current = currentByKey.get(key);
+    const comparison = comparisonByKey.get(key);
+    const source = current ?? comparison;
+    return {
+      key,
+      eventName: current?.eventName ?? comparison?.eventName ?? key,
+      label: current?.label || comparison?.label || source?.eventName || key,
+      isOther: Boolean(current?.isOther || comparison?.isOther),
+    };
+  });
+  const currentPalette = buildComplementaryOklchPalette(
+    entries.filter((item) => !item.isOther).length,
+  );
+  let currentPaletteIndex = 0;
+
+  const current = entries.map((item) => {
+    const color = item.isOther
+      ? "var(--muted-foreground)"
+      : (currentPalette[currentPaletteIndex++] ?? "var(--color-chart-1)");
+    const source = currentByKey.get(item.key);
+    return {
+      ...item,
+      displayLabel: item.isOther ? otherLabel : item.label,
+      color,
+      events: source?.events ?? 0,
+      sessions: source?.sessions ?? 0,
+      visitors: source?.visitors ?? 0,
+    };
+  });
+  const currentColorByKey = new Map(
+    current.map((item) => [item.key, item.color]),
+  );
+  const comparison = entries.map((item) => {
+    const source = comparisonByKey.get(item.key);
+    const color = item.isOther
+      ? "var(--muted-foreground)"
+      : (currentColorByKey.get(item.key) ?? "var(--color-chart-1)");
+    return {
+      ...item,
+      displayLabel: item.isOther ? otherLabel : item.label,
+      color,
+      events: source?.events ?? 0,
+      sessions: source?.sessions ?? 0,
+      visitors: source?.visitors ?? 0,
+    };
+  });
+
+  return { current, comparison };
 }
 
 export function createEventTrendChartData(
@@ -169,6 +252,72 @@ function createEventTrendRenderData(
   return rows;
 }
 
+function comparisonDataKey(key: string): string {
+  return `${COMPARISON_DATA_PREFIX}${key}`;
+}
+
+function createEventTrendComparisonRenderData(
+  data: ReadonlyArray<EventTrendChartDataPoint>,
+  comparisonData: ReadonlyArray<EventTrendChartDataPoint>,
+  series: ReadonlyArray<EventTrendChartSeries>,
+  comparisonSeries: ReadonlyArray<EventTrendChartSeries>,
+  from: number,
+  to: number,
+  comparisonFrom: number,
+  comparisonTo: number,
+  interval: DashboardInterval,
+  timeZone: string,
+): EventTrendComparisonChartDataPoint[] {
+  const currentRenderData = createEventTrendRenderData(
+    data,
+    series,
+    from,
+    to,
+    interval,
+    timeZone,
+  );
+  const comparisonRenderData = createEventTrendRenderData(
+    comparisonData,
+    comparisonSeries,
+    comparisonFrom,
+    comparisonTo,
+    interval,
+    timeZone,
+  );
+  const length = Math.max(
+    currentRenderData.length,
+    comparisonRenderData.length,
+  );
+
+  return Array.from({ length }, (_, index) => {
+    const currentPoint = currentRenderData[index];
+    const comparisonPoint = comparisonRenderData[index];
+    const point: EventTrendComparisonChartDataPoint = {
+      timestampMs:
+        currentPoint?.timestampMs ?? comparisonPoint?.timestampMs ?? 0,
+      totalEvents: Math.max(0, Number(currentPoint?.totalEvents ?? 0)),
+      comparisonTimestampMs:
+        comparisonPoint?.timestampMs ?? currentPoint?.timestampMs ?? 0,
+      comparisonTotalEvents: Math.max(
+        0,
+        Number(comparisonPoint?.totalEvents ?? 0),
+      ),
+    };
+
+    for (const item of series) {
+      point[item.key] = Math.max(0, Number(currentPoint?.[item.key] ?? 0));
+    }
+    for (const item of comparisonSeries) {
+      point[comparisonDataKey(item.key)] = Math.max(
+        0,
+        Number(comparisonPoint?.[item.key] ?? 0),
+      );
+    }
+
+    return point;
+  });
+}
+
 function EventTrendTooltip({
   active,
   payload,
@@ -177,19 +326,25 @@ function EventTrendTooltip({
   series,
   activeSeriesKey,
   totalLabel,
+  currentPeriodLabel,
+  comparisonSeries,
+  comparisonLabel,
 }: {
   active?: boolean;
   payload?: Array<{
     dataKey?: string | number;
     name?: string | number;
     value?: number | string;
-    payload?: EventTrendChartDataPoint;
+    payload?: EventTrendChartDataPoint | EventTrendComparisonChartDataPoint;
   }>;
   dateFormatter: Intl.DateTimeFormat;
   locale: Locale;
   series: ReadonlyArray<EventTrendChartSeries>;
   activeSeriesKey: string | null;
   totalLabel: string;
+  currentPeriodLabel?: string;
+  comparisonSeries?: ReadonlyArray<EventTrendChartSeries>;
+  comparisonLabel?: string;
 }) {
   if (!active || !payload?.length) return null;
 
@@ -202,6 +357,87 @@ function EventTrendTooltip({
   const activeValue = activeSeries
     ? Math.max(0, Number(row[activeSeries.key] ?? 0))
     : null;
+  const hasComparison = Boolean(comparisonSeries?.length);
+  const comparisonRow = row as EventTrendComparisonChartDataPoint;
+  const comparisonItem = hasComparison
+    ? comparisonSeries?.find((item) => item.key === activeSeriesKey)
+    : undefined;
+  const comparisonValue = comparisonItem
+    ? Math.max(
+        0,
+        Number(comparisonRow[comparisonDataKey(comparisonItem.key)] ?? 0),
+      )
+    : null;
+  const currentLabel = currentPeriodLabel ?? "Current period";
+  const resolvedComparisonLabel = comparisonLabel ?? "Comparison";
+
+  if (hasComparison) {
+    const comparisonTotal = Math.max(
+      0,
+      Number(comparisonRow.comparisonTotalEvents ?? 0),
+    );
+    const totalRows = [
+      {
+        label: `${currentLabel} · ${totalLabel}`,
+        color: "var(--color-chart-1)",
+        value: Math.max(0, Number(row.totalEvents ?? 0)),
+      },
+      {
+        label: `${resolvedComparisonLabel} · ${totalLabel}`,
+        color: "var(--color-compare-chart-1)",
+        value: comparisonTotal,
+      },
+    ];
+
+    return (
+      <div className="grid min-w-[220px] items-start gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-2 text-xs shadow-xl">
+        <div className="font-medium text-foreground">
+          {dateFormatter.format(new Date(Number(row.timestampMs ?? 0)))}
+        </div>
+        <div className="grid gap-1.5">
+          {totalRows.map((item) => (
+            <div key={item.label} className="flex items-center gap-2">
+              <ChartTooltipIndicator color={item.color} />
+              <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+                <span className="text-muted-foreground">{item.label}</span>
+                <span className="font-mono font-semibold tabular-nums text-foreground">
+                  {numberFormat(locale, item.value)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+        {activeSeries && activeValue !== null ? (
+          <div className="mt-0.5 grid gap-1.5 border-t border-border/40 pt-1.5">
+            <div className="flex items-center gap-2">
+              <ChartTooltipIndicator color={activeSeries.color} />
+              <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+                <span className="truncate text-muted-foreground">
+                  {currentLabel} · {activeSeries.displayLabel}
+                </span>
+                <span className="font-mono font-semibold tabular-nums text-foreground">
+                  {numberFormat(locale, activeValue)}
+                </span>
+              </div>
+            </div>
+            {comparisonItem && comparisonValue !== null ? (
+              <div className="flex items-center gap-2">
+                <ChartTooltipIndicator color={comparisonItem.color} />
+                <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+                  <span className="truncate text-muted-foreground">
+                    {resolvedComparisonLabel} · {comparisonItem.displayLabel}
+                  </span>
+                  <span className="font-mono font-semibold tabular-nums text-foreground">
+                    {numberFormat(locale, comparisonValue)}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="grid min-w-[200px] items-start gap-1.5 rounded-none border border-border/50 bg-background px-2.5 py-2 text-xs shadow-xl">
@@ -240,11 +476,15 @@ export const EventTrendLegend = memo(function EventTrendLegend({
   data,
   series,
   hoveredPoint,
+  comparisonData,
+  comparisonSeries,
+  hoveredComparisonPoint,
   loading = false,
   cumulativeLabel,
   totalLabel,
   locale,
   dateFormatter,
+  comparisonLabel,
   onSelectEvent,
 }: EventTrendLegendProps) {
   const totals = useMemo(() => {
@@ -261,6 +501,25 @@ export const EventTrendLegend = memo(function EventTrendLegend({
     }
     return nextTotals;
   }, [data, series]);
+  const comparisonTotals = useMemo(() => {
+    const nextTotals: Record<string, number> = {};
+    for (const item of comparisonSeries ?? []) {
+      nextTotals[item.key] = 0;
+    }
+    for (const point of comparisonData ?? []) {
+      for (const item of comparisonSeries ?? []) {
+        nextTotals[item.key] =
+          (nextTotals[item.key] ?? 0) +
+          Math.max(0, Number(point[item.key] ?? 0));
+      }
+    }
+    return nextTotals;
+  }, [comparisonData, comparisonSeries]);
+  const comparisonSeriesByKey = useMemo(
+    () => new Map((comparisonSeries ?? []).map((item) => [item.key, item])),
+    [comparisonSeries],
+  );
+  const hasComparison = Boolean(comparisonData && comparisonSeries?.length);
 
   return (
     <div className="flex flex-col gap-4 border-t border-border/40 pt-4">
@@ -285,9 +544,18 @@ export const EventTrendLegend = memo(function EventTrendLegend({
             )}
           </AutoTransition>
         </span>
-        <span className="font-medium text-[11px] text-muted-foreground">
-          {totalLabel}
-        </span>
+        {hasComparison ? (
+          <span className="flex items-center gap-3 font-medium text-[11px] text-muted-foreground">
+            <span>{totalLabel}</span>
+            <span className="text-compare-primary">
+              {comparisonLabel ?? "Comparison"}
+            </span>
+          </span>
+        ) : (
+          <span className="font-medium text-[11px] text-muted-foreground">
+            {totalLabel}
+          </span>
+        )}
       </div>
 
       <AutoTransition
@@ -313,9 +581,15 @@ export const EventTrendLegend = memo(function EventTrendLegend({
               </div>
             ))
           : series.map((item) => {
-              const value = hoveredPoint
+              const currentValue = hoveredPoint
                 ? Math.max(0, Number(hoveredPoint[item.key] ?? 0))
                 : Math.max(0, Number(totals[item.key] ?? 0));
+              const comparisonItem = comparisonSeriesByKey.get(item.key);
+              const comparisonValue = comparisonItem
+                ? hoveredComparisonPoint
+                  ? Math.max(0, Number(hoveredComparisonPoint[item.key] ?? 0))
+                  : Math.max(0, Number(comparisonTotals[item.key] ?? 0))
+                : null;
               const clickable = !item.isOther && Boolean(onSelectEvent);
 
               return (
@@ -345,10 +619,18 @@ export const EventTrendLegend = memo(function EventTrendLegend({
                   </div>
                   <AutoTransition>
                     <span
-                      key={`${item.key}/${value}`}
-                      className="font-mono text-xs font-semibold tabular-nums text-foreground"
+                      key={`${item.key}/${currentValue}/${comparisonValue ?? "none"}`}
+                      className={cn(
+                        "font-mono text-xs font-semibold tabular-nums text-foreground",
+                        hasComparison && "grid grid-cols-2 gap-x-2 text-right",
+                      )}
                     >
-                      {numberFormat(locale, value)}
+                      <span>{numberFormat(locale, currentValue)}</span>
+                      {hasComparison ? (
+                        <span className="text-compare-primary">
+                          {numberFormat(locale, comparisonValue ?? 0)}
+                        </span>
+                      ) : null}
                     </span>
                   </AutoTransition>
                 </button>
@@ -371,6 +653,12 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
   emptyLabel,
   cumulativeLabel,
   totalLabel,
+  currentPeriodLabel,
+  comparisonData,
+  comparisonSeries,
+  comparisonFrom = from,
+  comparisonTo = to,
+  comparisonLabel,
   onSelectEvent,
   className,
 }: EventTrendBarChartProps) {
@@ -382,33 +670,86 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
     () => createChartTooltipDateFormatter(locale, interval, timeZone),
     [interval, locale, timeZone],
   );
+  const hasComparison = Boolean(comparisonData && comparisonSeries?.length);
   const chartData = useMemo(
     () =>
-      createEventTrendRenderData(data, series, from, to, interval, timeZone),
-    [data, from, interval, series, timeZone, to],
+      hasComparison
+        ? createEventTrendComparisonRenderData(
+            data,
+            comparisonData ?? [],
+            series,
+            comparisonSeries ?? [],
+            from,
+            to,
+            comparisonFrom,
+            comparisonTo,
+            interval,
+            timeZone,
+          )
+        : createEventTrendRenderData(
+            data,
+            series,
+            from,
+            to,
+            interval,
+            timeZone,
+          ),
+    [
+      comparisonData,
+      comparisonFrom,
+      comparisonSeries,
+      comparisonTo,
+      data,
+      from,
+      hasComparison,
+      interval,
+      series,
+      timeZone,
+      to,
+    ],
   );
   const yAxisNumberFormatter = useMemo(
     () => createChartNumberFormatter(intlLocale(locale)),
     [locale],
   );
   const yAxisWidth = useMemo(() => {
-    const labels = chartData.map((row) =>
-      yAxisNumberFormatter.format(Math.max(0, Number(row.totalEvents ?? 0))),
-    );
+    const labels = chartData.map((row) => {
+      const currentTotal = Math.max(0, Number(row.totalEvents ?? 0));
+      const comparisonTotal = hasComparison
+        ? Math.max(
+            0,
+            Number(
+              (row as EventTrendComparisonChartDataPoint)
+                .comparisonTotalEvents ?? 0,
+            ),
+          )
+        : 0;
+      return yAxisNumberFormatter.format(
+        Math.max(currentTotal, comparisonTotal),
+      );
+    });
     return calculateChartYAxisWidth(labels, 4);
-  }, [chartData, yAxisNumberFormatter]);
-  const chartConfig = useMemo(
-    () =>
-      series.reduce((config, item) => {
-        config[item.key] = {
+  }, [chartData, hasComparison, yAxisNumberFormatter]);
+  const chartConfig = useMemo(() => {
+    const config = series.reduce((result, item) => {
+      result[item.key] = {
+        label: item.displayLabel,
+        color: item.color,
+      };
+      return result;
+    }, {} as ChartConfig);
+    if (hasComparison) {
+      for (const item of comparisonSeries ?? []) {
+        config[comparisonDataKey(item.key)] = {
           label: item.displayLabel,
           color: item.color,
         };
-        return config;
-      }, {} as ChartConfig),
-    [series],
-  );
-  const hasContent = series.length > 0 && data.length > 0;
+      }
+    }
+    return config;
+  }, [comparisonSeries, hasComparison, series]);
+  const hasContent =
+    series.length > 0 && (data.length > 0 || (comparisonData?.length ?? 0) > 0);
   const hoveredTimestampRef = useRef<number | null>(null);
   const hoveredSeriesKeyRef = useRef<string | null>(null);
   const [hoveredPoint, setHoveredPoint] =
@@ -420,7 +761,7 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
     hoveredSeriesKeyRef.current = null;
     setHoveredPoint((current) => (current === null ? current : null));
     setHoveredSeriesKey((current) => (current === null ? current : null));
-  }, [data, series]);
+  }, [comparisonData, comparisonSeries, data, series]);
 
   const handleHoverPoint = useCallback(
     (point: EventTrendChartDataPoint | null) => {
@@ -444,6 +785,23 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
     },
     [onSelectEvent],
   );
+  const hoveredComparisonPoint = useMemo(() => {
+    if (!hasComparison || !hoveredPoint) return null;
+
+    const comparisonPoint = hoveredPoint as EventTrendComparisonChartDataPoint;
+    const point: EventTrendChartDataPoint = {
+      timestampMs:
+        comparisonPoint.comparisonTimestampMs ?? comparisonPoint.timestampMs,
+      totalEvents: comparisonPoint.comparisonTotalEvents ?? 0,
+    };
+    for (const item of comparisonSeries ?? []) {
+      point[item.key] = Math.max(
+        0,
+        Number(comparisonPoint[comparisonDataKey(item.key)] ?? 0),
+      );
+    }
+    return point;
+  }, [comparisonSeries, hasComparison, hoveredPoint]);
 
   return (
     <div className={cn("space-y-4", className)}>
@@ -457,6 +815,8 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
               accessibilityLayer
               data={chartData}
               margin={{ left: 12, right: 12, top: 12 }}
+              barCategoryGap={hasComparison ? "16%" : undefined}
+              barGap={hasComparison ? 2 : 0}
               onMouseMove={(state) => {
                 if (
                   state &&
@@ -497,12 +857,44 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
                 axisLine={false}
                 tickMargin={4}
               />
+              {hasComparison ? (
+                <defs>
+                  {(comparisonSeries ?? []).map((item, index) => (
+                    <pattern
+                      key={`${COMPARISON_PATTERN_PREFIX}${index}`}
+                      id={`${COMPARISON_PATTERN_PREFIX}${index}`}
+                      patternUnits="userSpaceOnUse"
+                      width="8"
+                      height="8"
+                    >
+                      <rect
+                        width="8"
+                        height="8"
+                        fill={item.color}
+                        fillOpacity={0.28}
+                      />
+                      <path
+                        d="M-2 2L2 -2M0 8L8 0M6 10L10 6"
+                        fill="none"
+                        stroke={item.color}
+                        strokeOpacity={0.76}
+                        strokeWidth={1.25}
+                      />
+                    </pattern>
+                  ))}
+                </defs>
+              ) : null}
               <ChartTooltip
                 allowEscapeViewBox={{ x: false, y: true }}
                 wrapperStyle={{ zIndex: 20 }}
                 content={
                   <EventTrendTooltip
                     activeSeriesKey={hoveredSeriesKey}
+                    comparisonLabel={comparisonLabel}
+                    comparisonSeries={
+                      hasComparison ? comparisonSeries : undefined
+                    }
+                    currentPeriodLabel={currentPeriodLabel}
                     dateFormatter={tooltipFormatter}
                     locale={locale}
                     series={series}
@@ -510,21 +902,52 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
                   />
                 }
               />
-              {series.map((item) => (
-                <Bar
-                  key={item.key}
-                  dataKey={item.key}
-                  stackId="events"
-                  fill={`var(--color-${item.key})`}
-                  radius={0}
-                  isAnimationActive
-                  onClick={() => selectEvent(item)}
-                  onMouseEnter={() => handleHoverSeries(item.key)}
-                  className={cn(
-                    !item.isOther && onSelectEvent && "cursor-pointer",
-                  )}
-                />
-              ))}
+              {hasComparison
+                ? [
+                    ...(comparisonSeries ?? []).map((item, index) => (
+                      <Bar
+                        key={`comparison-${item.key}`}
+                        dataKey={comparisonDataKey(item.key)}
+                        stackId="comparison-events"
+                        fill={`url(#${COMPARISON_PATTERN_PREFIX}${index})`}
+                        stroke={item.color}
+                        strokeWidth={1}
+                        radius={0}
+                        isAnimationActive
+                        onMouseEnter={() => handleHoverSeries(item.key)}
+                      />
+                    )),
+                    ...series.map((item) => (
+                      <Bar
+                        key={`current-${item.key}`}
+                        dataKey={item.key}
+                        stackId="current-events"
+                        fill={item.color}
+                        radius={0}
+                        isAnimationActive
+                        onClick={() => selectEvent(item)}
+                        onMouseEnter={() => handleHoverSeries(item.key)}
+                        className={cn(
+                          !item.isOther && onSelectEvent && "cursor-pointer",
+                        )}
+                      />
+                    )),
+                  ]
+                : series.map((item) => (
+                    <Bar
+                      key={item.key}
+                      dataKey={item.key}
+                      stackId="events"
+                      fill={item.color}
+                      radius={0}
+                      isAnimationActive
+                      onClick={() => selectEvent(item)}
+                      onMouseEnter={() => handleHoverSeries(item.key)}
+                      className={cn(
+                        !item.isOther && onSelectEvent && "cursor-pointer",
+                      )}
+                    />
+                  ))}
             </BarChart>
           </ChartContainer>
         ) : (
@@ -551,11 +974,15 @@ export const EventTrendBarChart = memo(function EventTrendBarChart({
         data={data}
         series={series}
         hoveredPoint={hoveredPoint}
+        comparisonData={hasComparison ? comparisonData : undefined}
+        comparisonSeries={hasComparison ? comparisonSeries : undefined}
+        hoveredComparisonPoint={hoveredComparisonPoint}
         loading={loading}
         cumulativeLabel={cumulativeLabel}
         totalLabel={totalLabel}
         locale={locale}
         dateFormatter={tooltipFormatter}
+        comparisonLabel={comparisonLabel}
         onSelectEvent={onSelectEvent}
       />
     </div>

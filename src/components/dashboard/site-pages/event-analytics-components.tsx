@@ -11,8 +11,10 @@ import {
 } from "react";
 import type { RemixiconComponentType } from "@remixicon/react";
 import {
+  RiArrowDownLine,
   RiArrowDownSLine,
   RiArrowLeftLine,
+  RiArrowUpLine,
   RiArrowUpSLine,
   RiCheckLine,
   RiDatabase2Line,
@@ -40,6 +42,7 @@ import { AnimatedDataTableRow } from "@/components/dashboard/animated-data-table
 import {
   createEventTrendChartData,
   createEventTrendChartSeries,
+  createEventTrendComparisonChartSeries,
   EventTrendBarChart,
 } from "@/components/dashboard/charts/event-trend-bar-chart";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
@@ -496,12 +499,14 @@ function EventMetricCell({
   label,
   value,
   detail,
+  detailKey,
   loading = false,
 }: {
   icon: RemixiconComponentType;
   label: string;
   value: string;
-  detail: string;
+  detail: ReactNode;
+  detailKey?: string;
   loading?: boolean;
 }) {
   const contentKey = loading ? "loading" : value;
@@ -541,7 +546,7 @@ function EventMetricCell({
       </AutoResizer>
       <AutoTransition
         initial={false}
-        transitionKey={loading ? "loading" : detail}
+        transitionKey={loading ? "loading" : (detailKey ?? "detail")}
         className="mt-3 h-[14px]"
         duration={0.2}
         type="fade"
@@ -554,7 +559,7 @@ function EventMetricCell({
           />
         ) : (
           <p
-            key={detail}
+            key={detailKey ?? "detail"}
             className="h-[14px] min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground"
           >
             {detail}
@@ -565,23 +570,73 @@ function EventMetricCell({
   );
 }
 
+type EventMetricSummary = {
+  events: number;
+  eventTypes: number;
+  sessions: number;
+  visitors: number;
+  avgEventsPerSession: number;
+  shareOfAllEvents?: number;
+};
+
+function eventMetricDelta(current: number, comparison: number): number | null {
+  if (!Number.isFinite(current) || !Number.isFinite(comparison)) return null;
+  if (comparison === 0) return null;
+  return ((current - comparison) / comparison) * 100;
+}
+
+function EventMetricComparisonDetail({
+  locale,
+  comparisonLabel,
+  comparisonValue,
+  currentValue,
+  formatValue = (value) => numberFormat(locale, value),
+}: {
+  locale: Locale;
+  comparisonLabel: string;
+  comparisonValue: number;
+  currentValue: number;
+  formatValue?: (value: number) => string;
+}) {
+  const delta = eventMetricDelta(currentValue, comparisonValue);
+  const DeltaIcon =
+    delta !== null && delta >= 0 ? RiArrowUpLine : RiArrowDownLine;
+
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+      <span className="min-w-0 truncate">
+        {comparisonLabel}: {formatValue(comparisonValue)}
+      </span>
+      {delta !== null ? (
+        <span
+          className={cn(
+            "inline-flex shrink-0 items-center gap-0.5 font-mono tabular-nums",
+            delta >= 0 ? "text-emerald-600" : "text-rose-600",
+          )}
+        >
+          <DeltaIcon className="size-3" />
+          {delta >= 0 ? "+" : ""}
+          {delta.toFixed(1)}%
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export const EventMetricGrid = memo(function EventMetricGrid({
   locale,
   labels,
   summary,
+  comparisonSummary,
+  comparisonLabel,
   includeShare,
   loading = false,
 }: {
   locale: Locale;
   labels: EventPageCopy;
-  summary: {
-    events: number;
-    eventTypes: number;
-    sessions: number;
-    visitors: number;
-    avgEventsPerSession: number;
-    shareOfAllEvents?: number;
-  };
+  summary: EventMetricSummary;
+  comparisonSummary?: EventMetricSummary;
+  comparisonLabel?: string;
   includeShare?: boolean;
   loading?: boolean;
 }) {
@@ -593,6 +648,50 @@ export const EventMetricGrid = memo(function EventMetricGrid({
     includeShare && summary.shareOfAllEvents !== undefined
       ? percentFormat(locale, summary.shareOfAllEvents)
       : null;
+  const comparisonDetails = comparisonSummary
+    ? {
+        events: (
+          <EventMetricComparisonDetail
+            locale={locale}
+            comparisonLabel={comparisonLabel ?? "Comparison"}
+            comparisonValue={comparisonSummary.events}
+            currentValue={summary.events}
+          />
+        ),
+        eventTypes: (
+          <EventMetricComparisonDetail
+            locale={locale}
+            comparisonLabel={comparisonLabel ?? "Comparison"}
+            comparisonValue={comparisonSummary.eventTypes}
+            currentValue={summary.eventTypes}
+          />
+        ),
+        sessions: (
+          <EventMetricComparisonDetail
+            locale={locale}
+            comparisonLabel={comparisonLabel ?? "Comparison"}
+            comparisonValue={comparisonSummary.sessions}
+            currentValue={summary.sessions}
+          />
+        ),
+        visitors: (
+          <EventMetricComparisonDetail
+            locale={locale}
+            comparisonLabel={comparisonLabel ?? "Comparison"}
+            comparisonValue={comparisonSummary.visitors}
+            currentValue={summary.visitors}
+          />
+        ),
+        average: (
+          <EventMetricComparisonDetail
+            locale={locale}
+            comparisonLabel={comparisonLabel ?? "Comparison"}
+            comparisonValue={comparisonSummary.avgEventsPerSession}
+            currentValue={summary.avgEventsPerSession}
+          />
+        ),
+      }
+    : null;
 
   return (
     <Card className="py-0">
@@ -604,9 +703,15 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             loading={loading}
             value={numberFormat(locale, summary.events)}
             detail={
-              share
+              comparisonDetails?.events ??
+              (share
                 ? `${labels.shareOfAllEvents}: ${share}`
-                : labels.detailSubtitle
+                : labels.detailSubtitle)
+            }
+            detailKey={
+              comparisonSummary
+                ? `comparison-events:${comparisonSummary.events}:${summary.events}`
+                : "events-detail"
             }
           />
           <EventMetricCell
@@ -614,21 +719,39 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             label={labels.eventTypes}
             loading={loading}
             value={numberFormat(locale, summary.eventTypes)}
-            detail={labels.breakdownTitle}
+            detail={comparisonDetails?.eventTypes ?? labels.breakdownTitle}
+            detailKey={
+              comparisonSummary
+                ? `comparison-event-types:${comparisonSummary.eventTypes}:${summary.eventTypes}`
+                : "event-types-detail"
+            }
           />
           <EventMetricCell
             icon={RiFileList3Line}
             label={labels.sessions}
             loading={loading}
             value={numberFormat(locale, summary.sessions)}
-            detail={`${labels.avgEventsPerSession}: ${average}`}
+            detail={
+              comparisonDetails?.average ??
+              `${labels.avgEventsPerSession}: ${average}`
+            }
+            detailKey={
+              comparisonSummary
+                ? `comparison-average:${comparisonSummary.avgEventsPerSession}:${summary.avgEventsPerSession}`
+                : "sessions-detail"
+            }
           />
           <EventMetricCell
             icon={RiDatabase2Line}
             label={labels.visitors}
             loading={loading}
             value={numberFormat(locale, summary.visitors)}
-            detail={labels.recordsTitle}
+            detail={comparisonDetails?.visitors ?? labels.recordsTitle}
+            detailKey={
+              comparisonSummary
+                ? `comparison-visitors:${comparisonSummary.visitors}:${summary.visitors}`
+                : "visitors-detail"
+            }
           />
         </div>
       </CardContent>
@@ -640,10 +763,14 @@ export const EventTrendStackedBarCard = memo(function EventTrendStackedBarCard({
   locale,
   labels,
   trend,
+  comparisonTrend,
+  comparisonWindow,
   window: timeWindow,
   title,
   loading,
   cumulativeLabel,
+  currentPeriodLabel,
+  comparisonLabel,
   onSelectEvent,
 }: {
   locale: Locale;
@@ -651,19 +778,47 @@ export const EventTrendStackedBarCard = memo(function EventTrendStackedBarCard({
   trend:
     | EventsTrendData
     | { series: EventTrendSeries[]; data: EventsTrendData["data"] };
+  comparisonTrend?:
+    | EventsTrendData
+    | { series: EventTrendSeries[]; data: EventsTrendData["data"] };
+  comparisonWindow?: Pick<TimeWindow, "from" | "to">;
   window: TimeWindow;
   title: string;
   loading?: boolean;
   cumulativeLabel: string;
+  currentPeriodLabel?: string;
+  comparisonLabel?: string;
   onSelectEvent?: (eventName: string) => void;
 }) {
-  const series = useMemo(
+  const comparisonSeries = useMemo(
+    () =>
+      comparisonTrend
+        ? createEventTrendComparisonChartSeries(
+            trend.series,
+            comparisonTrend.series,
+            labels.other,
+          )
+        : null,
+    [comparisonTrend, labels.other, trend.series],
+  );
+  const defaultSeries = useMemo(
     () => createEventTrendChartSeries(trend.series, labels.other),
     [labels.other, trend.series],
   );
+  const series = comparisonSeries?.current ?? defaultSeries;
   const chartData = useMemo(
     () => createEventTrendChartData(trend.data, series),
     [series, trend.data],
+  );
+  const comparisonChartData = useMemo(
+    () =>
+      comparisonTrend && comparisonSeries
+        ? createEventTrendChartData(
+            comparisonTrend.data,
+            comparisonSeries.comparison,
+          )
+        : undefined,
+    [comparisonSeries, comparisonTrend],
   );
 
   return (
@@ -689,6 +844,12 @@ export const EventTrendStackedBarCard = memo(function EventTrendStackedBarCard({
           emptyLabel={labels.empty}
           cumulativeLabel={cumulativeLabel}
           totalLabel={labels.totalEvents}
+          currentPeriodLabel={currentPeriodLabel}
+          comparisonData={comparisonChartData}
+          comparisonSeries={comparisonSeries?.comparison}
+          comparisonFrom={comparisonWindow?.from}
+          comparisonTo={comparisonWindow?.to}
+          comparisonLabel={comparisonLabel}
           onSelectEvent={onSelectEvent}
         />
       </CardContent>

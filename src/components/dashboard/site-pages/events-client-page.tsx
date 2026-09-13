@@ -28,6 +28,7 @@ import {
   fetchEventsSummary,
   fetchEventsTrend,
 } from "@/lib/dashboard/client-data";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -154,6 +155,16 @@ function detailQueryTarget(
   return query ? `${pathname}?${query}` : pathname;
 }
 
+function comparisonLabelForEvents(
+  messages: AppMessages,
+  mode: "same" | "previous" | undefined,
+  hasComparisonFilter: boolean,
+): string {
+  return mode === "previous" && !hasComparisonFilter
+    ? messages.dashboardHeader.previousPeriod
+    : messages.dashboardHeader.compareButton;
+}
+
 export function EventsClientPage({
   locale,
   messages,
@@ -174,6 +185,26 @@ export function EventsClientPage({
     [searchParamsKey],
   );
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonQuery = useMemo(
+    () =>
+      resolveDashboardComparisonQuery(
+        new URLSearchParams(searchParamsKey),
+        timeWindow,
+        filters,
+      ),
+    [
+      filters,
+      searchParamsKey,
+      timeWindow.from,
+      timeWindow.interval,
+      timeWindow.timeZone,
+      timeWindow.to,
+    ],
+  );
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
+    [comparisonQuery],
+  );
 
   useEffect(() => {
     if (!detailEventName) {
@@ -191,22 +222,57 @@ export function EventsClientPage({
       timeWindow.interval,
       timeWindow.timeZone,
       filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
     ],
     queryFn: async ({ signal }) => {
-      const [summary, trend] = await Promise.all([
+      const currentRequest = Promise.all([
         fetchEventsSummary(siteId, timeWindow, filters, { signal }),
         fetchEventsTrend(siteId, timeWindow, filters, {
           limit: EVENT_TREND_MAX_SERIES,
           signal,
         }),
       ]);
-      return { summary, trend };
+      if (!comparisonQuery) {
+        const [summary, trend] = await currentRequest;
+        return { summary, trend };
+      }
+
+      const comparisonRequest = Promise.all([
+        fetchEventsSummary(
+          siteId,
+          comparisonQuery.window,
+          comparisonQuery.filters,
+          { signal },
+        ),
+        fetchEventsTrend(
+          siteId,
+          comparisonQuery.window,
+          comparisonQuery.filters,
+          {
+            limit: EVENT_TREND_MAX_SERIES,
+            signal,
+          },
+        ),
+      ]);
+      const [[summary, trend], [comparisonSummary, comparisonTrend]] =
+        await Promise.all([currentRequest, comparisonRequest]);
+      return { summary, trend, comparisonSummary, comparisonTrend };
     },
     enabled: typeof window !== "undefined",
   });
   const loading = isPending || isFetching;
   const summary = data?.summary ?? emptySummary();
   const trend = data?.trend ?? emptyTrend(timeWindow.interval);
+  const comparisonLabel = comparisonLabelForEvents(
+    messages,
+    comparisonQuery?.mode,
+    Boolean(comparisonQuery?.filters.root),
+  );
   const initialLoading = isPending && !data;
 
   const openEventType = useCallback(
@@ -258,6 +324,8 @@ export function EventsClientPage({
         locale={locale}
         labels={labels}
         summary={summary.summary}
+        comparisonSummary={data?.comparisonSummary?.summary}
+        comparisonLabel={comparisonLabel}
         loading={loading}
       />
 
@@ -265,10 +333,14 @@ export function EventsClientPage({
         locale={locale}
         labels={labels}
         trend={trend}
+        comparisonTrend={data?.comparisonTrend}
+        comparisonWindow={comparisonQuery?.window}
         window={timeWindow}
         title={labels.trendTitle}
         loading={loading}
         cumulativeLabel={messages.common.cumulativeEvents}
+        currentPeriodLabel={messages.dashboardHeader.compareCurrentPeriod}
+        comparisonLabel={comparisonLabel}
         onSelectEvent={openEventType}
       />
 
