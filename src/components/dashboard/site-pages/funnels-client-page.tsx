@@ -13,6 +13,10 @@ import {
   DetailDrawer,
 } from "@/components/dashboard/site-pages/detail-query-modal";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import { useInfiniteTableSentinel } from "@/components/dashboard/use-infinite-table-sentinel";
 import {
   AlertDialog,
@@ -40,6 +44,7 @@ import {
   fetchFunnels,
   updateFunnel,
 } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -111,6 +116,8 @@ function FunnelDetailDrawer({
   window,
   filters,
   filterKey,
+  comparisonQuery,
+  comparisonLabel,
   canManage,
   onEdit,
   onDelete,
@@ -125,10 +132,15 @@ function FunnelDetailDrawer({
   readonly window: TimeWindow;
   readonly filters: FilterDocument;
   readonly filterKey: string;
+  readonly comparisonQuery?: DashboardComparisonQuery | null;
+  readonly comparisonLabel?: string;
   readonly canManage: boolean;
   readonly onEdit: (funnel: FunnelDefinition) => void;
   readonly onDelete: (funnel: FunnelDefinition) => void;
 }) {
+  const comparisonFilterKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
   const detail = useQuery({
     queryKey: funnel
       ? funnelDetailQueryKey(siteId, funnel, window, filterKey)
@@ -146,14 +158,53 @@ function FunnelDetailDrawer({
       fetchFunnelDetail(siteId, funnelId, window, filters, { signal }),
     enabled: Boolean(funnelId),
   });
+  const comparisonDetail = useQuery({
+    queryKey:
+      funnel && comparisonQuery
+        ? funnelDetailQueryKey(
+            siteId,
+            funnel,
+            comparisonQuery.window,
+            comparisonFilterKey,
+          )
+        : [
+            "dashboard",
+            "funnel-detail-comparison-disabled",
+            siteId,
+            funnelId,
+            comparisonQuery?.window.from ?? "none",
+            comparisonQuery?.window.to ?? "none",
+            comparisonQuery?.window.timeZone ?? "none",
+            comparisonFilterKey,
+          ],
+    queryFn: ({ signal }) => {
+      if (!comparisonQuery) {
+        throw new Error("Comparison query is not enabled");
+      }
+      return fetchFunnelDetail(
+        siteId,
+        funnelId,
+        comparisonQuery.window,
+        comparisonQuery.filters,
+        { signal },
+      );
+    },
+    enabled: Boolean(funnelId && comparisonQuery),
+  });
   return (
     <FunnelDetail
       locale={locale}
       labels={labels}
       descriptionMessages={descriptionMessages}
       payload={detail.data}
+      comparisonAnalysis={comparisonDetail.data?.data.analysis}
       funnel={funnel}
-      loading={detail.isPending}
+      loading={detail.isFetching || !detail.data}
+      comparisonLoading={
+        Boolean(comparisonQuery) &&
+        (comparisonDetail.isFetching || !comparisonDetail.data)
+      }
+      comparisonLabel={comparisonLabel}
       error={detail.isError}
       canManage={canManage}
       onEdit={onEdit}
@@ -182,6 +233,8 @@ export function FunnelsClientPage({
   const detailId = searchParams.get(DETAIL_QUERY_PARAM)?.trim() ?? "";
   const queryClient = useQueryClient();
   const filterKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonQuery = useDashboardComparisonQuery(timeWindow, filters);
+  const comparisonLabel = dashboardComparisonLabel(messages, comparisonQuery);
   const listKey = useMemo(
     () => ["dashboard", "funnels", siteId] as const,
     [siteId],
@@ -387,6 +440,7 @@ export function FunnelsClientPage({
                 window={timeWindow}
                 filters={filters}
                 filterKey={filterKey}
+                comparisonQuery={comparisonQuery}
                 canManage={canManage}
                 onOpen={() => openDetail(funnel.id)}
                 onEdit={() => openEdit(funnel)}
@@ -439,6 +493,8 @@ export function FunnelsClientPage({
             window={timeWindow}
             filters={filters}
             filterKey={filterKey}
+            comparisonQuery={comparisonQuery}
+            comparisonLabel={comparisonLabel}
             canManage={canManage}
             onEdit={openEdit}
             onDelete={setDeleteTarget}

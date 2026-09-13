@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchFunnelDetail } from "@/lib/dashboard/client-data";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FunnelDefinition } from "@/lib/edge-client";
 import type { FilterDocument } from "@/lib/filter-contract";
@@ -134,6 +136,7 @@ export function FunnelCard({
   window,
   filters,
   filterKey,
+  comparisonQuery,
   canManage,
   onOpen,
   onEdit,
@@ -147,17 +150,44 @@ export function FunnelCard({
   readonly window: TimeWindow;
   readonly filters: FilterDocument;
   readonly filterKey: string;
+  readonly comparisonQuery?: DashboardComparisonQuery | null;
   readonly canManage: boolean;
   readonly onOpen: () => void;
   readonly onEdit: () => void;
   readonly onDelete: () => void;
 }) {
   const { ref, near } = useNearViewport();
+  const comparisonFilterKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
   const detail = useQuery({
     queryKey: funnelDetailQueryKey(siteId, funnel, window, filterKey),
     queryFn: ({ signal }) =>
       fetchFunnelDetail(siteId, funnel.id, window, filters, { signal }),
     enabled: near,
+  });
+  const comparisonDetail = useQuery({
+    queryKey: comparisonQuery
+      ? funnelDetailQueryKey(
+          siteId,
+          funnel,
+          comparisonQuery.window,
+          comparisonFilterKey,
+        )
+      : ["dashboard", "funnel-detail-comparison-disabled", siteId, funnel.id],
+    queryFn: ({ signal }) => {
+      if (!comparisonQuery) {
+        throw new Error("Comparison query is not enabled");
+      }
+      return fetchFunnelDetail(
+        siteId,
+        funnel.id,
+        comparisonQuery.window,
+        comparisonQuery.filters,
+        { signal },
+      );
+    },
+    enabled: near && Boolean(comparisonQuery),
   });
 
   return (
@@ -205,8 +235,13 @@ export function FunnelCard({
               descriptionMessages={descriptionMessages}
               funnel={detail.data?.data.funnel ?? funnel}
               analysis={detail.data?.data.analysis}
+              comparisonAnalysis={comparisonDetail.data?.data.analysis}
               compact
               loading={detail.isFetching || !detail.data}
+              comparisonLoading={
+                Boolean(comparisonQuery) &&
+                (comparisonDetail.isFetching || !comparisonDetail.data)
+              }
             />
           )}
         </CardContent>

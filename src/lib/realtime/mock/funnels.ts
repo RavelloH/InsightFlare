@@ -6,6 +6,7 @@ import type {
   FunnelMutationData,
   FunnelStep,
 } from "@/lib/edge-client";
+import { fnv1a } from "@/lib/realtime/demo-utils";
 import { demoBadRequest, demoNotFound } from "@/lib/realtime/mock/envelope";
 import { demoPage } from "@/lib/realtime/mock/pagination";
 import type { ErrorEnvelope } from "@/lib/response-envelope";
@@ -72,14 +73,35 @@ function siteFunnels(siteId: string): FunnelDefinition[] {
   return templates.map(cloneFunnel);
 }
 
-function analysisFor(funnel: FunnelDefinition): FunnelAnalysis {
-  const base = funnel.id.includes("checkout") ? 1260 : 1840;
+function analysisFor(
+  funnel: FunnelDefinition,
+  params: Record<string, string | number> = {},
+): FunnelAnalysis {
+  const range = `${String(params.from ?? "")}::${String(params.to ?? "")}`;
+  const filter = Object.entries(params)
+    .filter(([key]) => key.startsWith("filter["))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join("&");
+  const hash = fnv1a(`${funnel.id}::${range}::${filter}`);
+  const volumeFactor = 0.84 + (hash % 25) / 100;
+  const retentionFactor = 0.9 + ((hash >>> 8) % 21) / 100;
+  const base = Math.round(
+    (funnel.id.includes("checkout") ? 1260 : 1840) * volumeFactor,
+  );
   const retention = funnel.id.includes("checkout")
     ? [1, 0.62, 0.39, 0.24]
     : [1, 0.54, 0.38, 0.31];
   const progressionCounts = funnel.steps.map((_, index) =>
     Math.round(
-      base * (retention[index] ?? Math.max(0.12, 0.31 - index * 0.06)),
+      base *
+        (index === 0
+          ? 1
+          : Math.max(
+              0.04,
+              (retention[index] ?? Math.max(0.12, 0.31 - index * 0.06)) *
+                retentionFactor,
+            )),
     ),
   );
   const sessionCounts = progressionCounts.map((count) =>
@@ -148,7 +170,10 @@ export function generateDemoFunnels(
   if (!funnel) return demoNotFound();
   if (funnel.steps.length < 2)
     return demoBadRequest("Funnel has fewer than 2 steps");
-  return { ok: true, data: { funnel, analysis: analysisFor(funnel) } };
+  return {
+    ok: true,
+    data: { funnel, analysis: analysisFor(funnel, params) },
+  };
 }
 
 function parseV2Input(record: Record<string, unknown>): {

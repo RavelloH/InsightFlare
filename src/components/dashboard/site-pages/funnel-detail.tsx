@@ -7,6 +7,7 @@ import {
 } from "@remixicon/react";
 
 import { AnalysisJourneyTable } from "@/components/dashboard/site-pages/analysis-journey-table";
+import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +26,7 @@ import {
 } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
+  FunnelAnalysis,
   FunnelAnalysisStep,
   FunnelDefinition,
   FunnelDetailData,
@@ -34,6 +36,8 @@ import type { Locale } from "@/lib/i18n/config";
 import { type AppMessages, getMessages } from "@/lib/i18n/messages";
 
 import {
+  FunnelChangeRateInline,
+  funnelComparisonChange,
   funnelConvertedLabel,
   type FunnelDescriptionMessages,
   funnelMetricKey,
@@ -61,13 +65,27 @@ function FunnelMetric({
   label,
   value,
   detail,
+  comparisonLabel,
+  comparisonDetail,
+  comparisonChange = null,
+  comparisonLoading = false,
   loading = false,
 }: {
   readonly label: string;
   readonly value: string;
   readonly detail: string;
+  readonly comparisonLabel?: string;
+  readonly comparisonDetail?: string;
+  readonly comparisonChange?: number | null;
+  readonly comparisonLoading?: boolean;
   readonly loading?: boolean;
 }) {
+  const showComparison = Boolean(
+    comparisonLabel &&
+    (comparisonLoading ||
+      (comparisonDetail !== undefined && comparisonDetail !== null)),
+  );
+
   return (
     <div className="min-w-0 bg-card p-4">
       <p className="truncate text-[11px] uppercase text-muted-foreground">
@@ -92,23 +110,107 @@ function FunnelMetric({
           </p>
         )}
       </AutoTransition>
-      <AutoTransition
-        initial={false}
-        transitionKey={loading ? "loading" : detail}
-        duration={0.18}
-        type="fade"
-        presenceMode="wait"
-        className="mt-3 h-4"
-      >
-        {loading ? (
-          <Skeleton key="loading" className="h-3 w-32" />
-        ) : (
-          <p key="ready" className="truncate text-[11px] text-muted-foreground">
-            {detail}
-          </p>
-        )}
-      </AutoTransition>
+      <AutoResizer className="mt-3 min-w-0" duration={0.2}>
+        <AutoTransition
+          initial={false}
+          transitionKey={
+            loading
+              ? "loading"
+              : showComparison
+                ? `comparison:${comparisonDetail}:${comparisonChange ?? ""}`
+                : `current:${detail}`
+          }
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+          className="min-h-4"
+        >
+          {loading || (showComparison && comparisonLoading) ? (
+            <Skeleton key="loading" className="h-3 w-32" />
+          ) : showComparison ? (
+            <p
+              key="comparison"
+              className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+            >
+              <span className="min-w-0 truncate">
+                {comparisonLabel}: {comparisonDetail}
+              </span>
+              <FunnelChangeRateInline value={comparisonChange} />
+            </p>
+          ) : (
+            <p
+              key="detail"
+              className="truncate text-[11px] text-muted-foreground"
+            >
+              {detail}
+            </p>
+          )}
+        </AutoTransition>
+      </AutoResizer>
     </div>
+  );
+}
+
+function FunnelStepValue({
+  value,
+  comparisonChange,
+  loading,
+  comparisonLoading,
+  hasComparison,
+}: {
+  readonly value: string;
+  readonly comparisonChange: number | null;
+  readonly loading: boolean;
+  readonly comparisonLoading: boolean;
+  readonly hasComparison: boolean;
+}) {
+  const showComparison =
+    hasComparison && (comparisonLoading || comparisonChange !== null);
+
+  return (
+    <AutoResizer className="mt-1 min-w-0" duration={0.2}>
+      <div className="min-w-0">
+        <AutoTransition
+          initial={false}
+          transitionKey={loading ? "loading" : value}
+          duration={0.18}
+          type="fade"
+          presenceMode="wait"
+          className="min-h-4"
+        >
+          {loading ? (
+            <Skeleton key="loading" className="h-4 w-14" />
+          ) : (
+            <p key="ready" className="font-mono">
+              {value}
+            </p>
+          )}
+        </AutoTransition>
+        {showComparison ? (
+          <AutoTransition
+            initial={false}
+            transitionKey={
+              comparisonLoading
+                ? "comparison-loading"
+                : String(comparisonChange)
+            }
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="mt-1 min-h-4"
+          >
+            {comparisonLoading ? (
+              <Skeleton key="comparison-loading" className="h-4 w-14" />
+            ) : (
+              <FunnelChangeRateInline
+                key="comparison-ready"
+                value={comparisonChange}
+              />
+            )}
+          </AutoTransition>
+        ) : null}
+      </div>
+    </AutoResizer>
   );
 }
 
@@ -118,9 +220,11 @@ function FunnelStepRow({
   descriptionMessages,
   funnelStep,
   analysisStep,
+  comparisonAnalysisStep,
   index,
   metric,
   loading = false,
+  comparisonLoading = false,
   selected = false,
 }: {
   readonly locale: Locale;
@@ -128,9 +232,11 @@ function FunnelStepRow({
   readonly descriptionMessages: FunnelDescriptionMessages;
   readonly funnelStep: FunnelDefinition["steps"][number];
   readonly analysisStep?: FunnelAnalysisStep;
+  readonly comparisonAnalysisStep?: FunnelAnalysisStep;
   readonly index: number;
   readonly metric: "sessions" | "visitors";
   readonly loading?: boolean;
+  readonly comparisonLoading?: boolean;
   readonly selected?: boolean;
 }) {
   const stepRate = analysisStep?.progression.stepConversionRate ?? 0;
@@ -141,10 +247,27 @@ function FunnelStepRow({
   const secondaryCount = analysisStep
     ? funnelMetricValue(analysisStep, secondaryMetric)
     : 0;
+  const comparisonPrimaryCount = comparisonAnalysisStep
+    ? funnelMetricValue(comparisonAnalysisStep, metric)
+    : undefined;
+  const comparisonSecondaryCount = comparisonAnalysisStep
+    ? funnelMetricValue(comparisonAnalysisStep, secondaryMetric)
+    : undefined;
+  const comparisonStepRate =
+    comparisonAnalysisStep?.progression.stepConversionRate;
+  const comparisonDropOffCount =
+    comparisonAnalysisStep?.progression.dropOffCount;
   const width =
     conversionRate <= 0
       ? "0%"
       : `${Math.max(2, Math.min(100, conversionRate * 100))}%`;
+  const comparisonConversionRate =
+    comparisonAnalysisStep?.progression.conversionRate ?? 0;
+  const comparisonWidth =
+    comparisonConversionRate <= 0
+      ? "0%"
+      : `${Math.max(2, Math.min(100, comparisonConversionRate * 100))}%`;
+  const hasComparison = comparisonLoading || Boolean(comparisonAnalysisStep);
 
   return (
     <div
@@ -178,107 +301,120 @@ function FunnelStepRow({
                 </div>
               )}
             </AutoTransition>
-            <AutoTransition
-              initial={false}
-              transitionKey={loading ? "loading" : width}
-              duration={0.18}
-              type="fade"
-              presenceMode="wait"
-              className="h-3 overflow-hidden bg-muted"
-            >
-              {loading ? (
-                <Skeleton key="loading" className="h-full w-full" />
-              ) : (
-                <div
-                  key="ready"
-                  className="h-full bg-primary transition-[width]"
-                  style={{ width }}
-                />
-              )}
-            </AutoTransition>
+            <AutoResizer className="min-w-0" duration={0.2}>
+              <div className={hasComparison ? "space-y-1" : undefined}>
+                <AutoTransition
+                  initial={false}
+                  transitionKey={loading ? "loading" : width}
+                  duration={0.18}
+                  type="fade"
+                  presenceMode="wait"
+                  className="h-3 overflow-hidden bg-muted"
+                >
+                  {loading ? (
+                    <Skeleton key="loading" className="h-full w-full" />
+                  ) : (
+                    <div
+                      key="ready"
+                      className="h-full bg-primary transition-[width] motion-reduce:transition-none"
+                      style={{ width }}
+                    />
+                  )}
+                </AutoTransition>
+                {hasComparison ? (
+                  <AutoTransition
+                    initial={false}
+                    transitionKey={
+                      comparisonLoading
+                        ? "comparison-loading"
+                        : comparisonConversionRate
+                    }
+                    duration={0.18}
+                    type="fade"
+                    presenceMode="wait"
+                    className="h-1 overflow-hidden bg-muted"
+                  >
+                    {comparisonLoading ? (
+                      <Skeleton
+                        key="comparison-loading"
+                        className="h-full w-full rounded-none"
+                      />
+                    ) : comparisonAnalysisStep ? (
+                      <div
+                        key="comparison-ready"
+                        className="h-full bg-amber-500/80 transition-[width] motion-reduce:transition-none dark:bg-amber-300/80"
+                        style={{ width: comparisonWidth }}
+                      />
+                    ) : (
+                      <div
+                        key="comparison-empty"
+                        className="h-full w-0"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </AutoTransition>
+                ) : null}
+              </div>
+            </AutoResizer>
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
             <div>
               <p className="text-muted-foreground">
                 {funnelMetricLabel(labels, metric)}
               </p>
-              <AutoTransition
-                initial={false}
-                transitionKey={loading ? "loading" : primaryCount}
-                duration={0.18}
-                type="fade"
-                presenceMode="wait"
-                className="mt-1 h-4"
-              >
-                {loading ? (
-                  <Skeleton key="loading" className="h-4 w-14" />
-                ) : (
-                  <p key="ready" className="font-mono">
-                    {numberFormat(locale, primaryCount)}
-                  </p>
+              <FunnelStepValue
+                value={numberFormat(locale, primaryCount)}
+                comparisonChange={funnelComparisonChange(
+                  primaryCount,
+                  comparisonPrimaryCount,
                 )}
-              </AutoTransition>
+                loading={loading}
+                comparisonLoading={comparisonLoading}
+                hasComparison={hasComparison}
+              />
             </div>
             <div>
               <p className="text-muted-foreground">
                 {funnelMetricLabel(labels, secondaryMetric)}
               </p>
-              <AutoTransition
-                initial={false}
-                transitionKey={loading ? "loading" : secondaryCount}
-                duration={0.18}
-                type="fade"
-                presenceMode="wait"
-                className="mt-1 h-4"
-              >
-                {loading ? (
-                  <Skeleton key="loading" className="h-4 w-14" />
-                ) : (
-                  <p key="ready" className="font-mono">
-                    {numberFormat(locale, secondaryCount)}
-                  </p>
+              <FunnelStepValue
+                value={numberFormat(locale, secondaryCount)}
+                comparisonChange={funnelComparisonChange(
+                  secondaryCount,
+                  comparisonSecondaryCount,
                 )}
-              </AutoTransition>
+                loading={loading}
+                comparisonLoading={comparisonLoading}
+                hasComparison={hasComparison}
+              />
             </div>
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-3 text-xs">
             <div>
               <p className="text-muted-foreground">{labels.stepConversion}</p>
-              <AutoTransition
-                initial={false}
-                transitionKey={loading ? "loading" : stepRate}
-                duration={0.18}
-                type="fade"
-                presenceMode="wait"
-                className="mt-1 h-4"
-              >
-                {loading ? (
-                  <Skeleton key="loading" className="h-4 w-14" />
-                ) : (
-                  <p key="ready" className="font-mono">
-                    {percentFormat(locale, stepRate)}
-                  </p>
+              <FunnelStepValue
+                value={percentFormat(locale, stepRate)}
+                comparisonChange={funnelComparisonChange(
+                  stepRate,
+                  comparisonStepRate,
                 )}
-              </AutoTransition>
+                loading={loading}
+                comparisonLoading={comparisonLoading}
+                hasComparison={hasComparison}
+              />
             </div>
             <div>
               <p className="text-muted-foreground">{labels.dropOff}</p>
-              <AutoTransition
-                initial={false}
-                transitionKey={loading ? "loading" : dropOffCount}
-                duration={0.18}
-                type="fade"
-                presenceMode="wait"
-                className="mt-1 h-4"
-              >
-                {loading ? (
-                  <Skeleton key="loading" className="h-4 w-14" />
-                ) : (
-                  <p key="ready" className="font-mono">
-                    {numberFormat(locale, dropOffCount)}
-                  </p>
+              <FunnelStepValue
+                value={numberFormat(locale, dropOffCount)}
+                comparisonChange={funnelComparisonChange(
+                  dropOffCount,
+                  comparisonDropOffCount,
                 )}
-              </AutoTransition>
+                loading={loading}
+                comparisonLoading={comparisonLoading}
+                hasComparison={hasComparison}
+              />
             </div>
           </div>
         </div>
@@ -292,6 +428,9 @@ function FunnelDetailContent({
   labels,
   descriptionMessages,
   payload,
+  comparisonAnalysis,
+  comparisonLabel,
+  comparisonLoading,
   loading,
   canManage,
   onEdit,
@@ -305,6 +444,9 @@ function FunnelDetailContent({
   readonly labels: AppMessages["funnels"];
   readonly descriptionMessages: FunnelDescriptionMessages;
   readonly payload: FunnelDetailData;
+  readonly comparisonAnalysis?: FunnelAnalysis;
+  readonly comparisonLabel?: string;
+  readonly comparisonLoading: boolean;
   readonly loading: boolean;
   readonly canManage: boolean;
   readonly onEdit: (funnel: FunnelDefinition) => void;
@@ -315,8 +457,12 @@ function FunnelDetailContent({
   readonly filters: FilterDocument;
 }) {
   const { funnel, analysis } = payload.data;
-  const firstStep = analysis.steps[0];
-  const lastStep = analysis.steps.at(-1);
+  const firstStep =
+    analysis.steps.find((step) => step.stepId === funnel.steps[0]?.id) ??
+    analysis.steps[0];
+  const lastStep =
+    analysis.steps.find((step) => step.stepId === funnel.steps.at(-1)?.id) ??
+    analysis.steps.at(-1);
   const defaultStepId = lastStep?.stepId ?? funnel.steps.at(-1)?.id ?? "";
   const [selectedStepId, setSelectedStepId] = useState(defaultStepId);
   useEffect(() => {
@@ -347,6 +493,32 @@ function FunnelDetailContent({
     analysis.summary.largestDropOffStepIndex === null
       ? undefined
       : analysis.steps[analysis.summary.largestDropOffStepIndex];
+  const comparisonSummary = comparisonAnalysis
+    ? comparisonAnalysis.summary
+    : undefined;
+  const comparisonSteps = comparisonAnalysis?.steps ?? [];
+  const comparisonFirstStep =
+    comparisonSteps.find((step) => step.stepId === funnel.steps[0]?.id) ??
+    comparisonSteps[0];
+  const comparisonLastStep =
+    comparisonSteps.find((step) => step.stepId === funnel.steps.at(-1)?.id) ??
+    comparisonSteps.at(-1);
+  const comparisonStartingCount = comparisonFirstStep
+    ? funnelMetricValue(comparisonFirstStep, metric)
+    : 0;
+  const comparisonConvertedCount = comparisonLastStep
+    ? funnelMetricValue(comparisonLastStep, metric)
+    : 0;
+  const comparisonLargestDropOffStep =
+    comparisonSummary?.largestDropOffStepIndex === null ||
+    comparisonSummary?.largestDropOffStepIndex === undefined
+      ? undefined
+      : comparisonSteps[comparisonSummary.largestDropOffStepIndex];
+  const largestDropOffMatches = Boolean(
+    largestDropOffStep &&
+    comparisonLargestDropOffStep &&
+    largestDropOffStep.stepId === comparisonLargestDropOffStep.stepId,
+  );
 
   return (
     <div className="min-w-0 space-y-6 p-4 md:p-6">
@@ -418,6 +590,20 @@ function FunnelDetailContent({
               label={labels.overallConversion}
               value={percentFormat(locale, overallConversionRate)}
               detail={`${numberFormat(locale, convertedCount)} / ${numberFormat(locale, startingCount)} ${funnelMetricLabel(labels, metric)}`}
+              comparisonLabel={comparisonLabel}
+              comparisonDetail={
+                comparisonSummary
+                  ? percentFormat(
+                      locale,
+                      comparisonSummary.overallConversionRate,
+                    )
+                  : undefined
+              }
+              comparisonChange={funnelComparisonChange(
+                overallConversionRate,
+                comparisonSummary?.overallConversionRate,
+              )}
+              comparisonLoading={comparisonLoading}
               loading={loading}
             />
             <FunnelMetric
@@ -428,6 +614,17 @@ function FunnelDetailContent({
                   ? `${numberFormat(locale, secondaryStartingCount)} ${funnelMetricLabel(labels, secondaryMetric)}`
                   : "0"
               }
+              comparisonLabel={comparisonLabel}
+              comparisonDetail={
+                comparisonAnalysis
+                  ? numberFormat(locale, comparisonStartingCount)
+                  : undefined
+              }
+              comparisonChange={funnelComparisonChange(
+                startingCount,
+                comparisonStartingCount,
+              )}
+              comparisonLoading={comparisonLoading}
               loading={loading}
             />
             <FunnelMetric
@@ -438,6 +635,17 @@ function FunnelDetailContent({
                   ? `${numberFormat(locale, secondaryConvertedCount)} ${funnelMetricLabel(labels, secondaryMetric)}`
                   : labels.noDropOff
               }
+              comparisonLabel={comparisonLabel}
+              comparisonDetail={
+                comparisonAnalysis
+                  ? numberFormat(locale, comparisonConvertedCount)
+                  : undefined
+              }
+              comparisonChange={funnelComparisonChange(
+                convertedCount,
+                comparisonConvertedCount,
+              )}
+              comparisonLoading={comparisonLoading}
               loading={loading}
             />
             <FunnelMetric
@@ -455,6 +663,23 @@ function FunnelDetailContent({
                   ? `${funnelStepLabel(funnel.steps[largestDropOffStep.index]!, descriptionMessages)} ${percentFormat(locale, largestDropOffStep.progression.dropOffRate)}`
                   : labels.noDropOff
               }
+              comparisonLabel={comparisonLabel}
+              comparisonDetail={
+                comparisonAnalysis
+                  ? comparisonLargestDropOffStep
+                    ? `${funnelStepLabel(funnel.steps[comparisonLargestDropOffStep.index]!, descriptionMessages)} ${percentFormat(locale, comparisonLargestDropOffStep.progression.dropOffRate)}`
+                    : labels.noDropOff
+                  : undefined
+              }
+              comparisonChange={
+                largestDropOffMatches
+                  ? funnelComparisonChange(
+                      largestDropOffStep?.progression.dropOffCount,
+                      comparisonLargestDropOffStep?.progression.dropOffCount,
+                    )
+                  : null
+              }
+              comparisonLoading={comparisonLoading}
               loading={loading}
             />
           </div>
@@ -477,10 +702,18 @@ function FunnelDetailContent({
               labels={labels}
               descriptionMessages={descriptionMessages}
               funnelStep={step}
-              analysisStep={analysis.steps[index]}
+              analysisStep={
+                analysis.steps.find(
+                  (analysisStep) => analysisStep.stepId === step.id,
+                ) ?? analysis.steps[index]
+              }
+              comparisonAnalysisStep={comparisonAnalysis?.steps.find(
+                (analysisStep) => analysisStep.stepId === step.id,
+              )}
               index={index}
               metric={metric}
               loading={loading}
+              comparisonLoading={comparisonLoading}
               selected={step.id === selectedStepId}
             />
           ))}
@@ -632,6 +865,9 @@ export function FunnelDetail({
   labels,
   descriptionMessages,
   payload,
+  comparisonAnalysis,
+  comparisonLabel,
+  comparisonLoading = false,
   funnel,
   loading,
   error = false,
@@ -647,6 +883,9 @@ export function FunnelDetail({
   readonly labels: AppMessages["funnels"];
   readonly descriptionMessages: FunnelDescriptionMessages;
   readonly payload?: FunnelDetailData;
+  readonly comparisonAnalysis?: FunnelAnalysis;
+  readonly comparisonLabel?: string;
+  readonly comparisonLoading?: boolean;
   readonly funnel?: FunnelDefinition;
   readonly loading: boolean;
   readonly error?: boolean;
@@ -684,6 +923,9 @@ export function FunnelDetail({
           labels={labels}
           descriptionMessages={descriptionMessages}
           payload={payload}
+          comparisonAnalysis={comparisonAnalysis}
+          comparisonLabel={comparisonLabel}
+          comparisonLoading={comparisonLoading}
           loading={loading}
           canManage={canManage}
           onEdit={onEdit}
