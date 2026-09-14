@@ -86,6 +86,9 @@ function FunnelMetric({
     (comparisonLoading ||
       (comparisonDetail !== undefined && comparisonDetail !== null)),
   );
+  const valueTransitionKey = loading
+    ? "loading"
+    : `${value}:${showComparison ? (comparisonChange ?? "") : ""}`;
 
   return (
     <div className="min-w-0 bg-card p-4">
@@ -94,7 +97,7 @@ function FunnelMetric({
       </p>
       <AutoTransition
         initial={false}
-        transitionKey={loading ? "loading" : value}
+        transitionKey={valueTransitionKey}
         duration={0.18}
         type="fade"
         presenceMode="wait"
@@ -103,12 +106,17 @@ function FunnelMetric({
         {loading ? (
           <Skeleton key="loading" className="h-7 w-20" />
         ) : (
-          <p
+          <div
             key="ready"
-            className="truncate font-mono text-xl font-semibold leading-7"
+            className="flex min-w-0 items-end gap-1.5 leading-none"
           >
-            {value}
-          </p>
+            <span className="min-w-0 truncate font-mono text-xl font-semibold leading-none">
+              {value}
+            </span>
+            {showComparison ? (
+              <FunnelChangeRateInline value={comparisonChange} />
+            ) : null}
+          </div>
         )}
       </AutoTransition>
       <AutoResizer className="mt-3 min-w-0" duration={0.2}>
@@ -136,7 +144,6 @@ function FunnelMetric({
               <span className="min-w-0 truncate">
                 {comparisonLabel}: {comparisonDetail}
               </span>
-              <FunnelChangeRateInline value={comparisonChange} />
             </p>
           ) : (
             <p

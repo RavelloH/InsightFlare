@@ -500,6 +500,7 @@ function EventMetricCell({
   value,
   detail,
   detailKey,
+  comparisonChange,
   loading = false,
 }: {
   icon: RemixiconComponentType;
@@ -507,9 +508,10 @@ function EventMetricCell({
   value: string;
   detail: ReactNode;
   detailKey?: string;
+  comparisonChange?: number | null;
   loading?: boolean;
 }) {
-  const contentKey = loading ? "loading" : value;
+  const contentKey = loading ? "loading" : `${value}:${comparisonChange ?? ""}`;
 
   return (
     <div className="min-w-0 bg-card p-4">
@@ -535,12 +537,17 @@ function EventMetricCell({
               <Spinner className="size-5" />
             </div>
           ) : (
-            <p
+            <div
               key={value}
-              className="h-7 min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground"
+              className="flex h-7 min-w-0 items-end gap-1.5 leading-none"
             >
-              {value}
-            </p>
+              <span className="min-w-0 truncate font-mono text-xl leading-none font-semibold text-foreground">
+                {value}
+              </span>
+              {comparisonChange !== undefined ? (
+                <EventMetricChangeRate value={comparisonChange} />
+              ) : null}
+            </div>
           )}
         </AutoTransition>
       </AutoResizer>
@@ -585,40 +592,37 @@ function eventMetricDelta(current: number, comparison: number): number | null {
   return ((current - comparison) / comparison) * 100;
 }
 
+function EventMetricChangeRate({ value }: { value: number | null }) {
+  if (value === null) return null;
+  const ChangeIcon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-end gap-0.5 font-mono text-xs leading-none tabular-nums",
+        value >= 0 ? "text-emerald-600" : "text-rose-600",
+      )}
+    >
+      <ChangeIcon className="size-3.5" />
+      {value >= 0 ? "+" : ""}
+      {value.toFixed(1)}%
+    </span>
+  );
+}
+
 function EventMetricComparisonDetail({
   locale,
   comparisonLabel,
   comparisonValue,
-  currentValue,
   formatValue = (value) => numberFormat(locale, value),
 }: {
   locale: Locale;
   comparisonLabel: string;
   comparisonValue: number;
-  currentValue: number;
   formatValue?: (value: number) => string;
 }) {
-  const delta = eventMetricDelta(currentValue, comparisonValue);
-  const DeltaIcon =
-    delta !== null && delta >= 0 ? RiArrowUpLine : RiArrowDownLine;
-
   return (
-    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
-      <span className="min-w-0 truncate">
-        {comparisonLabel}: {formatValue(comparisonValue)}
-      </span>
-      {delta !== null ? (
-        <span
-          className={cn(
-            "inline-flex shrink-0 items-center gap-0.5 font-mono tabular-nums",
-            delta >= 0 ? "text-emerald-600" : "text-rose-600",
-          )}
-        >
-          <DeltaIcon className="size-3" />
-          {delta >= 0 ? "+" : ""}
-          {delta.toFixed(1)}%
-        </span>
-      ) : null}
+    <span className="min-w-0 truncate">
+      {comparisonLabel}: {formatValue(comparisonValue)}
     </span>
   );
 }
@@ -655,7 +659,6 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             locale={locale}
             comparisonLabel={comparisonLabel ?? "Comparison"}
             comparisonValue={comparisonSummary.events}
-            currentValue={summary.events}
           />
         ),
         eventTypes: (
@@ -663,7 +666,6 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             locale={locale}
             comparisonLabel={comparisonLabel ?? "Comparison"}
             comparisonValue={comparisonSummary.eventTypes}
-            currentValue={summary.eventTypes}
           />
         ),
         sessions: (
@@ -671,7 +673,6 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             locale={locale}
             comparisonLabel={comparisonLabel ?? "Comparison"}
             comparisonValue={comparisonSummary.sessions}
-            currentValue={summary.sessions}
           />
         ),
         visitors: (
@@ -679,7 +680,6 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             locale={locale}
             comparisonLabel={comparisonLabel ?? "Comparison"}
             comparisonValue={comparisonSummary.visitors}
-            currentValue={summary.visitors}
           />
         ),
         average: (
@@ -687,8 +687,24 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             locale={locale}
             comparisonLabel={comparisonLabel ?? "Comparison"}
             comparisonValue={comparisonSummary.avgEventsPerSession}
-            currentValue={summary.avgEventsPerSession}
           />
+        ),
+      }
+    : null;
+  const comparisonChanges = comparisonSummary
+    ? {
+        events: eventMetricDelta(summary.events, comparisonSummary.events),
+        eventTypes: eventMetricDelta(
+          summary.eventTypes,
+          comparisonSummary.eventTypes,
+        ),
+        visitors: eventMetricDelta(
+          summary.visitors,
+          comparisonSummary.visitors,
+        ),
+        average: eventMetricDelta(
+          summary.avgEventsPerSession,
+          comparisonSummary.avgEventsPerSession,
         ),
       }
     : null;
@@ -702,6 +718,7 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             label={labels.totalEvents}
             loading={loading}
             value={numberFormat(locale, summary.events)}
+            comparisonChange={comparisonChanges?.events}
             detail={
               comparisonDetails?.events ??
               (share
@@ -719,6 +736,7 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             label={labels.eventTypes}
             loading={loading}
             value={numberFormat(locale, summary.eventTypes)}
+            comparisonChange={comparisonChanges?.eventTypes}
             detail={comparisonDetails?.eventTypes ?? labels.breakdownTitle}
             detailKey={
               comparisonSummary
@@ -731,6 +749,7 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             label={labels.sessions}
             loading={loading}
             value={numberFormat(locale, summary.sessions)}
+            comparisonChange={comparisonChanges?.average}
             detail={
               comparisonDetails?.average ??
               `${labels.avgEventsPerSession}: ${average}`
@@ -746,6 +765,7 @@ export const EventMetricGrid = memo(function EventMetricGrid({
             label={labels.visitors}
             loading={loading}
             value={numberFormat(locale, summary.visitors)}
+            comparisonChange={comparisonChanges?.visitors}
             detail={comparisonDetails?.visitors ?? labels.recordsTitle}
             detailKey={
               comparisonSummary

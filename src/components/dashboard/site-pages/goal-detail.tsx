@@ -141,10 +141,13 @@ function GoalMetric({
     (comparisonLoading ||
       (comparisonDetail !== undefined && comparisonDetail !== null)),
   );
+  const valueTransitionKey = loading
+    ? "loading"
+    : `${value}:${showComparison ? (comparisonChange ?? "") : ""}`;
   const detailTransitionKey = loading
     ? "loading"
     : showComparison
-      ? `comparison:${String(comparisonDetail ?? "")}:${comparisonChange ?? ""}`
+      ? `comparison:${String(comparisonDetail ?? "")}`
       : `current:${String(detail ?? "")}`;
   return (
     <div className="min-w-0 bg-card p-4">
@@ -154,7 +157,7 @@ function GoalMetric({
       <AutoTransition
         className="mt-3 h-7"
         initial={false}
-        transitionKey={loading ? "loading" : value}
+        transitionKey={valueTransitionKey}
         duration={0.18}
         type="fade"
         presenceMode="wait"
@@ -162,12 +165,17 @@ function GoalMetric({
         {loading ? (
           <Skeleton key="loading" className="h-7 w-28" />
         ) : (
-          <p
+          <div
             key="value"
-            className="truncate font-mono text-xl font-semibold leading-7"
+            className="flex min-w-0 items-end gap-1.5 leading-none"
           >
-            {value}
-          </p>
+            <span className="min-w-0 truncate font-mono text-xl font-semibold leading-none">
+              {value}
+            </span>
+            {showComparison ? (
+              <ChangeRateInline value={comparisonChange} />
+            ) : null}
+          </div>
         )}
       </AutoTransition>
       <AutoResizer className="mt-3 min-w-0" duration={0.2}>
@@ -189,7 +197,6 @@ function GoalMetric({
               <span className="min-w-0 truncate">
                 {comparisonLabel}: {comparisonDetail}
               </span>
-              <ChangeRateInline value={comparisonChange} />
             </p>
           ) : (
             <p

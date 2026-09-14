@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import { dashboardComparisonLabel } from "@/components/dashboard/use-dashboard-comparison-query";
+import {
+  type DashboardComparisonQuery,
+  resolveDashboardComparisonQuery,
+} from "@/lib/dashboard/comparison-query";
 import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
 import type { FilterFieldId } from "@/lib/filter-contract";
 import { attachFilterScopePreference } from "@/lib/filter-contract";
+import type { AppMessages } from "@/lib/i18n/messages";
 
 const currentWindow = {
   preset: "7d" as const,
@@ -16,6 +21,13 @@ const currentWindow = {
 const currentFilters = parseFilterDocumentFromSearchParams(
   new URLSearchParams({ "filter[page.path]": "/docs" }),
 );
+
+const messages = {
+  dashboardHeader: {
+    compareButton: "对比",
+    previousPeriod: "上个周期",
+  },
+} as AppMessages;
 
 describe("resolveDashboardComparisonQuery", () => {
   it("returns null when comparison is not active", () => {
@@ -125,5 +137,27 @@ describe("resolveDashboardComparisonQuery", () => {
         currentFilters,
       ),
     ).toBeNull();
+  });
+
+  it("labels an unfiltered previous comparison as the previous period", () => {
+    const comparisonQuery: DashboardComparisonQuery = {
+      mode: "previous",
+      window: currentWindow,
+      filters: { version: 1, root: null },
+    };
+
+    expect(dashboardComparisonLabel(messages, comparisonQuery)).toBe(
+      "上个周期",
+    );
+  });
+
+  it("labels filtered comparisons consistently as comparisons", () => {
+    const comparisonQuery: DashboardComparisonQuery = {
+      mode: "previous",
+      window: currentWindow,
+      filters: currentFilters,
+    };
+
+    expect(dashboardComparisonLabel(messages, comparisonQuery)).toBe("对比");
   });
 });
