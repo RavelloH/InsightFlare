@@ -9,6 +9,7 @@ import {
   createRuntime,
   localCli,
   parseCommonOptions,
+  resolveViteBuildMode,
   type StageResult,
   targetEnv,
 } from "./shared/deploy-runtime";
@@ -85,12 +86,7 @@ async function runPrebuild(options: CommonOptions): Promise<void> {
 }
 
 async function runViteBuild(options: CommonOptions): Promise<void> {
-  const mode =
-    options.target === "cf"
-      ? "production"
-      : options.target === "demo"
-        ? "demo"
-        : "local";
+  const mode = resolveViteBuildMode(options.target);
   fs.rmSync(path.join(ROOT_DIR, "dist"), { recursive: true, force: true });
   await runtime.runCommand(
     process.execPath,
