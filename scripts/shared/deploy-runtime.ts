@@ -57,6 +57,15 @@ export function parseTarget(value: string | undefined): DeployTarget {
   throw new Error(`Unsupported target: ${value}`);
 }
 
+export function resolveViteBuildMode(target: DeployTarget): string {
+  // Vite reserves "local" for .env.*.local files, so it is not a valid mode.
+  return target === "cf"
+    ? "production"
+    : target === "demo"
+      ? "demo"
+      : "development";
+}
+
 export function parseCommonOptions(argv: string[]): CommonOptions {
   const target = parseTarget(readOption(argv, "target"));
   const config =
