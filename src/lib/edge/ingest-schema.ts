@@ -129,7 +129,10 @@ function hasIncompatibleLegacyEventContext(
   });
 }
 
-function migrateLegacyBufferedCustomEvents(sql: DurableObjectSqlStorage): void {
+function migrateLegacyBufferedCustomEvents(
+  sql: DurableObjectSqlStorage,
+  options?: IngestSchemaOptions,
+): void {
   const columnNames = tableColumnNames(sql, "buffered_custom_events");
   const value = (columnName: string, fallback: string): string =>
     columnNames.has(columnName) ? columnName : fallback;
@@ -138,8 +141,7 @@ function migrateLegacyBufferedCustomEvents(sql: DurableObjectSqlStorage): void {
       ? `COALESCE(${columnName}, ${fallback})`
       : fallback;
 
-  sql.exec("BEGIN");
-  try {
+  const migrate = () => {
     sql.exec(`
         CREATE TABLE buffered_custom_events_migration (
           event_id TEXT PRIMARY KEY,
@@ -205,6 +207,22 @@ function migrateLegacyBufferedCustomEvents(sql: DurableObjectSqlStorage): void {
     sql.exec(
       "ALTER TABLE buffered_custom_events_migration RENAME TO buffered_custom_events",
     );
+  };
+
+  // Durable Object SQLite rejects SQL BEGIN/COMMIT. Use its native API so
+  // schema changes and row copies roll back together if any step fails.
+  if (
+    typeof sql.transactionSync === "function" ||
+    typeof options?.transactionSync === "function"
+  ) {
+    transactionSync(sql, migrate, options);
+    return;
+  }
+
+  // Standalone SQLite callers without the Durable Object storage API.
+  sql.exec("BEGIN");
+  try {
+    migrate();
     sql.exec("COMMIT");
   } catch (error) {
     try {
@@ -482,7 +500,7 @@ export function initializeIngestSqlSchema(
   // all rows and legacy context values are copied before the old table goes
   // away.  Other old shapes can be migrated additively.
   if (hasIncompatibleLegacyEventContext(sql)) {
-    migrateLegacyBufferedCustomEvents(sql);
+    migrateLegacyBufferedCustomEvents(sql, options);
   }
   const eventColumnNames = tableColumnNames(sql, "buffered_custom_events");
   if (!eventColumnNames.has("received_at")) {
