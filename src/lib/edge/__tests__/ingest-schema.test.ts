@@ -215,6 +215,36 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function createLegacyCustomEventSchema(sql: SqliteSqlStorage): void {
+  sql.db.exec(`
+      CREATE TABLE buffered_custom_events (
+        event_id TEXT PRIMARY KEY,
+        site_id TEXT NOT NULL,
+        visit_id TEXT NOT NULL,
+        visitor_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        pathname TEXT NOT NULL,
+        hostname TEXT NOT NULL,
+        occurred_at INTEGER NOT NULL,
+        event_name TEXT NOT NULL,
+        event_data_json TEXT NOT NULL DEFAULT '{}',
+        dirty INTEGER NOT NULL DEFAULT 1,
+        flush_attempts INTEGER NOT NULL DEFAULT 0,
+        last_flush_error TEXT,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO buffered_custom_events (
+        event_id, site_id, visit_id, visitor_id, session_id,
+        pathname, hostname, occurred_at, event_name, event_data_json,
+        dirty, flush_attempts, created_at
+      ) VALUES (
+        'legacy-event', 'site-1', 'visit-1', 'visitor-1', 'session-1',
+        '/legacy', 'example.com', ${NOW - 1_000}, 'Legacy', '{"ok":true}',
+        1, 0, ${NOW}
+      );
+    `);
+}
+
 describe("initializeIngestSqlSchema", () => {
   it("backfills pre-scheduling rows and does not rewrite terminal NULL due rows", () => {
     const sql = new SqliteSqlStorage();
@@ -303,33 +333,7 @@ describe("initializeIngestSqlSchema", () => {
 
   it("preserves legacy custom event rows while adding current columns", () => {
     const sql = new SqliteSqlStorage();
-    sql.db.exec(`
-      CREATE TABLE buffered_custom_events (
-        event_id TEXT PRIMARY KEY,
-        site_id TEXT NOT NULL,
-        visit_id TEXT NOT NULL,
-        visitor_id TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        pathname TEXT NOT NULL,
-        hostname TEXT NOT NULL,
-        occurred_at INTEGER NOT NULL,
-        event_name TEXT NOT NULL,
-        event_data_json TEXT NOT NULL DEFAULT '{}',
-        dirty INTEGER NOT NULL DEFAULT 1,
-        flush_attempts INTEGER NOT NULL DEFAULT 0,
-        last_flush_error TEXT,
-        created_at INTEGER NOT NULL
-      );
-      INSERT INTO buffered_custom_events (
-        event_id, site_id, visit_id, visitor_id, session_id,
-        pathname, hostname, occurred_at, event_name, event_data_json,
-        dirty, flush_attempts, created_at
-      ) VALUES (
-        'legacy-event', 'site-1', 'visit-1', 'visitor-1', 'session-1',
-        '/legacy', 'example.com', ${NOW - 1_000}, 'Legacy', '{"ok":true}',
-        1, 0, ${NOW}
-      );
-    `);
+    createLegacyCustomEventSchema(sql);
 
     initializeIngestSqlSchema(sql);
 
@@ -384,5 +388,121 @@ describe("initializeIngestSqlSchema", () => {
       ]),
     );
     sql.close();
+  });
+
+  it.each(["sql", "options"] as const)(
+    "uses the %s transactionSync API for legacy migrations without raw SQL transactions",
+    (apiLocation) => {
+      const sql = new SqliteSqlStorage();
+      createLegacyCustomEventSchema(sql);
+      const originalExec = sql.exec.bind(sql);
+      vi.spyOn(sql, "exec").mockImplementation((query, ...bindings) => {
+        if (/^(BEGIN|COMMIT|ROLLBACK)\b/i.test(query.trim())) {
+          throw new Error(
+            "Raw SQL transactions are forbidden by Durable Objects",
+          );
+        }
+        return originalExec(query, ...bindings);
+      });
+      const transactionCalls = vi.fn();
+      const transaction = <T>(closure: () => T): T => {
+        transactionCalls();
+        sql.db.exec("BEGIN");
+        try {
+          const result = closure();
+          sql.db.exec("COMMIT");
+          return result;
+        } catch (error) {
+          sql.db.exec("ROLLBACK");
+          throw error;
+        }
+      };
+      if (apiLocation === "sql")
+        Object.assign(sql, { transactionSync: transaction });
+      const options =
+        apiLocation === "options"
+          ? { transactionSync: transaction }
+          : undefined;
+      try {
+        expect(() => initializeIngestSqlSchema(sql, options)).not.toThrow();
+        expect(transactionCalls).toHaveBeenCalledTimes(2);
+        expect(
+          rows(
+            sql,
+            "SELECT event_id, visitor_id, session_id, pathname, hostname FROM buffered_custom_events",
+          ),
+        ).toEqual([
+          {
+            event_id: "legacy-event",
+            visitor_id: "visitor-1",
+            session_id: "session-1",
+            pathname: "/legacy",
+            hostname: "example.com",
+          },
+        ]);
+        initializeIngestSqlSchema(sql, options);
+        expect(transactionCalls).toHaveBeenCalledTimes(2);
+        expect(
+          rows(sql, "SELECT COUNT(*) AS count FROM buffered_custom_events"),
+        ).toEqual([{ count: 1 }]);
+      } finally {
+        sql.close();
+      }
+    },
+  );
+
+  it("rolls back a failed native legacy migration and allows a safe retry", () => {
+    const sql = new SqliteSqlStorage();
+    createLegacyCustomEventSchema(sql);
+    const originalExec = sql.exec.bind(sql);
+    const execSpy = vi
+      .spyOn(sql, "exec")
+      .mockImplementation((query, ...bindings) => {
+        if (/^(BEGIN|COMMIT|ROLLBACK)\b/i.test(query.trim())) {
+          throw new Error(
+            "Raw SQL transactions are forbidden by Durable Objects",
+          );
+        }
+        if (
+          query.includes("ALTER TABLE buffered_custom_events_migration RENAME")
+        ) {
+          throw new Error("injected rename failure");
+        }
+        return originalExec(query, ...bindings);
+      });
+    const options = {
+      transactionSync<T>(closure: () => T): T {
+        sql.db.exec("BEGIN");
+        try {
+          const result = closure();
+          sql.db.exec("COMMIT");
+          return result;
+        } catch (error) {
+          sql.db.exec("ROLLBACK");
+          throw error;
+        }
+      },
+    };
+    try {
+      expect(() => initializeIngestSqlSchema(sql, options)).toThrow(
+        "injected rename failure",
+      );
+      expect(
+        rows(sql, "SELECT event_id, pathname FROM buffered_custom_events"),
+      ).toEqual([{ event_id: "legacy-event", pathname: "/legacy" }]);
+      expect(
+        rows(
+          sql,
+          "SELECT name FROM sqlite_master WHERE name IN ('buffered_custom_events_migration', 'buffered_custom_events_legacy')",
+        ),
+      ).toEqual([]);
+      execSpy.mockRestore();
+      initializeIngestSqlSchema(sql, options);
+      expect(
+        rows(sql, "SELECT event_id, pathname FROM buffered_custom_events"),
+      ).toEqual([{ event_id: "legacy-event", pathname: "/legacy" }]);
+    } finally {
+      sql.close();
+    }
   });
 });
