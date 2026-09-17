@@ -8,6 +8,8 @@ import {
 } from "react";
 import { Icon } from "@iconify/react";
 import {
+  RiArrowDownLine,
+  RiArrowUpLine,
   RiCheckboxCircleFill,
   RiCloseCircleFill,
   RiErrorWarningFill,
@@ -44,6 +46,10 @@ import {
   type TabbedDataTableRowAdapter,
   type TabbedDataTableSortState,
 } from "@/components/dashboard/tabbed-data-table-card";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,6 +104,8 @@ interface MetricCardModel {
   summary: PerformanceSummary;
   status: PerformanceStatus;
   score: number | null;
+  comparisonValue: number | null;
+  changeRate: number | null;
 }
 
 interface PathPerformanceRow {
@@ -108,6 +116,11 @@ interface PathPerformanceRow {
   value: number | null;
   score: number | null;
   status: PerformanceStatus;
+  comparisonViews: number;
+  comparisonSamples: number;
+  comparisonValue: number | null;
+  comparisonScore: number | null;
+  comparisonStatus: PerformanceStatus;
 }
 
 interface CountryHealthRow {
@@ -120,6 +133,11 @@ interface CountryHealthRow {
   value: number | null;
   score: number | null;
   status: PerformanceStatus;
+  comparisonViews: number;
+  comparisonSamples: number;
+  comparisonValue: number | null;
+  comparisonScore: number | null;
+  comparisonStatus: PerformanceStatus;
 }
 
 interface CountryMapHover {
@@ -477,6 +495,48 @@ function formatPanelValue(
   return formatMetricValue(locale, messages, key, value);
 }
 
+function performanceChangeRate(
+  current: number | null | undefined,
+  comparison: number | null | undefined,
+): number | null {
+  if (
+    current == null ||
+    comparison == null ||
+    !Number.isFinite(current) ||
+    !Number.isFinite(comparison) ||
+    comparison === 0
+  ) {
+    return null;
+  }
+  return ((current - comparison) / comparison) * 100;
+}
+
+function PerformanceChangeRate({
+  value,
+  activePanel,
+}: {
+  value: number | null;
+  activePanel: PerformancePanelKey;
+}) {
+  if (value == null || !Number.isFinite(value)) return null;
+
+  const improved = activePanel === "score" ? value >= 0 : value <= 0;
+  const ChangeIcon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-end gap-0.5 font-mono text-xs leading-none tabular-nums",
+        improved ? "text-emerald-600" : "text-rose-600",
+      )}
+    >
+      <ChangeIcon className="size-3.5" />
+      {value >= 0 ? "+" : ""}
+      {value.toFixed(1)}%
+    </span>
+  );
+}
+
 function statusColor(status: PerformanceStatus): string {
   if (status === "great") return "var(--color-chart-4)";
   if (status === "needs-improvement") return "oklch(0.75 0.16 80)";
@@ -759,6 +819,25 @@ function buildMetricTrend(
   return filled;
 }
 
+function alignComparisonTrend(
+  currentPoints: ReadonlyArray<ChartPoint>,
+  comparisonPoints: ReadonlyArray<ChartPoint>,
+): ChartPoint[] {
+  return currentPoints.map((point, index) => {
+    const comparisonPoint = comparisonPoints[index];
+    return (
+      comparisonPoint ?? {
+        timestampMs: point.timestampMs,
+        p50: null,
+        p75: null,
+        p95: null,
+        avg: null,
+        samples: 0,
+      }
+    );
+  });
+}
+
 const PERFORMANCE_TABLE_SKELETON_ROWS = 4;
 const PATH_TABLE_SKELETON_ROWS: PathPerformanceRow[] = Array.from(
   { length: PERFORMANCE_TABLE_SKELETON_ROWS },
@@ -770,6 +849,11 @@ const PATH_TABLE_SKELETON_ROWS: PathPerformanceRow[] = Array.from(
     value: null,
     score: null,
     status: "none",
+    comparisonViews: 0,
+    comparisonSamples: 0,
+    comparisonValue: null,
+    comparisonScore: null,
+    comparisonStatus: "none",
   }),
 );
 const COUNTRY_TABLE_SKELETON_ROWS: CountryHealthRow[] = Array.from(
@@ -784,6 +868,11 @@ const COUNTRY_TABLE_SKELETON_ROWS: CountryHealthRow[] = Array.from(
     value: null,
     score: null,
     status: "none",
+    comparisonViews: 0,
+    comparisonSamples: 0,
+    comparisonValue: null,
+    comparisonScore: null,
+    comparisonStatus: "none",
   }),
 );
 
@@ -964,11 +1053,13 @@ const PerformanceRail = memo(function PerformanceRail({
   activePanel,
   cards,
   onSelect,
+  comparisonLabel,
   loading = false,
 }: {
   activePanel: PerformancePanelKey;
   cards: MetricCardModel[];
   onSelect: (key: PerformancePanelKey) => void;
+  comparisonLabel?: string;
   loading?: boolean;
 }) {
   return (
@@ -1004,15 +1095,24 @@ const PerformanceRail = memo(function PerformanceRail({
                     <div className="truncate text-sm font-medium text-muted-foreground">
                       {card.label}
                     </div>
-                    <PerformanceDynamicValue
-                      loading={loading}
-                      skeletonClassName="h-8 w-24"
-                      className="mt-2"
-                    >
-                      <div className="text-2xl font-semibold tracking-tight">
-                        {card.valueLabel}
-                      </div>
-                    </PerformanceDynamicValue>
+                    <AutoResizer className="mt-2 w-full" duration={0.2}>
+                      <PerformanceDynamicValue
+                        loading={loading}
+                        skeletonClassName="h-8 w-24"
+                      >
+                        <div className="flex h-8 min-w-0 items-end gap-1.5 leading-none">
+                          <div className="min-w-0 truncate text-2xl leading-none font-semibold tracking-tight">
+                            {card.valueLabel}
+                          </div>
+                          {comparisonLabel ? (
+                            <PerformanceChangeRate
+                              value={card.changeRate}
+                              activePanel={card.key}
+                            />
+                          ) : null}
+                        </div>
+                      </PerformanceDynamicValue>
+                    </AutoResizer>
                   </div>
                   {loading ? (
                     <Skeleton className="size-9 shrink-0 rounded-full" />
@@ -1048,7 +1148,11 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
   activePanel,
   activeSummary,
   activeValue,
+  comparisonLabel,
+  comparisonSummary,
+  comparisonValue,
   pathCount,
+  comparisonPathCount,
   loading = false,
 }: {
   locale: Locale;
@@ -1056,7 +1160,11 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
   activePanel: PerformancePanelKey;
   activeSummary: PerformanceSummary;
   activeValue: number | null;
+  comparisonLabel?: string;
+  comparisonSummary?: PerformanceSummary | null;
+  comparisonValue?: number | null;
   pathCount: number;
+  comparisonPathCount?: number;
   loading?: boolean;
 }) {
   const activeStatus =
@@ -1076,6 +1184,13 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
     activePanel,
     activeValue,
   );
+  const displayComparisonValue = formatPanelValue(
+    locale,
+    messages,
+    activePanel,
+    comparisonValue,
+  );
+  const changeRate = performanceChangeRate(activeValue, comparisonValue);
   const description = metricDescription(messages, activePanel);
   const thresholdText =
     activePanel === "score"
@@ -1129,10 +1244,26 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
                       skeletonClassName="h-9 w-24"
                       transitionKey={displayValue}
                     >
-                      <div className="text-3xl font-semibold tracking-tight">
-                        {displayValue}
+                      <div className="flex h-9 items-end gap-2 leading-none">
+                        <div className="text-3xl leading-none font-semibold tracking-tight">
+                          {displayValue}
+                        </div>
+                        {comparisonLabel ? (
+                          <PerformanceChangeRate
+                            value={changeRate}
+                            activePanel={activePanel}
+                          />
+                        ) : null}
                       </div>
                     </PerformanceDynamicValue>
+                    {comparisonLabel ? (
+                      <PerformancePanelText
+                        transitionKey={`${activePanel}:comparison:${displayComparisonValue}`}
+                        className="text-xs text-muted-foreground"
+                      >
+                        {comparisonLabel}: {displayComparisonValue}
+                      </PerformancePanelText>
+                    ) : null}
                     <PerformanceDynamicValue
                       loading={loading}
                       skeletonClassName="h-5 w-24"
@@ -1256,10 +1387,16 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
               </div>
               <PerformanceSpinnerValue
                 loading={loading}
-                transitionKey={pathCount}
+                transitionKey={`${pathCount}:${comparisonPathCount ?? "--"}`}
               >
-                <div className="font-mono text-lg font-semibold tabular-nums">
-                  {numberFormat(locale, pathCount)}
+                <div className="grid gap-0.5 font-mono text-lg font-semibold tabular-nums">
+                  <span>{numberFormat(locale, pathCount)}</span>
+                  {comparisonLabel ? (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {comparisonLabel}:{" "}
+                      {numberFormat(locale, comparisonPathCount ?? 0)}
+                    </span>
+                  ) : null}
                 </div>
               </PerformanceSpinnerValue>
             </div>
@@ -1269,10 +1406,16 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
               </div>
               <PerformanceSpinnerValue
                 loading={loading}
-                transitionKey={activeSummary.samples}
+                transitionKey={`${activeSummary.samples}:${comparisonSummary?.samples ?? "--"}`}
               >
-                <div className="font-mono text-lg font-semibold tabular-nums">
-                  {numberFormat(locale, activeSummary.samples)}
+                <div className="grid gap-0.5 font-mono text-lg font-semibold tabular-nums">
+                  <span>{numberFormat(locale, activeSummary.samples)}</span>
+                  {comparisonLabel ? (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {comparisonLabel}:{" "}
+                      {numberFormat(locale, comparisonSummary?.samples ?? 0)}
+                    </span>
+                  ) : null}
                 </div>
               </PerformanceSpinnerValue>
             </div>
@@ -1293,20 +1436,39 @@ const MetricSummaryCard = memo(function MetricSummaryCard({
                 </div>
                 <PerformanceSpinnerValue
                   loading={loading}
-                  transitionKey={formatPanelValue(
+                  transitionKey={`${formatPanelValue(
                     locale,
                     messages,
                     activePanel,
                     value as number | null,
-                  )}
+                  )}:${formatPanelValue(
+                    locale,
+                    messages,
+                    activePanel,
+                    comparisonSummary?.[key as "p50" | "p75" | "p95"] ?? null,
+                  )}`}
                 >
-                  <div className="font-mono text-lg font-semibold tabular-nums">
-                    {formatPanelValue(
-                      locale,
-                      messages,
-                      activePanel,
-                      value as number | null,
-                    )}
+                  <div className="grid gap-0.5 font-mono text-lg font-semibold tabular-nums">
+                    <span>
+                      {formatPanelValue(
+                        locale,
+                        messages,
+                        activePanel,
+                        value as number | null,
+                      )}
+                    </span>
+                    {comparisonLabel ? (
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {comparisonLabel}:{" "}
+                        {formatPanelValue(
+                          locale,
+                          messages,
+                          activePanel,
+                          comparisonSummary?.[key as "p50" | "p75" | "p95"] ??
+                            null,
+                        )}
+                      </span>
+                    ) : null}
                   </div>
                 </PerformanceSpinnerValue>
               </div>
@@ -1609,12 +1771,14 @@ const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
   messages,
   activePanel,
   countries,
+  comparisonLabel,
   loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
   activePanel: PerformancePanelKey;
   countries: CountryHealthRow[];
+  comparisonLabel?: string;
   loading?: boolean;
 }) {
   const [featureCollection, setFeatureCollection] =
@@ -1680,13 +1844,22 @@ const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
   const sortedCountries = useMemo(() => {
     const direction = sort.direction === "asc" ? 1 : -1;
     return [...countries].sort((a, b) => {
-      if (sort.key === "samples") return (a.samples - b.samples) * direction;
+      if (sort.key === "samples") {
+        if (comparisonLabel) {
+          return (
+            ((a.comparisonValue ?? a.comparisonScore ?? -1) -
+              (b.comparisonValue ?? b.comparisonScore ?? -1)) *
+            direction
+          );
+        }
+        return (a.samples - b.samples) * direction;
+      }
       if (sort.key === "score") {
         return ((a.score ?? -1) - (b.score ?? -1)) * direction;
       }
       return ((a.value ?? -1) - (b.value ?? -1)) * direction;
     });
-  }, [countries, sort.direction, sort.key]);
+  }, [comparisonLabel, countries, sort.direction, sort.key]);
   const groupedRows = useMemo(
     () => ({
       poor: sortedCountries.filter((row) => row.status === "poor"),
@@ -1752,6 +1925,7 @@ const PerformanceHealthMapCard = memo(function PerformanceHealthMapCard({
               rows={groupedRows[status]}
               sort={sort}
               onSort={updateSort}
+              comparisonLabel={comparisonLabel}
               loading={loading}
             />
           ))}
@@ -1769,6 +1943,7 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
   rows,
   sort,
   onSort,
+  comparisonLabel,
   loading = false,
 }: {
   locale: Locale;
@@ -1778,6 +1953,7 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
   rows: CountryHealthRow[];
   sort: { key: PathSortKey; direction: SortDirection };
   onSort: (key: PathSortKey) => void;
+  comparisonLabel?: string;
   loading?: boolean;
 }) {
   const statusStyle = STATUS_STYLE[status];
@@ -1795,8 +1971,56 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
       PathSortKey,
       typeof status
     >[]
-  >(
-    () => [
+  >(() => {
+    const metricLabel =
+      activePanel === "score"
+        ? messages.performance.score
+        : messages.performance.metricValueColumn;
+
+    if (comparisonLabel) {
+      return [
+        {
+          key: "samples",
+          label: comparisonLabel,
+          getValue: (row) => row.comparisonValue ?? row.comparisonScore ?? 0,
+          format: (_value, row) =>
+            loading ? (
+              <Skeleton className="ml-auto h-4 w-14" />
+            ) : (
+              <span className="text-muted-foreground">
+                {formatPanelValue(
+                  locale,
+                  messages,
+                  activePanel,
+                  row.comparisonValue ?? row.comparisonScore,
+                )}
+              </span>
+            ),
+          className: "font-mono tabular-nums",
+        },
+        {
+          key: "value",
+          label: metricLabel,
+          getValue: (row) => row.value ?? row.score ?? 0,
+          format: (_value, row) =>
+            loading ? (
+              <Skeleton className="ml-auto h-4 w-14" />
+            ) : (
+              <span>
+                {formatPanelValue(
+                  locale,
+                  messages,
+                  activePanel,
+                  row.value ?? row.score,
+                )}
+              </span>
+            ),
+          className: "font-mono tabular-nums",
+        },
+      ];
+    }
+
+    return [
       {
         key: "samples",
         label: messages.performance.samplesLabel,
@@ -1805,36 +2029,40 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
           loading ? (
             <Skeleton className="ml-auto h-4 w-12" />
           ) : (
-            numberFormat(locale, value)
+            <span>{numberFormat(locale, value)}</span>
           ),
         className: "font-mono tabular-nums",
       },
       {
         key: "value",
-        label:
-          activePanel === "score"
-            ? messages.performance.score
-            : messages.performance.metricValueColumn,
+        label: metricLabel,
         getValue: (row) => row.value ?? row.score ?? 0,
         format: (_value, row) =>
           loading ? (
             <Skeleton className="ml-auto h-4 w-14" />
           ) : (
-            formatPanelValue(locale, messages, activePanel, row.value)
+            <span>
+              {formatPanelValue(
+                locale,
+                messages,
+                activePanel,
+                row.value ?? row.score,
+              )}
+            </span>
           ),
         className: "font-mono tabular-nums",
       },
-    ],
-    [
-      activePanel,
-      loading,
-      locale,
-      messages,
-      messages.performance.metricValueColumn,
-      messages.performance.samplesLabel,
-      messages.performance.score,
-    ],
-  );
+    ];
+  }, [
+    activePanel,
+    comparisonLabel,
+    loading,
+    locale,
+    messages,
+    messages.performance.metricValueColumn,
+    messages.performance.samplesLabel,
+    messages.performance.score,
+  ]);
   const tabs = useMemo(
     () =>
       [
@@ -1944,7 +2172,7 @@ const CountryStatusColumn = memo(function CountryStatusColumn({
           emptyLabel={messages.common.noData}
           headerHidden
           search={false}
-          progress="samples"
+          progress={comparisonLabel ? "value" : "samples"}
         />
       </div>
     </div>
@@ -1986,6 +2214,7 @@ const PathStatusColumn = memo(function PathStatusColumn({
   rows,
   sort,
   onSort,
+  comparisonLabel,
   loading = false,
 }: {
   locale: Locale;
@@ -1995,6 +2224,7 @@ const PathStatusColumn = memo(function PathStatusColumn({
   rows: PathPerformanceRow[];
   sort: { key: PathSortKey; direction: SortDirection };
   onSort: (key: PathSortKey) => void;
+  comparisonLabel?: string;
   loading?: boolean;
 }) {
   const statusStyle = STATUS_STYLE[status];
@@ -2012,8 +2242,56 @@ const PathStatusColumn = memo(function PathStatusColumn({
       PathSortKey,
       typeof status
     >[]
-  >(
-    () => [
+  >(() => {
+    const metricLabel =
+      activePanel === "score"
+        ? messages.performance.score
+        : messages.performance.metricValueColumn;
+
+    if (comparisonLabel) {
+      return [
+        {
+          key: "samples",
+          label: comparisonLabel,
+          getValue: (row) => row.comparisonValue ?? row.comparisonScore ?? 0,
+          format: (_value, row) =>
+            loading ? (
+              <Skeleton className="ml-auto h-4 w-14" />
+            ) : (
+              <span className="text-muted-foreground">
+                {formatPanelValue(
+                  locale,
+                  messages,
+                  activePanel,
+                  row.comparisonValue ?? row.comparisonScore,
+                )}
+              </span>
+            ),
+          className: "font-mono tabular-nums",
+        },
+        {
+          key: "value",
+          label: metricLabel,
+          getValue: (row) => row.value ?? row.score ?? 0,
+          format: (_value, row) =>
+            loading ? (
+              <Skeleton className="ml-auto h-4 w-14" />
+            ) : (
+              <span>
+                {formatPanelValue(
+                  locale,
+                  messages,
+                  activePanel,
+                  row.value ?? row.score,
+                )}
+              </span>
+            ),
+          className: "font-mono tabular-nums",
+        },
+      ];
+    }
+
+    return [
       {
         key: "samples",
         label: messages.performance.samplesLabel,
@@ -2022,36 +2300,40 @@ const PathStatusColumn = memo(function PathStatusColumn({
           loading ? (
             <Skeleton className="ml-auto h-4 w-12" />
           ) : (
-            numberFormat(locale, value)
+            <span>{numberFormat(locale, value)}</span>
           ),
         className: "font-mono tabular-nums",
       },
       {
         key: "value",
-        label:
-          activePanel === "score"
-            ? messages.performance.score
-            : messages.performance.metricValueColumn,
+        label: metricLabel,
         getValue: (row) => row.value ?? row.score ?? 0,
         format: (_value, row) =>
           loading ? (
             <Skeleton className="ml-auto h-4 w-14" />
           ) : (
-            formatPanelValue(locale, messages, activePanel, row.value)
+            <span>
+              {formatPanelValue(
+                locale,
+                messages,
+                activePanel,
+                row.value ?? row.score,
+              )}
+            </span>
           ),
         className: "font-mono tabular-nums",
       },
-    ],
-    [
-      activePanel,
-      loading,
-      locale,
-      messages,
-      messages.performance.metricValueColumn,
-      messages.performance.samplesLabel,
-      messages.performance.score,
-    ],
-  );
+    ];
+  }, [
+    activePanel,
+    comparisonLabel,
+    loading,
+    locale,
+    messages,
+    messages.performance.metricValueColumn,
+    messages.performance.samplesLabel,
+    messages.performance.score,
+  ]);
   const tabs = useMemo(
     () =>
       [
@@ -2157,7 +2439,7 @@ const PathStatusColumn = memo(function PathStatusColumn({
           emptyLabel={messages.common.noData}
           headerHidden
           search={false}
-          progress="samples"
+          progress={comparisonLabel ? "value" : "samples"}
         />
       </div>
     </div>
@@ -2169,12 +2451,14 @@ const PathPerformanceTable = memo(function PathPerformanceTable({
   messages,
   activePanel,
   rows,
+  comparisonLabel,
   loading = false,
 }: {
   locale: Locale;
   messages: AppMessages;
   activePanel: PerformancePanelKey;
   rows: PathPerformanceRow[];
+  comparisonLabel?: string;
   loading?: boolean;
 }) {
   const [sort, setSort] = useState<{
@@ -2187,13 +2471,22 @@ const PathPerformanceTable = memo(function PathPerformanceTable({
   const sortedRows = useMemo(() => {
     const direction = sort.direction === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
-      if (sort.key === "samples") return (a.samples - b.samples) * direction;
+      if (sort.key === "samples") {
+        if (comparisonLabel) {
+          return (
+            ((a.comparisonValue ?? a.comparisonScore ?? -1) -
+              (b.comparisonValue ?? b.comparisonScore ?? -1)) *
+            direction
+          );
+        }
+        return (a.samples - b.samples) * direction;
+      }
       if (sort.key === "score") {
         return ((a.score ?? -1) - (b.score ?? -1)) * direction;
       }
       return ((a.value ?? -1) - (b.value ?? -1)) * direction;
     });
-  }, [rows, sort.direction, sort.key]);
+  }, [comparisonLabel, rows, sort.direction, sort.key]);
   const groupedRows = useMemo(
     () => ({
       poor: sortedRows.filter((row) => row.status === "poor"),
@@ -2258,6 +2551,7 @@ const PathPerformanceTable = memo(function PathPerformanceTable({
               rows={groupedRows[status]}
               sort={sort}
               onSort={updateSort}
+              comparisonLabel={comparisonLabel}
               loading={loading}
             />
           ))}
@@ -2277,7 +2571,12 @@ export function PerformanceClientPage({
     window: TimeWindow;
   };
   const [activePanel, setActivePanel] = useState<PerformancePanelKey>("score");
+  const comparisonQuery = useDashboardComparisonQuery(timeWindow, filters);
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const comparisonFiltersKey = useMemo(
+    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : null),
+    [comparisonQuery],
+  );
   const { data, isPending, isPlaceholderData } = useQuery({
     queryKey: [
       "dashboard",
@@ -2288,30 +2587,66 @@ export function PerformanceClientPage({
       timeWindow.interval,
       timeWindow.timeZone,
       filtersKey,
+      comparisonQuery?.mode ?? null,
+      comparisonQuery?.window.from ?? null,
+      comparisonQuery?.window.to ?? null,
+      comparisonQuery?.window.interval ?? null,
+      comparisonQuery?.window.timeZone ?? null,
+      comparisonFiltersKey,
     ],
-    queryFn: async ({ signal }) => ({
-      performanceData: await fetchPerformance(siteId, timeWindow, filters, {
+    queryFn: async ({ signal }) => {
+      const currentPromise = fetchPerformance(siteId, timeWindow, filters, {
         signal,
-      }),
-      dataWindow: {
-        from: timeWindow.from,
-        to: timeWindow.to,
-        interval: timeWindow.interval,
-        timeZone: timeWindow.timeZone,
-      },
-    }),
+      });
+      const comparisonPromise = comparisonQuery
+        ? fetchPerformance(
+            siteId,
+            comparisonQuery.window,
+            comparisonQuery.filters,
+            { signal },
+          )
+        : Promise.resolve(null);
+      const [performanceData, comparisonData] = await Promise.all([
+        currentPromise,
+        comparisonPromise,
+      ]);
+
+      return {
+        performanceData,
+        comparisonData,
+        dataWindow: {
+          from: timeWindow.from,
+          to: timeWindow.to,
+          interval: timeWindow.interval,
+          timeZone: timeWindow.timeZone,
+        },
+        comparisonDataWindow: comparisonQuery
+          ? {
+              from: comparisonQuery.window.from,
+              to: comparisonQuery.window.to,
+              interval: comparisonQuery.window.interval,
+              timeZone: comparisonQuery.window.timeZone,
+            }
+          : null,
+      };
+    },
     placeholderData: keepPreviousData,
     enabled: typeof window !== "undefined",
   });
   const loading = isPending || isPlaceholderData;
   const performanceData =
     data?.performanceData ?? emptyPerformance(timeWindow.interval);
+  const comparisonPerformanceData = data?.comparisonData ?? null;
   const dataWindow = data?.dataWindow ?? {
     from: timeWindow.from,
     to: timeWindow.to,
     interval: timeWindow.interval,
     timeZone: timeWindow.timeZone,
   };
+  const comparisonDataWindow = data?.comparisonDataWindow ?? null;
+  const comparisonLabel = comparisonQuery
+    ? dashboardComparisonLabel(messages, comparisonQuery)
+    : null;
 
   const summaryByPanel = useMemo(
     () =>
@@ -2327,6 +2662,21 @@ export function PerformanceClientPage({
   );
   const activeSummary = summaryByPanel.get(activePanel) ?? EMPTY_SUMMARY;
   const activeValue = activeSummary.p75 ?? activeSummary.avg;
+  const comparisonSummaryByPanel = useMemo(() => {
+    if (!comparisonPerformanceData) return null;
+    return new Map<PerformancePanelKey, PerformanceSummary>(
+      PERFORMANCE_PANELS.map((key) => [
+        key,
+        key === "score"
+          ? scoreSummary(comparisonPerformanceData)
+          : (comparisonPerformanceData.summaries[key] ?? EMPTY_SUMMARY),
+      ]),
+    );
+  }, [comparisonPerformanceData]);
+  const comparisonSummary = comparisonSummaryByPanel?.get(activePanel) ?? null;
+  const comparisonValue = comparisonSummary
+    ? (comparisonSummary.p75 ?? comparisonSummary.avg)
+    : null;
 
   const chartPoints = useMemo(
     () =>
@@ -2335,6 +2685,23 @@ export function PerformanceClientPage({
         : buildMetricTrend(performanceData, activePanel, dataWindow),
     [activePanel, dataWindow, performanceData],
   );
+  const comparisonChartPoints = useMemo(() => {
+    if (!comparisonPerformanceData || !comparisonDataWindow) return [];
+    const points =
+      activePanel === "score"
+        ? buildScoreTrend(comparisonPerformanceData, comparisonDataWindow)
+        : buildMetricTrend(
+            comparisonPerformanceData,
+            activePanel,
+            comparisonDataWindow,
+          );
+    return alignComparisonTrend(chartPoints, points);
+  }, [
+    activePanel,
+    chartPoints,
+    comparisonDataWindow,
+    comparisonPerformanceData,
+  ]);
   const performanceTrendLabels = useMemo<PerformanceTrendChartLabels>(
     () => ({
       p50: messages.performance.p50Label,
@@ -2368,9 +2735,26 @@ export function PerformanceClientPage({
         summary,
         status,
         score,
+        comparisonValue:
+          comparisonSummaryByPanel?.get(key)?.p75 ??
+          comparisonSummaryByPanel?.get(key)?.avg ??
+          null,
+        changeRate: performanceChangeRate(
+          value,
+          comparisonSummaryByPanel?.get(key)?.p75 ??
+            comparisonSummaryByPanel?.get(key)?.avg,
+        ),
       };
     });
-  }, [locale, messages, summaryByPanel]);
+  }, [comparisonSummaryByPanel, locale, messages, summaryByPanel]);
+
+  const comparisonRouteMap = useMemo(() => {
+    const map = new Map<string, PerformanceRouteSummary>();
+    for (const route of comparisonPerformanceData?.routes ?? []) {
+      map.set(route.pathname || "/", route);
+    }
+    return map;
+  }, [comparisonPerformanceData?.routes]);
 
   const pathRows = useMemo<PathPerformanceRow[]>(
     () =>
@@ -2378,6 +2762,7 @@ export function PerformanceClientPage({
         const value = routeValue(route, activePanel);
         const score = routeScore(route);
         const pathname = route.pathname || "/";
+        const comparisonRoute = comparisonRouteMap.get(pathname);
         return {
           key: pathname,
           pathname,
@@ -2386,10 +2771,33 @@ export function PerformanceClientPage({
           value,
           score,
           status: routeStatus(route, activePanel),
+          comparisonViews: comparisonRoute?.views ?? 0,
+          comparisonSamples: comparisonRoute
+            ? routeSamples(comparisonRoute, activePanel)
+            : 0,
+          comparisonValue: comparisonRoute
+            ? routeValue(comparisonRoute, activePanel)
+            : null,
+          comparisonScore: comparisonRoute ? routeScore(comparisonRoute) : null,
+          comparisonStatus: comparisonRoute
+            ? routeStatus(comparisonRoute, activePanel)
+            : "none",
         };
       }),
-    [activePanel, performanceData.routes],
+    [activePanel, comparisonRouteMap, performanceData.routes],
   );
+
+  const comparisonCountryMap = useMemo(() => {
+    const map = new Map<string, PerformanceCountrySummary>();
+    for (const country of comparisonPerformanceData?.countries ?? []) {
+      const key = String(country.country ?? "")
+        .trim()
+        .toUpperCase();
+      if (key) map.set(key, country);
+    }
+    return map;
+  }, [comparisonPerformanceData?.countries]);
+
   const countryRows = useMemo<CountryHealthRow[]>(
     () =>
       (performanceData.countries ?? [])
@@ -2400,6 +2808,7 @@ export function PerformanceClientPage({
           const normalizedCountry = String(country.country ?? "")
             .trim()
             .toUpperCase();
+          const comparisonCountry = comparisonCountryMap.get(normalizedCountry);
           const { label, code } = resolveCountryLabel(
             normalizedCountry,
             locale,
@@ -2416,10 +2825,29 @@ export function PerformanceClientPage({
             value,
             score,
             status: countryStatus(country, activePanel),
+            comparisonViews: comparisonCountry?.views ?? 0,
+            comparisonSamples: comparisonCountry
+              ? countrySamples(comparisonCountry, activePanel)
+              : 0,
+            comparisonValue: comparisonCountry
+              ? countryValue(comparisonCountry, activePanel)
+              : null,
+            comparisonScore: comparisonCountry
+              ? countryScore(comparisonCountry)
+              : null,
+            comparisonStatus: comparisonCountry
+              ? countryStatus(comparisonCountry, activePanel)
+              : "none",
           };
         })
         .filter((country) => country.country.length > 0),
-    [activePanel, locale, messages.common.unknown, performanceData.countries],
+    [
+      activePanel,
+      comparisonCountryMap,
+      locale,
+      messages.common.unknown,
+      performanceData.countries,
+    ],
   );
 
   const hasContent =
@@ -2442,6 +2870,7 @@ export function PerformanceClientPage({
             activePanel={activePanel}
             cards={metricCards}
             onSelect={setActivePanel}
+            comparisonLabel={comparisonLabel ?? undefined}
             loading={loading}
           />
           <div className="min-w-0">
@@ -2452,7 +2881,13 @@ export function PerformanceClientPage({
                 activePanel={activePanel}
                 activeSummary={activeSummary}
                 activeValue={activeValue}
+                comparisonLabel={comparisonLabel ?? undefined}
+                comparisonSummary={comparisonSummary}
+                comparisonValue={comparisonValue}
                 pathCount={pathRows.length}
+                comparisonPathCount={
+                  comparisonPerformanceData?.routes?.length ?? 0
+                }
                 loading={loading}
               />
               <Card>
@@ -2493,6 +2928,8 @@ export function PerformanceClientPage({
                             activePanel={activePanel}
                             dataWindow={dataWindow}
                             points={chartPoints}
+                            comparisonPoints={comparisonChartPoints}
+                            comparisonLabel={comparisonLabel ?? undefined}
                             labels={performanceTrendLabels}
                             metricThresholds={METRIC_THRESHOLDS}
                             formatValue={formatPerformanceTrendValue}
@@ -2508,6 +2945,7 @@ export function PerformanceClientPage({
                 messages={messages}
                 activePanel={activePanel}
                 countries={countryRows}
+                comparisonLabel={comparisonLabel ?? undefined}
                 loading={loading}
               />
               <PathPerformanceTable
@@ -2515,6 +2953,7 @@ export function PerformanceClientPage({
                 messages={messages}
                 activePanel={activePanel}
                 rows={pathRows}
+                comparisonLabel={comparisonLabel ?? undefined}
                 loading={loading}
               />
             </div>
