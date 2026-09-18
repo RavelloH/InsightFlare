@@ -4,6 +4,10 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { GeoCountryStatsPanel } from "@/components/dashboard/geo-country-stats-panel";
 import type { GeoClientMapStageProps } from "@/components/dashboard/site-pages/geo-client-map-stage";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   pushUrlWithoutNavigation,
@@ -12,6 +16,7 @@ import {
 import {
   fetchOverviewGeoDimensionTab,
   fetchOverviewGeoPoints,
+  type OverviewGeoDimensionTab,
   type OverviewGeoTabRows,
 } from "@/lib/dashboard/client-data";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
@@ -92,6 +97,8 @@ interface GeoStatsEntry {
   views: number;
   sessions: number;
   visitors: number;
+  reference?: OverviewGeoTabRows[number]["reference"];
+  change?: OverviewGeoTabRows[number]["change"];
 }
 
 interface GeoDirectoryEntry {
@@ -1170,6 +1177,7 @@ export function GeoClientPage({
 }: GeoClientPageProps) {
   const isMobile = useIsMobile();
   const { window, filters } = useDashboardQuery();
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const searchParams = useLiveSearchParams();
   const geoMessages = messages.geo;
   const geoInvestigationMessages = geoMessages.investigation;
@@ -1188,6 +1196,30 @@ export function GeoClientPage({
     () => filterQueryKey(requestFilters),
     [requestFilters],
   );
+  const statsTab: OverviewGeoDimensionTab = requestedLocation
+    ? requestedLocation.level === "country"
+      ? "region"
+      : "city"
+    : "country";
+  const comparisonRequest = useMemo(() => {
+    if (!comparisonQuery) return null;
+    const comparisonFilters = requestedLocation?.canonical
+      ? setDashboardFilterValue(
+          comparisonQuery.filters,
+          "geo",
+          requestedLocation.canonical,
+        )
+      : comparisonQuery.filters;
+    return {
+      ...comparisonQuery,
+      filters: comparisonFilters,
+    };
+  }, [comparisonQuery, requestedLocation?.canonical]);
+  const comparisonFiltersKey = useMemo(
+    () =>
+      comparisonRequest ? filterQueryKey(comparisonRequest.filters) : "none",
+    [comparisonRequest],
+  );
   const { data: geoData, isFetching: loading } = useQuery({
     queryKey: [
       "dashboard",
@@ -1200,31 +1232,28 @@ export function GeoClientPage({
       locale,
       requestedLocation?.canonical ?? "",
       requestFiltersKey,
+      statsTab,
+      comparisonRequest?.mode ?? "none",
+      comparisonRequest?.window.from ?? "none",
+      comparisonRequest?.window.to ?? "none",
+      comparisonRequest?.window.interval ?? "none",
+      comparisonRequest?.window.timeZone ?? "none",
+      comparisonFiltersKey,
     ],
     queryFn: async ({ signal }) => {
-      const dimensionTab = !requestedLocation
-        ? null
-        : requestedLocation.level === "country"
-          ? "region"
-          : "city";
       const [geoPointsData, geoTabRows, geoLocaleBundle] = await Promise.all([
         fetchOverviewGeoPoints(siteId, window, requestFilters, {
           limit: 5000,
           applyGeoFilter: Boolean(requestedLocation?.canonical),
           signal,
         }),
-        dimensionTab
-          ? fetchOverviewGeoDimensionTab(
-              siteId,
-              window,
-              dimensionTab,
-              requestFilters,
-              {
-                limit: dimensionTab === "city" ? 600 : 400,
-                signal,
-              },
-            )
-          : Promise.resolve([] as OverviewGeoTabRows),
+        fetchOverviewGeoDimensionTab(siteId, window, statsTab, requestFilters, {
+          limit: statsTab === "city" ? 600 : 400,
+          comparison: comparisonRequest,
+          comparisonMetric: "views",
+          comparisonSortBy: "current",
+          signal,
+        }),
         fetchGeoLocaleBundle(
           requestedLocation,
           locale,
@@ -1313,6 +1342,8 @@ export function GeoClientPage({
         visitors:
           Number((row as { visitors?: unknown }).visitors ?? 0) ||
           Number(fallback?.visitors ?? 0),
+        reference: (row as OverviewGeoTabRows[number]).reference,
+        change: (row as OverviewGeoTabRows[number]).change,
       });
     }
 
@@ -1326,6 +1357,8 @@ export function GeoClientPage({
           views: Number(source?.views ?? fallback?.views ?? 0),
           sessions: Number(source?.sessions ?? fallback?.sessions ?? 0),
           visitors: Number(source?.visitors ?? fallback?.visitors ?? 0),
+          reference: source?.reference,
+          change: source?.change,
         };
       });
     }
@@ -1440,6 +1473,9 @@ export function GeoClientPage({
       ? geoMessages.regionLabel
       : geoMessages.cityLabel
     : geoMessages.countryLabel;
+  const comparisonLabel = comparisonQuery
+    ? dashboardComparisonLabel(messages, comparisonQuery)
+    : undefined;
 
   const updateLocation = useCallback(
     (nextLocation: string | null) => {
@@ -1477,6 +1513,7 @@ export function GeoClientPage({
       locale={locale}
       messages={messages}
       loading={loading}
+      comparisonLabel={comparisonLabel}
       stacked={isMobile}
       columnLabel={statsColumnLabel}
       currentLocationInfo={currentLocationInfo}

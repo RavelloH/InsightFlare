@@ -16,6 +16,10 @@ import {
 import type { PartialOptions } from "overlayscrollbars";
 import { OverlayScrollbars } from "overlayscrollbars";
 
+import {
+  ComparisonMetricToggle,
+  type ComparisonTableMetric,
+} from "@/components/dashboard/comparison-table";
 import { DataTableSwitch } from "@/components/dashboard/data-table-switch";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -36,6 +40,7 @@ interface GeoCountryStatsPanelProps {
   locale: Locale;
   messages: AppMessages;
   loading: boolean;
+  comparisonLabel?: string;
   stacked?: boolean;
   columnLabel: string;
   currentLocationInfo?: {
@@ -58,14 +63,28 @@ interface GeoCountryStatsPanelProps {
     views: number;
     sessions: number;
     visitors: number;
+    reference?: GeoComparisonValues;
+    change?: GeoComparisonChange;
   }>;
   selectedEntryKey?: string | null;
   onSelectEntry?: ((key: string) => void) | undefined;
   onBack?: (() => void) | undefined;
 }
 
-type SortKey = "visitors" | "views";
+type SortKey = "visitors" | "views" | "reference" | "current" | "change";
 type SortDirection = "asc" | "desc";
+
+type GeoComparisonValues = {
+  views: number;
+  sessions: number;
+  visitors: number;
+};
+
+type GeoComparisonChange = {
+  views: { absolute: number; relative: number | null };
+  sessions: { absolute: number; relative: number | null };
+  visitors: { absolute: number; relative: number | null };
+};
 
 const PANEL_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -82,6 +101,7 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
   locale,
   messages,
   loading,
+  comparisonLabel,
   stacked = false,
   columnLabel,
   currentLocationInfo,
@@ -99,6 +119,18 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
     key: "visitors",
     direction: "desc",
   });
+  const [comparisonMetric, setComparisonMetric] =
+    useState<ComparisonTableMetric>("views");
+  const comparisonMode = Boolean(comparisonLabel);
+  const effectiveSortKey: SortKey = comparisonMode
+    ? sort.key === "reference" ||
+      sort.key === "current" ||
+      sort.key === "change"
+      ? sort.key
+      : "current"
+    : sort.key === "visitors" || sort.key === "views"
+      ? sort.key
+      : "views";
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
   const scrollbarsRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
     null,
@@ -148,7 +180,7 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
   };
 
   const renderSortIndicator = (key: SortKey) => {
-    if (sort.key === key) {
+    if (effectiveSortKey === key) {
       return sort.direction === "desc" ? (
         <RiArrowDownSLine className="size-3.5" />
       ) : (
@@ -167,21 +199,49 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
   const sortedEntries = useMemo(() => {
     return [...entries].sort((left, right) => {
       const direction = sort.direction === "asc" ? 1 : -1;
-      const delta =
-        (Number(left[sort.key] ?? 0) - Number(right[sort.key] ?? 0)) *
-        direction;
+      const valueFor = (entry: (typeof entries)[number]) => {
+        if (!comparisonMode) {
+          return Number(entry[effectiveSortKey as "visitors" | "views"] ?? 0);
+        }
+        if (effectiveSortKey === "reference") {
+          return Number(entry.reference?.[comparisonMetric] ?? 0);
+        }
+        if (effectiveSortKey === "change") {
+          return entry.change?.[comparisonMetric]?.relative ?? Infinity;
+        }
+        return Number(entry[comparisonMetric] ?? 0);
+      };
+      const delta = (valueFor(left) - valueFor(right)) * direction;
       if (delta !== 0) return delta;
       return String(left.label).localeCompare(String(right.label), locale);
     });
-  }, [entries, locale, sort.direction, sort.key]);
+  }, [
+    comparisonMetric,
+    comparisonMode,
+    effectiveSortKey,
+    entries,
+    locale,
+    sort.direction,
+  ]);
 
   const progressTotal = useMemo(
     () =>
       sortedEntries.reduce(
-        (sum, entry) => sum + Math.max(0, Number(entry[sort.key] ?? 0)),
+        (sum, entry) =>
+          sum +
+          Math.max(
+            0,
+            Number(
+              entry[
+                comparisonMode
+                  ? comparisonMetric
+                  : (effectiveSortKey as "visitors" | "views")
+              ] ?? 0,
+            ),
+          ),
         0,
       ),
-    [sort.key, sortedEntries],
+    [comparisonMetric, comparisonMode, effectiveSortKey, sortedEntries],
   );
   const hasVisibleContent = sortedEntries.length > 0;
   const hasTopSectionContent = Boolean(
@@ -220,14 +280,117 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
     wikiSummary?.pageUrl,
   ]);
 
-  const tableHeader = (
+  const comparisonMetricLabel =
+    comparisonMetric === "views"
+      ? messages.common.views
+      : messages.common.visitors;
+  const tableHeader = comparisonMode ? (
     <TableRow className="hover:bg-transparent">
       <TableHead className="h-8 p-0">
         <div className="px-4">{columnLabel}</div>
       </TableHead>
       <TableHead
         aria-sort={
-          sort.key === "visitors"
+          effectiveSortKey === "reference"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[4.75rem] p-0"
+      >
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: comparisonLabel ?? "",
+            })}
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              effectiveSortKey === "reference"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSort("reference")}
+          >
+            {comparisonLabel}
+            {renderSortIndicator("reference")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead
+        aria-sort={
+          effectiveSortKey === "current"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[5.75rem] p-0"
+      >
+        <div className="flex items-center justify-end gap-1 px-2">
+          <ComparisonMetricToggle
+            metric={comparisonMetric}
+            metrics={["views", "visitors"]}
+            messages={messages}
+            onMetricChange={setComparisonMetric}
+          />
+          <button
+            type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: comparisonMetricLabel,
+            })}
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              effectiveSortKey === "current"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSort("current")}
+          >
+            {comparisonMetricLabel}
+            {renderSortIndicator("current")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead
+        aria-sort={
+          effectiveSortKey === "change"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[4.75rem] p-0"
+      >
+        <div className="flex justify-end px-4">
+          <button
+            type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: messages.common.change,
+            })}
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              effectiveSortKey === "change"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSort("change")}
+          >
+            {messages.common.change}
+            {renderSortIndicator("change")}
+          </button>
+        </div>
+      </TableHead>
+    </TableRow>
+  ) : (
+    <TableRow className="hover:bg-transparent">
+      <TableHead className="h-8 p-0">
+        <div className="px-4">{columnLabel}</div>
+      </TableHead>
+      <TableHead
+        aria-sort={
+          effectiveSortKey === "visitors"
             ? sort.direction === "asc"
               ? "ascending"
               : "descending"
@@ -243,7 +406,7 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
             })}
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-              sort.key === "visitors"
+              effectiveSortKey === "visitors"
                 ? "text-foreground"
                 : "text-muted-foreground",
             )}
@@ -256,7 +419,7 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
       </TableHead>
       <TableHead
         aria-sort={
-          sort.key === "views"
+          effectiveSortKey === "views"
             ? sort.direction === "asc"
               ? "ascending"
               : "descending"
@@ -272,7 +435,7 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
             })}
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-              sort.key === "views"
+              effectiveSortKey === "views"
                 ? "text-foreground"
                 : "text-muted-foreground",
             )}
@@ -287,11 +450,38 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
   );
 
   const rows = sortedEntries.map((entry) => {
-    const rowValue = Math.max(0, Number(entry[sort.key] ?? 0));
+    const rowValue = Math.max(
+      0,
+      Number(
+        entry[
+          comparisonMode
+            ? comparisonMetric
+            : (effectiveSortKey as "visitors" | "views")
+        ] ?? 0,
+      ),
+    );
     const progressPercent =
       progressTotal > 0 ? Math.min(100, (rowValue / progressTotal) * 100) : 0;
     const progressWidth = `${progressPercent.toFixed(2)}%`;
     const isSelected = entry.key === String(selectedEntryKey ?? "").trim();
+    const comparisonChange = comparisonMode
+      ? entry.change?.[comparisonMetric]
+      : null;
+    const comparisonChangeValue = comparisonChange?.relative;
+    const comparisonChangeClass =
+      comparisonChangeValue === null || comparisonChangeValue === undefined
+        ? "text-muted-foreground"
+        : comparisonChangeValue >= 0
+          ? "text-emerald-600"
+          : "text-rose-600";
+    const comparisonChangeText =
+      comparisonChange === undefined || comparisonChange === null
+        ? "—"
+        : comparisonChangeValue === null || comparisonChangeValue === undefined
+          ? entry[comparisonMetric] > 0
+            ? messages.common.new
+            : "—"
+          : `${comparisonChangeValue >= 0 ? "+" : ""}${(comparisonChangeValue * 100).toFixed(1)}%`;
 
     return (
       <TableRow
@@ -314,16 +504,43 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
             {entry.label}
           </div>
         </TableCell>
-        <TableCell className="p-0">
-          <div className="px-2 py-2 text-right font-mono tabular-nums">
-            {numberFormat(locale, entry.visitors)}
-          </div>
-        </TableCell>
-        <TableCell className="p-0">
-          <div className="px-2 py-2 text-right font-mono tabular-nums">
-            {numberFormat(locale, entry.views)}
-          </div>
-        </TableCell>
+        {comparisonMode ? (
+          <>
+            <TableCell className="p-0">
+              <div className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                {numberFormat(locale, entry.reference?.[comparisonMetric] ?? 0)}
+              </div>
+            </TableCell>
+            <TableCell className="p-0">
+              <div className="px-2 py-2 text-right font-mono tabular-nums">
+                {numberFormat(locale, entry[comparisonMetric])}
+              </div>
+            </TableCell>
+            <TableCell className="p-0">
+              <div
+                className={cn(
+                  "px-2 py-2 text-right font-mono tabular-nums",
+                  comparisonChangeClass,
+                )}
+              >
+                {comparisonChangeText}
+              </div>
+            </TableCell>
+          </>
+        ) : (
+          <>
+            <TableCell className="p-0">
+              <div className="px-2 py-2 text-right font-mono tabular-nums">
+                {numberFormat(locale, entry.visitors)}
+              </div>
+            </TableCell>
+            <TableCell className="p-0">
+              <div className="px-2 py-2 text-right font-mono tabular-nums">
+                {numberFormat(locale, entry.views)}
+              </div>
+            </TableCell>
+          </>
+        )}
       </TableRow>
     );
   });
@@ -460,8 +677,8 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
                   hasContent={hasVisibleContent}
                   loadingLabel={messages.common.loading}
                   emptyLabel={messages.common.noData}
-                  colSpan={3}
-                  contentKey={`${sort.key}-${sort.direction}-${selectedEntryKey ?? "none"}`}
+                  colSpan={comparisonMode ? 4 : 3}
+                  contentKey={`${comparisonMode ? comparisonLabel : "current"}-${comparisonMetric}-${effectiveSortKey}-${sort.direction}-${selectedEntryKey ?? "none"}`}
                   header={tableHeader}
                   rows={rows}
                 />
