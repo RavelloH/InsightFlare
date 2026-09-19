@@ -35,6 +35,7 @@ import {
 } from "@/components/dashboard/lazy-geo-location-label";
 import { OverviewGeoPointsMapCard } from "@/components/dashboard/overview-geo-points-map-card";
 import { PageHeading } from "@/components/dashboard/page-heading";
+import { PageDetailDrawer } from "@/components/dashboard/site-pages/page-detail-drawer";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
@@ -98,10 +99,7 @@ import {
   isSameGeoLabel,
   normalizeGeoTranslationLookupValue,
 } from "@/lib/dashboard/geo-translation";
-import {
-  buildPageDetailHref,
-  normalizePagePath,
-} from "@/lib/dashboard/page-detail";
+import { normalizePagePath } from "@/lib/dashboard/page-detail";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
 import {
@@ -491,7 +489,7 @@ type PageCardTargetUrlResolver = (params: {
   unknownLabel: string;
   fallbackHostname: string;
 }) => string | null;
-type PageCardDetailHrefResolver = (params: {
+type PageCardDetailPathResolver = (params: {
   tab: PageCardDetailTab;
   value: string;
   unknownLabel: string;
@@ -1310,7 +1308,7 @@ function isPageCardDetailTab(tab: PageCardTab): tab is PageCardDetailTab {
   return tab === "path" || tab === "entry" || tab === "exit";
 }
 
-function resolvePageCardDetailHref(params: {
+function resolvePageCardDetailPath(params: {
   tab?: PageCardDetailTab;
   basePath: string;
   value: string;
@@ -1322,7 +1320,7 @@ function resolvePageCardDetailHref(params: {
   const normalizedPath = normalizePagePath(raw);
   if (!normalizedPath) return null;
 
-  return buildPageDetailHref(params.basePath, normalizedPath);
+  return normalizedPath;
 }
 
 function resolveGeoLocationQueryValue(
@@ -2050,8 +2048,8 @@ interface OverviewPagesSectionProps extends OverviewClientPageProps {
   pageCardTargetUrlResolvers?: Partial<
     Record<PageCardTab, PageCardTargetUrlResolver>
   >;
-  pageCardDetailHrefResolvers?: Partial<
-    Record<PageCardDetailTab, PageCardDetailHrefResolver>
+  pageCardDetailPathResolvers?: Partial<
+    Record<PageCardDetailTab, PageCardDetailPathResolver>
   >;
   pageCardDetailClickResolvers?: Partial<
     Record<PageCardDetailTab, PageCardDetailClickResolver>
@@ -2085,7 +2083,7 @@ export function OverviewPagesSection({
   clientCardFetchers,
   geoCardFetchers,
   pageCardTargetUrlResolvers,
-  pageCardDetailHrefResolvers,
+  pageCardDetailPathResolvers,
   pageCardDetailClickResolvers,
   pageCardShowVisitors = true,
   primaryMetricLabel,
@@ -2095,6 +2093,7 @@ export function OverviewPagesSection({
   const router = useRouter();
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
+  const [pageDetailPath, setPageDetailPath] = useState<string | null>(null);
   const { window } = useDashboardQuery();
   const comparisonQuery = useOverviewComparisonQuery(
     window,
@@ -2257,6 +2256,10 @@ export function OverviewPagesSection({
   const pageDetailBasePath = useMemo(
     () => buildPagesPagePath(pathname),
     [pathname],
+  );
+  const pageDetailContentPathname = useMemo(
+    () => pageDetailBasePath.replace(/\/pages$/, "") || pathname,
+    [pageDetailBasePath, pathname],
   );
   const sourceCardTabMeta = useMemo<
     Record<
@@ -2490,11 +2493,11 @@ export function OverviewPagesSection({
     [],
   );
   const openPageCardRowDetail = useCallback(
-    (detailHref: string, event: MouseEvent<HTMLElement>) => {
+    (detailPath: string, event: MouseEvent<HTMLElement>) => {
       event.stopPropagation();
-      router.push(detailHref);
+      setPageDetailPath(normalizePagePath(detailPath));
     },
-    [router],
+    [],
   );
   const openPageCardRowDetailAction = useCallback(
     (
@@ -3071,11 +3074,11 @@ export function OverviewPagesSection({
         isPageCardDetailTab(tab) && resolvedPageCardDetailTabs.has(tab)
           ? (pageCardDetailClickResolvers?.[tab] ?? null)
           : null;
-      const rowDetailHref =
+      const rowDetailPath =
         !rowDetailAction &&
         isPageCardDetailTab(tab) &&
         resolvedPageCardDetailTabs.has(tab)
-          ? (pageCardDetailHrefResolvers?.[tab] ?? resolvePageCardDetailHref)({
+          ? (pageCardDetailPathResolvers?.[tab] ?? resolvePageCardDetailPath)({
               tab,
               basePath: pageDetailBasePath,
               value: item.label,
@@ -3142,13 +3145,13 @@ export function OverviewPagesSection({
               </TooltipTrigger>
               <TooltipContent>{messages.common.search}</TooltipContent>
             </Tooltip>
-          ) : rowDetailHref ? (
+          ) : rowDetailPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Clickable
                   className="inline-flex text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100 hover:text-foreground"
                   onClick={(event) =>
-                    openPageCardRowDetail(rowDetailHref, event)
+                    openPageCardRowDetail(rowDetailPath, event)
                   }
                   aria-label={messages.common.search}
                 >
@@ -3166,10 +3169,11 @@ export function OverviewPagesSection({
       messages.common.unknown,
       pageCardDefaultHostname,
       pageCardDetailClickResolvers,
-      pageCardDetailHrefResolvers,
+      pageCardDetailPathResolvers,
       pageCardTabMeta,
       pageCardTargetUrlResolvers,
       pageDetailBasePath,
+      openPageCardRowDetail,
       resolvedPageCardDetailTabs,
       resolvedPageCardNavigableTabs,
     ],
@@ -3316,9 +3320,9 @@ export function OverviewPagesSection({
           return;
         }
 
-        const rowDetailHref =
+        const rowDetailPath =
           isPageCardDetailTab(tab) && resolvedPageCardDetailTabs.has(tab)
-            ? (pageCardDetailHrefResolvers?.[tab] ?? resolvePageCardDetailHref)(
+            ? (pageCardDetailPathResolvers?.[tab] ?? resolvePageCardDetailPath)(
                 {
                   tab,
                   basePath: pageDetailBasePath,
@@ -3327,14 +3331,16 @@ export function OverviewPagesSection({
                 },
               )
             : null;
-        if (rowDetailHref) router.push(rowDetailHref);
+        if (rowDetailPath) {
+          setPageDetailPath(normalizePagePath(rowDetailPath));
+        }
       },
     }),
     [
       messages.common.unknown,
       pageCardDefaultHostname,
       pageCardDetailClickResolvers,
-      pageCardDetailHrefResolvers,
+      pageCardDetailPathResolvers,
       pageCardFilterEnabledByTab,
       pageCardLabel,
       pageCardTabMeta,
@@ -3720,6 +3726,20 @@ export function OverviewPagesSection({
           </div>
         ) : null}
       </section>
+
+      {pageDetailPath ? (
+        <PageDetailDrawer
+          locale={locale}
+          messages={messages}
+          siteId={siteId}
+          siteDomain={siteDomain}
+          pathname={pageDetailContentPathname}
+          pagePath={pageDetailPath}
+          onOpenChange={(open) => {
+            if (!open) setPageDetailPath(null);
+          }}
+        />
+      ) : null}
     </>
   );
 }

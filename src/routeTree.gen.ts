@@ -65,9 +65,7 @@ import { Route as LocaleAppTeamSlugSiteSlugVisitorsRouteImport } from './routes/
 import { Route as LocaleAppTeamSlugAccountNotificationsRouteImport } from './routes/$locale.app.$teamSlug.account.notifications'
 import { Route as LocaleAppTeamSlugManageSitesRouteImport } from './routes/$locale.app.$teamSlug.manage.sites'
 import { Route as LocaleAppTeamSlugNotificationsEmailPreviewRouteImport } from './routes/$locale.app.$teamSlug.notifications_.email-preview'
-import { Route as LocaleShareSlugPagesPageKeyRouteImport } from './routes/$locale.share.$slug.pages_.$pageKey'
 import { Route as LocaleAppTeamSlugSiteSlugEventsDetailRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.events_.detail'
-import { Route as LocaleAppTeamSlugSiteSlugPagesPageKeyRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.pages_.$pageKey'
 import { Route as LocaleAppTeamSlugSiteSlugSessionsDetailRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.sessions_.detail'
 import { Route as LocaleAppTeamSlugSiteSlugVisitorsDetailRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug.visitors_.detail'
 
@@ -387,22 +385,10 @@ const LocaleAppTeamSlugNotificationsEmailPreviewRoute =
     path: '/notifications/email-preview',
     getParentRoute: () => LocaleAppTeamSlugRoute,
   } as any)
-const LocaleShareSlugPagesPageKeyRoute =
-  LocaleShareSlugPagesPageKeyRouteImport.update({
-    id: '/pages_/$pageKey',
-    path: '/pages/$pageKey',
-    getParentRoute: () => LocaleShareSlugRoute,
-  } as any)
 const LocaleAppTeamSlugSiteSlugEventsDetailRoute =
   LocaleAppTeamSlugSiteSlugEventsDetailRouteImport.update({
     id: '/events_/detail',
     path: '/events/detail',
-    getParentRoute: () => LocaleAppTeamSlugSiteSlugRoute,
-  } as any)
-const LocaleAppTeamSlugSiteSlugPagesPageKeyRoute =
-  LocaleAppTeamSlugSiteSlugPagesPageKeyRouteImport.update({
-    id: '/pages_/$pageKey',
-    path: '/pages/$pageKey',
     getParentRoute: () => LocaleAppTeamSlugSiteSlugRoute,
   } as any)
 const LocaleAppTeamSlugSiteSlugSessionsDetailRoute =
@@ -474,10 +460,8 @@ export interface FileRoutesByFullPath {
   '/$locale/app/$teamSlug/account/notifications': typeof LocaleAppTeamSlugAccountNotificationsRoute
   '/$locale/app/$teamSlug/manage/sites': typeof LocaleAppTeamSlugManageSitesRoute
   '/$locale/app/$teamSlug/notifications/email-preview': typeof LocaleAppTeamSlugNotificationsEmailPreviewRoute
-  '/$locale/share/$slug/pages/$pageKey': typeof LocaleShareSlugPagesPageKeyRoute
   '/$locale/app/$teamSlug/$siteSlug/': typeof LocaleAppTeamSlugSiteSlugIndexRoute
   '/$locale/app/$teamSlug/$siteSlug/events/detail': typeof LocaleAppTeamSlugSiteSlugEventsDetailRoute
-  '/$locale/app/$teamSlug/$siteSlug/pages/$pageKey': typeof LocaleAppTeamSlugSiteSlugPagesPageKeyRoute
   '/$locale/app/$teamSlug/$siteSlug/sessions/detail': typeof LocaleAppTeamSlugSiteSlugSessionsDetailRoute
   '/$locale/app/$teamSlug/$siteSlug/visitors/detail': typeof LocaleAppTeamSlugSiteSlugVisitorsDetailRoute
 }
@@ -533,10 +517,8 @@ export interface FileRoutesByTo {
   '/$locale/app/$teamSlug/account/notifications': typeof LocaleAppTeamSlugAccountNotificationsRoute
   '/$locale/app/$teamSlug/manage/sites': typeof LocaleAppTeamSlugManageSitesRoute
   '/$locale/app/$teamSlug/notifications/email-preview': typeof LocaleAppTeamSlugNotificationsEmailPreviewRoute
-  '/$locale/share/$slug/pages/$pageKey': typeof LocaleShareSlugPagesPageKeyRoute
   '/$locale/app/$teamSlug/$siteSlug': typeof LocaleAppTeamSlugSiteSlugIndexRoute
   '/$locale/app/$teamSlug/$siteSlug/events/detail': typeof LocaleAppTeamSlugSiteSlugEventsDetailRoute
-  '/$locale/app/$teamSlug/$siteSlug/pages/$pageKey': typeof LocaleAppTeamSlugSiteSlugPagesPageKeyRoute
   '/$locale/app/$teamSlug/$siteSlug/sessions/detail': typeof LocaleAppTeamSlugSiteSlugSessionsDetailRoute
   '/$locale/app/$teamSlug/$siteSlug/visitors/detail': typeof LocaleAppTeamSlugSiteSlugVisitorsDetailRoute
 }
@@ -597,10 +579,8 @@ export interface FileRoutesById {
   '/$locale/app/$teamSlug/account/notifications': typeof LocaleAppTeamSlugAccountNotificationsRoute
   '/$locale/app/$teamSlug/manage/sites': typeof LocaleAppTeamSlugManageSitesRoute
   '/$locale/app/$teamSlug/notifications_/email-preview': typeof LocaleAppTeamSlugNotificationsEmailPreviewRoute
-  '/$locale/share/$slug/pages_/$pageKey': typeof LocaleShareSlugPagesPageKeyRoute
   '/$locale/app/$teamSlug/$siteSlug/': typeof LocaleAppTeamSlugSiteSlugIndexRoute
   '/$locale/app/$teamSlug/$siteSlug/events_/detail': typeof LocaleAppTeamSlugSiteSlugEventsDetailRoute
-  '/$locale/app/$teamSlug/$siteSlug/pages_/$pageKey': typeof LocaleAppTeamSlugSiteSlugPagesPageKeyRoute
   '/$locale/app/$teamSlug/$siteSlug/sessions_/detail': typeof LocaleAppTeamSlugSiteSlugSessionsDetailRoute
   '/$locale/app/$teamSlug/$siteSlug/visitors_/detail': typeof LocaleAppTeamSlugSiteSlugVisitorsDetailRoute
 }
@@ -662,10 +642,8 @@ export interface FileRouteTypes {
     | '/$locale/app/$teamSlug/account/notifications'
     | '/$locale/app/$teamSlug/manage/sites'
     | '/$locale/app/$teamSlug/notifications/email-preview'
-    | '/$locale/share/$slug/pages/$pageKey'
     | '/$locale/app/$teamSlug/$siteSlug/'
     | '/$locale/app/$teamSlug/$siteSlug/events/detail'
-    | '/$locale/app/$teamSlug/$siteSlug/pages/$pageKey'
     | '/$locale/app/$teamSlug/$siteSlug/sessions/detail'
     | '/$locale/app/$teamSlug/$siteSlug/visitors/detail'
   fileRoutesByTo: FileRoutesByTo
@@ -721,10 +699,8 @@ export interface FileRouteTypes {
     | '/$locale/app/$teamSlug/account/notifications'
     | '/$locale/app/$teamSlug/manage/sites'
     | '/$locale/app/$teamSlug/notifications/email-preview'
-    | '/$locale/share/$slug/pages/$pageKey'
     | '/$locale/app/$teamSlug/$siteSlug'
     | '/$locale/app/$teamSlug/$siteSlug/events/detail'
-    | '/$locale/app/$teamSlug/$siteSlug/pages/$pageKey'
     | '/$locale/app/$teamSlug/$siteSlug/sessions/detail'
     | '/$locale/app/$teamSlug/$siteSlug/visitors/detail'
   id:
@@ -784,10 +760,8 @@ export interface FileRouteTypes {
     | '/$locale/app/$teamSlug/account/notifications'
     | '/$locale/app/$teamSlug/manage/sites'
     | '/$locale/app/$teamSlug/notifications_/email-preview'
-    | '/$locale/share/$slug/pages_/$pageKey'
     | '/$locale/app/$teamSlug/$siteSlug/'
     | '/$locale/app/$teamSlug/$siteSlug/events_/detail'
-    | '/$locale/app/$teamSlug/$siteSlug/pages_/$pageKey'
     | '/$locale/app/$teamSlug/$siteSlug/sessions_/detail'
     | '/$locale/app/$teamSlug/$siteSlug/visitors_/detail'
   fileRoutesById: FileRoutesById
@@ -1191,25 +1165,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LocaleAppTeamSlugNotificationsEmailPreviewRouteImport
       parentRoute: typeof LocaleAppTeamSlugRoute
     }
-    '/$locale/share/$slug/pages_/$pageKey': {
-      id: '/$locale/share/$slug/pages_/$pageKey'
-      path: '/pages/$pageKey'
-      fullPath: '/$locale/share/$slug/pages/$pageKey'
-      preLoaderRoute: typeof LocaleShareSlugPagesPageKeyRouteImport
-      parentRoute: typeof LocaleShareSlugRoute
-    }
     '/$locale/app/$teamSlug/$siteSlug/events_/detail': {
       id: '/$locale/app/$teamSlug/$siteSlug/events_/detail'
       path: '/events/detail'
       fullPath: '/$locale/app/$teamSlug/$siteSlug/events/detail'
       preLoaderRoute: typeof LocaleAppTeamSlugSiteSlugEventsDetailRouteImport
-      parentRoute: typeof LocaleAppTeamSlugSiteSlugRoute
-    }
-    '/$locale/app/$teamSlug/$siteSlug/pages_/$pageKey': {
-      id: '/$locale/app/$teamSlug/$siteSlug/pages_/$pageKey'
-      path: '/pages/$pageKey'
-      fullPath: '/$locale/app/$teamSlug/$siteSlug/pages/$pageKey'
-      preLoaderRoute: typeof LocaleAppTeamSlugSiteSlugPagesPageKeyRouteImport
       parentRoute: typeof LocaleAppTeamSlugSiteSlugRoute
     }
     '/$locale/app/$teamSlug/$siteSlug/sessions_/detail': {
@@ -1247,7 +1207,6 @@ interface LocaleAppTeamSlugSiteSlugRouteChildren {
   LocaleAppTeamSlugSiteSlugVisitorsRoute: typeof LocaleAppTeamSlugSiteSlugVisitorsRoute
   LocaleAppTeamSlugSiteSlugIndexRoute: typeof LocaleAppTeamSlugSiteSlugIndexRoute
   LocaleAppTeamSlugSiteSlugEventsDetailRoute: typeof LocaleAppTeamSlugSiteSlugEventsDetailRoute
-  LocaleAppTeamSlugSiteSlugPagesPageKeyRoute: typeof LocaleAppTeamSlugSiteSlugPagesPageKeyRoute
   LocaleAppTeamSlugSiteSlugSessionsDetailRoute: typeof LocaleAppTeamSlugSiteSlugSessionsDetailRoute
   LocaleAppTeamSlugSiteSlugVisitorsDetailRoute: typeof LocaleAppTeamSlugSiteSlugVisitorsDetailRoute
 }
@@ -1283,8 +1242,6 @@ const LocaleAppTeamSlugSiteSlugRouteChildren: LocaleAppTeamSlugSiteSlugRouteChil
     LocaleAppTeamSlugSiteSlugIndexRoute: LocaleAppTeamSlugSiteSlugIndexRoute,
     LocaleAppTeamSlugSiteSlugEventsDetailRoute:
       LocaleAppTeamSlugSiteSlugEventsDetailRoute,
-    LocaleAppTeamSlugSiteSlugPagesPageKeyRoute:
-      LocaleAppTeamSlugSiteSlugPagesPageKeyRoute,
     LocaleAppTeamSlugSiteSlugSessionsDetailRoute:
       LocaleAppTeamSlugSiteSlugSessionsDetailRoute,
     LocaleAppTeamSlugSiteSlugVisitorsDetailRoute:
@@ -1372,7 +1329,6 @@ interface LocaleShareSlugRouteChildren {
   LocaleShareSlugReferrersRoute: typeof LocaleShareSlugReferrersRoute
   LocaleShareSlugRetentionRoute: typeof LocaleShareSlugRetentionRoute
   LocaleShareSlugIndexRoute: typeof LocaleShareSlugIndexRoute
-  LocaleShareSlugPagesPageKeyRoute: typeof LocaleShareSlugPagesPageKeyRoute
 }
 
 const LocaleShareSlugRouteChildren: LocaleShareSlugRouteChildren = {
@@ -1385,7 +1341,6 @@ const LocaleShareSlugRouteChildren: LocaleShareSlugRouteChildren = {
   LocaleShareSlugReferrersRoute: LocaleShareSlugReferrersRoute,
   LocaleShareSlugRetentionRoute: LocaleShareSlugRetentionRoute,
   LocaleShareSlugIndexRoute: LocaleShareSlugIndexRoute,
-  LocaleShareSlugPagesPageKeyRoute: LocaleShareSlugPagesPageKeyRoute,
 }
 
 const LocaleShareSlugRouteWithChildren = LocaleShareSlugRoute._addFileChildren(

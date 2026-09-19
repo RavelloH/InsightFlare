@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   RiArrowDownLine,
   RiArrowRightSLine,
@@ -11,6 +11,7 @@ import { motion } from "motion/react";
 import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { PagesShareTrendCard } from "@/components/dashboard/pages-share-trend-card";
+import { PageDetailDrawer } from "@/components/dashboard/site-pages/page-detail-drawer";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -18,23 +19,31 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  pushUrlWithoutNavigation,
+  replaceUrlWithoutNavigation,
+  useLiveSearchParams,
+} from "@/lib/client-history";
+import {
   fetchPagesDashboard,
   type PagesDashboardRow,
 } from "@/lib/dashboard/client-data";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import {
   durationFormat,
   intlLocale,
   numberFormat,
   percentFormat,
 } from "@/lib/dashboard/format";
-import { buildPageDetailHref } from "@/lib/dashboard/page-detail";
+import {
+  normalizePagePath,
+  PAGE_DETAIL_QUERY_PARAM,
+} from "@/lib/dashboard/page-detail";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
-import Link from "@/lib/router";
 
 const PAGE_CARD_PAGE_SIZE = 12;
 const PAGE_CARD_CHART_MAX_POINTS = 36;
@@ -43,7 +52,20 @@ interface PagesClientPageProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
+  siteDomain?: string;
   pathname: string;
+  sitePathname?: string;
+}
+
+function pageDetailQueryTarget(
+  pathname: string,
+  searchParams: URLSearchParams,
+  pagePath: string,
+): string {
+  const params = new URLSearchParams(searchParams.toString());
+  params.set(PAGE_DETAIL_QUERY_PARAM, pagePath);
+  const query = serializeDashboardSearchParams(params);
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 function formatChangeRate(value: number | null): string | null {
@@ -105,7 +127,7 @@ const PageTrafficCard = memo(function PageTrafficCard({
   locale,
   messages,
   pagesPerSessionFormatter,
-  href,
+  onOpenPage,
 }: {
   item: PagesDashboardRow;
   interval: TimeWindow["interval"];
@@ -113,16 +135,18 @@ const PageTrafficCard = memo(function PageTrafficCard({
   locale: Locale;
   messages: AppMessages;
   pagesPerSessionFormatter: Intl.NumberFormat;
-  href: string;
+  onOpenPage: (pagePath: string) => void;
 }) {
   const titles = item.titles.slice(0, 3);
   const displayPathname = decodeUrlDisplayValue(item.pathname || "/");
 
   return (
-    <Link
-      href={href}
-      className="group block h-full outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
+    <button
+      type="button"
+      onClick={() => onOpenPage(item.pathname)}
+      className="group block h-full w-full text-left outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
       aria-label={`${messages.pages.viewDetails}: ${displayPathname}`}
+      aria-haspopup="dialog"
     >
       <motion.div
         className="h-full"
@@ -210,7 +234,7 @@ const PageTrafficCard = memo(function PageTrafficCard({
           </CardContent>
         </Card>
       </motion.div>
-    </Link>
+    </button>
   );
 });
 
@@ -242,13 +266,20 @@ export function PagesClientPage({
   locale,
   messages,
   siteId,
+  siteDomain,
   pathname,
+  sitePathname,
 }: PagesClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
   };
   const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);
+  const searchParams = useLiveSearchParams();
+  const detailPagePath = normalizePagePath(
+    searchParams.get(PAGE_DETAIL_QUERY_PARAM),
+  );
+  const openedDetailFromListRef = useRef(false);
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const pagesPerSessionFormatter = useMemo(
     () =>
@@ -304,6 +335,40 @@ export function PagesClientPage({
     if (loadingInitial || loadingMore || appendError || !hasNextPage) return;
     void fetchNextPage();
   }, [appendError, fetchNextPage, hasNextPage, loadingInitial, loadingMore]);
+
+  useEffect(() => {
+    if (!detailPagePath) {
+      openedDetailFromListRef.current = false;
+    }
+  }, [detailPagePath]);
+
+  const openPageDetail = useCallback(
+    (pagePath: string) => {
+      const normalizedPagePath = normalizePagePath(pagePath);
+      if (!normalizedPagePath) return;
+
+      openedDetailFromListRef.current = true;
+      pushUrlWithoutNavigation(
+        pageDetailQueryTarget(pathname, searchParams, normalizedPagePath),
+      );
+    },
+    [pathname, searchParams],
+  );
+
+  const closePageDetail = useCallback(() => {
+    const params = new URLSearchParams(globalThis.window.location.search);
+    if (!params.has(PAGE_DETAIL_QUERY_PARAM)) return;
+
+    if (openedDetailFromListRef.current) {
+      openedDetailFromListRef.current = false;
+      globalThis.window.history.back();
+      return;
+    }
+
+    params.delete(PAGE_DETAIL_QUERY_PARAM);
+    const query = serializeDashboardSearchParams(params);
+    replaceUrlWithoutNavigation(query ? `${pathname}?${query}` : pathname);
+  }, [pathname]);
 
   useEffect(() => {
     const target = sentinelNode;
@@ -420,7 +485,7 @@ export function PagesClientPage({
                     locale={locale}
                     messages={messages}
                     pagesPerSessionFormatter={pagesPerSessionFormatter}
-                    href={buildPageDetailHref(pathname, item.pathname)}
+                    onOpenPage={openPageDetail}
                   />
                 ))}
                 {shouldShowLoadMoreSkeletons
@@ -454,6 +519,20 @@ export function PagesClientPage({
           )}
         </AutoTransition>
       </AutoResizer>
+
+      {detailPagePath ? (
+        <PageDetailDrawer
+          locale={locale}
+          messages={messages}
+          siteId={siteId}
+          siteDomain={siteDomain ?? ""}
+          pathname={sitePathname ?? pathname}
+          pagePath={detailPagePath}
+          onOpenChange={(open) => {
+            if (!open) closePageDetail();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

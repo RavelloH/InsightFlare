@@ -53,6 +53,7 @@ import {
   OverviewPagesSection,
   type OverviewPagesSectionCardData,
 } from "@/components/dashboard/site-pages/overview-client-page";
+import { PageDetailDrawer } from "@/components/dashboard/site-pages/page-detail-drawer";
 import type {
   SessionDetailMapTheme,
   SessionLocationPoint,
@@ -79,7 +80,7 @@ import {
 } from "@/lib/dashboard/client-data";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
-import { buildPageDetailHref } from "@/lib/dashboard/page-detail";
+import { normalizePagePath } from "@/lib/dashboard/page-detail";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
 import dynamic from "@/lib/dynamic";
@@ -892,18 +893,19 @@ function SummaryGridItem({
 
 function SummaryPathLink({
   pathname,
-  pagesPath,
+  onOpenPage,
 }: {
   pathname: string;
-  pagesPath: string;
+  onOpenPage: (pagePath: string) => void;
 }) {
   return (
-    <Link
-      href={buildPageDetailHref(pagesPath, pathname || "/")}
-      className="block min-w-0 truncate font-mono text-xs text-foreground outline-none hover:underline focus-visible:ring-1 focus-visible:ring-ring/60"
+    <button
+      type="button"
+      onClick={() => onOpenPage(pathname || "/")}
+      className="block min-w-0 truncate text-left font-mono text-xs text-foreground outline-none hover:underline focus-visible:ring-1 focus-visible:ring-ring/60"
     >
       {formatPath(pathname)}
-    </Link>
+    </button>
   );
 }
 
@@ -1121,7 +1123,7 @@ const MetaPanel = memo(function MetaPanel({
   messages,
   labels,
   detail,
-  pagesPath,
+  onOpenPage,
   timeZone,
   loading = false,
 }: {
@@ -1129,7 +1131,7 @@ const MetaPanel = memo(function MetaPanel({
   messages: AppMessages;
   labels: Labels;
   detail: SessionDetail;
-  pagesPath: string;
+  onOpenPage: (pagePath: string) => void;
   timeZone: string;
   loading?: boolean;
 }) {
@@ -1201,7 +1203,7 @@ const MetaPanel = memo(function MetaPanel({
             value={
               <SummaryPathLink
                 pathname={session.entryPath}
-                pagesPath={pagesPath}
+                onOpenPage={onOpenPage}
               />
             }
           />
@@ -1212,7 +1214,7 @@ const MetaPanel = memo(function MetaPanel({
             value={
               <SummaryPathLink
                 pathname={session.exitPath}
-                pagesPath={pagesPath}
+                onOpenPage={onOpenPage}
               />
             }
           />
@@ -1800,7 +1802,6 @@ function DetailContent({
     () => resolveSessionSiteDomain(detail),
     [detail],
   );
-  const pagesPath = `${siteBasePath}/pages`;
   const visitorHref = `${siteBasePath}/visitors?detail=${encodeURIComponent(
     session.visitorId,
   )}`;
@@ -1809,6 +1810,10 @@ function DetailContent({
     [detail],
   );
   const [selectedEvent, setSelectedEvent] = useState<JourneyEvent | null>(null);
+  const [pageDetailPath, setPageDetailPath] = useState<string | null>(null);
+  const openPageDetail = useCallback((pagePath: string) => {
+    setPageDetailPath(normalizePagePath(pagePath));
+  }, []);
   const eventDetailQuery = useQuery({
     queryKey: [
       "dashboard",
@@ -1869,7 +1874,7 @@ function DetailContent({
           messages={messages}
           labels={labels}
           detail={detail}
-          pagesPath={pagesPath}
+          onOpenPage={openPageDetail}
           timeZone={timeZone}
           loading={loading}
         />
@@ -1932,6 +1937,20 @@ function DetailContent({
           error={eventDetailError}
           eventKind={selectedEvent?.kind ?? "pageview"}
         />
+
+        {pageDetailPath ? (
+          <PageDetailDrawer
+            locale={locale}
+            messages={messages}
+            siteId={siteId}
+            siteDomain={sessionSiteDomain}
+            pathname={siteBasePath}
+            pagePath={pageDetailPath}
+            onOpenChange={(open) => {
+              if (!open) setPageDetailPath(null);
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

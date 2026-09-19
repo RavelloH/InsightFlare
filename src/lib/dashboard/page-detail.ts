@@ -27,14 +27,3 @@ export function slugifyPagePath(value: string): string {
 
   return slug || "page";
 }
-
-export function buildPageDetailHref(
-  basePath: string,
-  pagePath: string,
-): string {
-  const normalizedPath = normalizePagePath(pagePath) ?? "/";
-  const normalizedBasePath = basePath.replace(/\/+$/, "");
-  const params = new URLSearchParams();
-  params.set(PAGE_DETAIL_QUERY_PARAM, normalizedPath);
-  return `${normalizedBasePath}/detail?${params.toString()}`;
-}

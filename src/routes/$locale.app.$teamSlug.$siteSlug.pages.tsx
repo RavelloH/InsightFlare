@@ -24,12 +24,14 @@ function Page() {
       locale={locale}
       messages={messages}
       siteId={c.activeSite.id}
+      siteDomain={c.activeSite.domain}
       pathname={buildSitePath(
         locale,
         c.activeTeam.slug,
         c.activeSite.slug,
         "pages",
       )}
+      sitePathname={buildSitePath(locale, c.activeTeam.slug, c.activeSite.slug)}
     />
   );
 }

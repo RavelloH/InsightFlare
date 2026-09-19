@@ -1,10 +1,12 @@
 import { memo, useMemo } from "react";
+import { RiCloseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
   AsyncDimensionBreakdownCard,
   type AsyncDimensionBreakdownLoader,
 } from "@/components/dashboard/async-dimension-breakdown-card";
+import { useDetailDrawerClose } from "@/components/dashboard/site-pages/detail-query-modal";
 import {
   OverviewMetricsSection,
   OverviewPagesSection,
@@ -13,6 +15,7 @@ import {
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   fetchEventTypesTab,
@@ -28,7 +31,7 @@ import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
-interface PageDetailClientPageProps {
+export interface PageDetailClientPageProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
@@ -36,6 +39,7 @@ interface PageDetailClientPageProps {
   pathname: string;
   pagePath: string;
   showSourceLinkTab?: boolean;
+  inDetailDrawer?: boolean;
 }
 
 function buildPageDetailFilters(
@@ -78,7 +82,9 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
   pathname,
   pagePath,
   showSourceLinkTab,
+  inDetailDrawer = false,
 }: PageDetailClientPageProps) {
+  const drawerClose = useDetailDrawerClose();
   const { filters, window } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
@@ -298,9 +304,18 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
   const alternateTitles = titles.slice(1, 3);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <AutoResizer className="min-w-0 flex-1" duration={0.24}>
+    <div
+      className={
+        inDetailDrawer
+          ? "mx-auto w-full max-w-[1400px] space-y-6 p-4 md:p-6"
+          : "space-y-6"
+      }
+    >
+      <div className="relative flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <AutoResizer
+          className={drawerClose ? "min-w-0 flex-1 pr-10" : "min-w-0 flex-1"}
+          duration={0.24}
+        >
           <AutoTransition
             initial={false}
             duration={0.22}
@@ -344,6 +359,18 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
             </div>
           </AutoTransition>
         </AutoResizer>
+        {drawerClose ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="absolute right-0 top-0"
+            aria-label={messages.common.close}
+            onClick={drawerClose}
+          >
+            <RiCloseLine />
+          </Button>
+        ) : null}
       </div>
 
       <OverviewMetricsSection

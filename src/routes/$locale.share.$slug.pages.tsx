@@ -13,7 +13,9 @@ function Page() {
       locale={locale}
       messages={messages}
       siteId={c.publicSiteId}
+      siteDomain={c.site.domain}
       pathname={sharePath(locale, slug, "pages")}
+      sitePathname={sharePath(locale, slug)}
     />
   );
 }
