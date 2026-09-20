@@ -1717,7 +1717,10 @@ const SessionDetailBottomCards = memo(function SessionDetailBottomCards({
       async ({ cursor, limit, search, sort }) =>
         loadLocalTablePage({
           rows: eventRows,
-          sort,
+          sort: {
+            key: sort.key === "visitors" ? "visitors" : "views",
+            direction: sort.direction,
+          },
           columns: [
             { key: "views", getValue: (row) => row.views },
             { key: "visitors", getValue: (row) => row.visitors },

@@ -21,7 +21,7 @@ import { formatI18nTemplate } from "@/lib/i18n/template";
 import { cn } from "@/lib/utils";
 
 type NonEmptyArray<T> = readonly [T, ...T[]];
-type SortKey = "views" | "visitors";
+type SortKey = "views" | "visitors" | "reference" | "current" | "change";
 
 export type AsyncDimensionBreakdownLabelAppearance =
   | {
@@ -58,12 +58,20 @@ export interface AsyncDimensionBreakdownRow extends TabbedDataTableRowBase {
   label: string;
   views: number;
   visitors: number;
+  reference?: {
+    views: number;
+    visitors: number;
+  };
+  change?: {
+    views: { absolute: number; relative: number | null };
+    visitors: { absolute: number; relative: number | null };
+  };
   mono?: boolean;
   labelAppearance?: AsyncDimensionBreakdownLabelAppearance;
 }
 
 export type AsyncDimensionBreakdownLoader<T extends string> =
-  TabbedDataTableLoader<T, AsyncDimensionBreakdownRow, string>;
+  TabbedDataTableLoader<T, AsyncDimensionBreakdownRow, SortKey>;
 
 export interface AsyncDimensionBreakdownTab<
   T extends string = string,
@@ -83,6 +91,9 @@ interface AsyncDimensionBreakdownCardProps<T extends string> {
   showVisitors?: boolean;
   secondaryMetricLabel?: string;
   emptyLabel?: string;
+  comparisonLabel?: string;
+  comparisonCurrentLabel?: string;
+  comparisonMetric?: "views" | "visitors";
 }
 
 function normalizeRows(
@@ -94,6 +105,30 @@ function normalizeRows(
     label: String(row.label ?? "").trim(),
     views: Math.max(0, Number(row.views ?? 0)),
     visitors: Math.max(0, Number(row.visitors ?? 0)),
+    reference: row.reference
+      ? {
+          views: Math.max(0, Number(row.reference.views ?? 0)),
+          visitors: Math.max(0, Number(row.reference.visitors ?? 0)),
+        }
+      : undefined,
+    change: row.change
+      ? {
+          views: {
+            absolute: Number(row.change.views.absolute ?? 0),
+            relative:
+              row.change.views.relative === null
+                ? null
+                : Number(row.change.views.relative ?? 0),
+          },
+          visitors: {
+            absolute: Number(row.change.visitors.absolute ?? 0),
+            relative:
+              row.change.visitors.relative === null
+                ? null
+                : Number(row.change.visitors.relative ?? 0),
+          },
+        }
+      : undefined,
     mono: Boolean(row.mono),
     labelAppearance: row.labelAppearance,
   }));
@@ -218,6 +253,9 @@ export const AsyncDimensionBreakdownCard = memo(
     showVisitors = true,
     secondaryMetricLabel,
     emptyLabel,
+    comparisonLabel,
+    comparisonCurrentLabel,
+    comparisonMetric = "views",
   }: AsyncDimensionBreakdownCardProps<T>) {
     const resolvedEmptyLabel = emptyLabel ?? messages.common.noData;
     const resolvedSecondaryMetricLabel =
@@ -268,28 +306,114 @@ export const AsyncDimensionBreakdownCard = memo(
         T
       >[]
     >(
-      () => (tab) => [
-        {
-          key: "views",
-          label:
-            tabs.find((item) => item.value === tab)?.primaryMetricLabel ??
-            messages.common.views,
-          getValue: (row) => row.views,
-          format: (value) => numberFormat(locale, value),
-        },
-        ...(showVisitors
-          ? [
-              {
-                key: "visitors" as const,
-                label: resolvedSecondaryMetricLabel,
-                getValue: (row: AsyncDimensionBreakdownRow) => row.visitors,
-                format: (value: number) => numberFormat(locale, value),
+      () => (tab) => {
+        const primaryMetricLabel =
+          tabs.find((item) => item.value === tab)?.primaryMetricLabel ??
+          messages.common.views;
+
+        if (comparisonLabel) {
+          const comparisonMetricLabel =
+            comparisonMetric === "views"
+              ? primaryMetricLabel
+              : resolvedSecondaryMetricLabel;
+
+          return [
+            {
+              key: "reference" as const,
+              label: comparisonLabel,
+              getValue: (row: AsyncDimensionBreakdownRow) =>
+                row.reference?.[comparisonMetric] ?? 0,
+              sortValue: (row: AsyncDimensionBreakdownRow) =>
+                row.reference?.[comparisonMetric] ?? 0,
+              format: (value: number) => numberFormat(locale, value),
+            },
+            {
+              key: "current" as const,
+              label: comparisonCurrentLabel ?? comparisonMetricLabel,
+              getValue: (row: AsyncDimensionBreakdownRow) =>
+                row[comparisonMetric],
+              sortValue: (row: AsyncDimensionBreakdownRow) =>
+                row[comparisonMetric],
+              format: (value: number) => numberFormat(locale, value),
+            },
+            {
+              key: "change" as const,
+              label: messages.common.change,
+              getValue: (row: AsyncDimensionBreakdownRow) =>
+                row.change?.[comparisonMetric]?.absolute ?? 0,
+              sortValue: (row: AsyncDimensionBreakdownRow) =>
+                row.change?.[comparisonMetric]?.relative ?? Infinity,
+              format: (_value: number, row: AsyncDimensionBreakdownRow) => {
+                const change = row.change?.[comparisonMetric];
+                if (!change) {
+                  return <span className="text-muted-foreground">—</span>;
+                }
+                if (change.relative === null) {
+                  return (
+                    <span
+                      className={
+                        row[comparisonMetric] > 0
+                          ? "text-emerald-600"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      {row[comparisonMetric] > 0 ? messages.common.new : "—"}
+                    </span>
+                  );
+                }
+                const percentage = change.relative * 100;
+                return (
+                  <span
+                    className={
+                      percentage >= 0 ? "text-emerald-600" : "text-rose-600"
+                    }
+                  >
+                    {`${percentage >= 0 ? "+" : ""}${percentage.toFixed(1)}%`}
+                  </span>
+                );
               },
-            ]
-          : []),
-      ],
+            },
+            ...(showVisitors && comparisonMetric === "views"
+              ? [
+                  {
+                    key: "visitors" as const,
+                    label: resolvedSecondaryMetricLabel,
+                    getValue: (row: AsyncDimensionBreakdownRow) => row.visitors,
+                    sortValue: (row: AsyncDimensionBreakdownRow) =>
+                      row.visitors,
+                    format: (value: number) => numberFormat(locale, value),
+                  },
+                ]
+              : []),
+          ];
+        }
+
+        return [
+          {
+            key: "views" as const,
+            label: primaryMetricLabel,
+            getValue: (row: AsyncDimensionBreakdownRow) => row.views,
+            format: (value: number) => numberFormat(locale, value),
+          },
+          ...(showVisitors
+            ? [
+                {
+                  key: "visitors" as const,
+                  label: resolvedSecondaryMetricLabel,
+                  getValue: (row: AsyncDimensionBreakdownRow) => row.visitors,
+                  format: (value: number) => numberFormat(locale, value),
+                },
+              ]
+            : []),
+        ];
+      },
       [
+        comparisonCurrentLabel,
+        comparisonLabel,
+        comparisonMetric,
         locale,
+        messages.common.change,
+        messages.common.new,
         messages.common.views,
         resolvedSecondaryMetricLabel,
         showVisitors,
@@ -316,6 +440,14 @@ export const AsyncDimensionBreakdownCard = memo(
         className={className}
         search={search}
         export={exportConfig}
+        defaultSort={
+          comparisonLabel
+            ? {
+                key: "current",
+                direction: "desc",
+              }
+            : undefined
+        }
       />
     );
   },

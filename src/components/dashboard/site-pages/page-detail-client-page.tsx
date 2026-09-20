@@ -17,6 +17,7 @@ import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLiveSearchParams } from "@/lib/client-history";
 import {
   fetchEventTypesTab,
   fetchOverviewPageCardTab,
@@ -24,8 +25,10 @@ import {
   fetchPageQueryTab,
   type OverviewTabRows,
 } from "@/lib/dashboard/client-data";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { setDashboardFilterValue } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
@@ -65,11 +68,79 @@ function mapOverviewRows(
     const label = normalizeLabel(String(row.label ?? ""), fallbackLabel);
 
     return {
+      ...row,
       key: `${label}-${index}`,
       label,
       views: Math.max(0, Number(row.views ?? 0)),
       visitors: Math.max(0, Number(row.visitors ?? 0)),
       mono: options?.mono ?? false,
+    };
+  });
+}
+
+function comparisonLabelForPageDetail(
+  messages: AppMessages,
+  comparisonQuery: ReturnType<typeof resolveDashboardComparisonQuery>,
+  hasComparisonFilter: boolean,
+): string {
+  return comparisonQuery?.mode === "previous" && !hasComparisonFilter
+    ? messages.dashboardHeader.previousPeriod
+    : messages.dashboardHeader.compareButton;
+}
+
+function eventRowKey(row: OverviewTabRows[number]): string {
+  return row.key?.trim() || row.value?.trim() || String(row.label ?? "").trim();
+}
+
+function mergeEventRows(
+  currentRows: OverviewTabRows,
+  comparisonRows: OverviewTabRows,
+): OverviewTabRows {
+  const currentByKey = new Map(
+    currentRows.map((row) => [eventRowKey(row), row]),
+  );
+  const comparisonByKey = new Map(
+    comparisonRows.map((row) => [eventRowKey(row), row]),
+  );
+  const keys = [
+    ...currentRows.map(eventRowKey),
+    ...comparisonRows.map(eventRowKey).filter((key) => !currentByKey.has(key)),
+  ];
+
+  return keys.map((key) => {
+    const current = currentByKey.get(key);
+    const comparison = comparisonByKey.get(key);
+    const row = current ??
+      comparison ?? { label: key, views: 0, sessions: 0, visitors: 0 };
+    const views = Math.max(0, Number(current?.views ?? 0));
+    const visitors = Math.max(0, Number(current?.visitors ?? 0));
+    const referenceViews = Math.max(0, Number(comparison?.views ?? 0));
+    const referenceVisitors = Math.max(0, Number(comparison?.visitors ?? 0));
+    const relativeChange = (value: number, reference: number) =>
+      reference === 0 ? null : (value - reference) / reference;
+
+    return {
+      ...row,
+      key,
+      label: row.label ?? key,
+      views,
+      visitors,
+      reference: {
+        views: referenceViews,
+        sessions: 0,
+        visitors: referenceVisitors,
+      },
+      change: {
+        views: {
+          absolute: views - referenceViews,
+          relative: relativeChange(views, referenceViews),
+        },
+        sessions: { absolute: 0, relative: null },
+        visitors: {
+          absolute: visitors - referenceVisitors,
+          relative: relativeChange(visitors, referenceVisitors),
+        },
+      },
     };
   });
 }
@@ -89,9 +160,39 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
+  const liveSearchParams = useLiveSearchParams();
+  const liveSearchParamsKey = liveSearchParams.toString();
+  const hasComparisonFilter = useMemo(
+    () =>
+      [...new URLSearchParams(liveSearchParamsKey).keys()].some((key) =>
+        key.startsWith("compareFilter["),
+      ),
+    [liveSearchParamsKey],
+  );
   const detailFilters = useMemo(
     () => buildPageDetailFilters(filters, pagePath),
     [filters, pagePath],
+  );
+  const comparisonQuery = useMemo(
+    () =>
+      resolveDashboardComparisonQuery(
+        new URLSearchParams(liveSearchParamsKey),
+        window,
+        detailFilters,
+      ),
+    [
+      detailFilters,
+      liveSearchParamsKey,
+      window.from,
+      window.interval,
+      window.timeZone,
+      window.to,
+    ],
+  );
+  const comparisonLabel = comparisonLabelForPageDetail(
+    messages,
+    comparisonQuery,
+    hasComparisonFilter,
   );
   const detailRequestKey = useMemo(
     () =>
@@ -102,8 +203,20 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
         window.to,
         window.interval,
         JSON.stringify(detailFilters ?? {}),
+        comparisonQuery?.mode ?? "none",
+        comparisonQuery?.window.from ?? "none",
+        comparisonQuery?.window.to ?? "none",
+        JSON.stringify(comparisonQuery?.filters ?? null),
       ].join(":"),
-    [detailFilters, pagePath, siteId, window.from, window.interval, window.to],
+    [
+      comparisonQuery,
+      detailFilters,
+      pagePath,
+      siteId,
+      window.from,
+      window.interval,
+      window.to,
+    ],
   );
   const pageCardFetchers = useMemo(
     () => ({
@@ -118,6 +231,13 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
           search?: string;
           sort?: "views" | "visitors" | "sessions";
           direction?: "asc" | "desc";
+          comparison?: {
+            mode: "same" | "previous";
+            window: TimeWindow;
+            filters: FilterDocument;
+          } | null;
+          comparisonMetric?: "views" | "visitors" | "sessions";
+          comparisonSortBy?: "current" | "reference" | "change";
           signal?: AbortSignal;
         },
       ) =>
@@ -127,6 +247,9 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
           search: options?.search,
           sort: options?.sort,
           direction: options?.direction,
+          comparison: options?.comparison,
+          comparisonMetric: options?.comparisonMetric,
+          comparisonSortBy: options?.comparisonSortBy,
           signal: options?.signal,
         }),
       query: (
@@ -140,6 +263,13 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
           search?: string;
           sort?: "views" | "visitors" | "sessions";
           direction?: "asc" | "desc";
+          comparison?: {
+            mode: "same" | "previous";
+            window: TimeWindow;
+            filters: FilterDocument;
+          } | null;
+          comparisonMetric?: "views" | "visitors" | "sessions";
+          comparisonSortBy?: "current" | "reference" | "change";
           signal?: AbortSignal;
         },
       ) =>
@@ -149,6 +279,9 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
           search: options?.search,
           sort: options?.sort,
           direction: options?.direction,
+          comparison: options?.comparison,
+          comparisonMetric: options?.comparisonMetric,
+          comparisonSortBy: options?.comparisonSortBy,
           signal: options?.signal,
           resolvedScope:
             resolvedScope === "event" ||
@@ -265,20 +398,66 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
   const eventLoader = useMemo<AsyncDimensionBreakdownLoader<"event">>(
     () =>
       async ({ cursor, limit, search, signal, sort }) => {
-        const page = await fetchEventTypesTab(siteId, window, detailFilters, {
-          cursor,
-          limit,
-          search,
-          sort: sort.key === "visitors" ? "visitors" : "views",
-          direction: sort.direction,
+        if (!comparisonQuery) {
+          const page = await fetchEventTypesTab(siteId, window, detailFilters, {
+            cursor,
+            limit,
+            search,
+            sort: sort.key === "visitors" ? "visitors" : "views",
+            direction: sort.direction,
+            signal,
+          });
+          const items = mapOverviewRows(page.items, messages.common.unknown, {
+            mono: true,
+          });
+          return { items, pagination: page.pagination };
+        }
+
+        const requestOptions = {
+          limit: 200,
           signal,
+          sort: "views" as const,
+          direction: "desc" as const,
+        };
+        const [currentPage, comparisonPage] = await Promise.all([
+          fetchEventTypesTab(siteId, window, detailFilters, requestOptions),
+          fetchEventTypesTab(
+            siteId,
+            comparisonQuery.window,
+            comparisonQuery.filters,
+            requestOptions,
+          ),
+        ]);
+        const items = mapOverviewRows(
+          mergeEventRows(currentPage.items, comparisonPage.items),
+          messages.common.unknown,
+          { mono: true },
+        );
+
+        return loadLocalTablePage({
+          rows: items,
+          sort,
+          columns: [
+            { key: "views", getValue: (row) => row.views },
+            { key: "visitors", getValue: (row) => row.visitors },
+            { key: "current", getValue: (row) => row.views },
+            {
+              key: "reference",
+              getValue: (row) => row.reference?.views ?? 0,
+            },
+            {
+              key: "change",
+              getValue: (row) => row.change?.views.relative ?? -Infinity,
+            },
+          ],
+          tab: "event",
+          limit,
+          cursor,
+          search,
+          getSearchText: (row) => row.label,
         });
-        const items = mapOverviewRows(page.items, messages.common.unknown, {
-          mono: true,
-        });
-        return { items, pagination: page.pagination };
       },
-    [detailFilters, messages.common.unknown, siteId, window],
+    [comparisonQuery, detailFilters, messages.common.unknown, siteId, window],
   );
 
   const { data: titleRows, isFetching: titlesLoading } = useQuery({
@@ -426,6 +605,8 @@ export const PageDetailClientPage = memo(function PageDetailClientPage({
         tabs={eventTabs}
         requestKey={`${detailRequestKey}:event`}
         loader={eventLoader}
+        comparisonLabel={comparisonQuery ? comparisonLabel : undefined}
+        comparisonCurrentLabel={messages.pages.eventsMetric}
       />
     </div>
   );

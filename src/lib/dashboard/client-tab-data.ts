@@ -109,21 +109,31 @@ export async function fetchPageHashTab(
 ): Promise<OverviewTabData["data"]> {
   const payload = await fetchPrivateJson<OverviewTabData>(
     "/api/private/page-hash",
-    withFilters(
-      withPagination(
-        {
-          siteId,
-          from: window.from,
-          to: window.to,
-          timeZone: window.timeZone,
-          ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
-          ...(options?.sort ? { sort: options.sort } : {}),
-          ...(options?.direction ? { direction: options.direction } : {}),
-        },
-        options,
-        100,
+    withComparison(
+      withFilters(
+        withPagination(
+          {
+            siteId,
+            from: window.from,
+            to: window.to,
+            timeZone: window.timeZone,
+            ...(options?.search?.trim()
+              ? { search: options.search.trim() }
+              : {}),
+            ...(options?.sort ? { sort: options.sort } : {}),
+            ...(options?.direction ? { direction: options.direction } : {}),
+          },
+          options,
+          100,
+        ),
+        filters,
+        options?.resolvedScope,
       ),
-      filters,
+      options?.comparison,
+      {
+        metric: options?.comparisonMetric,
+        sortBy: options?.comparisonSortBy,
+      },
     ),
     { signal: options?.signal },
   ).catch(emptyOverviewTabUnlessAborted);

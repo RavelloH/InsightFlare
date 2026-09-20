@@ -85,7 +85,7 @@ export async function handleSimpleDimensionContract(
   }
   let comparison: OverviewTableComparisonQuery | undefined;
   if (
-    dimension.startsWith("utm.") &&
+    (dimension === "page.hash" || dimension.startsWith("utm.")) &&
     (compare === "same" || compare === "previous")
   ) {
     const referenceFilters: FilterDocument = compareFilterParams.size
