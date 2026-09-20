@@ -8,7 +8,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { motion } from "motion/react";
 import type { PartialOptions } from "overlayscrollbars";
 import { OverlayScrollbars } from "overlayscrollbars";
 
@@ -24,15 +23,21 @@ import { cn } from "@/lib/utils";
 
 export const DETAIL_QUERY_PARAM = "detail";
 
-const EXIT_DURATION_MS = 360;
-const CLOSE_SCROLL_TOP_THRESHOLD = 2;
-const CLOSE_SCROLL_MAX_WAIT_MS = 900;
+const CLOSE_TRANSLATE_Y_VH = 1.12;
+const CLOSE_MIN_DURATION_MS = 360;
+const CLOSE_MAX_DURATION_MS = 640;
+const CLOSE_TRAVEL_PX_PER_MS = 3;
+const DETAIL_DRAWER_OPEN_TRANSITION =
+  "transform 720ms linear(0, 0.088 5%, 0.261 10%, 0.441 15%, 0.597 20%, 0.719 25%, 0.81 30%, 0.874 35%, 0.918 40%, 0.948 45%, 0.968 50%, 0.98 55%, 0.988 60%, 0.993 65%, 0.996 70%, 0.998 75%, 0.999 80%, 0.999 85%, 1 90%, 1 95%, 1)";
+const CLOSE_TRANSITION_EASING = "cubic-bezier(0.38, 0.05, 0.86, 0.28)";
 const STACK_LIFT_PX = 28;
 const MAX_STACK_LIFT_DEPTH = 3;
 const POINTER_DRAG_THRESHOLD_PX = 6;
 const POINTER_GESTURE_RESET_MS = 500;
 
 let nextDetailDrawerInstanceId = 0;
+let detailDrawerBodyLockCount = 0;
+let detailDrawerPreviousBodyOverflow: string | null = null;
 
 const DETAIL_DRAWER_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -98,16 +103,15 @@ export function DetailDrawer({
   const [mounted, setMounted] = useState(false);
   const [rendered, setRendered] = useState(open);
   const [isReady, setIsReady] = useState(false);
+  const [openAnimationStarted, setOpenAnimationStarted] = useState(false);
   const [isCloseInteractionDisabled, setIsCloseInteractionDisabled] =
     useState(false);
   const [contentAreaBounds, setContentAreaBounds] =
     useState<ContentAreaBounds | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
   const closeAnimationFrameRef = useRef<number | null>(null);
-  const closeScrollFrameRef = useRef<number | null>(null);
-  const closeScrollTimeoutRef = useRef<number | null>(null);
+  const closeTranslateYRef = useRef(0);
+  const closeDurationRef = useRef(CLOSE_MIN_DURATION_MS);
   const pointerGestureRef = useRef<{
     pointerId: number;
     startX: number;
@@ -126,22 +130,7 @@ export function DetailDrawer({
   const stackDepth = framesAbove;
   const stackLift = -Math.min(stackDepth, MAX_STACK_LIFT_DEPTH) * STACK_LIFT_PX;
 
-  const clearCloseScrollPending = useCallback(() => {
-    if (closeScrollFrameRef.current !== null) {
-      window.cancelAnimationFrame(closeScrollFrameRef.current);
-      closeScrollFrameRef.current = null;
-    }
-    if (closeScrollTimeoutRef.current !== null) {
-      window.clearTimeout(closeScrollTimeoutRef.current);
-      closeScrollTimeoutRef.current = null;
-    }
-  }, []);
-
   const clearCloseAnimationPending = useCallback(() => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
     if (closeAnimationFrameRef.current !== null) {
       window.cancelAnimationFrame(closeAnimationFrameRef.current);
       closeAnimationFrameRef.current = null;
@@ -158,8 +147,23 @@ export function DetailDrawer({
     );
   }, []);
 
+  const resetScrollPosition = useCallback(() => {
+    const scrollElement = getScrollElement();
+    if (scrollElement) scrollElement.scrollTop = 0;
+  }, [getScrollElement]);
+
   const triggerCloseAnimation = useCallback(() => {
     setIsCloseInteractionDisabled(true);
+    closeTranslateYRef.current =
+      (getScrollElement()?.scrollTop ?? 0) +
+      window.innerHeight * CLOSE_TRANSLATE_Y_VH;
+    closeDurationRef.current = Math.min(
+      CLOSE_MAX_DURATION_MS,
+      Math.max(
+        CLOSE_MIN_DURATION_MS,
+        Math.round(closeTranslateYRef.current / CLOSE_TRAVEL_PX_PER_MS),
+      ),
+    );
 
     if (closeAnimationFrameRef.current !== null) {
       window.cancelAnimationFrame(closeAnimationFrameRef.current);
@@ -170,58 +174,13 @@ export function DetailDrawer({
       closeAnimationFrameRef.current = null;
       setIsClosing(true);
     });
-  }, []);
+  }, [getScrollElement]);
 
   const handleClose = useCallback(() => {
     if (!rendered || isClosing || isPreparingCloseRef.current) return;
     isPreparingCloseRef.current = true;
-    setIsCloseInteractionDisabled(true);
-    const scrollElement = getScrollElement();
-
-    const getScrollTop = () => {
-      if (scrollElement) return scrollElement.scrollTop;
-      return window.scrollY || document.documentElement.scrollTop || 0;
-    };
-
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearCloseScrollPending();
-      triggerCloseAnimation();
-    };
-
-    if (getScrollTop() <= CLOSE_SCROLL_TOP_THRESHOLD) {
-      finish();
-      return;
-    }
-
-    if (scrollElement) {
-      scrollElement.scrollTo({ top: 0, behavior: "smooth" });
-    } else {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-
-    const checkReachedTop = () => {
-      if (getScrollTop() <= CLOSE_SCROLL_TOP_THRESHOLD) {
-        finish();
-        return;
-      }
-      closeScrollFrameRef.current =
-        window.requestAnimationFrame(checkReachedTop);
-    };
-
-    closeScrollFrameRef.current = window.requestAnimationFrame(checkReachedTop);
-    closeScrollTimeoutRef.current = window.setTimeout(() => {
-      finish();
-    }, CLOSE_SCROLL_MAX_WAIT_MS);
-  }, [
-    clearCloseScrollPending,
-    getScrollElement,
-    isClosing,
-    rendered,
-    triggerCloseAnimation,
-  ]);
+    triggerCloseAnimation();
+  }, [isClosing, rendered, triggerCloseAnimation]);
 
   useEffect(() => {
     setMounted(true);
@@ -242,11 +201,28 @@ export function DetailDrawer({
     if (!open) return;
     setIsClosing(false);
     setIsReady(false);
+    setOpenAnimationStarted(false);
     setIsCloseInteractionDisabled(false);
     isPreparingCloseRef.current = false;
-    clearCloseScrollPending();
     clearCloseAnimationPending();
-  }, [clearCloseAnimationPending, clearCloseScrollPending, drawerKey, open]);
+  }, [clearCloseAnimationPending, drawerKey, open]);
+
+  useEffect(() => {
+    if (!open || !rendered || !mounted) return;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      setOpenAnimationStarted(true);
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [drawerKey, mounted, open, rendered]);
+
+  useEffect(() => {
+    if (!open || !rendered || !mounted) return;
+
+    const animationFrame = window.requestAnimationFrame(resetScrollPosition);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [drawerKey, mounted, open, rendered, resetScrollPosition]);
 
   useEffect(() => {
     if (!rendered || !mounted) return;
@@ -323,15 +299,30 @@ export function DetailDrawer({
       }
     };
 
-    const previousBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     document.addEventListener("keydown", handleEscape);
 
     return () => {
-      document.body.style.overflow = previousBodyOverflow;
       document.removeEventListener("keydown", handleEscape);
     };
   }, [handleClose, isCloseInteractionDisabled, isTopmost, rendered]);
+
+  useEffect(() => {
+    if (!rendered) return;
+
+    if (detailDrawerBodyLockCount === 0) {
+      detailDrawerPreviousBodyOverflow = document.body.style.overflow;
+    }
+    detailDrawerBodyLockCount += 1;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      detailDrawerBodyLockCount = Math.max(0, detailDrawerBodyLockCount - 1);
+      if (detailDrawerBodyLockCount === 0) {
+        document.body.style.overflow = detailDrawerPreviousBodyOverflow ?? "";
+        detailDrawerPreviousBodyOverflow = null;
+      }
+    };
+  }, [rendered]);
 
   useEffect(() => {
     if (!rendered || isCloseInteractionDisabled) return;
@@ -421,32 +412,11 @@ export function DetailDrawer({
   }, [handleClose, isTopmost]);
 
   useEffect(() => {
-    if (!isClosing) return;
-
-    closeTimerRef.current = window.setTimeout(() => {
-      setRendered(false);
-      setIsClosing(false);
-      setIsReady(false);
-      setIsCloseInteractionDisabled(false);
-      isPreparingCloseRef.current = false;
-      onOpenChange(false);
-    }, EXIT_DURATION_MS);
-
-    return () => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-    };
-  }, [isClosing, onOpenChange]);
-
-  useEffect(() => {
     return () => {
       isPreparingCloseRef.current = false;
-      clearCloseScrollPending();
       clearCloseAnimationPending();
     };
-  }, [clearCloseAnimationPending, clearCloseScrollPending]);
+  }, [clearCloseAnimationPending]);
 
   if (!mounted || !rendered) return null;
 
@@ -471,7 +441,10 @@ export function DetailDrawer({
         >
           <LayerPortal slot="backdrop">
             <AppOverlay
-              className="bg-black/50 backdrop-blur-sm"
+              className={cn(
+                "bg-black/50 backdrop-blur-sm will-change-[opacity]",
+                isCloseInteractionDisabled && "pointer-events-none",
+              )}
               layerId={layerId}
               open={!isClosing}
               onClick={handleCloseFromOutside}
@@ -479,7 +452,13 @@ export function DetailDrawer({
           </LayerPortal>
 
           <LayerPortal slot="surface">
-            <div className="fixed inset-y-0" style={contentAreaStyle}>
+            <div
+              className={cn(
+                "fixed inset-y-0",
+                isCloseInteractionDisabled && "pointer-events-none",
+              )}
+              style={contentAreaStyle}
+            >
               <VerticalScrollMask
                 hostRef={scrollContainerRef}
                 className="h-full min-h-0"
@@ -488,49 +467,57 @@ export function DetailDrawer({
                 onClick={handleCloseFromOutside}
               >
                 <div className="pointer-events-none relative mx-auto flex max-w-[1400px] items-start gap-6 px-4 pb-[4em] pt-[8em] sm:px-5 md:px-6">
-                  <motion.div
-                    ref={contentRef}
-                    initial={{
-                      top: 0,
-                      y: "112vh",
-                    }}
-                    animate={
-                      isClosing
-                        ? { top: 0, y: "112vh" }
-                        : { top: stackLift, y: "0vh" }
-                    }
-                    transition={
-                      isClosing
-                        ? { duration: 0.36, ease: [0.38, 0.05, 0.86, 0.28] }
-                        : {
-                            type: "spring",
-                            stiffness: 170,
-                            damping: 24,
-                            mass: 0.92,
-                          }
-                    }
+                  <div
                     data-detail-drawer-stack-depth={stackDepth}
-                    className={cn(
-                      isCloseInteractionDisabled
-                        ? "pointer-events-none"
-                        : "pointer-events-auto",
-                      "relative min-h-[132vh] min-w-0 flex-1 transform-gpu overflow-hidden rounded-sm border border-border/80 bg-background shadow-[0_-24px_70px_rgba(0,0,0,0.35)]",
-                    )}
-                    style={{
-                      willChange: isClosing || !isReady ? "transform" : "auto",
-                    }}
-                    onAnimationComplete={() => {
-                      if (!isClosing) {
-                        setIsReady(true);
-                      }
-                    }}
-                    onClick={(event) => event.stopPropagation()}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={ariaLabel}
+                    className="relative min-w-0 flex-1"
                   >
-                    <div className="relative h-full">{children}</div>
-                  </motion.div>
+                    <div
+                      className={cn(
+                        isCloseInteractionDisabled
+                          ? "pointer-events-none"
+                          : "pointer-events-auto",
+                        "relative min-h-[132vh] min-w-0 transform-gpu overflow-hidden rounded-sm border border-border/80 bg-background shadow-[0_-24px_70px_rgba(0,0,0,0.35)]",
+                      )}
+                      style={{
+                        transform: isClosing
+                          ? `translate3d(0, ${closeTranslateYRef.current - stackLift}px, 0)`
+                          : openAnimationStarted
+                            ? `translate3d(0, ${stackLift}px, 0)`
+                            : "translate3d(0, 112vh, 0)",
+                        transition: isClosing
+                          ? `transform ${closeDurationRef.current}ms ${CLOSE_TRANSITION_EASING}`
+                          : openAnimationStarted
+                            ? DETAIL_DRAWER_OPEN_TRANSITION
+                            : undefined,
+                        willChange:
+                          isClosing || !isReady ? "transform" : "auto",
+                      }}
+                      onTransitionEnd={(event) => {
+                        if (
+                          event.target !== event.currentTarget ||
+                          event.propertyName !== "transform"
+                        ) {
+                          return;
+                        }
+
+                        if (isClosing) {
+                          resetScrollPosition();
+                          setRendered(false);
+                          isPreparingCloseRef.current = false;
+                          onOpenChange(false);
+                          return;
+                        }
+
+                        setIsReady(true);
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label={ariaLabel}
+                    >
+                      <div className="relative h-full">{children}</div>
+                    </div>
+                  </div>
                 </div>
               </VerticalScrollMask>
             </div>
