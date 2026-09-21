@@ -461,8 +461,8 @@ export function DetailDrawer({
             >
               <VerticalScrollMask
                 hostRef={scrollContainerRef}
-                className="h-full min-h-0"
-                contentClassName="min-h-0 overscroll-contain"
+                className="pointer-events-auto h-full min-h-0"
+                contentClassName="min-h-0 overscroll-contain touch-pan-y"
                 scrollbarOptions={DETAIL_DRAWER_SCROLLBAR_OPTIONS}
                 onClick={handleCloseFromOutside}
               >
