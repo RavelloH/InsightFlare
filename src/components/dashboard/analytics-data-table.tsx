@@ -16,7 +16,13 @@ import { cn } from "@/lib/utils";
 
 type AnalyticsDataTableRowProps = Pick<
   ComponentPropsWithoutRef<"tr">,
-  "aria-hidden" | "className" | "onClick" | "onKeyDown" | "role" | "tabIndex"
+  | "aria-hidden"
+  | "aria-label"
+  | "className"
+  | "onClick"
+  | "onKeyDown"
+  | "role"
+  | "tabIndex"
 > & {
   [key: `data-${string}`]: string | undefined;
 };
@@ -27,6 +33,7 @@ export interface AnalyticsDataTableRow {
 }
 
 interface AnalyticsDataTableProps<TRow> {
+  toolbar?: ReactNode;
   header: ReactNode;
   rows: readonly TRow[];
   renderRow: (row: TRow, index: number) => AnalyticsDataTableRow;
@@ -276,6 +283,7 @@ const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
 }) as <TRow>(props: AnalyticsDataTableBodyProps<TRow>) => ReactNode;
 
 export function AnalyticsDataTable<TRow>({
+  toolbar,
   header,
   rows,
   renderRow,
@@ -313,6 +321,7 @@ export function AnalyticsDataTable<TRow>({
 
   const table = (
     <AnalyticsTableCard minTableWidth={minTableWidth} className={className}>
+      {toolbar ? <div className="border-b px-4 py-3">{toolbar}</div> : null}
       <Table className={tableClassName}>
         <TableHeader>{header}</TableHeader>
         <AnalyticsDataTableBody

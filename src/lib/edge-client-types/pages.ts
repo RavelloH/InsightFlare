@@ -58,6 +58,17 @@ export interface PagesDashboardChangeRates {
   avgDurationMs: number | null;
 }
 
+export type PagesDashboardMetric = keyof PagesDashboardMetrics;
+
+export interface PagesDashboardChange {
+  views: { absolute: number; relative: number | null };
+  visitors: { absolute: number; relative: number | null };
+  sessions: { absolute: number; relative: number | null };
+  bounceRate: { absolute: number; relative: number | null };
+  pagesPerSession: { absolute: number; relative: number | null };
+  avgDurationMs: { absolute: number; relative: number | null };
+}
+
 export interface PagesDashboardItem {
   pathname: string;
   titles: string[];
@@ -66,8 +77,15 @@ export interface PagesDashboardItem {
     views: number;
     visitors: number;
   }>;
+  referenceTrend?: Array<{
+    timestampMs: number;
+    views: number;
+    visitors: number;
+  }>;
   metrics: PagesDashboardMetrics;
   changeRates: PagesDashboardChangeRates;
+  reference?: PagesDashboardMetrics;
+  change?: PagesDashboardChange;
 }
 
 export interface PagesDashboardData {

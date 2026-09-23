@@ -4,6 +4,7 @@ import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-re
 import type {
   FilterValuesResult,
   OverviewTableComparisonQuery,
+  PagesDashboardComparisonQuery,
   PagesResult,
   ReferrersResult,
   ReferrerSummaryResult,
@@ -945,6 +946,25 @@ export function registerSiteContractProviders(
             window: timeWindow(request.time),
             filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
             interval: request.interval as never,
+            search:
+              typeof request.search === "string" ? request.search : undefined,
+            sort:
+              request.sort && typeof request.sort === "object"
+                ? (request.sort as {
+                    key:
+                      | "views"
+                      | "visitors"
+                      | "sessions"
+                      | "bounceRate"
+                      | "pagesPerSession"
+                      | "avgDurationMs";
+                    direction: "asc" | "desc";
+                  })
+                : undefined,
+            comparison:
+              request.comparison && typeof request.comparison === "object"
+                ? (request.comparison as PagesDashboardComparisonQuery)
+                : undefined,
             page:
               request.page && typeof request.page === "object"
                 ? (request.page as { limit: number; cursor?: string | null })

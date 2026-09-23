@@ -995,6 +995,82 @@ describe("edge pages D1 queries", () => {
     expect(calls[0]?.sql).toContain("scope_final_visits");
     expect(calls[1]?.sql).toContain("scope_final_visits");
   });
+
+  it("uses prepared scoped datasets for top pages and dashboard comparisons", async () => {
+    const prepared = prepareScopedQuery("pages", {
+      context: siteQueryContext("site-pages", "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: filterFixture({ path: "/pricing" }),
+      scopePreference: "visitor",
+    } as never);
+
+    const topPages = createD1Env([[]]);
+    await queryTopPagesFromD1(
+      topPages.env,
+      siteId,
+      window,
+      3,
+      false,
+      prepared.filters!,
+    );
+    expect(topPages.calls[0]?.sql).toContain("scope_final_visits");
+
+    const dashboard = createD1Env([
+      [
+        {
+          pathname: "/pricing",
+          current_views: 4,
+          current_sessions: 2,
+          current_visitors: 2,
+          current_bounces: 1,
+          current_total_duration: 2000,
+          current_duration_views: 0,
+          reference_views: 2,
+          reference_sessions: 1,
+          reference_visitors: 1,
+          reference_bounces: 1,
+          reference_total_duration: 1000,
+          reference_duration_views: 0,
+        },
+      ],
+      [],
+    ]);
+    await queryPagesDashboard(dashboard.env, siteId, {
+      window,
+      filters: prepared.filters!,
+      interval: "day",
+      page: { limit: 1, cursor: null },
+      comparison: {
+        current: {
+          time: createQueryTime(
+            window.startMs,
+            window.endExclusiveMs,
+            "UTC",
+            window.nowMs,
+          ),
+          filters: prepared.filters!,
+        },
+        reference: {
+          time: createQueryTime(
+            window.startMs - 2 * 60 * 60 * 1000,
+            window.startMs,
+            "UTC",
+            window.nowMs,
+          ),
+          filters: prepared.filters!,
+        },
+        metric: "views",
+        sortBy: "current",
+        direction: "desc",
+      },
+    });
+    expect(dashboard.calls[0]?.sql).toContain("current_scope_final_visits");
+  });
 });
 
 describe("edge paginated page and referrer readers", () => {
@@ -1419,6 +1495,221 @@ describe("edge paginated page and referrer readers", () => {
     });
     expect(second.calls[0].sql).toContain("pathname > ?");
   });
+
+  it("aggregates current and comparison page rows in one dashboard request", async () => {
+    const comparison = {
+      current: {
+        time: createQueryTime(
+          window.startMs,
+          window.endExclusiveMs,
+          window.timeZone,
+          window.nowMs,
+        ),
+        filters: EMPTY_FILTER_DOCUMENT,
+      },
+      reference: {
+        time: createQueryTime(
+          window.startMs - 2 * 60 * 60 * 1000,
+          window.startMs,
+          window.timeZone,
+          window.nowMs,
+        ),
+        filters: EMPTY_FILTER_DOCUMENT,
+      },
+      metric: "views" as const,
+      sortBy: "current" as const,
+      direction: "desc" as const,
+    };
+    const rows = (
+      pathname: string,
+      currentViews: number,
+      referenceViews: number,
+    ) => ({
+      pathname,
+      current_views: currentViews,
+      current_sessions: 2,
+      current_visitors: 2,
+      current_bounces: 1,
+      current_total_duration: 4_000,
+      current_duration_views: 0,
+      reference_views: referenceViews,
+      reference_sessions: 1,
+      reference_visitors: 1,
+      reference_bounces: 1,
+      reference_total_duration: 2_000,
+      reference_duration_views: 0,
+    });
+    const first = createD1Env([
+      [rows("/current", 10, 5), rows("/next", 8, 4)],
+      [
+        {
+          rowKind: "title",
+          pathname: "/current",
+          title: "Current",
+          views: 3,
+          rowOrder: 1,
+        },
+      ],
+    ]);
+    const firstPage = await queryPagesDashboard(first.env, siteId, {
+      window,
+      filters: EMPTY_FILTER_DOCUMENT,
+      interval: "day",
+      page: { limit: 1, cursor: null },
+      comparison,
+    });
+    expect(firstPage.items[0]).toMatchObject({
+      pathname: "/current",
+      metrics: { views: 10, sessions: 2 },
+      reference: { views: 5, sessions: 1 },
+      change: {
+        views: { absolute: 5, relative: 100 },
+      },
+    });
+    expect(firstPage.pagination).toMatchObject({
+      hasMore: true,
+      nextCursor: expect.any(String),
+    });
+
+    const second = createD1Env([[rows("/next", 8, 4)], []]);
+    await expect(
+      queryPagesDashboard(second.env, siteId, {
+        window,
+        filters: EMPTY_FILTER_DOCUMENT,
+        interval: "day",
+        page: { limit: 1, cursor: firstPage.pagination.nextCursor },
+        comparison,
+      }),
+    ).resolves.toMatchObject({
+      items: [{ pathname: "/next" }],
+      pagination: { hasMore: false, nextCursor: null },
+    });
+    expect(first.calls[0].sql).toContain("current_metrics");
+    expect(first.calls[0].sql).toContain("reference_metrics");
+    expect(second.calls[0].sql).toContain("change_relative");
+
+    const changeComparison = { ...comparison, sortBy: "change" as const };
+    const changeFirst = createD1Env([
+      [rows("/a", 10, 5), rows("/b", 8, 4)],
+      [],
+    ]);
+    const changeFirstPage = await queryPagesDashboard(changeFirst.env, siteId, {
+      window,
+      filters: EMPTY_FILTER_DOCUMENT,
+      interval: "day",
+      page: { limit: 1, cursor: null },
+      comparison: changeComparison,
+    });
+    const changeSecond = createD1Env([[rows("/b", 8, 4)], []]);
+    await expect(
+      queryPagesDashboard(changeSecond.env, siteId, {
+        window,
+        filters: EMPTY_FILTER_DOCUMENT,
+        interval: "day",
+        page: {
+          limit: 1,
+          cursor: changeFirstPage.pagination.nextCursor,
+        },
+        comparison: changeComparison,
+      }),
+    ).resolves.toMatchObject({ items: [{ pathname: "/b" }] });
+    expect(changeSecond.calls[0].sql).toContain("change_class");
+  });
+
+  it("supports page dashboard metric and comparison ordering variants", async () => {
+    const comparisonBase = {
+      current: {
+        time: createQueryTime(
+          window.startMs,
+          window.endExclusiveMs,
+          window.timeZone,
+          window.nowMs,
+        ),
+        filters: EMPTY_FILTER_DOCUMENT,
+      },
+      reference: {
+        time: createQueryTime(
+          window.startMs - 2 * 60 * 60 * 1000,
+          window.startMs,
+          window.timeZone,
+          window.nowMs,
+        ),
+        filters: EMPTY_FILTER_DOCUMENT,
+      },
+      direction: "asc" as const,
+    };
+    const row = {
+      pathname: "/docs",
+      current_views: 10,
+      current_sessions: 5,
+      current_visitors: 4,
+      current_bounces: 1,
+      current_total_duration: 5_000,
+      current_duration_views: 0,
+      reference_views: 8,
+      reference_sessions: 4,
+      reference_visitors: 3,
+      reference_bounces: 2,
+      reference_total_duration: 4_000,
+      reference_duration_views: 0,
+    };
+    for (const metric of [
+      "views",
+      "visitors",
+      "sessions",
+      "bounceRate",
+      "pagesPerSession",
+      "avgDurationMs",
+    ] as const) {
+      for (const sortBy of ["current", "reference", "change"] as const) {
+        const { env } = createD1Env([[row], []]);
+        await queryPagesDashboard(env, siteId, {
+          window,
+          filters: EMPTY_FILTER_DOCUMENT,
+          interval: "day",
+          search: "docs",
+          page: { limit: 1, cursor: null },
+          comparison: { ...comparisonBase, metric, sortBy },
+        });
+      }
+    }
+    const normalRow = {
+      pathname: "/docs",
+      views: 3,
+      sessions: 2,
+      visitors: 2,
+      bounces: 1,
+      totalDuration: 1_000,
+    };
+    for (const key of [
+      "views",
+      "visitors",
+      "sessions",
+      "bounceRate",
+      "pagesPerSession",
+      "avgDurationMs",
+    ] as const) {
+      const cursorRow =
+        key === "pagesPerSession" || key === "avgDurationMs"
+          ? { ...normalRow, sessions: 0 }
+          : normalRow;
+      const normal = createD1Env([
+        [cursorRow, { ...normalRow, pathname: "/next", views: 2 }],
+        [],
+        [],
+      ]);
+      await queryPagesDashboard(normal.env, siteId, {
+        window,
+        filters: EMPTY_FILTER_DOCUMENT,
+        interval: "day",
+        search: "docs",
+        sort: { key, direction: "asc" },
+        page: { limit: 1, cursor: null },
+      });
+      expect(normal.calls[0].sql).toContain("LOWER(pr.pathname) LIKE");
+      expect(normal.calls[0].sql).toContain(`ORDER BY pr.${key} asc`);
+    }
+  });
 });
 
 describe("edge pages handlers", () => {
@@ -1702,6 +1993,73 @@ describe("edge pages handlers", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].sql).toContain("scope_final_visits");
     expect(calls[0].bindings.length).toBeGreaterThan(4);
+  });
+
+  it("parses dashboard comparison controls and custom reference filters", async () => {
+    const { env, calls } = createD1Env([
+      [
+        {
+          pathname: "/docs",
+          current_views: 4,
+          current_sessions: 2,
+          current_visitors: 2,
+          current_bounces: 1,
+          current_total_duration: 2000,
+          current_duration_views: 0,
+          reference_views: 2,
+          reference_sessions: 1,
+          reference_visitors: 1,
+          reference_bounces: 1,
+          reference_total_duration: 1000,
+          reference_duration_views: 0,
+        },
+      ],
+      [],
+    ]);
+    const response = await handlePagesDashboard(
+      env,
+      siteId,
+      new URL(
+        `https://edge.test/pages/dashboard?from=${window.startMs}&to=${window.endExclusiveMs}&limit=1&compare=previous&metric=avgDurationMs&sortBy=reference&direction=asc&search=docs&compareFilter%5Bpage.path%5D=%2Fdocs`,
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls[0]?.sql).toContain("current_metrics");
+    expect(calls[0]?.sql).toContain("reference_metrics");
+    await expect(response.json()).resolves.toMatchObject({
+      data: { items: [{ pathname: "/docs", reference: { views: 2 } }] },
+    });
+  });
+
+  it("rejects invalid dashboard comparison controls before querying D1", async () => {
+    const requests = ["sort=invalid", "direction=sideways", "compare=invalid"];
+    for (const control of requests) {
+      const { env, calls } = createD1Env([]);
+      const response = await handlePagesDashboard(
+        env,
+        siteId,
+        new URL(
+          `https://edge.test/pages/dashboard?from=${window.startMs}&to=${window.endExclusiveMs}&${control}`,
+        ),
+      );
+      expect(response.status).toBe(400);
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it("treats same-period comparison without a reference filter as inactive", async () => {
+    const { env, calls } = createD1Env([[]]);
+    const response = await handlePagesDashboard(
+      env,
+      siteId,
+      new URL(
+        `https://edge.test/pages/dashboard?from=${window.startMs}&to=${window.endExclusiveMs}&compare=same`,
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(calls[0]?.sql).toContain("path_metrics");
+    expect(calls[0]?.sql).not.toContain("current_metrics");
   });
 
   it("rejects invalid dashboard cursors before querying D1", async () => {

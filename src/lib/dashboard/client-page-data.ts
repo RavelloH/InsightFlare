@@ -1,6 +1,7 @@
 import type {
   DashboardListRequestOptions,
   PageCardTabsData,
+  PagesDashboardListRequestOptions,
   PrivateRequestParams,
 } from "@/lib/dashboard/client-data-types";
 import {
@@ -17,7 +18,7 @@ import type { FilterDocument } from "@/lib/filter-contract";
 
 import { fetchTrend } from "./client-core-data";
 import { fetchPrivateJson } from "./client-request";
-import { withFilters } from "./client-utils";
+import { withComparison, withFilters, withPagination } from "./client-utils";
 
 function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   if (error instanceof Error && error.name === "AbortError") throw error;
@@ -28,26 +29,35 @@ export async function fetchPagesDashboard(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: {
-    limit?: number;
-    cursor?: string | null;
-    signal?: AbortSignal;
-  },
+  options?: PagesDashboardListRequestOptions,
 ): Promise<PagesDashboardData> {
-  return fetchPrivateJson<PagesDashboardData>(
-    "/api/private/pages-dashboard",
+  const params = withComparison(
     withFilters(
-      {
-        siteId,
-        from: window.from,
-        to: window.to,
-        timeZone: window.timeZone,
-        interval: window.interval,
-        limit: options?.limit ?? 12,
-        ...(options?.cursor ? { cursor: options.cursor } : {}),
-      },
+      withPagination(
+        {
+          siteId,
+          from: window.from,
+          to: window.to,
+          timeZone: window.timeZone,
+          interval: window.interval,
+          ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
+          ...(options?.sort ? { sort: options.sort } : {}),
+          ...(options?.direction ? { direction: options.direction } : {}),
+        },
+        options,
+        12,
+      ),
       filters,
     ),
+    options?.comparison,
+    {
+      metric: options?.comparisonMetric,
+      sortBy: options?.comparisonSortBy,
+    },
+  );
+  return fetchPrivateJson<PagesDashboardData>(
+    "/api/private/pages-dashboard",
+    params,
     { signal: options?.signal },
   );
 }

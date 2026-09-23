@@ -109,20 +109,129 @@ export function generateDemoPagesDashboard(
     Math.max(1, filtered.visits.length),
     (visit) => visit.pathname,
   );
+  const comparison = resolveDemoComparison(params, filters);
+  const referenceDataset = comparison
+    ? buildDemoFactDataset(siteId, comparison.from, comparison.to)
+    : null;
   const span = Math.max(0, to - from);
   const previousFrom = Math.max(0, from - span);
   const previousTo = Math.max(previousFrom, from);
-  const previousDataset = buildDemoFactDataset(
-    siteId,
-    previousFrom,
-    previousTo,
+  const previousDataset = comparison
+    ? null
+    : buildDemoFactDataset(siteId, previousFrom, previousTo);
+  const referenceFilters = comparison?.filters ?? null;
+  const referenceFiltered =
+    referenceDataset && referenceFilters
+      ? applyDemoFilters(referenceDataset, referenceFilters)
+      : null;
+  const referencePathRows = referenceFiltered
+    ? aggregateDimensionRowsFromVisits(
+        referenceDataset!,
+        referenceFiltered.visits,
+        Math.max(1, referenceFiltered.visits.length),
+        (visit) => visit.pathname,
+      )
+    : [];
+  const pathnames = Array.from(
+    new Set([
+      ...allPathRows.map((row) => row.label),
+      ...referencePathRows.map((row) => row.label),
+    ]),
   );
 
   const percentDelta = (current: number, previous: number) =>
     previous <= 0 ? null : ((current - previous) / previous) * 100;
 
+  const pageRows = pathnames.map((pathname) => {
+    const currentMetrics = aggregateOverviewMetrics(
+      dataset,
+      applyDemoFilters(dataset, { ...filters, path: pathname }),
+    );
+    const referenceMetrics =
+      referenceDataset && referenceFilters
+        ? aggregateOverviewMetrics(
+            referenceDataset,
+            applyDemoFilters(referenceDataset, {
+              ...referenceFilters,
+              path: pathname,
+            }),
+          )
+        : null;
+    const currentPagesPerSession =
+      currentMetrics.sessions > 0
+        ? currentMetrics.views / currentMetrics.sessions
+        : 0;
+    const referencePagesPerSession =
+      referenceMetrics && referenceMetrics.sessions > 0
+        ? referenceMetrics.views / referenceMetrics.sessions
+        : 0;
+    const metricValues = {
+      views: currentMetrics.views,
+      visitors: currentMetrics.visitors,
+      sessions: currentMetrics.sessions,
+      bounceRate: currentMetrics.bounceRate,
+      pagesPerSession: currentPagesPerSession,
+      avgDurationMs: currentMetrics.avgDurationMs,
+    };
+    const referenceValues = referenceMetrics
+      ? {
+          views: referenceMetrics.views,
+          visitors: referenceMetrics.visitors,
+          sessions: referenceMetrics.sessions,
+          bounceRate: referenceMetrics.bounceRate,
+          pagesPerSession: referencePagesPerSession,
+          avgDurationMs: referenceMetrics.avgDurationMs,
+        }
+      : null;
+    const previousMetrics =
+      previousDataset && !comparison
+        ? aggregateOverviewMetrics(
+            previousDataset,
+            applyDemoFilters(previousDataset, { ...filters, path: pathname }),
+          )
+        : null;
+    const previousValues = previousMetrics
+      ? {
+          views: previousMetrics.views,
+          visitors: previousMetrics.visitors,
+          sessions: previousMetrics.sessions,
+          bounceRate: previousMetrics.bounceRate,
+          pagesPerSession:
+            previousMetrics.sessions > 0
+              ? previousMetrics.views / previousMetrics.sessions
+              : 0,
+          avgDurationMs: previousMetrics.avgDurationMs,
+        }
+      : null;
+    const changeReferenceValues = referenceValues ?? previousValues;
+    const change = changeReferenceValues
+      ? Object.fromEntries(
+          Object.keys(metricValues).map((key) => {
+            const metric = key as keyof typeof metricValues;
+            const current = metricValues[metric];
+            const reference = changeReferenceValues[metric];
+            return [
+              metric,
+              {
+                absolute: current - reference,
+                relative: percentDelta(current, reference),
+              },
+            ];
+          }),
+        )
+      : undefined;
+    return {
+      label: pathname,
+      views: currentMetrics.views,
+      visitors: currentMetrics.visitors,
+      sessions: currentMetrics.sessions,
+      metrics: metricValues,
+      reference: referenceValues,
+      change,
+    };
+  });
   const page = demoPage(
-    allPathRows.map((row) => row.label),
+    pageRows,
     params,
     {
       operation: "pages-dashboard",
@@ -133,33 +242,54 @@ export function generateDemoPagesDashboard(
       timeZone,
       filters,
       includeDetails: true,
-      sort: "views:desc,sessions:desc,pathname:asc",
+      sort: String(params.sort ?? "views"),
+      direction: String(params.direction ?? "desc"),
     },
     12,
-    24,
+    25,
+    true,
+    {
+      search: String(params.search ?? ""),
+      getSearchValues: (row) => [row.label],
+      compare: (left, right) => {
+        const direction = params.direction === "asc" ? 1 : -1;
+        const metric = String(
+          params.compare === "same" || params.compare === "previous"
+            ? (params.metric ?? "views")
+            : (params.sort ?? "views"),
+        ) as keyof typeof left.metrics;
+        const sortBy = String(params.sortBy ?? "current");
+        const value = (row: typeof left) => {
+          if (sortBy === "reference") {
+            return Number(row.reference?.[metric] ?? 0);
+          }
+          if (sortBy === "change") {
+            return Number(row.change?.[metric]?.relative ?? 0);
+          }
+          return Number(row.metrics[metric] ?? 0);
+        };
+        const leftValue = value(left);
+        const rightValue = value(right);
+        return (
+          (leftValue - rightValue) * direction ||
+          left.label.localeCompare(right.label)
+        );
+      },
+    },
   );
   const items = page.items.flatMap((pathname) => {
-    const row = allPathRows.find((candidate) => candidate.label === pathname);
+    const row = pageRows.find(
+      (candidate) => candidate.label === pathname.label,
+    );
     if (!row) return [];
     const currentMetrics = aggregateOverviewMetrics(
       dataset,
-      applyDemoFilters(dataset, { ...filters, path: pathname }),
+      applyDemoFilters(dataset, { ...filters, path: row.label }),
     );
-    const previousMetrics = aggregateOverviewMetrics(
-      previousDataset,
-      applyDemoFilters(previousDataset, { ...filters, path: pathname }),
-    );
-    const currentPagesPerSession =
-      currentMetrics.sessions > 0
-        ? currentMetrics.views / currentMetrics.sessions
-        : 0;
-    const previousPagesPerSession =
-      previousMetrics.sessions > 0
-        ? previousMetrics.views / previousMetrics.sessions
-        : 0;
+    const currentPagesPerSession = row.metrics.pagesPerSession;
     const titles = aggregateDimensionRowsFromVisits(
       dataset,
-      filtered.visits.filter((visit) => visit.pathname === pathname),
+      filtered.visits.filter((visit) => visit.pathname === row.label),
       3,
       (visit) => visit.title,
     ).map((titleRow) => titleRow.label);
@@ -168,18 +298,34 @@ export function generateDemoPagesDashboard(
       from,
       to,
       interval,
-      { ...filters, path: pathname },
+      { ...filters, path: row.label },
       timeZone,
     ).map((point) => ({
       timestampMs: point.timestampMs,
       views: point.views,
       visitors: point.visitors,
     }));
+    const referenceTrend =
+      referenceDataset && referenceFilters && comparison
+        ? buildDemoTrendBuckets(
+            siteId,
+            comparison.from,
+            comparison.to,
+            interval,
+            { ...referenceFilters, path: row.label },
+            timeZone,
+          ).map((point) => ({
+            timestampMs: point.timestampMs,
+            views: point.views,
+            visitors: point.visitors,
+          }))
+        : undefined;
     return [
       {
-        pathname,
+        pathname: row.label,
         titles,
         trend,
+        ...(referenceTrend ? { referenceTrend } : {}),
         metrics: {
           views: currentMetrics.views,
           visitors: currentMetrics.visitors,
@@ -188,29 +334,35 @@ export function generateDemoPagesDashboard(
           pagesPerSession: currentPagesPerSession,
           avgDurationMs: currentMetrics.avgDurationMs,
         },
-        changeRates: {
-          views: percentDelta(currentMetrics.views, previousMetrics.views),
-          visitors: percentDelta(
-            currentMetrics.visitors,
-            previousMetrics.visitors,
-          ),
-          sessions: percentDelta(
-            currentMetrics.sessions,
-            previousMetrics.sessions,
-          ),
-          bounceRate: percentDelta(
-            currentMetrics.bounceRate,
-            previousMetrics.bounceRate,
-          ),
-          pagesPerSession: percentDelta(
-            currentPagesPerSession,
-            previousPagesPerSession,
-          ),
-          avgDurationMs: percentDelta(
-            currentMetrics.avgDurationMs,
-            previousMetrics.avgDurationMs,
-          ),
-        },
+        changeRates: row.change
+          ? Object.fromEntries(
+              Object.entries(row.change).map(([key, value]) => [
+                key,
+                value.relative,
+              ]),
+            )
+          : {
+              views: null,
+              visitors: null,
+              sessions: null,
+              bounceRate: null,
+              pagesPerSession: null,
+              avgDurationMs: null,
+            },
+        ...(row.reference && row.change
+          ? {
+              reference: row.reference,
+              change: Object.fromEntries(
+                Object.entries(row.change).map(([key, value]) => [
+                  key,
+                  {
+                    absolute: value.absolute,
+                    relative: value.relative,
+                  },
+                ]),
+              ),
+            }
+          : {}),
       },
     ];
   });

@@ -70,7 +70,7 @@ describe("dashboard client page data helpers", () => {
       }),
     );
     await fetchPagesDashboard("pages-site", window, undefined, {
-      limit: 40,
+      limit: 25,
       cursor: "pages-cursor",
     });
 
@@ -86,7 +86,7 @@ describe("dashboard client page data helpers", () => {
         "filter[referrer.domain]": "example.com",
       }),
     );
-    expect(paramsFromCall(fetchMock, 1).get("limit")).toBe("40");
+    expect(paramsFromCall(fetchMock, 1).get("limit")).toBe("25");
     expect(paramsFromCall(fetchMock, 1).get("cursor")).toBe("pages-cursor");
   });
 

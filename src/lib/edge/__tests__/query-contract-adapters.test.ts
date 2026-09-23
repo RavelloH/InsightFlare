@@ -351,11 +351,11 @@ describe("typed query adapter validation branches", () => {
           false,
         ),
         handleReferrerSummaryContract(env, siteId, new URL(`${base}&topN=20`)),
-        handlePagesDashboardContract(env, siteId, new URL(`${base}&limit=24`)),
+        handlePagesDashboardContract(env, siteId, new URL(`${base}&limit=25`)),
         handlePagesDashboardContract(
           env,
           siteId,
-          new URL(`${base}&limit=24&cursor=invalid`),
+          new URL(`${base}&limit=25&cursor=invalid`),
         ),
       ]);
 

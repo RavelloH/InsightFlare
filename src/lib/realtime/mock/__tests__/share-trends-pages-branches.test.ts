@@ -532,6 +532,90 @@ describe("mock/analytics-pages branch coverage", () => {
     });
   });
 
+  it("returns server-style comparison rows for demo page dashboards", () => {
+    const currentDataset = makeDataset([
+      makeVisit({
+        visitId: "current-home",
+        pathname: "/home",
+        title: "Home",
+        durationMs: 4_000,
+      }),
+      makeVisit({
+        visitId: "current-pricing",
+        sessionId: "s2",
+        visitorId: "u2",
+        pathname: "/pricing",
+        title: "Pricing",
+        durationMs: 2_000,
+      }),
+    ]);
+    const referenceDataset = makeDataset([
+      makeVisit({
+        visitId: "reference-home",
+        pathname: "/home",
+        title: "Home",
+        durationMs: 1_000,
+      }),
+    ]);
+    mockBuildDemoFactDataset
+      .mockReturnValueOnce(currentDataset)
+      .mockReturnValueOnce(referenceDataset)
+      .mockReturnValue(currentDataset);
+    mockApplyDemoFilters.mockImplementation(
+      (dataset: DemoFactDataset, filters: { path?: string }) => {
+        const visits = filters.path
+          ? dataset.visits.filter((visit) => visit.pathname === filters.path)
+          : dataset.visits;
+        return makeFiltered(visits);
+      },
+    );
+
+    expect(
+      generateDemoPagesDashboard(SITE_ID, {
+        from: BASE_TIME,
+        to: BASE_TIME + 3_600_000,
+        interval: "hour",
+        compare: "same",
+        "compareFilter[page.path]": "/home",
+        metric: "avgDurationMs",
+        sortBy: "change",
+        direction: "asc",
+        search: "home",
+        limit: 1,
+        timeZone: "UTC",
+      }),
+    ).toMatchObject({
+      ok: true,
+      data: {
+        items: [
+          expect.objectContaining({
+            pathname: "/home",
+            referenceTrend: expect.any(Array),
+            reference: expect.objectContaining({ views: 1 }),
+            change: expect.objectContaining({
+              avgDurationMs: expect.objectContaining({ relative: 300 }),
+            }),
+          }),
+        ],
+      },
+    });
+
+    expect(
+      generateDemoPagesDashboard(SITE_ID, {
+        from: BASE_TIME,
+        to: BASE_TIME + 3_600_000,
+        interval: "hour",
+        compare: "same",
+        "compareFilter[page.path]": "/home",
+        metric: "views",
+        sortBy: "reference",
+        direction: "desc",
+        limit: 1,
+        timeZone: "UTC",
+      }),
+    ).toMatchObject({ ok: true, data: { items: expect.any(Array) } });
+  });
+
   it("returns zero pages per session when a page has views but no weighted sessions", () => {
     const currentVisits = [
       makeVisit({ visitId: "zero-session", pathname: "/zero", title: "Zero" }),
@@ -556,12 +640,13 @@ describe("mock/analytics-pages branch coverage", () => {
         from: BASE_TIME,
         to: BASE_TIME,
         interval: "hour",
-        limit: 12,
+        limit: 25,
         timeZone: "UTC",
       }),
     ).toMatchObject({
       ok: true,
       data: {
+        pagination: { limit: 25 },
         items: [
           expect.objectContaining({
             pathname: "/zero",

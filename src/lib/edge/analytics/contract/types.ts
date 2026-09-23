@@ -382,6 +382,37 @@ export interface PageQuery extends BaseQuery {
   readonly sort?: Sort;
 }
 
+export type PagesDashboardMetric =
+  | "views"
+  | "visitors"
+  | "sessions"
+  | "bounceRate"
+  | "pagesPerSession"
+  | "avgDurationMs";
+export type PagesDashboardSortBy = "current" | "reference" | "change";
+
+export interface PagesDashboardComparisonQuery {
+  readonly current: ComparisonDatasetQuery;
+  readonly reference: ComparisonDatasetQuery;
+  readonly metric: PagesDashboardMetric;
+  readonly sortBy: PagesDashboardSortBy;
+  readonly direction: SortDirection;
+}
+
+/**
+ * The pages dashboard has its own list contract.  Keep the API v1 `PagesQuery`
+ * above unchanged while allowing the dashboard list to grow comparison-aware
+ * search and sorting independently.
+ */
+export interface PagesDashboardQuery extends BaseQuery {
+  readonly interval: CalendarGranularity;
+  readonly page?: PageRequest;
+  readonly search?: string;
+  readonly sort?: Sort<PagesDashboardMetric>;
+  readonly comparison?: PagesDashboardComparisonQuery;
+  readonly audience?: QueryAudience;
+}
+
 export interface OverviewQuery extends BaseQuery {
   readonly previousTime?: QueryTime;
   readonly detailInterval?: CalendarGranularity;
@@ -420,7 +451,6 @@ export interface EventFieldValuesQuery extends BaseQuery {
 }
 export type GeoPointsQuery = BaseQuery;
 export type TopPagesQuery = PagesQuery;
-export type PagesDashboardQuery = PageQuery;
 export type ReferrerQuery = ReferrersQuery;
 export type ChannelQuery = ChannelsQuery;
 

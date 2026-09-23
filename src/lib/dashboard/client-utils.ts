@@ -7,6 +7,7 @@ import type {
   PaginatedCollection,
   PaginationMeta,
 } from "@/lib/edge-client";
+import type { PagesDashboardMetric } from "@/lib/edge-client-types/pages";
 import {
   analyticsFilterRegistry,
   type FilterDocument,
@@ -193,7 +194,7 @@ export function withComparison(
   params: PrivateRequestParams,
   comparison?: DashboardComparisonRequest | null,
   options?: {
-    metric?: "views" | "visitors" | "sessions";
+    metric?: PagesDashboardMetric;
     sortBy?: "current" | "reference" | "change";
   },
 ): PrivateRequestParams {
@@ -216,7 +217,7 @@ export function withComparison(
 
 export function withPagination(
   params: PrivateRequestParams,
-  options?: DashboardListRequestOptions,
+  options?: Pick<DashboardListRequestOptions, "limit" | "cursor">,
   defaultLimit?: number,
 ): PrivateRequestParams {
   return {

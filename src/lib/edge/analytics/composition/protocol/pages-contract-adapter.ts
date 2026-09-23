@@ -1,7 +1,8 @@
 import { createD1SiteQueryRuntime } from "@/lib/edge/analytics/composition/d1";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
-  type BaseQuery,
+  type PagesDashboardComparisonQuery,
+  type PagesDashboardQuery,
   type PagesQuery,
   type PagesResult,
   type ReferrersQuery,
@@ -21,6 +22,7 @@ import {
   parseListSearch,
   parseQueryLimit,
   parseWindow,
+  previousComparableWindow,
   queryErrorResponse,
   type ResponseContext,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -171,9 +173,84 @@ export async function handlePagesDashboardContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const limit = parseQueryLimit(url, "limit", 12, 1, 24);
+  const limit = parseQueryLimit(url, "limit", 12, 1, 25);
   const cursor = url.searchParams.get("cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
+  const search = parseListSearch(url);
+  const rawSort = url.searchParams.get("sort");
+  const pageMetrics = [
+    "views",
+    "visitors",
+    "sessions",
+    "bounceRate",
+    "pagesPerSession",
+    "avgDurationMs",
+  ] as const;
+  if (
+    rawSort !== null &&
+    !pageMetrics.includes(rawSort as (typeof pageMetrics)[number])
+  ) {
+    return badRequest("Invalid sort", "invalid-input");
+  }
+  const rawDirection = url.searchParams.get("direction");
+  if (
+    rawDirection !== null &&
+    rawDirection !== "asc" &&
+    rawDirection !== "desc"
+  ) {
+    return badRequest("Invalid direction", "invalid-input");
+  }
+  const sort = (rawSort ?? "views") as (typeof pageMetrics)[number];
+  const direction = rawDirection ?? "desc";
+  const compare = url.searchParams.get("compare");
+  if (compare !== null && compare !== "same" && compare !== "previous") {
+    return badRequest("Invalid comparison", "invalid-input");
+  }
+  const compareFilterParams = new URLSearchParams();
+  for (const [key, value] of url.searchParams) {
+    if (key.startsWith("compareFilter[")) {
+      compareFilterParams.append(
+        `filter${key.slice("compareFilter".length)}`,
+        value,
+      );
+    }
+  }
+  const comparisonMetric = pageMetrics.includes(
+    url.searchParams.get("metric") as (typeof pageMetrics)[number],
+  )
+    ? (url.searchParams.get("metric") as (typeof pageMetrics)[number])
+    : "views";
+  const comparisonSortBy =
+    url.searchParams.get("sortBy") === "reference"
+      ? "reference"
+      : url.searchParams.get("sortBy") === "change"
+        ? "change"
+        : "current";
+  let comparison: PagesDashboardComparisonQuery | undefined;
+  if (compare === "same" || compare === "previous") {
+    const referenceFilters = compareFilterParams.size
+      ? parseFilterUrlForAudience(
+          queryContext.policy.audience,
+          compareFilterParams,
+        )
+      : compare === "previous"
+        ? filters
+        : ({ version: 1, root: null } as typeof filters);
+    if (compare !== "same" || referenceFilters.root) {
+      comparison = {
+        current: { time: toQueryTime(window), filters },
+        reference: {
+          time: toQueryTime(
+            compare === "previous" ? previousComparableWindow(window) : window,
+          ),
+          filters: referenceFilters,
+        },
+        metric: comparisonMetric,
+        sortBy: comparisonSortBy,
+        direction,
+      };
+    }
+  }
   const result = await createD1SiteQueryRuntime({ env, siteId }).execute<
     Awaited<ReturnType<typeof queryPagesDashboard>>
   >("pages-dashboard", {
@@ -181,13 +258,12 @@ export async function handlePagesDashboardContract(
     time: toQueryTime(window),
     filters,
     interval: parseInterval(url),
+    search,
+    sort: { key: sort, direction },
+    ...(comparison ? { comparison } : {}),
     page: { limit, cursor },
     audience: queryContext.policy.audience,
-  } as BaseQuery & {
-    readonly interval: ReturnType<typeof parseInterval>;
-    readonly page: { readonly limit: number; readonly cursor: string | null };
-    readonly audience: "private-dashboard" | "public-share" | "api-v1";
-  });
+  } satisfies PagesDashboardQuery);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, {
     ok: true,

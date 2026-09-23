@@ -8,6 +8,7 @@ import type {
   PagesDashboardData,
   PagesData,
 } from "@/lib/edge-client";
+import type { PagesDashboardMetric } from "@/lib/edge-client-types/pages";
 import type {
   AnalyticsFilterFieldId,
   FilterDocument,
@@ -66,6 +67,13 @@ export type DashboardListRequestOptions = {
   comparisonMetric?: "views" | "visitors" | "sessions";
   comparisonSortBy?: "current" | "reference" | "change";
   signal?: AbortSignal;
+};
+export type PagesDashboardListRequestOptions = Omit<
+  DashboardListRequestOptions,
+  "sort" | "comparisonMetric"
+> & {
+  sort?: PagesDashboardMetric;
+  comparisonMetric?: PagesDashboardMetric;
 };
 export type FetchPrivateJsonOptions = {
   signal?: AbortSignal;

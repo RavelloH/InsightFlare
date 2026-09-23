@@ -1,23 +1,22 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  RiArrowDownLine,
-  RiArrowRightSLine,
-  RiArrowUpLine,
-  RiRefreshLine,
-} from "@remixicon/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { motion } from "motion/react";
 
-import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
+import { useAnalyticsTableColumns } from "@/components/dashboard/analytics-table-column-settings";
 import { PageHeading } from "@/components/dashboard/page-heading";
 import { PagesShareTrendCard } from "@/components/dashboard/pages-share-trend-card";
+import {
+  createPagesTableColumnDefinitions,
+  LEGACY_PAGES_TABLE_COLUMNS_STORAGE_KEY,
+  PAGES_TABLE_COLUMNS_STORAGE_KEY,
+  type PagesSortState,
+  PagesTableCard,
+} from "@/components/dashboard/pages-table-card";
 import { PageDetailDrawer } from "@/components/dashboard/site-pages/page-detail-drawer";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/use-dashboard-query";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import {
+  dashboardComparisonLabel,
+  useDashboardComparisonQuery,
+} from "@/components/dashboard/use-dashboard-comparison-query";
 import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
@@ -27,26 +26,75 @@ import {
   fetchPagesDashboard,
   type PagesDashboardRow,
 } from "@/lib/dashboard/client-data";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
-import {
-  durationFormat,
-  intlLocale,
-  numberFormat,
-  percentFormat,
-} from "@/lib/dashboard/format";
 import {
   normalizePagePath,
   PAGE_DETAIL_QUERY_PARAM,
 } from "@/lib/dashboard/page-detail";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
+import type { PagesDashboardMetric } from "@/lib/edge-client-types/pages";
 import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
-const PAGE_CARD_PAGE_SIZE = 12;
-const PAGE_CARD_CHART_MAX_POINTS = 36;
+const PAGE_LIST_PAGE_SIZE = 25;
+
+function moveTrendAfterPage(ids: readonly string[]): string[] {
+  const withoutTrend = ids.filter((id) => id !== "trend");
+  const pageIndex = withoutTrend.indexOf("page");
+  withoutTrend.splice(pageIndex < 0 ? 0 : pageIndex + 1, 0, "trend");
+  return withoutTrend;
+}
+
+function migratePagesTableColumnSettings(): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    if (window.localStorage.getItem(PAGES_TABLE_COLUMNS_STORAGE_KEY)) return;
+    const legacyValue = window.localStorage.getItem(
+      LEGACY_PAGES_TABLE_COLUMNS_STORAGE_KEY,
+    );
+    if (!legacyValue) return;
+
+    const stored = JSON.parse(legacyValue) as {
+      version?: unknown;
+      order?: unknown;
+      visible?: unknown;
+    };
+    if (
+      stored.version !== 1 ||
+      !Array.isArray(stored.order) ||
+      !Array.isArray(stored.visible)
+    ) {
+      return;
+    }
+
+    const order = stored.order.filter(
+      (id): id is string => typeof id === "string",
+    );
+    const visible = stored.visible.filter(
+      (id): id is string => typeof id === "string",
+    );
+    const trendWasStored = order.includes("trend") || visible.includes("trend");
+
+    window.localStorage.setItem(
+      PAGES_TABLE_COLUMNS_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        order: moveTrendAfterPage(order),
+        visible: trendWasStored
+          ? visible.includes("trend")
+            ? moveTrendAfterPage(visible)
+            : visible
+          : moveTrendAfterPage(visible),
+      }),
+    );
+  } catch {
+    // Storage may be unavailable or contain invalid data; defaults will be used.
+  }
+}
 
 interface PagesClientPageProps {
   locale: Locale;
@@ -68,200 +116,6 @@ function pageDetailQueryTarget(
   return query ? `${pathname}?${query}` : pathname;
 }
 
-function formatChangeRate(value: number | null): string | null {
-  if (value === null) return null;
-  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
-}
-
-function changeRateClass(value: number | null, lowerIsBetter = false): string {
-  if (value === null) return "text-muted-foreground";
-  const isImprovement = lowerIsBetter ? value <= 0 : value >= 0;
-  return isImprovement ? "text-emerald-600" : "text-rose-600";
-}
-
-function ChangeRateInline({
-  value,
-  lowerIsBetter = false,
-}: {
-  value: number | null;
-  lowerIsBetter?: boolean;
-}) {
-  if (value === null) return null;
-  const Icon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
-  return (
-    <span
-      className={`inline-flex items-end gap-0.5 font-mono text-xs leading-none ${changeRateClass(value, lowerIsBetter)}`}
-    >
-      <Icon className="size-3.5" />
-      {formatChangeRate(value)}
-    </span>
-  );
-}
-
-function PageMetricField({
-  label,
-  value,
-  change,
-  lowerIsBetter = false,
-}: {
-  label: string;
-  value: string;
-  change: number | null;
-  lowerIsBetter?: boolean;
-}) {
-  return (
-    <div className="space-y-1">
-      <p className="text-muted-foreground">{label}</p>
-      <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
-        {value}
-        <ChangeRateInline value={change} lowerIsBetter={lowerIsBetter} />
-      </p>
-    </div>
-  );
-}
-
-const PageTrafficCard = memo(function PageTrafficCard({
-  item,
-  interval,
-  range,
-  locale,
-  messages,
-  pagesPerSessionFormatter,
-  onOpenPage,
-}: {
-  item: PagesDashboardRow;
-  interval: TimeWindow["interval"];
-  range: Pick<TimeWindow, "from" | "to" | "timeZone">;
-  locale: Locale;
-  messages: AppMessages;
-  pagesPerSessionFormatter: Intl.NumberFormat;
-  onOpenPage: (pagePath: string) => void;
-}) {
-  const titles = item.titles.slice(0, 3);
-  const displayPathname = decodeUrlDisplayValue(item.pathname || "/");
-
-  return (
-    <button
-      type="button"
-      onClick={() => onOpenPage(item.pathname)}
-      className="group block h-full w-full text-left outline-none focus-visible:ring-1 focus-visible:ring-ring/60"
-      aria-label={`${messages.pages.viewDetails}: ${displayPathname}`}
-      aria-haspopup="dialog"
-    >
-      <motion.div
-        className="h-full"
-        whileHover={{ scale: 1.012 }}
-        whileTap={{ scale: 0.992 }}
-        transition={{ duration: 0.16, ease: "easeOut" }}
-      >
-        <Card className="h-full transition-colors group-hover:border-border/80 group-hover:bg-accent/15">
-          <CardHeader className="space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1 space-y-1.5">
-                {titles.length > 0 ? (
-                  <>
-                    <CardTitle className="truncate">{titles[0]}</CardTitle>
-                    {titles.slice(1).map((title) => (
-                      <p
-                        key={`${item.pathname}-${title}`}
-                        className="truncate text-xs text-muted-foreground"
-                      >
-                        {title}
-                      </p>
-                    ))}
-                  </>
-                ) : (
-                  <CardTitle>{messages.pages.untitled}</CardTitle>
-                )}
-                <p className="break-all font-mono text-[11px] text-muted-foreground">
-                  {displayPathname}
-                </p>
-              </div>
-              <span className="inline-flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-                <RiArrowRightSLine className="size-4" />
-              </span>
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-4">
-            <TrafficPairBarChart
-              data={item.trend}
-              locale={locale}
-              timeZone={range.timeZone}
-              interval={interval}
-              range={range}
-              viewsLabel={messages.common.views}
-              visitorsLabel={messages.common.visitors}
-              maxPoints={PAGE_CARD_CHART_MAX_POINTS}
-              className="h-[116px]"
-            />
-
-            <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-[11px] sm:grid-cols-3">
-              <PageMetricField
-                label={messages.common.views}
-                value={numberFormat(locale, item.metrics.views)}
-                change={item.changeRates.views}
-              />
-              <PageMetricField
-                label={messages.common.visitors}
-                value={numberFormat(locale, item.metrics.visitors)}
-                change={item.changeRates.visitors}
-              />
-              <PageMetricField
-                label={messages.common.sessions}
-                value={numberFormat(locale, item.metrics.sessions)}
-                change={item.changeRates.sessions}
-              />
-              <PageMetricField
-                label={messages.common.bounceRate}
-                value={percentFormat(locale, item.metrics.bounceRate)}
-                change={item.changeRates.bounceRate}
-                lowerIsBetter
-              />
-              <PageMetricField
-                label={messages.pages.pagesPerSession}
-                value={pagesPerSessionFormatter.format(
-                  item.metrics.pagesPerSession,
-                )}
-                change={item.changeRates.pagesPerSession}
-              />
-              <PageMetricField
-                label={messages.common.avgDuration}
-                value={durationFormat(locale, item.metrics.avgDurationMs)}
-                change={item.changeRates.avgDurationMs}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-    </button>
-  );
-});
-
-const PageTrafficCardSkeleton = memo(function PageTrafficCardSkeleton() {
-  return (
-    <Card className="h-full">
-      <CardHeader className="space-y-2">
-        <Skeleton className="h-4 w-2/3" />
-        <Skeleton className="h-3 w-4/5" />
-        <Skeleton className="h-3 w-3/5" />
-        <Skeleton className="h-3 w-full" />
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <Skeleton className="h-[116px] w-full" />
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
-          {Array.from({ length: 6 }, (_, index) => (
-            <div key={index} className="space-y-1">
-              <Skeleton className="h-3 w-3/5" />
-              <Skeleton className="h-5 w-4/5" />
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-});
-
 export function PagesClientPage({
   locale,
   messages,
@@ -274,20 +128,63 @@ export function PagesClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
-  const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);
+  const globalComparisonQuery = useDashboardComparisonQuery(window, filters);
+  const comparisonQuery = useMemo(
+    () =>
+      globalComparisonQuery ??
+      resolveDashboardComparisonQuery(
+        new URLSearchParams("compare=previous"),
+        window,
+        filters,
+      ),
+    [
+      filters,
+      globalComparisonQuery,
+      window.from,
+      window.interval,
+      window.timeZone,
+      window.to,
+    ],
+  );
+  const comparisonActive = Boolean(comparisonQuery);
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [sort, setSort] = useState<PagesSortState>({
+    key: "views",
+    direction: "desc",
+  });
+  const columnDefinitions = useMemo(
+    () => createPagesTableColumnDefinitions(messages),
+    [messages],
+  );
+  useEffect(() => {
+    migratePagesTableColumnSettings();
+  }, []);
+  const pageColumns = useAnalyticsTableColumns({
+    storageKey: PAGES_TABLE_COLUMNS_STORAGE_KEY,
+    columns: columnDefinitions,
+  });
   const searchParams = useLiveSearchParams();
   const detailPagePath = normalizePagePath(
     searchParams.get(PAGE_DETAIL_QUERY_PARAM),
   );
   const openedDetailFromListRef = useRef(false);
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const pagesPerSessionFormatter = useMemo(
+  const comparisonFiltersKey = useMemo(
     () =>
-      new Intl.NumberFormat(intlLocale(locale), {
-        maximumFractionDigits: 2,
-      }),
-    [locale],
+      comparisonQuery
+        ? filterQueryKey(comparisonQuery.filters)
+        : "no-comparison",
+    [comparisonQuery],
   );
+
+  useEffect(() => {
+    const timeoutId = globalThis.setTimeout(() => {
+      setDebouncedQuery(query.trim());
+    }, 300);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [query]);
+
   const {
     data,
     error: queryError,
@@ -299,18 +196,31 @@ export function PagesClientPage({
   } = useInfiniteQuery({
     queryKey: [
       "dashboard",
-      "pages",
+      "pages-list",
       siteId,
       window.from,
       window.to,
       window.interval,
       window.timeZone,
       filtersKey,
+      debouncedQuery,
+      sort.key,
+      sort.direction,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? null,
+      comparisonQuery?.window.to ?? null,
+      comparisonFiltersKey,
     ],
     queryFn: ({ pageParam, signal }) =>
       fetchPagesDashboard(siteId, window, filters, {
         cursor: pageParam,
-        limit: PAGE_CARD_PAGE_SIZE,
+        limit: PAGE_LIST_PAGE_SIZE,
+        search: debouncedQuery,
+        sort: sort.key,
+        direction: sort.direction,
+        comparison: comparisonQuery,
+        comparisonMetric: sort.key,
+        comparisonSortBy: "current",
         signal,
       }),
     initialPageParam: null as string | null,
@@ -320,33 +230,45 @@ export function PagesClientPage({
         : undefined,
     enabled: typeof window !== "undefined",
   });
-  const items = useMemo(
-    () => data?.pages.flatMap((page) => page.data.items) ?? [],
-    [data?.pages],
-  );
+
+  const rows = useMemo(() => {
+    const seen = new Set<string>();
+    const result: PagesDashboardRow[] = [];
+    for (const page of data?.pages ?? []) {
+      for (const row of page.data.items) {
+        if (seen.has(row.pathname)) continue;
+        seen.add(row.pathname);
+        result.push(row);
+      }
+    }
+    return result;
+  }, [data?.pages]);
   const loadingInitial = isPending;
   const loadingMore = isFetchingNextPage;
-  const error =
-    queryError && items.length === 0 ? messages.pages.loadError : null;
-  const appendError = isFetchNextPageError
-    ? messages.pages.loadMoreError
-    : null;
-  const loadNextPage = useCallback(() => {
-    if (loadingInitial || loadingMore || appendError || !hasNextPage) return;
-    void fetchNextPage();
-  }, [appendError, fetchNextPage, hasNextPage, loadingInitial, loadingMore]);
+  const hasMore = hasNextPage ?? false;
+  const error = Boolean(queryError) && rows.length === 0;
+  const appendError = isFetchNextPageError;
 
-  useEffect(() => {
-    if (!detailPagePath) {
-      openedDetailFromListRef.current = false;
-    }
-  }, [detailPagePath]);
+  const loadNextPage = useCallback(() => {
+    if (loadingInitial || loadingMore || appendError || !hasMore) return;
+    void fetchNextPage();
+  }, [appendError, fetchNextPage, hasMore, loadingInitial, loadingMore]);
+
+  const toggleSort = useCallback((key: PagesDashboardMetric) => {
+    setSort((current) =>
+      current.key === key
+        ? {
+            key,
+            direction: current.direction === "desc" ? "asc" : "desc",
+          }
+        : { key, direction: "desc" },
+    );
+  }, []);
 
   const openPageDetail = useCallback(
     (pagePath: string) => {
       const normalizedPagePath = normalizePagePath(pagePath);
       if (!normalizedPagePath) return;
-
       openedDetailFromListRef.current = true;
       pushUrlWithoutNavigation(
         pageDetailQueryTarget(pathname, searchParams, normalizedPagePath),
@@ -358,77 +280,19 @@ export function PagesClientPage({
   const closePageDetail = useCallback(() => {
     const params = new URLSearchParams(globalThis.window.location.search);
     if (!params.has(PAGE_DETAIL_QUERY_PARAM)) return;
-
     if (openedDetailFromListRef.current) {
       openedDetailFromListRef.current = false;
       globalThis.window.history.back();
       return;
     }
-
     params.delete(PAGE_DETAIL_QUERY_PARAM);
     const query = serializeDashboardSearchParams(params);
     replaceUrlWithoutNavigation(query ? `${pathname}?${query}` : pathname);
   }, [pathname]);
 
   useEffect(() => {
-    const target = sentinelNode;
-    if (
-      !target ||
-      loadingInitial ||
-      loadingMore ||
-      appendError ||
-      error !== null ||
-      !hasNextPage ||
-      typeof IntersectionObserver === "undefined"
-    ) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        if (entry?.isIntersecting) {
-          loadNextPage();
-        }
-      },
-      {
-        root: null,
-        rootMargin: "480px 0px",
-        threshold: 0.01,
-      },
-    );
-
-    observer.observe(target);
-    const frameId = globalThis.requestAnimationFrame(() => {
-      const rect = target.getBoundingClientRect();
-      if (rect.top <= globalThis.innerHeight + 480 && rect.bottom >= -480) {
-        loadNextPage();
-      }
-    });
-
-    return () => {
-      globalThis.cancelAnimationFrame(frameId);
-      observer.disconnect();
-    };
-  }, [
-    appendError,
-    error,
-    hasNextPage,
-    loadingInitial,
-    loadingMore,
-    loadNextPage,
-    sentinelNode,
-  ]);
-
-  const shouldShowLoadMoreSkeletons =
-    !loadingInitial && !error && items.length > 0 && hasNextPage;
-  const contentStateKey = loadingInitial
-    ? "loading"
-    : error
-      ? "error"
-      : items.length === 0
-        ? "empty"
-        : "content";
+    if (!detailPagePath) openedDetailFromListRef.current = false;
+  }, [detailPagePath]);
 
   return (
     <div className="space-y-6">
@@ -445,80 +309,37 @@ export function PagesClientPage({
         filters={filters}
       />
 
-      <AutoResizer className="w-full" initial duration={0.24}>
-        <AutoTransition
-          initial={false}
-          duration={0.22}
-          transitionKey={contentStateKey}
-        >
-          {loadingInitial ? (
-            <section
-              className="grid gap-4 xl:grid-cols-2"
-              aria-busy="true"
-              aria-label={messages.common.loading}
-            >
-              {Array.from({ length: 6 }, (_, index) => (
-                <PageTrafficCardSkeleton key={`initial-skeleton-${index}`} />
-              ))}
-            </section>
-          ) : error ? (
-            <Card>
-              <CardContent className="py-8 text-sm text-muted-foreground">
-                {error}
-              </CardContent>
-            </Card>
-          ) : items.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-sm text-muted-foreground">
-                {messages.pages.empty}
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              <section className="grid gap-4 xl:grid-cols-2">
-                {items.map((item) => (
-                  <PageTrafficCard
-                    key={item.pathname}
-                    item={item}
-                    interval={window.interval}
-                    range={window}
-                    locale={locale}
-                    messages={messages}
-                    pagesPerSessionFormatter={pagesPerSessionFormatter}
-                    onOpenPage={openPageDetail}
-                  />
-                ))}
-                {shouldShowLoadMoreSkeletons
-                  ? Array.from({ length: 2 }, (_, index) => (
-                      <div
-                        key={`append-skeleton-${index}`}
-                        ref={index === 0 ? setSentinelNode : null}
-                      >
-                        <PageTrafficCardSkeleton />
-                      </div>
-                    ))
-                  : null}
-              </section>
-
-              {appendError ? (
-                <div className="flex justify-center">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      void fetchNextPage();
-                    }}
-                  >
-                    <RiRefreshLine className="size-4" />
-                    <span>{messages.pages.retry}</span>
-                  </Button>
-                </div>
-              ) : null}
-            </>
-          )}
-        </AutoTransition>
-      </AutoResizer>
+      <PagesTableCard
+        locale={locale}
+        messages={messages}
+        rows={rows}
+        sort={sort}
+        onSort={toggleSort}
+        onOpenPage={openPageDetail}
+        comparisonActive={comparisonActive}
+        comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
+        currentWindow={window}
+        comparisonWindow={comparisonQuery?.window}
+        searchValue={query}
+        searchPlaceholder={messages.common.search}
+        onSearchChange={setQuery}
+        columnDefinitions={columnDefinitions}
+        orderedColumnIds={pageColumns.orderedIds}
+        visibleColumnIds={pageColumns.visibleIds}
+        onColumnOrderChange={pageColumns.setOrder}
+        onColumnVisibilityChange={pageColumns.setVisible}
+        onColumnReset={pageColumns.reset}
+        columnSettingsLabels={messages.common.tableColumns}
+        loading={loadingInitial}
+        loadingMore={loadingMore}
+        error={error}
+        errorContent={messages.pages.loadError}
+        emptyContent={messages.pages.empty}
+        appendError={appendError}
+        appendErrorContent={messages.pages.loadMoreError}
+        hasMore={hasMore}
+        onLoadMore={loadNextPage}
+      />
 
       {detailPagePath ? (
         <PageDetailDrawer
