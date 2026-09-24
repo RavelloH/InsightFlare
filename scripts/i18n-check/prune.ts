@@ -65,7 +65,8 @@ function buildMessagesOutput(
     interfaceBody.push(`  ${tsKey(key)}: ${propType};`);
   }
 
-  return `import type { Locale } from "./config";
+  return `// @generated from src/i18n/*.yaml by scripts/i18n-check.
+import type { Locale } from "./config";
 
 export interface AppMessages {
 ${interfaceBody.join("\n")}

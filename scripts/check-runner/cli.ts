@@ -77,6 +77,15 @@ function createTasks(fix: boolean): CheckTask[] {
       ],
     },
     {
+      name: "Architecture",
+      steps: [
+        {
+          name: "Architecture",
+          args: ["run", "check:architecture"],
+        },
+      ],
+    },
+    {
       name: "Tracker SDK",
       steps: [
         {

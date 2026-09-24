@@ -38,6 +38,7 @@
     "check:schema": "npm run generate:schema && git diff --exit-code docs/schema.sql",
     "check:schema:fix": "npm run generate:schema",
     "check": "tsx scripts/check.ts",
+    "check:architecture": "tsx scripts/check-architecture.ts",
     "check:layer": "tsx scripts/check-layer-contract.ts",
     "check:verify": "tsx scripts/check.ts --verify",
     "check:e2e": "npm run check && npm run test:e2e",
