@@ -52,6 +52,16 @@ export const API_V1_QUERY_OPERATION_MAP = {
   "site.analytics.realtimeSessions": "realtime",
 } as const satisfies Record<AnalyticsOperationId, QueryOperation>;
 
+const API_V1_QUERY_VARIANT_MAP = {
+  "site.analytics.performanceSummary": "summary",
+  "site.analytics.performanceTimeseries": "timeseries",
+  "site.analytics.performanceBreakdown": "breakdown",
+  "site.analytics.realtimeSnapshot": "snapshot",
+  "site.analytics.realtimeActiveVisitors": "active-visitors",
+  "site.analytics.realtimeEvents": "events",
+  "site.analytics.realtimeSessions": "sessions",
+} as const satisfies Partial<Record<AnalyticsOperationId, string>>;
+
 export type CanonicalQueryOperation =
   (typeof API_V1_QUERY_OPERATION_MAP)[AnalyticsOperationId];
 
@@ -59,4 +69,12 @@ export function canonicalQueryOperationFor(
   operation: AnalyticsOperationId,
 ): CanonicalQueryOperation {
   return API_V1_QUERY_OPERATION_MAP[operation];
+}
+
+export function canonicalQueryVariantFor(
+  operation: AnalyticsOperationId,
+): string | undefined {
+  return API_V1_QUERY_VARIANT_MAP[
+    operation as keyof typeof API_V1_QUERY_VARIANT_MAP
+  ];
 }

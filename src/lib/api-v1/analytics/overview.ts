@@ -4,7 +4,7 @@ import {
   type AnalysisDefinitionReader,
   type ResolvedSavedFilter,
 } from "@/lib/api-v1/analytics/analysis-definition-reader";
-import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/analytics/query-application";
+import { createApiV1AnalyticsResultAdapter } from "@/lib/api-v1/analytics/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/analytics/query-context";
 import { resolveApiV1TimeRange } from "@/lib/api-v1/analytics/time-range";
 import {
@@ -360,9 +360,9 @@ export async function executeApiV1SiteOverview(
 
   return {
     ok: true,
-    value: await createApiV1QueryApplicationAdapter(aggregateCache).execute<
+    value: await createApiV1AnalyticsResultAdapter(aggregateCache).execute<
       OverviewQuery,
-      AnalyticsResult<OverviewResult>
+      OverviewResult
     >(
       {
         operation: "site.analytics.overview",
@@ -383,7 +383,7 @@ export async function executeApiV1SiteOverview(
             scopePreference: parsed.value.scope ?? "auto",
           }),
           policy: aggregateCachePolicy,
-          isCacheable: (result) => result.ok,
+          isCacheable: () => true,
         },
       },
       {

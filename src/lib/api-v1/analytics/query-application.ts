@@ -2,7 +2,10 @@ import type { OperationResultCache } from "@/lib/edge/analytics/application/cach
 import type { OperationCachePolicy } from "@/lib/edge/analytics/application/cache";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
+import {
+  canonicalQueryOperationFor,
+  canonicalQueryVariantFor,
+} from "@/lib/edge/analytics/application/query-operation-map";
 import {
   type AnalyticsServiceResult,
   type QueryExecutionContext,
@@ -177,10 +180,12 @@ export async function executeApiV1Query<Query, Result>(
     rawRequest,
     invocation.context,
   );
+  const canonicalVariant = canonicalQueryVariantFor(invocation.operation);
   const query = {
     ...invocation.query,
     context: invocation.context,
     time: { ...time, paginationBinding: requestBinding },
+    ...(canonicalVariant ? { queryMode: canonicalVariant } : {}),
   } as QueryInput;
   let providerError: unknown;
   const result = await createAnalyticsQueryApplicationService(cache).execute(
@@ -218,6 +223,31 @@ export function createApiV1QueryApplicationAdapter(
       executionContext: QueryExecutionContext,
     ): Promise<AnalyticsServiceResult<Result>> {
       return executeApiV1Query(cache, invocation, executionContext);
+    },
+  };
+}
+
+/** Preserve API v1's envelope while consuming the canonical provider result. */
+export function createApiV1AnalyticsResultAdapter(
+  cache?: OperationResultCache,
+) {
+  const adapter = createApiV1QueryApplicationAdapter(cache);
+  return {
+    async execute<Query, Result>(
+      invocation: ApiV1QueryInvocation<Query, Result>,
+      executionContext: QueryExecutionContext,
+    ): Promise<AnalyticsServiceResult<AnalyticsResult<Result>>> {
+      const result = await adapter.execute(invocation, executionContext);
+      if (!result.ok) return result;
+      if (!result.meta) throw new Error("analytics_result_metadata_missing");
+      return {
+        ...result,
+        value: {
+          ok: true,
+          data: result.value,
+          meta: result.meta,
+        },
+      };
     },
   };
 }

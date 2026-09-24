@@ -13,7 +13,7 @@ import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { readSiteGoalSummary } from "@/lib/edge/analytics/providers/d1/operations/site-goal-summary";
 import { readSiteGoalTimeseries } from "@/lib/edge/analytics/providers/d1/operations/site-goal-timeseries";
 
-import type { D1SiteQueryRuntimeOptions, RuntimeQuery } from "./shared";
+import type { D1SiteRuntimeBindings, RuntimeQuery } from "./shared";
 export {
   archiveGoalDefinition,
   createGoalDefinition,
@@ -28,7 +28,7 @@ function query(input: RuntimeQuery | undefined): RuntimeQuery {
 }
 export function registerGoalProviders(
   registry: AnalyticsProviderRegistry,
-  options: D1SiteQueryRuntimeOptions,
+  options: D1SiteRuntimeBindings,
 ): void {
   registry.register(
     "goal-summary",

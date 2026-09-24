@@ -20,7 +20,7 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
 
 import {
-  type D1SiteQueryRuntimeOptions,
+  type D1SiteRuntimeBindings,
   numberField,
   query,
   stringField,
@@ -29,7 +29,7 @@ import {
 
 export function registerTechnologyProviders(
   registry: AnalyticsProviderRegistry,
-  options: D1SiteQueryRuntimeOptions,
+  options: D1SiteRuntimeBindings,
 ): void {
   registry
     .register(

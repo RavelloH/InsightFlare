@@ -36,7 +36,7 @@ import { InvalidCursorError } from "@/lib/pagination";
 
 import {
   arrayField,
-  type D1SiteQueryRuntimeOptions,
+  type D1SiteRuntimeBindings,
   emptyEventContextCards,
   measured,
   numberField,
@@ -47,7 +47,7 @@ import {
 
 export function registerEventProviders(
   registry: AnalyticsProviderRegistry,
-  options: D1SiteQueryRuntimeOptions,
+  options: D1SiteRuntimeBindings,
 ): void {
   registry
     .register(

@@ -58,7 +58,7 @@ import { decodeReferrersCursor } from "@/lib/edge/analytics/providers/d1/interna
 import { InvalidCursorError } from "@/lib/pagination";
 
 import {
-  type D1SiteQueryRuntimeOptions,
+  type D1SiteRuntimeBindings,
   numberField,
   query,
   type RuntimeQuery,
@@ -95,7 +95,7 @@ function overviewTabExpression(tab: string): string | null {
   return null;
 }
 export async function overviewTabData(
-  options: D1SiteQueryRuntimeOptions,
+  options: D1SiteRuntimeBindings,
   request: RuntimeQuery,
 ): Promise<
   Readonly<{ data: { items: readonly unknown[]; pagination: unknown } }>
@@ -552,7 +552,7 @@ export function dimensionExpression(dimension: string): string {
 }
 export function registerSiteContractProviders(
   registry: AnalyticsProviderRegistry,
-  options: D1SiteQueryRuntimeOptions,
+  options: D1SiteRuntimeBindings,
 ): void {
   registry
     .register(

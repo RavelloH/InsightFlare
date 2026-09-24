@@ -1,11 +1,14 @@
-import type { D1TeamQueryRuntimeOptions } from "./d1";
-import { createD1TeamQueryRuntime } from "./d1";
+import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 
-/** Stable consumer entrypoint for the canonical team analytics runtime. */
-export type TeamAnalyticsRuntimeOptions = D1TeamQueryRuntimeOptions;
+import { createAnalyticsQueryRuntime } from "./query-runtime";
+
+/** Source-neutral provider input for the canonical team analytics runtime. */
+export interface TeamAnalyticsRuntimeOptions {
+  readonly providerRegistry: AnalyticsProviderRegistry;
+}
 
 export function createTeamAnalyticsRuntime(
   options: TeamAnalyticsRuntimeOptions,
 ) {
-  return createD1TeamQueryRuntime(options);
+  return createAnalyticsQueryRuntime(options.providerRegistry);
 }

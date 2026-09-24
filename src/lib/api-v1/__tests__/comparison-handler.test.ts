@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import { registerComparisonQueryProviders } from "@/lib/edge/analytics/composition/comparison-query-providers";
 import { createComparisonRuntime } from "@/lib/edge/analytics/composition/comparison-runtime";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { Env } from "@/lib/edge/types";
@@ -46,6 +48,19 @@ const baseBody = {
     trend: { interval: "day", metrics: ["views"] },
   },
 };
+function comparisonQueryRuntime(options: {
+  readonly siteId?: string;
+  readonly teamId?: string;
+  readonly allowedSiteIds?: readonly string[];
+}) {
+  const comparisonRuntime = createComparisonRuntime({ env, ...options });
+  const providerRegistry = new AnalyticsProviderRegistry();
+  registerComparisonQueryProviders(providerRegistry, comparisonRuntime);
+  return {
+    providerRegistry,
+    readSiteCount: comparisonRuntime.readSiteCount,
+  };
+}
 function rawMetrics(seed: number) {
   return {
     views: seed,
@@ -80,7 +95,7 @@ function handleSiteComparison(
   return handleSiteComparisonWithRuntime(
     request,
     principal,
-    createComparisonRuntime({ env, siteId }),
+    comparisonQueryRuntime({ siteId }),
     siteId,
     definitions,
   );
@@ -96,15 +111,14 @@ function handleSiteComparisonBreakdown(
   return handleSiteComparisonBreakdownWithRuntime(
     request,
     principal,
-    createComparisonRuntime({ env, siteId }),
+    comparisonQueryRuntime({ siteId }),
     siteId,
     dimension,
     definitions,
   );
 }
 function teamComparisonRuntime(principal: ApiKeyPrincipal) {
-  return createComparisonRuntime({
-    env,
+  return comparisonQueryRuntime({
     teamId: principal.teamId,
     allowedSiteIds: [...principal.siteIds].sort(),
   });

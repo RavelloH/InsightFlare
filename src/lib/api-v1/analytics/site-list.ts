@@ -409,6 +409,7 @@ async function handlePlannedSiteList<
   execution: ExecutionContext = {},
   definitions?: AnalysisDefinitionReader,
   responseMeta: ResponseMetaOptions = {},
+  queryOverrides: Readonly<Record<string, unknown>> = {},
 ): Promise<Response> {
   if (request.method !== "POST") {
     const method = errorResponse("method_not_allowed");
@@ -521,6 +522,7 @@ async function handlePlannedSiteList<
       timeZone,
       filters,
       scopePreference: input.scope ?? "auto",
+      ...queryOverrides,
     };
     const serviceResult = await createApiV1QueryApplicationAdapter().execute<
       typeof query,
@@ -753,6 +755,7 @@ export function handlePlannedSitePerformanceBreakdown(
   providerRegistry: AnalyticsProviderRegistry,
   execution?: ExecutionContext,
   definitions?: AnalysisDefinitionReader,
+  dimension?: string,
 ): Promise<Response> {
   return handlePlannedSiteList(
     request,
@@ -763,6 +766,8 @@ export function handlePlannedSitePerformanceBreakdown(
     providerRegistry,
     execution,
     definitions,
+    {},
+    dimension ? { dimension } : {},
   );
 }
 /** Planned event summary adapter; Hono registration remains rollout-gated. */

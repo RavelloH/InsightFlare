@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
   analyticsDiagnosticHeaders,
   createAnalyticsReadDiagnostics,
@@ -80,7 +80,7 @@ export async function handleOverviewContract(
     previousTime,
     detailInterval: includeDetail ? parseInterval(url) : undefined,
   } satisfies OverviewQuery;
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
     diagnostics,
@@ -135,7 +135,7 @@ export async function handleTrendContract(
     filters,
     interval: parseInterval(url),
   } satisfies TrendQuery;
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
     diagnostics,

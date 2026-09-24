@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import type { FilterValuesResult } from "@/lib/edge/analytics/contract";
 import {
   analyticsFilterDefinition,
@@ -57,7 +57,7 @@ export async function handleFilterValuesContract(
     },
     search: parseListSearch(url),
   } satisfies FilterValuesQuery;
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
   }).execute<FilterValuesResult>("filter-values", query);

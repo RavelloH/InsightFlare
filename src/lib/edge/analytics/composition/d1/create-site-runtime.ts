@@ -8,11 +8,10 @@ import { registerFunnelProvider } from "./funnels";
 import { registerGoalProviders } from "./goals";
 import { registerJourneyProviders } from "./journeys";
 import { overviewProvider, trendProvider } from "./overview";
-import type { D1SiteQueryRuntimeOptions } from "./shared";
+import type { D1SiteRuntimeBindings } from "./shared";
 import { registerSiteContractProviders } from "./site";
 import { registerTechnologyProviders } from "./technology";
 
-export type { D1SiteQueryRuntimeOptions } from "./shared";
 export type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 
 /**
@@ -20,7 +19,7 @@ export type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/intern
  * Audience policy and filter authorization are validated by the application
  * service before the provider is invoked.
  */
-export function createD1SiteQueryRuntime(options: D1SiteQueryRuntimeOptions) {
+export function createD1SiteQueryRuntime(options: D1SiteRuntimeBindings) {
   const diagnostics = options.diagnostics ?? createD1ReadDiagnostics();
   const reader = createOverviewReader(options.env, options.siteId, diagnostics);
   const registry = new AnalyticsProviderRegistry()

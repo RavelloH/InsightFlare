@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import { siteQueryContext } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract";
@@ -53,7 +53,7 @@ export async function handleEventTypesContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly items: readonly unknown[];
     readonly pagination: {
       readonly limit: number;
@@ -82,7 +82,7 @@ export async function handleEventsSummaryContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly summary: {
       readonly events: number;
       readonly eventTypes: number;
@@ -110,7 +110,7 @@ export async function handleEventsTrendContract(
   if (!window) return badRequest("Invalid time window");
   const interval = parseInterval(url);
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly interval: ReturnType<typeof parseInterval>;
     readonly series: readonly unknown[];
     readonly data: readonly unknown[];
@@ -138,7 +138,7 @@ export async function handleEventRecordsContract(
   const sort = parseEventRecordSort(url);
   const rawCursor = url.searchParams.get("cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly items: readonly unknown[];
     readonly pagination: {
       readonly limit: number;
@@ -173,7 +173,7 @@ export async function handleEventFieldValuesContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly fieldPath: string;
     readonly fieldValueType: string;
     readonly data: {
@@ -225,7 +225,7 @@ export async function handleEventTypeFieldsContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly eventName: string;
     readonly data: {
       readonly items: readonly unknown[];
@@ -261,7 +261,7 @@ export async function handleEventTypeContextContract(
   const selectedKeys = parseEventContextCardKeys(url);
   if (!selectedKeys) return badRequest("Valid context cards are required");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly eventName: string;
     readonly cards: Record<string, unknown>;
   }>("event-context", {
@@ -293,7 +293,7 @@ export async function handleEventTypeDetailContract(
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const includeContext = options?.includeContext ?? true;
   const includeBreakdowns = options?.includeBreakdowns ?? true;
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly eventName: string;
     readonly summary: Record<string, unknown>;
     readonly trend: Record<string, unknown>;
@@ -327,7 +327,7 @@ export async function handleEventRecordDetailContract(
   if (!eventId) return badRequest("eventId is required");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<
     Record<string, unknown>
   >("event-record-detail", {
     context: queryContext,

@@ -5,7 +5,7 @@ import {
   runWithD1Operation,
 } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
-export interface D1SiteQueryRuntimeOptions {
+export interface D1SiteRuntimeBindings {
   readonly env: Env;
   readonly siteId: string;
   readonly diagnostics?: D1ReadDiagnostics;

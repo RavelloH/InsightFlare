@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
   type FilterDocument,
   type OverviewTableComparisonQuery,
@@ -163,7 +163,7 @@ export async function handleOverviewTabContract(
     readonly current?: OverviewTableComparisonQuery["current"];
     readonly reference?: OverviewTableComparisonQuery["reference"];
   };
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly data: {
       readonly items: readonly unknown[];
       readonly pagination: unknown;

@@ -36,18 +36,17 @@ import {
   comparisonCacheKey,
   comparisonCachePolicy,
 } from "@/lib/edge/analytics/application/comparison-cache";
-import type { ComparisonRuntime } from "@/lib/edge/analytics/application/comparison-runtime";
 import {
   exceedsQueryCost,
   type QueryCostInput,
 } from "@/lib/edge/analytics/application/cost";
-import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
 import type { QueryExecutionContext } from "@/lib/edge/analytics/application/service";
+import type { AnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   type AnalyticsDomainError,
   type AnalyticsResult,
   type ComparisonBreakdownQuery,
+  type ComparisonBreakdownResult,
   type ComparisonMetricKey,
   type ComparisonQuery,
   type ComparisonResult,
@@ -67,11 +66,6 @@ import {
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
-import {
-  executeComparison,
-  executeComparisonBreakdown,
-  executeComparisonTrend,
-} from "@/lib/edge/analytics/contract/comparison";
 import { buildCalendarBucketPlan } from "@/lib/edge/analytics/contract/helpers";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const MAX_BODY_BYTES = 64 * 1024;
@@ -98,9 +92,13 @@ type ResolvedSide = {
 type ReportDomainResult = AnalyticsResult<
   ComparisonResult & { readonly trend?: ComparisonTrendResult }
 >;
-type BreakdownDomainResult = Awaited<
-  ReturnType<typeof executeComparisonBreakdown>
->;
+type ComparisonQueryRuntime = Pick<
+  AnalyticsQueryRuntime,
+  "providerRegistry"
+> & {
+  readonly readSiteCount: () => Promise<number>;
+};
+type BreakdownDomainResult = AnalyticsResult<ComparisonBreakdownResult>;
 function response(
   status: number,
   body: unknown,
@@ -528,7 +526,7 @@ function reportWire(
   };
 }
 async function executeReport(
-  runtime: ComparisonRuntime,
+  runtime: ComparisonQueryRuntime,
   context: QueryContext,
   sides: { readonly current: ResolvedSide; readonly reference: ResolvedSide },
   metrics: readonly ComparisonMetricKey[],
@@ -538,55 +536,23 @@ async function executeReport(
   executionContext: QueryExecutionContext,
   cacheKey: string,
 ) {
-  const query: ComparisonQuery = {
+  const query: ComparisonQuery & {
+    readonly interval?: ComparisonTrendQuery["interval"];
+    readonly trendMetrics?: readonly ComparisonMetricKey[];
+  } = {
     context,
     scopePreference: sides.current.scopePreference,
     current: { time: sides.current.time, filters: sides.current.filters },
     reference: { time: sides.reference.time, filters: sides.reference.filters },
     metrics,
-  };
-  const providers = runtime.providers;
-  const service = createApiV1QueryApplicationAdapter(comparisonCache);
-  const providerRegistry = new AnalyticsProviderRegistry().register(
-    canonicalQueryOperationFor(operation),
-    {
-      execute: async (providerQuery, execution) => {
-        const report = (await executeComparison(
-          providerQuery as ComparisonQuery,
-          providers.overview,
-          execution?.signal,
-        )) as ReportDomainResult;
-        if (!report.ok || !interval) return { value: report };
-        const trendQuery: ComparisonTrendQuery = {
-          ...(providerQuery as ComparisonQuery),
+    ...(interval
+      ? {
           interval,
           trendMetrics: selectedTrendMetrics ?? metrics,
-        };
-        const trend = await executeComparisonTrend(
-          trendQuery,
-          providers.trend,
-          execution?.signal,
-        );
-        if (!trend.ok) return { value: trend as ReportDomainResult };
-        return {
-          value: {
-            ok: true,
-            data: { ...report.data, trend: trend.data },
-            meta: {
-              ...report.meta,
-              source:
-                report.meta.source === trend.meta.source
-                  ? report.meta.source
-                  : "mixed",
-              approximateVisitors:
-                report.meta.approximateVisitors ||
-                trend.meta.approximateVisitors,
-            },
-          } as ReportDomainResult,
-        };
-      },
-    },
-  );
+        }
+      : {}),
+  };
+  const service = createApiV1QueryApplicationAdapter(comparisonCache);
   return service.execute<ComparisonQuery, ReportDomainResult>(
     {
       operation,
@@ -597,13 +563,13 @@ async function executeReport(
         policy: comparisonCachePolicy,
         isCacheable: (value) => value.ok,
       },
-      providerRegistry,
+      providerRegistry: runtime.providerRegistry,
     },
     executionContext,
   );
 }
 async function executeBreakdown(
-  runtime: ComparisonRuntime,
+  runtime: ComparisonQueryRuntime,
   context: QueryContext,
   sides: { readonly current: ResolvedSide; readonly reference: ResolvedSide },
   dimension: string,
@@ -624,19 +590,6 @@ async function executeBreakdown(
     limit,
     sort,
   };
-  const providers = runtime.providers;
-  const providerRegistry = new AnalyticsProviderRegistry().register(
-    canonicalQueryOperationFor(operation),
-    {
-      execute: async (providerQuery, execution) => ({
-        value: await executeComparisonBreakdown(
-          providerQuery as ComparisonBreakdownQuery,
-          providers.breakdown,
-          execution?.signal,
-        ),
-      }),
-    },
-  );
   return createApiV1QueryApplicationAdapter(comparisonCache).execute<
     ComparisonBreakdownQuery,
     BreakdownDomainResult
@@ -650,7 +603,7 @@ async function executeBreakdown(
         policy: comparisonCachePolicy,
         isCacheable: (value) => value.ok,
       },
-      providerRegistry,
+      providerRegistry: runtime.providerRegistry,
     },
     executionContext,
   );
@@ -800,7 +753,7 @@ function prepareTeamSides(
 }
 async function reportHandler(
   request: Request,
-  runtime: ComparisonRuntime,
+  runtime: ComparisonQueryRuntime,
   input: SiteReportInput | TeamReportInput,
   context: QueryContext,
   sides: { readonly current: ResolvedSide; readonly reference: ResolvedSide },
@@ -925,7 +878,7 @@ function executionContextFor(
 }
 async function breakdownHandler(
   request: Request,
-  runtime: ComparisonRuntime,
+  runtime: ComparisonQueryRuntime,
   input: SiteBreakdownInput | TeamBreakdownInput,
   context: QueryContext,
   sides: { readonly current: ResolvedSide; readonly reference: ResolvedSide },
@@ -1047,7 +1000,7 @@ async function breakdownHandler(
 export async function handleSiteComparison(
   request: Request,
   principal: ApiKeyPrincipal,
-  runtime: ComparisonRuntime,
+  runtime: ComparisonQueryRuntime,
   siteId: string,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -1076,7 +1029,7 @@ export async function handleSiteComparison(
 export async function handleTeamComparison(
   request: Request,
   principal: ApiKeyPrincipal,
-  runtime: ComparisonRuntime,
+  runtime: ComparisonQueryRuntime,
 ): Promise<Response> {
   const parsed = await parseBody<TeamReportInput>(
     request,
@@ -1102,7 +1055,7 @@ export async function handleTeamComparison(
 export async function handleSiteComparisonBreakdown(
   request: Request,
   principal: ApiKeyPrincipal,
-  runtime: ComparisonRuntime,
+  runtime: ComparisonQueryRuntime,
   siteId: string,
   dimension: string,
   definitions?: AnalysisDefinitionReader,
@@ -1133,7 +1086,7 @@ export async function handleSiteComparisonBreakdown(
 export async function handleTeamComparisonBreakdown(
   request: Request,
   principal: ApiKeyPrincipal,
-  runtime: ComparisonRuntime,
+  runtime: ComparisonQueryRuntime,
   dimension: string,
 ): Promise<Response> {
   const parsed = await parseBody<TeamBreakdownInput>(

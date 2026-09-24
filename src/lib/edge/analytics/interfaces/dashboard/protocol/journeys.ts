@@ -1,5 +1,5 @@
 import { resolveReportingTimeZone } from "@/lib/analytics/time-zone";
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
   type JourneyAnalysisContext,
   parseFilterUrlForAudience,
@@ -62,7 +62,7 @@ export async function handleVisitorsContract(
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const analysisContext = parseJourneyAnalysisContext(url);
   if (analysisContext === null) return badRequest("Invalid analysis context");
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly items: readonly unknown[];
     readonly pagination: {
       readonly limit: number;
@@ -97,7 +97,7 @@ export async function handleSessionsContract(
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const analysisContext = parseJourneyAnalysisContext(url);
   if (analysisContext === null) return badRequest("Invalid analysis context");
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly items: readonly unknown[];
     readonly pagination: {
       readonly limit: number;
@@ -130,7 +130,7 @@ export async function handleVisitorDetailContract(
   // dashboard window; the window is only contract metadata and policy input.
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<
     Record<string, unknown>
   >("visitor-detail", {
     context: queryContext,
@@ -153,7 +153,7 @@ export async function handleSessionDetailContract(
   if (!sessionId) return badRequest("Missing sessionId");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<
     Record<string, unknown>
   >("session-detail", {
     context: queryContext,
@@ -183,7 +183,7 @@ export async function handleJourneyCollectionContract(
   const targetId = url.searchParams.get(targetKey)?.trim();
   if (!targetId) return badRequest(`Missing ${targetKey}`);
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly items: readonly unknown[];
     readonly pagination: unknown;
   }>(path, {
@@ -219,7 +219,7 @@ export async function handleJourneyEventDetailContract(
   if (eventKind === null) return badRequest("Invalid eventKind");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
   }).execute<Record<string, unknown> | null>("journey-event-detail", {

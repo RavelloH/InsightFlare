@@ -2,7 +2,7 @@ import {
   GOAL_TIMESERIES_MAX_BUCKETS,
   goalQueryCost,
 } from "@/lib/edge/analytics/application/goal-cost";
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
   analyticsDiagnosticHeaders,
   createAnalyticsReadDiagnostics,
@@ -511,7 +511,7 @@ export function executePrivateQuery(
         goalId,
         ...(input.pathname === "goal-timeseries" ? { interval } : {}),
       };
-      return createSiteAnalyticsRuntime({
+      return createEdgeSiteAnalyticsRuntime({
         env: input.env,
         siteId: input.siteId,
         diagnostics,

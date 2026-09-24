@@ -1,11 +1,14 @@
-import type { D1SiteQueryRuntimeOptions } from "./d1";
-import { createD1SiteQueryRuntime } from "./d1";
+import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 
-/** Stable consumer entrypoint for the canonical site analytics runtime. */
-export type SiteAnalyticsRuntimeOptions = D1SiteQueryRuntimeOptions;
+import { createAnalyticsQueryRuntime } from "./query-runtime";
+
+/** Source-neutral provider input for the canonical site analytics runtime. */
+export interface SiteAnalyticsRuntimeOptions {
+  readonly providerRegistry: AnalyticsProviderRegistry;
+}
 
 export function createSiteAnalyticsRuntime(
   options: SiteAnalyticsRuntimeOptions,
 ) {
-  return createD1SiteQueryRuntime(options);
+  return createAnalyticsQueryRuntime(options.providerRegistry);
 }

@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
   archiveFunnelDefinition,
   createFunnelDefinition,
@@ -50,7 +50,10 @@ export async function handleFunnelAnalysisContract(
       nowMs,
       timeZone: "UTC",
     };
-    const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+    const result = await createEdgeSiteAnalyticsRuntime({
+      env,
+      siteId,
+    }).execute<{
       readonly items: readonly unknown[];
       readonly pagination: Record<string, unknown>;
     }>("funnel-analysis", {
@@ -70,7 +73,7 @@ export async function handleFunnelAnalysisContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<{
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
     readonly funnel: Record<string, unknown> | null;
     readonly analysis: Record<string, unknown> | null;
   }>(

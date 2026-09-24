@@ -17,7 +17,7 @@ import {
 import { InvalidCursorError } from "@/lib/pagination";
 
 import {
-  type D1SiteQueryRuntimeOptions,
+  type D1SiteRuntimeBindings,
   query,
   stringField,
   timeWindow,
@@ -43,7 +43,7 @@ export function funnelAnalysisCost(rangeMs: number) {
 }
 export function registerFunnelProvider(
   registry: AnalyticsProviderRegistry,
-  options: D1SiteQueryRuntimeOptions,
+  options: D1SiteRuntimeBindings,
 ): void {
   registry.register(
     "funnel-analysis",

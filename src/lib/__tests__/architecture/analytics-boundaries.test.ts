@@ -49,7 +49,12 @@ describe("analytics architecture", () => {
       "interfaces/dashboard/private.ts",
       "interfaces/dashboard/public.ts",
       "interfaces/dashboard/protocol/overview.ts",
-      "composition/api-v1-provider-registry.ts",
+      "composition/site-operation-providers.ts",
+      "composition/site-realtime-providers.ts",
+      "composition/comparison-query-providers.ts",
+      "composition/site-runtime.ts",
+      "composition/team-runtime.ts",
+      "composition/edge-runtime.ts",
       "composition/d1/index.ts",
       "composition/d1/shared.ts",
       "composition/d1/overview.ts",
@@ -167,8 +172,13 @@ describe("analytics architecture", () => {
       "registerV1TeamAnalyticsRoutes",
     );
     expect(
-      source("src/lib/edge/analytics/composition/api-v1-provider-registry.ts"),
-    ).toContain("canonicalQueryOperationFor");
+      existsSync(
+        path.join(analyticsRoot, "composition", "api-v1-provider-registry.ts"),
+      ),
+    ).toBe(false);
+    expect(source("src/lib/api-v1/analytics/query-application.ts")).toContain(
+      "canonicalQueryOperationFor",
+    );
     expect(source("src/lib/dashboard/route-data.ts")).toContain(
       "createTeamDashboardQueryRuntime",
     );
@@ -319,14 +329,28 @@ describe("analytics architecture", () => {
     expect(registry).toMatch(/Map<\s*QueryOperation/u);
   });
 
-  it("keeps API v1 provider assembly in composition", () => {
-    for (const file of [
-      "src/lib/hono/routes/v1/site-analytics.ts",
-      "src/lib/hono/routes/v1/team-analytics.ts",
-    ]) {
-      const content = source(file);
-      expect(content).toContain("createApiV1ProviderRegistry");
-      expect(content).not.toContain("createReaderProviderRegistry");
+  it("routes API v1 queries through complete site and team runtimes", () => {
+    const siteRoutes = source("src/lib/hono/routes/v1/site-analytics.ts");
+    const teamRoutes = source("src/lib/hono/routes/v1/team-analytics.ts");
+    const edgeRuntime = source(
+      "src/lib/edge/analytics/composition/edge-runtime.ts",
+    );
+    const siteRuntime = source(
+      "src/lib/edge/analytics/composition/site-runtime.ts",
+    );
+    const teamRuntime = source(
+      "src/lib/edge/analytics/composition/team-runtime.ts",
+    );
+    expect(siteRoutes).toContain("createEdgeSiteAnalyticsRuntime");
+    expect(teamRoutes).toContain("createEdgeTeamAnalyticsRuntime");
+    expect(edgeRuntime).toContain("registerSiteAnalyticsOperations");
+    expect(edgeRuntime).toContain("registerSiteRealtimeProviders");
+    expect(edgeRuntime).toContain("registerComparisonQueryProviders");
+    expect(siteRuntime).not.toMatch(/\bD1[A-Za-z]*Options\b/u);
+    expect(teamRuntime).not.toMatch(/\bD1[A-Za-z]*Options\b/u);
+    for (const content of [siteRoutes, teamRoutes]) {
+      expect(content).not.toContain("createApiV1ProviderRegistry");
+      expect(content).not.toContain("createComparisonRuntime");
       expect(content).not.toMatch(/analytics\/providers(?:\/|["'])/u);
       expect(content).not.toContain("readSite");
       expect(content).not.toContain("readTeam");

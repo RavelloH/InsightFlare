@@ -27,16 +27,18 @@ export function createTestProviderRegistry(
           ...(query as unknown as Record<string, unknown>),
           signal: execution?.signal,
         };
-        const value =
-          typeof reader === "function"
-            ? await reader(input as never)
-            : operation.id.endsWith("timeseries")
-              ? await executeTrend(reader, input as unknown as TrendQuery)
-              : await executeOverview(
-                  reader,
-                  input as unknown as OverviewQuery,
-                );
-        return { value };
+        if (typeof reader === "function") {
+          return { value: await reader(input as never) };
+        }
+        const result = operation.id.endsWith("timeseries")
+          ? await executeTrend(reader, input as unknown as TrendQuery)
+          : await executeOverview(reader, input as unknown as OverviewQuery);
+        if (!result.ok) throw new Error(result.error.kind);
+        return {
+          value: result.data,
+          source: result.meta.source,
+          approximateVisitors: result.meta.approximateVisitors,
+        };
       },
     });
   }

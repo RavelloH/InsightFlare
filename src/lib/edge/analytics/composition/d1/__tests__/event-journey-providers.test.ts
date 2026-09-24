@@ -61,7 +61,7 @@ vi.mock("@/lib/edge/analytics/providers/d1/operations/site-journeys", () => ({
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { registerEventProviders } from "@/lib/edge/analytics/composition/d1/events";
 import { registerJourneyProviders } from "@/lib/edge/analytics/composition/d1/journeys";
-import type { D1SiteQueryRuntimeOptions } from "@/lib/edge/analytics/composition/d1/shared";
+import type { D1SiteRuntimeBindings } from "@/lib/edge/analytics/composition/d1/shared";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
@@ -131,7 +131,7 @@ function input(fields: Record<string, unknown> = {}) {
 function registry(
   register: (
     value: AnalyticsProviderRegistry,
-    options: D1SiteQueryRuntimeOptions,
+    options: D1SiteRuntimeBindings,
   ) => void,
 ) {
   const value = new AnalyticsProviderRegistry();

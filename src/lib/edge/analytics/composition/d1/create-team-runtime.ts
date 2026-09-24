@@ -21,7 +21,7 @@ type RuntimeQuery = QueryInput & {
   readonly time: QueryTime;
   readonly [key: string]: unknown;
 };
-export interface D1TeamQueryRuntimeOptions {
+interface D1TeamRuntimeBindings {
   readonly env: Env;
 }
 function query(input: QueryInput): RuntimeQuery {
@@ -53,7 +53,7 @@ function timeWindow(time: QueryTime) {
     timeZone: time.reportingTimeZone,
   };
 }
-export function createD1TeamQueryRuntime(options: D1TeamQueryRuntimeOptions) {
+export function createD1TeamQueryRuntime(options: D1TeamRuntimeBindings) {
   const registry = new AnalyticsProviderRegistry()
     .register(
       "overview",

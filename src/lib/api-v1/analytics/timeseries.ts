@@ -7,7 +7,7 @@ import {
   resolveApiV1Filter,
   toApiV1QueryTime,
 } from "@/lib/api-v1/analytics/overview";
-import { createApiV1QueryApplicationAdapter } from "@/lib/api-v1/analytics/query-application";
+import { createApiV1AnalyticsResultAdapter } from "@/lib/api-v1/analytics/query-application";
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/analytics/query-context";
 import { SiteTimeseriesQueryDtoSchema } from "@/lib/api-v1/contract/dto/analytics";
 import { fromZodIssues } from "@/lib/api-v1/contract/errors";
@@ -76,9 +76,9 @@ export async function executeApiV1SiteTimeseries(
   if (!filter.ok) return filter;
   return {
     ok: true,
-    value: await createApiV1QueryApplicationAdapter(aggregateCache).execute<
+    value: await createApiV1AnalyticsResultAdapter(aggregateCache).execute<
       TrendQuery,
-      AnalyticsResult<TrendResult>
+      TrendResult
     >(
       {
         operation: "site.analytics.timeseries",
@@ -101,7 +101,7 @@ export async function executeApiV1SiteTimeseries(
             extra: { interval: parsed.data.interval },
           }),
           policy: aggregateCachePolicy,
-          isCacheable: (result) => result.ok,
+          isCacheable: () => true,
         },
       },
       {

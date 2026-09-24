@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
   type BaseQuery,
@@ -28,7 +28,7 @@ export async function handleRetentionContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
   }).execute<RetentionResult>("retention", {
@@ -53,7 +53,7 @@ export async function handlePerformanceContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const interval = parseInterval(url);
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
   }).execute<PerformanceDashboardResult>("performance", {

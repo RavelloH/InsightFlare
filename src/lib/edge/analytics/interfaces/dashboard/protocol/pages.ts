@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
   type Interval,
@@ -100,7 +100,7 @@ export async function handlePagesContract(
     includeTabs,
     page: { limit, ...(cursor ? { cursor } : {}) },
   } as PagesQuery & { readonly includeTabs: boolean };
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
   }).execute<PagesResult | PagesWithTabsResult>("pages", query);
@@ -162,7 +162,7 @@ export async function handleReferrersContract(
     direction,
     page: { limit, ...(cursor ? { cursor } : {}) },
   } satisfies ReferrersQuery;
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
   }).execute<ReferrersResult>("referrers", query);
@@ -186,7 +186,7 @@ export async function handleReferrerSummaryContract(
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const topN = parseQueryLimit(url, "topN", 5, 1, 20);
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
   }).execute<ReferrerSummaryResult>("referrers", {
@@ -288,7 +288,7 @@ export async function handlePagesDashboardContract(
       };
     }
   }
-  const result = await createSiteAnalyticsRuntime({
+  const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
   }).execute<PagesDashboardRuntimeResult>("pages-dashboard", {

@@ -20,7 +20,7 @@ import {
 } from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
 
 import {
-  type D1SiteQueryRuntimeOptions,
+  type D1SiteRuntimeBindings,
   query,
   stringField,
   timeWindow,
@@ -68,7 +68,7 @@ function listSortFromRequest(
 
 export function registerJourneyProviders(
   registry: AnalyticsProviderRegistry,
-  options: D1SiteQueryRuntimeOptions,
+  options: D1SiteRuntimeBindings,
 ): void {
   registry
     .register(

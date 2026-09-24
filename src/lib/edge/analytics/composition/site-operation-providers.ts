@@ -1,17 +1,12 @@
-import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
 import {
   AnalyticsProviderRegistry,
   type TypedQueryProvider,
 } from "@/lib/edge/analytics/application/provider-registry";
-import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
+import type { AnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
-  createD1SiteQueryRuntime,
-  createD1TeamQueryRuntime,
-} from "@/lib/edge/analytics/composition/d1";
-import {
-  type AnalyticsResult,
   EMPTY_FILTER_DOCUMENT,
   type QueryInput,
+  type QueryOperation,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -49,12 +44,6 @@ import {
   readSitePerformanceTimeseries,
 } from "@/lib/edge/analytics/providers/d1/operations/site-performance";
 import { readSiteRetention } from "@/lib/edge/analytics/providers/d1/operations/site-retention";
-import {
-  readSiteRealtimeActiveVisitors,
-  readSiteRealtimeEvents,
-  readSiteRealtimeSessions,
-  readSiteRealtimeSnapshot,
-} from "@/lib/edge/analytics/providers/realtime/operations/site-realtime";
 import type { Env } from "@/lib/edge/types";
 
 type RuntimeQuery = QueryInput & {
@@ -62,12 +51,89 @@ type RuntimeQuery = QueryInput & {
   readonly [key: string]: unknown;
 };
 
-export interface QueryRuntimeOptions {
+type SiteQueryProviderKind =
+  | "overview"
+  | "timeseries"
+  | "pages"
+  | "referrers"
+  | "events-summary"
+  | "breakdown"
+  | "cross-breakdown"
+  | "channels"
+  | "filter-values"
+  | "retention"
+  | "funnel-analysis"
+  | "goal-summary"
+  | "goal-timeseries"
+  | "performance-summary"
+  | "performance-timeseries"
+  | "performance-breakdown"
+  | "events-timeseries"
+  | "event-types"
+  | "event-type-detail"
+  | "event-fields"
+  | "event-field-values"
+  | "events-search"
+  | "event-detail"
+  | "visitor-detail"
+  | "session-detail"
+  | "journey-event-detail"
+  | "visitors-search"
+  | "sessions-search"
+  | "visitor-events"
+  | "visitor-sessions"
+  | "session-events";
+
+const SITE_QUERY_OPERATION_BY_KIND = {
+  overview: "overview",
+  timeseries: "trend",
+  pages: "pages",
+  referrers: "referrers",
+  "events-summary": "event-summary",
+  breakdown: "dimension",
+  "cross-breakdown": "cross-dimension",
+  channels: "channels",
+  "filter-values": "filter-values",
+  retention: "retention",
+  "funnel-analysis": "funnel-analysis",
+  "goal-summary": "goal-summary",
+  "goal-timeseries": "goal-timeseries",
+  "performance-summary": "performance",
+  "performance-timeseries": "performance",
+  "performance-breakdown": "performance",
+  "events-timeseries": "event-trend",
+  "event-types": "event-types",
+  "event-type-detail": "event-type-detail",
+  "event-fields": "event-fields",
+  "event-field-values": "event-field-values",
+  "events-search": "event-records",
+  "event-detail": "event-record-detail",
+  "visitor-detail": "visitor-detail",
+  "session-detail": "session-detail",
+  "journey-event-detail": "journey-event-detail",
+  "visitors-search": "visitors",
+  "sessions-search": "sessions",
+  "visitor-events": "visitor-events",
+  "visitor-sessions": "visitor-sessions",
+  "session-events": "session-events",
+} as const satisfies Record<SiteQueryProviderKind, QueryOperation>;
+
+const SITE_QUERY_PROVIDER_KINDS = Object.keys(
+  SITE_QUERY_OPERATION_BY_KIND,
+) as SiteQueryProviderKind[];
+
+const SITE_QUERY_VARIANT_BY_KIND: Partial<
+  Record<SiteQueryProviderKind, string>
+> = {
+  "performance-summary": "summary",
+  "performance-timeseries": "timeseries",
+  "performance-breakdown": "breakdown",
+};
+
+interface SiteQueryProviderOptions {
   readonly env: Env;
-  readonly siteId?: string;
-  readonly teamId?: string;
-  readonly operation: AnalyticsOperationId;
-  readonly performanceDimension?: string;
+  readonly siteId: string;
+  readonly queryKind: SiteQueryProviderKind;
 }
 
 function query(input: QueryInput): RuntimeQuery {
@@ -135,80 +201,35 @@ function provider<Result>(
   };
 }
 
-/**
- * Site overview/timeseries API v1 handlers consume the full canonical result
- * envelope because they expose source and accuracy metadata. The canonical
- * runtime provider reports those fields beside its value, so adapt that shape
- * at the protocol composition boundary instead of leaking API concerns into
- * the shared runtime.
- */
-function analyticsResultProvider<Result>(
-  source: TypedQueryProvider<Result>,
-): TypedQueryProvider<AnalyticsResult<Result>> {
-  return {
-    execute: async (input, execution) => {
-      const result = await source.execute(input, execution);
-      const runtimeInput = query(input);
-      return {
-        value: {
-          ok: true,
-          data: result.value,
-          meta: {
-            time: runtimeInput.time,
-            source: result.source ?? "raw",
-            approximateVisitors: Boolean(result.approximateVisitors),
-            ...(runtimeInput.scopePlan
-              ? {
-                  filterScope: {
-                    requested: runtimeInput.scopePreference ?? "auto",
-                    resolved: runtimeInput.scopePlan.scope,
-                  },
-                }
-              : {}),
-          },
-        },
-      };
-    },
-  };
-}
-
 function siteId(input: RuntimeQuery, fallback: string): string {
   return stringField(input, "siteId", fallback);
 }
 
 function registerSiteOperation(
   registry: AnalyticsProviderRegistry,
-  options: QueryRuntimeOptions,
+  options: SiteQueryProviderOptions,
+  canonicalRuntime: AnalyticsQueryRuntime,
 ): void {
-  const operation = canonicalQueryOperationFor(options.operation);
+  const operation = SITE_QUERY_OPERATION_BY_KIND[options.queryKind];
   const { env, siteId: configuredSiteId = "" } = options;
 
   if (
-    options.operation === "site.analytics.overview" ||
-    options.operation === "site.analytics.timeseries" ||
-    options.operation === "site.analytics.pages" ||
-    options.operation === "site.analytics.referrers" ||
-    options.operation === "site.analytics.eventsSummary"
+    options.queryKind === "overview" ||
+    options.queryKind === "timeseries" ||
+    options.queryKind === "pages" ||
+    options.queryKind === "referrers" ||
+    options.queryKind === "events-summary"
   ) {
-    const runtime = createD1SiteQueryRuntime({
-      env,
-      siteId: configuredSiteId,
-    });
-    const canonicalProvider = runtime.providerRegistry.resolve(operation);
+    const canonicalProvider =
+      canonicalRuntime.providerRegistry.resolve(operation);
     if (canonicalProvider) {
-      registry.register(
-        operation,
-        options.operation === "site.analytics.overview" ||
-          options.operation === "site.analytics.timeseries"
-          ? analyticsResultProvider(canonicalProvider)
-          : canonicalProvider,
-      );
+      registry.register(operation, canonicalProvider);
       return;
     }
   }
 
-  switch (options.operation) {
-    case "site.analytics.breakdown":
+  switch (options.queryKind) {
+    case "breakdown":
       registry.register(
         operation,
         provider((input) =>
@@ -223,7 +244,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.crossBreakdown":
+    case "cross-breakdown":
       registry.register(
         operation,
         provider((input) =>
@@ -240,7 +261,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.channels":
+    case "channels":
       registry.register(
         operation,
         provider((input) =>
@@ -254,7 +275,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.filterValues":
+    case "filter-values":
       registry.register(
         operation,
         provider((input) =>
@@ -270,7 +291,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.retentionCohorts":
+    case "retention":
       registry.register(
         operation,
         provider((input) =>
@@ -284,7 +305,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.funnelAnalysis":
+    case "funnel-analysis":
       registry.register(
         operation,
         provider(async (input) => {
@@ -299,7 +320,7 @@ function registerSiteOperation(
         }),
       );
       return;
-    case "site.analytics.goalSummary":
+    case "goal-summary":
       registry.register(
         operation,
         provider((input) =>
@@ -313,7 +334,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.goalTimeseries":
+    case "goal-timeseries":
       registry.register(
         operation,
         provider((input) =>
@@ -328,7 +349,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.performanceSummary":
+    case "performance-summary":
       registry.register(
         operation,
         provider((input) =>
@@ -341,7 +362,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.performanceTimeseries":
+    case "performance-timeseries":
       registry.register(
         operation,
         provider((input) =>
@@ -355,15 +376,14 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.performanceBreakdown":
+    case "performance-breakdown":
       registry.register(
         operation,
         provider((input) =>
           readSitePerformanceBreakdown({
             env,
             siteId: siteId(input, configuredSiteId),
-            dimension:
-              options.performanceDimension ?? stringField(input, "dimension"),
+            dimension: stringField(input, "dimension"),
             metric: stringField(input, "metric") as never,
             limit: limitField(input),
             window: timeWindow(input.time),
@@ -372,7 +392,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.eventsTimeseries":
+    case "events-timeseries":
       registry.register(
         operation,
         provider((input) =>
@@ -387,7 +407,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.eventTypes":
+    case "event-types":
       registry.register(
         operation,
         provider((input) =>
@@ -402,7 +422,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.eventTypeDetail":
+    case "event-type-detail":
       registry.register(
         operation,
         provider((input) =>
@@ -417,7 +437,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.eventFields":
+    case "event-fields":
       registry.register(
         operation,
         provider((input) =>
@@ -433,7 +453,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.eventFieldValues":
+    case "event-field-values":
       registry.register(
         operation,
         provider((input) =>
@@ -452,7 +472,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.eventsSearch":
+    case "events-search":
       registry.register(
         operation,
         provider((input) =>
@@ -471,7 +491,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.eventDetail":
+    case "event-detail":
       registry.register(
         operation,
         provider((input) =>
@@ -484,7 +504,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.visitorDetail":
+    case "visitor-detail":
       registry.register(
         operation,
         provider((input) =>
@@ -497,7 +517,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.sessionDetail":
+    case "session-detail":
       registry.register(
         operation,
         provider((input) =>
@@ -510,7 +530,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.journeyEventDetail":
+    case "journey-event-detail":
       registry.register(
         operation,
         provider((input) =>
@@ -525,7 +545,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.visitorsSearch":
+    case "visitors-search":
       registry.register(
         operation,
         provider((input) =>
@@ -542,7 +562,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.sessionsSearch":
+    case "sessions-search":
       registry.register(
         operation,
         provider((input) =>
@@ -559,7 +579,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.visitorEvents":
+    case "visitor-events":
       registry.register(
         operation,
         provider((input) =>
@@ -576,7 +596,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.visitorSessions":
+    case "visitor-sessions":
       registry.register(
         operation,
         provider((input) =>
@@ -593,7 +613,7 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.sessionEvents":
+    case "session-events":
       registry.register(
         operation,
         provider((input) =>
@@ -610,92 +630,70 @@ function registerSiteOperation(
         ),
       );
       return;
-    case "site.analytics.realtimeSnapshot":
-      registry.register(
-        operation,
-        provider((input, signal) =>
-          readSiteRealtimeSnapshot({
-            env,
-            siteId: siteId(input, configuredSiteId),
-            startMs: input.time.range.startMs,
-            endExclusiveMs: input.time.range.endExclusiveMs,
-            limit: limitField(input),
-            signal,
-          }),
-        ),
-      );
-      return;
-    case "site.analytics.realtimeActiveVisitors":
-      registry.register(
-        operation,
-        provider((input, signal) =>
-          readSiteRealtimeActiveVisitors({
-            env,
-            siteId: siteId(input, configuredSiteId),
-            startMs: input.time.range.startMs,
-            endExclusiveMs: input.time.range.endExclusiveMs,
-            signal,
-          }),
-        ),
-      );
-      return;
-    case "site.analytics.realtimeEvents":
-      registry.register(
-        operation,
-        provider((input, signal) =>
-          readSiteRealtimeEvents({
-            env,
-            siteId: siteId(input, configuredSiteId),
-            startMs: input.time.range.startMs,
-            endExclusiveMs: input.time.range.endExclusiveMs,
-            limit: limitField(input),
-            signal,
-          }),
-        ),
-      );
-      return;
-    case "site.analytics.realtimeSessions":
-      registry.register(
-        operation,
-        provider((input, signal) =>
-          readSiteRealtimeSessions({
-            env,
-            siteId: siteId(input, configuredSiteId),
-            startMs: input.time.range.startMs,
-            endExclusiveMs: input.time.range.endExclusiveMs,
-            limit: numberField(input, "limit", 20),
-            signal,
-          }),
-        ),
-      );
-      return;
-    default:
-      return;
   }
 }
 
-function registerTeamOperation(
-  registry: AnalyticsProviderRegistry,
-  options: QueryRuntimeOptions,
-): void {
-  const operation = canonicalQueryOperationFor(options.operation);
-  const { env } = options;
+export function registerSiteAnalyticsOperations(
+  runtime: AnalyticsQueryRuntime,
+  options: Omit<SiteQueryProviderOptions, "queryKind">,
+): AnalyticsQueryRuntime {
+  const registry = runtime.providerRegistry;
+  const variants = new Map<
+    QueryOperation,
+    Map<string, TypedQueryProvider<unknown>>
+  >();
 
-  const runtime = createD1TeamQueryRuntime({ env });
-  const canonicalProvider = runtime.providerRegistry.resolve(operation);
-  if (canonicalProvider) {
-    registry.register(operation, canonicalProvider);
-  }
-}
+  for (const queryKind of SITE_QUERY_PROVIDER_KINDS) {
+    const operation = SITE_QUERY_OPERATION_BY_KIND[queryKind];
 
-export function createApiV1ProviderRegistry(
-  options: QueryRuntimeOptions,
-): AnalyticsProviderRegistry {
-  const registry = new AnalyticsProviderRegistry();
-  if (options.operation.startsWith("site.")) {
-    registerSiteOperation(registry, options);
-  } else {
-    registerTeamOperation(registry, options);
+    const operationRegistry = new AnalyticsProviderRegistry();
+    registerSiteOperation(
+      operationRegistry,
+      { ...options, queryKind },
+      runtime,
+    );
+    const operationProvider = operationRegistry.resolve(operation);
+    if (!operationProvider) continue;
+
+    const queryVariant = SITE_QUERY_VARIANT_BY_KIND[queryKind];
+    if (queryVariant) {
+      const operationVariants = variants.get(operation) ?? new Map();
+      operationVariants.set(queryVariant, operationProvider);
+      variants.set(operation, operationVariants);
+      continue;
+    }
+
+    const fallback = registry.resolve(operation);
+    registry.register(operation, {
+      execute: async (input, execution) => {
+        if (input.context.policy.audience === "api-v1" || !fallback) {
+          return operationProvider.execute(input, execution);
+        }
+        return fallback.execute(input, execution);
+      },
+    });
   }
-  return registry;
+
+  for (const [operation, operationVariants] of variants) {
+    const fallback = registry.resolve(operation);
+    registry.register(operation, {
+      execute: async (input, execution) => {
+        if (input.context.policy.audience === "api-v1") {
+          const query = input as QueryInput & {
+            readonly queryMode?: unknown;
+          };
+          const queryMode =
+            typeof query.queryMode === "string" ? query.queryMode : "";
+          const operationProvider = operationVariants.get(queryMode);
+          if (operationProvider) {
+            return operationProvider.execute(input, execution);
+          }
+        }
+        if (fallback) return fallback.execute(input, execution);
+        throw new Error(`unsupported-query-operation:${operation}`);
+      },
+    });
+  }
+
+  return runtime;
 }

@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
   parseFilterUrlForAudience,
   withoutGeoFilter,
@@ -34,7 +34,7 @@ export async function handleOverviewGeoPointsContract(
     : withoutGeoFilter(
         parseFilterUrlForAudience(queryContext.policy.audience, url),
       );
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<
     Record<string, unknown> & { readonly points: readonly unknown[] }
   >("geo-points", {
     context: queryContext,

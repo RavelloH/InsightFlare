@@ -46,26 +46,21 @@ import {
   jsonError,
   SitePerformanceBreakdownDimensionSchema,
 } from "@/lib/api-v1";
-import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
-import { createApiV1ProviderRegistry } from "@/lib/edge/analytics/composition/api-v1-provider-registry";
-import { createComparisonRuntime } from "@/lib/edge/analytics/composition/comparison-runtime";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { AppEnv } from "@/lib/hono/types";
 interface SiteAnalyticsRouteDependencies {
   readonly resolvePrincipal: (c: Context<AppEnv>) => ApiKeyPrincipal;
   readonly resourceNotFound: (c: Context<AppEnv>) => Response;
 }
-function providerRegistry(
-  c: Context<AppEnv>,
-  operation: AnalyticsOperationId,
-  performanceDimension?: string,
-) {
-  return createApiV1ProviderRegistry({
+function analyticsRuntime(c: Context<AppEnv>, siteId: string) {
+  return createEdgeSiteAnalyticsRuntime({
     env: c.env,
-    siteId: c.req.param("siteId") ?? "",
-    operation,
-    performanceDimension,
+    siteId,
   });
+}
+function providerRegistry(c: Context<AppEnv>, siteId: string) {
+  return analyticsRuntime(c, siteId).providerRegistry;
 }
 export function registerV1SiteAnalyticsRoutes(
   routes: Hono<AppEnv>,
@@ -77,7 +72,7 @@ export function registerV1SiteAnalyticsRoutes(
     return handleSiteComparison(
       c.req.raw,
       deps.resolvePrincipal(c),
-      createComparisonRuntime({ env: c.env, siteId }),
+      analyticsRuntime(c, siteId),
       siteId,
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -91,7 +86,7 @@ export function registerV1SiteAnalyticsRoutes(
       return handleSiteComparisonBreakdown(
         c.req.raw,
         deps.resolvePrincipal(c),
-        createComparisonRuntime({ env: c.env, siteId }),
+        analyticsRuntime(c, siteId),
         siteId,
         dimension,
         createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
@@ -105,7 +100,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.overview"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -148,7 +143,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.timeseries"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -162,7 +157,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       dimension,
-      providerRegistry(c, "site.analytics.breakdown"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -174,7 +169,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.crossBreakdown"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -186,7 +181,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.pages"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -198,7 +193,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.referrers"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -210,7 +205,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.channels"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -222,7 +217,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.filterValues"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -234,7 +229,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.retentionCohorts"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -246,7 +241,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.funnelAnalysis"),
+      providerRegistry(c, siteId),
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
@@ -259,7 +254,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.goalSummary"),
+      providerRegistry(c, siteId),
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
@@ -272,7 +267,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.goalTimeseries"),
+      providerRegistry(c, siteId),
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
@@ -284,7 +279,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.performanceSummary"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -296,7 +291,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.performanceTimeseries"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -327,13 +322,10 @@ export function registerV1SiteAnalyticsRoutes(
         c.req.raw,
         deps.resolvePrincipal(c),
         siteId,
-        providerRegistry(
-          c,
-          "site.analytics.performanceBreakdown",
-          parsedDimension.data,
-        ),
+        providerRegistry(c, siteId),
         { signal: c.req.raw.signal, capturedAtMs: Date.now() },
         createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
+        parsedDimension.data,
       );
     },
   );
@@ -344,7 +336,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.eventsSummary"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -356,7 +348,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.eventsTimeseries"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -368,7 +360,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.eventTypes"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -380,7 +372,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.eventTypeDetail"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -392,7 +384,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.eventFields"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -404,7 +396,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.eventFieldValues"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -416,7 +408,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.eventsSearch"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -428,7 +420,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.eventDetail"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -439,7 +431,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.journeyEventDetail"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -450,7 +442,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.realtimeSnapshot"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -461,7 +453,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.realtimeActiveVisitors"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -472,7 +464,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.realtimeEvents"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -483,7 +475,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.realtimeSessions"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -494,7 +486,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.visitorDetail"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -505,7 +497,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.sessionDetail"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -516,7 +508,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.visitorsSearch"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -528,7 +520,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.sessionsSearch"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -540,7 +532,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.visitorEvents"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -552,7 +544,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.visitorSessions"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -564,7 +556,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, "site.analytics.sessionEvents"),
+      providerRegistry(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );

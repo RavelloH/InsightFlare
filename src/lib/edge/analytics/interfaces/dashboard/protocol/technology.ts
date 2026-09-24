@@ -1,4 +1,4 @@
-import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
   isCrossBreakdownDimension,
   parseFilterUrlForAudience,
@@ -37,15 +37,15 @@ async function executeTechnology<T>(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createSiteAnalyticsRuntime({ env, siteId }).execute<T>(
-    operation,
-    {
-      context: queryContext,
-      time: queryWindowToTime(window),
-      filters,
-      ...parameters,
-    },
-  );
+  const result = await createEdgeSiteAnalyticsRuntime({
+    env,
+    siteId,
+  }).execute<T>(operation, {
+    context: queryContext,
+    time: queryWindowToTime(window),
+    filters,
+    ...parameters,
+  });
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...shape(result.data) });
 }
