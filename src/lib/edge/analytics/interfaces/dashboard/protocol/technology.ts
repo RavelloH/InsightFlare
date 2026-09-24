@@ -40,14 +40,17 @@ async function executeTechnology<T>(
   const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
-  }).execute<T>(operation, {
+  }).execute(operation, {
     context: queryContext,
     time: queryWindowToTime(window),
     filters,
     ...parameters,
   });
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...shape(result.data) });
+  return jsonResponseWith(ctx!, {
+    ok: true,
+    ...shape(result.data as T),
+  });
 }
 export function handleBrowserTrendContract(
   env: Env,

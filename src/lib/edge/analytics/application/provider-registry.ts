@@ -1,5 +1,6 @@
 import type {
-  QueryInput,
+  CanonicalQuery,
+  CanonicalResult,
   QueryOperation,
   QuerySource,
 } from "@/lib/edge/analytics/contract";
@@ -17,12 +18,19 @@ export interface TypedQueryProviderResult<T> {
 }
 
 /** The only provider shape accepted by the application layer. */
-export interface TypedQueryProvider<T> {
+export interface TypedQueryProvider<
+  Operation extends QueryOperation = QueryOperation,
+  Result = CanonicalResult<Operation>,
+> {
   execute(
-    input: QueryInput,
+    input: CanonicalQuery<Operation>,
     execution?: { readonly signal?: AbortSignal },
-  ): Promise<TypedQueryProviderResult<T>>;
+  ): Promise<TypedQueryProviderResult<Result>>;
 }
+
+type AnyTypedQueryProvider = {
+  [Operation in QueryOperation]: TypedQueryProvider<Operation>;
+}[QueryOperation];
 
 /**
  * Request-scoped registry for canonical query operations.
@@ -32,42 +40,46 @@ export interface TypedQueryProvider<T> {
  * maintains one provider map.
  */
 export class AnalyticsProviderRegistry {
-  private readonly providers = new Map<
-    QueryOperation,
-    TypedQueryProvider<unknown>
-  >();
+  private readonly providers = new Map<QueryOperation, AnyTypedQueryProvider>();
 
-  register<T>(
-    operation: QueryOperation,
-    provider: TypedQueryProvider<T>,
+  register<Operation extends QueryOperation>(
+    operation: Operation,
+    provider: TypedQueryProvider<NoInfer<Operation>>,
   ): this {
-    this.providers.set(operation, provider as TypedQueryProvider<unknown>);
+    this.providers.set(operation, provider as AnyTypedQueryProvider);
     return this;
   }
 
-  resolve<T>(operation: QueryOperation): TypedQueryProvider<T> | undefined {
-    return this.providers.get(operation) as TypedQueryProvider<T> | undefined;
+  resolve<Operation extends QueryOperation>(
+    operation: Operation,
+  ): TypedQueryProvider<Operation> | undefined {
+    return this.providers.get(operation) as
+      TypedQueryProvider<Operation> | undefined;
   }
 }
 
-export function typedQueryProvider<T>(
+/** Builds a provider from the query/result contract for one canonical operation. */
+export function typedQueryProviderFor<Operation extends QueryOperation>(
+  operation: Operation,
   reader: (
-    input?: QueryInput,
+    input: CanonicalQuery<Operation>,
     execution?: { readonly signal?: AbortSignal },
-  ) => Promise<TypedQueryProviderResult<T>>,
-): TypedQueryProvider<T> {
+  ) => Promise<TypedQueryProviderResult<CanonicalResult<Operation>>>,
+): TypedQueryProvider<Operation> {
+  void operation;
   return { execute: reader };
 }
 
-export function createTypedQueryProviderRegistry<T>(
-  operation: QueryOperation,
+export function createTypedQueryProviderRegistry<
+  Operation extends QueryOperation,
+>(
+  operation: Operation,
   reader: (
-    input?: QueryInput,
+    input: CanonicalQuery<Operation>,
     execution?: { readonly signal?: AbortSignal },
-  ) => Promise<TypedQueryProviderResult<T>>,
+  ) => Promise<TypedQueryProviderResult<CanonicalResult<Operation>>>,
 ): AnalyticsProviderRegistry {
-  return new AnalyticsProviderRegistry().register(
-    operation,
-    typedQueryProvider(reader),
-  );
+  return new AnalyticsProviderRegistry().register(operation, {
+    execute: reader,
+  });
 }

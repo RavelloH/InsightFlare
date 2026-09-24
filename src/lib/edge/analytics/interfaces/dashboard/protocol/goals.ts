@@ -1,16 +1,10 @@
-import {
-  archiveGoalDefinition,
-  createGoalDefinition,
-  decodeGoalDefinitionCursor,
-  queryGoalDefinition,
-  queryGoalDefinitionsPage,
-  updateGoalDefinition,
-} from "@/lib/edge/analytics/composition/d1/goals";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import type { GoalDefinition } from "@/lib/edge/analytics/contract/goal";
 import {
   type GoalConfigV1,
   GoalConfigValidationError,
 } from "@/lib/edge/analytics/contract/goal-config";
+import type { GoalDefinitionResource } from "@/lib/edge/analytics/resources/goals";
 import type { Env } from "@/lib/edge/types";
 import {
   bad as badRequest,
@@ -53,7 +47,7 @@ function validationResponse(error: unknown): Response | null {
     : null;
 }
 async function handleGoalList(
-  env: Env,
+  resource: GoalDefinitionResource,
   siteId: string,
   url: URL,
   ctx?: ResponseContext,
@@ -63,25 +57,24 @@ async function handleGoalList(
     ? Math.min(200, Math.max(1, limitParam))
     : 50;
   const cursorText = url.searchParams.get("cursor");
-  const cursor = await decodeGoalDefinitionCursor(env, siteId, cursorText);
-  if (cursorText && !cursor) return badRequest("Invalid cursor");
-  const page = await queryGoalDefinitionsPage(env, siteId, limit, cursor);
-  return jsonResponseWith(ctx, { ok: true, data: page });
+  const result = await resource.list({ siteId, limit, cursor: cursorText });
+  if (!result.ok) return badRequest("Invalid cursor");
+  return jsonResponseWith(ctx, { ok: true, data: result.page });
 }
 async function handleGoalDetail(
-  env: Env,
+  resource: GoalDefinitionResource,
   siteId: string,
   url: URL,
   ctx?: ResponseContext,
 ): Promise<Response> {
   const goalId = url.searchParams.get("id")?.trim();
-  if (!goalId) return handleGoalList(env, siteId, url, ctx);
-  const goal = await queryGoalDefinition(env, siteId, goalId);
+  if (!goalId) return handleGoalList(resource, siteId, url, ctx);
+  const goal = await resource.get(siteId, goalId);
   if (!goal) return notFound();
   return jsonResponseWith(ctx, { ok: true, data: { goal } });
 }
 async function handleGoalCreate(
-  env: Env,
+  resource: GoalDefinitionResource,
   siteId: string,
   request: Request,
   ctx?: ResponseContext,
@@ -91,12 +84,7 @@ async function handleGoalCreate(
   const input = readWriteConfig(body);
   if (!input) return badRequest("Invalid goal configuration");
   try {
-    const goal = await createGoalDefinition(
-      env,
-      siteId,
-      input.name,
-      input.config,
-    );
+    const goal = await resource.create(siteId, input.name, input.config);
     return jsonResponseWith(ctx, { ok: true, data: { goal } }, 201);
   } catch (error) {
     const response = validationResponse(error);
@@ -105,7 +93,7 @@ async function handleGoalCreate(
   }
 }
 async function handleGoalUpdate(
-  env: Env,
+  resource: GoalDefinitionResource,
   siteId: string,
   url: URL,
   request: Request,
@@ -113,7 +101,7 @@ async function handleGoalUpdate(
 ): Promise<Response> {
   const goalId = url.searchParams.get("id")?.trim();
   if (!goalId) return badRequest("Goal id is required");
-  const current = await queryGoalDefinition(env, siteId, goalId);
+  const current = await resource.get(siteId, goalId);
   if (!current) return notFound();
   const body = await readWriteBody(request);
   if (body instanceof Response) return body;
@@ -132,7 +120,7 @@ async function handleGoalUpdate(
     return badRequest("Invalid goal configuration");
   }
   try {
-    const goal = await updateGoalDefinition(env, siteId, goalId, name, {
+    const goal = await resource.update(siteId, goalId, name, {
       filterDslVersion,
       filterDsl,
     });
@@ -144,14 +132,14 @@ async function handleGoalUpdate(
   }
 }
 async function handleGoalDelete(
-  env: Env,
+  resource: GoalDefinitionResource,
   siteId: string,
   url: URL,
   ctx?: ResponseContext,
 ): Promise<Response> {
   const goalId = url.searchParams.get("id")?.trim();
   if (!goalId) return badRequest("Goal id is required");
-  await archiveGoalDefinition(env, siteId, goalId);
+  await resource.archive(siteId, goalId);
   return jsonResponseWith(ctx, { ok: true });
 }
 /** Private Goal definition protocol adapter. */
@@ -162,13 +150,17 @@ export async function handleGoal(
   ctx?: ResponseContext,
   request?: Request,
 ): Promise<Response> {
+  const resource: GoalDefinitionResource = createEdgeSiteAnalyticsRuntime({
+    env,
+    siteId,
+  }).resources.goals;
   const method = request?.method ?? "GET";
-  if (method === "GET") return handleGoalDetail(env, siteId, url, ctx);
+  if (method === "GET") return handleGoalDetail(resource, siteId, url, ctx);
   if (method === "POST" && request)
-    return handleGoalCreate(env, siteId, request, ctx);
+    return handleGoalCreate(resource, siteId, request, ctx);
   if (method === "PATCH" && request)
-    return handleGoalUpdate(env, siteId, url, request, ctx);
-  if (method === "DELETE") return handleGoalDelete(env, siteId, url, ctx);
+    return handleGoalUpdate(resource, siteId, url, request, ctx);
+  if (method === "DELETE") return handleGoalDelete(resource, siteId, url, ctx);
   return notAllowed();
 }
 /** Descriptive alias for callers that only need the private definition API. */

@@ -37,10 +37,7 @@ import type {
   NotificationMessageData,
   NotificationRuleData,
 } from "@/lib/dashboard-api/contract/types";
-import {
-  createTeamDashboardQueryRuntime,
-  type SsrTeamDashboardData,
-} from "@/lib/edge/analytics/composition/ssr-query-runtime";
+import { createTeamDashboardQueryRuntime } from "@/lib/edge/analytics/composition/ssr-query-runtime";
 import {
   createQueryTime,
   parseFilterUrlForAudience,
@@ -127,23 +124,15 @@ export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
         publicEnabled: Number(Boolean(site.publicEnabled)),
       })),
     });
-    const result = await teamDashboardRuntime.execute<SsrTeamDashboardData>(
-      "team-dashboard",
-      {
-        context: teamQueryContext(
-          resolved.teamId,
-          "private-dashboard",
-          resolved.allowedSiteIds,
-        ),
-        time: createQueryTime(
-          window.from,
-          window.to,
-          window.timeZone,
-          window.to,
-        ),
-        filters,
-      },
-    );
+    const result = await teamDashboardRuntime.execute("team-dashboard", {
+      context: teamQueryContext(
+        resolved.teamId,
+        "private-dashboard",
+        resolved.allowedSiteIds,
+      ),
+      time: createQueryTime(window.from, window.to, window.timeZone, window.to),
+      filters,
+    });
     if (!result.ok) throw new Error(result.error.kind);
     return {
       data: result.data,

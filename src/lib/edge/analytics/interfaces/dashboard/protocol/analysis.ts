@@ -1,11 +1,10 @@
 import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
-  type BaseQuery,
-  type PerformanceDashboardResult,
+  type Interval,
   type PerformanceQuery,
   queryWindowToTime,
-  type RetentionResult,
+  type RetentionQuery,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import {
@@ -29,18 +28,27 @@ export async function handleRetentionContract(
 ): Promise<Response> {
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await createEdgeSiteAnalyticsRuntime({
-    env,
-    siteId,
-  }).execute<RetentionResult>("retention", {
+  const rawGranularity =
+    url.searchParams.get("granularity") ?? url.searchParams.get("interval");
+  const allowedGranularities: readonly Interval[] = [
+    "minute",
+    "hour",
+    "day",
+    "week",
+    "month",
+  ];
+  const query: RetentionQuery = {
     context: queryContext,
     time: queryWindowToTime(window),
     filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
-    granularity:
-      url.searchParams.get("granularity") ??
-      url.searchParams.get("interval") ??
-      "week",
-  } as BaseQuery & { readonly granularity: string });
+    granularity: allowedGranularities.includes(rawGranularity as Interval)
+      ? (rawGranularity as Interval)
+      : "week",
+  };
+  const result = await createEdgeSiteAnalyticsRuntime({
+    env,
+    siteId,
+  }).execute("retention", query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
@@ -65,7 +73,7 @@ export async function handlePerformanceContract(
   const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
-  }).execute<PerformanceDashboardResult>("performance", query);
+  }).execute("performance", query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, {
     ok: true,

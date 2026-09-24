@@ -3,13 +3,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
 import { AnalysisDefinitionReadCancelledError } from "@/lib/api-v1/analytics/analysis-definition-reader";
 import {
-  handlePlannedSiteGoalSummary,
-  handlePlannedSiteGoalTimeseries,
+  handlePlannedSiteGoalSummary as handleGoalSummary,
+  handlePlannedSiteGoalTimeseries as handleGoalTimeseries,
 } from "@/lib/api-v1/analytics/goal-analysis";
 import { goalAggregateCache } from "@/lib/api-v1/analytics/goal-analysis";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
+import { createD1GoalDefinitionResource } from "@/lib/edge/analytics/providers/d1/resources/goals";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
+import type { Env } from "@/lib/edge/types";
+
+function withD1GoalResource(
+  handler: typeof handleGoalSummary,
+): typeof handleGoalSummary {
+  return (...args) => {
+    const goalDefinitions =
+      args[7] ?? createD1GoalDefinitionResource(args[0] as Env);
+    return handler(
+      args[0] as Env,
+      args[1] as Request,
+      args[2] as ApiKeyPrincipal,
+      args[3] as string,
+      args[4] as Parameters<typeof handleGoalSummary>[4],
+      args[5] as Parameters<typeof handleGoalSummary>[5],
+      args[6] as Parameters<typeof handleGoalSummary>[6],
+      goalDefinitions,
+    );
+  };
+}
+const handlePlannedSiteGoalSummary = withD1GoalResource(handleGoalSummary);
+const handlePlannedSiteGoalTimeseries =
+  withD1GoalResource(handleGoalTimeseries);
 const principal = (
   overrides: Partial<ApiKeyPrincipal> = {},
 ): ApiKeyPrincipal => ({

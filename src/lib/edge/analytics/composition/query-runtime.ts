@@ -3,21 +3,19 @@ import type { QueryExecutionContext } from "@/lib/edge/analytics/application/ser
 import type { TypedQueryOperationInvocation } from "@/lib/edge/analytics/application/service";
 import type {
   AnalyticsResult,
-  BaseQuery,
+  CanonicalQuery,
+  CanonicalResult,
   QueryOperation,
 } from "@/lib/edge/analytics/contract";
 
 import { createAnalyticsQueryApplicationService } from "./query-application-service";
 
-type CanonicalRuntimeQuery =
-  BaseQuery | (BaseQuery & Readonly<Record<string, unknown>>);
-
 export interface AnalyticsQueryExecutor {
-  execute<Result>(
-    operation: QueryOperation,
-    query: CanonicalRuntimeQuery,
+  execute<Operation extends QueryOperation>(
+    operation: Operation,
+    query: CanonicalQuery<Operation>,
     execution?: QueryExecutionContext,
-  ): Promise<AnalyticsResult<Result>>;
+  ): Promise<AnalyticsResult<CanonicalResult<Operation>>>;
 }
 export type AnalyticsQueryRuntime = AnalyticsQueryExecutor;
 
@@ -31,13 +29,13 @@ export function createAnalyticsQueryRuntime(
   providerRegistry: AnalyticsProviderRegistry,
   service = createAnalyticsQueryApplicationService(),
 ): AnalyticsQueryExecutor {
-  return {
-    execute<Result>(
-      operation: QueryOperation,
-      query: CanonicalRuntimeQuery,
+  const executor = {
+    execute<Operation extends QueryOperation>(
+      operation: Operation,
+      query: CanonicalQuery<Operation>,
       execution: QueryExecutionContext = {},
-    ): Promise<AnalyticsResult<Result>> {
-      const invocation: TypedQueryOperationInvocation<Result> = {
+    ): Promise<AnalyticsResult<CanonicalResult<Operation>>> {
+      const invocation: TypedQueryOperationInvocation<Operation> = {
         kind: "typed-query",
         operation,
         query,
@@ -47,7 +45,7 @@ export function createAnalyticsQueryRuntime(
               cache: {
                 ...execution.cache,
                 isCacheable: execution.cache.isCacheable as
-                  ((value: Result) => boolean) | undefined,
+                  ((value: CanonicalResult<Operation>) => boolean) | undefined,
               },
             }
           : {}),
@@ -58,4 +56,5 @@ export function createAnalyticsQueryRuntime(
       return requestService.execute(invocation, execution);
     },
   };
+  return executor as AnalyticsQueryExecutor;
 }

@@ -1,16 +1,9 @@
-import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
-import type {
-  OverviewQuery,
-  OverviewReader,
-  OverviewResult,
-  TrendQuery,
-  TrendResult,
-} from "@/lib/edge/analytics/contract";
+import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
+import type { OverviewReader } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 
 export function overviewProvider(reader: OverviewReader) {
-  return typedQueryProvider<OverviewResult>(async (input) => {
-    const query = input as OverviewQuery;
+  return typedQueryProviderFor("overview", async (query) => {
     const filters = query.filters ?? EMPTY_FILTER_DOCUMENT;
     const current = await reader.readOverview({
       time: query.time,
@@ -52,8 +45,7 @@ export function overviewProvider(reader: OverviewReader) {
 }
 
 export function trendProvider(reader: OverviewReader) {
-  return typedQueryProvider<TrendResult>(async (input) => {
-    const query = input as TrendQuery;
+  return typedQueryProviderFor("trend", async (query) => {
     const result = await reader.readTrend({
       time: query.time,
       filters: query.filters ?? EMPTY_FILTER_DOCUMENT,

@@ -17,7 +17,7 @@ import {
   jsonSuccess,
   methodNotAllowed,
 } from "@/lib/api-v1/contract/wire-helpers";
-import { funnelAnalysisCost } from "@/lib/edge/analytics/composition/d1";
+import { funnelAnalysisCost } from "@/lib/edge/analytics/application/funnel-cost";
 import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   attachSavedFilterScopePreference,

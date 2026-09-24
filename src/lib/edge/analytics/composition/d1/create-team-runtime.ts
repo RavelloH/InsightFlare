@@ -1,49 +1,19 @@
 import {
   AnalyticsProviderRegistry,
-  typedQueryProvider,
+  typedQueryProviderFor,
 } from "@/lib/edge/analytics/application/provider-registry";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
-  type BreakdownResult,
   EMPTY_FILTER_DOCUMENT,
-  type QueryInput,
   type QueryTime,
-  type TeamOverviewQueryResult,
-  type TeamSitesQueryResult,
-  type TeamTimeseriesQueryResult,
 } from "@/lib/edge/analytics/contract";
 import { readTeamBreakdown } from "@/lib/edge/analytics/providers/d1/operations/team-breakdown";
 import { readTeamOverview } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
 import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
 import { readTeamTimeseries } from "@/lib/edge/analytics/providers/d1/operations/team-timeseries";
 import type { Env } from "@/lib/edge/types";
-type RuntimeQuery = QueryInput & {
-  readonly time: QueryTime;
-  readonly [key: string]: unknown;
-};
 interface D1TeamRuntimeBindings {
   readonly env: Env;
-}
-function query(input: QueryInput): RuntimeQuery {
-  return input as RuntimeQuery;
-}
-function stringField(input: RuntimeQuery, name: string, fallback = ""): string {
-  const value = input[name];
-  return typeof value === "string" ? value : fallback;
-}
-function numberField(
-  input: RuntimeQuery,
-  name: string,
-  fallback: number,
-): number {
-  const value = input[name];
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-function allowedSiteIds(input: RuntimeQuery): readonly string[] | undefined {
-  const value = input.allowedSiteIds;
-  return Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? value
-    : undefined;
 }
 function timeWindow(time: QueryTime) {
   return {
@@ -57,83 +27,83 @@ export function createD1TeamProviderRegistry(options: D1TeamRuntimeBindings) {
   const registry = new AnalyticsProviderRegistry()
     .register(
       "overview",
-      typedQueryProvider<TeamOverviewQueryResult>(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("overview", async (request) => {
+        const result = await readTeamOverview({
+          env: options.env,
+          teamId: request.teamId ?? "",
+          allowedSiteIds: request.allowedSiteIds,
+          window: timeWindow(request.time),
+          filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+        });
         return {
-          value: await readTeamOverview({
-            env: options.env,
-            teamId: stringField(request, "teamId"),
-            allowedSiteIds: allowedSiteIds(request),
-            window: timeWindow(request.time),
-            filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
-          }),
+          value: { current: result.data },
+          source: result.source,
+          approximateVisitors: result.approximateVisitors,
         };
       }),
     )
     .register(
       "trend",
-      typedQueryProvider<TeamTimeseriesQueryResult>(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("trend", async (request) => {
+        const result = await readTeamTimeseries({
+          env: options.env,
+          teamId: request.teamId ?? "",
+          allowedSiteIds: request.allowedSiteIds,
+          interval: request.interval,
+          window: timeWindow(request.time),
+          filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+        });
         return {
-          value: await readTeamTimeseries({
-            env: options.env,
-            teamId: stringField(request, "teamId"),
-            allowedSiteIds: allowedSiteIds(request),
-            interval: request.interval as never,
-            window: timeWindow(request.time),
-            filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
-          }),
+          value: result.data,
+          source: result.source,
+          approximateVisitors: result.approximateVisitors,
         };
       }),
     )
     .register(
       "team-sites",
-      typedQueryProvider<TeamSitesQueryResult>(async (input) => {
-        const request = query(input!);
-        const rawPage = request.page;
-        const pageValue =
-          rawPage && typeof rawPage === "object"
-            ? (rawPage as { limit?: unknown; cursor?: unknown })
-            : null;
-        const page = pageValue
+      typedQueryProviderFor("team-sites", async (request) => {
+        const page = request.page
           ? {
-              limit:
-                typeof pageValue.limit === "number" &&
-                Number.isFinite(pageValue.limit)
-                  ? pageValue.limit
-                  : 20,
-              cursor:
-                typeof pageValue.cursor === "string" ? pageValue.cursor : null,
+              limit: request.page.limit,
+              cursor: request.page.cursor ?? null,
             }
           : undefined;
+        const result = await readTeamSites({
+          env: options.env,
+          teamId: request.teamId ?? "",
+          allowedSiteIds: request.allowedSiteIds,
+          interval: request.interval,
+          window: timeWindow(request.time),
+          filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+          page,
+          audience: request.context.policy.audience,
+        });
         return {
-          value: await readTeamSites({
-            env: options.env,
-            teamId: stringField(request, "teamId"),
-            allowedSiteIds: allowedSiteIds(request),
-            interval:
-              typeof request.interval === "string"
-                ? (request.interval as never)
-                : undefined,
-            window: timeWindow(request.time),
-            filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
-            page,
-            audience: request.context.policy.audience,
-          }),
+          value: result.data,
+          source: result.source,
+          approximateVisitors: result.approximateVisitors,
         };
       }),
     )
     .register(
       "dimension",
-      typedQueryProvider<BreakdownResult>(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("dimension", async (request) => {
+        if (request.mode !== "breakdown") {
+          throw new Error("unsupported-team-dimension-mode");
+        }
         return {
           value: await readTeamBreakdown({
             env: options.env,
-            teamId: stringField(request, "teamId"),
-            allowedSiteIds: allowedSiteIds(request),
-            dimension: stringField(request, "dimension"),
-            limit: numberField(request, "limit", 20),
+            teamId: "teamId" in request ? (request.teamId ?? "") : "",
+            allowedSiteIds:
+              "allowedSiteIds" in request ? request.allowedSiteIds : undefined,
+            dimension: request.dimension,
+            limit:
+              typeof request.limit === "number" &&
+              Number.isFinite(request.limit)
+                ? request.limit
+                : 20,
             window: timeWindow(request.time),
             filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
           }),

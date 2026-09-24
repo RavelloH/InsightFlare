@@ -1917,7 +1917,7 @@ describe("edge pages handlers", () => {
 
     expect(mapDimensionRows(rows)).toEqual([
       {
-        value: "Chrome",
+        key: "Chrome",
         label: "Chrome",
         views: 5,
         sessions: 3,

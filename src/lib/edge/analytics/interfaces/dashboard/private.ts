@@ -7,11 +7,7 @@ import {
   analyticsDiagnosticHeaders,
   createAnalyticsReadDiagnostics,
 } from "@/lib/edge/analytics/composition";
-import { queryGoalDefinition } from "@/lib/edge/analytics/composition/d1/goals";
-import {
-  createTeamDashboardQueryRuntime,
-  type SsrTeamDashboardData,
-} from "@/lib/edge/analytics/composition/ssr-query-runtime";
+import { createTeamDashboardQueryRuntime } from "@/lib/edge/analytics/composition/ssr-query-runtime";
 import {
   buildCalendarBucketPlan,
   createQueryTime,
@@ -477,9 +473,15 @@ export function executePrivateQuery(
       const interval = parseInterval(input.url);
       const filters = parseFilterUrlForAudience("private-dashboard", input.url);
       const goalId = input.url.searchParams.get("id")?.trim() ?? "";
+      const diagnostics = createAnalyticsReadDiagnostics();
+      const runtime = createEdgeSiteAnalyticsRuntime({
+        env: input.env,
+        siteId: input.siteId,
+        diagnostics,
+      });
       let goal;
       try {
-        goal = await queryGoalDefinition(input.env, input.siteId, goalId);
+        goal = await runtime.resources.goals.get(input.siteId, goalId);
       } catch {
         return queryErrorResponse({ kind: "internal", operation });
       }
@@ -498,7 +500,6 @@ export function executePrivateQuery(
           reason: "too-many-buckets",
         });
       }
-      const diagnostics = createAnalyticsReadDiagnostics();
       const query = {
         context: queryContext,
         time: createQueryTime(
@@ -511,22 +512,16 @@ export function executePrivateQuery(
         goalId,
         ...(input.pathname === "goal-timeseries" ? { interval } : {}),
       };
-      return createEdgeSiteAnalyticsRuntime({
-        env: input.env,
-        siteId: input.siteId,
-        diagnostics,
-      })
-        .execute(operation, query, { cost })
-        .then((result) => {
-          if (!result.ok) return queryErrorResponse(result.error);
-          if (!result.data) return notFound();
-          return jsonResponseWith(
-            ctx!,
-            { ok: true, data: result.data },
-            200,
-            analyticsDiagnosticHeaders(result.meta.source, diagnostics),
-          );
-        });
+      return runtime.execute(operation, query, { cost }).then((result) => {
+        if (!result.ok) return queryErrorResponse(result.error);
+        if (!result.data) return notFound();
+        return jsonResponseWith(
+          ctx!,
+          { ok: true, data: result.data },
+          200,
+          analyticsDiagnosticHeaders(result.meta.source, diagnostics),
+        );
+      });
     })();
   }
   if (input.pathname === "goals") {
@@ -633,7 +628,7 @@ export async function executePrivateTeamDashboard(
     interval,
     allowedSiteIds: input.allowedSiteIds,
     diagnostics,
-  }).execute<SsrTeamDashboardData>("team-dashboard", {
+  }).execute("team-dashboard", {
     context: teamQueryContext(
       input.teamId,
       "private-dashboard",

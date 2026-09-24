@@ -1,4 +1,4 @@
-import type { QueryInput, QueryTime } from "@/lib/edge/analytics/contract";
+import type { QueryTime } from "@/lib/edge/analytics/contract";
 import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import {
   currentInvocationLogger,
@@ -10,24 +10,17 @@ export interface D1SiteRuntimeBindings {
   readonly siteId: string;
   readonly diagnostics?: D1ReadDiagnostics;
 }
-export type RuntimeQuery = QueryInput & {
-  readonly time: QueryTime;
-  readonly [key: string]: unknown;
-};
-export function query(input: QueryInput): RuntimeQuery {
-  return input as RuntimeQuery;
-}
-export function stringField(
-  input: RuntimeQuery,
-  name: string,
+export function stringField<Input extends object, Field extends keyof Input>(
+  input: Input,
+  name: Field,
   fallback = "",
 ): string {
   const value = input[name];
   return typeof value === "string" ? value : fallback;
 }
-export function numberField(
-  input: RuntimeQuery,
-  name: string,
+export function numberField<Input extends object, Field extends keyof Input>(
+  input: Input,
+  name: Field,
   fallback: number,
 ): number {
   const value = input[name];
@@ -50,9 +43,9 @@ export function measured<T>(
     ? logger.measure(operation, () => runWithD1Operation(operation, action))
     : action();
 }
-export function arrayField(
-  input: RuntimeQuery,
-  name: string,
+export function arrayField<Input extends object, Field extends keyof Input>(
+  input: Input,
+  name: Field,
 ): readonly unknown[] {
   return Array.isArray(input[name]) ? input[name] : [];
 }

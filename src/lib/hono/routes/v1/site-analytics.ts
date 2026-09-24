@@ -249,27 +249,31 @@ export function registerV1SiteAnalyticsRoutes(
   routes.post("/sites/:siteId/analytics/goals/summary", (c) => {
     const siteId = c.req.param("siteId");
     if (!siteId) return deps.resourceNotFound(c);
+    const runtime = analyticsRuntime(c, siteId);
     return handlePlannedSiteGoalSummary(
       c.env,
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      queryExecutor(c, siteId),
+      runtime,
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      runtime.resources.goals,
     );
   });
   routes.post("/sites/:siteId/analytics/goals/timeseries", (c) => {
     const siteId = c.req.param("siteId");
     if (!siteId) return deps.resourceNotFound(c);
+    const runtime = analyticsRuntime(c, siteId);
     return handlePlannedSiteGoalTimeseries(
       c.env,
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      queryExecutor(c, siteId),
+      runtime,
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      runtime.resources.goals,
     );
   });
   routes.post("/sites/:siteId/analytics/performance/summary", (c) => {

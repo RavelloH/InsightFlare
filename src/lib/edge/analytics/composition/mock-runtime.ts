@@ -2,10 +2,11 @@
 
 import {
   AnalyticsProviderRegistry,
-  typedQueryProvider,
+  typedQueryProviderFor,
 } from "@/lib/edge/analytics/application/provider-registry";
 import type {
   BaseQuery,
+  CanonicalResult,
   QueryContext,
   QueryOperation,
 } from "@/lib/edge/analytics/contract";
@@ -28,11 +29,16 @@ export interface MockQueryRuntimeInput extends DemoQueryRuntimeInput {
 export function createMockAnalyticsQueryRuntime(input: MockQueryRuntimeInput) {
   const providerRegistry = new AnalyticsProviderRegistry().register(
     input.operation,
-    typedQueryProvider(async (query) => {
-      const resolvedScope = query?.scopePlan?.scope;
-      const demoInput = resolvedScope ? { ...input, resolvedScope } : input;
+    typedQueryProviderFor(input.operation, async (query) => {
+      const resolvedScope =
+        "scopePlan" in query ? query.scopePlan?.scope : undefined;
+      const demoInput = resolvedScope
+        ? { ...input, query, resolvedScope }
+        : { ...input, query };
       return {
-        value: await executeDemoQueryPayload(demoInput),
+        value: (await executeDemoQueryPayload(
+          demoInput,
+        )) as unknown as CanonicalResult<typeof input.operation>,
         source: "mock" as const,
       };
     }),

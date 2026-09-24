@@ -16,21 +16,12 @@ export type {
   SortDirection,
   VisitorListSortKey,
 } from "@/lib/edge/analytics/contract";
+export type { TeamSiteRow } from "@/lib/edge/analytics/contract";
 export {
   DEFAULT_EVENT_RECORD_SORT,
   DEFAULT_SESSION_LIST_SORT,
   DEFAULT_VISITOR_LIST_SORT,
 } from "@/lib/edge/analytics/contract";
-export interface TeamSiteRow {
-  id: string;
-  teamId: string;
-  name: string;
-  domain: string;
-  publicEnabled: number;
-  publicSlug: string | null;
-  createdAt: number;
-  updatedAt: number;
-}
 export interface OverviewAggregateRow {
   views: number;
   sessions: number;

@@ -1,36 +1,14 @@
 import type { ComparisonRuntime } from "@/lib/edge/analytics/application/comparison-runtime";
 import {
   type AnalyticsProviderRegistry,
-  typedQueryProvider,
+  typedQueryProviderFor,
 } from "@/lib/edge/analytics/application/provider-registry";
-import type {
-  AnalyticsResult,
-  ComparisonBreakdownQuery,
-  ComparisonBreakdownResult,
-  ComparisonMetricKey,
-  ComparisonQuery,
-  ComparisonResult,
-  ComparisonTrendQuery,
-  ComparisonTrendResult,
-  QueryInput,
-} from "@/lib/edge/analytics/contract";
+import type { ComparisonTrendQuery } from "@/lib/edge/analytics/contract";
 import {
   executeComparison,
   executeComparisonBreakdown,
   executeComparisonTrend,
 } from "@/lib/edge/analytics/contract/comparison";
-
-type ComparisonExecutionQuery = ComparisonQuery & {
-  readonly interval?: ComparisonTrendQuery["interval"];
-  readonly trendMetrics?: readonly ComparisonMetricKey[];
-};
-type ComparisonReportResult = AnalyticsResult<
-  ComparisonResult & { readonly trend?: ComparisonTrendResult }
->;
-
-function comparisonQuery(input: QueryInput): ComparisonExecutionQuery {
-  return input as ComparisonExecutionQuery;
-}
 
 /** Register comparison operations beside the site's or team's canonical queries. */
 export function registerComparisonQueryProviders(
@@ -39,8 +17,7 @@ export function registerComparisonQueryProviders(
 ): void {
   registry.register(
     "comparison",
-    typedQueryProvider<ComparisonReportResult>(async (input, execution) => {
-      const query = comparisonQuery(input!);
+    typedQueryProviderFor("comparison", async (query, execution) => {
       const report = await executeComparison(
         query,
         runtime.providers.overview,
@@ -80,14 +57,12 @@ export function registerComparisonQueryProviders(
 
   registry.register(
     "comparison-breakdown",
-    typedQueryProvider<AnalyticsResult<ComparisonBreakdownResult>>(
-      async (input, execution) => ({
-        value: await executeComparisonBreakdown(
-          input as ComparisonBreakdownQuery,
-          runtime.providers.breakdown,
-          execution?.signal,
-        ),
-      }),
-    ),
+    typedQueryProviderFor("comparison-breakdown", async (input, execution) => ({
+      value: await executeComparisonBreakdown(
+        input,
+        runtime.providers.breakdown,
+        execution?.signal,
+      ),
+    })),
   );
 }

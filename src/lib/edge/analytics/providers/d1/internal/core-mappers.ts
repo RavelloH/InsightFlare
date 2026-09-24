@@ -87,8 +87,7 @@ export function mapTabs(rows: readonly DimensionRow[] | null | undefined) {
 }
 export function mapDimensionRows(rows: DimensionRow[]) {
   return rows.map((row) => ({
-    value: row.value,
-    // Keep label for existing public consumers while exposing the typed value.
+    key: row.value,
     label: row.value,
     views: row.views,
     sessions: row.sessions,

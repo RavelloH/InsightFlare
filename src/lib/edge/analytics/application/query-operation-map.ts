@@ -57,6 +57,9 @@ export const API_V1_QUERY_OPERATION_MAP = {
 } as const satisfies Record<AnalyticsOperationId, QueryOperation>;
 
 const API_V1_QUERY_VARIANT_MAP = {
+  "site.analytics.breakdown": "breakdown",
+  "team.analytics.breakdown": "breakdown",
+  "site.analytics.channels": "list",
   "site.analytics.performanceSummary": "summary",
   "site.analytics.performanceTimeseries": "timeseries",
   "site.analytics.performanceBreakdown": "breakdown",
@@ -67,22 +70,30 @@ const API_V1_QUERY_VARIANT_MAP = {
 } as const satisfies Partial<
   Record<
     AnalyticsOperationId,
-    Exclude<PerformanceQueryMode, "dashboard"> | RealtimeQueryMode
+    | Exclude<PerformanceQueryMode, "dashboard">
+    | RealtimeQueryMode
+    | "breakdown"
+    | "list"
   >
 >;
 
 export type CanonicalQueryOperation =
   (typeof API_V1_QUERY_OPERATION_MAP)[AnalyticsOperationId];
 
-export function canonicalQueryOperationFor(
-  operation: AnalyticsOperationId,
-): CanonicalQueryOperation {
+export function canonicalQueryOperationFor<
+  Operation extends AnalyticsOperationId,
+>(operation: Operation): (typeof API_V1_QUERY_OPERATION_MAP)[Operation] {
   return API_V1_QUERY_OPERATION_MAP[operation];
 }
 
 export function canonicalQueryVariantFor(
   operation: AnalyticsOperationId,
-): Exclude<PerformanceQueryMode, "dashboard"> | RealtimeQueryMode | undefined {
+):
+  | Exclude<PerformanceQueryMode, "dashboard">
+  | RealtimeQueryMode
+  | "breakdown"
+  | "list"
+  | undefined {
   return API_V1_QUERY_VARIANT_MAP[
     operation as keyof typeof API_V1_QUERY_VARIANT_MAP
   ];

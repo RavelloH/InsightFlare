@@ -1,5 +1,5 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
+import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
@@ -20,13 +20,7 @@ import {
   queryUtmDimensionTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
 
-import {
-  type D1SiteRuntimeBindings,
-  numberField,
-  query,
-  stringField,
-  timeWindow,
-} from "./shared";
+import { type D1SiteRuntimeBindings, timeWindow } from "./shared";
 
 export function registerTechnologyProviders(
   registry: AnalyticsProviderRegistry,
@@ -35,13 +29,13 @@ export function registerTechnologyProviders(
   registry
     .register(
       "share-trend",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("share-trend", async (input) => {
+        const request = input;
         const window = timeWindow(request.time);
-        const interval = request.interval as never;
+        const interval = request.interval;
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
-        const limit = numberField(request, "limit", 5);
-        const variant = stringField(request, "variant", "browser");
+        const limit = request.limit ?? 5;
+        const variant = request.variant;
         const value =
           variant === "browser"
             ? await queryBrowserTrendFromD1(
@@ -68,7 +62,7 @@ export function registerTechnologyProviders(
                     window,
                     interval,
                     filters,
-                    stringField(request, "dimension") as never,
+                    request.dimension,
                     limit,
                   )
                 : variant === "utm"
@@ -78,7 +72,7 @@ export function registerTechnologyProviders(
                       window,
                       interval,
                       filters,
-                      stringField(request, "dimension") as never,
+                      request.dimension,
                       limit,
                     )
                   : variant === "referrer-channel"
@@ -103,28 +97,27 @@ export function registerTechnologyProviders(
     )
     .register(
       "radar",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("radar", async (input) => {
+        const request = input;
         const window = timeWindow(request.time);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
-        const variant = stringField(request, "variant", "browser");
         const value =
-          variant === "version"
+          request.variant === "version"
             ? await queryBrowserVersionBreakdownFromD1(
                 options.env,
                 options.siteId,
                 window,
                 filters,
-                numberField(request, "browserLimit", 0),
-                numberField(request, "versionLimit", 5),
+                request.browserLimit ?? 0,
+                request.versionLimit ?? 5,
               )
-            : variant === "referrer"
+            : request.variant === "referrer"
               ? await queryReferrerRadarFromD1(
                   options.env,
                   options.siteId,
                   window,
                   filters,
-                  numberField(request, "limit", 24),
+                  request.limit ?? 24,
                 )
               : await queryBrowserRadarFromD1(
                   options.env,
@@ -137,41 +130,33 @@ export function registerTechnologyProviders(
     )
     .register(
       "cross-dimension",
-      typedQueryProvider<
-        | Awaited<ReturnType<typeof queryBrowserCrossBreakdownFromD1>>
-        | Awaited<ReturnType<typeof queryCrossDimensionFromD1>>
-      >(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("cross-dimension", async (input) => {
+        const request = input;
         const window = timeWindow(request.time);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
-        const primaryDimension = resolveCrossBreakdownDimension(
-          stringField(request, "primaryDimension"),
-        );
-        const secondaryDimension = resolveCrossBreakdownDimension(
-          stringField(request, "secondaryDimension"),
-        );
-        const browserVariant = stringField(request, "variant") === "browser";
-        if (
-          !browserVariant &&
-          (!primaryDimension ||
-            !secondaryDimension ||
-            request.primaryDimension === request.secondaryDimension)
-        ) {
-          throw new Error("unsupported-dimension");
-        }
-        if (browserVariant) {
+        if (request.variant === "browser") {
           const value = await queryBrowserCrossBreakdownFromD1(
             options.env,
             options.siteId,
             window,
             filters,
-            numberField(request, "browserLimit", 8),
-            numberField(request, "osLimit", 6),
-            numberField(request, "deviceTypeLimit", 5),
+            request.browserLimit ?? 8,
+            request.osLimit ?? 6,
+            request.deviceTypeLimit ?? 5,
           );
           return { value };
         }
-        if (!primaryDimension || !secondaryDimension) {
+        const primaryDimension = resolveCrossBreakdownDimension(
+          request.primaryDimension,
+        );
+        const secondaryDimension = resolveCrossBreakdownDimension(
+          request.secondaryDimension,
+        );
+        if (
+          !primaryDimension ||
+          !secondaryDimension ||
+          request.primaryDimension === request.secondaryDimension
+        ) {
           throw new Error("unsupported-dimension");
         }
         const value = await queryCrossDimensionFromD1(
@@ -179,8 +164,8 @@ export function registerTechnologyProviders(
           options.siteId,
           window,
           filters,
-          numberField(request, "primaryLimit", 5),
-          numberField(request, "secondaryLimit", 6),
+          request.primaryLimit,
+          request.secondaryLimit,
           primaryDimension,
           secondaryDimension,
         );

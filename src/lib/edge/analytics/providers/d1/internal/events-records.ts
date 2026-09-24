@@ -517,7 +517,7 @@ LIMIT 1
   if (!record) return null;
   const detail = await readCustomEventDetail(env, siteId, eventId);
   return {
-    event: { ...mapEventRecord(record), eventKind: "custom_event" },
+    event: { ...mapEventRecord(record), eventKind: "custom_event" as const },
     context: {
       visitId: record.visitId,
       sessionId: record.sessionId,

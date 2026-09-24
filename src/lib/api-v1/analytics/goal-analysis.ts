@@ -29,7 +29,6 @@ import {
   GOAL_TIMESERIES_MAX_BUCKETS,
   goalQueryCost,
 } from "@/lib/edge/analytics/application/goal-cost";
-import { queryGoalDefinition } from "@/lib/edge/analytics/composition/d1/goals";
 import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   attachSavedFilterScopePreference,
@@ -45,6 +44,7 @@ import {
   savedFilterScopePreferenceFromDocument,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import type { GoalDefinitionResource } from "@/lib/edge/analytics/resources/goals";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import { canAccessSiteId } from "@/lib/edge/auth/api-key-auth";
 import type { Env } from "@/lib/edge/types";
@@ -139,6 +139,7 @@ async function executeGoalQuery(
   siteId: string,
   executor: AnalyticsQueryExecutor,
   definitions: AnalysisDefinitionReader | undefined,
+  goalDefinitions: GoalDefinitionResource | undefined,
   kind: "summary" | "timeseries",
   execution: {
     readonly signal?: AbortSignal;
@@ -269,7 +270,8 @@ async function executeGoalQuery(
 
   let goal;
   try {
-    goal = await queryGoalDefinition(env, siteId, value.goalId);
+    if (!goalDefinitions) throw new Error("goal_definition_resource_missing");
+    goal = await goalDefinitions.get(siteId, value.goalId);
   } catch {
     return requestError(
       request,
@@ -440,6 +442,7 @@ export function handlePlannedSiteGoalSummary(
     readonly deadlineMs?: number;
     readonly capturedAtMs?: number;
   } = {},
+  goalDefinitions?: GoalDefinitionResource,
 ) {
   return executeGoalQuery(
     env,
@@ -448,6 +451,7 @@ export function handlePlannedSiteGoalSummary(
     siteId,
     executor,
     definitions,
+    goalDefinitions,
     "summary",
     execution,
   );
@@ -464,6 +468,7 @@ export function handlePlannedSiteGoalTimeseries(
     readonly deadlineMs?: number;
     readonly capturedAtMs?: number;
   } = {},
+  goalDefinitions?: GoalDefinitionResource,
 ) {
   return executeGoalQuery(
     env,
@@ -472,6 +477,7 @@ export function handlePlannedSiteGoalTimeseries(
     siteId,
     executor,
     definitions,
+    goalDefinitions,
     "timeseries",
     execution,
   );

@@ -8,6 +8,8 @@ import {
 } from "@/lib/edge/analytics/application/cost";
 import type {
   AnalyticsResult,
+  CanonicalQuery,
+  CanonicalResult,
   EntitySetExpression,
   FilterScope,
   QueryInput,
@@ -62,15 +64,17 @@ export type AnalyticsApplicationErrorHandler = (
  * The only application invocation shape. Route, SSR, and protocol adapters
  * normalize their own inputs before creating this object.
  */
-export interface TypedQueryOperationInvocation<Result> {
+export interface TypedQueryOperationInvocation<
+  Operation extends QueryOperation,
+> {
   readonly kind: "typed-query";
-  readonly operation: QueryOperation;
-  readonly query: QueryInput;
+  readonly operation: Operation;
+  readonly query: CanonicalQuery<Operation>;
   readonly providerRegistry: AnalyticsProviderRegistry;
   readonly cache?: {
     readonly key: string;
     readonly policy: OperationCachePolicy;
-    readonly isCacheable?: (value: Result) => boolean;
+    readonly isCacheable?: (value: CanonicalResult<Operation>) => boolean;
   };
 }
 type ExecutionFailure = {
@@ -155,34 +159,6 @@ class UncacheableResult extends Error {
     super("analytics result must not enter cache");
   }
 }
-/**
- * Provider payloads for the legacy API overview/timeseries adapters contain
- * an inner AnalyticsResult envelope. That envelope is still a provider
- * payload for cache purposes, so refresh its request metadata after a cache
- * hit instead of making requested Auto/concrete scope part of semantic
- * identity.
- */
-function rehydrateScopedProviderValue<Result>(
-  value: Result,
-  query: QueryInput,
-): Result {
-  if (!query.scopePlan || !value || typeof value !== "object") return value;
-  const candidate = value as {
-    readonly ok?: unknown;
-    readonly meta?: Record<string, unknown>;
-  };
-  if (candidate.ok !== true || !candidate.meta) return value;
-  return {
-    ...(value as Record<string, unknown>),
-    meta: {
-      ...candidate.meta,
-      filterScope: {
-        requested: query.scopePreference ?? "auto",
-        resolved: query.scopePlan.scope,
-      },
-    },
-  } as Result;
-}
 export class TypedQueryApplicationService {
   constructor(
     private readonly cache?: OperationResultCache,
@@ -204,10 +180,10 @@ export class TypedQueryApplicationService {
       : null;
   }
 
-  private async executeTypedQuery<Result>(
-    invocation: TypedQueryOperationInvocation<Result>,
+  private async executeTypedQuery<Operation extends QueryOperation>(
+    invocation: TypedQueryOperationInvocation<Operation>,
     executionContext: QueryExecutionContext,
-  ): Promise<AnalyticsResult<Result>> {
+  ): Promise<AnalyticsResult<CanonicalResult<Operation>>> {
     emit(executionContext, "start");
 
     const before = executionDomainError(executionContext);
@@ -281,7 +257,7 @@ export class TypedQueryApplicationService {
     }
 
     try {
-      const provider = invocation.providerRegistry.resolve<Result>(
+      const provider = invocation.providerRegistry.resolve<Operation>(
         invocation.operation,
       );
       if (!provider) {
@@ -291,9 +267,14 @@ export class TypedQueryApplicationService {
           error: { kind: "internal", operation: invocation.operation },
         };
       }
-      const load = async (): Promise<TypedQueryProviderResult<Result>> =>
-        provider.execute(preparedQuery, executionContext);
-      let result: TypedQueryProviderResult<Result>;
+      const load = async (): Promise<
+        TypedQueryProviderResult<CanonicalResult<Operation>>
+      > =>
+        provider.execute(
+          preparedQuery as CanonicalQuery<Operation>,
+          executionContext,
+        );
+      let result: TypedQueryProviderResult<CanonicalResult<Operation>>;
       if (!invocation.cache || !this.cache) {
         result = await load();
       } else {
@@ -313,13 +294,11 @@ export class TypedQueryApplicationService {
           ).value;
         } catch (error) {
           if (!(error instanceof UncacheableResult)) throw error;
-          result = error.value as TypedQueryProviderResult<Result>;
+          result = error.value as TypedQueryProviderResult<
+            CanonicalResult<Operation>
+          >;
         }
       }
-      result = {
-        ...result,
-        value: rehydrateScopedProviderValue(result.value, preparedQuery),
-      };
       const time =
         "time" in preparedQuery
           ? (preparedQuery as QueryInput & { readonly time: QueryTime }).time
@@ -391,10 +370,10 @@ export class TypedQueryApplicationService {
    * Executes a registered canonical query. Providers receive only the
    * normalized query object, never HTTP/auth objects or route DTOs.
    */
-  async execute<Result>(
-    invocation: TypedQueryOperationInvocation<Result>,
+  async execute<Operation extends QueryOperation>(
+    invocation: TypedQueryOperationInvocation<Operation>,
     executionContext: QueryExecutionContext = {},
-  ): Promise<AnalyticsResult<Result>> {
+  ): Promise<AnalyticsResult<CanonicalResult<Operation>>> {
     return this.executeTypedQuery(invocation, executionContext);
   }
 }

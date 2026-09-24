@@ -34,14 +34,15 @@ export async function handleOverviewGeoPointsContract(
     : withoutGeoFilter(
         parseFilterUrlForAudience(queryContext.policy.audience, url),
       );
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<
-    Record<string, unknown> & { readonly points: readonly unknown[] }
-  >("geo-points", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-    limit: parseLimit(url, 5000, 20000),
-  } as BaseQuery & { readonly limit: number });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "geo-points",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+      limit: parseLimit(url, 5000, 20000),
+    } as BaseQuery & { readonly limit: number },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   const { points, ...summary } = result.data;
   return jsonResponseWith(ctx!, { ok: true, ...summary, data: points });

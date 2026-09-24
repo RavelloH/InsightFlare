@@ -553,6 +553,32 @@ export function collectArchitectureViolations(
       );
     }
 
+    if (
+      relative === "src/lib/edge/analytics/contract/canonical-operation-map.ts"
+    ) {
+      if (
+        !/Exclude<\s*QueryOperation,\s*keyof CanonicalOperationMap\s*>/u.test(
+          sourceText,
+        ) ||
+        !/AssertNever<MissingCanonicalOperations>/u.test(sourceText)
+      ) {
+        violations.push({
+          rule: "canonical-operation-map-missing-coverage-check",
+          source: relative,
+          specifier: "<source text>",
+          target: relative,
+          line: 1,
+          message:
+            "CanonicalOperationMap must assert that every QueryOperation is mapped.",
+        });
+      }
+      addSourceRuleViolation(
+        "canonical-query-index-signature",
+        /readonly\s*\[\s*key\s*:\s*string\s*\]\s*:\s*unknown/u,
+        "Canonical operation queries must use declared fields instead of an unknown index signature.",
+      );
+    }
+
     for (const imported of importsIn(sourceText, absolute)) {
       const resolved = resolveInternalImport(
         root,
@@ -585,6 +611,23 @@ export function collectArchitectureViolations(
           message: "Project alias does not resolve to a source module.",
         });
         continue;
+      }
+      if (
+        (isWithin(relative, "src/lib/api-v1") ||
+          isWithin(relative, "src/lib/edge/analytics/interfaces/dashboard")) &&
+        /src\/lib\/edge\/analytics\/(?:composition\/d1\/(?:goals|funnels)|providers\/d1\/(?:internal|resources)\/(?:goals|funnels))/u.test(
+          resolved,
+        )
+      ) {
+        violations.push({
+          rule: "analytics-interface-d1-definition-repository",
+          source: relative,
+          specifier: imported.specifier,
+          target: resolved,
+          line: imported.line,
+          message:
+            "API v1 and Dashboard interfaces must access Goal/Funnel definitions through analytics resources composed by the runtime.",
+        });
       }
       for (const finding of ruleViolations(relative, resolved)) {
         if (

@@ -12,7 +12,7 @@ import {
 import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import type {
   AnalyticsResult,
-  BaseQuery,
+  CanonicalQuery,
   QueryInput,
   QueryTime,
 } from "@/lib/edge/analytics/contract";
@@ -147,49 +147,6 @@ function serviceError<Result>(
 function serializeApiV1Result(operation: AnalyticsOperationId, value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const result = value as Record<string, unknown>;
-  if (operation === "site.analytics.breakdown" && Array.isArray(result.items)) {
-    return {
-      ...result,
-      items: result.items.map((item) => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) {
-          return item;
-        }
-        const { value: dimensionValue, ...fields } = item as Record<
-          string,
-          unknown
-        >;
-        return {
-          ...fields,
-          key:
-            typeof fields.key === "string"
-              ? fields.key
-              : typeof dimensionValue === "string"
-                ? dimensionValue
-                : "",
-        };
-      }),
-    };
-  }
-  if (operation === "site.analytics.channels" && Array.isArray(result.data)) {
-    return {
-      items: result.data.map((item) => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) {
-          return item;
-        }
-        const row = item as Record<string, unknown>;
-        const { label, ...metrics } = row;
-        return {
-          ...metrics,
-          channel:
-            typeof row.channel === "string"
-              ? row.channel
-              : typeof label === "string"
-                ? label
-                : "",
-        };
-      }),
-    };
-  }
   if (
     operation === "site.analytics.filterValues" &&
     result.data &&
@@ -368,9 +325,9 @@ export async function executeApiV1Query<Query, Result>(
     context: invocation.context,
     time: { ...time, paginationBinding: requestBinding },
     ...(canonicalVariant ? { mode: canonicalVariant } : {}),
-  } as BaseQuery & Readonly<Record<string, unknown>>;
+  } as CanonicalQuery<typeof operation>;
   let providerError: unknown;
-  const result = await invocation.executor.execute<Result>(operation, query, {
+  const canonicalResult = await invocation.executor.execute(operation, query, {
     ...executionContext,
     operation: invocation.operation,
     ...(invocation.cache
@@ -388,6 +345,7 @@ export async function executeApiV1Query<Query, Result>(
       executionContext.onProviderError?.(error);
     },
   });
+  const result = canonicalResult as AnalyticsResult<Result>;
   if (!result.ok && result.error.kind === "internal") {
     if (providerError) {
       return Promise.reject(

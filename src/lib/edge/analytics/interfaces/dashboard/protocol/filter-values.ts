@@ -1,5 +1,4 @@
 import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
-import type { FilterValuesResult } from "@/lib/edge/analytics/contract";
 import {
   analyticsFilterDefinition,
   type FilterValuesQuery,
@@ -60,7 +59,7 @@ export async function handleFilterValuesContract(
   const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
-  }).execute<FilterValuesResult>("filter-values", query);
+  }).execute("filter-values", query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }

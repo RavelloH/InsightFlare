@@ -67,5 +67,21 @@ describe("site realtime canonical provider", () => {
     await expect(
       provider.execute({ ...baseQuery, mode: "invalid" } as never),
     ).rejects.toThrow("unsupported-realtime-query-mode");
+
+    const defaultedQuery: RealtimeQuery = {
+      context: baseQuery.context,
+      time: baseQuery.time,
+      filters: baseQuery.filters,
+      mode: "snapshot",
+    };
+    await provider.execute(defaultedQuery);
+    expect(readSiteRealtimeSnapshot).toHaveBeenLastCalledWith({
+      env,
+      siteId: "site-1",
+      startMs: 100,
+      endExclusiveMs: 200,
+      limit: 20,
+      signal: undefined,
+    });
   });
 });

@@ -53,22 +53,17 @@ export async function handleEventTypesContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly items: readonly unknown[];
-    readonly pagination: {
-      readonly limit: number;
-      readonly returned: number;
-      readonly hasMore: boolean;
-      readonly nextCursor: string | null;
-    };
-  }>("event-types", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-    limit: parseLimit(url, 20, 200),
-    search: url.searchParams.get("search")?.trim() ?? "",
-    cursor: url.searchParams.get("cursor") ?? "",
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-types",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+      limit: parseLimit(url, 20, 200),
+      search: url.searchParams.get("search")?.trim() ?? "",
+      cursor: url.searchParams.get("cursor") ?? "",
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
@@ -82,20 +77,14 @@ export async function handleEventsSummaryContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly summary: {
-      readonly events: number;
-      readonly eventTypes: number;
-      readonly sessions: number;
-      readonly visitors: number;
-      readonly avgEventsPerSession: number;
-    };
-    readonly cards: readonly unknown[];
-  }>("event-summary", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-summary",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
@@ -110,18 +99,17 @@ export async function handleEventsTrendContract(
   if (!window) return badRequest("Invalid time window");
   const interval = parseInterval(url);
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly interval: ReturnType<typeof parseInterval>;
-    readonly series: readonly unknown[];
-    readonly data: readonly unknown[];
-  }>("event-trend", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-    interval,
-    limit: parseLimit(url, 8, 18),
-    eventName: parseEventName(url) ?? "",
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-trend",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+      interval,
+      limit: parseLimit(url, 8, 18),
+      eventName: parseEventName(url) ?? "",
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
@@ -138,23 +126,18 @@ export async function handleEventRecordsContract(
   const sort = parseEventRecordSort(url);
   const rawCursor = url.searchParams.get("cursor");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly items: readonly unknown[];
-    readonly pagination: {
-      readonly limit: number;
-      readonly returned: number;
-      readonly hasMore: boolean;
-      readonly nextCursor: string | null;
-    };
-  }>("event-records", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-    page: { limit, cursor: rawCursor },
-    sort,
-    search: parseListSearch(url) ?? "",
-    eventName: parseEventName(url) ?? "",
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-records",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+      page: { limit, cursor: rawCursor },
+      sort,
+      search: parseListSearch(url) ?? "",
+      eventName: parseEventName(url) ?? "",
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }
@@ -173,31 +156,23 @@ export async function handleEventFieldValuesContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly fieldPath: string;
-    readonly fieldValueType: string;
-    readonly data: {
-      readonly items: readonly unknown[];
-      readonly pagination: {
-        readonly limit: number;
-        readonly returned: number;
-        readonly hasMore: boolean;
-        readonly nextCursor: string | null;
-      };
-    };
-  }>("event-field-values", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-    eventName: eventName ?? "",
-    fieldPath,
-    fieldValueType,
-    limit: parseLimit(url, 25, 100),
-    search: parseListSearch(url) ?? "",
-    cursor: url.searchParams.get("cursor") ?? "",
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-field-values",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+      eventName: eventName ?? "",
+      fieldPath,
+      fieldValueType,
+      limit: parseLimit(url, 25, 100),
+      search: parseListSearch(url) ?? "",
+      cursor: url.searchParams.get("cursor") ?? "",
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...result.data });
+  const { eventName: _eventName, ...data } = result.data;
+  return jsonResponseWith(ctx!, { ok: true, ...data });
 }
 function parseEventContextCardKeys(url: URL): EventContextCardKey[] | null {
   const raw = url.searchParams.get("cards")?.trim();
@@ -225,25 +200,17 @@ export async function handleEventTypeFieldsContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly eventName: string;
-    readonly data: {
-      readonly items: readonly unknown[];
-      readonly pagination: {
-        readonly limit: number;
-        readonly returned: number;
-        readonly hasMore: boolean;
-        readonly nextCursor: string | null;
-      };
-    };
-  }>("event-fields", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-    eventName: eventName ?? "",
-    limit: parseLimit(url, 100, 200),
-    cursor: url.searchParams.get("cursor") ?? "",
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-fields",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+      eventName: eventName ?? "",
+      limit: parseLimit(url, 100, 200),
+      cursor: url.searchParams.get("cursor") ?? "",
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
@@ -261,17 +228,17 @@ export async function handleEventTypeContextContract(
   const selectedKeys = parseEventContextCardKeys(url);
   if (!selectedKeys) return badRequest("Valid context cards are required");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly eventName: string;
-    readonly cards: Record<string, unknown>;
-  }>("event-context", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-    eventName,
-    selectedKeys,
-    limit: 100,
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-context",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+      eventName,
+      selectedKeys,
+      limit: 100,
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
@@ -293,26 +260,18 @@ export async function handleEventTypeDetailContract(
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
   const includeContext = options?.includeContext ?? true;
   const includeBreakdowns = options?.includeBreakdowns ?? true;
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly eventName: string;
-    readonly summary: Record<string, unknown>;
-    readonly trend: Record<string, unknown>;
-    readonly breakdowns: {
-      readonly pages: readonly unknown[];
-      readonly countries: readonly unknown[];
-      readonly devices: readonly unknown[];
-      readonly browsers: readonly unknown[];
-    };
-    readonly cards: Record<string, unknown>;
-  }>("event-type-detail", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters,
-    eventName,
-    interval: parseInterval(url),
-    includeContext,
-    includeBreakdowns,
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-type-detail",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters,
+      eventName,
+      interval: parseInterval(url),
+      includeContext,
+      includeBreakdowns,
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, ...result.data });
 }
@@ -327,14 +286,15 @@ export async function handleEventRecordDetailContract(
   if (!eventId) return badRequest("eventId is required");
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<
-    Record<string, unknown>
-  >("event-record-detail", {
-    context: queryContext,
-    time: queryWindowToTime(window),
-    filters: { version: 1, root: null },
-    eventId,
-  });
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "event-record-detail",
+    {
+      context: queryContext,
+      time: queryWindowToTime(window),
+      filters: { version: 1, root: null },
+      eventId,
+    },
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, { ok: true, data: result.data });
 }

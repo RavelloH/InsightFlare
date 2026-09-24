@@ -1,11 +1,5 @@
+import { funnelAnalysisCost } from "@/lib/edge/analytics/application/funnel-cost";
 import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
-import {
-  archiveFunnelDefinition,
-  createFunnelDefinition,
-  funnelAnalysisCost,
-  queryFunnelDefinition,
-  updateFunnelDefinition,
-} from "@/lib/edge/analytics/composition/d1/funnels";
 import {
   type FunnelConfigV2,
   parseFilterUrlForAudience,
@@ -26,6 +20,7 @@ import {
   queryErrorResponse,
   type ResponseContext,
 } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import type { FunnelDefinitionResource } from "@/lib/edge/analytics/resources/funnels";
 import { appNow } from "@/lib/edge/runtime/e2e-clock";
 import type { Env } from "@/lib/edge/types";
 import { ONE_DAY_MS } from "@/lib/edge/utils";
@@ -53,10 +48,7 @@ export async function handleFunnelAnalysisContract(
     const result = await createEdgeSiteAnalyticsRuntime({
       env,
       siteId,
-    }).execute<{
-      readonly items: readonly unknown[];
-      readonly pagination: Record<string, unknown>;
-    }>("funnel-analysis", {
+    }).execute("funnel-analysis", {
       context: queryContext,
       // Definition listing has no analytic time range. Keep it contract-bound
       // to the default dashboard range without altering its source query.
@@ -73,10 +65,7 @@ export async function handleFunnelAnalysisContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const filters = parseFilterUrlForAudience(queryContext.policy.audience, url);
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly funnel: Record<string, unknown> | null;
-    readonly analysis: Record<string, unknown> | null;
-  }>(
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
     "funnel-analysis",
     {
       context: queryContext,
@@ -87,6 +76,9 @@ export async function handleFunnelAnalysisContract(
     { cost: funnelAnalysisCost(window.endExclusiveMs - window.startMs) },
   );
   if (!result.ok) return queryErrorResponse(result.error);
+  if (!("funnel" in result.data)) {
+    throw new Error("funnel_analysis_result_mismatch");
+  }
   if (!result.data.funnel) return notFound();
   if (!result.data.analysis) return badRequest("Funnel has fewer than 2 steps");
   return jsonResponseWith(ctx!, {
@@ -153,7 +145,7 @@ function invalidConfigResponse(error: unknown): Response | null {
     : null;
 }
 async function handleFunnelCreate(
-  env: Env,
+  resource: FunnelDefinitionResource,
   siteId: string,
   request: Request,
   ctx?: ResponseContext,
@@ -163,12 +155,7 @@ async function handleFunnelCreate(
   const input = writeConfig(body);
   if (!input) return badRequest("Invalid funnel configuration");
   try {
-    const funnel = await createFunnelDefinition(
-      env,
-      siteId,
-      input.name,
-      input.config,
-    );
+    const funnel = await resource.create(siteId, input.name, input.config);
     return jsonResponseWith(ctx, { ok: true, data: { funnel } }, 201);
   } catch (error) {
     const response = invalidConfigResponse(error);
@@ -177,7 +164,7 @@ async function handleFunnelCreate(
   }
 }
 async function handleFunnelUpdate(
-  env: Env,
+  resource: FunnelDefinitionResource,
   siteId: string,
   url: URL,
   request: Request,
@@ -185,7 +172,7 @@ async function handleFunnelUpdate(
 ): Promise<Response> {
   const funnelId = url.searchParams.get("id")?.trim();
   if (!funnelId) return badRequest("Funnel id is required");
-  const current = await queryFunnelDefinition(env, siteId, funnelId);
+  const current = await resource.get(siteId, funnelId);
   if (!current) return notFound();
   const body = await readWriteBody(request);
   if (body instanceof Response) return body;
@@ -222,13 +209,7 @@ async function handleFunnelUpdate(
     steps: (body.steps ?? current.steps) as FunnelConfigV2["steps"],
   };
   try {
-    const funnel = await updateFunnelDefinition(
-      env,
-      siteId,
-      funnelId,
-      name,
-      config,
-    );
+    const funnel = await resource.update(siteId, funnelId, name, config);
     return jsonResponseWith(ctx, { ok: true, data: { funnel } });
   } catch (error) {
     const response = invalidConfigResponse(error);
@@ -237,14 +218,14 @@ async function handleFunnelUpdate(
   }
 }
 async function handleFunnelDelete(
-  env: Env,
+  resource: FunnelDefinitionResource,
   siteId: string,
   url: URL,
   ctx?: ResponseContext,
 ): Promise<Response> {
   const funnelId = url.searchParams.get("id")?.trim();
   if (!funnelId) return badRequest("Funnel id is required");
-  await archiveFunnelDefinition(env, siteId, funnelId);
+  await resource.archive(siteId, funnelId);
   return jsonResponseWith(ctx, { ok: true });
 }
 /** Private Funnel definition resource protocol. */
@@ -255,6 +236,10 @@ export async function handleFunnel(
   ctx?: ResponseContext,
   request?: Request,
 ): Promise<Response> {
+  const resource: FunnelDefinitionResource = createEdgeSiteAnalyticsRuntime({
+    env,
+    siteId,
+  }).resources.funnels;
   const method = request?.method ?? "GET";
   if (method === "GET") {
     return handleFunnelAnalysisContract(
@@ -266,9 +251,10 @@ export async function handleFunnel(
     );
   }
   if (method === "POST" && request)
-    return handleFunnelCreate(env, siteId, request, ctx);
+    return handleFunnelCreate(resource, siteId, request, ctx);
   if (method === "PATCH" && request)
-    return handleFunnelUpdate(env, siteId, url, request, ctx);
-  if (method === "DELETE") return handleFunnelDelete(env, siteId, url, ctx);
+    return handleFunnelUpdate(resource, siteId, url, request, ctx);
+  if (method === "DELETE")
+    return handleFunnelDelete(resource, siteId, url, ctx);
   return notAllowed();
 }

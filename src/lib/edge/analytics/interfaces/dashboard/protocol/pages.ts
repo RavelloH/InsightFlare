@@ -1,15 +1,11 @@
 import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
-  type Interval,
   type PagesDashboardComparisonQuery,
   type PagesDashboardQuery,
   type PagesQuery,
-  type PagesResult,
   previousComparableWindow,
   type ReferrersQuery,
-  type ReferrersResult,
-  type ReferrerSummaryResult,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract";
@@ -33,46 +29,6 @@ import {
   mapTabs,
 } from "@/lib/edge/analytics/interfaces/dashboard/protocol/serializers";
 import type { Env } from "@/lib/edge/types";
-interface PagesWithTabsResult {
-  readonly pages: PagesResult;
-  readonly tabs: {
-    readonly path: readonly {
-      value: string;
-      views: number;
-      sessions: number;
-      visitors: number;
-    }[];
-    readonly title: readonly {
-      value: string;
-      views: number;
-      sessions: number;
-      visitors: number;
-    }[];
-    readonly hostname: readonly {
-      value: string;
-      views: number;
-      sessions: number;
-      visitors: number;
-    }[];
-    readonly entry: readonly {
-      value: string;
-      views: number;
-      sessions: number;
-      visitors: number;
-    }[];
-    readonly exit: readonly {
-      value: string;
-      views: number;
-      sessions: number;
-      visitors: number;
-    }[];
-  };
-}
-interface PagesDashboardRuntimeResult {
-  readonly items: readonly unknown[];
-  readonly pagination: PagesResult["pagination"];
-  readonly interval: Interval;
-}
 export async function handlePagesContract(
   env: Env,
   siteId: string,
@@ -103,11 +59,15 @@ export async function handlePagesContract(
   const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
-  }).execute<PagesResult | PagesWithTabsResult>("pages", query);
+  }).execute("pages", query);
   if (!result.ok) return queryErrorResponse(result.error);
-  const pagesResult = includeTabs
-    ? (result.data as PagesWithTabsResult).pages
-    : (result.data as PagesResult);
+  const pagesResult =
+    "pages" in result.data
+      ? result.data.pages
+      : "items" in result.data && "pagination" in result.data
+        ? result.data
+        : null;
+  if (!pagesResult) throw new Error("pages_result_shape_mismatch");
   const payload: Record<string, unknown> = {
     ok: true,
     data: {
@@ -116,7 +76,10 @@ export async function handlePagesContract(
     },
   };
   if (includeTabs) {
-    const tabs = (result.data as PagesWithTabsResult).tabs;
+    if (!("tabs" in result.data)) {
+      throw new Error("pages_tabs_result_shape_mismatch");
+    }
+    const tabs = result.data.tabs;
     payload.tabs = {
       path: mapTabs(tabs.path),
       title: mapTabs(tabs.title),
@@ -165,8 +128,11 @@ export async function handleReferrersContract(
   const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
-  }).execute<ReferrersResult>("referrers", query);
+  }).execute("referrers", query);
   if (!result.ok) return queryErrorResponse(result.error);
+  if (!("items" in result.data)) {
+    throw new Error("referrers_result_shape_mismatch");
+  }
   return jsonResponseWith(ctx!, {
     ok: true,
     data: {
@@ -189,7 +155,7 @@ export async function handleReferrerSummaryContract(
   const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
-  }).execute<ReferrerSummaryResult>("referrers", {
+  }).execute("referrers", {
     context: queryContext,
     time: queryWindowToTime(window),
     filters,
@@ -291,7 +257,7 @@ export async function handlePagesDashboardContract(
   const result = await createEdgeSiteAnalyticsRuntime({
     env,
     siteId,
-  }).execute<PagesDashboardRuntimeResult>("pages-dashboard", {
+  }).execute("pages-dashboard", {
     context: queryContext,
     time: queryWindowToTime(window),
     filters,

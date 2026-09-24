@@ -1,3 +1,7 @@
+import { createD1FunnelDefinitionResource } from "@/lib/edge/analytics/providers/d1/resources/funnels";
+import { createD1GoalDefinitionResource } from "@/lib/edge/analytics/providers/d1/resources/goals";
+import type { FunnelDefinitionResource } from "@/lib/edge/analytics/resources/funnels";
+import type { GoalDefinitionResource } from "@/lib/edge/analytics/resources/goals";
 import type { Env } from "@/lib/edge/types";
 
 import { createD1SiteProviderRegistry } from "./d1/create-site-runtime";
@@ -25,11 +29,17 @@ export interface EdgeTeamAnalyticsRuntimeOptions {
 export type EdgeAnalyticsRuntime = AnalyticsQueryRuntime & {
   readonly readSiteCount: () => Promise<number>;
 };
+export type EdgeSiteAnalyticsRuntime = EdgeAnalyticsRuntime & {
+  readonly resources: {
+    readonly goals: GoalDefinitionResource;
+    readonly funnels: FunnelDefinitionResource;
+  };
+};
 
 /** Compose current Edge data sources before entering the source-neutral runtime. */
 export function createEdgeSiteAnalyticsRuntime(
   options: EdgeSiteAnalyticsRuntimeOptions,
-): EdgeAnalyticsRuntime {
+): EdgeSiteAnalyticsRuntime {
   const providerRegistry = createD1SiteProviderRegistry(options);
   registerSiteRealtimeProviders(providerRegistry, options);
   const comparisonRuntime = createComparisonRuntime({
@@ -40,6 +50,10 @@ export function createEdgeSiteAnalyticsRuntime(
   return {
     ...createSiteAnalyticsRuntime(providerRegistry),
     readSiteCount: comparisonRuntime.readSiteCount,
+    resources: {
+      goals: createD1GoalDefinitionResource(options.env),
+      funnels: createD1FunnelDefinitionResource(options.env),
+    },
   };
 }
 

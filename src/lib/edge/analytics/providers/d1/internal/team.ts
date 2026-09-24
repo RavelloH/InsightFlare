@@ -1,3 +1,4 @@
+import type { TeamDashboardData } from "@/lib/edge/analytics/contract";
 import {
   type FilterDocument,
   scopedFilterMetadata,
@@ -488,43 +489,6 @@ export async function queryTeamSitesPageFromD1(
 export interface TeamDashboardQueryResult {
   readonly data: TeamDashboardData;
   readonly source: AnalyticsDataSource;
-}
-export interface TeamDashboardOverview {
-  readonly views: number;
-  readonly sessions: number;
-  readonly visitors: number;
-  readonly bounces: number;
-  readonly totalDurationMs: number;
-  readonly avgDurationMs: number;
-  readonly bounceRate: number;
-  readonly approximateVisitors: boolean;
-}
-export interface TeamDashboardSite extends TeamSiteRow {
-  readonly overview: TeamDashboardOverview;
-  readonly changeRates: Readonly<
-    Record<
-      | "views"
-      | "visitors"
-      | "sessions"
-      | "bounceRate"
-      | "avgDurationMs"
-      | "pagesPerSession",
-      number | null
-    >
-  >;
-}
-export interface TeamDashboardTrendBucket {
-  readonly bucket: number;
-  readonly timestampMs: number;
-  readonly sites: readonly {
-    readonly siteId: string;
-    readonly views: number;
-    readonly visitors: number;
-  }[];
-}
-export interface TeamDashboardData {
-  readonly sites: readonly TeamDashboardSite[];
-  readonly trend: readonly TeamDashboardTrendBucket[];
 }
 /** Typed team dashboard reader shared by private and API v1 adapters. */
 export async function queryTeamDashboardForTeam(

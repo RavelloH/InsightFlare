@@ -1,15 +1,13 @@
 import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
+  type CanonicalDimensionQuery,
   type FilterDocument,
   type OverviewTableComparisonQuery,
   parseFilterUrlForAudience,
   previousComparableWindow,
   withoutGeoFilter,
 } from "@/lib/edge/analytics/contract";
-import {
-  type DimensionQuery,
-  siteQueryContext,
-} from "@/lib/edge/analytics/contract";
+import { siteQueryContext } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract";
 import {
   parseLimit,
@@ -131,6 +129,7 @@ export async function handleSimpleDimensionContract(
     filters,
     ...(comparison
       ? {
+          mode: "overview-tab" as const,
           tab: dimension,
           limit,
           cursor: cursor ?? "",
@@ -142,24 +141,18 @@ export async function handleSimpleDimensionContract(
           reference: comparison.reference,
         }
       : {
+          mode: "breakdown" as const,
           dimension,
           limit,
           search: parseListSearch(url),
           sort: { key: sort, direction },
           page: { limit, ...(cursor ? { cursor } : {}) },
         }),
-  } as DimensionQuery & {
-    readonly tab?: string;
-    readonly current?: OverviewTableComparisonQuery["current"];
-    readonly reference?: OverviewTableComparisonQuery["reference"];
-  };
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<
-    | readonly unknown[]
-    | {
-        readonly items: readonly unknown[];
-        readonly pagination: unknown;
-      }
-  >("dimension", query);
+  } as CanonicalDimensionQuery;
+  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute(
+    "dimension",
+    query,
+  );
   if (!result.ok) return queryErrorResponse(result.error);
   if (comparison && result.data && typeof result.data === "object") {
     return jsonResponseWith(ctx!, {

@@ -7,14 +7,12 @@ import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
   type OverviewMetrics,
   type OverviewQuery,
-  type OverviewResult,
   percentChange,
   previousComparableWindow,
   queryWindowToTime,
   siteQueryContext,
   type TrendPoint,
   type TrendQuery,
-  type TrendResult,
 } from "@/lib/edge/analytics/contract";
 import {
   parseBooleanFlag,
@@ -84,7 +82,7 @@ export async function handleOverviewContract(
     env,
     siteId,
     diagnostics,
-  }).execute<OverviewResult>("overview", query);
+  }).execute("overview", query);
   if (!result.ok) return queryErrorResponse(result.error);
 
   const current = aggregateMetrics(result.data.current);
@@ -139,7 +137,7 @@ export async function handleTrendContract(
     env,
     siteId,
     diagnostics,
-  }).execute<TrendResult>("trend", query);
+  }).execute("trend", query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(
     ctx!,

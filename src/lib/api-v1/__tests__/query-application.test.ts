@@ -13,6 +13,16 @@ import {
 import { InvalidCursorError } from "@/lib/pagination";
 const context = siteQueryContext("site-1", "api-v1");
 const time = createQueryTime(1_000, 2_000, "UTC", 2_000);
+const overviewData = {
+  current: {
+    views: 1,
+    sessions: 0,
+    visitors: 0,
+    bounces: 0,
+    totalDurationMs: 0,
+    durationViews: 0,
+  },
+};
 function invocation(
   providerRegistry: AnalyticsProviderRegistry,
   query: Record<string, unknown> = {
@@ -48,7 +58,7 @@ describe("API v1 query application adapter", () => {
   it("requires a legacy query to expose a canonical time", async () => {
     const registry = new AnalyticsProviderRegistry().register(
       canonicalQueryOperationFor("site.analytics.overview"),
-      { execute: async () => ({ value: { views: 1 } }) },
+      { execute: async () => ({ value: overviewData }) },
     );
 
     await expect(
@@ -91,7 +101,7 @@ describe("API v1 query application adapter", () => {
   it("translates canonical cost failures back to the API v1 error shape", async () => {
     const registry = new AnalyticsProviderRegistry().register(
       canonicalQueryOperationFor("site.analytics.overview"),
-      { execute: async () => ({ value: { views: 1 } }) },
+      { execute: async () => ({ value: overviewData }) },
     );
 
     await expect(
@@ -107,7 +117,7 @@ describe("API v1 query application adapter", () => {
   it("translates canonical policy failures back to the external operation", async () => {
     const registry = new AnalyticsProviderRegistry().register(
       canonicalQueryOperationFor("site.analytics.overview"),
-      { execute: async () => ({ value: { views: 1 } }) },
+      { execute: async () => ({ value: overviewData }) },
     );
     const deniedContext = {
       ...context,
@@ -143,7 +153,7 @@ describe("API v1 query application adapter", () => {
       {
         execute: async (query) => {
           receivedQuery = query as unknown as Record<string, unknown>;
-          return { value: { views: 1 } };
+          return { value: overviewData };
         },
       },
     );
@@ -157,7 +167,7 @@ describe("API v1 query application adapter", () => {
         },
         {},
       ),
-    ).resolves.toMatchObject({ ok: true, value: { views: 1 } });
+    ).resolves.toMatchObject({ ok: true, value: { current: { views: 1 } } });
     expect(
       (receivedQuery?.time as { paginationBinding?: unknown })
         ?.paginationBinding,
@@ -174,7 +184,7 @@ describe("API v1 query application adapter", () => {
             query as unknown as { time: { paginationBinding: string } }
           ).time.paginationBinding;
           bindings.push(binding);
-          return { value: { views: 1 } };
+          return { value: overviewData };
         },
       },
     );
@@ -252,7 +262,7 @@ describe("API v1 query application adapter", () => {
         result: {
           items: [
             null,
-            { value: "US", views: 4 },
+            { key: "US", views: 4 },
             { key: "canonical", value: "ignored", views: 2 },
           ],
         },
@@ -267,19 +277,15 @@ describe("API v1 query application adapter", () => {
       {
         operation: "site.analytics.channels",
         result: {
-          data: [
-            { label: "organic_search", views: 3, sessions: 2, visitors: 1 },
+          items: [
+            { channel: "organic_search", views: 3, sessions: 2, visitors: 1 },
             { channel: "direct", views: 2 },
-            {},
-            null,
           ],
         },
         expected: {
           items: [
             { channel: "organic_search", views: 3, sessions: 2, visitors: 1 },
             { channel: "direct", views: 2 },
-            { channel: "" },
-            null,
           ],
         },
       },
@@ -459,7 +465,7 @@ describe("API v1 query application adapter", () => {
     for (const entry of cases) {
       const registry = new AnalyticsProviderRegistry().register(
         canonicalQueryOperationFor(entry.operation),
-        { execute: async () => ({ value: entry.result }) },
+        { execute: async () => ({ value: entry.result }) } as never,
       );
       const result = await executeApiV1Query(
         undefined,

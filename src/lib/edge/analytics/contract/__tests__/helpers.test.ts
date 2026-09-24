@@ -200,7 +200,12 @@ describe("query contract time helpers", () => {
       reportingTimeZone: normalizeReportingTimeZone("UTC"),
       capturedAtMs: 200 as never,
     };
-    const reader = vi.fn(async () => ({ value: { rows: [] } }));
+    const reader = vi.fn(async () => ({
+      value: {
+        items: [],
+        pagination: { limit: 0, returned: 0, hasMore: false, nextCursor: null },
+      },
+    }));
     const result = await executeTypedApplicationOperation(
       "event-records",
       {
@@ -224,24 +229,42 @@ describe("query contract time helpers", () => {
       "event-types",
       input,
       createTypedQueryProviderRegistry("event-types", async () => ({
-        value: { source: "direct" },
+        value: {
+          items: [],
+          pagination: {
+            limit: 0,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
         source: "rollup",
         approximateVisitors: true,
       })),
     );
     expect(direct).toMatchObject({
       ok: true,
-      data: { source: "direct" },
+      data: { items: [] },
       meta: { source: "rollup", approximateVisitors: true },
     });
 
     const registry = createTypedQueryProviderRegistry(
       "event-types",
-      async () => ({ value: { source: "registry" } }),
+      async () => ({
+        value: {
+          items: [],
+          pagination: {
+            limit: 0,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      }),
     );
     await expect(
       executeTypedApplicationOperation("event-types", input, registry),
-    ).resolves.toMatchObject({ ok: true, data: { source: "registry" } });
+    ).resolves.toMatchObject({ ok: true, data: { items: [] } });
     await expect(
       executeTypedApplicationOperation(
         "event-types",
@@ -257,7 +280,16 @@ describe("query contract time helpers", () => {
       "overview",
       input,
       createTypedQueryProviderRegistry("overview", async () => ({
-        value: { current: { views: 1 } },
+        value: {
+          current: {
+            views: 1,
+            sessions: 0,
+            visitors: 0,
+            bounces: 0,
+            totalDurationMs: 0,
+            durationViews: 0,
+          },
+        },
         source: "mock" as const,
         approximateVisitors: false,
       })),
@@ -269,9 +301,15 @@ describe("query contract time helpers", () => {
     await expect(
       executeTypedApplicationOperation(
         "comparison",
-        input,
+        input as never,
         createTypedQueryProviderRegistry("comparison", async () => ({
-          value: composed,
+          value: {
+            ok: false as const,
+            error: {
+              kind: "capability-denied" as const,
+              capability: "comparison",
+            },
+          },
         })),
       ),
     ).resolves.toMatchObject({
@@ -294,7 +332,16 @@ describe("query contract time helpers", () => {
           },
         },
         createTypedQueryProviderRegistry("overview", async () => ({
-          value: composed,
+          value: {
+            current: {
+              views: 1,
+              sessions: 0,
+              visitors: 0,
+              bounces: 0,
+              totalDurationMs: 0,
+              durationViews: 0,
+            },
+          },
         })),
       ),
     ).resolves.toMatchObject({
@@ -344,7 +391,16 @@ describe("query contract time helpers", () => {
           filters: oneClause,
         },
         createTypedQueryProviderRegistry("overview", async () => ({
-          value: composed,
+          value: {
+            current: {
+              views: 1,
+              sessions: 0,
+              visitors: 0,
+              bounces: 0,
+              totalDurationMs: 0,
+              durationViews: 0,
+            },
+          },
         })),
       ),
     ).resolves.toMatchObject({
@@ -383,7 +439,17 @@ describe("query contract time helpers", () => {
       },
       createTypedQueryProviderRegistry(
         "event-records",
-        vi.fn(async () => ({ value: {} })),
+        vi.fn(async () => ({
+          value: {
+            items: [],
+            pagination: {
+              limit: 0,
+              returned: 0,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        })),
       ),
     );
     expect(tooMany).toMatchObject({
@@ -432,7 +498,17 @@ describe("query contract time helpers", () => {
       },
       createTypedQueryProviderRegistry(
         "event-records",
-        vi.fn(async () => ({ value: {} })),
+        vi.fn(async () => ({
+          value: {
+            items: [],
+            pagination: {
+              limit: 0,
+              returned: 0,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        })),
       ),
     );
     expect(limited).toMatchObject({

@@ -410,7 +410,7 @@ export interface PagesDashboardComparisonQuery {
  * search and sorting independently.
  */
 export interface PagesDashboardQuery extends BaseQuery {
-  readonly interval: CalendarGranularity;
+  readonly interval: Interval;
   readonly page?: PageRequest;
   readonly search?: string;
   readonly sort?: Sort<PagesDashboardMetric>;
@@ -704,7 +704,36 @@ export interface FilterValuesResult {
     readonly pagination: PaginationMeta;
   };
 }
-export type GeoPointsResult = CanonicalObject;
+export interface GeoPointsResult {
+  readonly points: readonly {
+    readonly latitude: number;
+    readonly longitude: number;
+    readonly timestampMs: number;
+    readonly country: string;
+    readonly region: string;
+    readonly regionCode: string;
+    readonly city: string;
+    readonly pointCount: number;
+  }[];
+  readonly countryCounts: readonly {
+    readonly country: string;
+    readonly views: number;
+    readonly sessions: number;
+    readonly visitors: number;
+  }[];
+  readonly regionCounts: readonly {
+    readonly value: string;
+    readonly views: number;
+    readonly sessions: number;
+    readonly visitors: number;
+  }[];
+  readonly cityCounts: readonly {
+    readonly value: string;
+    readonly views: number;
+    readonly sessions: number;
+    readonly visitors: number;
+  }[];
+}
 export type TopPagesResult = PagesResult;
 export type DashboardPage = CanonicalObject;
 export type ReferrerResult = ReferrersResult;

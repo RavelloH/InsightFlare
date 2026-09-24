@@ -1,16 +1,13 @@
 import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
+import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
 import type {
-  FilterValuesResult,
+  ChannelOverviewTabQuery,
+  DimensionOverviewTabQuery,
   OverviewTableComparisonQuery,
-  PagesDashboardComparisonQuery,
-  PagesResult,
+  OverviewTabResult,
   PerformanceQuery,
-  PerformanceQueryResult,
   QueryInput,
-  ReferrersResult,
-  ReferrerSummaryResult,
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
@@ -44,7 +41,6 @@ import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/i
 import {
   parseRetentionGranularity,
   queryRetentionFromD1,
-  type RetentionResult,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import { queryGeoPointAggregate } from "@/lib/edge/analytics/providers/d1/internal/journeys";
 import {
@@ -70,8 +66,6 @@ import { InvalidCursorError } from "@/lib/pagination";
 import {
   type D1SiteRuntimeBindings,
   numberField,
-  query,
-  type RuntimeQuery,
   stringField,
   timeWindow,
 } from "./shared";
@@ -125,10 +119,8 @@ function isPerformanceQuery(input: QueryInput): input is PerformanceQuery {
 }
 export async function overviewTabData(
   options: D1SiteRuntimeBindings,
-  request: RuntimeQuery,
-): Promise<
-  Readonly<{ data: { items: readonly unknown[]; pagination: unknown } }>
-> {
+  request: DimensionOverviewTabQuery | ChannelOverviewTabQuery,
+): Promise<OverviewTabResult> {
   const tab = stringField(request, "tab");
   const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
   const window = timeWindow(request.time);
@@ -146,14 +138,8 @@ export async function overviewTabData(
     request.comparison && typeof request.comparison === "object"
       ? (request.comparison as OverviewTableComparisonQuery)
       : null;
-  const comparisonCurrent =
-    request.current && typeof request.current === "object"
-      ? (request.current as RuntimeQuery)
-      : null;
-  const comparisonReference =
-    request.reference && typeof request.reference === "object"
-      ? (request.reference as RuntimeQuery)
-      : null;
+  const comparisonCurrent = request.current ?? null;
+  const comparisonReference = request.reference ?? null;
   if (
     comparison &&
     comparisonCurrent?.time &&
@@ -586,16 +572,9 @@ export function registerSiteContractProviders(
   registry
     .register(
       "dimension",
-      typedQueryProvider<
-        | ReturnType<typeof mapDimensionRows>
-        | Awaited<ReturnType<typeof overviewTabData>>
-        | Readonly<{
-            items: readonly unknown[];
-            pagination?: unknown;
-          }>
-      >(async (input) => {
-        const request = query(input!);
-        if (request.tab) {
+      typedQueryProviderFor("dimension", async (input) => {
+        const request = input;
+        if (request.mode === "overview-tab") {
           return { value: await overviewTabData(options, request) };
         }
         const pageRequest =
@@ -696,8 +675,8 @@ export function registerSiteContractProviders(
     )
     .register(
       "geo-points",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("geo-points", async (input) => {
+        const request = input;
         const aggregate = await queryGeoPointAggregate(
           options.env,
           options.siteId,
@@ -717,9 +696,9 @@ export function registerSiteContractProviders(
     )
     .register(
       "channels",
-      typedQueryProvider<unknown>(async (input) => {
-        const request = query(input!);
-        if (request.tab === "source.channel") {
+      typedQueryProviderFor("channels", async (input) => {
+        const request = input;
+        if (request.mode === "overview-tab") {
           return { value: await overviewTabData(options, request) };
         }
         const rows = await queryChannelAggregate(
@@ -731,8 +710,8 @@ export function registerSiteContractProviders(
         );
         return {
           value: {
-            data: rows.map((row) => ({
-              label: row.channel,
+            items: rows.map((row) => ({
+              channel: row.channel,
               views: row.views,
               sessions: row.sessions,
               visitors: row.visitors,
@@ -743,8 +722,8 @@ export function registerSiteContractProviders(
     )
     .register(
       "filter-values",
-      typedQueryProvider<FilterValuesResult>(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("filter-values", async (input) => {
+        const request = input;
         const field = stringField(request, "field");
         const pageValue = request.page;
         const page =
@@ -786,8 +765,8 @@ export function registerSiteContractProviders(
     )
     .register(
       "retention",
-      typedQueryProvider<RetentionResult>(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("retention", async (input) => {
+        const request = input;
         return {
           value: await queryRetentionFromD1(
             options.env,
@@ -803,7 +782,7 @@ export function registerSiteContractProviders(
     )
     .register(
       "performance",
-      typedQueryProvider<PerformanceQueryResult>(async (input) => {
+      typedQueryProviderFor("performance", async (input) => {
         if (!input || !isPerformanceQuery(input)) {
           throw new Error("unsupported-performance-query-mode");
         }
@@ -858,12 +837,8 @@ export function registerSiteContractProviders(
     )
     .register(
       "pages",
-      typedQueryProvider<
-        | PagesResult
-        | Awaited<ReturnType<typeof queryPageTabsAggregate>>
-        | Awaited<ReturnType<typeof queryPagesWithTabsFromD1>>
-      >(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("pages", async (input) => {
+        const request = input;
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
         if (request.variant === "tabs") {
           return {
@@ -954,119 +929,89 @@ export function registerSiteContractProviders(
     )
     .register(
       "referrers",
-      typedQueryProvider<ReferrersResult | ReferrerSummaryResult>(
-        async (input) => {
-          const request = query(input!);
-          if (request.variant === "summary") {
-            const topN = numberField(
-              request,
-              "topN",
-              numberField(request, "limit", 5),
-            );
-            return {
-              value: await queryReferrerSummaryFromD1(
-                options.env,
-                options.siteId,
-                timeWindow(request.time),
-                request.filters ?? EMPTY_FILTER_DOCUMENT,
-                topN,
-              ),
-              source: "raw",
-            };
-          }
-          const rawPage = request.page;
-          const page =
-            rawPage && typeof rawPage === "object"
-              ? (rawPage as { limit?: unknown; cursor?: unknown })
-              : {};
-          {
-            const limit =
-              typeof page.limit === "number" && Number.isFinite(page.limit)
-                ? page.limit
-                : numberField(request, "limit", 20);
-            const cursorText =
-              typeof page.cursor === "string" ? page.cursor : null;
-            const sortBy =
-              stringField(request, "sort") === "visitors"
-                ? "visitors"
-                : "views";
-            const sortDirection =
-              stringField(request, "direction") === "asc" ? "asc" : "desc";
-            const window = timeWindow(request.time);
-            const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
-            const cursor = await decodeReferrersCursor(
+      typedQueryProviderFor("referrers", async (input) => {
+        const request = input;
+        if (request.variant === "summary") {
+          const topN = numberField(
+            request,
+            "topN",
+            numberField(request, "limit", 5),
+          );
+          return {
+            value: await queryReferrerSummaryFromD1(
+              options.env,
+              options.siteId,
+              timeWindow(request.time),
+              request.filters ?? EMPTY_FILTER_DOCUMENT,
+              topN,
+            ),
+            source: "raw",
+          };
+        }
+        const rawPage = request.page;
+        const page =
+          rawPage && typeof rawPage === "object"
+            ? (rawPage as { limit?: unknown; cursor?: unknown })
+            : {};
+        {
+          const limit =
+            typeof page.limit === "number" && Number.isFinite(page.limit)
+              ? page.limit
+              : numberField(request, "limit", 20);
+          const cursorText =
+            typeof page.cursor === "string" ? page.cursor : null;
+          const sortBy =
+            stringField(request, "sort") === "visitors" ? "visitors" : "views";
+          const sortDirection =
+            stringField(request, "direction") === "asc" ? "asc" : "desc";
+          const window = timeWindow(request.time);
+          const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+          const cursor = await decodeReferrersCursor(
+            options.env,
+            options.siteId,
+            window,
+            filters,
+            request.includeFullUrl === true,
+            typeof request.search === "string" ? request.search : undefined,
+            cursorText,
+            request.context.policy.audience,
+            sortBy,
+            sortDirection,
+          );
+          if (cursorText && !cursor) throw new InvalidCursorError("referrers");
+          return {
+            value: await queryReferrersPageFromD1(
               options.env,
               options.siteId,
               window,
               filters,
+              limit,
               request.includeFullUrl === true,
               typeof request.search === "string" ? request.search : undefined,
-              cursorText,
+              cursor,
+              undefined,
               request.context.policy.audience,
               sortBy,
               sortDirection,
-            );
-            if (cursorText && !cursor)
-              throw new InvalidCursorError("referrers");
-            return {
-              value: await queryReferrersPageFromD1(
-                options.env,
-                options.siteId,
-                window,
-                filters,
-                limit,
-                request.includeFullUrl === true,
-                typeof request.search === "string" ? request.search : undefined,
-                cursor,
-                undefined,
-                request.context.policy.audience,
-                sortBy,
-                sortDirection,
-              ),
-              source: "raw",
-            };
-          }
-        },
-      ),
+            ),
+            source: "raw",
+          };
+        }
+      }),
     )
     .register(
       "pages-dashboard",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("pages-dashboard", async (input) => {
+        const request = input;
         return {
           value: await queryPagesDashboard(options.env, options.siteId, {
             window: timeWindow(request.time),
             filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
-            interval: request.interval as never,
-            search:
-              typeof request.search === "string" ? request.search : undefined,
-            sort:
-              request.sort && typeof request.sort === "object"
-                ? (request.sort as {
-                    key:
-                      | "views"
-                      | "visitors"
-                      | "sessions"
-                      | "bounceRate"
-                      | "pagesPerSession"
-                      | "avgDurationMs";
-                    direction: "asc" | "desc";
-                  })
-                : undefined,
-            comparison:
-              request.comparison && typeof request.comparison === "object"
-                ? (request.comparison as PagesDashboardComparisonQuery)
-                : undefined,
-            page:
-              request.page && typeof request.page === "object"
-                ? (request.page as { limit: number; cursor?: string | null })
-                : {
-                    limit: numberField(request, "limit", 12),
-                    cursor:
-                      typeof request.cursor === "string"
-                        ? request.cursor
-                        : null,
-                  },
+            interval: request.interval,
+            search: request.search,
+            sort: request.sort,
+            comparison: request.comparison,
+            page: request.page ?? { limit: 12, cursor: null },
             audience: request.context.policy.audience,
           }),
         };

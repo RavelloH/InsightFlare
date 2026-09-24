@@ -1,15 +1,15 @@
 import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import {
+  type CanonicalChannelsQuery,
+  type CanonicalDimensionQuery,
   type FilterDocument,
   type OverviewTableComparisonQuery,
+  type OverviewTabResult,
   parseFilterUrlForAudience,
   previousComparableWindow,
   withoutGeoFilter,
 } from "@/lib/edge/analytics/contract";
-import {
-  type BaseQuery,
-  siteQueryContext,
-} from "@/lib/edge/analytics/contract";
+import { siteQueryContext } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract";
 import {
   parseLimit,
@@ -74,7 +74,6 @@ export async function handleOverviewTabContract(
   }
   const sort = rawSort ?? "views";
   const direction = rawDirection ?? "desc";
-  const operation = tab === "source.channel" ? "channels" : "dimension";
   const compare = url.searchParams.get("compare");
   const compareFilterParams = new URLSearchParams();
   for (const [key, value] of url.searchParams) {
@@ -136,10 +135,11 @@ export async function handleOverviewTabContract(
       };
     }
   }
-  const query = {
+  const query: CanonicalDimensionQuery = {
     context: queryContext,
     time: queryWindowToTime(window),
     filters,
+    mode: "overview-tab" as const,
     tab,
     limit: parseLimit(url, 100, 200),
     cursor: url.searchParams.get("cursor") ?? "",
@@ -153,22 +153,16 @@ export async function handleOverviewTabContract(
           reference: comparison.reference,
         }
       : {}),
-  } as BaseQuery & {
-    readonly tab: OverviewTab;
-    readonly limit: number;
-    readonly search?: string;
-    readonly sort: "views" | "visitors";
-    readonly direction: "asc" | "desc";
-    readonly comparison?: OverviewTableComparisonQuery;
-    readonly current?: OverviewTableComparisonQuery["current"];
-    readonly reference?: OverviewTableComparisonQuery["reference"];
   };
-  const result = await createEdgeSiteAnalyticsRuntime({ env, siteId }).execute<{
-    readonly data: {
-      readonly items: readonly unknown[];
-      readonly pagination: unknown;
-    };
-  }>(operation, query);
+  const runtime = createEdgeSiteAnalyticsRuntime({ env, siteId });
+  const result =
+    tab === "source.channel"
+      ? await runtime.execute("channels", {
+          ...query,
+          tab: "source.channel",
+        } satisfies CanonicalChannelsQuery)
+      : await runtime.execute("dimension", query);
   if (!result.ok) return queryErrorResponse(result.error);
-  return jsonResponseWith(ctx!, { ok: true, ...result.data });
+  const data = result.data as OverviewTabResult;
+  return jsonResponseWith(ctx!, { ok: true, ...data });
 }

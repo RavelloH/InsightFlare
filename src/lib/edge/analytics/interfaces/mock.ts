@@ -41,12 +41,13 @@ export async function executeMockQuery(
   const result = await createMockAnalyticsQueryRuntime({
     ...input,
     query,
-  }).execute<DemoQueryPayloadResult>(input.operation, query);
+  }).execute(input.operation, query);
   if (!result.ok) return queryErrorResponse(result.error);
+  const payload = result.data as unknown as DemoQueryPayloadResult;
 
   return createDemoQueryResponse(
-    result.data.payload,
-    result.data.status,
+    payload.payload,
+    payload.status,
     Boolean(input.publicQuery),
     input.context ?? {
       requestId: getRequestId(input.request),

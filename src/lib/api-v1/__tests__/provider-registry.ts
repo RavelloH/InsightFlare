@@ -4,10 +4,12 @@ import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/que
 import type { AnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
+  type CanonicalQuery,
   executeOverview,
   executeTrend,
   type OverviewQuery,
   type OverviewReader,
+  type QueryOperation,
   type TrendQuery,
 } from "@/lib/edge/analytics/contract";
 
@@ -24,7 +26,10 @@ export function createTestProviderRegistry(
   const registry = new AnalyticsProviderRegistry();
   for (const operation of analyticsOperationRegistry) {
     registry.register(canonicalQueryOperationFor(operation.id), {
-      execute: async (query, execution) => {
+      execute: async (
+        query: CanonicalQuery<QueryOperation>,
+        execution?: { readonly signal?: AbortSignal },
+      ) => {
         const input = {
           ...(query as unknown as Record<string, unknown>),
           signal: execution?.signal,
@@ -42,7 +47,7 @@ export function createTestProviderRegistry(
           approximateVisitors: result.meta.approximateVisitors,
         };
       },
-    });
+    } as never);
   }
   return createAnalyticsQueryRuntime(registry);
 }

@@ -1,5 +1,5 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
+import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import {
   mapEventAnalyticsContextCards,
@@ -40,7 +40,6 @@ import {
   emptyEventContextCards,
   measured,
   numberField,
-  query,
   stringField,
   timeWindow,
 } from "./shared";
@@ -52,8 +51,8 @@ export function registerEventProviders(
   registry
     .register(
       "event-types",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("event-types", async (input) => {
+        const request = input;
         const limit = numberField(request, "limit", 20);
         const search = stringField(request, "search") || undefined;
         const cursorText = stringField(request, "cursor") || null;
@@ -89,8 +88,8 @@ export function registerEventProviders(
     )
     .register(
       "event-summary",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("event-summary", async (input) => {
+        const request = input;
         const data = await queryEventsSummaryFromD1(
           options.env,
           options.siteId,
@@ -115,9 +114,9 @@ export function registerEventProviders(
     )
     .register(
       "event-trend",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
-        const interval = request.interval as never;
+      typedQueryProviderFor("event-trend", async (input) => {
+        const request = input;
+        const interval = request.interval ?? "day";
         return {
           value: {
             interval,
@@ -136,8 +135,8 @@ export function registerEventProviders(
     )
     .register(
       "event-records",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("event-records", async (input) => {
+        const request = input;
         return {
           value: await readSiteEventRecords({
             env: options.env,
@@ -145,24 +144,21 @@ export function registerEventProviders(
             window: timeWindow(request.time),
             filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
             audience: request.context.policy.audience,
-            sort: (request.sort as never) ?? {
+            sort: {
               field: "occurredAt",
-              direction: "desc",
+              direction: request.sort?.direction ?? "desc",
             },
             search: stringField(request, "search") || undefined,
             eventName: stringField(request, "eventName") || undefined,
-            page:
-              request.page && typeof request.page === "object"
-                ? (request.page as { limit: number; cursor?: string | null })
-                : { limit: numberField(request, "limit", 80), cursor: null },
+            page: request.page ?? { limit: request.limit ?? 80, cursor: null },
           }),
         };
       }),
     )
     .register(
       "event-field-values",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("event-field-values", async (input) => {
+        const request = input;
         const eventName = stringField(request, "eventName") || undefined;
         const fieldPath = stringField(request, "fieldPath");
         const fieldValueType = stringField(request, "fieldValueType");
@@ -200,6 +196,7 @@ export function registerEventProviders(
         );
         return {
           value: {
+            eventName,
             fieldPath,
             fieldValueType,
             data: {
@@ -212,8 +209,8 @@ export function registerEventProviders(
     )
     .register(
       "event-fields",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("event-fields", async (input) => {
+        const request = input;
         const eventName = stringField(request, "eventName") || undefined;
         const limit = numberField(request, "limit", 100);
         const window = timeWindow(request.time);
@@ -252,8 +249,8 @@ export function registerEventProviders(
     )
     .register(
       "event-context",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("event-context", async (input) => {
+        const request = input;
         const eventName = stringField(request, "eventName");
         const selectedKeys = arrayField(request, "selectedKeys").filter(
           (key): key is (typeof EVENT_CONTEXT_CARD_KEYS)[number] =>
@@ -284,8 +281,8 @@ export function registerEventProviders(
     )
     .register(
       "event-type-detail",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("event-type-detail", async (input) => {
+        const request = input;
         const eventName = stringField(request, "eventName");
         const includeContext = request.includeContext !== false;
         const includeBreakdowns = request.includeBreakdowns !== false;
@@ -305,7 +302,7 @@ export function registerEventProviders(
               options.env,
               options.siteId,
               timeWindow(request.time),
-              request.interval as never,
+              request.interval ?? "day",
               request.filters ?? EMPTY_FILTER_DOCUMENT,
               eventName,
             ),
@@ -343,8 +340,8 @@ export function registerEventProviders(
     )
     .register(
       "event-record-detail",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
+      typedQueryProviderFor("event-record-detail", async (input) => {
+        const request = input;
         return {
           value: await queryEventRecordDetailFromD1(
             options.env,

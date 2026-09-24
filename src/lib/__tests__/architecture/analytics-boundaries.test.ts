@@ -430,8 +430,40 @@ describe("analytics architecture", () => {
       "api-v1-local-provider-selection",
       "analytics-interface-local-provider-registry",
       "analytics-interface-concrete-provider",
+      "canonical-operation-map-missing-coverage-check",
+      "canonical-query-index-signature",
+      "analytics-interface-d1-definition-repository",
     ]) {
       expect(checker).toContain(rule);
+    }
+  });
+
+  it("maps every canonical operation and keeps Goal/Funnel D1 repositories behind resources", () => {
+    const operationMap = source(
+      "src/lib/edge/analytics/contract/canonical-operation-map.ts",
+    );
+    expect(operationMap).toContain("CanonicalOperationMap");
+    expect(operationMap).toMatch(
+      /Exclude<\s*QueryOperation,\s*keyof CanonicalOperationMap\s*>/u,
+    );
+    expect(operationMap).toContain("AssertNever<MissingCanonicalOperations>");
+    expect(operationMap).not.toMatch(
+      /readonly\s*\[\s*key\s*:\s*string\s*\]\s*:\s*unknown/u,
+    );
+
+    for (const directory of [
+      "src/lib/api-v1",
+      "src/lib/edge/analytics/interfaces/dashboard",
+    ]) {
+      for (const file of productionFiles(directory)) {
+        const content = readFileSync(file, "utf8");
+        expect(
+          content,
+          `${file} imports a Goal/Funnel D1 repository`,
+        ).not.toMatch(
+          /(?:composition\/d1\/(?:goals|funnels)|providers\/d1\/(?:internal|resources)\/(?:goals|funnels))/u,
+        );
+      }
     }
   });
 

@@ -218,7 +218,7 @@ describe("D1 site contract provider pagination routing", () => {
       "client.browser",
       "geo.country",
     ]) {
-      await provider.execute(input({ tab, limit: 1 }));
+      await provider.execute(input({ mode: "overview-tab", tab, limit: 1 }));
     }
     expect(queryDimensionPageFromD1).toHaveBeenCalled();
     expect(querySessionPathDimensionPageFromD1).toHaveBeenCalled();

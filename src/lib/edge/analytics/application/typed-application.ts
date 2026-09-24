@@ -1,13 +1,14 @@
 import type {
   AnalyticsResult,
-  BaseQuery,
+  CanonicalQuery,
+  CanonicalResult,
   QueryOperation,
-} from "@/lib/edge/analytics/contract/types";
+} from "@/lib/edge/analytics/contract";
 
 import {
   AnalyticsProviderRegistry,
   createTypedQueryProviderRegistry,
-  typedQueryProvider,
+  typedQueryProviderFor,
 } from "./provider-registry";
 import {
   TypedQueryApplicationService,
@@ -20,15 +21,17 @@ export type {
 export {
   AnalyticsProviderRegistry,
   createTypedQueryProviderRegistry,
-  typedQueryProvider,
+  typedQueryProviderFor,
 };
 /** Executes a canonical query through the application service and provider registry. */
-export async function executeTypedApplicationOperation<T>(
-  operation: QueryOperation,
-  input: BaseQuery,
+export async function executeTypedApplicationOperation<
+  Operation extends QueryOperation,
+>(
+  operation: Operation,
+  input: CanonicalQuery<Operation>,
   providerRegistry: AnalyticsProviderRegistry,
-): Promise<AnalyticsResult<T>> {
-  const invocation: TypedQueryOperationInvocation<T> = {
+): Promise<AnalyticsResult<CanonicalResult<Operation>>> {
+  const invocation: TypedQueryOperationInvocation<Operation> = {
     kind: "typed-query",
     operation,
     query: input,
