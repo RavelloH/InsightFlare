@@ -109,6 +109,19 @@ describe("filter URL codec", () => {
     });
   });
 
+  it("preserves a trailing backslash in a set value", () => {
+    const params = new URLSearchParams();
+    params.set("filter[page.path]", "in:/first,/tail\\");
+    const document = parseFilterParams(params, analyticsFilterRegistry);
+
+    expect(document.root).toMatchObject({
+      kind: "condition",
+      target: { kind: "field", field: "page.path" },
+      operator: "in",
+      value: ["/first", "/tail\\"],
+    });
+  });
+
   it("round-trips a canonical document through URLSearchParams", () => {
     const source: FilterDocument = {
       version: 1,
