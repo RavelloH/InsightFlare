@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { executeApiV1Query } from "@/lib/api-v1/analytics/query-application";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
+import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
@@ -24,7 +25,7 @@ function invocation(
     operation: "site.analytics.overview" as const,
     context,
     query,
-    providerRegistry,
+    executor: createAnalyticsQueryRuntime(providerRegistry),
   };
 }
 describe("API v1 query application adapter", () => {
@@ -241,6 +242,236 @@ describe("API v1 query application adapter", () => {
       ).rejects.toThrow(
         thrown instanceof Error ? "provider-failed" : "data-unavailable",
       );
+    }
+  });
+
+  it("serializes canonical provider results at the API v1 boundary", async () => {
+    const cases = [
+      {
+        operation: "site.analytics.breakdown",
+        result: {
+          items: [
+            null,
+            { value: "US", views: 4 },
+            { key: "canonical", value: "ignored", views: 2 },
+          ],
+        },
+        expected: {
+          items: [
+            null,
+            { key: "US", views: 4 },
+            { key: "canonical", views: 2 },
+          ],
+        },
+      },
+      {
+        operation: "site.analytics.channels",
+        result: {
+          data: [
+            { label: "organic_search", views: 3, sessions: 2, visitors: 1 },
+            { channel: "direct", views: 2 },
+            {},
+            null,
+          ],
+        },
+        expected: {
+          items: [
+            { channel: "organic_search", views: 3, sessions: 2, visitors: 1 },
+            { channel: "direct", views: 2 },
+            { channel: "" },
+            null,
+          ],
+        },
+      },
+      {
+        operation: "site.analytics.filterValues",
+        result: {
+          field: "country",
+          data: {
+            items: [{ value: "US", label: "US", occurrences: 4 }],
+            pagination: {
+              limit: 20,
+              returned: 1,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        },
+        expected: {
+          field: "country",
+          items: [{ value: "US", label: "US", occurrences: 4 }],
+          pagination: {
+            limit: 20,
+            returned: 1,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      },
+      {
+        operation: "site.analytics.eventTypes",
+        result: {
+          items: [
+            { key: "canonical", label: "label", events: 8, views: 5 },
+            { label: "signup", views: 5, sessions: 3, visitors: 2 },
+            {},
+            null,
+          ],
+          pagination: {
+            limit: 20,
+            returned: 1,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+        expected: {
+          items: [
+            {
+              key: "canonical",
+              label: "label",
+              events: 8,
+            },
+            {
+              key: "signup",
+              label: "signup",
+              events: 5,
+              sessions: 3,
+              visitors: 2,
+            },
+            { key: "", events: 0 },
+            null,
+          ],
+          pagination: {
+            limit: 20,
+            returned: 1,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      },
+      {
+        operation: "site.analytics.retentionCohorts",
+        result: {
+          granularity: "day",
+          cohorts: [
+            "unknown",
+            { bucket: 1_000, sessions: 2 },
+            { bucket: "legacy", start: "2026-01-01T00:00:00.000Z" },
+          ],
+        },
+        expected: {
+          granularity: "day",
+          cohorts: [
+            "unknown",
+            {
+              sessions: 2,
+              start: "1970-01-01T00:00:01.000Z",
+            },
+            { start: "2026-01-01T00:00:00.000Z" },
+          ],
+        },
+      },
+      {
+        operation: "site.analytics.eventFields",
+        result: {
+          eventName: "signup",
+          data: { items: [{ path: "user.plan" }], pagination: { limit: 20 } },
+        },
+        expected: {
+          eventName: "signup",
+          items: [{ path: "user.plan" }],
+          pagination: { limit: 20 },
+        },
+      },
+      {
+        operation: "site.analytics.eventsTimeseries",
+        result: {
+          interval: "hour",
+          series: [{ key: "signup", label: "Signup" }],
+          data: [
+            null,
+            { timestampMs: 1_000, totalEvents: 3 },
+            { timestamp: "legacy", totalEvents: 1 },
+          ],
+        },
+        expected: {
+          interval: "hour",
+          series: [{ key: "signup", label: "Signup" }],
+          points: [
+            null,
+            {
+              totalEvents: 3,
+              timestamp: "1970-01-01T00:00:01.000Z",
+            },
+            { timestamp: "legacy", totalEvents: 1 },
+          ],
+        },
+      },
+      {
+        operation: "site.analytics.eventFieldValues",
+        result: {
+          eventName: "signup",
+          fieldPath: "user.plan",
+          fieldValueType: "string",
+          data: { items: [{ value: "pro" }], pagination: { limit: 20 } },
+        },
+        expected: {
+          eventName: "signup",
+          fieldPath: "user.plan",
+          fieldValueType: "string",
+          items: [{ value: "pro" }],
+          pagination: { limit: 20 },
+        },
+      },
+      {
+        operation: "site.analytics.eventTypeDetail",
+        result: {
+          trend: {
+            interval: "day",
+            data: [
+              null,
+              { timestampMs: 1_000, events: 3 },
+              { timestamp: "legacy", events: 1 },
+            ],
+          },
+        },
+        expected: {
+          trend: {
+            interval: "day",
+            data: [
+              null,
+              {
+                events: 3,
+                timestamp: "1970-01-01T00:00:01.000Z",
+              },
+              { timestamp: "legacy", events: 1 },
+            ],
+          },
+        },
+      },
+      {
+        operation: "site.analytics.funnelAnalysis",
+        result: { funnel: null },
+        expected: null,
+      },
+    ] as const;
+
+    for (const entry of cases) {
+      const registry = new AnalyticsProviderRegistry().register(
+        canonicalQueryOperationFor(entry.operation),
+        { execute: async () => ({ value: entry.result }) },
+      );
+      const result = await executeApiV1Query(
+        undefined,
+        {
+          operation: entry.operation,
+          context,
+          query: { context, time, filters: EMPTY_FILTER_DOCUMENT },
+          executor: createAnalyticsQueryRuntime(registry),
+        },
+        {},
+      );
+      expect(result).toMatchObject({ ok: true, value: entry.expected });
     }
   });
 });

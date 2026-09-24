@@ -638,8 +638,14 @@ describe("edge query technology handlers", () => {
       expect.any(Object),
       12,
       1,
-      "client.browser",
-      "client.deviceType",
+      {
+        labelExpr: "TRIM(COALESCE(browser, ''))",
+        fallbackKeyBase: "browser",
+      },
+      {
+        labelExpr: "TRIM(COALESCE(device_type, ''))",
+        fallbackKeyBase: "device",
+      },
     );
   });
 
@@ -667,8 +673,14 @@ describe("edge query technology handlers", () => {
       expect.any(Object),
       5,
       6,
-      "deviceType",
-      "operatingSystem",
+      {
+        labelExpr: "TRIM(COALESCE(device_type, ''))",
+        fallbackKeyBase: "device",
+      },
+      {
+        labelExpr: "TRIM(COALESCE(os, ''))",
+        fallbackKeyBase: "os",
+      },
     );
   });
 });

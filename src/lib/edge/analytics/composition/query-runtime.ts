@@ -12,14 +12,14 @@ import { createAnalyticsQueryApplicationService } from "./query-application-serv
 type CanonicalRuntimeQuery =
   BaseQuery | (BaseQuery & Readonly<Record<string, unknown>>);
 
-export interface AnalyticsQueryRuntime {
-  readonly providerRegistry: AnalyticsProviderRegistry;
+export interface AnalyticsQueryExecutor {
   execute<Result>(
     operation: QueryOperation,
     query: CanonicalRuntimeQuery,
     execution?: QueryExecutionContext,
   ): Promise<AnalyticsResult<Result>>;
 }
+export type AnalyticsQueryRuntime = AnalyticsQueryExecutor;
 
 /**
  * Runtime boundary shared by HTTP, SSR, and test adapters.
@@ -30,9 +30,8 @@ export interface AnalyticsQueryRuntime {
 export function createAnalyticsQueryRuntime(
   providerRegistry: AnalyticsProviderRegistry,
   service = createAnalyticsQueryApplicationService(),
-): AnalyticsQueryRuntime {
+): AnalyticsQueryExecutor {
   return {
-    providerRegistry,
     execute<Result>(
       operation: QueryOperation,
       query: CanonicalRuntimeQuery,
@@ -43,8 +42,20 @@ export function createAnalyticsQueryRuntime(
         operation,
         query,
         providerRegistry,
+        ...(execution.cache
+          ? {
+              cache: {
+                ...execution.cache,
+                isCacheable: execution.cache.isCacheable as
+                  ((value: Result) => boolean) | undefined,
+              },
+            }
+          : {}),
       };
-      return service.execute(invocation, execution);
+      const requestService = execution.cacheStore
+        ? createAnalyticsQueryApplicationService(execution.cacheStore)
+        : service;
+      return requestService.execute(invocation, execution);
     },
   };
 }

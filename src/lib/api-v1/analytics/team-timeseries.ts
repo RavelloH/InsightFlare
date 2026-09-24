@@ -14,7 +14,7 @@ import {
   fromZodIssues,
 } from "@/lib/api-v1/contract/errors";
 import { exceedsQueryCost } from "@/lib/edge/analytics/application/cost";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   type FilterDocument,
   isReportingTimeZone,
@@ -123,7 +123,7 @@ function filter(input: TeamTimeseriesQueryDto): FilterDocument | null {
 export async function handlePlannedTeamTimeseries(
   request: Request,
   principal: ApiKeyPrincipal,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   executionContext: {
     readonly signal?: AbortSignal;
     readonly deadlineMs?: number;
@@ -232,7 +232,7 @@ export async function handlePlannedTeamTimeseries(
           principal.siteIds,
         ),
         query,
-        providerRegistry,
+        executor,
       },
       {
         signal: executionContext.signal,

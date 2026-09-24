@@ -8,6 +8,7 @@ import {
 } from "@/lib/api-v1/analytics/goal-analysis";
 import { goalAggregateCache } from "@/lib/api-v1/analytics/goal-analysis";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal = (
   overrides: Partial<ApiKeyPrincipal> = {},
@@ -427,7 +428,7 @@ describe("typed Goal analytics HTTP adapter", () => {
         request(body),
         principal(),
         "site-1",
-        new AnalyticsProviderRegistry(),
+        createAnalyticsQueryRuntime(new AnalyticsProviderRegistry()),
       ),
     ).resolves.toHaveProperty("status", 422);
 
@@ -442,7 +443,7 @@ describe("typed Goal analytics HTTP adapter", () => {
         request(body),
         principal(),
         "site-1",
-        throwing,
+        createAnalyticsQueryRuntime(throwing),
       ),
     ).resolves.toHaveProperty("status", 503);
 

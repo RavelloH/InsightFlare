@@ -11,11 +11,11 @@ import { createApiV1AnalyticsResultAdapter } from "@/lib/api-v1/analytics/query-
 import { createApiV1SiteQueryContext } from "@/lib/api-v1/analytics/query-context";
 import { SiteTimeseriesQueryDtoSchema } from "@/lib/api-v1/contract/dto/analytics";
 import { fromZodIssues } from "@/lib/api-v1/contract/errors";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import type {
   AnalyticsServiceResult,
   QueryExecutionContext,
 } from "@/lib/edge/analytics/application/service";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import type {
   AnalyticsResult,
   TrendQuery,
@@ -27,7 +27,7 @@ export async function executeApiV1SiteTimeseries(
   input: unknown,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   executionContext: QueryExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<
@@ -90,7 +90,7 @@ export async function executeApiV1SiteTimeseries(
           scopePreference: parsed.data.scope ?? "auto",
           interval: parsed.data.interval,
         },
-        providerRegistry,
+        executor,
         cache: {
           key: await aggregateCacheKey({
             operation: "site.analytics.timeseries",

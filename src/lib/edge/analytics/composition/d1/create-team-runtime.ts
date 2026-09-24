@@ -53,7 +53,7 @@ function timeWindow(time: QueryTime) {
     timeZone: time.reportingTimeZone,
   };
 }
-export function createD1TeamQueryRuntime(options: D1TeamRuntimeBindings) {
+export function createD1TeamProviderRegistry(options: D1TeamRuntimeBindings) {
   const registry = new AnalyticsProviderRegistry()
     .register(
       "overview",
@@ -141,5 +141,9 @@ export function createD1TeamQueryRuntime(options: D1TeamRuntimeBindings) {
       }),
     );
 
-  return createAnalyticsQueryRuntime(registry);
+  return registry;
+}
+
+export function createD1TeamQueryRuntime(options: D1TeamRuntimeBindings) {
+  return createAnalyticsQueryRuntime(createD1TeamProviderRegistry(options));
 }

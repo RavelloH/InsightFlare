@@ -13,7 +13,7 @@ import {
   fromRequestBodyError,
   fromZodIssues,
 } from "@/lib/api-v1/contract/errors";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   type BreakdownResult,
   type FilterDocument,
@@ -128,7 +128,7 @@ export async function handleTeamBreakdown(
   request: Request,
   principal: ApiKeyPrincipal,
   dimension: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   executionContext: {
     readonly signal?: AbortSignal;
     readonly deadlineMs?: number;
@@ -236,7 +236,7 @@ export async function handleTeamBreakdown(
           principal.siteIds,
         ),
         query,
-        providerRegistry,
+        executor,
       },
       {
         signal: executionContext.signal,

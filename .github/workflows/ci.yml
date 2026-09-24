@@ -40,6 +40,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Check architecture
+        run: npm run check:architecture
+
+      - name: Check layer contract
+        run: npm run check:layer
+
       - name: Check translations
         run: npm run check:i18n
 

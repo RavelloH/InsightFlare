@@ -1,5 +1,6 @@
 import "@tanstack/react-start/server-only";
 
+import type { Interval } from "@/lib/edge/analytics/contract";
 import { type FilterDocument } from "@/lib/edge/analytics/contract";
 import { SitePerformanceBreakdownDimensionSchema } from "@/lib/edge/analytics/contract/performance-dimensions";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -65,7 +66,10 @@ function serializePoint(point: PerformanceTrendPointRow) {
 }
 export async function readSitePerformanceTimeseries(
   input: ReadSitePerformanceTimeseriesInput,
-): Promise<{ readonly interval: string; readonly series: PerformanceSeries }> {
+): Promise<{
+  readonly interval: Interval;
+  readonly series: PerformanceSeries;
+}> {
   const result = await queryAllPerformanceTrendsFromD1(
     input.env,
     input.siteId,

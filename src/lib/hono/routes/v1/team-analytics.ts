@@ -32,7 +32,7 @@ function typedTeamOverview(
   return handlePlannedTeamOverview(
     c.req.raw,
     principal,
-    analyticsRuntime(c, principal).providerRegistry,
+    analyticsRuntime(c, principal),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -44,7 +44,7 @@ function typedTeamTimeseries(
   return handlePlannedTeamTimeseries(
     c.req.raw,
     principal,
-    analyticsRuntime(c, principal).providerRegistry,
+    analyticsRuntime(c, principal),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -56,7 +56,7 @@ function typedTeamSites(
   return handlePlannedTeamSites(
     c.req.raw,
     principal,
-    analyticsRuntime(c, principal).providerRegistry,
+    analyticsRuntime(c, principal),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
@@ -71,7 +71,7 @@ function typedTeamBreakdown(
     c.req.raw,
     principal,
     dimension,
-    analyticsRuntime(c, principal).providerRegistry,
+    analyticsRuntime(c, principal),
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }

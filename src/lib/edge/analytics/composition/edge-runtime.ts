@@ -1,11 +1,11 @@
 import type { Env } from "@/lib/edge/types";
 
+import { createD1SiteProviderRegistry } from "./d1/create-site-runtime";
+import { createD1TeamProviderRegistry } from "./d1/create-team-runtime";
 import { registerComparisonQueryProviders } from "./comparison-query-providers";
 import { createComparisonRuntime } from "./comparison-runtime";
-import { createD1SiteQueryRuntime, createD1TeamQueryRuntime } from "./d1";
 import type { AnalyticsReadDiagnostics } from "./query-diagnostics";
 import type { AnalyticsQueryRuntime } from "./query-runtime";
-import { registerSiteAnalyticsOperations } from "./site-operation-providers";
 import { registerSiteRealtimeProviders } from "./site-realtime-providers";
 import { createSiteAnalyticsRuntime } from "./site-runtime";
 import { createTeamAnalyticsRuntime } from "./team-runtime";
@@ -30,21 +30,15 @@ export type EdgeAnalyticsRuntime = AnalyticsQueryRuntime & {
 export function createEdgeSiteAnalyticsRuntime(
   options: EdgeSiteAnalyticsRuntimeOptions,
 ): EdgeAnalyticsRuntime {
-  const providers = createD1SiteQueryRuntime(options);
-  registerSiteAnalyticsOperations(providers, options);
-  registerSiteRealtimeProviders(providers.providerRegistry, options);
+  const providerRegistry = createD1SiteProviderRegistry(options);
+  registerSiteRealtimeProviders(providerRegistry, options);
   const comparisonRuntime = createComparisonRuntime({
     env: options.env,
     siteId: options.siteId,
   });
-  registerComparisonQueryProviders(
-    providers.providerRegistry,
-    comparisonRuntime,
-  );
+  registerComparisonQueryProviders(providerRegistry, comparisonRuntime);
   return {
-    ...createSiteAnalyticsRuntime({
-      providerRegistry: providers.providerRegistry,
-    }),
+    ...createSiteAnalyticsRuntime(providerRegistry),
     readSiteCount: comparisonRuntime.readSiteCount,
   };
 }
@@ -53,20 +47,15 @@ export function createEdgeSiteAnalyticsRuntime(
 export function createEdgeTeamAnalyticsRuntime(
   options: EdgeTeamAnalyticsRuntimeOptions,
 ): EdgeAnalyticsRuntime {
-  const providers = createD1TeamQueryRuntime(options);
+  const providerRegistry = createD1TeamProviderRegistry(options);
   const comparisonRuntime = createComparisonRuntime({
     env: options.env,
     teamId: options.teamId,
     allowedSiteIds: options.allowedSiteIds,
   });
-  registerComparisonQueryProviders(
-    providers.providerRegistry,
-    comparisonRuntime,
-  );
+  registerComparisonQueryProviders(providerRegistry, comparisonRuntime);
   return {
-    ...createTeamAnalyticsRuntime({
-      providerRegistry: providers.providerRegistry,
-    }),
+    ...createTeamAnalyticsRuntime(providerRegistry),
     readSiteCount: comparisonRuntime.readSiteCount,
   };
 }

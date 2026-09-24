@@ -1,6 +1,8 @@
 import { analyticsOperationRegistry } from "@/lib/edge/analytics/application/operation-registry";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
+import type { AnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
+import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   executeOverview,
   executeTrend,
@@ -18,7 +20,7 @@ type TestReader = ((input: never) => Promise<unknown>) | OverviewReader;
  */
 export function createTestProviderRegistry(
   reader: TestReader,
-): AnalyticsProviderRegistry {
+): AnalyticsQueryRuntime {
   const registry = new AnalyticsProviderRegistry();
   for (const operation of analyticsOperationRegistry) {
     registry.register(canonicalQueryOperationFor(operation.id), {
@@ -42,5 +44,5 @@ export function createTestProviderRegistry(
       },
     });
   }
-  return registry;
+  return createAnalyticsQueryRuntime(registry);
 }

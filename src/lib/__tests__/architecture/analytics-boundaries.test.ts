@@ -49,8 +49,8 @@ describe("analytics architecture", () => {
       "interfaces/dashboard/private.ts",
       "interfaces/dashboard/public.ts",
       "interfaces/dashboard/protocol/overview.ts",
-      "composition/site-operation-providers.ts",
       "composition/site-realtime-providers.ts",
+      "composition/mock-runtime.ts",
       "composition/comparison-query-providers.ts",
       "composition/site-runtime.ts",
       "composition/team-runtime.ts",
@@ -106,7 +106,7 @@ describe("analytics architecture", () => {
     }
   });
 
-  it("makes registries the only provider entry point", () => {
+  it("keeps provider registries behind the canonical query executor", () => {
     const service = source("src/lib/edge/analytics/application/service.ts");
     const registry = source(
       "src/lib/edge/analytics/application/provider-registry.ts",
@@ -130,6 +130,11 @@ describe("analytics architecture", () => {
     expect(typedApplication).toContain(".execute(invocation)");
     expect(typedApplication).not.toContain("providerRegistry.resolve");
     expect(typedApplication).not.toContain("assertOperationAllowed");
+    const runtime = source(
+      "src/lib/edge/analytics/composition/query-runtime.ts",
+    );
+    expect(runtime).not.toContain("readonly providerRegistry:");
+    expect(service).toContain("providerRegistry.resolve");
   });
 
   it("routes every typed-query runtime through a registry", () => {
@@ -151,14 +156,16 @@ describe("analytics architecture", () => {
     }
   });
 
-  it("keeps service consumers on the registry boundary", () => {
+  it("keeps API v1 consumers on the query executor boundary", () => {
     for (const file of productionFiles("src/lib/api-v1")) {
-      if (file.endsWith(`${path.sep}query-application.ts`)) continue;
       const content = readFileSync(file, "utf8");
-      if (!content.includes("new TypedQueryApplicationService")) continue;
-      expect(content).toMatch(
-        /providerRegistry|createApiV1QueryApplicationAdapter/u,
+      expect(content, `${file} imports the provider registry`).not.toContain(
+        "AnalyticsProviderRegistry",
       );
+      expect(
+        content,
+        `${file} imports a concrete analytics provider`,
+      ).not.toMatch(/analytics\/providers(?:\/|["'])/u);
     }
     for (const file of productionFiles("src/lib/api-v1")) {
       expect(readFileSync(file, "utf8")).not.toContain(
@@ -176,14 +183,17 @@ describe("analytics architecture", () => {
         path.join(analyticsRoot, "composition", "api-v1-provider-registry.ts"),
       ),
     ).toBe(false);
-    expect(source("src/lib/api-v1/analytics/query-application.ts")).toContain(
-      "canonicalQueryOperationFor",
+    const queryApplication = source(
+      "src/lib/api-v1/analytics/query-application.ts",
     );
+    expect(queryApplication).toContain("canonicalQueryOperationFor");
+    expect(queryApplication).toContain("invocation.executor.execute");
+    expect(queryApplication).not.toContain("AnalyticsProviderRegistry");
     expect(source("src/lib/dashboard/route-data.ts")).toContain(
       "createTeamDashboardQueryRuntime",
     );
     expect(source("src/lib/edge/analytics/interfaces/mock.ts")).toContain(
-      "createMockProviderRegistry",
+      "createMockAnalyticsQueryRuntime",
     );
   });
 
@@ -343,18 +353,30 @@ describe("analytics architecture", () => {
     );
     expect(siteRoutes).toContain("createEdgeSiteAnalyticsRuntime");
     expect(teamRoutes).toContain("createEdgeTeamAnalyticsRuntime");
-    expect(edgeRuntime).toContain("registerSiteAnalyticsOperations");
+    expect(edgeRuntime).toContain("createD1SiteProviderRegistry");
     expect(edgeRuntime).toContain("registerSiteRealtimeProviders");
     expect(edgeRuntime).toContain("registerComparisonQueryProviders");
     expect(siteRuntime).not.toMatch(/\bD1[A-Za-z]*Options\b/u);
     expect(teamRuntime).not.toMatch(/\bD1[A-Za-z]*Options\b/u);
     for (const content of [siteRoutes, teamRoutes]) {
+      expect(content).not.toContain("providerRegistry");
+      expect(content).not.toContain("AnalyticsProviderRegistry");
       expect(content).not.toContain("createApiV1ProviderRegistry");
       expect(content).not.toContain("createComparisonRuntime");
       expect(content).not.toMatch(/analytics\/providers(?:\/|["'])/u);
       expect(content).not.toContain("readSite");
       expect(content).not.toContain("readTeam");
     }
+  });
+
+  it("never selects canonical providers from API v1 audience", () => {
+    const composition = productionFiles("src/lib/edge/analytics/composition")
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
+    expect(composition).not.toMatch(
+      /audience\s*===\s*["']api-v1["'][\s\S]{0,240}(?:provider|registry)|(?:provider|registry)[\s\S]{0,240}audience\s*===\s*["']api-v1["']/u,
+    );
+    expect(composition).not.toContain("queryMode");
   });
 
   it("keeps the D1 provider free of application policy context", () => {
@@ -388,13 +410,28 @@ describe("analytics architecture", () => {
   });
 
   it("keeps protocol adapters free of provider callbacks", () => {
-    for (const file of productionFiles(
-      "src/lib/edge/analytics/interfaces/dashboard/protocol",
-    )) {
+    for (const file of productionFiles("src/lib/edge/analytics/interfaces")) {
       const content = readFileSync(file, "utf8");
       expect(content, `${file} creates a local query provider`).not.toMatch(
-        /createTypedQueryProviderRegistry|new AnalyticsProviderRegistry|typedQueryProvider|executeTypedApplicationOperation/u,
+        /create\w*ProviderRegistry|new AnalyticsProviderRegistry|typedQueryProvider|executeTypedApplicationOperation/u,
       );
+      expect(content, `${file} imports a concrete provider`).not.toMatch(
+        /analytics\/providers(?:\/|["'])/u,
+      );
+    }
+  });
+
+  it("runs analytics-specific runtime boundary rules in the architecture check", () => {
+    const checker = source("scripts/check-architecture.ts");
+    for (const rule of [
+      "analytics-provider-audience-selection",
+      "analytics-untyped-query-variant",
+      "api-v1-provider-registry",
+      "api-v1-local-provider-selection",
+      "analytics-interface-local-provider-registry",
+      "analytics-interface-concrete-provider",
+    ]) {
+      expect(checker).toContain(rule);
     }
   });
 

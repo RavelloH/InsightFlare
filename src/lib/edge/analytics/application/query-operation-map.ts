@@ -1,4 +1,8 @@
 import type { QueryOperation } from "@/lib/edge/analytics/contract";
+import type {
+  PerformanceQueryMode,
+  RealtimeQueryMode,
+} from "@/lib/edge/analytics/contract";
 
 import type { AnalyticsOperationId } from "./operation-registry";
 
@@ -60,7 +64,12 @@ const API_V1_QUERY_VARIANT_MAP = {
   "site.analytics.realtimeActiveVisitors": "active-visitors",
   "site.analytics.realtimeEvents": "events",
   "site.analytics.realtimeSessions": "sessions",
-} as const satisfies Partial<Record<AnalyticsOperationId, string>>;
+} as const satisfies Partial<
+  Record<
+    AnalyticsOperationId,
+    Exclude<PerformanceQueryMode, "dashboard"> | RealtimeQueryMode
+  >
+>;
 
 export type CanonicalQueryOperation =
   (typeof API_V1_QUERY_OPERATION_MAP)[AnalyticsOperationId];
@@ -73,7 +82,7 @@ export function canonicalQueryOperationFor(
 
 export function canonicalQueryVariantFor(
   operation: AnalyticsOperationId,
-): string | undefined {
+): Exclude<PerformanceQueryMode, "dashboard"> | RealtimeQueryMode | undefined {
   return API_V1_QUERY_VARIANT_MAP[
     operation as keyof typeof API_V1_QUERY_VARIANT_MAP
   ];

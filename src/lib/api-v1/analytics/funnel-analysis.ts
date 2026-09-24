@@ -17,8 +17,8 @@ import {
   jsonSuccess,
   methodNotAllowed,
 } from "@/lib/api-v1/contract/wire-helpers";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { funnelAnalysisCost } from "@/lib/edge/analytics/composition/d1";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   attachSavedFilterScopePreference,
   EMPTY_FILTER_DOCUMENT,
@@ -108,7 +108,7 @@ export async function handlePlannedSiteFunnelAnalysis(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   definitions?: AnalysisDefinitionReader,
   execution: {
     readonly signal?: AbortSignal;
@@ -284,7 +284,7 @@ export async function handlePlannedSiteFunnelAnalysis(
             timeZone: resolved.timeZone,
           },
         },
-        providerRegistry,
+        executor,
       },
       {
         signal: execution.signal,

@@ -1,29 +1,32 @@
-/* c8 ignore file -- this module bridges fixture transport and typed queries. */
+/* c8 ignore file -- this module assembles the fixture query runtime. */
 
 import {
   AnalyticsProviderRegistry,
   typedQueryProvider,
 } from "@/lib/edge/analytics/application/provider-registry";
-import {
-  type BaseQuery,
-  type QueryContext,
-  type QueryOperation,
+import type {
+  BaseQuery,
+  QueryContext,
+  QueryOperation,
 } from "@/lib/edge/analytics/contract";
-
 import {
   type DemoQueryRuntimeInput,
   executeDemoQueryPayload,
-} from "./demo-query";
-export interface MockQueryProviderInput extends DemoQueryRuntimeInput {
-  /** Canonical policy context supplied by the Private/Public adapter. */
+} from "@/lib/edge/analytics/providers/mock/demo-query";
+
+import { createAnalyticsQueryRuntime } from "./query-runtime";
+
+export interface MockQueryRuntimeInput extends DemoQueryRuntimeInput {
+  /** Canonical policy context supplied by the protocol adapter. */
   readonly queryContext: QueryContext;
-  /** The operation selected by the protocol adapter. */
+  /** Canonical operation selected by composition. */
   readonly operation: QueryOperation;
   /** Canonical query supplied by the inbound protocol adapter. */
   readonly query: BaseQuery;
 }
-export function createMockProviderRegistry(input: MockQueryProviderInput) {
-  return new AnalyticsProviderRegistry().register(
+
+export function createMockAnalyticsQueryRuntime(input: MockQueryRuntimeInput) {
+  const providerRegistry = new AnalyticsProviderRegistry().register(
     input.operation,
     typedQueryProvider(async (query) => {
       const resolvedScope = query?.scopePlan?.scope;
@@ -34,4 +37,5 @@ export function createMockProviderRegistry(input: MockQueryProviderInput) {
       };
     }),
   );
+  return createAnalyticsQueryRuntime(providerRegistry);
 }

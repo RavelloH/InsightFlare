@@ -39,6 +39,14 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/pages-dashboard", () => ({
 vi.mock("@/lib/edge/analytics/providers/d1/internal/performance", () => ({
   queryPerformanceDashboardFromD1: vi.fn(),
 }));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/operations/site-performance",
+  () => ({
+    readSitePerformanceBreakdown: vi.fn(),
+    readSitePerformanceSummary: vi.fn(),
+    readSitePerformanceTimeseries: vi.fn(),
+  }),
+);
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   dimensionExpression,
@@ -76,6 +84,11 @@ import {
   queryReferrersPageFromD1,
   queryReferrerSummaryFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
+import {
+  readSitePerformanceBreakdown,
+  readSitePerformanceSummary,
+  readSitePerformanceTimeseries,
+} from "@/lib/edge/analytics/providers/d1/operations/site-performance";
 import type { Env } from "@/lib/edge/types";
 const env = {} as Env;
 const siteId = "site-provider";
@@ -189,6 +202,9 @@ describe("D1 site contract provider pagination routing", () => {
       cityCounts: [],
     });
     vi.mocked(queryPerformanceDashboardFromD1).mockResolvedValue({} as never);
+    vi.mocked(readSitePerformanceSummary).mockResolvedValue({} as never);
+    vi.mocked(readSitePerformanceTimeseries).mockResolvedValue({} as never);
+    vi.mocked(readSitePerformanceBreakdown).mockResolvedValue({} as never);
   });
 
   it("routes overview tabs to the matching paginated reader", async () => {
@@ -207,6 +223,32 @@ describe("D1 site contract provider pagination routing", () => {
     expect(queryDimensionPageFromD1).toHaveBeenCalled();
     expect(querySessionPathDimensionPageFromD1).toHaveBeenCalled();
     expect(queryReferrersPageFromD1).toHaveBeenCalled();
+  });
+
+  it("dispatches typed performance modes through one canonical provider", async () => {
+    const provider = providers().resolve("performance")!;
+    await provider.execute(input({ mode: "summary" }));
+    await provider.execute(input({ mode: "timeseries", interval: "day" }));
+    await provider.execute(
+      input({
+        mode: "breakdown",
+        dimension: "page.path",
+        metric: "lcp",
+        limit: 10,
+      }),
+    );
+    await provider.execute(input({ mode: "dashboard", interval: "day" }));
+
+    expect(readSitePerformanceSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ env, siteId }),
+    );
+    expect(readSitePerformanceTimeseries).toHaveBeenCalledWith(
+      expect.objectContaining({ interval: "day" }),
+    );
+    expect(readSitePerformanceBreakdown).toHaveBeenCalledWith(
+      expect.objectContaining({ dimension: "page.path", metric: "lcp" }),
+    );
+    expect(queryPerformanceDashboardFromD1).toHaveBeenCalled();
   });
 
   it("keeps bounded list and summary requests on their explicit paths", async () => {

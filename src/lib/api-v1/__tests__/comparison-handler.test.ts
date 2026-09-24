@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { registerComparisonQueryProviders } from "@/lib/edge/analytics/composition/comparison-query-providers";
 import { createComparisonRuntime } from "@/lib/edge/analytics/composition/comparison-runtime";
+import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { Env } from "@/lib/edge/types";
 const mocks = vi.hoisted(() => ({
@@ -57,7 +58,7 @@ function comparisonQueryRuntime(options: {
   const providerRegistry = new AnalyticsProviderRegistry();
   registerComparisonQueryProviders(providerRegistry, comparisonRuntime);
   return {
-    providerRegistry,
+    ...createAnalyticsQueryRuntime(providerRegistry),
     readSiteCount: comparisonRuntime.readSiteCount,
   };
 }

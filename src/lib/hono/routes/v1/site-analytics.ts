@@ -59,8 +59,8 @@ function analyticsRuntime(c: Context<AppEnv>, siteId: string) {
     siteId,
   });
 }
-function providerRegistry(c: Context<AppEnv>, siteId: string) {
-  return analyticsRuntime(c, siteId).providerRegistry;
+function queryExecutor(c: Context<AppEnv>, siteId: string) {
+  return analyticsRuntime(c, siteId);
 }
 export function registerV1SiteAnalyticsRoutes(
   routes: Hono<AppEnv>,
@@ -100,7 +100,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -143,7 +143,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -157,7 +157,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       dimension,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -169,7 +169,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -181,7 +181,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -193,7 +193,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -205,7 +205,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -217,7 +217,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -229,7 +229,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -241,7 +241,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
@@ -254,7 +254,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
@@ -267,7 +267,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
@@ -279,7 +279,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -291,7 +291,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -322,7 +322,7 @@ export function registerV1SiteAnalyticsRoutes(
         c.req.raw,
         deps.resolvePrincipal(c),
         siteId,
-        providerRegistry(c, siteId),
+        queryExecutor(c, siteId),
         { signal: c.req.raw.signal, capturedAtMs: Date.now() },
         createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
         parsedDimension.data,
@@ -336,7 +336,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -348,7 +348,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -360,7 +360,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -372,7 +372,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -384,7 +384,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -396,7 +396,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -408,7 +408,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -420,7 +420,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -431,7 +431,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -442,7 +442,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -453,7 +453,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -464,7 +464,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -475,7 +475,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -486,7 +486,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -497,7 +497,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
     );
   });
@@ -508,7 +508,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -520,7 +520,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -532,7 +532,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -544,7 +544,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -556,7 +556,7 @@ export function registerV1SiteAnalyticsRoutes(
       c.req.raw,
       deps.resolvePrincipal(c),
       siteId,
-      providerRegistry(c, siteId),
+      queryExecutor(c, siteId),
       { signal: c.req.raw.signal, capturedAtMs: Date.now() },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );

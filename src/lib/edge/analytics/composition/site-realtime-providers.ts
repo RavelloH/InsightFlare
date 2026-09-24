@@ -2,6 +2,12 @@ import {
   type AnalyticsProviderRegistry,
   typedQueryProvider,
 } from "@/lib/edge/analytics/application/provider-registry";
+import type { QueryInput } from "@/lib/edge/analytics/contract";
+import {
+  type RealtimeQuery,
+  type RealtimeQueryMode,
+  type RealtimeQueryResult,
+} from "@/lib/edge/analytics/contract";
 import {
   readSiteRealtimeActiveVisitors,
   readSiteRealtimeEvents,
@@ -10,31 +16,16 @@ import {
 } from "@/lib/edge/analytics/providers/realtime/operations/site-realtime";
 import type { Env } from "@/lib/edge/types";
 
-type RealtimeQuery = {
-  readonly siteId?: unknown;
-  readonly queryMode?: unknown;
-  readonly time: {
-    readonly range: {
-      readonly startMs: number;
-      readonly endExclusiveMs: number;
-    };
-  };
-  readonly limit?: unknown;
-};
-type RealtimeQueryResult =
-  | Awaited<ReturnType<typeof readSiteRealtimeSnapshot>>
-  | Awaited<ReturnType<typeof readSiteRealtimeActiveVisitors>>
-  | Awaited<ReturnType<typeof readSiteRealtimeEvents>>
-  | Awaited<ReturnType<typeof readSiteRealtimeSessions>>;
-
-function siteId(query: RealtimeQuery, configuredSiteId: string): string {
-  return typeof query.siteId === "string" ? query.siteId : configuredSiteId;
+function isRealtimeMode(value: unknown): value is RealtimeQueryMode {
+  return (
+    value === "snapshot" ||
+    value === "active-visitors" ||
+    value === "events" ||
+    value === "sessions"
+  );
 }
-
-function limit(query: RealtimeQuery, fallback: number): number {
-  return typeof query.limit === "number" && Number.isFinite(query.limit)
-    ? query.limit
-    : fallback;
+function isRealtimeQuery(input: QueryInput): input is RealtimeQuery {
+  return "time" in input && "mode" in input && isRealtimeMode(input.mode);
 }
 
 /** Realtime source providers are composed beside the D1 site query providers. */
@@ -45,13 +36,17 @@ export function registerSiteRealtimeProviders(
   registry.register(
     "realtime",
     typedQueryProvider<RealtimeQueryResult>(async (input, execution) => {
-      const query = input as unknown as RealtimeQuery;
-      const configuredSiteId = siteId(query, options.siteId);
+      if (!input || !isRealtimeQuery(input)) {
+        throw new Error("unsupported-realtime-query-mode");
+      }
+      const query = input;
+      const configuredSiteId = query.siteId ?? options.siteId;
       const startMs = query.time.range.startMs;
       const endExclusiveMs = query.time.range.endExclusiveMs;
       const signal = execution?.signal;
+      const limit = query.limit ?? 20;
 
-      switch (query.queryMode) {
+      switch (query.mode) {
         case "snapshot":
           return {
             value: await readSiteRealtimeSnapshot({
@@ -59,7 +54,7 @@ export function registerSiteRealtimeProviders(
               siteId: configuredSiteId,
               startMs,
               endExclusiveMs,
-              limit: limit(query, 20),
+              limit,
               signal,
             }),
           };
@@ -80,7 +75,7 @@ export function registerSiteRealtimeProviders(
               siteId: configuredSiteId,
               startMs,
               endExclusiveMs,
-              limit: limit(query, 20),
+              limit,
               signal,
             }),
           };
@@ -91,7 +86,7 @@ export function registerSiteRealtimeProviders(
               siteId: configuredSiteId,
               startMs,
               endExclusiveMs,
-              limit: limit(query, 20),
+              limit,
               signal,
             }),
           };

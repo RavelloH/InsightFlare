@@ -8,8 +8,8 @@ import {
   fromRequestBodyError,
 } from "@/lib/api-v1/contract/errors";
 import { serializeAnalyticsResult } from "@/lib/api-v1/contract/serializer";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import type { QueryExecutionContext } from "@/lib/edge/analytics/application/service";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const MAX_BODY_BYTES = 64 * 1024;
 function id(): string {
@@ -103,7 +103,7 @@ export async function handlePlannedSiteTimeseries(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   executionContext: QueryExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<Response> {
@@ -140,7 +140,7 @@ export async function handlePlannedSiteTimeseries(
       input,
       principal,
       siteId,
-      providerRegistry,
+      executor,
       executionContext,
       definitions,
     );

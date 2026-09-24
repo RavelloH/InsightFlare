@@ -3,12 +3,8 @@ import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application
 import { createAnalyticsQueryRuntime } from "./query-runtime";
 
 /** Source-neutral provider input for the canonical site analytics runtime. */
-export interface SiteAnalyticsRuntimeOptions {
-  readonly providerRegistry: AnalyticsProviderRegistry;
-}
-
 export function createSiteAnalyticsRuntime(
-  options: SiteAnalyticsRuntimeOptions,
+  providerRegistry: AnalyticsProviderRegistry,
 ) {
-  return createAnalyticsQueryRuntime(options.providerRegistry);
+  return createAnalyticsQueryRuntime(providerRegistry);
 }

@@ -19,7 +19,7 @@ export type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/intern
  * Audience policy and filter authorization are validated by the application
  * service before the provider is invoked.
  */
-export function createD1SiteQueryRuntime(options: D1SiteRuntimeBindings) {
+export function createD1SiteProviderRegistry(options: D1SiteRuntimeBindings) {
   const diagnostics = options.diagnostics ?? createD1ReadDiagnostics();
   const reader = createOverviewReader(options.env, options.siteId, diagnostics);
   const registry = new AnalyticsProviderRegistry()
@@ -32,5 +32,9 @@ export function createD1SiteQueryRuntime(options: D1SiteRuntimeBindings) {
   registerFunnelProvider(registry, options);
   registerGoalProviders(registry, options);
 
-  return createAnalyticsQueryRuntime(registry);
+  return registry;
+}
+
+export function createD1SiteQueryRuntime(options: D1SiteRuntimeBindings) {
+  return createAnalyticsQueryRuntime(createD1SiteProviderRegistry(options));
 }

@@ -3,6 +3,7 @@ import { parseFilterUrlForAudience } from "@/lib/edge/analytics/contract";
 import {
   type BaseQuery,
   type PerformanceDashboardResult,
+  type PerformanceQuery,
   queryWindowToTime,
   type RetentionResult,
   siteQueryContext,
@@ -53,19 +54,18 @@ export async function handlePerformanceContract(
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
   const interval = parseInterval(url);
-  const result = await createEdgeSiteAnalyticsRuntime({
-    env,
-    siteId,
-  }).execute<PerformanceDashboardResult>("performance", {
+  const query: PerformanceQuery = {
     context: queryContext,
+    mode: "dashboard",
     time: queryWindowToTime(window),
     filters: parseFilterUrlForAudience(queryContext.policy.audience, url),
     interval,
     limit: parseLimit(url, 18, 50),
-  } as BaseQuery & {
-    readonly interval: ReturnType<typeof parseInterval>;
-    readonly limit: number;
-  });
+  };
+  const result = await createEdgeSiteAnalyticsRuntime({
+    env,
+    siteId,
+  }).execute<PerformanceDashboardResult>("performance", query);
   if (!result.ok) return queryErrorResponse(result.error);
   return jsonResponseWith(ctx!, {
     ok: true,

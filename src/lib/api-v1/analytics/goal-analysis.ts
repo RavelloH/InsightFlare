@@ -29,8 +29,8 @@ import {
   GOAL_TIMESERIES_MAX_BUCKETS,
   goalQueryCost,
 } from "@/lib/edge/analytics/application/goal-cost";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { queryGoalDefinition } from "@/lib/edge/analytics/composition/d1/goals";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   attachSavedFilterScopePreference,
   createScopedFilterPlan,
@@ -137,7 +137,7 @@ async function executeGoalQuery(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   definitions: AnalysisDefinitionReader | undefined,
   kind: "summary" | "timeseries",
   execution: {
@@ -367,7 +367,7 @@ async function executeGoalQuery(
         operation,
         context,
         query,
-        providerRegistry,
+        executor,
         cache: {
           key: cacheKey,
           policy: goalAggregateCachePolicy,
@@ -433,7 +433,7 @@ export function handlePlannedSiteGoalSummary(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   definitions?: AnalysisDefinitionReader,
   execution: {
     readonly signal?: AbortSignal;
@@ -446,7 +446,7 @@ export function handlePlannedSiteGoalSummary(
     request,
     principal,
     siteId,
-    providerRegistry,
+    executor,
     definitions,
     "summary",
     execution,
@@ -457,7 +457,7 @@ export function handlePlannedSiteGoalTimeseries(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   definitions?: AnalysisDefinitionReader,
   execution: {
     readonly signal?: AbortSignal;
@@ -470,7 +470,7 @@ export function handlePlannedSiteGoalTimeseries(
     request,
     principal,
     siteId,
-    providerRegistry,
+    executor,
     definitions,
     "timeseries",
     execution,

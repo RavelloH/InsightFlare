@@ -6,6 +6,7 @@ import type {
 } from "@/lib/filter-contract/scope-preference";
 import type { FilterAudience } from "@/lib/filter-contract/types";
 import type { PageRequest, PageResult, PaginationMeta } from "@/lib/pagination";
+import type { RealtimeEvent, RealtimeVisit } from "@/schemas/realtime";
 
 import type { FunnelProgressionScope, FunnelStepV2 } from "./funnel-config";
 import type { ScopedFilterPlan } from "./scoped-filter";
@@ -227,6 +228,22 @@ export type CanonicalObject = Readonly<Record<string, unknown>>;
 export interface BaseQuery extends QueryInput {
   readonly time: QueryTime;
 }
+export type RealtimeQueryMode =
+  "snapshot" | "active-visitors" | "events" | "sessions";
+export interface RealtimeQuery extends BaseQuery {
+  readonly mode: RealtimeQueryMode;
+  readonly siteId?: string;
+  readonly limit?: number;
+}
+export type RealtimeQueryResult =
+  | {
+      readonly activeNow: number;
+      readonly events: readonly RealtimeEvent[];
+      readonly visits: readonly RealtimeVisit[];
+    }
+  | { readonly activeNow: number }
+  | { readonly items: readonly RealtimeEvent[] }
+  | { readonly items: readonly RealtimeVisit[] };
 export type { PageRequest, PageResult, PaginationMeta } from "@/lib/pagination";
 export const COMPARISON_METRIC_KEYS = [
   "views",
@@ -611,6 +628,49 @@ export interface PerformanceDashboardResult {
   readonly routes: readonly PerformanceRouteRow[];
   readonly countries: readonly PerformanceCountryRow[];
 }
+export type PerformanceQueryMode =
+  "dashboard" | "summary" | "timeseries" | "breakdown";
+export type PerformanceQuery =
+  | (BaseQuery & {
+      readonly mode: "dashboard";
+      readonly interval: Interval;
+      readonly limit?: number;
+    })
+  | (BaseQuery & { readonly mode: "summary" })
+  | (BaseQuery & {
+      readonly mode: "timeseries";
+      readonly interval: Interval;
+    })
+  | (BaseQuery & {
+      readonly mode: "breakdown";
+      readonly dimension: string;
+      readonly metric: PerformanceMetricKey;
+      readonly limit?: number;
+    });
+export interface PerformanceSummaryResult {
+  readonly metrics: Record<PerformanceMetricKey, PerformanceSummaryRow>;
+}
+export interface PerformanceTimeseriesResult {
+  readonly interval: Interval;
+  readonly series: Record<
+    PerformanceMetricKey,
+    readonly (PerformanceSummaryRow & { readonly timestamp: string })[]
+  >;
+}
+export interface PerformanceBreakdownResult {
+  readonly dimension: string;
+  readonly metric: PerformanceMetricKey;
+  readonly items: readonly (PerformanceRouteMetricRow & {
+    readonly key: string;
+    readonly label: string;
+    readonly views: number;
+  })[];
+}
+export type PerformanceQueryResult =
+  | PerformanceDashboardResult
+  | PerformanceSummaryResult
+  | PerformanceTimeseriesResult
+  | PerformanceBreakdownResult;
 export interface BreakdownItem {
   readonly key: string;
   readonly label: string;

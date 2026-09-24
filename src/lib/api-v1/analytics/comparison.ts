@@ -92,10 +92,7 @@ type ResolvedSide = {
 type ReportDomainResult = AnalyticsResult<
   ComparisonResult & { readonly trend?: ComparisonTrendResult }
 >;
-type ComparisonQueryRuntime = Pick<
-  AnalyticsQueryRuntime,
-  "providerRegistry"
-> & {
+type ComparisonQueryRuntime = Pick<AnalyticsQueryRuntime, "execute"> & {
   readonly readSiteCount: () => Promise<number>;
 };
 type BreakdownDomainResult = AnalyticsResult<ComparisonBreakdownResult>;
@@ -563,7 +560,7 @@ async function executeReport(
         policy: comparisonCachePolicy,
         isCacheable: (value) => value.ok,
       },
-      providerRegistry: runtime.providerRegistry,
+      executor: runtime,
     },
     executionContext,
   );
@@ -603,7 +600,7 @@ async function executeBreakdown(
         policy: comparisonCachePolicy,
         isCacheable: (value) => value.ok,
       },
-      providerRegistry: runtime.providerRegistry,
+      executor: runtime,
     },
     executionContext,
   );

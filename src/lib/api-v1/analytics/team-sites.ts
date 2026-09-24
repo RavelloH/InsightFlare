@@ -13,7 +13,7 @@ import {
   fromRequestBodyError,
   fromZodIssues,
 } from "@/lib/api-v1/contract/errors";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   type FilterDocument,
   isReportingTimeZone,
@@ -123,7 +123,7 @@ function filter(input: TeamSitesQueryDto): FilterDocument | null {
 export async function handlePlannedTeamSites(
   request: Request,
   principal: ApiKeyPrincipal,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   executionContext: {
     readonly signal?: AbortSignal;
     readonly deadlineMs?: number;
@@ -222,7 +222,7 @@ export async function handlePlannedTeamSites(
         ),
         query,
         rawRequest: input,
-        providerRegistry,
+        executor,
       },
       {
         signal: executionContext.signal,

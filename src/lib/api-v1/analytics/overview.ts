@@ -18,11 +18,11 @@ import {
   createOperationCacheKey,
   OperationResultCache,
 } from "@/lib/edge/analytics/application/cache";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import type {
   AnalyticsServiceResult,
   QueryExecutionContext,
 } from "@/lib/edge/analytics/application/service";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   type AnalyticsResult,
   attachSavedFilterScopePreference,
@@ -314,7 +314,7 @@ export async function executeApiV1SiteOverview(
   input: unknown,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   executionContext: QueryExecutionContext,
   definitions?: AnalysisDefinitionReader,
 ): Promise<
@@ -373,7 +373,7 @@ export async function executeApiV1SiteOverview(
           filters: filter.value,
           scopePreference: parsed.value.scope ?? "auto",
         },
-        providerRegistry,
+        executor,
         cache: {
           key: await aggregateCacheKey({
             operation: "site.analytics.overview",

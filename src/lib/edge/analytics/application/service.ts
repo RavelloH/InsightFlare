@@ -22,7 +22,6 @@ import type { AnalyticsProviderRegistry } from "./provider-registry";
 import type { TypedQueryProviderResult } from "./provider-registry";
 import { validateTypedQueryInput } from "./query-validation";
 export type { AnalyticsServiceError, AnalyticsServiceResult } from "./errors";
-export { AnalyticsProviderRegistry } from "./provider-registry";
 export interface QueryExecutionContext {
   readonly signal?: AbortSignal;
   readonly deadlineMs?: number;
@@ -31,6 +30,14 @@ export interface QueryExecutionContext {
   readonly now?: () => number;
   /** Optional normalized cost dimensions supplied by the DTO adapter. */
   readonly cost?: QueryCostInput;
+  /** Optional protocol-owned cache policy carried through the runtime boundary. */
+  readonly cache?: {
+    readonly key: string;
+    readonly policy: OperationCachePolicy;
+    readonly isCacheable?: (value: unknown) => boolean;
+  };
+  /** Optional cache instance supplied by a protocol adapter. */
+  readonly cacheStore?: OperationResultCache;
   /** Optional low-cardinality hook; callers must not include query payloads. */
   readonly onEvent?: (event: AnalyticsQueryEvent) => void;
   /** Allows a protocol adapter to preserve its legacy provider-error mapping. */

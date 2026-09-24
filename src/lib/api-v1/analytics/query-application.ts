@@ -1,7 +1,6 @@
 import type { OperationResultCache } from "@/lib/edge/analytics/application/cache";
 import type { OperationCachePolicy } from "@/lib/edge/analytics/application/cache";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   canonicalQueryOperationFor,
   canonicalQueryVariantFor,
@@ -10,9 +9,10 @@ import {
   type AnalyticsServiceResult,
   type QueryExecutionContext,
 } from "@/lib/edge/analytics/application/service";
-import { createAnalyticsQueryApplicationService } from "@/lib/edge/analytics/composition/query-application-service";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import type {
   AnalyticsResult,
+  BaseQuery,
   QueryInput,
   QueryTime,
 } from "@/lib/edge/analytics/contract";
@@ -24,7 +24,7 @@ export interface ApiV1QueryInvocation<Query, Result> {
   readonly query: Query;
   /** Canonical request DTO, before it is expanded into a provider query. */
   readonly rawRequest?: unknown;
-  readonly providerRegistry: AnalyticsProviderRegistry;
+  readonly executor: AnalyticsQueryExecutor;
   readonly cache?: {
     readonly key: string;
     readonly policy: OperationCachePolicy;
@@ -144,9 +144,200 @@ function serviceError<Result>(
     error: { kind: "operation-not-allowed", operation },
   };
 }
+function serializeApiV1Result(operation: AnalyticsOperationId, value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const result = value as Record<string, unknown>;
+  if (operation === "site.analytics.breakdown" && Array.isArray(result.items)) {
+    return {
+      ...result,
+      items: result.items.map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return item;
+        }
+        const { value: dimensionValue, ...fields } = item as Record<
+          string,
+          unknown
+        >;
+        return {
+          ...fields,
+          key:
+            typeof fields.key === "string"
+              ? fields.key
+              : typeof dimensionValue === "string"
+                ? dimensionValue
+                : "",
+        };
+      }),
+    };
+  }
+  if (operation === "site.analytics.channels" && Array.isArray(result.data)) {
+    return {
+      items: result.data.map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return item;
+        }
+        const row = item as Record<string, unknown>;
+        const { label, ...metrics } = row;
+        return {
+          ...metrics,
+          channel:
+            typeof row.channel === "string"
+              ? row.channel
+              : typeof label === "string"
+                ? label
+                : "",
+        };
+      }),
+    };
+  }
+  if (
+    operation === "site.analytics.filterValues" &&
+    result.data &&
+    typeof result.data === "object" &&
+    !Array.isArray(result.data)
+  ) {
+    const data = result.data as Record<string, unknown>;
+    return {
+      field: result.field,
+      items: data.items,
+      pagination: data.pagination,
+    };
+  }
+  if (operation === "site.analytics.retentionCohorts") {
+    const cohorts = Array.isArray(result.cohorts) ? result.cohorts : [];
+    return {
+      granularity: result.granularity,
+      cohorts: cohorts.map((cohort) => {
+        if (!cohort || typeof cohort !== "object" || Array.isArray(cohort)) {
+          return cohort;
+        }
+        const { bucket, ...fields } = cohort as Record<string, unknown>;
+        return {
+          ...fields,
+          start:
+            typeof bucket === "number"
+              ? new Date(bucket).toISOString()
+              : fields.start,
+        };
+      }),
+    };
+  }
+  if (operation === "site.analytics.eventsTimeseries") {
+    const data = Array.isArray(result.data) ? result.data : [];
+    return {
+      interval: result.interval,
+      series: result.series,
+      points: data.map((point) => {
+        if (!point || typeof point !== "object" || Array.isArray(point)) {
+          return point;
+        }
+        const row = point as Record<string, unknown>;
+        const { timestampMs, ...fields } = row;
+        return {
+          ...fields,
+          timestamp:
+            typeof timestampMs === "number"
+              ? new Date(timestampMs).toISOString()
+              : row.timestamp,
+        };
+      }),
+    };
+  }
+  if (
+    operation === "site.analytics.eventTypes" &&
+    Array.isArray(result.items)
+  ) {
+    return {
+      ...result,
+      items: result.items.map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return item;
+        }
+        const row = item as Record<string, unknown>;
+        const key =
+          typeof row.key === "string"
+            ? row.key
+            : typeof row.label === "string"
+              ? row.label
+              : "";
+        const { views, ...fields } = row;
+        return {
+          ...fields,
+          key,
+          events:
+            typeof row.events === "number"
+              ? row.events
+              : typeof views === "number"
+                ? views
+                : 0,
+        };
+      }),
+    };
+  }
+  if (
+    operation === "site.analytics.eventFields" &&
+    result.data &&
+    typeof result.data === "object" &&
+    !Array.isArray(result.data)
+  ) {
+    const data = result.data as Record<string, unknown>;
+    return {
+      eventName: result.eventName,
+      items: data.items,
+      pagination: data.pagination,
+    };
+  }
+  if (
+    operation === "site.analytics.eventFieldValues" &&
+    result.data &&
+    typeof result.data === "object" &&
+    !Array.isArray(result.data)
+  ) {
+    const data = result.data as Record<string, unknown>;
+    return {
+      eventName: result.eventName,
+      fieldPath: result.fieldPath,
+      fieldValueType: result.fieldValueType,
+      items: data.items,
+      pagination: data.pagination,
+    };
+  }
+  if (operation === "site.analytics.eventTypeDetail") {
+    const trend = result.trend;
+    if (!trend || typeof trend !== "object" || Array.isArray(trend)) {
+      return value;
+    }
+    const trendRecord = trend as Record<string, unknown>;
+    const data = Array.isArray(trendRecord.data) ? trendRecord.data : [];
+    return {
+      ...result,
+      trend: {
+        ...trendRecord,
+        data: data.map((point) => {
+          if (!point || typeof point !== "object" || Array.isArray(point)) {
+            return point;
+          }
+          const row = point as Record<string, unknown>;
+          const { timestampMs, ...fields } = row;
+          return {
+            ...fields,
+            timestamp:
+              typeof timestampMs === "number"
+                ? new Date(timestampMs).toISOString()
+                : row.timestamp,
+          };
+        }),
+      },
+    };
+  }
+  if (operation === "site.analytics.funnelAnalysis" && result.funnel === null) {
+    return null;
+  }
+  return value;
+}
 /**
  * API v1 adapter entry point. The external operation id is translated here;
- * the application service sees only a canonical QueryOperation and registry.
+ * the runtime sees only a canonical QueryOperation and canonical query.
  */
 export async function executeApiV1Query<Query, Result>(
   cache: OperationResultCache | undefined,
@@ -165,15 +356,6 @@ export async function executeApiV1Query<Query, Result>(
   }
 
   const operation = canonicalQueryOperationFor(invocation.operation);
-  if (!invocation.providerRegistry.resolve<Result>(operation)) {
-    return {
-      ok: false,
-      error: {
-        kind: "operation-not-allowed",
-        operation: invocation.operation,
-      },
-    };
-  }
   const rawRequest = invocation.rawRequest ?? invocation.query;
   const requestBinding = await apiV1RequestPaginationBinding(
     invocation.operation,
@@ -185,28 +367,51 @@ export async function executeApiV1Query<Query, Result>(
     ...invocation.query,
     context: invocation.context,
     time: { ...time, paginationBinding: requestBinding },
-    ...(canonicalVariant ? { queryMode: canonicalVariant } : {}),
-  } as QueryInput;
+    ...(canonicalVariant ? { mode: canonicalVariant } : {}),
+  } as BaseQuery & Readonly<Record<string, unknown>>;
   let providerError: unknown;
-  const result = await createAnalyticsQueryApplicationService(cache).execute(
-    {
-      kind: "typed-query",
-      operation,
-      query,
-      providerRegistry: invocation.providerRegistry,
-      cache: invocation.cache,
+  const result = await invocation.executor.execute<Result>(operation, query, {
+    ...executionContext,
+    operation: invocation.operation,
+    ...(invocation.cache
+      ? {
+          cache: {
+            ...invocation.cache,
+            isCacheable: (value: unknown) =>
+              invocation.cache?.isCacheable?.(value as Result) ?? true,
+          },
+        }
+      : {}),
+    ...(cache ? { cacheStore: cache } : {}),
+    onProviderError: (error) => {
+      providerError = error;
+      executionContext.onProviderError?.(error);
     },
-    {
-      ...executionContext,
-      operation: invocation.operation,
-      onProviderError: (error) => {
-        providerError = error;
-        executionContext.onProviderError?.(error);
+  });
+  if (!result.ok && result.error.kind === "internal") {
+    if (providerError) {
+      return Promise.reject(
+        providerError instanceof Error
+          ? providerError
+          : new Error("data-unavailable"),
+      );
+    }
+    return {
+      ok: false,
+      error: {
+        kind: "operation-not-allowed",
+        operation: invocation.operation,
       },
-    },
-  );
+    };
+  }
+  const protocolResult = result.ok
+    ? {
+        ...result,
+        data: serializeApiV1Result(invocation.operation, result.data) as Result,
+      }
+    : result;
   return (
-    serviceError(invocation.operation, result) ??
+    serviceError(invocation.operation, protocolResult) ??
     Promise.reject(
       providerError instanceof Error
         ? providerError

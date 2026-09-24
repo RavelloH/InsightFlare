@@ -323,6 +323,12 @@ function ruleViolations(
     isWithin(source, "src/lib/api-v1/analytics") ||
     isWithin(source, "src/lib/api-v1")
   ) {
+    if (isWithin(target, `${analytics}/application/provider-registry`))
+      findings.push({
+        rule: "api-v1-provider-registry",
+        message:
+          "API v1 must execute canonical queries through the Analytics runtime instead of importing its provider registry.",
+      });
     if (provider)
       findings.push({
         rule: "api-v1-concrete-provider",
@@ -330,6 +336,13 @@ function ruleViolations(
           "API v1 must use Analytics composition/application boundaries instead of concrete provider modules.",
       });
   }
+
+  if (isWithin(source, `${analytics}/interfaces`) && provider)
+    findings.push({
+      rule: "analytics-interface-concrete-provider",
+      message:
+        "Analytics interfaces must use the runtime boundary; concrete source selection belongs in composition.",
+    });
 
   if (sourceDashboard && provider)
     findings.push({
@@ -488,6 +501,57 @@ export function collectArchitectureViolations(
       continue;
     const sourceText = readFileSync(absolute, "utf8");
     if (isGeneratedFile(relative, sourceText)) continue;
+
+    const addSourceRuleViolation = (
+      rule: string,
+      pattern: RegExp,
+      message: string,
+    ) => {
+      const match = pattern.exec(sourceText);
+      if (match?.index === undefined) return;
+      violations.push({
+        rule,
+        source: relative,
+        specifier: "<source text>",
+        target: relative,
+        line: sourceText.slice(0, match.index).split(/\r?\n/u).length,
+        message,
+      });
+    };
+
+    if (isWithin(relative, "src/lib/api-v1")) {
+      addSourceRuleViolation(
+        "api-v1-provider-registry",
+        /\bAnalyticsProviderRegistry\b/u,
+        "API v1 must use the Analytics query executor and must not reference AnalyticsProviderRegistry.",
+      );
+      addSourceRuleViolation(
+        "api-v1-local-provider-selection",
+        /\b(?:create\w*ProviderRegistry|typedQueryProvider)\b/u,
+        "API v1 must not assemble provider registries or select concrete providers.",
+      );
+    }
+
+    if (isWithin(relative, "src/lib/edge/analytics/interfaces")) {
+      addSourceRuleViolation(
+        "analytics-interface-local-provider-registry",
+        /\b(?:create\w*ProviderRegistry|new\s+AnalyticsProviderRegistry|typedQueryProvider)\b/u,
+        "Analytics interfaces must not create provider registries; source selection belongs in composition.",
+      );
+    }
+
+    if (isWithin(relative, "src/lib/edge/analytics/composition")) {
+      addSourceRuleViolation(
+        "analytics-provider-audience-selection",
+        /audience\s*===\s*["']api-v1["'][\s\S]{0,240}(?:provider|registry)|(?:provider|registry)[\s\S]{0,240}audience\s*===\s*["']api-v1["']/u,
+        "Canonical provider selection must not depend on the API v1 audience.",
+      );
+      addSourceRuleViolation(
+        "analytics-untyped-query-variant",
+        /\bqueryMode\b/u,
+        "Canonical operation variants must use their typed mode contract instead of queryMode.",
+      );
+    }
 
     for (const imported of importsIn(sourceText, absolute)) {
       const resolved = resolveInternalImport(

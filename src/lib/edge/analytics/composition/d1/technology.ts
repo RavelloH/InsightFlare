@@ -1,6 +1,7 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { typedQueryProvider } from "@/lib/edge/analytics/application/provider-registry";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
   queryBrowserCrossBreakdownFromD1,
   queryBrowserEngineTrendFromD1,
@@ -136,31 +137,53 @@ export function registerTechnologyProviders(
     )
     .register(
       "cross-dimension",
-      typedQueryProvider(async (input) => {
+      typedQueryProvider<
+        | Awaited<ReturnType<typeof queryBrowserCrossBreakdownFromD1>>
+        | Awaited<ReturnType<typeof queryCrossDimensionFromD1>>
+      >(async (input) => {
         const request = query(input!);
         const window = timeWindow(request.time);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
-        const value =
-          stringField(request, "variant") === "browser"
-            ? await queryBrowserCrossBreakdownFromD1(
-                options.env,
-                options.siteId,
-                window,
-                filters,
-                numberField(request, "browserLimit", 8),
-                numberField(request, "osLimit", 6),
-                numberField(request, "deviceTypeLimit", 5),
-              )
-            : await queryCrossDimensionFromD1(
-                options.env,
-                options.siteId,
-                window,
-                filters,
-                numberField(request, "primaryLimit", 5),
-                numberField(request, "secondaryLimit", 6),
-                request.primaryDimension as never,
-                request.secondaryDimension as never,
-              );
+        const primaryDimension = resolveCrossBreakdownDimension(
+          stringField(request, "primaryDimension"),
+        );
+        const secondaryDimension = resolveCrossBreakdownDimension(
+          stringField(request, "secondaryDimension"),
+        );
+        const browserVariant = stringField(request, "variant") === "browser";
+        if (
+          !browserVariant &&
+          (!primaryDimension ||
+            !secondaryDimension ||
+            request.primaryDimension === request.secondaryDimension)
+        ) {
+          throw new Error("unsupported-dimension");
+        }
+        if (browserVariant) {
+          const value = await queryBrowserCrossBreakdownFromD1(
+            options.env,
+            options.siteId,
+            window,
+            filters,
+            numberField(request, "browserLimit", 8),
+            numberField(request, "osLimit", 6),
+            numberField(request, "deviceTypeLimit", 5),
+          );
+          return { value };
+        }
+        if (!primaryDimension || !secondaryDimension) {
+          throw new Error("unsupported-dimension");
+        }
+        const value = await queryCrossDimensionFromD1(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          numberField(request, "primaryLimit", 5),
+          numberField(request, "secondaryLimit", 6),
+          primaryDimension,
+          secondaryDimension,
+        );
         return { value };
       }),
     );

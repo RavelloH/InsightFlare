@@ -2,13 +2,10 @@
 
 import {
   createDemoQueryResponse,
+  createMockAnalyticsQueryRuntime,
   type DemoQueryPayloadResult,
+  type MockQueryRuntimeInput,
 } from "@/lib/edge/analytics/composition/mock-provider";
-import {
-  createMockProviderRegistry,
-  type MockQueryProviderInput,
-} from "@/lib/edge/analytics/composition/mock-provider";
-import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   filterScopePreferenceFromDocument,
   parseFilterUrlForAudience,
@@ -18,7 +15,7 @@ import { parseWindow } from "@/lib/edge/analytics/interfaces/dashboard/protocol/
 import { queryErrorResponse } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
 import { badRequest } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
 import { getRequestId } from "@/lib/response";
-export type MockQueryInput = Omit<MockQueryProviderInput, "query">;
+export type MockQueryInput = Omit<MockQueryRuntimeInput, "query">;
 export async function executeMockQuery(
   input: MockQueryInput,
 ): Promise<Response> {
@@ -41,9 +38,10 @@ export async function executeMockQuery(
     filters,
     scopePreference: filterScopePreferenceFromDocument(filters),
   };
-  const result = await createAnalyticsQueryRuntime(
-    createMockProviderRegistry({ ...input, query }),
-  ).execute<DemoQueryPayloadResult>(input.operation, query);
+  const result = await createMockAnalyticsQueryRuntime({
+    ...input,
+    query,
+  }).execute<DemoQueryPayloadResult>(input.operation, query);
   if (!result.ok) return queryErrorResponse(result.error);
 
   return createDemoQueryResponse(

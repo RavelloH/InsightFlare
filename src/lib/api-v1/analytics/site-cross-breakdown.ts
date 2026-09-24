@@ -19,7 +19,7 @@ import {
   fromRequestBodyError,
   fromZodIssues,
 } from "@/lib/api-v1/contract/errors";
-import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   attachSavedFilterScopePreference,
   type CrossBreakdownResult,
@@ -158,7 +158,7 @@ export async function handlePlannedSiteCrossBreakdown(
   request: Request,
   principal: ApiKeyPrincipal,
   siteId: string,
-  providerRegistry: AnalyticsProviderRegistry,
+  executor: AnalyticsQueryExecutor,
   execution: {
     readonly signal?: AbortSignal;
     readonly deadlineMs?: number;
@@ -280,7 +280,7 @@ export async function handlePlannedSiteCrossBreakdown(
         operation: "site.analytics.crossBreakdown",
         context: siteQueryContext(siteId, "api-v1"),
         query,
-        providerRegistry,
+        executor,
       },
       {
         signal: execution.signal,

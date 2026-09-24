@@ -6,6 +6,9 @@ import type {
   OverviewTableComparisonQuery,
   PagesDashboardComparisonQuery,
   PagesResult,
+  PerformanceQuery,
+  PerformanceQueryResult,
+  QueryInput,
   ReferrersResult,
   ReferrerSummaryResult,
 } from "@/lib/edge/analytics/contract";
@@ -33,8 +36,10 @@ import {
   decodeDimensionCursor,
   decodeSessionPathDimensionCursor,
   queryDimensionPageFromD1,
+  querySessionBoundaryDimensionFromD1,
   querySessionPathDimensionPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
+import { queryEventTypeAggregate } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import {
   parseRetentionGranularity,
@@ -55,6 +60,11 @@ import {
   queryReferrerSummaryFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import { decodeReferrersCursor } from "@/lib/edge/analytics/providers/d1/internal/referrers";
+import {
+  readSitePerformanceBreakdown,
+  readSitePerformanceSummary,
+  readSitePerformanceTimeseries,
+} from "@/lib/edge/analytics/providers/d1/operations/site-performance";
 import { InvalidCursorError } from "@/lib/pagination";
 
 import {
@@ -93,6 +103,25 @@ function overviewTabExpression(tab: string): string | null {
   if (tab === "geo.timezone") return "TRIM(COALESCE(timezone, ''))";
   if (tab === "geo.organization") return "TRIM(COALESCE(as_organization, ''))";
   return null;
+}
+function isPerformanceQuery(input: QueryInput): input is PerformanceQuery {
+  if (!("time" in input) || !("mode" in input)) return false;
+  if (input.mode === "summary") return true;
+  if (input.mode === "dashboard" || input.mode === "timeseries") {
+    return (
+      "interval" in input &&
+      ["minute", "hour", "day", "week", "month"].includes(
+        String(input.interval),
+      )
+    );
+  }
+  return (
+    input.mode === "breakdown" &&
+    "dimension" in input &&
+    typeof input.dimension === "string" &&
+    "metric" in input &&
+    ["ttfb", "fcp", "lcp", "cls", "inp"].includes(String(input.metric))
+  );
 }
 export async function overviewTabData(
   options: D1SiteRuntimeBindings,
@@ -562,7 +591,7 @@ export function registerSiteContractProviders(
         | Awaited<ReturnType<typeof overviewTabData>>
         | Readonly<{
             items: readonly unknown[];
-            pagination: unknown;
+            pagination?: unknown;
           }>
       >(async (input) => {
         const request = query(input!);
@@ -595,9 +624,37 @@ export function registerSiteContractProviders(
             sortRecord?.direction === "asc" ? "asc" : "desc";
           const search =
             typeof request.search === "string" ? request.search : undefined;
-          const selectExpr = dimensionExpression(
-            stringField(request, "dimension"),
-          );
+          const dimension = stringField(request, "dimension");
+          if (dimension === "event.name") {
+            const rows = await queryEventTypeAggregate(
+              options.env,
+              options.siteId,
+              window,
+              filters,
+              limit,
+              search,
+            );
+            return { value: { items: mapDimensionRows(rows) } };
+          }
+          if (
+            dimension === "session.entryPath" ||
+            dimension === "session.exitPath"
+          ) {
+            const rows = await querySessionBoundaryDimensionFromD1(
+              options.env,
+              options.siteId,
+              window,
+              filters,
+              limit,
+              dimension === "session.entryPath" ? "entry" : "exit",
+              undefined,
+              search,
+              sortBy,
+              sortDirection,
+            );
+            return { value: { items: mapDimensionRows(rows) } };
+          }
+          const selectExpr = dimensionExpression(dimension);
           const cursor = await decodeDimensionCursor(
             options.env,
             options.siteId,
@@ -746,18 +803,57 @@ export function registerSiteContractProviders(
     )
     .register(
       "performance",
-      typedQueryProvider(async (input) => {
-        const request = query(input!);
-        return {
-          value: await queryPerformanceDashboardFromD1(
-            options.env,
-            options.siteId,
-            timeWindow(request.time),
-            request.interval as never,
-            request.filters ?? EMPTY_FILTER_DOCUMENT,
-            numberField(request, "limit", 18),
-          ),
-        };
+      typedQueryProvider<PerformanceQueryResult>(async (input) => {
+        if (!input || !isPerformanceQuery(input)) {
+          throw new Error("unsupported-performance-query-mode");
+        }
+        const request = input;
+        const window = timeWindow(request.time);
+        const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        switch (request.mode) {
+          case "summary":
+            return {
+              value: await readSitePerformanceSummary({
+                env: options.env,
+                siteId: options.siteId,
+                window,
+                filters,
+              }),
+            };
+          case "timeseries":
+            return {
+              value: await readSitePerformanceTimeseries({
+                env: options.env,
+                siteId: options.siteId,
+                window,
+                filters,
+                interval: request.interval,
+              }),
+            };
+          case "breakdown":
+            return {
+              value: await readSitePerformanceBreakdown({
+                env: options.env,
+                siteId: options.siteId,
+                window,
+                filters,
+                dimension: request.dimension,
+                metric: request.metric,
+                limit: request.limit ?? 20,
+              }),
+            };
+          case "dashboard":
+            return {
+              value: await queryPerformanceDashboardFromD1(
+                options.env,
+                options.siteId,
+                window,
+                request.interval,
+                filters,
+                request.limit ?? 18,
+              ),
+            };
+        }
       }),
     )
     .register(
