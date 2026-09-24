@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { withDashboardCache } from "@/lib/edge/dashboard-cache";
+import { withDashboardCache } from "@/lib/edge/analytics/composition/dashboard-cache";
 
 describe("dashboard cache low branch coverage", () => {
   beforeEach(() => {

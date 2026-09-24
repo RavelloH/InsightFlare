@@ -1,4 +1,3 @@
-export * from "../typed-operations";
 export type * from "./breakdown";
 export type * from "./events";
 export type * from "./journeys";

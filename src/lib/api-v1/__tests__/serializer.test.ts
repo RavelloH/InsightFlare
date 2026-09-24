@@ -4,16 +4,15 @@ import {
   fromAnalyticsDomainError,
   fromZodIssues,
   toJsonPointer,
-} from "@/lib/api-v1/errors";
+} from "@/lib/api-v1/contract/errors";
 import {
   serializeAnalyticsResult,
   toWireSuccess,
-} from "@/lib/api-v1/serializer";
+} from "@/lib/api-v1/contract/serializer";
 import {
   type AnalyticsDomainError,
   createQueryTime,
 } from "@/lib/edge/analytics/contract";
-
 describe("API v1 wire serializer", () => {
   it("uses RFC 6901 paths and stable error definitions", () => {
     expect(toJsonPointer("")).toBe("");

@@ -4,10 +4,9 @@ import {
   type DashboardCacheIdentity,
   type DashboardCacheOptions,
   withDashboardCache,
-} from "@/lib/edge/dashboard-cache";
+} from "@/lib/edge/analytics/composition/dashboard-cache";
 import type { AppEnv } from "@/lib/hono/types";
 import { executionContext, requestUrl } from "@/lib/hono/utils/context";
-
 function cacheIdentity(
   c: Parameters<MiddlewareHandler<AppEnv>>[0],
 ): DashboardCacheIdentity | undefined {
@@ -36,7 +35,6 @@ function cacheIdentity(
 
   return undefined;
 }
-
 export function dashboardCacheMiddleware(
   options?: DashboardCacheOptions,
 ): MiddlewareHandler<AppEnv> {

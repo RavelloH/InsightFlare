@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
-import {
-  type FilterExpression,
-  FilterValidationError,
-} from "@/lib/edge/analytics/contract/filters";
 import {
   assertObservationFilterCompatible,
   planObservationFilter,
 } from "@/lib/edge/analytics/contract/observation-planner";
 import { parseFilterDsl } from "@/lib/filter-contract";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import {
+  type FilterExpression,
+  FilterValidationError,
+} from "@/lib/filter-contract/filters";
 
 function field(field: string, value: string): FilterExpression {
   return {

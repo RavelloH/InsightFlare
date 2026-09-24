@@ -1,6 +1,6 @@
-import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine";
-import { expandCustomEventDataJson } from "@/lib/edge/custom-event-json";
-import type { InvocationLogger } from "@/lib/edge/observability-logger";
+import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine/config";
+import { expandCustomEventDataJson } from "@/lib/edge/ingest/custom-event-json";
+import type { InvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env, NormalizedCustomEvent } from "@/lib/edge/types";
 
 import { EVENT_ANALYTICS_SCHEMA_VERSION } from "./event-schema";

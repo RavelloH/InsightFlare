@@ -9,20 +9,17 @@ import type {
   TabbedDataTableLoaderOptions,
   TabbedDataTablePage,
   TabbedDataTableRowBase,
-} from "@/components/dashboard/tabbed-data-table-card";
-
+} from "@/components/dashboard/common/tabbed-data-table-card";
 const sentinelState = vi.hoisted(() => ({
   onReachEnd: undefined as (() => void) | undefined,
 }));
-
-vi.mock("@/components/dashboard/use-infinite-table-sentinel", () => ({
+vi.mock("@/components/dashboard/common/use-infinite-table-sentinel", () => ({
   useInfiniteTableSentinel: ({ onReachEnd }: { onReachEnd: () => void }) => {
     sentinelState.onReachEnd = onReachEnd;
     return () => undefined;
   },
 }));
-
-vi.mock("@/components/dashboard/animated-data-table-row", () => ({
+vi.mock("@/components/dashboard/common/animated-data-table-row", () => ({
   AnimatedDataTableRow: ({
     children,
     reduceMotion: _reduceMotion,
@@ -32,8 +29,7 @@ vi.mock("@/components/dashboard/animated-data-table-row", () => ({
     reduceMotion?: boolean;
   } & Record<string, unknown>) => <tr {...props}>{children}</tr>,
 }));
-
-vi.mock("@/components/dashboard/tabbed-scroll-mask-card", () => ({
+vi.mock("@/components/dashboard/common/tabbed-scroll-mask-card", () => ({
   TabbedScrollMaskCard: ({
     children,
     headerRight,
@@ -47,8 +43,7 @@ vi.mock("@/components/dashboard/tabbed-scroll-mask-card", () => ({
     </div>
   ),
 }));
-
-vi.mock("@/components/dashboard/data-table-switch", () => ({
+vi.mock("@/components/dashboard/common/data-table-switch", () => ({
   DataTableSwitch: ({
     loading,
     hasContent,
@@ -76,7 +71,6 @@ vi.mock("@/components/dashboard/data-table-switch", () => ({
       <div data-testid="empty">Empty</div>
     ),
 }));
-
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }));
 vi.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -88,21 +82,16 @@ vi.mock("motion/react", async (importOriginal) => ({
   AnimatePresence: ({ children }: { children: ReactNode }) => children,
   useReducedMotion: () => true,
 }));
-
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
-} from "@/components/dashboard/tabbed-data-table-card";
-
+} from "@/components/dashboard/common/tabbed-data-table-card";
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-
 interface TestRow extends TabbedDataTableRowBase {
   value: number;
 }
-
 type TestSortKey = "value";
 type TestTab = "all";
-
 const tabs = [{ value: "all", label: "All" }] as const;
 const columns: readonly TabbedDataTableColumn<TestRow, TestSortKey, TestTab>[] =
   [
@@ -112,7 +101,6 @@ const columns: readonly TabbedDataTableColumn<TestRow, TestSortKey, TestTab>[] =
       getValue: (row) => row.value,
     },
   ];
-
 function page(
   items: readonly TestRow[],
   nextCursor: string | null = null,
@@ -127,7 +115,6 @@ function page(
     },
   };
 }
-
 function renderTable(
   loader: TabbedDataTableLoader<TestTab, TestRow, TestSortKey>,
 ) {
@@ -156,19 +143,16 @@ function renderTable(
   });
   return { client, container, root };
 }
-
 async function settle() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 }
-
 function renderedLabels(container: HTMLDivElement) {
   return Array.from(container.querySelectorAll("tbody tr"), (row) =>
     row.querySelector("td")?.textContent?.trim(),
   ).filter((label): label is string => Boolean(label));
 }
-
 describe("TabbedDataTableCard loader contract", () => {
   let container: HTMLDivElement | undefined;
   let root: Root | undefined;

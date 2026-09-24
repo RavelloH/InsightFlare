@@ -1,7 +1,7 @@
 import {
   buildLocalityLocationValue,
   buildRegionLocationValue,
-} from "@/lib/dashboard/geo-location";
+} from "@/lib/analytics/geo-location";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -23,7 +23,6 @@ import {
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { mapGeoPointRow } from "./journey-helpers";
 import { scopedDatasetFor } from "./scoped-dataset";
-
 export async function querySessionLocationPointsFromD1(
   env: Env,
   siteId: string,
@@ -58,7 +57,6 @@ ORDER BY timestampMs ASC, visit_id ASC
     ])
   ).map(mapGeoPointRow);
 }
-
 export async function queryGeoPointsFromD1(
   env: Env,
   siteId: string,

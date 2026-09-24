@@ -2,7 +2,6 @@ import type { GoalDefinition } from "@/lib/edge/analytics/contract";
 import {
   type FilterDocument,
   parseGoalFilter,
-  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/contract";
 import { buildTimeBuckets } from "@/lib/edge/analytics/providers/d1/internal/core-time";
 import type {
@@ -12,6 +11,7 @@ import type {
 import type { GoalTimeseriesAggregateRow } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
 import { queryGoalTimeseriesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
 import { queryGoalDefinition } from "@/lib/edge/analytics/providers/d1/internal/goals";
+import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 
 export interface SiteGoalTimeseriesInput {

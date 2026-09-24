@@ -1,4 +1,4 @@
-import { measureCurrentExternalFetch } from "@/lib/edge/observability-logger";
+import { measureCurrentExternalFetch } from "@/lib/edge/observability/logger";
 
 const GITHUB_API_BASE =
   import.meta.env.VITE_GITHUB_API_BASE || "https://api.github.com";

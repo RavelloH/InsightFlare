@@ -1,5 +1,5 @@
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -17,7 +17,6 @@ import {
   regionValueExpr,
   visitSourceBindings,
 } from "./core";
-
 export const EVENT_CONTEXT_CARD_KEYS = [
   "path",
   "query",
@@ -39,9 +38,7 @@ export const EVENT_CONTEXT_CARD_KEYS = [
   "timezone",
   "organization",
 ] as const;
-
 export type EventContextCardKey = (typeof EVENT_CONTEXT_CARD_KEYS)[number];
-
 export async function queryEventDimensionRowsFromFilteredEvents(
   env: Env,
   baseCte: string,
@@ -69,7 +66,6 @@ LIMIT ?
 `;
   return queryD1All<DimensionRow>(env, sql, [...bindings, limit]);
 }
-
 export async function queryEventGeoRowsFromFilteredEvents(
   env: Env,
   baseCte: string,
@@ -93,7 +89,6 @@ LIMIT ?
 `;
   return queryD1All<GeoTabRow>(env, sql, [...bindings, limit]);
 }
-
 export async function queryEventSessionBoundaryRowsFromFilteredEvents(
   env: Env,
   baseCte: string,
@@ -134,7 +129,6 @@ LIMIT ?
 `;
   return queryD1All<DimensionRow>(env, sql, [...bindings, limit]);
 }
-
 export async function queryEventAnalyticsContextCardsFromD1(
   env: Env,
   siteId: string,

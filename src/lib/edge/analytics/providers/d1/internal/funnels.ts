@@ -1,3 +1,4 @@
+import type { QueryWindow } from "@/lib/edge/analytics/contract";
 import {
   createScopedFilterPlan,
   EMPTY_FILTER_DOCUMENT,
@@ -5,26 +6,15 @@ import {
   type FunnelAnalysis,
   type FunnelConfigV2,
   type FunnelDefinition,
-  parsePrivateFilterUrl,
 } from "@/lib/edge/analytics/contract";
 import {
   decodeFunnelConfig,
-  encodeFunnelConfig,
-  FunnelConfigValidationError,
   funnelSemanticFingerprint,
 } from "@/lib/edge/analytics/contract/funnel-config";
 import type { Env } from "@/lib/edge/types";
 
-import {
-  badRequest,
-  jsonResponseWith,
-  notAllowed,
-  notFound,
-  parseWindow,
-  queryD1All,
-  type QueryWindow,
-  type ResponseContext,
-} from "./core";
+import { queryD1All } from "./core";
+import { encodeD1FunnelConfig } from "./funnel-config-validation";
 import { buildFunnelSqlPlan } from "./funnel-planner";
 import {
   decodePageCursor,
@@ -34,23 +24,19 @@ import {
   paginationBinding,
 } from "./pagination";
 import { compileScopedDatasetSql, scopedDatasetFor } from "./scoped-dataset";
-
 const FUNNEL_ANALYSIS_KIND = "funnel";
-
 export type {
   FunnelAnalysis,
   FunnelAnalysisStep,
   FunnelDefinition,
   FunnelStepV2 as FunnelStepConfig,
 } from "@/lib/edge/analytics/contract";
-
 function rowConfig(row: Record<string, unknown>): FunnelConfigV2 {
   return decodeFunnelConfig(
     Number(row.config_version ?? 1),
     String(row.config_json ?? ""),
   );
 }
-
 async function mapFunnelDefinition(
   row: Record<string, unknown>,
 ): Promise<FunnelDefinition> {
@@ -68,12 +54,10 @@ async function mapFunnelDefinition(
     updatedAt: Number(row.updated_at ?? 0),
   };
 }
-
 interface FunnelDefinitionCursor {
   readonly createdAt: number;
   readonly id: string;
 }
-
 function funnelDefinitionCursor(value: unknown): FunnelDefinitionCursor | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
@@ -83,11 +67,9 @@ function funnelDefinitionCursor(value: unknown): FunnelDefinitionCursor | null {
     ? { id: candidate.id, createdAt: candidate.createdAt as number }
     : null;
 }
-
 async function funnelCursorBinding(siteId: string): Promise<string> {
   return paginationBinding(["funnels-v2", siteId, "createdAt:desc,id:desc"]);
 }
-
 export async function queryFunnelDefinitionsPage(
   env: Env,
   siteId: string,
@@ -131,7 +113,6 @@ export async function queryFunnelDefinitionsPage(
     },
   };
 }
-
 export async function decodeFunnelDefinitionCursor(
   env: Env,
   siteId: string,
@@ -145,7 +126,6 @@ export async function decodeFunnelDefinitionCursor(
     funnelDefinitionCursor,
   );
 }
-
 export async function queryFunnelDefinition(
   env: Env,
   siteId: string,
@@ -158,7 +138,6 @@ export async function queryFunnelDefinition(
   );
   return rows[0] ? mapFunnelDefinition(rows[0]) : null;
 }
-
 function baseFunnelDataset(
   siteId: string,
   window: QueryWindow,
@@ -182,18 +161,15 @@ function baseFunnelDataset(
     window,
   });
 }
-
 function numberRow(value: unknown): number {
   const result = Number(value ?? 0);
   return Number.isFinite(result) && result > 0 ? Math.floor(result) : 0;
 }
-
 interface FunnelCountRow {
   readonly stepIndex?: unknown;
   readonly sessions?: unknown;
   readonly visitors?: unknown;
 }
-
 function analysisFromRows(
   config: FunnelConfigV2,
   rows: readonly FunnelCountRow[],
@@ -247,7 +223,6 @@ function analysisFromRows(
     },
   };
 }
-
 export async function queryFunnelAnalysis(
   env: Env,
   siteId: string,
@@ -267,119 +242,13 @@ export async function queryFunnelAnalysis(
   );
   return analysisFromRows(config, rows);
 }
-
-async function handleFunnelList(
+export async function createFunnelDefinition(
   env: Env,
   siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const limitParam = Number.parseInt(url.searchParams.get("limit") ?? "50", 10);
-  const limit = Number.isFinite(limitParam)
-    ? Math.min(200, Math.max(1, limitParam))
-    : 50;
-  const cursorText = url.searchParams.get("cursor");
-  const cursor = await decodeFunnelDefinitionCursor(env, siteId, cursorText);
-  if (cursorText && !cursor) return badRequest("Invalid cursor");
-  const page = await queryFunnelDefinitionsPage(env, siteId, limit, cursor);
-  return jsonResponseWith(ctx!, { ok: true, data: page });
-}
-
-async function handleFunnelDetail(
-  env: Env,
-  siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const funnelId = url.searchParams.get("id")?.trim();
-  if (!funnelId) return handleFunnelList(env, siteId, url, ctx);
-  const window = parseWindow(url);
-  if (!window) return badRequest("Invalid time window");
-  const funnel = await queryFunnelDefinition(env, siteId, funnelId);
-  if (!funnel) return notFound();
-  if (funnel.steps.length < 2)
-    return badRequest("Funnel has fewer than 2 steps");
-  const config: FunnelConfigV2 = {
-    filterDslVersion: funnel.filterDslVersion,
-    progressionScope: funnel.progressionScope,
-    conversionWindowMs: funnel.conversionWindowMs,
-    steps: funnel.steps,
-  };
-  const analysis = await queryFunnelAnalysis(
-    env,
-    siteId,
-    window,
-    parsePrivateFilterUrl(url),
-    config,
-  );
-  return jsonResponseWith(ctx!, { ok: true, data: { funnel, analysis } });
-}
-
-interface FunnelWriteBody {
-  readonly name?: unknown;
-  readonly filterDslVersion?: unknown;
-  readonly progressionScope?: unknown;
-  readonly conversionWindowMs?: unknown;
-  readonly steps?: unknown;
-}
-
-function readWriteConfig(
-  body: FunnelWriteBody,
-): { name: string; config: FunnelConfigV2 } | null {
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  const filterDslVersion = body.filterDslVersion ?? 1;
-  const progressionScope = body.progressionScope ?? "session";
-  const conversionWindowMs =
-    body.conversionWindowMs === undefined ? null : body.conversionWindowMs;
-  if (
-    !name ||
-    !Array.isArray(body.steps) ||
-    filterDslVersion !== 1 ||
-    (progressionScope !== "session" && progressionScope !== "visitor") ||
-    (conversionWindowMs !== null &&
-      (typeof conversionWindowMs !== "number" ||
-        !Number.isFinite(conversionWindowMs)))
-  ) {
-    return null;
-  }
-  return {
-    name,
-    config: {
-      filterDslVersion,
-      progressionScope,
-      conversionWindowMs,
-      steps: body.steps as FunnelConfigV2["steps"],
-    },
-  };
-}
-
-async function handleFunnelCreate(
-  env: Env,
-  siteId: string,
-  request: Request,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  let body: FunnelWriteBody;
-  try {
-    const parsed: unknown = await request.json();
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return badRequest("Invalid JSON body");
-    }
-    body = parsed as FunnelWriteBody;
-  } catch {
-    return badRequest("Invalid JSON body");
-  }
-  const input = readWriteConfig(body);
-  if (!input) return badRequest("Invalid funnel configuration");
-  let encoded;
-  try {
-    encoded = encodeFunnelConfig(input.config);
-  } catch (error) {
-    if (error instanceof FunnelConfigValidationError) {
-      return badRequest("Invalid funnel configuration");
-    }
-    throw error;
-  }
+  name: string,
+  config: FunnelConfigV2,
+): Promise<FunnelDefinition> {
+  const encoded = encodeD1FunnelConfig(config);
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1_000);
   await env.DB.prepare(
@@ -389,7 +258,7 @@ async function handleFunnelCreate(
       id,
       siteId,
       FUNNEL_ANALYSIS_KIND,
-      input.name,
+      name,
       encoded.configJson,
       encoded.configVersion,
       now,
@@ -398,71 +267,16 @@ async function handleFunnelCreate(
     .run();
   const funnel = await queryFunnelDefinition(env, siteId, id);
   if (!funnel) throw new Error("funnel_create_readback_failed");
-  return jsonResponseWith(ctx!, { ok: true, data: { funnel } }, 201);
+  return funnel;
 }
-
-async function handleFunnelUpdate(
+export async function updateFunnelDefinition(
   env: Env,
   siteId: string,
-  url: URL,
-  request: Request,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const funnelId = url.searchParams.get("id")?.trim();
-  if (!funnelId) return badRequest("Funnel id is required");
-  const current = await queryFunnelDefinition(env, siteId, funnelId);
-  if (!current) return notFound();
-  let body: FunnelWriteBody;
-  try {
-    const parsed: unknown = await request.json();
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return badRequest("Invalid JSON body");
-    }
-    body = parsed as FunnelWriteBody;
-  } catch {
-    return badRequest("Invalid JSON body");
-  }
-  const filterDslVersion =
-    body.filterDslVersion === undefined
-      ? current.filterDslVersion
-      : body.filterDslVersion;
-  const progressionScope =
-    body.progressionScope === undefined
-      ? current.progressionScope
-      : body.progressionScope;
-  const conversionWindowMs =
-    body.conversionWindowMs === undefined
-      ? current.conversionWindowMs
-      : body.conversionWindowMs;
-  if (
-    filterDslVersion !== 1 ||
-    (progressionScope !== "session" && progressionScope !== "visitor") ||
-    (conversionWindowMs !== null &&
-      (typeof conversionWindowMs !== "number" ||
-        !Number.isFinite(conversionWindowMs)))
-  ) {
-    return badRequest("Invalid funnel configuration");
-  }
-  const config: FunnelConfigV2 = {
-    filterDslVersion,
-    progressionScope,
-    conversionWindowMs,
-    steps: (body.steps ?? current.steps) as FunnelConfigV2["steps"],
-  };
-  if (body.name !== undefined && typeof body.name !== "string") {
-    return badRequest("Name is required");
-  }
-  const name = body.name === undefined ? current.name : body.name.trim();
-  if (!name) return badRequest("Name is required");
-  let encoded;
-  try {
-    encoded = encodeFunnelConfig(config);
-  } catch (error) {
-    if (error instanceof FunnelConfigValidationError) {
-      return badRequest("Invalid funnel configuration");
-    }
-    throw error;
-  }
+  funnelId: string,
+  name: string,
+  config: FunnelConfigV2,
+): Promise<FunnelDefinition> {
+  const encoded = encodeD1FunnelConfig(config);
   const now = Math.floor(Date.now() / 1_000);
   await env.DB.prepare(
     "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind=? AND archived_at IS NULL",
@@ -479,39 +293,17 @@ async function handleFunnelUpdate(
     .run();
   const funnel = await queryFunnelDefinition(env, siteId, funnelId);
   if (!funnel) throw new Error("funnel_update_readback_failed");
-  return jsonResponseWith(ctx!, { ok: true, data: { funnel } });
+  return funnel;
 }
-
-async function handleFunnelDelete(
+export async function archiveFunnelDefinition(
   env: Env,
   siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-): Promise<Response> {
-  const funnelId = url.searchParams.get("id")?.trim();
-  if (!funnelId) return badRequest("Funnel id is required");
+  funnelId: string,
+): Promise<void> {
   const now = Math.floor(Date.now() / 1_000);
   await env.DB.prepare(
     "UPDATE analysis_definitions SET archived_at = ?, updated_at = ? WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL",
   )
     .bind(now, now, funnelId, siteId, FUNNEL_ANALYSIS_KIND)
     .run();
-  return jsonResponseWith(ctx!, { ok: true });
-}
-
-export async function handleFunnel(
-  env: Env,
-  siteId: string,
-  url: URL,
-  ctx?: ResponseContext,
-  request?: Request,
-): Promise<Response> {
-  const method = request?.method ?? "GET";
-  if (method === "GET") return handleFunnelDetail(env, siteId, url, ctx);
-  if (method === "POST" && request)
-    return handleFunnelCreate(env, siteId, request, ctx);
-  if (method === "PATCH" && request)
-    return handleFunnelUpdate(env, siteId, url, request, ctx);
-  if (method === "DELETE") return handleFunnelDelete(env, siteId, url, ctx);
-  return notAllowed();
 }

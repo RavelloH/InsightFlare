@@ -5,6 +5,10 @@ import {
   type FunnelConfigV2,
 } from "@/lib/edge/analytics/contract";
 import {
+  FUNNEL_SQL_MAX_BINDINGS,
+  FUNNEL_SQL_STRUCTURAL_BUDGET,
+} from "@/lib/edge/analytics/providers/d1/internal/funnel-planner";
+import {
   decodeFunnelDefinitionCursor,
   queryFunnelAnalysis,
   queryFunnelDefinition,
@@ -18,7 +22,25 @@ import {
   stringField,
   timeWindow,
 } from "./shared";
-
+export {
+  archiveFunnelDefinition,
+  createFunnelDefinition,
+  queryFunnelDefinition,
+  updateFunnelDefinition,
+} from "@/lib/edge/analytics/providers/d1/internal/funnels";
+export function funnelAnalysisCost(rangeMs: number) {
+  return {
+    rangeMs,
+    siteCount: 1,
+    metricCount: 1,
+    provider: "d1" as const,
+    funnelStepCount: FUNNEL_SQL_STRUCTURAL_BUDGET.maxSteps,
+    funnelCteCount: FUNNEL_SQL_STRUCTURAL_BUDGET.maxFunnelCtes,
+    funnelSqlLength: FUNNEL_SQL_STRUCTURAL_BUDGET.maxSqlLength,
+    funnelBindingCount: FUNNEL_SQL_MAX_BINDINGS,
+    funnelWorstCase: true,
+  };
+}
 export function registerFunnelProvider(
   registry: AnalyticsProviderRegistry,
   options: D1SiteQueryRuntimeOptions,

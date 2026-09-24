@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import { handleAdminWs } from "@/lib/edge/admin-ws";
+import { handleAdminWs } from "@/lib/edge/admin/ws";
 import type { AppEnv } from "@/lib/hono/types";
 import { nf as notFound } from "@/lib/response";
 

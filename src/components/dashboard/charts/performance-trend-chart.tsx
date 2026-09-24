@@ -20,10 +20,9 @@ import {
 } from "@/components/ui/chart";
 import { intlLocale } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-import type { PerformanceMetricKey } from "@/lib/edge-client";
+import type { PerformanceMetricKey } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import { cn } from "@/lib/utils";
-
 export interface PerformanceTrendChartPoint {
   timestampMs: number;
   p50: number | null;
@@ -32,17 +31,14 @@ export interface PerformanceTrendChartPoint {
   avg: number | null;
   samples: number;
 }
-
 export interface PerformanceTrendChartLabels {
   p50: string;
   p75: string;
   p95: string;
 }
-
 export type PerformanceTrendMetricThresholds = Readonly<
   Record<PerformanceMetricKey, { good: number; poor: number }>
 >;
-
 export interface PerformanceTrendChartProps {
   locale: Locale;
   activePanel: PerformanceMetricKey | "score";
@@ -55,7 +51,6 @@ export interface PerformanceTrendChartProps {
   formatValue: (value: number | null | undefined) => string;
   className?: string;
 }
-
 const PERFORMANCE_SERIES_COLORS = {
   p50: "var(--color-chart-1)",
   p75: "var(--color-chart-4)",
@@ -71,13 +66,11 @@ const PERFORMANCE_TREND_CONNECTOR_DELAY_MS =
   PERFORMANCE_TREND_ANIMATION_DURATION_MS + 120;
 const PERFORMANCE_TREND_LEGEND_CLASS =
   "pt-6 flex-wrap justify-center gap-x-4 gap-y-2 [&>div>div]:h-2.5 [&>div>div]:w-2.5 [&>div>div]:shrink-0 [&>div>div]:rounded-none";
-
 const ZONE_COLORS = {
   great: "var(--color-chart-2)",
   needsImprovement: "oklch(0.75 0.16 80)",
   poor: "var(--color-destructive)",
 } as const;
-
 function tickDateFormat(
   localeCode: string,
   interval: TimeWindow["interval"],
@@ -103,7 +96,6 @@ function tickDateFormat(
     day: "numeric",
   });
 }
-
 function tooltipDateFormat(
   localeCode: string,
   interval: TimeWindow["interval"],
@@ -132,7 +124,6 @@ function tooltipDateFormat(
     day: "numeric",
   });
 }
-
 function chartDomain(
   key: PerformanceMetricKey | "score",
   points: ReadonlyArray<PerformanceTrendChartPoint>,
@@ -155,7 +146,6 @@ function chartDomain(
     Math.max(thresholds.poor * 1.2, Math.ceil((observedMax * 1.2) / 100) * 100),
   ];
 }
-
 function zoneBackground(
   key: PerformanceMetricKey | "score",
   domainMax: number,
@@ -181,7 +171,6 @@ function zoneBackground(
   );
   return `linear-gradient(to bottom, ${poor} 0% ${poorEnd}%, ${needs} ${poorEnd}% ${needsEnd}%, ${great} ${needsEnd}% 100%)`;
 }
-
 function TrendZones({
   activePanel,
   metricThresholds,
@@ -226,7 +215,6 @@ function TrendZones({
     </>
   );
 }
-
 function hasTrendValue(
   point: PerformanceTrendChartPoint | undefined,
   seriesKey: PerformanceSeriesKey,
@@ -234,7 +222,6 @@ function hasTrendValue(
   const value = point?.[seriesKey];
   return value != null && Number.isFinite(value);
 }
-
 function isIsolatedTrendPoint(
   points: ReadonlyArray<PerformanceTrendChartPoint>,
   seriesKey: PerformanceSeriesKey,
@@ -246,7 +233,6 @@ function isIsolatedTrendPoint(
     !hasTrendValue(points[index + 1], seriesKey)
   );
 }
-
 function createIsolatedTrendDot(
   points: ReadonlyArray<PerformanceTrendChartPoint>,
   seriesKey: PerformanceSeriesKey,
@@ -283,16 +269,13 @@ function createIsolatedTrendDot(
     return <circle key={dotKey} cx={cx} cy={cy} r={3.2} fill={color} />;
   };
 }
-
 type PerformanceSeriesKey = "p50" | "p75" | "p95";
-
 interface TrendConnectorLinePoint {
   x?: number;
   y?: number;
   value?: number | null;
   payload?: PerformanceTrendChartPoint;
 }
-
 interface TrendFormattedGraphicalItem {
   item?: {
     props?: {
@@ -303,11 +286,9 @@ interface TrendFormattedGraphicalItem {
     points?: TrendConnectorLinePoint[];
   };
 }
-
 function isPerformanceSeriesKey(value: unknown): value is PerformanceSeriesKey {
   return value === "p50" || value === "p75" || value === "p95";
 }
-
 function isRenderedTrendPoint(
   point: TrendConnectorLinePoint,
   seriesKey: PerformanceSeriesKey,
@@ -320,7 +301,6 @@ function isRenderedTrendPoint(
     Number.isFinite(point.y)
   );
 }
-
 function gapConnectorPaths(
   points: TrendConnectorLinePoint[],
   seriesKey: PerformanceSeriesKey,
@@ -349,7 +329,6 @@ function gapConnectorPaths(
 
   return paths;
 }
-
 function TrendGapConnectorOverlay({
   visible,
   renderKey,
@@ -405,7 +384,6 @@ function TrendGapConnectorOverlay({
     </AutoTransition>
   );
 }
-
 export const PerformanceTrendChart = memo(function PerformanceTrendChart({
   locale,
   activePanel,

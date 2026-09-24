@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import { handlePublicAccountLinks } from "@/lib/edge/public-account-links";
+import { handlePublicAccountLinks } from "@/lib/edge/auth/public-account-links";
 import type { AppEnv } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
 import { nf as notFound } from "@/lib/response";

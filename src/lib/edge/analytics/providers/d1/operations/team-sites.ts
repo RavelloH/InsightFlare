@@ -5,9 +5,9 @@ import {
   effectiveScopeForPagination,
   type FilterDocument,
   filterFingerprint,
-  type OverviewMetrics,
   type QueryAudience,
   type QuerySource,
+  type TeamSitesQueryResult,
   type TrendResult,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -27,8 +27,6 @@ import {
   toQueryTime,
 } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
-import type { PageResult } from "@/lib/pagination";
-
 export interface ReadTeamSitesInput {
   readonly env: Env;
   readonly teamId: string;
@@ -39,32 +37,11 @@ export interface ReadTeamSitesInput {
   readonly page?: { readonly limit: number; readonly cursor?: string | null };
   readonly audience?: QueryAudience;
 }
-
-export interface TeamSiteAnalyticsResult {
-  readonly siteId: string;
-  readonly name: string;
-  readonly domain: string;
-  readonly publicEnabled: boolean;
-  readonly publicSlug: string | null;
-  readonly createdAt: number;
-  readonly updatedAt: number;
-  readonly metrics: OverviewMetrics;
-  readonly trend?: TrendResult["points"];
-  readonly lastEventAtMs: number | null;
-}
-
-export interface TeamSitesQueryResult {
-  readonly data: PageResult<TeamSiteAnalyticsResult>;
-  readonly source: QuerySource;
-  readonly approximateVisitors: boolean;
-}
-
 function allowedSiteBinding(
   allowedSiteIds?: readonly string[],
 ): readonly string[] {
   return [...new Set(allowedSiteIds ?? [])].sort();
 }
-
 function teamSiteCursor(value: unknown): {
   readonly createdAt: number;
   readonly id: string;
@@ -77,7 +54,6 @@ function teamSiteCursor(value: unknown): {
     ? { createdAt: candidate.createdAt as number, id: candidate.id }
     : null;
 }
-
 async function teamSitesCursorBinding(
   input: ReadTeamSitesInput,
 ): Promise<string> {
@@ -95,7 +71,6 @@ async function teamSitesCursorBinding(
     "createdAt:desc,id:asc",
   ]);
 }
-
 async function readTeamSitesPage(
   input: ReadTeamSitesInput,
   page: NonNullable<ReadTeamSitesInput["page"]>,
@@ -122,13 +97,11 @@ async function readTeamSitesPage(
       : null,
   };
 }
-
 function source(values: readonly QuerySource[]): QuerySource {
   if (values.length === 0) return "raw";
   if (values.every((value) => value === values[0])) return values[0]!;
   return "mixed";
 }
-
 /**
  * A team-site composite owns its metadata, metrics, optional trend and latest
  * activity. It intentionally does not project a generic breakdown row.

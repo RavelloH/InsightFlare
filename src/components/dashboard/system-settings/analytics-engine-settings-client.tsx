@@ -33,7 +33,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { requestAdminService } from "@/lib/admin-service-client";
 import {
   EVENT_ANALYTICS_DATASET,
   type PublicAnalyticsEngineConfig,
@@ -41,18 +40,16 @@ import {
   TRAFFIC_ANALYTICS_DATASET,
 } from "@/lib/analytics-engine-config";
 import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
+import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
 import { SystemSettingsGuideDialog } from "./system-settings-guide-dialog";
-
 interface AnalyticsEngineSettingsClientProps {
   messages: AppMessages;
   initialData?: SystemSettingsInitialData | null;
 }
-
 type FormState = Pick<PublicAnalyticsEngineConfig, "accountId">;
-
 function defaultConfig(): PublicAnalyticsEngineConfig {
   return {
     accountId: "",
@@ -66,13 +63,11 @@ function defaultConfig(): PublicAnalyticsEngineConfig {
     updatedAt: 0,
   };
 }
-
 function toFormState(config: PublicAnalyticsEngineConfig): FormState {
   return {
     accountId: config.accountId,
   };
 }
-
 async function fetchConfig(
   signal?: AbortSignal,
 ): Promise<PublicAnalyticsEngineConfig> {
@@ -83,7 +78,6 @@ async function fetchConfig(
     },
   );
 }
-
 async function saveConfig(
   body: Record<string, unknown>,
 ): Promise<PublicAnalyticsEngineConfig> {
@@ -95,7 +89,6 @@ async function saveConfig(
     },
   );
 }
-
 async function deleteConfig(): Promise<PublicAnalyticsEngineConfig> {
   return requestAdminService<PublicAnalyticsEngineConfig>(
     "analytics-engine-config",
@@ -104,7 +97,6 @@ async function deleteConfig(): Promise<PublicAnalyticsEngineConfig> {
     },
   );
 }
-
 export function AnalyticsEngineSettingsClient({
   messages,
   initialData = null,

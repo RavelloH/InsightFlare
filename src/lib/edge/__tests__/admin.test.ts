@@ -7,19 +7,19 @@ import {
   canReadSite,
   canReadTeam,
   uniqueTeamSlug,
-} from "@/lib/edge/admin-access";
-import { requireActor, verifyPassword } from "@/lib/edge/admin-auth";
+} from "@/lib/edge/admin/access";
+import { requireActor, verifyPassword } from "@/lib/edge/admin/auth";
 import {
   type EdgeSessionClaims,
   requireSession,
-} from "@/lib/edge/session-auth";
+} from "@/lib/edge/auth/session-auth";
 import {
   deleteSiteScriptSettings,
   readSiteScriptSettings,
   readSiteTrackingConfig,
   upsertSiteScriptSettings,
   upsertSiteTrackingConfig,
-} from "@/lib/edge/site-settings-store";
+} from "@/lib/edge/sites/settings-store";
 import type { Env } from "@/lib/edge/types";
 import { privateAdminRoutes } from "@/lib/hono/routes/private/admin";
 import { privateSessionRoutes } from "@/lib/hono/routes/private/session";
@@ -27,7 +27,6 @@ import { publicSessionRoutes } from "@/lib/hono/routes/public/session";
 import { deriveSecret, SECRET_PURPOSES } from "@/lib/secrets";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
 import type { DoDiagnosticPayload } from "@/lib/system-performance";
-
 const deriveMockBytes = vi.hoisted(
   () =>
     (password: Uint8Array, nonce: Uint8Array, length: number): Uint8Array => {
@@ -41,7 +40,6 @@ const deriveMockBytes = vi.hoisted(
       return out;
     },
 );
-
 vi.mock("@noble/hashes/argon2.js", () => ({
   argon2id: vi.fn(
     (
@@ -51,19 +49,16 @@ vi.mock("@noble/hashes/argon2.js", () => ({
     ) => deriveMockBytes(password, nonce, options.dkLen ?? 32),
   ),
 }));
-
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/site-settings-store", () => ({
+vi.mock("@/lib/edge/sites/settings-store", () => ({
   deleteSiteScriptSettings: vi.fn(),
   readSiteTrackingConfig: vi.fn(),
   readSiteScriptSettings: vi.fn(),
   upsertSiteTrackingConfig: vi.fn(),
   upsertSiteScriptSettings: vi.fn(),
 }));
-
 type UserRow = {
   id: string;
   username: string;
@@ -76,7 +71,6 @@ type UserRow = {
   created_at: number;
   updated_at: number;
 };
-
 interface MockStatement {
   sql?: string;
   bind: ReturnType<typeof vi.fn>;
@@ -84,12 +78,10 @@ interface MockStatement {
   all: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
 }
-
 interface MockDurableObjectNamespace {
   idFromName: ReturnType<typeof vi.fn>;
   get: ReturnType<typeof vi.fn>;
 }
-
 type ActualSessionAuth = {
   extractSessionToken: (request: Request) => string;
   requireSession: (
@@ -101,14 +93,12 @@ type ActualSessionAuth = {
     env: Env,
   ) => Promise<EdgeSessionClaims | null>;
 };
-
 const requireSessionMock = vi.mocked(requireSession);
 const readSiteScriptSettingsMock = vi.mocked(readSiteScriptSettings);
 const upsertSiteScriptSettingsMock = vi.mocked(upsertSiteScriptSettings);
 const readSiteTrackingConfigMock = vi.mocked(readSiteTrackingConfig);
 const upsertSiteTrackingConfigMock = vi.mocked(upsertSiteTrackingConfig);
 const deleteSiteScriptSettingsMock = vi.mocked(deleteSiteScriptSettings);
-
 const adminSession: EdgeSessionClaims = {
   userId: "admin-1",
   username: "admin",
@@ -116,7 +106,6 @@ const adminSession: EdgeSessionClaims = {
   systemRole: "admin",
   exp: 9_999_999_999,
 };
-
 const userSession: EdgeSessionClaims = {
   userId: "user-1",
   username: "user",
@@ -124,10 +113,8 @@ const userSession: EdgeSessionClaims = {
   systemRole: "user",
   exp: 9_999_999_999,
 };
-
 const uuid = (value: string) =>
   value as `${string}-${string}-${string}-${string}-${string}`;
-
 function b64u(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -136,17 +123,14 @@ function b64u(bytes: Uint8Array): string {
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 }
-
 function bytesFromString(input: string): Uint8Array {
   return new TextEncoder().encode(input);
 }
-
 function toArrayBuffer(input: Uint8Array): ArrayBuffer {
   const out = new Uint8Array(input.length);
   out.set(input);
   return out.buffer;
 }
-
 async function hmacToken(
   payloadPart: string,
   secret = "session-secret",
@@ -167,25 +151,21 @@ async function hmacToken(
   );
   return `${payloadPart}.${b64u(signature)}`;
 }
-
 async function sessionToken(
   payload: Record<string, unknown>,
   secret = "session-secret",
 ): Promise<string> {
   return hmacToken(b64u(bytesFromString(JSON.stringify(payload))), secret);
 }
-
 async function sessionSecretFromRoot(root = "main-secret"): Promise<string> {
   return deriveSecret(root, SECRET_PURPOSES.dashboardSession);
 }
-
 async function derivedSessionToken(
   payload: Record<string, unknown>,
   root = "main-secret",
 ): Promise<string> {
   return sessionToken(payload, await sessionSecretFromRoot(root));
 }
-
 function argonHash(
   password: string,
   nonce = new Uint8Array([
@@ -196,7 +176,6 @@ function argonHash(
   const expected = deriveMockBytes(passwordBytes, nonce, 32);
   return `argon2id$v=19$m=4096,t=1,p=1$${b64u(nonce)}$${b64u(expected)}`;
 }
-
 function userRow(overrides: Partial<UserRow> = {}): UserRow {
   return {
     id: "admin-1",
@@ -211,7 +190,6 @@ function userRow(overrides: Partial<UserRow> = {}): UserRow {
     ...overrides,
   };
 }
-
 function publicUser(row: UserRow) {
   return {
     id: row.id,
@@ -230,7 +208,6 @@ function publicUser(row: UserRow) {
     updatedAt: row.updated_at,
   };
 }
-
 function statement(
   input: {
     first?: unknown;
@@ -270,7 +247,6 @@ function statement(
 
   return stmt;
 }
-
 function createIngestDo(
   handlers: Record<
     string,
@@ -295,7 +271,6 @@ function createIngestDo(
   });
   return { idFromName, get };
 }
-
 function createEnv(
   statements: MockStatement[] = [],
   input: {
@@ -332,13 +307,11 @@ function createEnv(
     ingestDo,
   };
 }
-
 function setSession(
   session: EdgeSessionClaims | null = adminSession,
 ): ReturnType<typeof vi.fn> {
   return requireSessionMock.mockResolvedValue(session);
 }
-
 function jsonInit(
   body: Record<string, unknown>,
   method: "POST" | "PATCH" = "POST",
@@ -349,11 +322,9 @@ function jsonInit(
     body: JSON.stringify(body),
   };
 }
-
 function edgeRequest(path: string, init?: RequestInit): Request {
   return new Request(`https://edge.test${path}`, init);
 }
-
 async function dispatch(path: string, env: Env, init?: RequestInit) {
   if (path === "/api/public/session") {
     return publicSessionRoutes.fetch(edgeRequest("/", init), env);
@@ -370,14 +341,12 @@ async function dispatch(path: string, env: Env, init?: RequestInit) {
   }
   return new Response("Not Found", { status: 404 });
 }
-
 function mockUuid(...ids: string[]) {
   const spy = vi.spyOn(crypto, "randomUUID");
   for (const id of ids) spy.mockReturnValueOnce(uuid(id));
   if (ids.length > 0) spy.mockReturnValue(uuid(ids[ids.length - 1]));
   return spy;
 }
-
 function diagnosticPayload(
   overrides: Partial<DoDiagnosticPayload> = {},
 ): DoDiagnosticPayload {
@@ -425,7 +394,6 @@ function diagnosticPayload(
     ...overrides,
   };
 }
-
 describe("private admin edge handler", () => {
   beforeEach(() => {
     requireSessionMock.mockReset();
@@ -638,7 +606,9 @@ describe("private admin edge handler", () => {
         extractSessionToken,
         requireSession: requireActualSession,
         verifySessionToken,
-      } = await vi.importActual<ActualSessionAuth>("@/lib/edge/session-auth");
+      } = await vi.importActual<ActualSessionAuth>(
+        "@/lib/edge/auth/session-auth",
+      );
       vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
       const env = createEnv([], {
         env: { MAIN_SECRET: "main-secret" },
@@ -680,7 +650,9 @@ describe("private admin edge handler", () => {
 
     it("rejects invalid real session tokens", async () => {
       const { requireSession: requireActualSession, verifySessionToken } =
-        await vi.importActual<ActualSessionAuth>("@/lib/edge/session-auth");
+        await vi.importActual<ActualSessionAuth>(
+          "@/lib/edge/auth/session-auth",
+        );
       vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
       const env = createEnv([], {
         env: { MAIN_SECRET: "main-secret" },

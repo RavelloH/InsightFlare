@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchPrivateJson } from "@/lib/dashboard/client-request";
-import { fetchFilterValues } from "@/lib/dashboard/client-tab-data";
+import { fetchFilterValues } from "@/lib/dashboard/client/data/tabs";
+import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import { attachFilterScopePreference } from "@/lib/filter-contract";
 
-vi.mock("@/lib/dashboard/client-request", () => ({
+vi.mock("@/lib/dashboard/client/request", () => ({
   fetchPrivateJson: vi.fn(),
   fetchPrivateJsonMutate: vi.fn(),
 }));

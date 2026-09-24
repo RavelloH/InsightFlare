@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { apiV1CoreRouteRegistry } from "@/lib/api-v1/application/core-registry";
+import { assertSavedFilterDocument } from "@/lib/api-v1/application/registry";
 import {
-  assertSavedFilterDocument,
-  GetTeamVisibleSavedFilterInputSchema,
-  ListTeamVisibleSavedFiltersInputSchema,
-  SavedFilterDefinitionSchema,
-} from "@/lib/api-v1/application-registry";
-import { apiV1CoreRouteRegistry } from "@/lib/api-v1/core-registry";
+  apiV1AnalyticsRouteById,
+  apiV1ApplicationRouteById,
+  apiV1BatchRouteById,
+  apiV1RouteById,
+  apiV1RouteVariantIds,
+  isApiV1BatchEligible,
+  isApiV1RouteVariantId,
+} from "@/lib/api-v1/application/route-lookups";
 import {
   apiV1AnalyticsBreakdownRouteRegistry,
   apiV1AnalyticsComparisonRouteRegistry,
@@ -24,28 +28,25 @@ import {
   apiV1AnalyticsPerformanceRouteRegistry,
   apiV1AnalyticsRealtimeRouteRegistry,
   apiV1AnalyticsRetentionRouteRegistry,
-  apiV1AnalyticsRouteById,
   apiV1AnalyticsRouteRegistry,
   apiV1AnalyticsSchemaRouteRegistry,
   apiV1AnalyticsTeamBreakdownRouteRegistry,
   apiV1AnalyticsTeamSitesRouteRegistry,
   apiV1AnalyticsTimeseriesRouteRegistry,
-  apiV1ApplicationRouteById,
   apiV1ApplicationRouteRegistry,
   apiV1BatchEligibleRouteIds,
-  apiV1BatchRouteById,
   apiV1NonBatchRouteRegistry,
-  apiV1RouteById,
   apiV1RouteRegistry,
-  apiV1RouteVariantIds,
-  isApiV1BatchEligible,
-  isApiV1RouteVariantId,
-} from "@/lib/api-v1/route-registry";
+} from "@/lib/api-v1/application/route-registry";
+import {
+  GetTeamVisibleSavedFilterInputSchema,
+  ListTeamVisibleSavedFiltersInputSchema,
+  SavedFilterDefinitionSchema,
+} from "@/lib/api-v1/contract/resources";
 import {
   analyticsOperationById,
   analyticsOperationRegistry,
 } from "@/lib/edge/analytics/application/operation-registry";
-
 describe("target API v1 route registry", () => {
   it("keeps the batch allow-list explicit and read-only", () => {
     expect(apiV1BatchEligibleRouteIds).toContain("site.analytics.eventsSearch");

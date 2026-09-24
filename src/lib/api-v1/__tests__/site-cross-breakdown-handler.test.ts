@@ -6,17 +6,16 @@ import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
   type AnalysisDefinitionReader,
-} from "@/lib/api-v1/analysis-definition-reader";
+} from "@/lib/api-v1/analytics/analysis-definition-reader";
 import {
   handlePlannedSiteCrossBreakdown,
   type SiteCrossBreakdownReader,
-} from "@/lib/api-v1/site-cross-breakdown-handler";
+} from "@/lib/api-v1/analytics/site-cross-breakdown";
 import {
   AnalyticsCrossBreakdownResponseSchema,
   ApiV1ErrorEnvelopeSchema,
-} from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/contract/wire";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -39,7 +38,6 @@ function reader() {
     .fn<SiteCrossBreakdownReader>()
     .mockResolvedValue({ columns: [], rows: [], totalVisitors: 0 });
 }
-
 function request(
   body: BodyInit | null = JSON.stringify(input),
   init: RequestInit = {},
@@ -55,7 +53,6 @@ function request(
     },
   );
 }
-
 describe("planned site cross-breakdown HTTP adapter", () => {
   it("serves a strict typed envelope through a live Hono route", async () => {
     const provider = reader();

@@ -1,0 +1,2385 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { findSiteProfile } from "@/lib/demo/data/site-profiles";
+import { handleDemoNotificationEmailPreview } from "@/lib/demo/notifications/email-preview";
+import {
+  createMockRealtimeSocket,
+  type RealtimeSocketLike,
+} from "@/lib/demo/realtime/socket";
+import { handleDemoRequest } from "@/lib/demo/runtime";
+const SITE_ID = "demo-site-001";
+const DAY_MS = 24 * 60 * 60 * 1000;
+const FIXED_FROM = Date.UTC(2026, 0, 5);
+const FIXED_TO = FIXED_FROM + 2 * DAY_MS;
+const ANALYTICS_PARAMS = {
+  siteId: SITE_ID,
+  from: FIXED_FROM,
+  to: FIXED_TO,
+  timeZone: "UTC",
+};
+function ok(result: unknown): { ok: boolean; data: unknown } {
+  return result as { ok: boolean; data: unknown };
+}
+function asRecord(result: unknown): Record<string, unknown> {
+  return result as Record<string, unknown>;
+}
+function dataRows(result: unknown): Array<Record<string, unknown>> {
+  const data = asRecord(result).data;
+  if (Array.isArray(data)) return data as Array<Record<string, unknown>>;
+  const page = data as { items?: unknown };
+  expect(Array.isArray(page?.items)).toBe(true);
+  return page.items as Array<Record<string, unknown>>;
+}
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+describe("mock — handleDemoRequest", () => {
+  describe("write operations", () => {
+    it("returns user+teams for POST /api/public/session", () => {
+      const res = ok(
+        handleDemoRequest({ path: "/api/public/session", method: "POST" }),
+      );
+      expect(res.ok).toBe(true);
+      const data = res.data as Record<string, unknown>;
+      expect(data.user).toBeTruthy();
+      expect(Array.isArray(data.teams)).toBe(true);
+    });
+
+    it("returns user+teams for GET /api/private/session", () => {
+      const res = ok(handleDemoRequest({ path: "/api/private/session" }));
+      expect(res.ok).toBe(true);
+    });
+
+    it("PATCH /profile merges body into demo user", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/profile",
+          method: "PATCH",
+          body: { name: "New Name", timeZone: "Asia/Shanghai" },
+        }),
+      );
+      expect(res.ok).toBe(true);
+      const data = res.data as Record<string, unknown>;
+      expect(data.name).toBe("New Name");
+      expect(data.timeZone).toBeTruthy();
+    });
+
+    it("PATCH /profile keeps existing timeZone when key is absent", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/profile",
+          method: "PATCH",
+          body: { name: "Only Name" },
+        }),
+      );
+      const data = res.data as Record<string, unknown>;
+      expect(data.name).toBe("Only Name");
+      expect("timeZone" in data).toBe(true);
+    });
+
+    it("routes demo notification write operations", () => {
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-email/test",
+            method: "POST",
+          }),
+        ).data,
+      ).toMatchObject({ provider: "resend" });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-test",
+            method: "POST",
+            body: { teamId: "demo-team-001", userId: "demo-user-001" },
+          }),
+        ).data,
+      ).toMatchObject({ message: expect.any(Object) });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/notifications",
+            method: "PATCH",
+          }),
+        ).data,
+      ).toEqual({ updated: 1 });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/notifications/demo-notification-message-attention",
+            method: "PATCH",
+            params: { teamId: "demo-team-001" },
+          }),
+        ).data,
+      ).toMatchObject({ id: "demo-notification-message-attention" });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/notifications/missing",
+            method: "PATCH",
+            params: { teamId: "demo-team-001" },
+          }),
+        ).data,
+      ).toBeNull();
+    });
+
+    it("routes demo notification rule and email config mutations", () => {
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-rules/preview",
+            method: "POST",
+            body: { ruleId: "demo-notification-rule-conversion-drop" },
+          }),
+        ).data,
+      ).toMatchObject({
+        status: "triggered",
+        message: {
+          type: "threshold",
+          title: expect.stringContaining("traffic threshold reached"),
+          bodyText: expect.stringContaining("Threshold: < 120"),
+        },
+      });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-rules/run",
+            method: "POST",
+            body: { ruleId: "demo-notification-rule-daily" },
+          }),
+        ).data,
+      ).toMatchObject({
+        evaluation: { status: "triggered" },
+        messageCount: 1,
+        messages: [expect.objectContaining({ type: "report" })],
+      });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-rules",
+            method: "DELETE",
+            params: { id: "rule-1" },
+          }),
+        ).data,
+      ).toEqual({ id: "rule-1", removed: true });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-rules",
+            method: "POST",
+            body: { name: "New rule", teamId: "demo-team-001" },
+          }),
+        ).data,
+      ).toMatchObject({ name: "New rule" });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-email",
+            method: "DELETE",
+          }),
+        ).data,
+      ).toMatchObject({ enabled: false, resend: { configured: false } });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-email",
+            method: "PATCH",
+            body: {
+              enabled: true,
+              provider: "none",
+              fromName: "Demo",
+              fromEmail: "demo@example.test",
+              replyTo: "reply@example.test",
+              resendApiKey: "re_demo",
+            },
+          }),
+        ).data,
+      ).toMatchObject({
+        enabled: true,
+        provider: "none",
+        fromName: "Demo",
+        fromEmail: "demo@example.test",
+        replyTo: "reply@example.test",
+        resend: { configured: true, apiKeyHint: "••••demo" },
+      });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-email",
+            method: "PATCH",
+            body: { resendApiKey: "re_demo", clearResendApiKey: true },
+          }),
+        ).data,
+      ).toMatchObject({ resend: { configured: false } });
+    });
+
+    it("covers notification rule preview and run variants", () => {
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-rules/preview",
+            method: "POST",
+            body: { id: "demo-notification-rule-daily" },
+          }),
+        ).data,
+      ).toMatchObject({
+        status: "triggered",
+        message: { type: "report", data: { reportType: expect.any(String) } },
+      });
+
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-rules/preview",
+            method: "POST",
+            body: { ruleId: "demo-notification-rule-no-data" },
+          }),
+        ).data,
+      ).toMatchObject({
+        status: "triggered",
+        message: { type: "health", severity: "critical" },
+      });
+
+      const fallback = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/notification-rules/preview",
+          method: "POST",
+          body: null,
+        }),
+      ).data as Record<string, unknown>;
+      expect(fallback.status).toBe("triggered");
+
+      const run = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/notification-rules/run",
+          method: "POST",
+          body: { ruleId: "missing-rule-id" },
+        }),
+      ).data as Record<string, unknown>;
+      expect(run.summary).toEqual(
+        expect.objectContaining({
+          rulesScanned: 1,
+          messagesCreated: expect.any(Number),
+        }),
+      );
+    });
+
+    it("routes funnel and API key write variants", () => {
+      expect(
+        handleDemoRequest({
+          path: "/api/private/funnels",
+          method: "POST",
+          params: { siteId: SITE_ID },
+          body: { name: "Checkout", steps: [] },
+        }),
+      ).toBeDefined();
+      expect(
+        handleDemoRequest({
+          path: "/api/private/funnels",
+          method: "DELETE",
+          params: { siteId: SITE_ID, id: "funnel-1" },
+        }),
+      ).toBeDefined();
+
+      const created = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/api-keys",
+          method: "POST",
+          params: { teamId: "demo-team-001" },
+          body: {
+            name: "Created key",
+            scopes: ["analytics:read"],
+            siteIds: [SITE_ID],
+          },
+        }),
+      ).data as Record<string, unknown>;
+      expect(created).toMatchObject({
+        key: {
+          name: "Created key",
+          scopes: ["analytics:read"],
+          siteIds: [SITE_ID],
+        },
+        secret: expect.stringContaining("if_demo_"),
+      });
+
+      const key = (created.key as Record<string, unknown>).id;
+      const revoked = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/api-keys",
+          method: "PATCH",
+          body: { keyId: key, teamId: "demo-team-001" },
+        }),
+      ).data as Record<string, unknown>;
+      expect(revoked.status).toBe("revoked");
+    });
+
+    it("routes demo site writes with fallback body handling", () => {
+      const updated = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/site",
+          method: "PATCH",
+          body: {
+            siteId: "site-new",
+            teamId: "demo-team-001",
+            name: "Updated",
+            domain: "updated.example.test",
+            publicEnabled: false,
+            publicSlug: "updated",
+          },
+        }),
+      ).data as Record<string, unknown>;
+      expect(updated).toMatchObject({
+        id: "site-new",
+        name: "Updated",
+        domain: "updated.example.test",
+        publicEnabled: false,
+        publicSlug: "updated",
+      });
+
+      const fallback = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/site",
+          method: "POST",
+          body: null,
+        }),
+      ).data as Record<string, unknown>;
+      expect(fallback.id).toBeTruthy();
+    });
+
+    it("PATCH /profile tolerates non-object bodies", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/profile",
+          method: "PATCH",
+          body: "not-an-object",
+        }),
+      );
+      expect(res.ok).toBe(true);
+    });
+
+    it("PUT /site-config merges config body", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/site-config",
+          method: "PUT",
+          body: { config: { foo: "bar" } },
+        }),
+      );
+      expect(res.ok).toBe(true);
+    });
+
+    it("PUT /site-config tolerates missing config", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/site-config",
+          method: "PUT",
+          body: {},
+        }),
+      );
+      expect(res.ok).toBe(true);
+    });
+
+    it("returns generic success for unrecognized writes", () => {
+      const res = ok(
+        handleDemoRequest({ path: "/api/private/unknown", method: "DELETE" }),
+      );
+      expect(res.ok).toBe(true);
+    });
+  });
+
+  describe("admin routes", () => {
+    it("returns auth/me data", () => {
+      const res = ok(handleDemoRequest({ path: "/api/private/session" }));
+      expect(res.ok).toBe(true);
+    });
+
+    it("returns users", () => {
+      const res = ok(handleDemoRequest({ path: "/api/private/admin/users" }));
+      expect(Array.isArray(res.data)).toBe(true);
+      expect((res.data as unknown[]).length).toBeGreaterThan(1);
+    });
+
+    it("returns teams", () => {
+      const res = ok(handleDemoRequest({ path: "/api/private/admin/teams" }));
+      expect(Array.isArray(res.data)).toBe(true);
+    });
+
+    it("returns sites", () => {
+      const res = ok(handleDemoRequest({ path: "/api/private/admin/sites" }));
+      expect(Array.isArray(res.data)).toBe(true);
+    });
+
+    it("returns members", () => {
+      const res = ok(handleDemoRequest({ path: "/api/private/admin/members" }));
+      expect(Array.isArray(res.data)).toBe(true);
+    });
+
+    it("returns team invites", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/team-invites",
+          params: { teamId: "demo-team-001" },
+        }),
+      );
+      expect(res.data).toEqual([
+        expect.objectContaining({
+          code: expect.stringContaining("demo_"),
+          url: expect.stringContaining("/invite#token="),
+        }),
+        expect.any(Object),
+        expect.any(Object),
+      ]);
+    });
+
+    it("returns site config", () => {
+      const res = ok(
+        handleDemoRequest({ path: "/api/private/admin/site-config" }),
+      );
+      expect(res.ok).toBe(true);
+    });
+
+    it("returns script snippet", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/script-snippet",
+          params: { siteId: SITE_ID },
+        }),
+      );
+      expect(res.ok).toBe(true);
+    });
+
+    it("returns system performance metrics", () => {
+      const res = ok(
+        handleDemoRequest({ path: "/api/private/admin/system-performance" }),
+      );
+      expect(res.ok).toBe(true);
+    });
+
+    it("returns DO diagnostic", () => {
+      const res = ok(
+        handleDemoRequest({ path: "/api/private/admin/do-diagnostic" }),
+      );
+      expect(res.ok).toBe(true);
+    });
+
+    it("returns blocked/included request observation data and paginates detail rows", () => {
+      const path = "/api/private/admin/request-observation";
+      const params = {
+        from: FIXED_FROM,
+        to: FIXED_FROM + 60 * 60 * 1000,
+        limit: 7,
+      };
+      const overview = asRecord(handleDemoRequest({ path, params }));
+      const blocked = overview.blocked as Record<string, unknown>;
+      const included = overview.included as Record<string, unknown>;
+      const blockedEvents = overview.blockedEvents as unknown[];
+      const includedEvents = overview.includedEvents as unknown[];
+
+      expect(blockedEvents).toHaveLength(7);
+      expect(includedEvents).toHaveLength(7);
+      expect(blocked.events).toEqual(blockedEvents);
+      expect(included.events).toEqual(includedEvents);
+      expect((blocked.pagination as Record<string, unknown>).hasMore).toBe(
+        true,
+      );
+      expect((included.pagination as Record<string, unknown>).hasMore).toBe(
+        true,
+      );
+      expect(
+        [...blockedEvents, ...includedEvents].every(
+          (event) => !(event as Record<string, unknown>).sampleWeight,
+        ),
+      ).toBe(true);
+      expect(blockedEvents[0]).toHaveProperty("ip");
+      expect(blockedEvents[0]).toHaveProperty("userAgent");
+      expect(blockedEvents[0]).not.toHaveProperty("metadataJson");
+      expect(includedEvents[0]).toHaveProperty("requestMethod");
+      expect(includedEvents[0]).toHaveProperty("hostname");
+      expect(includedEvents[0]).not.toHaveProperty("ip");
+      expect(includedEvents[0]).not.toHaveProperty("userAgent");
+      expect(includedEvents[0]).not.toHaveProperty("metadataJson");
+
+      const nextPageResponse = asRecord(
+        handleDemoRequest({
+          path,
+          params: {
+            ...params,
+            source: "blocked",
+            cursor: String(
+              (blocked.pagination as Record<string, unknown>).nextCursor ?? "",
+            ),
+          },
+        }),
+      );
+      const nextPage = nextPageResponse.data as Record<string, unknown>;
+
+      const nextPageEvents = nextPage.items as unknown[];
+      expect(nextPageEvents).toHaveLength(7);
+      expect(nextPageEvents).not.toEqual(blockedEvents);
+      expect((nextPageEvents[0] as Record<string, unknown>).traceId).not.toBe(
+        (blockedEvents[0] as Record<string, unknown>).traceId,
+      );
+      expect(nextPageResponse.source).toBe("blocked");
+      expect((nextPage.pagination as Record<string, unknown>).hasMore).toBe(
+        true,
+      );
+      expect(
+        (nextPage.pagination as Record<string, unknown>).nextCursor,
+      ).toEqual(expect.any(String));
+    });
+
+    it("resolves demo request observation dimensions from their semantic fields", () => {
+      const path = "/api/private/admin/request-observation";
+      const params = {
+        from: FIXED_FROM,
+        to: FIXED_FROM + DAY_MS,
+        dimensionSource: "blocked",
+      };
+      const dimensionRows = (group: string, tab: string) => {
+        const response = asRecord(
+          handleDemoRequest({
+            path,
+            params: { ...params, dimensionGroup: group, dimensionTab: tab },
+          }),
+        );
+        const dimension = response.dimension as Record<string, unknown>;
+        return dimension.rows as Array<Record<string, unknown>>;
+      };
+
+      const reasonRows = dimensionRows("detection", "reason");
+      expect(reasonRows.length).toBeGreaterThan(0);
+      expect(reasonRows.every((row) => row.label !== "Unknown")).toBe(true);
+      expect(reasonRows.every((row) => Number(row.botCount) >= 0)).toBe(true);
+
+      const siteRows = dimensionRows("target", "site");
+      expect(siteRows.length).toBeGreaterThan(0);
+      expect(siteRows[0]).toMatchObject({
+        key: expect.stringMatching(/^demo-site-/),
+        label: expect.not.stringMatching(/^Unknown$/),
+        iconLabel: expect.any(String),
+      });
+
+      const ipPrefixRows = dimensionRows("client", "ipPrefix");
+      expect(ipPrefixRows.length).toBeGreaterThan(0);
+      expect(
+        ipPrefixRows.every(
+          (row) =>
+            String(row.label) === "Unknown" ||
+            String(row.label).endsWith("/24"),
+        ),
+      ).toBe(true);
+      expect(
+        ipPrefixRows.some((row) => String(row.label).endsWith("/24")),
+      ).toBe(true);
+    });
+
+    it("returns notification admin lists", () => {
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/api-keys",
+            params: { teamId: "demo-team-001" },
+          }),
+        ).data,
+      ).toEqual(expect.any(Array));
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-rules",
+            params: { teamId: "demo-team-001" },
+          }),
+        ).data,
+      ).toEqual(expect.any(Array));
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/notifications",
+            params: { teamId: "demo-team-001", locale: "zh" },
+          }),
+        ).data,
+      ).toMatchObject({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            type: "threshold",
+            title: expect.stringContaining("访问量达到阈值"),
+          }),
+          expect.objectContaining({ type: "milestone" }),
+          expect.objectContaining({ type: "change" }),
+        ]),
+        unreadAttentionCount: expect.any(Number),
+      });
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/notification-email",
+          }),
+        ).data,
+      ).toMatchObject({ resend: { configured: false } });
+      expect(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { teamId: "demo-team-001" },
+        }),
+      ).toBeDefined();
+    });
+
+    it("models the internal scheduled-task cadence in demo mode", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(Date.UTC(2026, 7, 31, 11, 2, 55)));
+
+      const response = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { pageSize: 2000 },
+        }),
+      );
+      const tasks = response.tasks as Array<Record<string, unknown>>;
+      const taskByKey = new Map(tasks.map((task) => [String(task.key), task]));
+
+      expect(tasks).toHaveLength(3);
+      expect(taskByKey.get("notification_tick")).toMatchObject({
+        schedule: "Every 30 minutes",
+        runs30d: 1440,
+        nextRunAt: Date.UTC(2026, 7, 31, 11, 30),
+      });
+      expect(taskByKey.get("visit_hourly_rollup")).toMatchObject({
+        schedule: "Every hour",
+        runs30d: 720,
+        nextRunAt: Date.UTC(2026, 7, 31, 12),
+      });
+      expect(taskByKey.get("database_maintenance")).toMatchObject({
+        schedule: "Every day",
+        runs30d: 30,
+        skipped30d: 1,
+        nextRunAt: Date.UTC(2026, 8, 1),
+      });
+
+      const runs = (response.runs as Record<string, unknown>).items as Array<
+        Record<string, unknown>
+      >;
+      const skippedGroup = runs.find((group) =>
+        (group.runs as Array<Record<string, unknown>>).some(
+          (run) => run.status === "skipped",
+        ),
+      );
+      expect(skippedGroup).toMatchObject({
+        status: "skipped",
+        taskCount: 1,
+        skippedCount: 1,
+        logsCount: 0,
+      });
+      const selectedResponse = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { runId: String(skippedGroup?.id) },
+        }),
+      );
+      expect(selectedResponse.logs).toMatchObject({
+        items: [],
+        pagination: { hasMore: false, nextCursor: null },
+      });
+
+      const paged = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { status: "success", limit: 1 },
+        }),
+      );
+      expect((paged.runs as Record<string, unknown>).pagination).toMatchObject({
+        hasMore: true,
+        nextCursor: expect.any(String),
+      });
+
+      const firstTaskRun = ((runs[0]?.runs as Array<Record<string, unknown>>) ??
+        [])[0];
+      const childSelected = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { runId: String(firstTaskRun?.id) },
+        }),
+      );
+      expect((childSelected.selectedRun as Record<string, unknown>).id).toBe(
+        runs[0]?.id,
+      );
+
+      const emptyPage = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { page: 999, limit: 2, runId: "missing-demo-run" },
+        }),
+      );
+      expect(emptyPage.selectedRun).toBeNull();
+    });
+
+    it("keeps demo scheduled-task settings stateful", () => {
+      const unchanged = asRecord(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/scheduled-tasks",
+            method: "PATCH",
+            body: {},
+          }),
+        ).data,
+      );
+      expect(unchanged.tasks).toEqual(expect.any(Array));
+
+      const disabled = asRecord(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/scheduled-tasks",
+            method: "PATCH",
+            body: {
+              taskKey: "notification_tick",
+              enabled: 0,
+              retention: {
+                scheduledTaskLogsDays: 45,
+                notificationTestDays: 60,
+                notificationAttentionDays: 240,
+                notificationDefaultDays: 90,
+              },
+            },
+          }),
+        ).data,
+      );
+      const disabledTask = (
+        disabled.tasks as Array<Record<string, unknown>>
+      ).find((task) => task.key === "notification_tick");
+      expect(disabledTask).toMatchObject({ enabled: false, nextRunAt: null });
+      expect(disabled.retention).toEqual({
+        scheduledTaskLogsDays: 45,
+        notificationTestDays: 60,
+        notificationAttentionDays: 240,
+        notificationDefaultDays: 90,
+      });
+
+      const restored = asRecord(
+        ok(
+          handleDemoRequest({
+            path: "/api/private/admin/scheduled-tasks",
+            method: "PATCH",
+            body: {
+              taskKey: "notification_tick",
+              enabled: true,
+              retentionDays: 30,
+              retention: {
+                notificationTestDays: 30,
+                notificationAttentionDays: 180,
+                notificationDefaultDays: 120,
+              },
+            },
+          }),
+        ).data,
+      );
+      const restoredTask = (
+        restored.tasks as Array<Record<string, unknown>>
+      ).find((task) => task.key === "notification_tick");
+      expect(restoredTask).toMatchObject({ enabled: true });
+      expect(restored.retention).toMatchObject({
+        scheduledTaskLogsDays: 30,
+        notificationTestDays: 30,
+        notificationAttentionDays: 180,
+        notificationDefaultDays: 120,
+      });
+
+      const invalidPagination = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/scheduled-tasks",
+          params: { limit: "invalid" },
+        }),
+      );
+      expect(invalidPagination.runs as Record<string, unknown>).toMatchObject({
+        pagination: {
+          limit: 50,
+          returned: expect.any(Number),
+          hasMore: expect.any(Boolean),
+          nextCursor: expect.anything(),
+        },
+      });
+    });
+
+    it("returns system-performance with different windowMinutes values", () => {
+      for (const minutes of [5, 30, 180, 720, 1440]) {
+        const res = handleDemoRequest({
+          path: "/api/private/admin/system-performance",
+          params: { windowMinutes: minutes },
+        });
+        expect(res).toBeDefined();
+      }
+    });
+
+    it("honors supported system-performance minutes and falls back otherwise", () => {
+      for (const [minutes, bucketSizeMs] of [
+        [15, 60_000],
+        [60, 5 * 60_000],
+        [360, 30 * 60_000],
+        [1440, 60 * 60_000],
+      ] as const) {
+        const res = asRecord(
+          handleDemoRequest({
+            path: "/api/private/admin/system-performance",
+            params: { minutes },
+          }),
+        );
+        const window = res.window as Record<string, unknown>;
+        expect(window.minutes).toBe(minutes);
+        expect(window.bucketSizeMs).toBe(bucketSizeMs);
+      }
+
+      const fallback = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/system-performance",
+          params: { minutes: 999 },
+        }),
+      );
+      expect((fallback.window as Record<string, unknown>).minutes).toBe(60);
+    });
+  });
+
+  describe("analytics queries", () => {
+    const now = Date.now();
+    const baseParams = {
+      siteId: SITE_ID,
+      from: now - 3_600_000,
+      to: now,
+    };
+
+    const routes = [
+      "/api/private/filter-values",
+      "/api/private/overview",
+      "/api/private/overview-page-path",
+      "/api/private/overview-page-title",
+      "/api/private/overview-page-hostname",
+      "/api/private/overview-page-entry",
+      "/api/private/overview-page-exit",
+      "/api/private/overview-source-channel",
+      "/api/private/overview-source-domain",
+      "/api/private/overview-source-link",
+      "/api/private/overview-client-browser",
+      "/api/private/overview-client-os-version",
+      "/api/private/overview-client-device-type",
+      "/api/private/overview-client-language",
+      "/api/private/overview-client-screen-size",
+      "/api/private/overview-geo-country",
+      "/api/private/overview-geo-region",
+      "/api/private/overview-geo-city",
+      "/api/private/overview-geo-continent",
+      "/api/private/overview-geo-timezone",
+      "/api/private/overview-geo-organization",
+      "/api/private/overview-geo-points",
+      "/api/private/trend",
+      "/api/private/sessions",
+      "/api/private/pages",
+      "/api/private/referrers",
+      "/api/private/visitors",
+      "/api/private/countries",
+      "/api/private/page-hash",
+      "/api/private/page-query",
+      "/api/private/event-types",
+      "/api/private/events-summary",
+      "/api/private/events-trend",
+      "/api/private/events-records",
+      "/api/private/pages-dashboard",
+      "/api/private/retention",
+      "/api/private/performance",
+      "/api/private/browser-cross-breakdown",
+      "/api/private/browser-version-breakdown",
+      "/api/private/browser-radar",
+      "/api/private/referrer-radar",
+      "/api/private/referrer-dimension-trend",
+      "/api/private/referrer-channel-dimension-trend",
+      "/api/private/browser-trend",
+      "/api/private/browser-engine-trend",
+      "/api/private/client-dimension-trend",
+      "/api/private/utm-dimension-trend",
+      "/api/private/utm-source",
+      "/api/private/utm-medium",
+      "/api/private/utm-campaign",
+      "/api/private/utm-term",
+      "/api/private/utm-content",
+    ];
+
+    it.each(routes)("returns a defined result for %s", (route) => {
+      const res = handleDemoRequest({ path: route, params: baseParams });
+      expect(res).toBeDefined();
+    });
+
+    it("returns channel data for the demo source tab", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/overview-source-channel",
+          params: baseParams,
+        }),
+      );
+      expect(res).toMatchObject({
+        ok: true,
+        data: { items: expect.any(Array), pagination: expect.any(Object) },
+      });
+      expect(
+        ((res.data as Record<string, unknown>).items as unknown[]).length,
+      ).toBeGreaterThan(0);
+    });
+
+    it("serializes dashboard collection routes with pagination metadata", () => {
+      const serialize = (
+        path: string,
+        params: Record<string, string | number> = {},
+      ) =>
+        JSON.parse(
+          JSON.stringify(
+            handleDemoRequest({
+              path,
+              params: { ...ANALYTICS_PARAMS, limit: 2, ...params },
+            }),
+          ),
+        ) as Record<string, any>;
+
+      const collectionRequests = [
+        ["/api/private/overview-page-path", {}],
+        ["/api/private/overview-source-domain", {}],
+        ["/api/private/overview-client-browser", {}],
+        ["/api/private/filter-values", { filterKey: "page.path" }],
+        ["/api/private/pages", {}],
+        ["/api/private/referrers", {}],
+        ["/api/private/page-hash", {}],
+        ["/api/private/page-query", {}],
+        ["/api/private/event-types", {}],
+      ] as const;
+
+      for (const [path, params] of collectionRequests) {
+        const response = serialize(path, params);
+        expect(response).toMatchObject({
+          ok: true,
+          data: {
+            items: expect.any(Array),
+            pagination: {
+              limit: 2,
+              returned: expect.any(Number),
+              hasMore: expect.any(Boolean),
+            },
+          },
+        });
+        expect(
+          response.data.pagination.nextCursor === null ||
+            typeof response.data.pagination.nextCursor === "string",
+        ).toBe(true);
+        expect(response.data.items).toHaveLength(
+          response.data.pagination.returned,
+        );
+      }
+    });
+
+    it("keeps demo analytics envelopes aligned with the real route contracts", () => {
+      const request = (
+        path: string,
+        extra: Record<string, string | number> = {},
+      ) =>
+        asRecord(
+          handleDemoRequest({
+            path,
+            params: { ...ANALYTICS_PARAMS, ...extra },
+          }),
+        );
+
+      const pages = request("/api/private/pages");
+      expect(pages.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      });
+      expect(pages.tabs).toBeDefined();
+
+      const publicPages = request("/api/public/share/some-token/pages");
+      expect(publicPages.tabs).toBeUndefined();
+      expect(publicPages.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      });
+
+      const referrers = request("/api/private/referrers");
+      const referrerItems = (
+        referrers.data as { items: Array<Record<string, unknown>> }
+      ).items;
+      expect(referrerItems[0]).not.toHaveProperty("visitors");
+
+      const channel = request("/api/private/referrer-channel-dimension-trend");
+      expect(Object.keys(channel.source as object).sort()).toEqual([
+        "data",
+        "series",
+      ]);
+      expect(Object.keys(channel.channel as object).sort()).toEqual([
+        "data",
+        "series",
+      ]);
+
+      const eventsTrend = request("/api/private/events-trend");
+      expect(eventsTrend.data).toMatchObject({
+        interval: expect.any(String),
+        series: expect.any(Array),
+        data: expect.any(Array),
+      });
+
+      const utm = request("/api/private/utm-source");
+      expect(utm.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.any(Object),
+      });
+      expect(utm.data).not.toEqual(expect.any(Array));
+    });
+
+    it("paginates only profile page paths and referrer domains", () => {
+      const profile = findSiteProfile(SITE_ID);
+      const serialize = (path: string) =>
+        JSON.parse(
+          JSON.stringify(
+            handleDemoRequest({
+              path,
+              params: { ...baseParams, limit: 100 },
+            }),
+          ),
+        ) as Record<string, any>;
+
+      const pageResponse = serialize("/api/private/overview-page-path");
+      const sourceResponse = serialize("/api/private/overview-source-domain");
+      const geoResponse = serialize("/api/private/overview-geo-country");
+      const pageItems = pageResponse.data.items as Array<{ label: string }>;
+      const sourceItems = sourceResponse.data.items as Array<{
+        label: string;
+      }>;
+
+      expect(pageResponse.data.pagination).toMatchObject({
+        hasMore: false,
+        nextCursor: null,
+      });
+      expect(sourceResponse.data.pagination).toMatchObject({
+        hasMore: false,
+        nextCursor: null,
+      });
+      expect(geoResponse.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.objectContaining({
+          hasMore: false,
+          nextCursor: null,
+        }),
+      });
+      expect(
+        pageItems.every((item) => profile.paths.includes(item.label)),
+      ).toBe(true);
+      const profileSources = new Set(
+        profile.topReferrers.map((referrer) =>
+          referrer.name === "(direct)" ? "" : referrer.name.toLowerCase(),
+        ),
+      );
+      expect(
+        sourceItems.every((item) =>
+          profileSources.has(item.label.toLowerCase()),
+        ),
+      ).toBe(true);
+    });
+
+    it("serializes split journey collections and event payload details", () => {
+      const visitor = dataRows(
+        handleDemoRequest({
+          path: "/api/private/visitors",
+          params: ANALYTICS_PARAMS,
+        }),
+      )[0];
+      const session = dataRows(
+        handleDemoRequest({
+          path: "/api/private/sessions",
+          params: ANALYTICS_PARAMS,
+        }),
+      )[0];
+      expect(visitor?.visitorId).toEqual(expect.any(String));
+      expect(session?.sessionId).toEqual(expect.any(String));
+
+      const serialize = (
+        path: string,
+        params: Record<string, string | number>,
+      ) =>
+        JSON.parse(
+          JSON.stringify(handleDemoRequest({ path, params })),
+        ) as Record<string, any>;
+      const assertCollection = (response: Record<string, any>) => {
+        expect(response).toMatchObject({
+          ok: true,
+          data: {
+            items: expect.any(Array),
+            pagination: {
+              limit: 2,
+              returned: expect.any(Number),
+              hasMore: expect.any(Boolean),
+            },
+          },
+        });
+      };
+
+      assertCollection(
+        serialize("/api/private/visitor-events", {
+          ...ANALYTICS_PARAMS,
+          visitorId: String(visitor?.visitorId ?? ""),
+          limit: 2,
+        }),
+      );
+      assertCollection(
+        serialize("/api/private/visitor-sessions", {
+          ...ANALYTICS_PARAMS,
+          visitorId: String(visitor?.visitorId ?? ""),
+          limit: 2,
+        }),
+      );
+      const sessionEventPage = serialize("/api/private/session-events", {
+        ...ANALYTICS_PARAMS,
+        sessionId: String(session?.sessionId ?? ""),
+        limit: 2,
+      });
+      assertCollection(sessionEventPage);
+
+      const firstSessionEvent =
+        sessionEventPage.data.items.find(
+          (item: Record<string, unknown>) => item.kind === "pageview",
+        ) ?? sessionEventPage.data.items[0];
+      const journeyEventDetail = serialize(
+        "/api/private/journey-event-detail",
+        {
+          ...ANALYTICS_PARAMS,
+          eventId: String(firstSessionEvent?.id ?? ""),
+          eventKind: String(firstSessionEvent?.kind ?? ""),
+          sessionId: String(firstSessionEvent?.sessionId ?? ""),
+          visitId: String(firstSessionEvent?.visitId ?? ""),
+        },
+      );
+      expect(journeyEventDetail.data.event).toMatchObject({
+        eventId: String(firstSessionEvent?.id ?? ""),
+      });
+
+      const event = dataRows(
+        handleDemoRequest({
+          path: "/api/private/events-records",
+          params: { ...ANALYTICS_PARAMS, pageSize: 1 },
+        }),
+      )[0];
+      const detail = serialize("/api/private/event-record-detail", {
+        ...ANALYTICS_PARAMS,
+        eventId: String(event?.eventId ?? ""),
+      });
+      expect(detail.data.eventData).toMatchObject({
+        plan: expect.any(String),
+        page: expect.any(Object),
+        items: expect.any(Array),
+      });
+    });
+
+    it("client-cross-breakdown handles missing dimensions gracefully", () => {
+      const res = handleDemoRequest({
+        path: "/api/private/client-cross-breakdown",
+        params: baseParams,
+      }) as Record<string, unknown>;
+      expect(res).toMatchObject({
+        ok: false,
+        error: { message: "Unsupported primary dimension" },
+      });
+    });
+
+    it("client-cross-breakdown returns data for valid dimensions", () => {
+      const res = handleDemoRequest({
+        path: "/api/private/client-cross-breakdown",
+        params: {
+          ...baseParams,
+          primaryDimension: "client.browser",
+          secondaryDimension: "client.deviceType",
+        },
+      }) as Record<string, unknown>;
+      expect(res.ok).toBe(true);
+    });
+
+    it("client-cross-breakdown accepts the same generic dimensions as Edge", () => {
+      for (const [primaryDimension, secondaryDimension] of [
+        ["page.path", "utm.source"],
+        ["client.browser", "geo.country"],
+        ["browser", "language"],
+      ] as const) {
+        const res = asRecord(
+          handleDemoRequest({
+            path: "/api/private/client-cross-breakdown",
+            params: {
+              ...baseParams,
+              primaryDimension,
+              secondaryDimension,
+            },
+          }),
+        );
+        expect(res).toMatchObject({
+          ok: true,
+          data: {
+            columns: expect.any(Array),
+            rows: expect.any(Array),
+            totalVisitors: expect.any(Number),
+          },
+        });
+      }
+    });
+
+    it("returns ok for team dashboard", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/team-dashboard",
+          params: baseParams,
+        }),
+      );
+      expect(res).toBeDefined();
+    });
+
+    it("returns session detail", () => {
+      const res = handleDemoRequest({
+        path: "/api/private/session-detail",
+        params: { ...baseParams, sessionId: "demo-site-001-s-00001" },
+      });
+      expect(res).toBeDefined();
+    });
+
+    it("routes standard journey event detail for private and API v1 paths", () => {
+      const params = {
+        ...baseParams,
+        eventId: "missing-event",
+        eventKind: "pageview",
+      };
+      expect(
+        handleDemoRequest({
+          path: "/api/private/journey-event-detail",
+          params,
+        }),
+      ).toMatchObject({ ok: true, data: null });
+      expect(
+        handleDemoRequest({
+          path: `/api/v1/sites/${SITE_ID}/analytics/journey-events/detail`,
+          params,
+        }),
+      ).toMatchObject({ ok: true, data: null });
+    });
+
+    it("returns visitor detail", () => {
+      const res = handleDemoRequest({
+        path: "/api/private/visitor-detail",
+        params: { ...baseParams, visitorId: "v-001-000001" },
+      });
+      expect(res).toBeDefined();
+    });
+
+    it("returns overview change rates and detail trend when requested", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/overview",
+          params: {
+            ...ANALYTICS_PARAMS,
+            includeChange: "true",
+            includeDetail: "1",
+            interval: "hour",
+            tz: "Asia/Shanghai",
+          },
+        }),
+      );
+
+      expect(res.ok).toBe(true);
+      expect(res.previousData).toBeTruthy();
+      expect(res.changeRates).toEqual(
+        expect.objectContaining({
+          views: expect.any(Number),
+          sessions: expect.any(Number),
+        }),
+      );
+      expect(res.detail).toEqual(
+        expect.objectContaining({
+          interval: "hour",
+          data: expect.any(Array),
+        }),
+      );
+    }, 20000);
+
+    it("rejects an inverted time window", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/trend",
+          params: {
+            siteId: SITE_ID,
+            from: FIXED_TO,
+            to: FIXED_FROM,
+            interval: "hour",
+          },
+        }),
+      );
+
+      expect(res).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
+    });
+
+    it("returns event detail, context cards, and payload field values", () => {
+      const eventRows = dataRows(
+        handleDemoRequest({
+          path: "/api/private/events-records",
+          params: { ...ANALYTICS_PARAMS, pageSize: 10 },
+        }),
+      );
+      expect(eventRows.length).toBeGreaterThan(0);
+      const event = eventRows[0];
+      const eventId = String(event.eventId);
+      const eventName = String(event.eventName);
+
+      const detail = ok(
+        handleDemoRequest({
+          path: "/api/private/event-record-detail",
+          params: { ...ANALYTICS_PARAMS, eventId },
+        }),
+      ).data as Record<string, unknown>;
+      expect(detail.event).toEqual(expect.objectContaining({ eventId }));
+      expect(detail.eventData).toEqual(
+        expect.objectContaining({
+          plan: expect.any(String),
+          page: expect.any(Object),
+          flags: expect.any(Object),
+          items: expect.any(Array),
+        }),
+      );
+
+      const typeDetail = asRecord(
+        handleDemoRequest({
+          path: "/api/private/event-type-detail",
+          params: { ...ANALYTICS_PARAMS, eventName, interval: "hour" },
+        }),
+      );
+      expect(typeDetail.eventName).toBe(eventName);
+      expect(typeDetail.summary).toEqual(
+        expect.objectContaining({ eventTypes: 1 }),
+      );
+      expect(typeDetail.breakdowns).toEqual(
+        expect.objectContaining({
+          pages: expect.any(Array),
+          countries: expect.any(Array),
+          devices: expect.any(Array),
+          browsers: expect.any(Array),
+        }),
+      );
+      expect(typeDetail.cards).toEqual(
+        expect.objectContaining({
+          page: expect.any(Object),
+          source: expect.any(Object),
+          client: expect.any(Object),
+          geo: expect.any(Object),
+        }),
+      );
+
+      const context = asRecord(
+        handleDemoRequest({
+          path: "/api/private/event-type-context",
+          params: { ...ANALYTICS_PARAMS, eventName, cards: "path" },
+        }),
+      );
+      expect(context.eventName).toBe(eventName);
+      expect(context.cards).toEqual(
+        expect.objectContaining({
+          page: expect.objectContaining({ path: expect.any(Array) }),
+          source: expect.any(Object),
+          client: expect.any(Object),
+          geo: expect.any(Object),
+        }),
+      );
+      const fieldValues = dataRows(
+        handleDemoRequest({
+          path: "/api/private/event-type-field-values",
+          params: {
+            ...ANALYTICS_PARAMS,
+            eventName,
+            fieldPath: "/plan",
+            fieldValueType: "string",
+            limit: 5,
+          },
+        }),
+      );
+      expect(fieldValues.length).toBeGreaterThan(0);
+      expect(fieldValues[0]).toEqual(
+        expect.objectContaining({
+          value: expect.any(String),
+          occurrences: expect.any(Number),
+        }),
+      );
+
+      const fields = asRecord(
+        handleDemoRequest({
+          path: "/api/private/event-type-fields",
+          params: { ...ANALYTICS_PARAMS, eventName },
+        }),
+      );
+      expect(fields).toMatchObject({ ok: true, eventName });
+      expect((fields.data as Record<string, unknown>).items).toEqual(
+        expect.any(Array),
+      );
+
+      const apiV1Fields = asRecord(
+        handleDemoRequest({
+          path: `/api/v1/sites/${SITE_ID}/event-fields`,
+          params: { ...ANALYTICS_PARAMS, eventName },
+        }),
+      );
+      expect(apiV1Fields).toMatchObject({ ok: true, eventName });
+
+      const apiV1FieldValues = asRecord(
+        handleDemoRequest({
+          path: `/api/v1/sites/${SITE_ID}/event-fields/values`,
+          params: {
+            ...ANALYTICS_PARAMS,
+            eventName,
+            fieldPath: "/plan",
+            fieldValueType: "string",
+            search: "pro",
+          },
+        }),
+      );
+      expect(apiV1FieldValues.data).toEqual(
+        expect.objectContaining({ items: expect.any(Array) }),
+      );
+    });
+
+    it("supports event payload filters for scalar and array values", () => {
+      const planMiss = dataRows(
+        handleDemoRequest({
+          path: "/api/private/events-records",
+          params: {
+            ...ANALYTICS_PARAMS,
+            "filter[event.payload][/plan]": "not-a-demo-plan",
+          },
+        }),
+      );
+      expect(planMiss).toHaveLength(0);
+
+      const planNeRows = dataRows(
+        handleDemoRequest({
+          path: "/api/private/events-records",
+          params: {
+            ...ANALYTICS_PARAMS,
+            pageSize: 3,
+            "filter[event.payload][/plan]": "neq:not-a-demo-plan",
+          },
+        }),
+      );
+      expect(planNeRows.length).toBeGreaterThan(0);
+
+      const nullArrayRows = dataRows(
+        handleDemoRequest({
+          path: "/api/private/events-records",
+          params: {
+            ...ANALYTICS_PARAMS,
+            pageSize: 3,
+            "filter[event.payload][/items/*]": "isNull",
+          },
+        }),
+      );
+      expect(nullArrayRows.length).toBeGreaterThan(0);
+
+      const numberMiss = dataRows(
+        handleDemoRequest({
+          path: "/api/private/events-records",
+          params: {
+            ...ANALYTICS_PARAMS,
+            "filter[event.payload][/value]": "eq:json:999999",
+          },
+        }),
+      );
+      expect(numberMiss).toHaveLength(0);
+    });
+
+    it("groups less common event names into an Other trend series", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/events-trend",
+          params: {
+            ...ANALYTICS_PARAMS,
+            interval: "hour",
+            limit: 1,
+          },
+        }),
+      );
+
+      expect(res.ok).toBe(true);
+      expect(res.data).toMatchObject({
+        interval: "hour",
+        series: expect.arrayContaining([
+          expect.objectContaining({ key: "other", isOther: true }),
+        ]),
+        data: expect.any(Array),
+      });
+    });
+
+    it("returns empty event field values when required params are absent", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/event-type-field-values",
+          params: ANALYTICS_PARAMS,
+        }),
+      );
+
+      expect(res).toMatchObject({
+        ok: false,
+        error: { message: "fieldPath is required" },
+      });
+    });
+
+    it.each([
+      "page.path",
+      "page.title",
+      "page.hostname",
+      "page.query",
+      "page.hash",
+      "session.entryPath",
+      "session.exitPath",
+      "referrer.domain",
+      "referrer.url",
+      "client.browser",
+      "client.browserVersion",
+      "client.browserEngine",
+      "client.os",
+      "client.osVersion",
+      "client.deviceType",
+      "client.language",
+      "client.screenSize",
+      "geo.country",
+      "geo.region",
+      "geo.city",
+      "geo.continent",
+      "geo.timeZone",
+      "geo.organization",
+      "event.name",
+      "utm.source",
+      "utm.medium",
+      "utm.campaign",
+      "utm.term",
+      "utm.content",
+    ])("returns canonical filter values for %s", (filterKey) => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/private/filter-values",
+          params: { ...ANALYTICS_PARAMS, filterKey, limit: 8 },
+        }),
+      );
+
+      expect(res.ok).toBe(true);
+      expect(asRecord(res).field).toBe(filterKey);
+      expect((res.data as Record<string, unknown>).items).toEqual(
+        expect.any(Array),
+      );
+      const values = (
+        (res.data as Record<string, unknown>).items as Array<{ value: string }>
+      ).map((item) => item.value);
+      expect(new Set(values).size).toBe(values.length);
+    });
+
+    it("excludes the current canonical condition before finding filter values", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/filter-values",
+          params: {
+            ...ANALYTICS_PARAMS,
+            filterKey: "page.path",
+            "filter[page.path]": "/not-present-in-demo",
+          },
+        }),
+      );
+      expect(res).toMatchObject({ ok: true, field: "page.path" });
+      expect(res.data).toEqual(
+        expect.objectContaining({ items: expect.any(Array) }),
+      );
+    });
+
+    it("removes nested NOT and OR branches for the active canonical field", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/filter-values",
+          params: {
+            ...ANALYTICS_PARAMS,
+            filterKey: "page.path",
+            "filter[page.path][not]": "/private",
+            "filter[page.title][not]": "Internal",
+            "filter[page.path][or:0.0]": "/",
+            "filter[page.title][or:0.1]": "Home",
+          },
+        }),
+      );
+      expect(res).toMatchObject({ ok: true, field: "page.path" });
+    });
+
+    it("returns payload fields across event types when eventName is absent", () => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/event-type-fields",
+          params: ANALYTICS_PARAMS,
+        }),
+      );
+      expect(res).toMatchObject({ ok: true, eventName: "" });
+      expect((res.data as Record<string, unknown>).items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: "/plan", valueType: "string" }),
+          expect.objectContaining({ path: "/value", valueType: "number" }),
+        ]),
+      );
+    });
+
+    it("limits public filter values to public canonical fields", () => {
+      const denied = asRecord(
+        handleDemoRequest({
+          path: "/api/public/share/some-token/filter-values",
+          params: { ...ANALYTICS_PARAMS, filterKey: "page.query" },
+        }),
+      );
+      expect(denied).toMatchObject({
+        ok: false,
+        error: { message: "Invalid filter field" },
+      });
+    });
+
+    it("returns hierarchical geo point counts with and without region filters", () => {
+      const countryRes = asRecord(
+        handleDemoRequest({
+          path: "/api/private/overview-geo-points",
+          params: {
+            ...ANALYTICS_PARAMS,
+            geo: "US",
+            applyGeoFilter: "true",
+            limit: 50,
+          },
+        }),
+      );
+      expect(countryRes.ok).toBe(true);
+      expect(countryRes.data).toEqual(expect.any(Array));
+      expect(countryRes.countryCounts).toEqual(expect.any(Array));
+      expect(countryRes.regionCounts).toEqual(expect.any(Array));
+
+      const region = (countryRes.regionCounts as Array<{ value: string }>)[0];
+      if (region) {
+        const regionRes = asRecord(
+          handleDemoRequest({
+            path: "/api/private/overview-geo-points",
+            params: {
+              ...ANALYTICS_PARAMS,
+              geo: region.value,
+              applyGeoFilter: 1,
+              limit: 50,
+            },
+          }),
+        );
+        expect(regionRes.cityCounts).toEqual(expect.any(Array));
+      }
+    });
+
+    it.each([
+      "browser",
+      "operatingSystem",
+      "osVersion",
+      "deviceType",
+      "language",
+      "screenSize",
+    ])("routes client dimension trend for %s", (dimension) => {
+      const res = asRecord(
+        handleDemoRequest({
+          path: "/api/private/client-dimension-trend",
+          params: {
+            ...ANALYTICS_PARAMS,
+            dimension,
+            interval: "hour",
+            limit: 2,
+          },
+        }),
+      );
+
+      expect(res.ok).toBe(true);
+      expect(res.series).toEqual(expect.any(Array));
+      expect(res.data).toEqual(expect.any(Array));
+    });
+
+    it.each(["source", "medium", "campaign", "term", "content"])(
+      "routes UTM trend for %s",
+      (dimension) => {
+        const res = asRecord(
+          handleDemoRequest({
+            path: "/api/private/utm-dimension-trend",
+            params: {
+              ...ANALYTICS_PARAMS,
+              dimension,
+              interval: "hour",
+              limit: 2,
+            },
+          }),
+        );
+
+        expect(res.ok).toBe(true);
+        expect(res.series).toEqual(expect.any(Array));
+        expect(res.data).toEqual(expect.any(Array));
+      },
+    );
+
+    it("returns browser and client cross breakdowns with other buckets", () => {
+      const browserCross = asRecord(
+        handleDemoRequest({
+          path: "/api/private/browser-cross-breakdown",
+          params: {
+            ...ANALYTICS_PARAMS,
+            browserLimit: 1,
+            osLimit: 1,
+            deviceTypeLimit: 1,
+          },
+        }),
+      );
+      expect(browserCross.ok).toBe(true);
+      expect(browserCross.operatingSystem).toEqual(
+        expect.objectContaining({
+          columns: expect.any(Array),
+          rows: expect.any(Array),
+        }),
+      );
+
+      const sameDimension = asRecord(
+        handleDemoRequest({
+          path: "/api/private/client-cross-breakdown",
+          params: {
+            ...ANALYTICS_PARAMS,
+            primaryDimension: "client.browser",
+            secondaryDimension: "client.browser",
+          },
+        }),
+      );
+      expect(sameDimension).toMatchObject({
+        ok: false,
+        error: { message: "Primary and secondary dimensions must differ" },
+      });
+
+      const clientCross = asRecord(
+        handleDemoRequest({
+          path: "/api/private/client-cross-breakdown",
+          params: {
+            ...ANALYTICS_PARAMS,
+            primaryDimension: "client.browser",
+            secondaryDimension: "client.language",
+            primaryLimit: 1,
+            secondaryLimit: 1,
+          },
+        }),
+      );
+      expect(clientCross).toMatchObject({
+        ok: true,
+        data: {
+          columns: expect.any(Array),
+          rows: expect.any(Array),
+        },
+      });
+    });
+
+    it("rejects inverted-window trend and radar routes", () => {
+      const invertedParams = {
+        siteId: SITE_ID,
+        from: FIXED_TO,
+        to: FIXED_FROM,
+        interval: "hour",
+      };
+
+      const clientTrend = asRecord(
+        handleDemoRequest({
+          path: "/api/private/client-dimension-trend",
+          params: { ...invertedParams, dimension: "browser" },
+        }),
+      );
+      expect(clientTrend).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
+
+      const utmTrend = asRecord(
+        handleDemoRequest({
+          path: "/api/private/utm-dimension-trend",
+          params: { ...invertedParams, dimension: "source" },
+        }),
+      );
+      expect(utmTrend).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
+
+      const browserRadar = asRecord(
+        handleDemoRequest({
+          path: "/api/private/browser-radar",
+          params: invertedParams,
+        }),
+      );
+      expect(browserRadar).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
+
+      const referrerRadar = asRecord(
+        handleDemoRequest({
+          path: "/api/private/referrer-radar",
+          params: invertedParams,
+        }),
+      );
+      expect(referrerRadar).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
+
+      const browserCross = asRecord(
+        handleDemoRequest({
+          path: "/api/private/browser-cross-breakdown",
+          params: invertedParams,
+        }),
+      );
+      expect(browserCross).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
+
+      const clientCross = asRecord(
+        handleDemoRequest({
+          path: "/api/private/client-cross-breakdown",
+          params: {
+            ...invertedParams,
+            primaryDimension: "client.browser",
+            secondaryDimension: "client.language",
+          },
+        }),
+      );
+      expect(clientCross).toMatchObject({
+        ok: false,
+        error: { message: "Invalid time window" },
+      });
+    });
+
+    it("limits browser versions and includes nested version rows", () => {
+      const rows = dataRows(
+        handleDemoRequest({
+          path: "/api/private/browser-version-breakdown",
+          params: {
+            ...ANALYTICS_PARAMS,
+            browserLimit: 1,
+            versionLimit: 1,
+          },
+        }),
+      );
+
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0].versions).toEqual(expect.any(Array));
+    });
+
+    it("paginates pages, sessions, visitors, and event records", () => {
+      const pages = asRecord(
+        handleDemoRequest({
+          path: "/api/private/pages-dashboard",
+          params: { ...ANALYTICS_PARAMS, limit: 2 },
+        }),
+      );
+      expect(pages.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: expect.objectContaining({ limit: 2, returned: 2 }),
+      });
+
+      const visitors = asRecord(
+        handleDemoRequest({
+          path: "/api/private/visitors",
+          params: {
+            ...ANALYTICS_PARAMS,
+            limit: 2,
+            sortBy: "views",
+            sortDir: "asc",
+            search: "/",
+          },
+        }),
+      );
+      expect(visitors.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: { limit: 2, nextCursor: expect.any(String) },
+      });
+
+      const sessions = asRecord(
+        handleDemoRequest({
+          path: "/api/private/sessions",
+          params: {
+            ...ANALYTICS_PARAMS,
+            limit: 2,
+            sortBy: "durationMs",
+            sortDir: "asc",
+            q: "/",
+          },
+        }),
+      );
+      expect(sessions.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: { limit: 2, nextCursor: expect.any(String) },
+      });
+
+      const events = asRecord(
+        handleDemoRequest({
+          path: "/api/private/events-records",
+          params: {
+            ...ANALYTICS_PARAMS,
+            limit: 2,
+            sortBy: "eventName",
+            sortDir: "asc",
+            search: "/",
+          },
+        }),
+      );
+      expect(events.data).toMatchObject({
+        items: expect.any(Array),
+        pagination: { limit: 2 },
+      });
+    });
+
+    it("builds visitor and session details from IDs returned by list routes", () => {
+      const visitor = dataRows(
+        handleDemoRequest({
+          path: "/api/private/visitors",
+          params: { ...ANALYTICS_PARAMS, limit: 1 },
+        }),
+      )[0];
+      expect(visitor).toBeTruthy();
+
+      const visitorDetail = ok(
+        handleDemoRequest({
+          path: "/api/private/visitor-detail",
+          params: {
+            ...ANALYTICS_PARAMS,
+            visitorId: String(visitor.visitorId),
+          },
+        }),
+      ).data as Record<string, unknown>;
+      expect(visitorDetail).toEqual(
+        expect.objectContaining({
+          visitor: expect.objectContaining({
+            visitorId: String(visitor.visitorId),
+          }),
+          metrics: expect.any(Object),
+          sessions: expect.any(Array),
+          events: expect.any(Array),
+          activity: expect.any(Array),
+          performance: expect.any(Object),
+        }),
+      );
+
+      const session = dataRows(
+        handleDemoRequest({
+          path: "/api/private/sessions",
+          params: { ...ANALYTICS_PARAMS, limit: 1 },
+        }),
+      )[0];
+      expect(session).toBeTruthy();
+
+      const sessionDetail = ok(
+        handleDemoRequest({
+          path: "/api/private/session-detail",
+          params: {
+            ...ANALYTICS_PARAMS,
+            sessionId: String(session.sessionId),
+          },
+        }),
+      ).data as Record<string, unknown>;
+      expect(sessionDetail).toEqual(
+        expect.objectContaining({
+          session: expect.objectContaining({
+            sessionId: String(session.sessionId),
+          }),
+          locationPoints: expect.any(Array),
+          events: expect.any(Array),
+          visitedPages: expect.any(Array),
+          eventDistribution: expect.any(Array),
+          performance: expect.any(Object),
+        }),
+      );
+    });
+
+    it("rejects missing journey IDs", () => {
+      expect(
+        handleDemoRequest({
+          path: "/api/private/visitor-detail",
+          params: ANALYTICS_PARAMS,
+        }),
+      ).toMatchObject({ ok: false, error: { message: "Missing visitorId" } });
+      expect(
+        handleDemoRequest({
+          path: "/api/private/session-detail",
+          params: ANALYTICS_PARAMS,
+        }),
+      ).toMatchObject({ ok: false, error: { message: "Missing sessionId" } });
+    });
+
+    it("normalizes retention granularity and returns monthly cohorts", () => {
+      const invalid = asRecord(
+        handleDemoRequest({
+          path: "/api/private/retention",
+          params: { ...ANALYTICS_PARAMS, granularity: "quarter" },
+        }),
+      );
+      expect(invalid.granularity).toBe("week");
+
+      const monthly = asRecord(
+        handleDemoRequest({
+          path: "/api/private/retention",
+          params: { ...ANALYTICS_PARAMS, granularity: "month" },
+        }),
+      );
+      expect(monthly.granularity).toBe("month");
+      expect(monthly.cohorts).toEqual(expect.any(Array));
+    });
+  });
+
+  describe("public routes", () => {
+    const now = Date.now();
+    const params = {
+      siteId: SITE_ID,
+      from: now - 3_600_000,
+      to: now,
+    };
+
+    it("dispatches overview to the same generator", () => {
+      const res = handleDemoRequest({
+        path: "/api/public/share/some-token/overview",
+        params,
+      });
+      expect(res).toBeDefined();
+    });
+
+    it("returns public site metadata and not-found for missing public slugs", () => {
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/public/share/demo-site-001/site",
+            params,
+          }),
+        ),
+      ).toMatchObject({
+        ok: true,
+        data: {
+          id: expect.any(String),
+          slug: "demo-site-001",
+          name: expect.any(String),
+          domain: expect.any(String),
+        },
+      });
+
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/public/share/no-such-demo-public-site-999/site",
+            params,
+          }),
+        ),
+      ).toMatchObject({
+        ok: false,
+        error: { code: "not_found", message: "Not Found" },
+      });
+
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/public/share/no-such-demo-public-site-999/unknown",
+            params,
+          }),
+        ),
+      ).toMatchObject({
+        ok: false,
+        error: { code: "not_found", message: "Not Found" },
+      });
+    });
+
+    it("dispatches trend to the same generator", () => {
+      const res = handleDemoRequest({
+        path: "/api/public/share/some-token/trend",
+        params,
+      });
+      expect(res).toBeDefined();
+    });
+
+    it("dispatches pages to the same generator", () => {
+      const res = handleDemoRequest({
+        path: "/api/public/share/some-token/pages",
+        params,
+      });
+      expect(res).toBeDefined();
+    });
+
+    it("dispatches referrers to the same generator", () => {
+      const res = handleDemoRequest({
+        path: "/api/public/share/some-token/referrers",
+        params,
+      });
+      expect(res).toBeDefined();
+    });
+
+    it("returns fallback for unknown public sub-paths", () => {
+      const res = ok(
+        handleDemoRequest({
+          path: "/api/public/share/some-token/unknown",
+          params,
+        }),
+      );
+      expect(res.ok).toBe(false);
+      expect(res).toMatchObject({
+        error: { code: "not_found", message: "Not Found" },
+      });
+    });
+
+    it.each([
+      "performance",
+      "countries",
+      "filter-values",
+      "overview-geo-points",
+      "overview-client-browser",
+      "overview-client-os-version",
+      "overview-client-device-type",
+      "overview-client-language",
+      "overview-client-screen-size",
+      "overview-geo-country",
+      "overview-geo-region",
+      "overview-geo-city",
+      "overview-geo-continent",
+      "overview-geo-timezone",
+      "overview-geo-organization",
+      "browser-trend",
+      "browser-engine-trend",
+      "browser-version-breakdown",
+      "browser-cross-breakdown",
+      "browser-radar",
+      "referrer-radar",
+      "referrer-dimension-trend",
+      "referrer-channel-dimension-trend",
+      "client-dimension-trend",
+      "client-cross-breakdown",
+    ])("dispatches public %s routes", (subPath) => {
+      const res = handleDemoRequest({
+        path: `/api/public/share/some-token/${subPath}`,
+        params: {
+          ...params,
+          dimension: "browser",
+          filterKey: "client.browser",
+          primaryDimension: "client.browser",
+          secondaryDimension: "client.language",
+        },
+      });
+
+      expect(res).toBeDefined();
+      expect(ok(res).ok).toBe(true);
+    });
+
+    it("falls back for unsupported public client and geo tabs", () => {
+      expect(
+        ok(
+          handleDemoRequest({
+            path: "/api/public/share/some-token/overview-geo-unknown",
+            params,
+          }),
+        ),
+      ).toMatchObject({ ok: true });
+    });
+  });
+
+  describe("email preview", () => {
+    it("renders demo notification previews in html, text, and json formats", async () => {
+      await expect(
+        handleDemoNotificationEmailPreview({
+          type: "report",
+          locale: "zh",
+          format: "html",
+        }),
+      ).resolves.toContain("<");
+      await expect(
+        handleDemoNotificationEmailPreview({
+          type: "threshold",
+          locale: "en",
+          format: "text",
+        }),
+      ).resolves.toEqual(expect.any(String));
+      await expect(
+        handleDemoNotificationEmailPreview({
+          type: "health",
+          locale: "en",
+          format: "json",
+        }),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          subject: expect.any(String),
+          html: expect.any(String),
+          text: expect.any(String),
+        }),
+      );
+    });
+  });
+
+  describe("fallback", () => {
+    it("returns a not-found error for unrecognized GET paths", () => {
+      const res = ok(
+        handleDemoRequest({ path: "/api/private/totally-unknown" }),
+      );
+      expect(res.ok).toBe(false);
+      expect(res).toMatchObject({
+        error: { code: "not_found", message: "Not Found" },
+      });
+    });
+  });
+});
+describe("mock — createMockRealtimeSocket", () => {
+  function closeSocket(socket: RealtimeSocketLike) {
+    try {
+      socket.close();
+    } catch {
+      // ignore
+    }
+  }
+
+  it("returns a socket-like object", () => {
+    const socket = createMockRealtimeSocket({ siteId: SITE_ID });
+    expect(typeof socket.close).toBe("function");
+    expect(socket.readyState).toBeGreaterThanOrEqual(0);
+    closeSocket(socket);
+  });
+
+  it("can be closed twice without error", () => {
+    const socket = createMockRealtimeSocket({ siteId: SITE_ID });
+    socket.close();
+    expect(() => socket.close()).not.toThrow();
+  });
+
+  it("respects custom activeWindowMs", () => {
+    const socket = createMockRealtimeSocket({
+      siteId: SITE_ID,
+      activeWindowMs: 60_000,
+    });
+    expect(socket).toBeDefined();
+    closeSocket(socket);
+  });
+
+  it("opens, emits a snapshot, and closes cleanly on the timer path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_TO);
+    const randomSpy = vi
+      .spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.5)
+      .mockReturnValue(0.5);
+    const socket = createMockRealtimeSocket({ siteId: SITE_ID });
+    const onopen = vi.fn();
+    const onmessage = vi.fn();
+    const onclose = vi.fn();
+    socket.onopen = onopen;
+    socket.onmessage = onmessage;
+    socket.onclose = onclose;
+
+    await vi.advanceTimersByTimeAsync(120);
+
+    expect(randomSpy).toHaveBeenCalled();
+    expect(socket.readyState).toBe(1);
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(onmessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.stringContaining('"type":"snapshot"'),
+      }),
+    );
+
+    socket.close(4001, "done");
+    expect(socket.readyState).toBe(3);
+    expect(onclose).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 4001,
+        reason: "done",
+        wasClean: false,
+      }),
+    );
+  });
+
+  it("emits an error when the mock handshake fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_TO);
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.1)
+      .mockReturnValue(0.5);
+    const socket = createMockRealtimeSocket({ siteId: SITE_ID });
+    const onerror = vi.fn();
+    const onopen = vi.fn();
+    socket.onerror = onerror;
+    socket.onopen = onopen;
+
+    await vi.advanceTimersByTimeAsync(120);
+
+    expect(onerror).toHaveBeenCalledTimes(1);
+    expect(onopen).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(0);
+    closeSocket(socket);
+  });
+
+  it("does not open when closed before the handshake timer completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_TO);
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const socket = createMockRealtimeSocket({ siteId: SITE_ID });
+    const onopen = vi.fn();
+    const onclose = vi.fn();
+    socket.onopen = onopen;
+    socket.onclose = onclose;
+
+    socket.close();
+    await vi.advanceTimersByTimeAsync(780);
+
+    expect(socket.readyState).toBe(3);
+    expect(onopen).not.toHaveBeenCalled();
+    expect(onclose).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 1000,
+        reason: "mock closed",
+        wasClean: true,
+      }),
+    );
+  });
+
+  it("emits realtime events after the initial snapshot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_TO);
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.5)
+      .mockReturnValue(1);
+    const socket = createMockRealtimeSocket({ siteId: SITE_ID });
+    const onmessage = vi.fn();
+    socket.onmessage = onmessage;
+
+    await vi.advanceTimersByTimeAsync(120);
+    await vi.advanceTimersByTimeAsync(41_000);
+
+    const messages = onmessage.mock.calls.map(([event]) =>
+      JSON.parse((event as MessageEvent).data as string),
+    ) as Array<{ type: string; data: Record<string, unknown> }>;
+    const eventMessage = messages.find((message) => message.type === "event");
+    expect(eventMessage?.data).toMatchObject({
+      eventType: expect.any(String),
+      visitorId: expect.any(String),
+      sessionId: expect.any(String),
+      pathname: expect.any(String),
+      hash: "",
+    });
+    closeSocket(socket);
+  });
+
+  it("emits an error on the scheduled disconnect path", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_TO);
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.5)
+      .mockReturnValue(0);
+    const socket = createMockRealtimeSocket({ siteId: SITE_ID });
+    const onerror = vi.fn();
+    socket.onerror = onerror;
+
+    await vi.advanceTimersByTimeAsync(120);
+    await vi.advanceTimersByTimeAsync(18_000);
+
+    expect(onerror).toHaveBeenCalledTimes(1);
+    expect(socket.readyState).toBe(1);
+    closeSocket(socket);
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { executeApiV1Query } from "@/lib/api-v1/query-application";
+import { executeApiV1Query } from "@/lib/api-v1/analytics/query-application";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
 import {
@@ -10,10 +10,8 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { InvalidCursorError } from "@/lib/pagination";
-
 const context = siteQueryContext("site-1", "api-v1");
 const time = createQueryTime(1_000, 2_000, "UTC", 2_000);
-
 function invocation(
   providerRegistry: AnalyticsProviderRegistry,
   query: Record<string, unknown> = {
@@ -29,7 +27,6 @@ function invocation(
     providerRegistry,
   };
 }
-
 describe("API v1 query application adapter", () => {
   it("fails closed when the external provider is missing", async () => {
     await expect(

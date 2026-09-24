@@ -4,15 +4,13 @@ import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
   createAnalysisDefinitionReader,
-} from "@/lib/api-v1/analysis-definition-reader";
-
+} from "@/lib/api-v1/analytics/analysis-definition-reader";
 function database(row: unknown) {
   const first = vi.fn().mockResolvedValue(row);
   const bind = vi.fn().mockReturnValue({ first });
   const prepare = vi.fn().mockReturnValue({ bind });
   return { db: { prepare }, prepare, bind, first };
 }
-
 describe("API v1 analysis definition reader", () => {
   it("reads only a team-visible definition scoped to the API key's team", async () => {
     const fake = database({

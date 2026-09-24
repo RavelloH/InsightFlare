@@ -1,4 +1,3 @@
-import type { ScopedDatasetSql } from "@/lib/edge/analytics/contract";
 import {
   analyticsFilterRegistry,
   effectiveScopeForPagination,
@@ -34,6 +33,7 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
+import type { ScopedDatasetSql } from "./scoped-dataset";
 import {
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,

@@ -9,7 +9,7 @@ import {
 } from "@/lib/notifications/content";
 import { renderNotificationEmailText } from "@/lib/notifications/email-text";
 import { resolveNotificationLocale } from "@/lib/notifications/locale";
-import type { NotificationMessage } from "@/lib/notifications/message-store";
+import type { NotificationMessage } from "@/lib/notifications/message";
 
 function message(input: Partial<NotificationMessage>): NotificationMessage {
   return {

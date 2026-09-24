@@ -1,15 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
-import { AnalysisDefinitionReadCancelledError } from "@/lib/api-v1/analysis-definition-reader";
+import { AnalysisDefinitionReadCancelledError } from "@/lib/api-v1/analytics/analysis-definition-reader";
 import {
   handlePlannedSiteGoalSummary,
   handlePlannedSiteGoalTimeseries,
-} from "@/lib/api-v1/goal-analysis-handler";
-import { goalAggregateCache } from "@/lib/api-v1/goal-analysis-handler";
+} from "@/lib/api-v1/analytics/goal-analysis";
+import { goalAggregateCache } from "@/lib/api-v1/analytics/goal-analysis";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal = (
   overrides: Partial<ApiKeyPrincipal> = {},
 ): ApiKeyPrincipal => ({
@@ -21,7 +20,6 @@ const principal = (
   status: "active",
   ...overrides,
 });
-
 const body = {
   goalId: "goal-1",
   timeRange: {
@@ -31,7 +29,6 @@ const body = {
     timeZone: "UTC",
   },
 };
-
 function request(
   input: unknown,
   method = "POST",
@@ -46,7 +43,6 @@ function request(
       : { body: rawBody ?? JSON.stringify(input) }),
   });
 }
-
 function goalRow(filterDsl = 'event.name eq "purchase"', name = "Purchase") {
   return {
     id: "goal-1",
@@ -58,7 +54,6 @@ function goalRow(filterDsl = 'event.name eq "purchase"', name = "Purchase") {
     updated_at: 2,
   };
 }
-
 function envWithGoal(row: Record<string, unknown> | null) {
   return {
     DB: {
@@ -73,7 +68,6 @@ function envWithGoal(row: Record<string, unknown> | null) {
     },
   } as never;
 }
-
 describe("typed Goal analytics HTTP adapter", () => {
   beforeEach(() => goalAggregateCache.clear());
 

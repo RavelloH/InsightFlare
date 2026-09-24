@@ -1,32 +1,27 @@
-import type { ZonedInterval } from "@/lib/dashboard/time-zone";
-import type { PageRequest, PageResult, PaginationMeta } from "@/lib/pagination";
-
-import type { FilterDocument } from "./filters";
-import type { FunnelProgressionScope, FunnelStepV2 } from "./funnel-config";
+import type { ZonedInterval } from "@/lib/analytics/time-zone";
+import type { FilterDocument } from "@/lib/filter-contract/filters";
 import type {
   FilterScope,
   FilterScopePreference,
-  ScopedDatasetSql,
-  ScopedFilterPlan,
-} from "./scoped-filter";
+} from "@/lib/filter-contract/scope-preference";
+import type { FilterAudience } from "@/lib/filter-contract/types";
+import type { PageRequest, PageResult, PaginationMeta } from "@/lib/pagination";
 
+import type { FunnelProgressionScope, FunnelStepV2 } from "./funnel-config";
+import type { ScopedFilterPlan } from "./scoped-filter";
 /** Branded primitives keep protocol strings and unvalidated numbers out of the domain layer. */
 export type Brand<T, Name extends string> = T & {
   readonly __brand: Name;
 };
-
 export type EpochMs = Brand<number, "EpochMs">;
 export type ReportingTimeZone = Brand<string, "ReportingTimeZone">;
 export type SiteId = Brand<string, "SiteId">;
 export type TeamId = Brand<string, "TeamId">;
-
 export type CalendarGranularity = ZonedInterval;
-
 export interface TimeRange {
   readonly startMs: EpochMs;
   readonly endExclusiveMs: EpochMs;
 }
-
 export interface QueryTime {
   readonly range: TimeRange;
   readonly reportingTimeZone: ReportingTimeZone;
@@ -34,13 +29,55 @@ export interface QueryTime {
   /** API v1 raw-request identity used to keep preset cursors stable. */
   readonly paginationBinding?: string;
 }
-
+/**
+ * Unbranded query window used at HTTP and provider boundaries before it is
+ * normalized into the canonical QueryTime contract.
+ */
+export interface QueryWindow {
+  /** Inclusive epoch-millisecond query boundary. */
+  startMs: number;
+  /** Exclusive epoch-millisecond query boundary. */
+  endExclusiveMs: number;
+  nowMs: number;
+  timeZone: string;
+  /** Optional API v1 request binding; private/public use parsed semantics. */
+  paginationBinding?: string;
+}
+export type Interval = "minute" | "hour" | "day" | "week" | "month";
+export type VisitorListSortKey =
+  "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
+export type SessionListSortKey = "startedAt" | "durationMs" | "views";
+export type EventRecordSortKey = "occurredAt" | "eventName" | "pathname";
+export type ClientDimensionKey =
+  | "browser"
+  | "operatingSystem"
+  | "osVersion"
+  | "deviceType"
+  | "language"
+  | "screenSize";
+export type UtmDimensionKey =
+  "source" | "medium" | "campaign" | "term" | "content";
+export interface ListSort<Key extends string> {
+  readonly key: Key;
+  readonly direction: SortDirection;
+}
+export const DEFAULT_VISITOR_LIST_SORT: ListSort<VisitorListSortKey> = {
+  key: "lastSeenAt",
+  direction: "desc",
+};
+export const DEFAULT_SESSION_LIST_SORT: ListSort<SessionListSortKey> = {
+  key: "startedAt",
+  direction: "desc",
+};
+export const DEFAULT_EVENT_RECORD_SORT: ListSort<EventRecordSortKey> = {
+  key: "occurredAt",
+  direction: "desc",
+};
 export interface CalendarBucket {
   readonly index: number;
   readonly startMs: EpochMs;
   readonly endExclusiveMs: EpochMs;
 }
-
 export interface CalendarBucketPlan {
   readonly granularity: CalendarGranularity;
   readonly reportingTimeZone: ReportingTimeZone;
@@ -48,9 +85,7 @@ export interface CalendarBucketPlan {
   readonly hourAligned: boolean;
   readonly truncated: boolean;
 }
-
-export type QueryAudience = "private-dashboard" | "public-share" | "api-v1";
-
+export type QueryAudience = FilterAudience;
 export type QuerySubject =
   | { readonly kind: "site"; readonly siteId: SiteId; readonly teamId?: TeamId }
   | {
@@ -58,7 +93,6 @@ export type QuerySubject =
       readonly teamId: TeamId;
       readonly authorizedSiteIds: readonly SiteId[];
     };
-
 export type QueryOperation =
   | "overview"
   | "trend"
@@ -100,9 +134,7 @@ export type QueryOperation =
   | "goal-timeseries"
   | "team-dashboard"
   | "explore";
-
 export type AnalyticsDimension = string;
-
 export type DetailCapability =
   | "page.query"
   | "page.hash"
@@ -114,7 +146,6 @@ export type DetailCapability =
   | "event.fields"
   | "visitor.trajectory"
   | "session.trajectory";
-
 export interface QueryLimits {
   readonly maxRangeMs?: number;
   readonly maxBuckets?: number;
@@ -122,7 +153,6 @@ export interface QueryLimits {
   readonly maxFilterClauses?: number;
   readonly maxCursorBytes?: number;
 }
-
 export interface QueryPolicy {
   readonly revision: string;
   readonly audience: QueryAudience;
@@ -134,12 +164,10 @@ export interface QueryPolicy {
   /** Whether this operation exposes a cursor-bounded collection. */
   readonly cursorPagination: boolean;
 }
-
 export interface QueryContext {
   readonly subject: QuerySubject;
   readonly policy: QueryPolicy;
 }
-
 /** Minimum shape required by the application service for every query. */
 export interface QueryInput {
   readonly context: QueryContext;
@@ -148,19 +176,13 @@ export interface QueryInput {
   readonly scopePreference?: FilterScopePreference;
   /** Internal compiled plan attached before a provider is invoked. */
   readonly scopePlan?: ScopedFilterPlan;
-  /** Internal provider relation bundle for a resolved historical dataset. */
-  readonly scopedDataset?: ScopedDatasetSql;
 }
-
 export type SortDirection = "asc" | "desc";
-
 export interface Sort<Key extends string = string> {
   readonly key: Key;
   readonly direction: SortDirection;
 }
-
 export type QuerySource = "raw" | "rollup" | "mixed" | "mock";
-
 export interface QueryResultMeta {
   readonly time: QueryTime;
   readonly source: QuerySource;
@@ -170,13 +192,11 @@ export interface QueryResultMeta {
     readonly resolved: FilterScope;
   };
 }
-
 export interface InputIssue {
   readonly path: string;
   readonly code: string;
   readonly message?: string;
 }
-
 export type AnalyticsDomainError =
   | { readonly kind: "request-cancelled" }
   | { readonly kind: "deadline-exceeded" }
@@ -200,19 +220,14 @@ export type AnalyticsDomainError =
   | { readonly kind: "dimension-not-supported"; readonly dimension: string }
   | { readonly kind: "data-unavailable"; readonly retryable: boolean }
   | { readonly kind: "internal"; readonly operation: QueryOperation };
-
 export type AnalyticsResult<T> =
   | { readonly ok: true; readonly data: T; readonly meta: QueryResultMeta }
   | { readonly ok: false; readonly error: AnalyticsDomainError };
-
 export type CanonicalObject = Readonly<Record<string, unknown>>;
-
 export interface BaseQuery extends QueryInput {
   readonly time: QueryTime;
 }
-
 export type { PageRequest, PageResult, PaginationMeta } from "@/lib/pagination";
-
 export const COMPARISON_METRIC_KEYS = [
   "views",
   "sessions",
@@ -225,15 +240,12 @@ export const COMPARISON_METRIC_KEYS = [
   "viewsPerSession",
   "events",
 ] as const;
-
 export type ComparisonMetricKey = (typeof COMPARISON_METRIC_KEYS)[number];
-
 export interface ComparisonDatasetQuery {
   readonly time: QueryTime;
   readonly filters?: FilterDocument;
   readonly scopePreference?: FilterScopePreference;
 }
-
 /**
  * The table comparison contract is intentionally smaller than the public
  * comparison-breakdown API.  Overview table endpoints keep their existing
@@ -241,7 +253,6 @@ export interface ComparisonDatasetQuery {
  */
 export type OverviewTableMetric = "views" | "visitors" | "sessions";
 export type OverviewTableSortBy = "current" | "reference" | "change";
-
 export interface OverviewTableComparisonQuery {
   readonly current: ComparisonDatasetQuery;
   readonly reference: ComparisonDatasetQuery;
@@ -249,7 +260,6 @@ export interface OverviewTableComparisonQuery {
   readonly sortBy: OverviewTableSortBy;
   readonly direction: SortDirection;
 }
-
 export interface ComparisonQuery {
   readonly context: QueryContext;
   readonly scopePreference?: FilterScopePreference;
@@ -257,12 +267,10 @@ export interface ComparisonQuery {
   readonly reference: ComparisonDatasetQuery;
   readonly metrics: readonly ComparisonMetricKey[];
 }
-
 export interface ComparisonTrendQuery extends ComparisonQuery {
   readonly interval: CalendarGranularity;
   readonly trendMetrics: readonly ComparisonMetricKey[];
 }
-
 export type ComparisonBreakdownSortBy =
   | "current.views"
   | "current.sessions"
@@ -277,7 +285,6 @@ export type ComparisonBreakdownSortBy =
   | "change.visitors.absolute"
   | "change.visitors.relative"
   | "key";
-
 export interface ComparisonBreakdownQuery extends ComparisonQuery {
   readonly dimension: AnalyticsDimension;
   readonly limit: number;
@@ -286,54 +293,43 @@ export interface ComparisonBreakdownQuery extends ComparisonQuery {
     readonly direction: SortDirection;
   };
 }
-
 export type ComparisonMetricValue = number | null;
-
 export interface ComparisonMetricDelta {
   readonly absolute: ComparisonMetricValue;
   readonly relative: ComparisonMetricValue;
 }
-
 export type ComparisonMetricProjection = Readonly<
   Partial<Record<ComparisonMetricKey, ComparisonMetricValue>>
 >;
-
 export type ComparisonDelta = Readonly<
   Partial<Record<ComparisonMetricKey, ComparisonMetricDelta>>
 >;
-
 export interface ComparisonRawMetrics extends OverviewMetrics {
   readonly events: number;
 }
-
 export interface ComparisonRawTrendPoint extends ComparisonRawMetrics {
   readonly bucket: number;
   readonly timestampMs: EpochMs;
   readonly fromMs: EpochMs;
   readonly toMs: EpochMs;
 }
-
 export interface ComparisonRawTrendResult {
   readonly interval: CalendarGranularity;
   readonly points: readonly ComparisonRawTrendPoint[];
 }
-
 export interface ComparisonRawBreakdownItem extends ComparisonRawMetrics {
   readonly key: string;
   readonly label: string;
 }
-
 export interface ComparisonRawBreakdownResult {
   readonly items: readonly ComparisonRawBreakdownItem[];
   readonly complete: boolean;
 }
-
 export interface ComparisonResult {
   readonly current: ComparisonMetricProjection;
   readonly reference: ComparisonMetricProjection;
   readonly change: ComparisonDelta;
 }
-
 export interface ComparisonTrendPoint {
   readonly index: number;
   readonly current: {
@@ -348,12 +344,10 @@ export interface ComparisonTrendPoint {
   };
   readonly change: ComparisonDelta;
 }
-
 export interface ComparisonTrendResult {
   readonly interval: CalendarGranularity;
   readonly points: readonly ComparisonTrendPoint[];
 }
-
 export interface ComparisonBreakdownItem {
   readonly key: string;
   readonly label: string;
@@ -361,13 +355,11 @@ export interface ComparisonBreakdownItem {
   readonly reference: ComparisonMetricProjection;
   readonly change: ComparisonDelta;
 }
-
 export interface ComparisonBreakdownResult {
   readonly items: readonly ComparisonBreakdownItem[];
   readonly complete: boolean;
   readonly dimension?: AnalyticsDimension;
 }
-
 export interface DimensionQuery extends BaseQuery {
   readonly dimension?: AnalyticsDimension;
   readonly limit?: number;
@@ -376,12 +368,10 @@ export interface DimensionQuery extends BaseQuery {
   readonly search?: string;
   readonly comparison?: OverviewTableComparisonQuery;
 }
-
 export interface PageQuery extends BaseQuery {
   readonly page?: PageRequest;
   readonly sort?: Sort;
 }
-
 export type PagesDashboardMetric =
   | "views"
   | "visitors"
@@ -390,7 +380,6 @@ export type PagesDashboardMetric =
   | "pagesPerSession"
   | "avgDurationMs";
 export type PagesDashboardSortBy = "current" | "reference" | "change";
-
 export interface PagesDashboardComparisonQuery {
   readonly current: ComparisonDatasetQuery;
   readonly reference: ComparisonDatasetQuery;
@@ -398,7 +387,6 @@ export interface PagesDashboardComparisonQuery {
   readonly sortBy: PagesDashboardSortBy;
   readonly direction: SortDirection;
 }
-
 /**
  * The pages dashboard has its own list contract.  Keep the API v1 `PagesQuery`
  * above unchanged while allowing the dashboard list to grow comparison-aware
@@ -412,7 +400,6 @@ export interface PagesDashboardQuery extends BaseQuery {
   readonly comparison?: PagesDashboardComparisonQuery;
   readonly audience?: QueryAudience;
 }
-
 export interface OverviewQuery extends BaseQuery {
   readonly previousTime?: QueryTime;
   readonly detailInterval?: CalendarGranularity;
@@ -425,7 +412,6 @@ export interface BreakdownQuery extends BaseQuery {
   readonly limit: number;
   readonly sort?: Sort<"views" | "sessions" | "visitors" | "key">;
 }
-
 export interface CrossBreakdownQuery extends BaseQuery {
   readonly primaryDimension: AnalyticsDimension;
   readonly secondaryDimension: AnalyticsDimension;
@@ -453,7 +439,6 @@ export type GeoPointsQuery = BaseQuery;
 export type TopPagesQuery = PagesQuery;
 export type ReferrerQuery = ReferrersQuery;
 export type ChannelQuery = ChannelsQuery;
-
 export interface OverviewMetrics {
   readonly views: number;
   readonly sessions: number;
@@ -462,23 +447,19 @@ export interface OverviewMetrics {
   readonly totalDurationMs: number;
   readonly durationViews: number;
 }
-
 export interface OverviewResult {
   readonly current: OverviewMetrics;
   readonly previous?: OverviewMetrics;
   readonly detail?: TrendResult;
 }
-
 export interface TrendPoint extends OverviewMetrics {
   readonly bucket: number;
   readonly timestampMs: EpochMs;
 }
-
 export interface TrendResult {
   readonly interval: CalendarGranularity;
   readonly points: readonly TrendPoint[];
 }
-
 export interface PageItem {
   readonly pathname: string;
   readonly query: string;
@@ -486,27 +467,23 @@ export interface PageItem {
   readonly views: number;
   readonly sessions: number;
 }
-
 export interface ReferrerItem {
   readonly referrer: string;
   readonly views: number;
   readonly sessions: number;
   readonly visitors: number;
 }
-
 export interface ChannelItem {
   readonly channel: string;
   readonly views: number;
   readonly sessions: number;
   readonly visitors: number;
 }
-
 export interface PagesQuery extends BaseQuery {
   readonly limit: number;
   readonly includeDetails: boolean;
   readonly page?: PageRequest;
 }
-
 export interface ReferrersQuery extends BaseQuery {
   readonly limit: number;
   readonly includeFullUrl: boolean;
@@ -517,21 +494,17 @@ export interface ReferrersQuery extends BaseQuery {
   readonly variant?: "list" | "summary";
   readonly topN?: number;
 }
-
 export interface ChannelsQuery extends BaseQuery {
   readonly limit: number;
 }
-
 export interface PagesResult {
   readonly items: readonly PageItem[];
   readonly pagination: PaginationMeta;
 }
-
 export interface ReferrersResult {
   readonly items: readonly ReferrerItem[];
   readonly pagination: PaginationMeta;
 }
-
 export interface ReferrerSummaryResult {
   readonly totalViews: number;
   readonly directViews: number;
@@ -544,13 +517,10 @@ export interface ReferrerSummaryResult {
     readonly views: number;
   }[];
 }
-
 export interface ChannelsResult {
   readonly items: readonly ChannelItem[];
 }
-
 export type FunnelStepConfig = FunnelStepV2;
-
 export interface FunnelDefinition {
   readonly id: string;
   readonly siteId: string;
@@ -563,7 +533,6 @@ export interface FunnelDefinition {
   readonly createdAt: number;
   readonly updatedAt: number;
 }
-
 export interface FunnelAnalysisStep {
   readonly stepId: string;
   readonly index: number;
@@ -577,7 +546,6 @@ export interface FunnelAnalysisStep {
     readonly dropOffRate: number;
   };
 }
-
 export interface FunnelAnalysis {
   readonly progressionScope: FunnelProgressionScope;
   readonly steps: FunnelAnalysisStep[];
@@ -588,7 +556,6 @@ export interface FunnelAnalysis {
     readonly largestDropOffStepIndex: number | null;
   };
 }
-
 export interface RetentionResult {
   readonly granularity: CalendarGranularity;
   readonly cohorts: readonly {
@@ -601,7 +568,49 @@ export interface RetentionResult {
     }[];
   }[];
 }
-
+export type PerformanceMetricKey = "ttfb" | "fcp" | "lcp" | "cls" | "inp";
+export interface PerformanceSummaryRow {
+  readonly avg: number | null;
+  readonly p50: number | null;
+  readonly p75: number | null;
+  readonly p95: number | null;
+  readonly samples: number;
+}
+export interface PerformanceTrendPointRow {
+  readonly bucket: number;
+  readonly timestampMs: number;
+  readonly avg: number | null;
+  readonly p50: number | null;
+  readonly p75: number | null;
+  readonly p95: number | null;
+  readonly samples: number;
+}
+export interface PerformanceRouteMetricRow {
+  readonly avg: number | null;
+  readonly p50: number | null;
+  readonly p75: number | null;
+  readonly p95: number | null;
+  readonly samples: number;
+}
+export interface PerformanceRouteRow {
+  readonly pathname: string;
+  readonly views: number;
+  readonly metrics: Record<PerformanceMetricKey, PerformanceRouteMetricRow>;
+}
+export interface PerformanceCountryRow {
+  readonly country: string;
+  readonly views: number;
+  readonly metrics: Record<PerformanceMetricKey, PerformanceRouteMetricRow>;
+}
+export interface PerformanceDashboardResult {
+  readonly summaries: Record<PerformanceMetricKey, PerformanceSummaryRow>;
+  readonly trends: Record<
+    PerformanceMetricKey,
+    readonly PerformanceTrendPointRow[]
+  >;
+  readonly routes: readonly PerformanceRouteRow[];
+  readonly countries: readonly PerformanceCountryRow[];
+}
 export interface BreakdownItem {
   readonly key: string;
   readonly label: string;
@@ -609,15 +618,12 @@ export interface BreakdownItem {
   readonly sessions: number;
   readonly visitors: number;
 }
-
 export interface BreakdownResult {
   readonly items: readonly BreakdownItem[];
 }
-
 export interface CrossBreakdownRow extends BreakdownItem {
   readonly cells: readonly BreakdownItem[];
 }
-
 export interface CrossBreakdownResult {
   readonly columns: readonly BreakdownItem[];
   readonly rows: readonly CrossBreakdownRow[];
@@ -643,12 +649,10 @@ export type TopPagesResult = PagesResult;
 export type DashboardPage = CanonicalObject;
 export type ReferrerResult = ReferrersResult;
 export type ChannelResult = ChannelsResult;
-
 export type EventQuery = BaseQuery;
 export type JourneyQuery = BaseQuery;
 export type AnalysisQuery = BaseQuery;
 export type TeamQuery = BaseQuery;
-
 export interface EventQueryOperations {
   summary(input: EventQuery): Promise<AnalyticsResult<CanonicalObject>>;
   trend(input: EventQuery): Promise<AnalyticsResult<CanonicalObject>>;
@@ -656,21 +660,17 @@ export interface EventQueryOperations {
     input: PageQuery,
   ): Promise<AnalyticsResult<PageResult<CanonicalObject>>>;
 }
-
 export interface JourneyQueryOperations {
   list(input: PageQuery): Promise<AnalyticsResult<PageResult<CanonicalObject>>>;
   detail(input: JourneyQuery): Promise<AnalyticsResult<CanonicalObject>>;
 }
-
 export interface AnalysisQueryOperations {
   retention(input: AnalysisQuery): Promise<AnalyticsResult<CanonicalObject>>;
   funnel(input: AnalysisQuery): Promise<AnalyticsResult<CanonicalObject>>;
 }
-
 export interface TeamQueryOperations {
   dashboard(input: TeamQuery): Promise<AnalyticsResult<CanonicalObject>>;
 }
-
 export interface TypedQueryOperations {
   readonly overview: {
     get(input: OverviewQuery): Promise<AnalyticsResult<OverviewResult>>;

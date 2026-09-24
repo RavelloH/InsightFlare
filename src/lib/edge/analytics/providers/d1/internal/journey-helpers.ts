@@ -1,4 +1,4 @@
-import { zonedParts } from "@/lib/dashboard/time-zone";
+import { zonedParts } from "@/lib/analytics/time-zone";
 
 import type {
   GeoPointRow,
@@ -21,19 +21,16 @@ import {
   PERFORMANCE_METRIC_KEYS,
   roundPerformanceValue,
 } from "./core";
-
 export function nullableNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
-
 export function nullableCoordinate(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
-
 export function sessionDurationMs(
   startedAt: number,
   endedAt: number,
@@ -52,7 +49,6 @@ export function sessionDurationMs(
   }
   return Math.max(0, Math.round(totalDurationMs || 0));
 }
-
 export function whereClauseWithTarget(
   filterClause: string,
   target?: { column: string; value: string },
@@ -63,11 +59,9 @@ export function whereClauseWithTarget(
     : "";
   return `WHERE ${target.column} = ? ${filterAndClause}`;
 }
-
 export function escapeLikeSearch(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }
-
 export function buildJourneySearchSql(
   search: string | undefined,
   alias = "",
@@ -110,11 +104,9 @@ export function buildJourneySearchSql(
     bindings: Array.from({ length: expressions.length }, () => pattern),
   };
 }
-
 export function directionSql(direction: SortDirection): "ASC" | "DESC" {
   return direction === "asc" ? "ASC" : "DESC";
 }
-
 export function visitorListOrderBy(sort: ListSort<VisitorListSortKey>): string {
   const column: Record<VisitorListSortKey, string> = {
     firstSeenAt: "firstSeenAt",
@@ -126,7 +118,6 @@ export function visitorListOrderBy(sort: ListSort<VisitorListSortKey>): string {
     ? `${column[sort.key]} ${directionSql(sort.direction)}, visitorId ASC`
     : `${column[sort.key]} ${directionSql(sort.direction)}, lastSeenAt DESC, visitorId ASC`;
 }
-
 export function sessionListOrderBy(sort: ListSort<SessionListSortKey>): string {
   const column: Record<SessionListSortKey, string> = {
     startedAt: "startedAt",
@@ -137,7 +128,6 @@ export function sessionListOrderBy(sort: ListSort<SessionListSortKey>): string {
     ? `${column[sort.key]} ${directionSql(sort.direction)}, sessionId ASC`
     : `${column[sort.key]} ${directionSql(sort.direction)}, startedAt DESC, sessionId ASC`;
 }
-
 export function mapVisitorRow(row: Record<string, unknown>): VisitorRow {
   return {
     visitorId: String(row.visitorId ?? ""),
@@ -166,7 +156,6 @@ export function mapVisitorRow(row: Record<string, unknown>): VisitorRow {
       row.screenHeight === null ? null : Number(row.screenHeight ?? 0) || null,
   };
 }
-
 export function mapSessionRow(row: Record<string, unknown>): SessionRow {
   const startedAt = Number(row.startedAt ?? 0);
   const endedAt = Number(row.endedAt ?? startedAt);
@@ -208,7 +197,6 @@ export function mapSessionRow(row: Record<string, unknown>): SessionRow {
     performance: mapVisitPerformanceMetrics(row),
   };
 }
-
 export function mapGeoPointRow(row: Record<string, unknown>): GeoPointRow {
   return {
     latitude: Number(row.latitude ?? 0),
@@ -221,7 +209,6 @@ export function mapGeoPointRow(row: Record<string, unknown>): GeoPointRow {
     pointCount: Math.max(1, Number(row.pointCount ?? 1)),
   };
 }
-
 export function mapJourneyEventRow(
   row: Record<string, unknown>,
 ): JourneyEventRow {
@@ -261,7 +248,6 @@ export function mapJourneyEventRow(
     performance: mapVisitPerformanceMetrics(row),
   };
 }
-
 export function sessionStartEvent(session: SessionRow): JourneyEventRow {
   return {
     id: `session-start:${session.sessionId}`,
@@ -291,7 +277,6 @@ export function sessionStartEvent(session: SessionRow): JourneyEventRow {
     performance: emptyVisitPerformanceMetrics(),
   };
 }
-
 export function sessionLeaveEvent(
   session: SessionRow,
   events: JourneyEventRow[],
@@ -334,7 +319,6 @@ export function sessionLeaveEvent(
     performance: emptyVisitPerformanceMetrics(),
   };
 }
-
 export function summarizeVisitedPages(
   events: JourneyEventRow[],
 ): JourneyPageCountRow[] {
@@ -352,7 +336,6 @@ export function summarizeVisitedPages(
     )
     .slice(0, 50);
 }
-
 export function summarizeEventDistribution(
   events: JourneyEventRow[],
 ): JourneyEventCountRow[] {
@@ -370,7 +353,6 @@ export function summarizeEventDistribution(
     )
     .slice(0, 50);
 }
-
 export function emptyJourneyPerformanceSummary(): JourneyPerformanceSummaryRow {
   return Object.fromEntries(
     PERFORMANCE_METRIC_KEYS.map((metric) => [
@@ -379,7 +361,6 @@ export function emptyJourneyPerformanceSummary(): JourneyPerformanceSummaryRow {
     ]),
   ) as JourneyPerformanceSummaryRow;
 }
-
 export function summarizeJourneyPerformance(
   events: JourneyEventRow[],
 ): JourneyPerformanceSummaryRow {
@@ -416,7 +397,6 @@ export function summarizeJourneyPerformance(
   }
   return summary;
 }
-
 export function reportingDateKey(
   timestampMs: number,
   timeZone: string,
@@ -426,7 +406,6 @@ export function reportingDateKey(
   const day = String(parts.day).padStart(2, "0");
   return `${parts.year}-${month}-${day}`;
 }
-
 export function summarizeActivity(
   events: JourneyEventRow[],
   timeZone: string,
@@ -441,7 +420,6 @@ export function summarizeActivity(
     .map(([date, count]) => ({ date, count }))
     .sort((left, right) => left.date.localeCompare(right.date));
 }
-
 export function percentile(values: number[], percentileValue: number): number {
   const filtered = values
     .filter((value) => Number.isFinite(value) && value >= 0)
@@ -453,7 +431,6 @@ export function percentile(values: number[], percentileValue: number): number {
   );
   return filtered[index] ?? 0;
 }
-
 export function averageGapMs(values: number[]): number {
   const sorted = values
     .filter((value) => Number.isFinite(value) && value > 0)
@@ -465,9 +442,7 @@ export function averageGapMs(values: number[]): number {
   }
   return Math.round(total / (sorted.length - 1));
 }
-
 export type DetailTarget = { type: "visitor" | "session"; value: string };
-
 export function detailTargetColumn(
   target: DetailTarget,
 ): "visitor_id" | "session_id" {

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import { readPublicLoginTurnstileRuntimeConfig } from "@/lib/edge/login-turnstile-runtime";
+import { readPublicLoginTurnstileRuntimeConfig } from "@/lib/edge/auth/login-turnstile-runtime";
 import type { AppEnv } from "@/lib/hono/types";
 import { jsonResponseFor, nf as notFound } from "@/lib/response";
 

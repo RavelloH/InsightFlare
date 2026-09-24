@@ -1,6 +1,6 @@
+import { type FilterDocument } from "@/lib/filter-contract/filters";
 import type { PageResult } from "@/lib/pagination";
 
-import { type FilterDocument } from "./filters";
 import { EMPTY_FILTER_DOCUMENT } from "./helpers";
 import { assertDetailAllowed, assertOperationAllowed } from "./policy";
 import type {

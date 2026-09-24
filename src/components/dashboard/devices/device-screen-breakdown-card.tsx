@@ -1,0 +1,858 @@
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  RiArrowDownSLine,
+  RiComputerLine,
+  RiExternalLinkLine,
+} from "@remixicon/react";
+import { useQuery } from "@tanstack/react-query";
+
+import {
+  DonutChart,
+  type DonutChartDataPoint,
+} from "@/components/dashboard/charts/donut-chart";
+import { ContentSwitch } from "@/components/dashboard/common/content-switch";
+import {
+  TabbedDataTableCard,
+  type TabbedDataTableColumn,
+  type TabbedDataTableLoader,
+} from "@/components/dashboard/common/tabbed-data-table-card";
+import {
+  ComparisonMetricToggle,
+  type ComparisonTableMetric,
+  createComparisonTableColumns,
+} from "@/components/dashboard/comparison/comparison-table";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { fetchClientDimensionTrend } from "@/lib/dashboard/client/data/index";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import {
+  aggregateScreenBuckets,
+  classifyScreenBucket,
+  type ParsedScreenSize,
+  parseScreenSizeLabel,
+  type ScreenBucketKey,
+  type ScreenBucketSummary,
+} from "@/lib/dashboard/device-insights";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import { numberFormat, percentFormat } from "@/lib/dashboard/format";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
+import type {
+  BrowserTrendData,
+  BrowserTrendSeries,
+} from "@/lib/dashboard-api/client/edge";
+import type { FilterDocument } from "@/lib/filter-contract/index";
+import type { Locale } from "@/lib/i18n/config";
+import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
+import { cn } from "@/lib/utils";
+const CHART_COLORS = [
+  "var(--color-chart-1)",
+  "var(--color-chart-2)",
+  "var(--color-chart-3)",
+  "var(--color-chart-4)",
+  "var(--color-chart-5)",
+  "var(--muted-foreground)",
+] as const;
+const COMPARISON_CHART_COLORS = [
+  "var(--color-compare-chart-1)",
+  "var(--color-compare-chart-2)",
+  "var(--color-compare-chart-3)",
+  "var(--color-compare-chart-4)",
+  "var(--color-compare-chart-5)",
+  "var(--muted-foreground)",
+] as const;
+type ScreenSortKey =
+  "visitors" | "views" | "sessions" | "current" | "reference" | "change";
+type ScreenListTab = "screenSize";
+interface ScreenListItem extends BrowserTrendSeries {
+  key: string;
+  displayLabel: string;
+  share: number;
+  parsed: ParsedScreenSize | null;
+  bucket: ScreenBucketKey;
+  reference?: {
+    views: number;
+    sessions: number;
+    visitors: number;
+  };
+  change?: {
+    views: { absolute: number; relative: number | null };
+    sessions: { absolute: number; relative: number | null };
+    visitors: { absolute: number; relative: number | null };
+  };
+}
+const EMPTY_TREND: BrowserTrendData = {
+  ok: true,
+  interval: "day",
+  series: [],
+  data: [],
+};
+function relativeChange(current: number, reference: number): number | null {
+  if (reference === 0) return current === 0 ? 0 : null;
+  return (current - reference) / reference;
+}
+function mergeScreenSeries(
+  current: readonly BrowserTrendSeries[],
+  reference: readonly BrowserTrendSeries[],
+  includeComparison: boolean,
+): BrowserTrendSeries[] {
+  const currentByKey = new Map(
+    current.map((series) => [series.key || series.label, series]),
+  );
+  const referenceByKey = new Map(
+    reference.map((series) => [series.key || series.label, series]),
+  );
+  const keys = [
+    ...current.map((series) => series.key || series.label),
+    ...reference
+      .map((series) => series.key || series.label)
+      .filter((key) => !currentByKey.has(key)),
+  ];
+
+  return keys.map((key) => {
+    const currentSeries = currentByKey.get(key);
+    const referenceSeries = referenceByKey.get(key);
+    return {
+      key,
+      label: currentSeries?.label ?? referenceSeries?.label ?? key,
+      views: currentSeries?.views ?? 0,
+      sessions: currentSeries?.sessions ?? 0,
+      visitors: currentSeries?.visitors ?? 0,
+      ...((currentSeries?.isOther ?? referenceSeries?.isOther)
+        ? { isOther: true }
+        : {}),
+      ...(includeComparison
+        ? {
+            reference: {
+              views: referenceSeries?.views ?? 0,
+              sessions: referenceSeries?.sessions ?? 0,
+              visitors: referenceSeries?.visitors ?? 0,
+            },
+            change: {
+              views: {
+                absolute:
+                  (currentSeries?.views ?? 0) - (referenceSeries?.views ?? 0),
+                relative: relativeChange(
+                  currentSeries?.views ?? 0,
+                  referenceSeries?.views ?? 0,
+                ),
+              },
+              sessions: {
+                absolute:
+                  (currentSeries?.sessions ?? 0) -
+                  (referenceSeries?.sessions ?? 0),
+                relative: relativeChange(
+                  currentSeries?.sessions ?? 0,
+                  referenceSeries?.sessions ?? 0,
+                ),
+              },
+              visitors: {
+                absolute:
+                  (currentSeries?.visitors ?? 0) -
+                  (referenceSeries?.visitors ?? 0),
+                relative: relativeChange(
+                  currentSeries?.visitors ?? 0,
+                  referenceSeries?.visitors ?? 0,
+                ),
+              },
+            },
+          }
+        : {}),
+    } as BrowserTrendSeries & Pick<ScreenListItem, "reference" | "change">;
+  });
+}
+function formatScreenLabel(label: string): string {
+  const parsed = parseScreenSizeLabel(label);
+  if (!parsed) return label;
+  return `${parsed.width} x ${parsed.height}`;
+}
+function displaySeriesLabel(
+  series: BrowserTrendSeries,
+  messages: AppMessages,
+): string {
+  return series.isOther
+    ? messages.devices.otherLabel
+    : formatScreenLabel(series.label);
+}
+function bucketLabel(bucket: ScreenBucketKey, messages: AppMessages): string {
+  return messages.devices.screenBucketLabels[bucket];
+}
+function resolvePreviewUrl(siteDomain: string): string | null {
+  const normalized = String(siteDomain ?? "")
+    .trim()
+    .replace(/\/+$/, "");
+  if (!normalized) return null;
+  if (/^https?:\/\//i.test(normalized)) return normalized;
+  if (
+    normalized.startsWith("localhost") ||
+    normalized.startsWith("127.") ||
+    normalized.endsWith(".local")
+  ) {
+    return `http://${normalized}`;
+  }
+  return `https://${normalized}`;
+}
+function ScreenCategoryPieCard({
+  locale,
+  messages,
+  bucketSummary,
+  comparisonBucketSummary,
+  comparisonLabel,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  bucketSummary: ScreenBucketSummary[];
+  comparisonBucketSummary?: ScreenBucketSummary[];
+  comparisonLabel?: string;
+}) {
+  const donutData = useMemo(() => {
+    const currentByKey = new Map(
+      bucketSummary.map((bucket) => [bucket.key, bucket]),
+    );
+    const comparisonByKey = new Map(
+      (comparisonBucketSummary ?? []).map((bucket) => [bucket.key, bucket]),
+    );
+    const keys = [
+      ...bucketSummary.map((bucket) => bucket.key),
+      ...(comparisonBucketSummary ?? [])
+        .map((bucket) => bucket.key)
+        .filter((key) => !currentByKey.has(key)),
+    ];
+    const current = keys.map<DonutChartDataPoint>((key, index) => {
+      const bucket = currentByKey.get(key);
+      return {
+        key,
+        label: bucketLabel(key, messages),
+        value: bucket?.visitors ?? 0,
+        share: bucket?.share ?? 0,
+        color: CHART_COLORS[index % CHART_COLORS.length],
+      };
+    });
+    const comparison =
+      comparisonBucketSummary === undefined
+        ? undefined
+        : keys.map<DonutChartDataPoint>((key, index) => {
+            const bucket = comparisonByKey.get(key);
+            return {
+              key,
+              label: bucketLabel(key, messages),
+              value: bucket?.visitors ?? 0,
+              share: bucket?.share ?? 0,
+              color:
+                COMPARISON_CHART_COLORS[index % COMPARISON_CHART_COLORS.length],
+            };
+          });
+
+    return { current, comparison };
+  }, [bucketSummary, comparisonBucketSummary, messages]);
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+  const hasComparison = donutData.comparison !== undefined;
+  const chartData = donutData.current;
+
+  const renderLegend = () => (
+    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+      {chartData.map((item, index) => {
+        const comparisonItem = donutData.comparison?.[index];
+        const isDimmed = highlightedKey !== null && highlightedKey !== item.key;
+
+        return (
+          <button
+            key={item.key}
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1.5 text-xs transition-opacity motion-reduce:transition-none",
+              isDimmed && "opacity-40",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+            onPointerEnter={() => setHighlightedKey(item.key)}
+            onPointerLeave={() => setHighlightedKey(null)}
+            onFocus={() => setHighlightedKey(item.key)}
+            onBlur={() => setHighlightedKey(null)}
+          >
+            <span className="inline-flex shrink-0 items-center gap-0.5">
+              <span
+                className="size-2.5 rounded-none"
+                style={{ backgroundColor: item.color }}
+              />
+              {comparisonItem ? (
+                <span
+                  className="size-2.5 rounded-none"
+                  style={{ backgroundColor: comparisonItem.color }}
+                />
+              ) : null}
+            </span>
+            <span className="text-muted-foreground">{item.label}</span>
+            <span className="font-mono tabular-nums text-foreground">
+              {percentFormat(locale, item.share)}
+            </span>
+            {comparisonItem ? (
+              <span className="font-mono tabular-nums text-compare-primary">
+                {percentFormat(locale, comparisonItem.share)}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <Card className="flex h-full flex-col">
+      <CardHeader>
+        <CardTitle className="inline-flex items-center gap-2">
+          <RiComputerLine className="size-4" />
+          {messages.devices.screenBucketTitle}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-1 flex-col items-center justify-center gap-6">
+        <DonutChart
+          data={chartData}
+          comparisonData={donutData.comparison}
+          currentLabel={messages.dashboardHeader.compareCurrentPeriod}
+          comparisonLabel={comparisonLabel}
+          highlightedKey={highlightedKey}
+          locale={locale}
+          valueLabel={messages.common.visitors}
+          className="max-w-[18rem]"
+          onHighlightChange={setHighlightedKey}
+        />
+        {hasComparison ? (
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="size-2 shrink-0 rounded-none"
+                style={{ backgroundColor: "var(--color-chart-1)" }}
+              />
+              {messages.dashboardHeader.compareCurrentPeriod}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="size-2 shrink-0 rounded-none"
+                style={{ backgroundColor: "var(--color-compare-chart-1)" }}
+              />
+              {comparisonLabel}
+            </span>
+          </div>
+        ) : null}
+        {renderLegend()}
+      </CardContent>
+    </Card>
+  );
+}
+function ScreenValueListCard({
+  locale,
+  messages,
+  items,
+  requestKey,
+  comparisonQuery,
+  comparisonLabel,
+  comparisonMetric,
+  onComparisonMetricChange,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  items: ScreenListItem[];
+  requestKey: string;
+  comparisonQuery: DashboardComparisonQuery | null;
+  comparisonLabel: string;
+  comparisonMetric: ComparisonTableMetric;
+  onComparisonMetricChange: (metric: ComparisonTableMetric) => void;
+}) {
+  const comparisonColumns = useMemo(
+    () =>
+      createComparisonTableColumns<ScreenListItem, ScreenListTab>({
+        metric: comparisonMetric,
+        comparisonLabel,
+        locale,
+        messages,
+        getCurrent: (item) => item[comparisonMetric],
+        getReference: (item) => item.reference?.[comparisonMetric],
+        getChange: (item) => item.change?.[comparisonMetric],
+      }),
+    [comparisonLabel, comparisonMetric, locale, messages],
+  );
+  const columns = useMemo<
+    readonly TabbedDataTableColumn<
+      ScreenListItem,
+      ScreenSortKey,
+      ScreenListTab
+    >[]
+  >(
+    () =>
+      comparisonQuery
+        ? comparisonColumns
+        : [
+            {
+              key: "visitors" as const,
+              label: messages.common.visitors,
+              getValue: (item: ScreenListItem) => item.visitors,
+              format: (value: number) => numberFormat(locale, value),
+            },
+            {
+              key: "views" as const,
+              label: messages.common.views,
+              getValue: (item: ScreenListItem) => item.views,
+              format: (value: number) => numberFormat(locale, value),
+            },
+            {
+              key: "sessions" as const,
+              label: messages.common.sessions,
+              getValue: (item: ScreenListItem) => item.sessions,
+              format: (value: number) => numberFormat(locale, value),
+            },
+          ],
+    [
+      comparisonColumns,
+      comparisonQuery,
+      locale,
+      messages.common.sessions,
+      messages.common.views,
+      messages.common.visitors,
+    ],
+  );
+  const tabs = useMemo(
+    () =>
+      [
+        {
+          value: "screenSize" as const,
+          label: messages.common.screenSize,
+          columnLabel: messages.common.screenSize,
+          defaultSort: {
+            key: (comparisonQuery ? "current" : "visitors") as ScreenSortKey,
+            direction: "desc" as const,
+          },
+        },
+      ] as const,
+    [comparisonQuery, messages.common.screenSize],
+  );
+  const rowAdapter = useMemo(
+    () => ({
+      renderLabel: (item: ScreenListItem) => (
+        <span className="font-mono break-words text-foreground">
+          {item.displayLabel}
+        </span>
+      ),
+      getSearchText: (item: ScreenListItem) => item.label,
+      getExportLabel: (item: ScreenListItem) => item.label,
+      getClassName: () => "hover:brightness-95",
+    }),
+    [],
+  );
+  const loader = useCallback<
+    TabbedDataTableLoader<ScreenListTab, ScreenListItem, ScreenSortKey>
+  >(
+    async ({ cursor, limit, search, sort }) =>
+      loadLocalTablePage({
+        rows: items,
+        sort,
+        columns,
+        tab: "screenSize",
+        limit,
+        cursor,
+        search,
+        getText: (item) => item.displayLabel,
+        getSearchText: (item) => item.label,
+        tieBreakers: ["views", "sessions"],
+      }),
+    [columns, items],
+  );
+
+  return (
+    <TabbedDataTableCard<ScreenListTab, ScreenListItem, ScreenSortKey>
+      tabs={tabs}
+      loader={loader}
+      requestKey={requestKey}
+      columns={columns}
+      rowAdapter={rowAdapter}
+      sortActionLabel={(label) =>
+        formatI18nTemplate(messages.common.sortBy, { label })
+      }
+      loadingLabel={messages.common.loading}
+      emptyLabel={messages.common.noData}
+      headerHidden={!comparisonQuery}
+      className="h-full"
+      search={false}
+      headerRight={
+        comparisonQuery ? (
+          <ComparisonMetricToggle
+            metric={comparisonMetric}
+            metrics={["visitors", "views", "sessions"]}
+            messages={messages}
+            onMetricChange={onComparisonMetricChange}
+          />
+        ) : null
+      }
+    />
+  );
+}
+function ScreenPreviewCard({
+  locale,
+  messages,
+  previewUrl,
+  items,
+}: {
+  locale: Locale;
+  messages: AppMessages;
+  previewUrl: string | null;
+  items: ScreenListItem[];
+}) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [frameBounds, setFrameBounds] = useState({ width: 0, height: 0 });
+  const [selectedKey, setSelectedKey] = useState<string>("");
+
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+
+    const update = () => {
+      setFrameBounds({
+        width: node.clientWidth,
+        height: node.clientHeight,
+      });
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (items.length === 0) {
+      setSelectedKey("");
+      return;
+    }
+    if (!items.some((item) => item.key === selectedKey)) {
+      setSelectedKey(items[0].key);
+    }
+  }, [items, selectedKey]);
+
+  const selectedItem = useMemo(
+    () => items.find((item) => item.key === selectedKey) ?? items[0] ?? null,
+    [items, selectedKey],
+  );
+  const selectedViewport = selectedItem?.parsed ?? null;
+  const scale = useMemo(() => {
+    if (!selectedViewport) return 1;
+    if (frameBounds.width <= 0 || frameBounds.height <= 0) return 1;
+    return Math.min(
+      (frameBounds.width - 32) / selectedViewport.width,
+      (frameBounds.height - 32) / selectedViewport.height,
+      1,
+    );
+  }, [frameBounds.height, frameBounds.width, selectedViewport]);
+  const scaledWidth = selectedViewport
+    ? Math.max(1, Math.round(selectedViewport.width * scale))
+    : 0;
+  const scaledHeight = selectedViewport
+    ? Math.max(1, Math.round(selectedViewport.height * scale))
+    : 0;
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <CardTitle className="inline-flex items-center gap-2">
+          <RiComputerLine className="size-4" />
+          {messages.devices.screenPreviewTitle}
+        </CardTitle>
+        <div className="flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild disabled={items.length === 0}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-w-44 justify-between font-normal"
+              >
+                <span className="truncate">
+                  {selectedItem?.displayLabel ??
+                    messages.devices.selectedViewportLabel}
+                </span>
+                <RiArrowDownSLine className="size-4 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup
+                value={selectedItem?.key ?? ""}
+                onValueChange={setSelectedKey}
+              >
+                {items.map((item) => (
+                  <DropdownMenuRadioItem key={item.key} value={item.key}>
+                    {item.displayLabel}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {previewUrl ? (
+            <Button asChild variant="outline" size="sm">
+              <a href={previewUrl} target="_blank" rel="noreferrer">
+                <RiExternalLinkLine className="size-4" />
+                <span>{messages.devices.openSiteLabel}</span>
+              </a>
+            </Button>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-muted-foreground">
+            {messages.devices.selectedViewportLabel}
+          </span>
+          <span className="font-medium text-foreground">
+            {selectedItem?.displayLabel ??
+              messages.devices.previewUnavailableLabel}
+          </span>
+          {selectedItem ? (
+            <span className="font-mono text-xs tabular-nums text-muted-foreground">
+              {numberFormat(locale, selectedItem.visitors)}{" "}
+              {messages.common.visitors}
+              {" · "}
+              {percentFormat(locale, selectedItem.share)}
+            </span>
+          ) : null}
+        </div>
+
+        <div
+          ref={viewportRef}
+          className="relative flex min-h-[26rem] items-center justify-center overflow-hidden px-2 py-4 sm:min-h-[34rem]"
+        >
+          {previewUrl && selectedViewport ? (
+            <div
+              className="relative shrink-0"
+              style={{
+                width: scaledWidth,
+                height: scaledHeight,
+              }}
+            >
+              <div
+                className="absolute left-0 top-0 overflow-hidden border border-border/60 bg-background"
+                style={{
+                  width: selectedViewport.width,
+                  height: selectedViewport.height,
+                  transform: `scale(${scale})`,
+                  transformOrigin: "top left",
+                }}
+              >
+                <iframe
+                  title={`${messages.devices.screenPreviewTitle}-${selectedItem?.displayLabel ?? "preview"}`}
+                  src={previewUrl}
+                  className="block border-0 bg-background"
+                  style={{
+                    width: selectedViewport.width,
+                    height: selectedViewport.height,
+                  }}
+                  loading="lazy"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="max-w-md text-center text-sm text-muted-foreground">
+              {messages.devices.previewUnavailableLabel}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+interface DeviceScreenBreakdownCardProps {
+  locale: Locale;
+  messages: AppMessages;
+  siteId: string;
+  siteDomain: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery?: DashboardComparisonQuery | null;
+  comparisonLabel?: string;
+}
+export const DeviceScreenBreakdownCard = memo(
+  function DeviceScreenBreakdownCard({
+    locale,
+    messages,
+    siteId,
+    siteDomain,
+    window,
+    filters,
+    comparisonQuery = null,
+    comparisonLabel = "",
+  }: DeviceScreenBreakdownCardProps) {
+    const [comparisonMetric, setComparisonMetric] =
+      useState<ComparisonTableMetric>("visitors");
+    const screenTrendQuery = useQuery({
+      queryKey: [
+        "dashboard",
+        "device-screen-breakdown",
+        siteId,
+        window.from,
+        window.to,
+        window.timeZone,
+        window.interval,
+        filters,
+        comparisonQuery?.mode ?? "none",
+        comparisonQuery?.window.from ?? "none",
+        comparisonQuery?.window.to ?? "none",
+        comparisonQuery?.window.timeZone ?? "none",
+        comparisonQuery?.filters ?? null,
+      ],
+      queryFn: async ({ signal }) => {
+        try {
+          const [current, comparison] = await Promise.all([
+            fetchClientDimensionTrend(siteId, window, "screenSize", filters, {
+              limit: 10,
+              signal,
+            }),
+            comparisonQuery
+              ? fetchClientDimensionTrend(
+                  siteId,
+                  comparisonQuery.window,
+                  "screenSize",
+                  comparisonQuery.filters,
+                  { limit: 10, signal },
+                )
+              : Promise.resolve(null),
+          ]);
+          return { current, comparison };
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError")
+            throw error;
+          return { current: EMPTY_TREND, comparison: null };
+        }
+      },
+      enabled: typeof window !== "undefined",
+    });
+    const screenTrendData = screenTrendQuery.data ?? {
+      current: EMPTY_TREND,
+      comparison: null,
+    };
+    const screenTrend = screenTrendData.current;
+    const comparisonTrend = screenTrendData.comparison;
+    const loading = screenTrendQuery.isPending;
+    const totalVisitors = useMemo(
+      () => screenTrend.series.reduce((sum, item) => sum + item.visitors, 0),
+      [screenTrend.series],
+    );
+    const listItems = useMemo<ScreenListItem[]>(
+      () =>
+        mergeScreenSeries(
+          screenTrend.series,
+          comparisonTrend?.series ?? [],
+          Boolean(comparisonQuery),
+        ).map((series) => {
+          const parsed = parseScreenSizeLabel(series.label);
+          return {
+            ...series,
+            key: (series as { key?: string }).key || series.label,
+            displayLabel: displaySeriesLabel(series, messages),
+            share: totalVisitors > 0 ? series.visitors / totalVisitors : 0,
+            parsed,
+            bucket: parsed
+              ? classifyScreenBucket(series.label)
+              : "unclassified",
+          };
+        }),
+      [
+        comparisonQuery,
+        comparisonTrend?.series,
+        messages,
+        screenTrend.series,
+        totalVisitors,
+      ],
+    );
+    const explicitItems = useMemo(
+      () => listItems.filter((item) => item.parsed && !item.isOther),
+      [listItems],
+    );
+    const requestKey = useMemo(
+      () =>
+        `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${locale}:${filterQueryKey(filters)}:${comparisonQuery?.mode ?? "none"}:${comparisonQuery?.window.from ?? "none"}:${comparisonQuery?.window.to ?? "none"}:${comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"}:${comparisonMetric}:${JSON.stringify(explicitItems)}`,
+      [
+        explicitItems,
+        filters,
+        locale,
+        comparisonMetric,
+        comparisonQuery,
+        siteId,
+        window.from,
+        window.interval,
+        window.timeZone,
+        window.to,
+      ],
+    );
+    const bucketSummary = useMemo(() => {
+      const buckets = [...aggregateScreenBuckets(screenTrend.series).buckets];
+      buckets.sort((left, right) => right.visitors - left.visitors);
+      return buckets;
+    }, [screenTrend.series]);
+    const comparisonBucketSummary = useMemo(() => {
+      if (!comparisonQuery) return undefined;
+      const buckets = [
+        ...aggregateScreenBuckets(comparisonTrend?.series ?? []).buckets,
+      ];
+      buckets.sort((left, right) => right.visitors - left.visitors);
+      return buckets;
+    }, [comparisonQuery, comparisonTrend?.series]);
+    const previewUrl = useMemo(
+      () => resolvePreviewUrl(siteDomain),
+      [siteDomain],
+    );
+
+    return (
+      <section className="space-y-4">
+        <div className="px-1">
+          <h2 className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
+            <RiComputerLine className="size-4 shrink-0" />
+            {messages.devices.screenDistributionTitle}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {messages.devices.screenDistributionSubtitle}
+          </p>
+        </div>
+
+        <ContentSwitch
+          loading={loading}
+          hasContent={listItems.length > 0}
+          loadingLabel={messages.common.loading}
+          emptyContent={<p>{messages.common.noData}</p>}
+          minHeightClassName="min-h-[320px]"
+        >
+          <div className="space-y-4">
+            <div className="grid items-stretch gap-4 lg:grid-cols-2">
+              <ScreenCategoryPieCard
+                locale={locale}
+                messages={messages}
+                bucketSummary={bucketSummary}
+                comparisonBucketSummary={comparisonBucketSummary}
+                comparisonLabel={comparisonLabel}
+              />
+              <ScreenValueListCard
+                locale={locale}
+                messages={messages}
+                items={explicitItems}
+                requestKey={requestKey}
+                comparisonQuery={comparisonQuery}
+                comparisonLabel={comparisonLabel}
+                comparisonMetric={comparisonMetric}
+                onComparisonMetricChange={setComparisonMetric}
+              />
+            </div>
+
+            <ScreenPreviewCard
+              locale={locale}
+              messages={messages}
+              previewUrl={previewUrl}
+              items={explicitItems}
+            />
+          </div>
+        </ContentSwitch>
+      </section>
+    );
+  },
+);

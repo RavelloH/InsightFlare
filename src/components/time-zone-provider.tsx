@@ -10,23 +10,22 @@ import {
 } from "react";
 
 import {
-  browserTimeZone as detectBrowserTimeZone,
   normalizeTimeZone,
   resolveReportingTimeZone,
+} from "@/lib/analytics/time-zone";
+import {
+  browserTimeZone as detectBrowserTimeZone,
   writeReportingTimeZoneCookie,
 } from "@/lib/dashboard/time-zone";
-
 interface TimeZoneContextValue {
   timeZone: string;
   timeZonePreference: string;
   browserTimeZone: string;
   setTimeZonePreference: (timeZone: string) => void;
 }
-
 const TimeZoneContext = createContext<TimeZoneContextValue | null>(null);
 const useClientLayoutEffect =
   typeof window === "undefined" ? useEffect : useLayoutEffect;
-
 export function TimeZoneProvider({ children }: { children: ReactNode }) {
   const [timeZonePreference, setTimeZonePreferenceState] = useState("");
   // Read the browser zone during the first client render so API consumers do
@@ -80,7 +79,6 @@ export function TimeZoneProvider({ children }: { children: ReactNode }) {
     </TimeZoneContext.Provider>
   );
 }
-
 export function useReportingTimeZone(): TimeZoneContextValue {
   const context = useContext(TimeZoneContext);
   if (!context) {
@@ -90,7 +88,6 @@ export function useReportingTimeZone(): TimeZoneContextValue {
   }
   return context;
 }
-
 /** Connects an authenticated dashboard shell to the global client manager. */
 export function useAccountTimeZonePreference(
   timeZone: string | null | undefined,

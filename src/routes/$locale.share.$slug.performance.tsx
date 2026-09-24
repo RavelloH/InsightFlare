@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { PerformanceClientPage } from "@/components/dashboard/site-pages/performance-client-page";
+import { PerformanceClientPage } from "@/components/dashboard/site-pages/performance/performance-client-page";
 export const Route = createFileRoute("/$locale/share/$slug/performance")({
   component: Page,
 });

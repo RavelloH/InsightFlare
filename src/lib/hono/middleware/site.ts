@@ -1,14 +1,13 @@
 import type { MiddlewareHandler } from "hono";
 
-import { jsonError } from "@/lib/api-v1/wire-helpers";
+import { jsonError } from "@/lib/api-v1";
+import { canAccessSiteId } from "@/lib/edge/auth/api-key-auth";
 import {
   fetchPublicSite,
   resolvePrivateSiteForSession,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
-import { canAccessSiteId } from "@/lib/edge/api-key-auth";
+} from "@/lib/edge/auth/site-access";
 import type { AppEnv, HonoApiSite } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
-
 export function resolvePrivateSiteMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const session = c.get("session");
@@ -30,7 +29,6 @@ export function resolvePrivateSiteMiddleware(): MiddlewareHandler<AppEnv> {
     await next();
   };
 }
-
 export function resolvePublicSiteMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const site = await fetchPublicSite(c.env, requestUrl(c));
@@ -45,7 +43,6 @@ export function resolvePublicSiteMiddleware(): MiddlewareHandler<AppEnv> {
     await next();
   };
 }
-
 export function resolveApiSiteMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const principal = c.get("apiPrincipal");

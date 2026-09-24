@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { handleFunnel } from "@/lib/edge/analytics/providers/d1/internal/funnels";
+import { handleFunnel } from "@/lib/edge/analytics/interfaces/dashboard/protocol/funnels";
 import type { Env } from "@/lib/edge/types";
 
 function createEnv(

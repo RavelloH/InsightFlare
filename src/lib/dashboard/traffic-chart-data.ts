@@ -1,20 +1,17 @@
-import type { DashboardInterval } from "@/lib/dashboard/query-state";
 import {
   addZonedInterval,
   startOfZonedInterval,
-} from "@/lib/dashboard/time-zone";
-
+} from "@/lib/analytics/time-zone";
+import type { DashboardInterval } from "@/lib/dashboard/query-state";
 export interface TrafficChartPoint {
   timestampMs: number;
   views: number;
   visitors: number;
 }
-
 export function safeChartCount(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.round(value));
 }
-
 function intervalStepMs(interval: DashboardInterval): number {
   if (interval === "minute") return 60_000;
   if (interval === "hour") return 60 * 60_000;
@@ -22,7 +19,6 @@ function intervalStepMs(interval: DashboardInterval): number {
   if (interval === "week") return 7 * 24 * 60 * 60_000;
   return 30 * 24 * 60 * 60_000;
 }
-
 export function fillMissingTrafficData(
   data: TrafficChartPoint[],
   interval: DashboardInterval,
@@ -87,7 +83,6 @@ export function fillMissingTrafficData(
 
   return filled;
 }
-
 export function downsampleTrafficData(
   data: TrafficChartPoint[],
   maxPoints: number,

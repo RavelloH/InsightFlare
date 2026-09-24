@@ -11,7 +11,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 
-import { LayerSystemFixture } from "@/components/dashboard/site-pages/layer-system-fixture";
+import { LayerSystemFixture } from "@/components/dashboard/site-pages/overview/layer-system-fixture";
 import { GlobalScrollbars } from "@/components/global-scrollbars";
 import { AppQueryProvider } from "@/components/query-client-provider";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -34,12 +34,10 @@ import { getMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";
 
 import "@/app/globals.css";
-
 const THEME_INIT_SCRIPT = `(function(){try{var k='insightflare-theme';var t=localStorage.getItem(k)||'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light'}catch(e){}})()`;
 const ESBUILD_NAME_HELPER_SCRIPT = `(function(){if(typeof globalThis.__name!=="function"){globalThis.__name=function(target){return target}}})()`;
 const DEMO_ANALYTICS_SCRIPT_SRC =
   "https://insight.ravelloh.com/script.js?siteId=04de9d96-fcec-41b1-b259-56e0dbaa2c5e";
-
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -57,7 +55,6 @@ export const Route = createRootRoute({
   errorComponent: ErrorPage,
   component: RootDocument,
 });
-
 function RootDocument() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const locale = resolveLocale(pathname.split("/")[1]);
@@ -103,7 +100,6 @@ function RootDocument() {
     </html>
   );
 }
-
 export function NotFoundPage() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const locale = resolveLocale(pathname.split("/")[1]);
@@ -130,7 +126,6 @@ export function NotFoundPage() {
     />
   );
 }
-
 export function ErrorPage({ error }: { error: Error }) {
   const pathname = useLocation({ select: (location) => location.pathname });
   const locale = resolveLocale(pathname.split("/")[1]);
@@ -162,7 +157,6 @@ export function ErrorPage({ error }: { error: Error }) {
     />
   );
 }
-
 function buildErrorReportUrl({
   pathname,
   status,
@@ -194,7 +188,6 @@ function buildErrorReportUrl({
 
   return `https://github.com/RavelloH/InsightFlare/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}&labels=bug`;
 }
-
 function ErrorPageLayout({
   locale,
   pathname,

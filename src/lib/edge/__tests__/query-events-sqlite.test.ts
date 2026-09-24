@@ -14,7 +14,6 @@ import {
   type QueryTime,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
-import type { FilterExpression } from "@/lib/edge/analytics/contract/filters";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import { queryEventFieldsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
@@ -37,6 +36,7 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
+import type { FilterExpression } from "@/lib/filter-contract/filters";
 
 import { filterFixture } from "./filter-fixtures";
 

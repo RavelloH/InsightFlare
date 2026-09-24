@@ -4,8 +4,7 @@ import {
   buildCampaignRowsByTab,
   CAMPAIGN_TABS,
   type CampaignRawRowsByTab,
-} from "@/components/dashboard/campaign-utils";
-
+} from "@/components/dashboard/campaigns/campaign-utils";
 describe("campaign breakdown utilities", () => {
   it("exports the expected campaign tab order", () => {
     expect(CAMPAIGN_TABS).toEqual([

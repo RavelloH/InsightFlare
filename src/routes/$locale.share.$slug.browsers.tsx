@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { BrowsersClientPage } from "@/components/dashboard/site-pages/browsers-client-page";
+import { BrowsersClientPage } from "@/components/dashboard/site-pages/browsers/browsers-client-page";
 import { sharePath } from "@/lib/dashboard/share-path";
 export const Route = createFileRoute("/$locale/share/$slug/browsers")({
   component: Page,

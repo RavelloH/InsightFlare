@@ -299,6 +299,44 @@ describe("TypedQueryApplicationService", () => {
     });
   });
 
+  it("reports provider failures to the injected application error handler", async () => {
+    const failure = new Error("provider-down");
+    const onApplicationError = vi.fn();
+    const service = new TypedQueryApplicationService(
+      undefined,
+      undefined,
+      onApplicationError,
+    );
+
+    await expect(
+      service.execute(invocation("pages", () => Promise.reject(failure))),
+    ).resolves.toEqual({
+      ok: false,
+      error: { kind: "internal", operation: "pages" },
+    });
+    expect(onApplicationError).toHaveBeenCalledWith(failure, "pages");
+  });
+
+  it("keeps provider errors stable if the application error handler throws", async () => {
+    const failure = new Error("provider-down");
+    const onApplicationError = vi.fn(() => {
+      throw new Error("logging failed");
+    });
+    const service = new TypedQueryApplicationService(
+      undefined,
+      undefined,
+      onApplicationError,
+    );
+
+    await expect(
+      service.execute(invocation("pages", () => Promise.reject(failure))),
+    ).resolves.toEqual({
+      ok: false,
+      error: { kind: "internal", operation: "pages" },
+    });
+    expect(onApplicationError).toHaveBeenCalledWith(failure, "pages");
+  });
+
   it("rejects policy-denied operations before provider execution", async () => {
     const run = vi.fn().mockResolvedValue("unreachable");
     const context = {

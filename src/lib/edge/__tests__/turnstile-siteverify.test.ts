@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { verifyTurnstileToken } from "@/lib/edge/turnstile-siteverify";
+import { verifyTurnstileToken } from "@/lib/edge/auth/turnstile-siteverify";
 
 describe("Turnstile Siteverify", () => {
   beforeEach(() => {

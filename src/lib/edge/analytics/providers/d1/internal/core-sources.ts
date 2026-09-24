@@ -2,18 +2,17 @@ import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import {
   currentD1Operation,
   currentInvocationLogger,
-} from "@/lib/edge/observability-logger";
+} from "@/lib/edge/observability/logger";
 import {
   SITE_PK_FROM_SITE_ID_SQL,
   sitePksFromSiteIdsSql,
-} from "@/lib/edge/site-identity-sql";
+} from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import { buildEventFilterSql, usesSessionBoundaryFilter } from "./core-filters";
 import type { FilterDocument, QueryWindow } from "./core-types";
 import { type D1ReadDiagnostics, recordD1RowsRead } from "./diagnostics";
 import { compileScopedDatasetSql } from "./scoped-dataset";
-
 export const VISIT_SOURCE_COLUMNS = `
     visit_id, site_id, site_pk, visitor_id, session_id, status, started_at, last_activity_at,
     ended_at, finalized_at, duration_ms, duration_source, exit_reason,
@@ -26,7 +25,6 @@ export const VISIT_SOURCE_COLUMNS = `
     perf_ttfb_ms, perf_fcp_ms, perf_lcp_ms, perf_cls, perf_inp_ms,
     ae_synced_at
   `;
-
 export function buildVisitSourceCte(): string {
   return `
 visit_source AS (
@@ -36,7 +34,6 @@ visit_source AS (
     AND started_at >= ? AND started_at < ?
 )`;
 }
-
 export function buildCustomEventSourceCte(): string {
   return `
 event_source AS (
@@ -97,7 +94,6 @@ event_source AS (
     AND ce.occurred_at >= ? AND ce.occurred_at < ?
 )`;
 }
-
 export function buildTargetVisitSourceCte(
   targetColumn: "session_id" | "visitor_id",
   options?: { withinWindow?: boolean },
@@ -110,7 +106,6 @@ visit_source AS (
   ${options?.withinWindow ? "AND started_at >= ? AND started_at < ?" : ""}
 )`;
 }
-
 export function buildDetailCustomEventSourceCte(options?: {
   materialize?: boolean;
 }): string {
@@ -137,7 +132,6 @@ event_source${options?.materialize ? " AS MATERIALIZED" : " AS"} (
     AND ce.visit_id = fv.visit_id
 )`;
 }
-
 export function buildEventAnalyticsSourceCte(options?: {
   eventName?: string;
   eventNames?: string[];
@@ -233,7 +227,6 @@ ${cteName} AS (
     AND ce.occurred_at >= ? AND ce.occurred_at < ?
 )`;
 }
-
 export function buildEventFilteredSourceCte(
   siteId: string,
   window: QueryWindow,
@@ -296,14 +289,12 @@ filtered_events ${options?.materialize ? "AS MATERIALIZED" : "AS"} (
     ],
   };
 }
-
 export function visitSourceBindings(
   siteId: string,
   window: QueryWindow,
 ): Array<string | number> {
   return [siteId, window.startMs, window.endExclusiveMs];
 }
-
 export function eventSourceBindings(
   siteId: string,
   window: QueryWindow,
@@ -315,7 +306,6 @@ export function eventSourceBindings(
       ? [siteId, ...eventName, siteId, window.startMs, window.endExclusiveMs]
       : [siteId, window.startMs, window.endExclusiveMs];
 }
-
 export function targetVisitSourceBindings(
   siteId: string,
   targetValue: string,
@@ -325,13 +315,11 @@ export function targetVisitSourceBindings(
     ? [siteId, targetValue, window.startMs, window.endExclusiveMs]
     : [siteId, targetValue];
 }
-
 export function detailCustomEventSourceBindings(
   siteId: string,
 ): Array<string | number> {
   return [siteId];
 }
-
 export function buildVisitSourceCteForSites(siteCount: number): string {
   return `
 visit_source AS (
@@ -341,14 +329,12 @@ visit_source AS (
     AND started_at >= ? AND started_at < ?
 )`;
 }
-
 export function visitSourceBindingsForSites(
   siteIds: string[],
   window: QueryWindow,
 ): Array<string | number> {
   return [...siteIds, window.startMs, window.endExclusiveMs];
 }
-
 export async function queryD1All<T extends object>(
   env: Env,
   sql: string,

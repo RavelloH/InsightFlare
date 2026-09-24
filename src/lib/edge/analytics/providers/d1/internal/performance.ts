@@ -4,6 +4,7 @@ import type {
   FilterDocument,
   Interval,
   PerformanceCountryRow,
+  PerformanceDashboardResult,
   PerformanceMetricKey,
   PerformanceRouteRow,
   PerformanceSummaryRow,
@@ -27,7 +28,6 @@ import {
   visitSourceBindings,
 } from "./core";
 import { scopedDatasetFor } from "./scoped-dataset";
-
 interface PerformanceVisitSource {
   readonly ctes: string;
   readonly relation: string;
@@ -35,7 +35,6 @@ interface PerformanceVisitSource {
   readonly filterClause: string;
   readonly filterBindings: Array<string | number>;
 }
-
 function performanceVisitSource(
   siteId: string,
   window: QueryWindow,
@@ -61,7 +60,6 @@ function performanceVisitSource(
     filterBindings: filter.bindings,
   };
 }
-
 function performanceMetricVisitsSql(
   source: string,
   dimensions: string[] = [],
@@ -75,13 +73,11 @@ function performanceMetricVisitsSql(
   WHERE ${column} IS NOT NULL`;
   }).join("\n  UNION ALL\n  ");
 }
-
 function performanceMetricPresenceSql(): string {
   return PERFORMANCE_METRIC_KEYS.map(
     (metric) => `${PERFORMANCE_METRIC_COLUMNS[metric]} IS NOT NULL`,
   ).join(" OR ");
 }
-
 function emptyPerformanceSummaries(): Record<
   PerformanceMetricKey,
   PerformanceSummaryRow
@@ -94,7 +90,6 @@ function emptyPerformanceSummaries(): Record<
     inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
   };
 }
-
 function mapPerformanceSummaries(
   rows: Record<string, unknown>[],
 ): Record<PerformanceMetricKey, PerformanceSummaryRow> {
@@ -112,14 +107,12 @@ function mapPerformanceSummaries(
   }
   return summaries;
 }
-
 function emptyPerformanceTrends(): Record<
   PerformanceMetricKey,
   PerformanceTrendPointRow[]
 > {
   return { ttfb: [], fcp: [], lcp: [], cls: [], inp: [] };
 }
-
 function mapPerformanceTrends(
   rows: Record<string, unknown>[],
   buckets: ReturnType<typeof buildTimeBuckets>,
@@ -141,7 +134,6 @@ function mapPerformanceTrends(
   }
   return trends;
 }
-
 function mapPerformanceRoutes(
   rows: Record<string, unknown>[],
 ): PerformanceRouteRow[] {
@@ -166,7 +158,6 @@ function mapPerformanceRoutes(
   }
   return [...byPath.values()];
 }
-
 function mapPerformanceCountries(
   rows: Record<string, unknown>[],
 ): PerformanceCountryRow[] {
@@ -193,7 +184,6 @@ function mapPerformanceCountries(
   }
   return [...byCountry.values()];
 }
-
 export async function queryPerformanceSummariesFromD1(
   env: Env,
   siteId: string,
@@ -254,7 +244,6 @@ GROUP BY thresholds.metric, thresholds.sampleCount, thresholds.avgValue
   ]);
   return mapPerformanceSummaries(rows);
 }
-
 export async function queryPerformanceTrendFromD1(
   env: Env,
   siteId: string,
@@ -328,7 +317,6 @@ ORDER BY thresholds.bucket ASC
     samples: Number(row.samples ?? 0),
   }));
 }
-
 export async function queryAllPerformanceTrendsFromD1(
   env: Env,
   siteId: string,
@@ -406,7 +394,6 @@ ORDER BY thresholds.metric ASC, thresholds.bucket ASC
   ]);
   return mapPerformanceTrends(rows, buckets);
 }
-
 export async function queryPerformanceRoutesFromD1(
   env: Env,
   siteId: string,
@@ -497,7 +484,6 @@ ORDER BY path_views.views DESC, thresholds.pathname ASC, thresholds.metric ASC
   ]);
   return mapPerformanceRoutes(rows);
 }
-
 export async function queryPerformanceCountriesFromD1(
   env: Env,
   siteId: string,
@@ -585,7 +571,6 @@ ORDER BY country_views.views DESC, thresholds.country ASC, thresholds.metric ASC
   ]);
   return mapPerformanceCountries(rows);
 }
-
 export async function queryPerformanceDashboardFromD1(
   env: Env,
   siteId: string,
@@ -593,12 +578,7 @@ export async function queryPerformanceDashboardFromD1(
   interval: Interval,
   filters: FilterDocument,
   routeLimit: number,
-): Promise<{
-  summaries: Record<PerformanceMetricKey, PerformanceSummaryRow>;
-  trends: Record<PerformanceMetricKey, PerformanceTrendPointRow[]>;
-  routes: PerformanceRouteRow[];
-  countries: PerformanceCountryRow[];
-}> {
+): Promise<PerformanceDashboardResult> {
   const source = performanceVisitSource(siteId, window, filters);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "started_at");

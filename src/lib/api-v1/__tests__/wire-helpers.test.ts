@@ -6,8 +6,7 @@ import {
   jsonList,
   jsonSuccess,
   methodNotAllowed,
-} from "@/lib/api-v1/wire-helpers";
-
+} from "@/lib/api-v1/contract/wire-helpers";
 describe("API v1 wire helpers", () => {
   it("creates request metadata and list envelopes", async () => {
     const request = new Request("https://app.test/api");

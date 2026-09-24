@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 
-import { executeAdminService } from "@/lib/edge/admin-service";
+import { executeAdminService } from "@/lib/edge/admin/service/index";
 import type { AppEnv } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
 import { nf as notFound } from "@/lib/response";

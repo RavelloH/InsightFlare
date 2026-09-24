@@ -5,9 +5,9 @@ import {
   formatNotificationNumber,
 } from "@/lib/notifications/email-format";
 import { renderNotificationPlainText } from "@/lib/notifications/email-text";
-import type { NotificationMessageDraft } from "@/lib/notifications/evaluator";
 import { buildLocalizedNotificationMessageFields } from "@/lib/notifications/localized-message";
-import type { NotificationMessage } from "@/lib/notifications/message-store";
+import type { NotificationMessageDraft } from "@/lib/notifications/message";
+import type { NotificationMessage } from "@/lib/notifications/message";
 
 function draft(
   input: Partial<NotificationMessageDraft>,

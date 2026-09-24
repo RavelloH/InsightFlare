@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { AdminUsersManagementClient } from "@/components/dashboard/admin-users-management-client";
+import { AdminUsersManagementClient } from "@/components/dashboard/admin/admin-users-management-client";
 import { loadAdminUsersInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 export const Route = createFileRoute("/$locale/app/manage/users")({

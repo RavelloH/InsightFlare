@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { FunnelsClientPage } from "@/components/dashboard/site-pages/funnels-client-page";
+import { FunnelsClientPage } from "@/components/dashboard/site-pages/funnels/funnels-client-page";
 import { buildSitePath } from "@/lib/dashboard/paths";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { dashboardPageTitle } from "@/lib/page-title";

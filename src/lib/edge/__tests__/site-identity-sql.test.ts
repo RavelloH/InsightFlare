@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   SITE_PK_FROM_SITE_ID_SQL,
   sitePksFromSiteIdsSql,
-} from "@/lib/edge/site-identity-sql";
-
+} from "@/lib/edge/sites/identity-sql";
 describe("site identity SQL", () => {
   it("builds site_pk lookups from external site IDs", () => {
     expect(SITE_PK_FROM_SITE_ID_SQL).toBe(

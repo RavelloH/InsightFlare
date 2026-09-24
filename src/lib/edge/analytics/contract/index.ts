@@ -1,21 +1,30 @@
-export * from "./application";
 export * from "./channels";
 export * from "./comparison";
 export * from "./comparison-metrics";
+export * from "./dimensions";
 export * from "./filter-adapters";
-export * from "./filter-codec";
-export * from "./filter-compiler";
-export * from "./filter-registry";
-export * from "./filters";
+export * from "./filter-transformations";
+export * from "./filter-validation";
 export * from "./funnel-config";
 export type * from "./goal";
 export * from "./goal-config";
 export * from "./helpers";
 export type * from "./journey-analysis";
 export * from "./observation-planner";
-export * from "./operations/index";
+export type * from "./operations/index";
 export * from "./overview";
 export * from "./pages";
+export * from "./performance-dimensions";
 export * from "./policy";
 export * from "./scoped-filter";
+export type * from "./team-results";
 export type * from "./types";
+export {
+  DEFAULT_EVENT_RECORD_SORT,
+  DEFAULT_SESSION_LIST_SORT,
+  DEFAULT_VISITOR_LIST_SORT,
+} from "./types";
+export * from "@/lib/filter-contract/filter-codec";
+export * from "@/lib/filter-contract/filter-registry";
+export * from "@/lib/filter-contract/filters";
+export * from "@/lib/filter-contract/scope-preference";

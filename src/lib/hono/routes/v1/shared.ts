@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 
-import { jsonError } from "@/lib/api-v1/wire-helpers";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { jsonError } from "@/lib/api-v1";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { AppEnv } from "@/lib/hono/types";
 
 export function principal(c: Context<AppEnv>): ApiKeyPrincipal {

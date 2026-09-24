@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { VisitorsClientPage } from "@/components/dashboard/site-pages/visitors-client-page";
+import { VisitorsClientPage } from "@/components/dashboard/site-pages/visitors/visitors-client-page";
 import { buildSitePath } from "@/lib/dashboard/paths";
 import { dashboardPageTitle } from "@/lib/page-title";
 

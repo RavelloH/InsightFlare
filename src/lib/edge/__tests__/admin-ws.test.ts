@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { handleAdminWs } from "@/lib/edge/admin-ws";
-import { setE2eClock } from "@/lib/edge/e2e-clock";
+import { handleAdminWs } from "@/lib/edge/admin/ws";
+import { setE2eClock } from "@/lib/edge/runtime/e2e-clock";
 import { deriveSecret, SECRET_PURPOSES } from "@/lib/secrets";
 
 const CLOCK_KEY = "__insightflare_e2e_clock__";

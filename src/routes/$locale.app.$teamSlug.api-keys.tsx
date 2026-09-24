@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { ApiKeysClient } from "@/components/dashboard/api-keys-client";
+import { ApiKeysClient } from "@/components/dashboard/admin/api-keys-client";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { loadApiKeysInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";

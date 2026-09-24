@@ -4,12 +4,6 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  handleSessionDetailContract as handleSessionDetail,
-  handleSessionsContract as handleSessions,
-  handleVisitorDetailContract as handleVisitorDetail,
-  handleVisitorsContract as handleVisitors,
-} from "@/lib/edge/analytics/composition/protocol/journeys-contract-adapter";
-import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
@@ -17,6 +11,12 @@ import {
   prepareScopedQuery,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import {
+  handleSessionDetailContract as handleSessionDetail,
+  handleSessionsContract as handleSessions,
+  handleVisitorDetailContract as handleVisitorDetail,
+  handleVisitorsContract as handleVisitors,
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/journeys";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   buildSessionAggregationSql,
@@ -39,18 +39,14 @@ import {
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
-
 type D1Row = Record<string, unknown>;
 type QueryBinding = string | number | null;
-
 interface QueryCall {
   sql: string;
   bindings: QueryBinding[];
 }
-
 const siteId = "site-journey";
 const baseMs = Date.UTC(2026, 0, 1);
-
 function queryWindow(): QueryWindow {
   return {
     startMs: baseMs,
@@ -59,7 +55,6 @@ function queryWindow(): QueryWindow {
     timeZone: "UTC",
   };
 }
-
 function createD1Env(resultSets: D1Row[][]): {
   env: Env;
   calls: QueryCall[];
@@ -84,7 +79,6 @@ function createD1Env(resultSets: D1Row[][]): {
     calls,
   };
 }
-
 function createSqliteDetailEnv(): {
   env: Env;
   calls: QueryCall[];
@@ -163,15 +157,12 @@ function createSqliteDetailEnv(): {
         .map((row) => String((row as { detail?: unknown }).detail ?? "")),
   };
 }
-
 function visitBindings(window: QueryWindow): QueryBinding[] {
   return [siteId, window.startMs, window.endExclusiveMs];
 }
-
 function eventBindings(window: QueryWindow): QueryBinding[] {
   return [siteId, window.startMs, window.endExclusiveMs];
 }
-
 function condition(
   field: string,
   value: string,
@@ -184,7 +175,6 @@ function condition(
     value,
   };
 }
-
 function prepareScopedFilters(
   operation: "sessions" | "visitors",
   scope: "session" | "visitor",
@@ -204,7 +194,6 @@ function prepareScopedFilters(
   } as never);
   return prepared.filters!;
 }
-
 function url(path: string, params: Record<string, string | number | boolean>) {
   const parsed = new URL(`https://edge.test${path}`);
   for (const [key, value] of Object.entries(params)) {
@@ -212,7 +201,6 @@ function url(path: string, params: Record<string, string | number | boolean>) {
   }
   return parsed;
 }
-
 function visitorRow(overrides: D1Row = {}): D1Row {
   return {
     visitorId: "visitor-1",
@@ -238,7 +226,6 @@ function visitorRow(overrides: D1Row = {}): D1Row {
     ...overrides,
   };
 }
-
 function sessionRow(overrides: D1Row = {}): D1Row {
   return {
     sessionId: "session-1",
@@ -275,7 +262,6 @@ function sessionRow(overrides: D1Row = {}): D1Row {
     ...overrides,
   };
 }
-
 function journeyEventRow(overrides: D1Row = {}): D1Row {
   return {
     id: "visit-1",
@@ -310,7 +296,6 @@ function journeyEventRow(overrides: D1Row = {}): D1Row {
     ...overrides,
   };
 }
-
 function visitorDetailVisitRow(overrides: D1Row = {}): D1Row {
   return {
     sourceType: "visit",
@@ -349,7 +334,6 @@ function visitorDetailVisitRow(overrides: D1Row = {}): D1Row {
     ...overrides,
   };
 }
-
 function visitorDetailCustomEventRow(overrides: D1Row = {}): D1Row {
   return {
     ...visitorDetailVisitRow(),
@@ -360,7 +344,6 @@ function visitorDetailCustomEventRow(overrides: D1Row = {}): D1Row {
     ...overrides,
   };
 }
-
 describe("edge journey detail D1 queries", () => {
   it("supports aggregation SQL callers without pagination", () => {
     expect(
@@ -1523,7 +1506,6 @@ describe("edge journey detail D1 queries", () => {
     expect(calls[2].bindings).toEqual([siteId, "session-2"]);
   });
 });
-
 describe("edge journey list D1 queries", () => {
   it("uses the canonical visitor list query with default sorting", async () => {
     const window = queryWindow();
@@ -1629,7 +1611,6 @@ describe("edge journey list D1 queries", () => {
     ]);
   });
 });
-
 describe("edge journey geo D1 queries", () => {
   it("passes geo aggregate calls through to the D1 implementation", async () => {
     const window = queryWindow();
@@ -1936,7 +1917,6 @@ describe("edge journey geo D1 queries", () => {
     });
   });
 });
-
 describe("edge journey handlers", () => {
   it("paginates visitors with a keyset cursor and trims hasMore rows", async () => {
     const window = queryWindow();

@@ -1,12 +1,15 @@
-import { sha256Hex } from "@/lib/edge/utils";
 import {
   FILTER_DSL_MAX_LENGTH,
   type FilterDocument,
   parseFilterDsl,
 } from "@/lib/filter-contract";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import {
+  assertFilterAudience,
+  filterFingerprint,
+} from "@/lib/filter-contract/filters";
+import { sha256Hex } from "@/lib/sha256";
 
-import { analyticsFilterRegistry } from "./filter-registry";
-import { assertFilterAudience, filterFingerprint } from "./filters";
 import { assertObservationFilterCompatible } from "./observation-planner";
 
 export const GOAL_CONFIG_VERSION = 1 as const;

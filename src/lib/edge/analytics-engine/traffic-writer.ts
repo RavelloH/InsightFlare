@@ -1,7 +1,7 @@
-import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine";
-import type { AnalyticsSessionState } from "@/lib/edge/analytics-session-state";
-import type { BufferedVisitRow } from "@/lib/edge/ingest-types";
-import type { InvocationLogger } from "@/lib/edge/observability-logger";
+import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine/config";
+import type { AnalyticsSessionState } from "@/lib/edge/ingest/session-state";
+import type { BufferedVisitRow } from "@/lib/edge/ingest/types";
+import type { InvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env, NormalizedPageview } from "@/lib/edge/types";
 
 import { type DimensionFamily, encodeDimensionCode } from "./schema";
@@ -15,20 +15,16 @@ import {
   safeStringify,
   stringValue,
 } from "./writer-utils";
-
 export type TrafficAnalyticsEnvironment = Env & {
   TRAFFIC_ANALYTICS?: AnalyticsEngineDataset;
 };
-
 export type TrafficAnalyticsLogger = Pick<InvocationLogger, "warn" | "error"> &
   Partial<Pick<InvocationLogger, "info">>;
-
 export interface TrafficPageviewInput {
   record: NormalizedPageview;
   sessionPageIndex: number;
   sessionViewCount?: number;
 }
-
 export interface TrafficVisitFinalizedInput {
   visit: TrafficVisitSnapshot;
   receivedAt: number;
@@ -38,7 +34,6 @@ export interface TrafficVisitFinalizedInput {
   durationSource?: string;
   exitReason?: string;
 }
-
 export interface TrafficVisitSnapshot {
   siteId: string;
   visitId: string;
@@ -82,7 +77,6 @@ export interface TrafficVisitSnapshot {
   perfCls?: number | null;
   perfInpMs?: number | null;
 }
-
 export interface TrafficSessionEndedInput extends AnalyticsSessionState {
   siteId: string;
   receivedAt: number;
@@ -111,7 +105,6 @@ export interface TrafficSessionEndedInput extends AnalyticsSessionState {
     | "screenHeight"
   >;
 }
-
 export const TRAFFIC_FLAG_DURATION_PRESENT = 1 << 0;
 export const TRAFFIC_FLAG_SESSION_PAGE_INDEX_PRESENT = 1 << 1;
 export const TRAFFIC_FLAG_SESSION_VIEW_COUNT_PRESENT = 1 << 2;
@@ -122,19 +115,15 @@ export const TRAFFIC_FLAG_FCP_PRESENT = 1 << 6;
 export const TRAFFIC_FLAG_LCP_PRESENT = 1 << 7;
 export const TRAFFIC_FLAG_CLS_PRESENT = 1 << 8;
 export const TRAFFIC_FLAG_INP_PRESENT = 1 << 9;
-
 export function hasTrafficFlag(flags: number, flag: number): boolean {
   return Number.isFinite(flags) && (Math.trunc(flags) & flag) === flag;
 }
-
 function valueOrZero(value: number | null | undefined): number {
   return finiteNumber(value) ?? 0;
 }
-
 function optionalString(value: unknown, maxLength: number): string {
   return stringValue(value, maxLength);
 }
-
 function dimensionCodeFor(
   country: string,
   continent: string,
@@ -151,7 +140,6 @@ function dimensionCodeFor(
   }
   return 0;
 }
-
 function pointExtraJson(
   context: Pick<
     BufferedVisitRow,
@@ -182,7 +170,6 @@ function pointExtraJson(
     exitReason: optionalString(context.exitReason, 80),
   });
 }
-
 function writeTrafficPoint(
   env: TrafficAnalyticsEnvironment,
   point: { indexes: [string]; blobs: string[]; doubles: number[] },
@@ -201,7 +188,6 @@ function writeTrafficPoint(
     logger?.error("ingest.traffic_analytics_write_failed");
   }
 }
-
 export function writeTrafficPageviewFact(
   env: TrafficAnalyticsEnvironment,
   input: TrafficPageviewInput,
@@ -288,7 +274,6 @@ export function writeTrafficPageviewFact(
     logger,
   );
 }
-
 export function writeTrafficVisitFinalizedFact(
   env: TrafficAnalyticsEnvironment,
   input: TrafficVisitFinalizedInput,
@@ -393,7 +378,6 @@ export function writeTrafficVisitFinalizedFact(
     logger,
   );
 }
-
 export function writeTrafficSessionEndedFact(
   env: TrafficAnalyticsEnvironment,
   input: TrafficSessionEndedInput,

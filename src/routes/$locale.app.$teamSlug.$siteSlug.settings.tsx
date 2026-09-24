@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { SettingsClientPage } from "@/components/dashboard/site-pages/settings-client-page";
+import { SettingsClientPage } from "@/components/dashboard/site-pages/settings/settings-client-page";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { loadSiteSettingsInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";

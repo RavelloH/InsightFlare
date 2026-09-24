@@ -1,13 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { initializeE2eClock } from "@/lib/edge/e2e-clock";
 import type { Env } from "@/lib/edge/types";
 import { createSessionToken } from "@/lib/session";
 import { middleware } from "@/middleware";
-
 const baseEnv = { MAIN_SECRET: "test-secret" } as unknown as Env;
 const CLOCK_KEY = "__insightflare_e2e_clock__";
-
 function request(
   path: string,
   options?: { cookies?: Record<string, string>; headers?: HeadersInit },
@@ -21,7 +18,6 @@ function request(
   if (cookies) result.headers.set("cookie", cookies);
   return result;
 }
-
 describe("page request middleware", () => {
   afterEach(() => {
     Reflect.deleteProperty(globalThis, CLOCK_KEY);

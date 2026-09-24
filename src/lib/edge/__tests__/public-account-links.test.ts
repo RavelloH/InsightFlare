@@ -1,23 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  getValidAccountActionToken,
-  markAccountActionTokenUsed,
-  toPublicAccountActionToken,
-} from "@/lib/edge/account-action-tokens";
-import {
   byId,
   byIdentifier,
   hashPassword,
   normE,
   normU,
   toPublicUser,
-} from "@/lib/edge/admin-auth";
-import { handlePublicAccountLinks } from "@/lib/edge/public-account-links";
-import { requireSession } from "@/lib/edge/session-auth";
+} from "@/lib/edge/admin/auth";
+import {
+  getValidAccountActionToken,
+  markAccountActionTokenUsed,
+  toPublicAccountActionToken,
+} from "@/lib/edge/auth/account-action-tokens";
+import { handlePublicAccountLinks } from "@/lib/edge/auth/public-account-links";
+import { requireSession } from "@/lib/edge/auth/session-auth";
 import type { Env } from "@/lib/edge/types";
-
-vi.mock("@/lib/edge/account-action-tokens", () => ({
+vi.mock("@/lib/edge/auth/account-action-tokens", () => ({
   getValidAccountActionToken: vi.fn(),
   markAccountActionTokenUsed: vi.fn(),
   toPublicAccountActionToken: vi.fn((row: TokenRow) => ({
@@ -36,8 +35,7 @@ vi.mock("@/lib/edge/account-action-tokens", () => ({
     status: "active",
   })),
 }));
-
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   byId: vi.fn(),
   byIdentifier: vi.fn(),
   hashPassword: vi.fn(),
@@ -51,11 +49,9 @@ vi.mock("@/lib/edge/admin-auth", () => ({
     systemRole: user.system_role === "admin" ? "admin" : "user",
   })),
 }));
-
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
-
 interface TokenRow {
   id: string;
   type: "team_invite" | "password_reset";
@@ -71,7 +67,6 @@ interface TokenRow {
   used_by_user_id: string | null;
   revoked_at: number | null;
 }
-
 interface UserRow {
   id: string;
   username: string;
@@ -83,13 +78,11 @@ interface UserRow {
   created_at: number;
   updated_at: number;
 }
-
 interface MockStatement {
   bind: ReturnType<typeof vi.fn>;
   first: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
 }
-
 const teamInviteRow: TokenRow = {
   id: "invite-1",
   type: "team_invite",
@@ -109,7 +102,6 @@ const teamInviteRow: TokenRow = {
   used_by_user_id: null,
   revoked_at: null,
 };
-
 const resetRow: TokenRow = {
   ...teamInviteRow,
   id: "reset-1",
@@ -119,7 +111,6 @@ const resetRow: TokenRow = {
   email: null,
   payload_json: "{}",
 };
-
 const user: UserRow = {
   id: "user-1",
   username: "friend",
@@ -131,14 +122,12 @@ const user: UserRow = {
   created_at: 1,
   updated_at: 2,
 };
-
 const getValidAccountActionTokenMock = vi.mocked(getValidAccountActionToken);
 const markAccountActionTokenUsedMock = vi.mocked(markAccountActionTokenUsed);
 const byIdMock = vi.mocked(byId);
 const byIdentifierMock = vi.mocked(byIdentifier);
 const hashPasswordMock = vi.mocked(hashPassword);
 const requireSessionMock = vi.mocked(requireSession);
-
 function statement(first: unknown = null): MockStatement {
   const stmt = {
     bind: vi.fn(function (this: MockStatement) {
@@ -149,7 +138,6 @@ function statement(first: unknown = null): MockStatement {
   };
   return stmt;
 }
-
 function createEnv(statements: MockStatement[] = []) {
   let index = 0;
   const prepare = vi.fn(() => {
@@ -165,7 +153,6 @@ function createEnv(statements: MockStatement[] = []) {
     batch,
   };
 }
-
 function request(path: string, body: Record<string, unknown>) {
   return new Request(`https://app.test${path}`, {
     method: "POST",
@@ -173,11 +160,9 @@ function request(path: string, body: Record<string, unknown>) {
     body: JSON.stringify(body),
   });
 }
-
 async function jsonOf(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
-
 describe("public account link handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();

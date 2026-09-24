@@ -11,9 +11,8 @@ import {
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
-} from "@/lib/edge/hourly-rollup";
+} from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
 import type { Env } from "@/lib/edge/types";
-
 function makeDbMock(firstResult: unknown = null, allResults: unknown[] = []) {
   return {
     prepare: vi.fn().mockReturnThis(),
@@ -24,7 +23,6 @@ function makeDbMock(firstResult: unknown = null, allResults: unknown[] = []) {
     batch: vi.fn(),
   };
 }
-
 function document(field: string, value: string) {
   return normalizeFilterDocument(
     {
@@ -39,7 +37,6 @@ function document(field: string, value: string) {
     analyticsFilterRegistry,
   );
 }
-
 describe("hasFilters", () => {
   it("returns false for empty filters", () => {
     expect(hasFilters(EMPTY_FILTER_DOCUMENT)).toBe(false);
@@ -51,14 +48,12 @@ describe("hasFilters", () => {
     expect(hasFilters(document("client.deviceType", "desktop"))).toBe(true);
   });
 });
-
 describe("hasFilterDocument", () => {
   it("does not treat the document version as an active filter", () => {
     expect(hasFilterDocument(EMPTY_FILTER_DOCUMENT)).toBe(false);
     expect(hasFilterDocument(document("geo.country", "US"))).toBe(true);
   });
 });
-
 describe("queryOverviewForSitesFromHourlyRollups", () => {
   it("returns empty Map for empty siteIds", async () => {
     const env = { DB: makeDbMock() } as unknown as Env;
@@ -127,7 +122,6 @@ describe("queryOverviewForSitesFromHourlyRollups", () => {
     expect(result).toBeNull();
   });
 });
-
 describe("queryTrendForSitesFromHourlyRollups", () => {
   it("returns empty array for empty siteIds", async () => {
     const env = { DB: makeDbMock() } as unknown as Env;
@@ -245,7 +239,6 @@ describe("queryTrendForSitesFromHourlyRollups", () => {
     ]);
   });
 });
-
 describe("queryOverviewAndTrendForSitesFromHourlyRollupsPartial", () => {
   it("returns empty aggregates for an empty site list", async () => {
     const env = { DB: makeDbMock() } as unknown as Env;
@@ -439,7 +432,6 @@ describe("queryOverviewAndTrendForSitesFromHourlyRollupsPartial", () => {
     ]);
   });
 });
-
 describe("queryOverviewForSitesFromHourlyRollups edge cases", () => {
   it("returns null when not all sites have aggregation state", async () => {
     const db = makeDbMock();

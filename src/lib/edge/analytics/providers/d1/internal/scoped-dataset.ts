@@ -1,27 +1,24 @@
 import {
   analyticsFilterDefinition,
   attachScopedFilterMetadata,
-  compileFilterDocument,
   createQueryTime,
   createScopedFilterPlan,
   type EntitySetExpression,
   factEntityKindsForFilter,
   type FilterCondition,
   type FilterDocument,
-  type FilterScope,
   type FilterValue,
   type ObservationPredicatePlan,
   planObservationFilter,
   type QueryOperation,
-  type ScopedDatasetSql,
   scopedFilterMetadata,
   type ScopedFilterPlan,
-  type SqlBinding,
 } from "@/lib/edge/analytics/contract";
 import {
   SITE_PK_FROM_SITE_ID_SQL,
   sitePksFromSiteIdsSql,
-} from "@/lib/edge/site-identity-sql";
+} from "@/lib/edge/sites/identity-sql";
+import type { FilterScope } from "@/lib/filter-contract/scope-preference";
 
 import { buildVisitFilterSql } from "./core-filters";
 import {
@@ -30,8 +27,22 @@ import {
   VISIT_SOURCE_COLUMNS,
 } from "./core-sources";
 import type { QueryWindow } from "./core-types";
-import { buildScopedFactsCtes, type ScopedFactKind } from "./scoped-facts";
+import { compileFilterDocument } from "./filter-compiler";
 
+export interface SqlBinding {
+  readonly value: string | number | null;
+}
+
+export interface ScopedDatasetSql {
+  readonly ctes: string;
+  readonly bindings: readonly SqlBinding[];
+  readonly visitRelation: string;
+  readonly eventRelation: string;
+  readonly sessionRelation: string;
+  readonly visitorRelation: string;
+  readonly scope: FilterScope;
+}
+import { buildScopedFactsCtes, type ScopedFactKind } from "./scoped-facts";
 export interface ScopedDatasetCompilerInput {
   readonly filters: FilterDocument;
   readonly plan: ScopedFilterPlan;
@@ -45,7 +56,6 @@ export interface ScopedDatasetCompilerInput {
    */
   readonly compatibilityEventSource?: boolean;
 }
-
 export function scopedDatasetFor(
   siteId: string,
   window: QueryWindow,
@@ -61,7 +71,6 @@ export function scopedDatasetFor(
       })
     : null;
 }
-
 /**
  * Compatibility bridge for direct readers that still receive a normalized
  * filter document instead of an application-prepared document. Historical
@@ -114,7 +123,6 @@ export function scopedDatasetForUnpreparedReader(
     compatibilityEventSource: true,
   });
 }
-
 function emptyEventSourceCte(): string {
   return `
 scope_raw_events AS MATERIALIZED (
@@ -168,7 +176,6 @@ scope_raw_events AS MATERIALIZED (
   WHERE 0
 )`;
 }
-
 function compileUnpreparedCompatibilityDataset(
   siteId: string,
   window: QueryWindow,
@@ -256,12 +263,10 @@ scope_final_visitors AS (
     scope: plan.scope,
   };
 }
-
 function siteIdsSql(siteIds: readonly string[]): string {
   if (siteIds.length === 0) throw new Error("scoped_dataset_requires_site");
   return sitePksFromSiteIdsSql(siteIds.length);
 }
-
 function visitSource(siteIds: readonly string[]): string {
   return `
 scope_raw_visits AS MATERIALIZED (
@@ -271,7 +276,6 @@ scope_raw_visits AS MATERIALIZED (
     AND started_at >= ? AND started_at < ?
 )`;
 }
-
 function eventSource(
   siteIds: readonly string[],
   compatibility = false,
@@ -338,18 +342,15 @@ function eventSource(
       `ce.site_pk IN ${siteIdsSql(siteIds)}`,
     );
 }
-
 function entityColumn(entityKind: "session" | "visitor"): string {
   return entityKind === "session" ? "session_id" : "visitor_id";
 }
-
 function conditionDocument(condition: FilterCondition): FilterDocument {
   return {
     version: 1,
     root: condition,
   };
 }
-
 function factKindForCondition(
   condition: FilterCondition,
 ): ScopedFactKind | null {
@@ -366,7 +367,6 @@ function factKindForCondition(
   }
   return null;
 }
-
 function factColumnName(condition: FilterCondition): string {
   if (condition.target.kind !== "field") {
     throw new TypeError("Fact filters require a field target.");
@@ -395,7 +395,6 @@ function factColumnName(condition: FilterCondition): string {
   }
   return column;
 }
-
 function factBinding(value: FilterValue, valueKind: string): string | number {
   if (value === null) {
     throw new TypeError("Fact predicates require a non-null scalar binding.");
@@ -417,7 +416,6 @@ function factBinding(value: FilterValue, valueKind: string): string | number {
   }
   return value;
 }
-
 function compileFactPredicate(
   condition: FilterCondition,
   alias: string,
@@ -466,7 +464,6 @@ function compileFactPredicate(
   }
   return `${source} ${sqlOperator} ${push(value as FilterValue)}`;
 }
-
 function compileFactMembershipCondition(
   condition: FilterCondition,
   entityKind: ScopedFactKind,
@@ -511,7 +508,6 @@ function compileFactMembershipCondition(
     bindings,
   };
 }
-
 function compileMembershipCondition(
   condition: FilterCondition,
   entityKind: ScopedFactKind,
@@ -563,18 +559,15 @@ function compileMembershipCondition(
     bindings,
   };
 }
-
 interface MembershipSql {
   readonly relation: string;
   readonly ctes: string[];
   readonly bindings: Array<string | number>;
 }
-
 interface ObservationRelationSql {
   readonly cte: string;
   readonly bindings: Array<string | number>;
 }
-
 /**
  * The relations produced when an already-scoped dataset is narrowed by one
  * observation filter.  The dataset's final relations are deliberately the
@@ -592,19 +585,16 @@ export interface ScopedObservationFilterSql {
   readonly matchedVisitsRelation: string;
   readonly matchedEventsRelation: string;
 }
-
 function safeSqlIdentifier(value: string, label: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
     throw new TypeError(`${label} must be an internal SQL identifier.`);
   }
   return value;
 }
-
 /** Validate and return a CTE prefix before it is interpolated into SQL. */
 export function assertSafeScopedObservationCtePrefix(prefix: string): string {
   return safeSqlIdentifier(prefix, "observation CTE prefix");
 }
-
 function scopedObservationRelation(
   relation: string,
   source: string,
@@ -637,7 +627,6 @@ function scopedObservationRelation(
     bindings: [...compiled.bindings],
   };
 }
-
 /**
  * Apply one parsed/validated Observation Filter to an existing dataset.
  *
@@ -722,7 +711,6 @@ ${visitorRelation} AS (
     matchedEventsRelation: matchedEventRelation,
   };
 }
-
 /**
  * Canonical name for the shared Funnel/analysis primitive. Keep the longer
  * `apply...` export above for callers that describe this operation as a
@@ -730,11 +718,9 @@ ${visitorRelation} AS (
  */
 export const executeObservationFilterOnScopedDataset =
   applyObservationFilterToScopedDataset;
-
 /** Concise alias for callers that already operate on a scoped dataset. */
 export const compileScopedObservationFilterSql =
   applyObservationFilterToScopedDataset;
-
 function compileObservationRelation(
   name: string,
   source: string,
@@ -763,7 +749,6 @@ function compileObservationRelation(
     bindings: [...compiled.bindings],
   };
 }
-
 function compileEntityMembership(
   expression: EntitySetExpression | null,
   entityKind: ScopedFactKind,
@@ -842,7 +827,6 @@ ${name} AS (
 
   return { relation: compile(expression), ctes, bindings };
 }
-
 /**
  * Compile the one relation bundle consumed by historical D1 providers.
  * Raw sources, entity universes, and membership sets stay inside this

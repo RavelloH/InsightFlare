@@ -5,13 +5,12 @@ import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-regi
 import {
   handlePlannedTeamSites,
   type TeamSitesReader,
-} from "@/lib/api-v1/team-sites-handler";
+} from "@/lib/api-v1/analytics/team-sites";
 import {
   ApiV1ErrorEnvelopeSchema,
   TeamAnalyticsSitesResponseSchema,
-} from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/contract/wire";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -29,7 +28,6 @@ const input = {
   },
   interval: "hour" as const,
 };
-
 function reader() {
   return vi.fn<TeamSitesReader>().mockResolvedValue({
     source: "raw",
@@ -76,7 +74,6 @@ function reader() {
     },
   });
 }
-
 function request(
   body: BodyInit | null = JSON.stringify(input),
   init: RequestInit = {},
@@ -89,7 +86,6 @@ function request(
     ...(method === "GET" || method === "HEAD" ? {} : { body }),
   });
 }
-
 describe("planned team sites HTTP adapter", () => {
   it("returns an independent typed composite through a live Hono route", async () => {
     const provider = reader();

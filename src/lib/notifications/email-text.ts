@@ -7,7 +7,7 @@ import {
   formatNotificationNumber,
 } from "./email-format";
 import { NOTIFICATION_EMAIL_MESSAGES } from "./email-i18n";
-import type { NotificationMessage } from "./message-store";
+import type { NotificationMessage } from "./message";
 
 interface RenderNotificationEmailTextInput {
   content: NotificationContent;

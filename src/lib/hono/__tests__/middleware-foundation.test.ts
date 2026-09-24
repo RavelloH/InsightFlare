@@ -1,8 +1,8 @@
 import { type Handler, Hono, type MiddlewareHandler } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-import type * as ApiKeyAuthModule from "@/lib/edge/api-key-auth";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
+import type * as ApiKeyAuthModule from "@/lib/edge/auth/api-key-auth";
 import type { Env } from "@/lib/edge/types";
 import { apiNoCacheMiddleware } from "@/lib/hono/middleware/api-cache";
 import {
@@ -28,16 +28,14 @@ import {
 import type { AppEnv } from "@/lib/hono/types";
 import { responseContext } from "@/lib/hono/utils/context";
 import { internalServerError } from "@/lib/hono/utils/response";
-
-vi.mock("@/lib/edge/api-key-auth", async (importOriginal) => {
+vi.mock("@/lib/edge/auth/api-key-auth", async (importOriginal) => {
   const actual = await importOriginal<typeof ApiKeyAuthModule>();
   return {
     ...actual,
     authenticateApiKey: vi.fn(),
   };
 });
-
-vi.mock("@/lib/edge/dashboard-cache", () => ({
+vi.mock("@/lib/edge/analytics/composition/dashboard-cache", () => ({
   withDashboardCache: vi.fn(
     async (
       _ctx: ExecutionContext,
@@ -46,27 +44,23 @@ vi.mock("@/lib/edge/dashboard-cache", () => ({
     ) => loader(),
   ),
 }));
-
-vi.mock("@/lib/edge/analytics/providers/d1/internal/core", () => ({
+vi.mock("@/lib/edge/auth/site-access", () => ({
   fetchPublicSite: vi.fn(),
   resolvePrivateSiteForSession: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
-
-const { authenticateApiKey } = await import("@/lib/edge/api-key-auth");
-const { withDashboardCache } = await import("@/lib/edge/dashboard-cache");
+const { authenticateApiKey } = await import("@/lib/edge/auth/api-key-auth");
+const { withDashboardCache } =
+  await import("@/lib/edge/analytics/composition/dashboard-cache");
 const { fetchPublicSite, resolvePrivateSiteForSession } =
-  await import("@/lib/edge/analytics/providers/d1/internal/core");
-const { requireSession } = await import("@/lib/edge/session-auth");
-
+  await import("@/lib/edge/auth/site-access");
+const { requireSession } = await import("@/lib/edge/auth/session-auth");
 const ctx = {
   passThroughOnException: vi.fn(),
   waitUntil: vi.fn(),
 } as unknown as ExecutionContext;
-
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -81,11 +75,9 @@ const session = {
   systemRole: "user" as const,
   exp: 9999999999,
 };
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://app.test${path}`, init);
 }
-
 function createApp(
   middleware: MiddlewareHandler<AppEnv>,
   handler: Handler<AppEnv>,
@@ -95,7 +87,6 @@ function createApp(
   app.all("*", handler);
   return app;
 }
-
 function createPrivateSiteApp(handler: Handler<AppEnv>) {
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
@@ -106,7 +97,6 @@ function createPrivateSiteApp(handler: Handler<AppEnv>) {
   app.all("*", handler);
   return app;
 }
-
 function createEnv(first: unknown = null): Env {
   return {
     DB: {
@@ -118,7 +108,6 @@ function createEnv(first: unknown = null): Env {
     },
   } as unknown as Env;
 }
-
 function responseWithThrowingHeaderSet(): Response {
   const response = new Response("upgraded");
   const headers = new Headers(response.headers);
@@ -129,7 +118,6 @@ function responseWithThrowingHeaderSet(): Response {
   set.mockClear();
   return response;
 }
-
 describe("Hono middleware foundation", () => {
   beforeEach(() => {
     vi.clearAllMocks();

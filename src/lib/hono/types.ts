@@ -1,6 +1,6 @@
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-import type { InvocationLogger } from "@/lib/edge/observability-logger";
-import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
+import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
+import type { InvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env as EdgeEnv } from "@/lib/edge/types";
 
 export type HonoBindings = EdgeEnv;

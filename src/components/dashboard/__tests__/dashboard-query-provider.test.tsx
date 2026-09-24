@@ -6,9 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DashboardQueryProvider,
   useDashboardQuery,
-} from "@/components/dashboard/dashboard-query-provider";
+} from "@/components/dashboard/shell/dashboard-query-provider";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
-
 function Probe() {
   const { filters, scopePreference } = useDashboardQuery();
   return createElement(
@@ -17,7 +16,6 @@ function Probe() {
     `${filters.root ? "filtered" : "empty"}:${scopePreference}`,
   );
 }
-
 function App({ children }: { children: ReactNode }) {
   return (
     <TimeZoneProvider>
@@ -27,7 +25,6 @@ function App({ children }: { children: ReactNode }) {
     </TimeZoneProvider>
   );
 }
-
 function ScopeApp({ scopeKey }: { scopeKey: string }) {
   return (
     <TimeZoneProvider>
@@ -37,7 +34,6 @@ function ScopeApp({ scopeKey }: { scopeKey: string }) {
     </TimeZoneProvider>
   );
 }
-
 describe("DashboardQueryProvider", () => {
   let container: HTMLDivElement;
   let root: Root;

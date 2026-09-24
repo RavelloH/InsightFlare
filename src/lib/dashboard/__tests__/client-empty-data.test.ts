@@ -26,8 +26,7 @@ import {
   emptyTrend,
   emptyVisitorDetail,
   emptyVisitors,
-} from "@/lib/dashboard/client-empty-data";
-
+} from "@/lib/dashboard/client/data/empty";
 describe("dashboard client empty data builders", () => {
   it("builds isolated empty trend and performance payloads", () => {
     const trend = emptyTrend("hour");

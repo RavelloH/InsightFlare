@@ -9,8 +9,7 @@ import {
   resolveCountryLabelFromFeature,
   WORLD_MAP_HEIGHT,
   WORLD_MAP_WIDTH,
-} from "@/components/dashboard/site-pages/performance-map-utils";
-
+} from "@/components/dashboard/site-pages/performance/performance-map-utils";
 function feature(
   properties: Record<string, unknown>,
   id?: string,
@@ -22,7 +21,6 @@ function feature(
     geometry: null as any,
   };
 }
-
 describe("performance map utilities", () => {
   it("normalizes only two-letter country codes", () => {
     expect(normalizeCountryCode(" us ")).toBe("US");

@@ -236,7 +236,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
 
   it("should successfully boot the SDK and mount the installation flag when loaded properly", async () => {
     // Import dynamically using stable clean paths since vi.resetModules() already clears memory cache
-    await import("../sdk.ts");
+    await import("../sdk");
 
     // The SDK registers an install key in window containing the exported public APIs object
     expect((window as any).__insightflare_tracker_v6__).toBeDefined();
@@ -306,7 +306,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
     });
 
     // Asset the loader crashes safely during bootstrap, preventing invalid script mounts
-    await expect(import("../sdk.ts")).rejects.toThrow(
+    await expect(import("../sdk")).rejects.toThrow(
       "InsightFlare: script element not found",
     );
   });
@@ -318,7 +318,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
       configurable: true,
     });
 
-    await expect(import("../sdk.ts")).rejects.toThrow(
+    await expect(import("../sdk")).rejects.toThrow(
       "InsightFlare: script element not found",
     );
   });
@@ -332,7 +332,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
     });
 
     // The default runtime configuration explicitly ignores Do Not Track.
-    const sdk = await import("../sdk.ts");
+    const sdk = await import("../sdk");
     expect(sdk).toBeDefined();
 
     // Restore DNT
@@ -384,7 +384,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
       );
 
     // Boot SDK
-    await import("../sdk.ts");
+    await import("../sdk");
 
     // Since sendBeacon is missing, the SDK pageview track must fall back to standard fetch
     expect(fetchSpy).toHaveBeenCalled();
@@ -416,7 +416,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
 
     expect(fetchSpy).not.toHaveBeenCalled();
 
@@ -434,18 +434,18 @@ describe("Tracker Browser SDK Integration Suite", () => {
 
   it("should reject re-installation when an SDK instance is already mounted on window", async () => {
     // First successful boot
-    await import("../sdk.ts");
+    await import("../sdk");
     expect((window as any).__insightflare_tracker_v6__).toBeDefined();
 
     // Re-import to simulate duplicate script tag — install key is still on window
     vi.resetModules();
-    await expect(import("../sdk.ts")).rejects.toThrow(
+    await expect(import("../sdk")).rejects.toThrow(
       "InsightFlare: already installed",
     );
   });
 
   it("should expose stable public API surface on window install key", async () => {
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     expect(api.version).toBe("6");
     expect(api.track).toBeTypeOf("function");
@@ -469,7 +469,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
 
     api.identify("  alice  ", { name: "  Alice  " });
@@ -505,7 +505,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     api.identify("alice", { name: "Alice" });
     api.reset();
@@ -545,7 +545,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const api = (window as any).__insightflare_tracker_v6__;
     const oldVisitorId = window.localStorage.getItem(
@@ -596,7 +596,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const api = (window as any).__insightflare_tracker_v6__;
     fetchSpy.mockClear();
@@ -632,7 +632,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const api = (window as any).__insightflare_tracker_v6__;
     const visitorId = window.localStorage.getItem(
@@ -672,7 +672,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
       );
 
     setRuntimeConfig({ isEuMode: true });
-    await import("../sdk.ts");
+    await import("../sdk");
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
     const api = (window as any).__insightflare_tracker_v6__;
     fetchSpy.mockClear();
@@ -700,7 +700,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear(); // ignore initial pageview
 
     const api = (window as any).__insightflare_tracker_v6__;
@@ -722,7 +722,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const api = (window as any).__insightflare_tracker_v6__;
@@ -739,7 +739,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const api = (window as any).__insightflare_tracker_v6__;
@@ -757,7 +757,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const api = (window as any).__insightflare_tracker_v6__;
@@ -773,7 +773,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     api.setGlobalProperties({ plan: "pro", region: "us" });
     fetchSpy.mockClear();
@@ -791,7 +791,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     api.setGlobalProperties({ plan: "pro" });
     api.clearGlobalProperties();
@@ -803,7 +803,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
   });
 
   it("should ignore non-object/array inputs in setGlobalProperties()", async () => {
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     expect(() => api.setGlobalProperties(null)).not.toThrow();
     expect(() => api.setGlobalProperties(undefined)).not.toThrow();
@@ -818,7 +818,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const api = (window as any).__insightflare_tracker_v6__;
@@ -838,7 +838,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const api = (window as any).__insightflare_tracker_v6__;
@@ -856,7 +856,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const api = (window as any).__insightflare_tracker_v6__;
@@ -873,7 +873,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     api.identify("user-789", { name: "Bob" });
     fetchSpy.mockClear();
@@ -891,7 +891,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const api = (window as any).__insightflare_tracker_v6__;
@@ -910,7 +910,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const button = document.createElement("button");
@@ -938,7 +938,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const el = document.createElement("button");
@@ -962,7 +962,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const el = document.createElement("button");
@@ -986,7 +986,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const el = document.createElement("button");
@@ -1006,7 +1006,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const form = document.createElement("form");
@@ -1033,7 +1033,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const a = document.createElement("a");
@@ -1056,7 +1056,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const a = document.createElement("a");
@@ -1075,7 +1075,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const mailto = document.createElement("a");
@@ -1100,7 +1100,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const a = document.createElement("a");
@@ -1115,7 +1115,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
     const sendBeaconSpy = vi.fn().mockReturnValue(true);
     (navigator as any).sendBeacon = sendBeaconSpy;
 
-    await import("../sdk.ts");
+    await import("../sdk");
 
     Object.defineProperty(document, "visibilityState", {
       value: "hidden",
@@ -1138,7 +1138,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
     const sendBeaconSpy = vi.fn().mockReturnValue(true);
     (navigator as any).sendBeacon = sendBeaconSpy;
 
-    await import("../sdk.ts");
+    await import("../sdk");
     window.dispatchEvent(new Event("pagehide"));
 
     expect(sendBeaconSpy).toHaveBeenCalled();
@@ -1148,7 +1148,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
     const sendBeaconSpy = vi.fn().mockReturnValue(true);
     (navigator as any).sendBeacon = sendBeaconSpy;
 
-    await import("../sdk.ts");
+    await import("../sdk");
     Object.defineProperty(document, "visibilityState", {
       value: "hidden",
       writable: true,
@@ -1173,7 +1173,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     api.debug();
     fetchSpy.mockClear();
@@ -1194,7 +1194,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
       Promise.resolve(new Response(JSON.stringify({ ok: true }))),
     );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     api.debug();
     api.identify("dbg-user", { name: "Dbg" });
@@ -1210,7 +1210,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
 
   it("should set up history.pushState wrapper that schedules a route change", async () => {
     const beforeImport = history.pushState;
-    await import("../sdk.ts");
+    await import("../sdk");
     // SDK wraps pushState — the function reference must change after install
     expect(history.pushState).not.toBe(beforeImport);
     expect(typeof history.pushState).toBe("function");
@@ -1218,7 +1218,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
 
   it("should also wrap history.replaceState", async () => {
     const beforeImport = history.replaceState;
-    await import("../sdk.ts");
+    await import("../sdk");
     expect(history.replaceState).not.toBe(beforeImport);
   });
 
@@ -1229,7 +1229,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     // happy-dom may not synchronously reflect path changes via pushState —
@@ -1251,7 +1251,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     history.pushState({}, "", window.location.pathname);
@@ -1262,7 +1262,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
   });
 
   it("should attach popstate handler that schedules route changes", async () => {
-    await import("../sdk.ts");
+    await import("../sdk");
     // Dispatching popstate must not throw — exercises the handler closure
     expect(() => {
       window.dispatchEvent(new PopStateEvent("popstate"));
@@ -1271,7 +1271,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
   });
 
   it("should attach hashchange handler that schedules route changes", async () => {
-    await import("../sdk.ts");
+    await import("../sdk");
     expect(() => {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     }).not.toThrow();
@@ -1285,7 +1285,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
     history.replaceState({}, "", window.location.pathname + "#section");
     window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -1303,7 +1303,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     history.pushState({}, "", "/will-be-flushed");
@@ -1345,7 +1345,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     // Wait for UA client hints to settle
     await new Promise((r) => setTimeout(r, 0));
 
@@ -1376,7 +1376,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await new Promise((r) => setTimeout(r, 0));
 
     fetchSpy.mockClear();
@@ -1405,7 +1405,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await new Promise((r) => setTimeout(r, 0));
 
     fetchSpy.mockClear();
@@ -1425,7 +1425,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await new Promise((r) => setTimeout(r, 0));
 
     fetchSpy.mockClear();
@@ -1436,7 +1436,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
   });
 
   it("should expose the API on window.insightflare as well as the install key", async () => {
-    await import("../sdk.ts");
+    await import("../sdk");
     expect((window as any).insightflare).toBe((window as any)[installKey]);
     expect((window as any).insightflare.siteId).toBe("configured-site");
   });
@@ -1589,7 +1589,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
     window.dispatchEvent(new Event("pagehide"));
 
@@ -1607,7 +1607,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
     const api = (window as any).__insightflare_tracker_v6__;
     const circular: Record<string, unknown> = {};
@@ -1624,7 +1624,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
     const api = (window as any).__insightflare_tracker_v6__;
     api.track("  spaced_event  ");
@@ -1644,7 +1644,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
     const api = (window as any).__insightflare_tracker_v6__;
     const props = Object.create({ inherited: "ignored" });
@@ -1663,7 +1663,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const form = document.createElement("form");
@@ -1683,7 +1683,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const button = document.createElement("button");
@@ -1699,7 +1699,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
       .spyOn(globalThis, "fetch")
       .mockRejectedValue(new Error("network down"));
 
-    await expect(import("../sdk.ts")).resolves.toBeDefined();
+    await expect(import("../sdk")).resolves.toBeDefined();
     await new Promise((r) => setTimeout(r, 0));
 
     expect(fetchSpy).toHaveBeenCalled();
@@ -1714,7 +1714,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await new Promise((r) => queueMicrotask(r));
     const api = (window as any).__insightflare_tracker_v6__;
     api.debug();
@@ -1752,7 +1752,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
     vi.spyOn(window, "setTimeout").mockImplementation(((callback) => {
       routeCallbacks.push(callback as () => void);
@@ -1779,7 +1779,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
     vi.spyOn(window, "setTimeout").mockImplementation(
       (() => 0) as typeof window.setTimeout,
@@ -1811,7 +1811,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const a = document.createElement("a");
@@ -1829,7 +1829,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const a = document.createElement("a");
@@ -1847,7 +1847,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const button = document.createElement("button");
@@ -1873,7 +1873,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const button = document.createElement("button");
@@ -1921,7 +1921,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await new Promise((r) => setTimeout(r, 0));
 
     fetchSpy.mockClear();
@@ -1956,7 +1956,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await new Promise((r) => setTimeout(r, 0));
 
     fetchSpy.mockClear();
@@ -1978,7 +1978,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     await new Promise((r) => setTimeout(r, 0));
 
     const body = decodeFetchBody(fetchSpy);
@@ -2013,7 +2013,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
       );
 
     try {
-      await import("../sdk.ts");
+      await import("../sdk");
 
       const body = decodeFetchBody(fetchSpy);
       expect(body.title).toBe("");
@@ -2041,7 +2041,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
       Promise.resolve(new Response(JSON.stringify({ ok: true }))),
     );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     const api = (window as any).__insightflare_tracker_v6__;
     api.debug();
     api.identify("debug-no-name");
@@ -2068,7 +2068,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
       writable: true,
     });
 
-    await import("../sdk.ts");
+    await import("../sdk");
 
     expect((window as any).__insightflare_tracker_v6__).toBeDefined();
     expect(history.pushState).toBeUndefined();
@@ -2081,7 +2081,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
         Promise.resolve(new Response(JSON.stringify({ ok: true }))),
       );
 
-    await import("../sdk.ts");
+    await import("../sdk");
     fetchSpy.mockClear();
 
     const button = document.createElement("button");
@@ -2106,7 +2106,7 @@ describe("Tracker Browser SDK Integration Suite", () => {
     const sendBeaconSpy = vi.fn().mockReturnValue(true);
     (navigator as any).sendBeacon = sendBeaconSpy;
 
-    await import("../sdk.ts");
+    await import("../sdk");
     document.dispatchEvent(new Event("visibilitychange"));
 
     expect(sendBeaconSpy).not.toHaveBeenCalled();

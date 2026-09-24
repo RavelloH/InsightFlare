@@ -1,12 +1,13 @@
+import {
+  fetchPrivateJson,
+  fetchPrivateJsonMutate,
+} from "@/lib/dashboard/client/request";
 import type {
   SavedFilterDeleteResponse,
   SavedFilterInput,
   SavedFilterListResponse,
   SavedFilterResponse,
 } from "@/lib/saved-filters";
-
-import { fetchPrivateJson, fetchPrivateJsonMutate } from "./client-request";
-
 export function fetchSavedFilters(
   siteId: string,
   options?: { limit?: number; cursor?: string | null; signal?: AbortSignal },
@@ -22,7 +23,6 @@ export function fetchSavedFilters(
     { signal: options?.signal },
   );
 }
-
 export function createSavedFilter(
   siteId: string,
   input: SavedFilterInput,
@@ -34,7 +34,6 @@ export function createSavedFilter(
     input,
   );
 }
-
 export function updateSavedFilter(
   siteId: string,
   filterId: string,
@@ -47,7 +46,6 @@ export function updateSavedFilter(
     input,
   );
 }
-
 export function deleteSavedFilter(
   siteId: string,
   filterId: string,

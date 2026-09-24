@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { PagesClientPage } from "@/components/dashboard/site-pages/pages-client-page";
+import { PagesClientPage } from "@/components/dashboard/site-pages/pages/pages-client-page";
 import { sharePath } from "@/lib/dashboard/share-path";
 export const Route = createFileRoute("/$locale/share/$slug/pages")({
   component: Page,

@@ -1,25 +1,22 @@
 import { Hono } from "hono";
 
-import { timingSafeEqualString } from "@/lib/edge/api-key-store";
-import { runDatabaseMaintenance } from "@/lib/edge/database-maintenance";
+import { timingSafeEqualString } from "@/lib/edge/auth/api-key-store";
 import {
   advanceE2eClock,
   appNow,
   e2eClockNow,
   setE2eClock,
-} from "@/lib/edge/e2e-clock";
-import { runHourlyAggregation } from "@/lib/edge/hourly-rollup";
-import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-task-registry";
-import { runScheduledTask } from "@/lib/edge/scheduled-task-runner";
+} from "@/lib/edge/runtime/e2e-clock";
+import { runDatabaseMaintenance } from "@/lib/edge/scheduled-tasks/database-maintenance";
+import { runHourlyAggregation } from "@/lib/edge/scheduled-tasks/hourly-rollup";
+import { getScheduledTaskDefinition } from "@/lib/edge/scheduled-tasks/registry";
+import { runScheduledTask } from "@/lib/edge/scheduled-tasks/runner";
 import type { AppEnv } from "@/lib/hono/types";
-import { runNotificationTick } from "@/lib/notifications/notification-task";
-
+import { runNotificationTick } from "@/lib/notifications/edge/notification-task";
 const CONTROL_TOKEN_HEADER = "x-insightflare-e2e-token";
-
 function notFound(): Response {
   return new Response("Not Found", { status: 404 });
 }
-
 function isAuthorized(request: Request, env: AppEnv["Bindings"]): boolean {
   const expected = env.INSIGHTFLARE_E2E_CONTROL_TOKEN || "";
   const received = request.headers.get(CONTROL_TOKEN_HEADER) || "";
@@ -29,7 +26,6 @@ function isAuthorized(request: Request, env: AppEnv["Bindings"]): boolean {
     timingSafeEqualString(received, expected)
   );
 }
-
 async function body(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const value = (await request.json()) as unknown;
@@ -40,7 +36,6 @@ async function body(request: Request): Promise<Record<string, unknown> | null> {
     return null;
   }
 }
-
 async function siteExists(
   env: AppEnv["Bindings"],
   siteId: string,
@@ -52,18 +47,14 @@ async function siteExists(
       .first<{ id: string }>(),
   );
 }
-
 export const e2eRoutes = new Hono<AppEnv>();
-
 e2eRoutes.use("*", async (c, next) => {
   if (!isAuthorized(c.req.raw, c.env)) return notFound();
   await next();
 });
-
 e2eRoutes.get("/clock", (c) =>
   c.json({ ok: true, data: { nowMs: e2eClockNow() } }),
 );
-
 e2eRoutes.post("/clock/set", async (c) => {
   const input = await body(c.req.raw);
   const nowMs = Number(input?.nowMs);
@@ -72,7 +63,6 @@ e2eRoutes.post("/clock/set", async (c) => {
   }
   return c.json({ ok: true, data: { nowMs: setE2eClock(nowMs) } });
 });
-
 e2eRoutes.post("/clock/advance", async (c) => {
   const input = await body(c.req.raw);
   const deltaMs = Number(input?.deltaMs);
@@ -81,7 +71,6 @@ e2eRoutes.post("/clock/advance", async (c) => {
   }
   return c.json({ ok: true, data: { nowMs: advanceE2eClock(deltaMs) } });
 });
-
 e2eRoutes.post("/d1/execute", async (c) => {
   const input = await body(c.req.raw);
   const sql = typeof input?.sql === "string" ? input.sql : "";
@@ -92,7 +81,6 @@ e2eRoutes.post("/d1/execute", async (c) => {
     return c.json({ ok: false, error: "d1_execute_failed" }, 500);
   }
 });
-
 e2eRoutes.post("/archive/put", async (c) => {
   const input = await body(c.req.raw);
   const key = String(input?.key || "")
@@ -109,7 +97,6 @@ e2eRoutes.post("/archive/put", async (c) => {
     return c.json({ ok: false, error: "archive_put_failed" }, 502);
   }
 });
-
 e2eRoutes.post("/scheduled/run", async (c) => {
   const input = await body(c.req.raw);
   const key = String(input?.key || "");
@@ -154,7 +141,6 @@ e2eRoutes.post("/scheduled/run", async (c) => {
   }
   return c.json({ ok: true, data: { key, scheduledAt } });
 });
-
 e2eRoutes.post("/ingest/flush", async (c) => {
   const input = await body(c.req.raw);
   const siteId = String(input?.siteId || "")
@@ -169,7 +155,6 @@ e2eRoutes.post("/ingest/flush", async (c) => {
   if (!response.ok) return c.json({ ok: false, error: "flush_failed" }, 502);
   return c.json({ ok: true, data: { flushed: true, siteId } });
 });
-
 e2eRoutes.get("/ingest/status", async (c) => {
   const siteId = String(c.req.query("siteId") || "")
     .trim()

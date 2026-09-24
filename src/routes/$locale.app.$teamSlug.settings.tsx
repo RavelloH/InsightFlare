@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { TeamManagementClient } from "@/components/dashboard/team-management-client";
+import { TeamManagementClient } from "@/components/dashboard/admin/team-management-client";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { loadTeamManagementInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";

@@ -4,8 +4,7 @@ import {
   executeTypedBatch,
   type TypedBatchDispatchContext,
   type TypedBatchItem,
-} from "@/lib/api-v1/typed-batch";
-
+} from "@/lib/api-v1/batch/handler";
 const principal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -13,7 +12,6 @@ const principal = {
   scopes: ["analytics:read" as const],
   siteIds: ["site-1"],
 };
-
 const input = {
   requests: [
     {
@@ -30,10 +28,10 @@ const input = {
     },
   ],
 };
-
 describe("executeTypedBatch", () => {
   it("accepts the expanded 50-item request contract", async () => {
-    const { TypedBatchRequestSchema } = await import("@/lib/api-v1/dto/batch");
+    const { TypedBatchRequestSchema } =
+      await import("@/lib/api-v1/contract/dto/batch");
     const requests = Array.from({ length: 50 }, (_, index) => ({
       id: `item-${index}`,
       method: "POST" as const,
@@ -152,7 +150,8 @@ describe("executeTypedBatch", () => {
   });
 
   it("fails duplicate IDs at DTO validation before any batch work is scheduled", async () => {
-    const { TypedBatchRequestSchema } = await import("@/lib/api-v1/dto/batch");
+    const { TypedBatchRequestSchema } =
+      await import("@/lib/api-v1/contract/dto/batch");
     expect(
       TypedBatchRequestSchema.safeParse({
         requests: [

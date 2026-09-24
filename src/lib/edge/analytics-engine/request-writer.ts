@@ -1,5 +1,5 @@
-import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine";
-import type { InvocationLogger } from "@/lib/edge/observability-logger";
+import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine/config";
+import type { InvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env, TrackerClientPayload } from "@/lib/edge/types";
 
 import {
@@ -35,20 +35,15 @@ import {
   safeStringify,
   stringValue,
 } from "./writer-utils";
-
 export type { RequestAnalyticsInput } from "./request-schema";
-
 export type RequestAnalyticsEnvironment = Env & {
   REQUEST_ANALYTICS?: AnalyticsEngineDataset;
 };
-
 export type RequestAnalyticsLogger = Pick<InvocationLogger, "warn" | "error"> &
   Partial<Pick<InvocationLogger, "info">>;
-
 function requestCategory(input: RequestAnalyticsInput): string {
   return stringValue(input.category, 40);
 }
-
 function requestReasons(input: RequestAnalyticsInput): string {
   return clampString(
     input.reasons
@@ -58,7 +53,6 @@ function requestReasons(input: RequestAnalyticsInput): string {
     2_048,
   );
 }
-
 /**
  * Write the single request-level projection for a /collect request.
  *

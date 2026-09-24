@@ -3,7 +3,9 @@ import type * as ReactStartServerModule from "@tanstack/react-start/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as DashboardServerModule from "@/lib/dashboard/server";
-
+const { teamDashboardExecute } = vi.hoisted(() => ({
+  teamDashboardExecute: vi.fn(),
+}));
 vi.mock("@tanstack/react-start", async (importOriginal) => {
   const actual = await importOriginal<typeof ReactStartModule>();
   return {
@@ -46,12 +48,10 @@ vi.mock("@tanstack/react-start", async (importOriginal) => {
     },
   };
 });
-
 vi.mock("@tanstack/react-start/server", async (importOriginal) => {
   const actual = await importOriginal<typeof ReactStartServerModule>();
   return { ...actual, getRequest: vi.fn() };
 });
-
 vi.mock("@/lib/dashboard/server", () => ({
   getDashboardRootContext: vi.fn(),
   getDashboardTeamSites: vi.fn(),
@@ -59,32 +59,27 @@ vi.mock("@/lib/dashboard/server", () => ({
   getTeamSiteContext: vi.fn(),
   readDashboardAdmin: vi.fn(),
 }));
-
 vi.mock("@/lib/dashboard/query-preferences", () => ({
   resolveDashboardInitialWindow: vi.fn(),
 }));
-
-vi.mock("@/lib/dashboard/server-query", () => ({
+vi.mock("@/lib/dashboard/server/query", () => ({
   resolveTeamDashboardRequest: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/analytics/providers/d1/operations/team-dashboard", () => ({
-  readTeamDashboard: vi.fn(),
+vi.mock("@/lib/edge/analytics/composition/ssr-query-runtime", () => ({
+  createTeamDashboardQueryRuntime: vi.fn(() => ({
+    execute: teamDashboardExecute,
+  })),
 }));
-
 vi.mock("@/lib/edge/runtime", () => ({
   resolveEdgeRuntime: vi.fn(),
 }));
-
-vi.mock("@/lib/edge-client", () => ({
+vi.mock("@/lib/dashboard-api/client/edge", () => ({
   fetchPublicSite: vi.fn(),
   normalizeNotificationPreferencesData: vi.fn((value: unknown) => value),
 }));
-
-vi.mock("@/lib/dashboard/client-request", () => ({
+vi.mock("@/lib/dashboard/client/request", () => ({
   publicDashboardSiteId: vi.fn((slug: string) => `public-${slug}`),
 }));
-
 import { getRequest } from "@tanstack/react-start/server";
 
 import { resolveDashboardInitialWindow } from "@/lib/dashboard/query-preferences";
@@ -112,14 +107,13 @@ import {
   getDashboardTeamSites,
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
-import { resolveTeamDashboardRequest } from "@/lib/dashboard/server-query";
-import { readTeamDashboard } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
-import { resolveEdgeRuntime } from "@/lib/edge/runtime";
+import { resolveTeamDashboardRequest } from "@/lib/dashboard/server/query";
 import {
   fetchPublicSite,
   normalizeNotificationPreferencesData,
-} from "@/lib/edge-client";
-
+} from "@/lib/dashboard-api/client/edge";
+import { createTeamDashboardQueryRuntime } from "@/lib/edge/analytics/composition/ssr-query-runtime";
+import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 function headersOf(init: Record<string, string>, url = "https://app.test/") {
   return {
     url,
@@ -128,7 +122,6 @@ function headersOf(init: Record<string, string>, url = "https://app.test/") {
     },
   } as unknown as Request;
 }
-
 function mockAdminReads(reads: Record<string, unknown>) {
   vi.mocked(readDashboardAdmin).mockImplementation(async (route) => {
     const key = String(route);
@@ -137,7 +130,6 @@ function mockAdminReads(reads: Record<string, unknown>) {
       : null;
   });
 }
-
 describe("Dashboard route data loaders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -164,10 +156,11 @@ describe("Dashboard route data loaders", () => {
       interval: "day",
       timeZone: "Asia/Tokyo",
     });
-    vi.mocked(readTeamDashboard).mockResolvedValue({
+    teamDashboardExecute.mockReset().mockResolvedValue({
+      ok: true,
       data: { sites: [], trend: [] },
-      source: "raw",
-    } as never);
+      meta: { source: "raw", approximateVisitors: false },
+    });
     vi.mocked(getDashboardTeamSites).mockResolvedValue([]);
   });
 
@@ -268,7 +261,7 @@ describe("Dashboard route data loaders", () => {
         env: { DB: {} },
         teamId: "team-requested",
       });
-      expect(readTeamDashboard).toHaveBeenCalledWith({
+      expect(createTeamDashboardQueryRuntime).toHaveBeenCalledWith({
         env: { DB: {} },
         teamId: "team-1",
         window: {
@@ -278,21 +271,30 @@ describe("Dashboard route data loaders", () => {
           timeZone: "Asia/Tokyo",
         },
         interval: "day",
-        filters: { version: 1, root: null },
         allowedSiteIds: ["site-1"],
         preloadedSites: [],
       });
+      expect(teamDashboardExecute).toHaveBeenCalledWith(
+        "team-dashboard",
+        expect.objectContaining({
+          filters: { version: 1, root: null },
+          time: expect.objectContaining({
+            range: { startMs: 100, endExclusiveMs: 200 },
+            reportingTimeZone: "Asia/Tokyo",
+          }),
+        }),
+      );
     });
 
     it("keeps typed operation failures as SSR errors", async () => {
-      vi.mocked(readTeamDashboard).mockRejectedValueOnce(new Error("internal"));
+      teamDashboardExecute.mockRejectedValueOnce(new Error("internal"));
 
       await expect(
         loadTeamDashboardSnapshot({
           data: { teamId: "team-requested" },
         } as never),
       ).rejects.toThrow("internal");
-      expect(readTeamDashboard).toHaveBeenCalled();
+      expect(teamDashboardExecute).toHaveBeenCalled();
     });
 
     it("passes URL filters to the SSR team dashboard reader", async () => {
@@ -307,7 +309,8 @@ describe("Dashboard route data loaders", () => {
         data: { teamId: "team-requested" },
       } as never);
 
-      expect(readTeamDashboard).toHaveBeenCalledWith(
+      expect(teamDashboardExecute).toHaveBeenCalledWith(
+        "team-dashboard",
         expect.objectContaining({
           filters: {
             version: 1,

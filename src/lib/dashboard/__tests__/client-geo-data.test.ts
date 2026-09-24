@@ -3,10 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchOverviewGeoDimensionTab,
   fetchOverviewGeoPoints,
-} from "@/lib/dashboard/client-geo-data";
+} from "@/lib/dashboard/client/data/geo";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-
 describe("dashboard client geo data helpers", () => {
   const realFetch = globalThis.fetch;
   const realDemoMode = process.env.VITE_DEMO_MODE;

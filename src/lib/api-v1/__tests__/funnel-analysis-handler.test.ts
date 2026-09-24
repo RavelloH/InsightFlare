@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
-import { AnalysisDefinitionReadCancelledError } from "@/lib/api-v1/analysis-definition-reader";
-import { handlePlannedSiteFunnelAnalysis } from "@/lib/api-v1/funnel-analysis-handler";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { AnalysisDefinitionReadCancelledError } from "@/lib/api-v1/analytics/analysis-definition-reader";
+import { handlePlannedSiteFunnelAnalysis } from "@/lib/api-v1/analytics/funnel-analysis";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 
 const principal = (
   overrides: Partial<ApiKeyPrincipal> = {},

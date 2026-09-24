@@ -6,8 +6,7 @@ import {
   readBoundedJson,
   serializedUtf8ByteLength,
   utf8ByteLength,
-} from "@/lib/api-v1/request-budget";
-
+} from "@/lib/api-v1/application/request-budget";
 describe("API v1 request budgets", () => {
   it("measures UTF-8 bytes rather than UTF-16 code units", () => {
     expect(utf8ByteLength("😀")).toBe(4);

@@ -1,17 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  buildSiteAnalyticsSchema,
-  buildTeamAnalyticsSchema,
-} from "@/lib/api-v1/analytics-schema";
+import { AnalyticsTimeseriesResponseSchema } from "@/lib/api-v1/contract/wire";
 import {
   ApiV1GeneratedAbortError,
   ApiV1GeneratedContractError,
   ApiV1GeneratedTransportError,
   createApiV1GeneratedClient,
 } from "@/lib/api-v1/generated-client";
-import { AnalyticsTimeseriesResponseSchema } from "@/lib/api-v1/wire";
-
+import {
+  buildSiteAnalyticsSchema,
+  buildTeamAnalyticsSchema,
+} from "@/lib/api-v1/schema/analytics";
 const overviewInput = {
   timeRange: {
     kind: "absolute" as const,
@@ -20,7 +19,6 @@ const overviewInput = {
   },
   filter: null,
 };
-
 const overviewData = {
   views: 10,
   sessions: 4,
@@ -31,14 +29,12 @@ const overviewData = {
   bounceRate: 0.25,
   approximateVisitors: false,
 };
-
 function response(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
 }
-
 describe("API v1 generated client", () => {
   it("routes core and comparison commands through the generated transport", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>

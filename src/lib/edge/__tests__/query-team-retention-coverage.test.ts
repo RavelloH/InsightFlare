@@ -3,14 +3,17 @@ import { DatabaseSync } from "node:sqlite";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { executePrivateTeamDashboard } from "@/lib/edge/analytics/adapters/private";
-import { handleRetentionContract as handleRetention } from "@/lib/edge/analytics/composition/protocol/analysis-contract-adapter";
+import { executePrivateTeamDashboard } from "@/lib/edge/analytics/interfaces/dashboard/private";
+import { handleRetentionContract as handleRetention } from "@/lib/edge/analytics/interfaces/dashboard/protocol/analysis";
+import { parseWindow } from "@/lib/edge/analytics/interfaces/dashboard/protocol/parsers";
 import {
-  badRequest,
-  normalizePathname,
-  parseWindow,
-  resolvePrivateTeam,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+  parseLimit,
+  parseQueryLimit,
+  parseSessionListSort,
+  parseVisitorListSort,
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/parsers";
+import { badRequest } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import { normalizePathname } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   browserMajorVersionExpr,
   clientDimensionDefinition,
@@ -19,27 +22,18 @@ import {
   utmDimensionDefinition,
 } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
-  parseLimit,
-  parseQueryLimit,
-  parseSessionListSort,
-  parseVisitorListSort,
-} from "@/lib/edge/analytics/providers/d1/internal/core-parsers";
-import {
   queryTeamOverviewFromD1,
   queryTeamTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/team";
-import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
+import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
+import { resolvePrivateTeam } from "@/lib/edge/auth/site-access";
 import type { Env } from "@/lib/edge/types";
-
 const requireSessionMock = vi.hoisted(() => vi.fn());
-
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: requireSessionMock,
 }));
-
 type D1Row = Record<string, unknown>;
 type QueryBinding = string | number | null;
-
 function addSiteIdentityFixture(
   database: DatabaseSync,
   siteIds: readonly string[],
@@ -65,13 +59,11 @@ function addSiteIdentityFixture(
   );
   siteIds.forEach((siteId, index) => insertIdentity.run(index + 1, siteId));
 }
-
 interface QueryCall {
   kind: "all" | "first";
   sql: string;
   bindings: QueryBinding[];
 }
-
 const siteId = "site-team-retention";
 const baseMs = Date.UTC(2026, 0, 5, 0);
 const window = {
@@ -80,7 +72,6 @@ const window = {
   nowMs: baseMs + 3 * 60 * 60 * 1000,
   timeZone: "UTC",
 };
-
 const adminSession: EdgeSessionClaims = {
   userId: "admin-1",
   username: "admin",
@@ -88,7 +79,6 @@ const adminSession: EdgeSessionClaims = {
   systemRole: "admin",
   exp: 9_999_999_999,
 };
-
 function createD1Env(resultSets: D1Row[][], firstRows: D1Row[] = []) {
   const calls: QueryCall[] = [];
   const pendingAll = [...resultSets];
@@ -116,15 +106,12 @@ function createD1Env(resultSets: D1Row[][], firstRows: D1Row[] = []) {
     prepare,
   };
 }
-
 function visitBindingsForSites(siteIds: string[]) {
   return [...siteIds, window.startMs, window.endExclusiveMs];
 }
-
 function visitBindings(targetWindow = window) {
   return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
-
 function url(path: string, params: Record<string, string | number | boolean>) {
   const parsed = new URL(`https://edge.test${path}`);
   for (const [key, value] of Object.entries(params)) {
@@ -132,7 +119,6 @@ function url(path: string, params: Record<string, string | number | boolean>) {
   }
   return parsed;
 }
-
 async function handleTeamDashboard(
   request: Request,
   env: Env,
@@ -148,7 +134,6 @@ async function handleTeamDashboard(
     url: target,
   });
 }
-
 describe("edge query core dimension and parser edge coverage", () => {
   it("normalizes page labels and dimension SQL definitions", () => {
     expect(normalizePathname("  ")).toBe("/");
@@ -197,7 +182,6 @@ describe("edge query core dimension and parser edge coverage", () => {
     ).toEqual({ key: "durationMs", direction: "asc" });
   });
 });
-
 describe("edge team query coverage", () => {
   beforeEach(() => {
     requireSessionMock.mockReset();
@@ -696,7 +680,6 @@ describe("edge team query coverage", () => {
     });
   });
 });
-
 describe("edge journey retention coverage", () => {
   it("rejects invalid retention windows before querying D1", async () => {
     const { env, prepare } = createD1Env([]);

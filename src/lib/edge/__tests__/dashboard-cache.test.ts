@@ -3,8 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PUBLIC_QUERY_CACHE_OPTIONS,
   withDashboardCache,
-} from "@/lib/edge/dashboard-cache";
-
+} from "@/lib/edge/analytics/composition/dashboard-cache";
 describe("edge dashboard cache wrapper", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();

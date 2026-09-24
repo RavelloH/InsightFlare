@@ -1,7 +1,7 @@
 import { RiHammerLine } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { PageHeading } from "@/components/dashboard/page-heading";
+import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute("/$locale/app/$teamSlug/widgets")({

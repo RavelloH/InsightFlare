@@ -43,18 +43,18 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import { queryGeoPointAggregate } from "@/lib/edge/analytics/providers/d1/internal/journeys";
 import {
-  queryPagesDashboard,
   queryPagesPageFromD1,
   queryPagesWithTabsFromD1,
   queryPageTabsAggregate,
+} from "@/lib/edge/analytics/providers/d1/internal/pages";
+import { decodePagesCursor } from "@/lib/edge/analytics/providers/d1/internal/pages";
+import { queryPagesDashboard } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard";
+import { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
+import {
   queryReferrersPageFromD1,
   queryReferrerSummaryFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/pages";
-import {
-  decodePagesCursor,
-  decodeReferrersCursor,
-} from "@/lib/edge/analytics/providers/d1/internal/pages";
-import { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
+} from "@/lib/edge/analytics/providers/d1/internal/referrers";
+import { decodeReferrersCursor } from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import { InvalidCursorError } from "@/lib/pagination";
 
 import {
@@ -65,7 +65,6 @@ import {
   stringField,
   timeWindow,
 } from "./shared";
-
 function overviewTabExpression(tab: string): string | null {
   if (tab === "page.path") return "TRIM(COALESCE(pathname, ''))";
   if (tab === "page.query") return "TRIM(COALESCE(query_string, ''))";
@@ -95,7 +94,6 @@ function overviewTabExpression(tab: string): string | null {
   if (tab === "geo.organization") return "TRIM(COALESCE(as_organization, ''))";
   return null;
 }
-
 export async function overviewTabData(
   options: D1SiteQueryRuntimeOptions,
   request: RuntimeQuery,
@@ -541,7 +539,6 @@ export async function overviewTabData(
     },
   };
 }
-
 export function dimensionExpression(dimension: string): string {
   if (dimension === "country") return "country";
   if (dimension === "page.query") return "query_string";
@@ -553,7 +550,6 @@ export function dimensionExpression(dimension: string): string {
   }
   return dimension;
 }
-
 export function registerSiteContractProviders(
   registry: AnalyticsProviderRegistry,
   options: D1SiteQueryRuntimeOptions,
@@ -654,7 +650,7 @@ export function registerSiteContractProviders(
         );
         return {
           value: {
-            data: aggregate.points,
+            points: aggregate.points,
             countryCounts: aggregate.countryCounts,
             regionCounts: aggregate.regionCounts,
             cityCounts: aggregate.cityCounts,

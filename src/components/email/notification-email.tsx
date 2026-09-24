@@ -29,7 +29,7 @@ import {
   formatNotificationNumber,
 } from "@/lib/notifications/email-format";
 import { NOTIFICATION_EMAIL_MESSAGES } from "@/lib/notifications/email-i18n";
-import type { NotificationMessage } from "@/lib/notifications/message-store";
+import type { NotificationMessage } from "@/lib/notifications/message";
 
 export interface NotificationEmailProps {
   locale: Locale;

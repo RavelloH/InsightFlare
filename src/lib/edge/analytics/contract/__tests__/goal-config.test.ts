@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
 import {
   decodeGoalConfig,
   encodeGoalConfig,
@@ -11,6 +10,7 @@ import {
   validateGoalConfigForWrite,
 } from "@/lib/edge/analytics/contract/goal-config";
 import { FILTER_DSL_MAX_LENGTH, parseFilterDsl } from "@/lib/filter-contract";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 
 const validConfig: GoalConfigV1 = {
   filterDslVersion: 1,

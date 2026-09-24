@@ -1,16 +1,15 @@
 import type { MiddlewareHandler } from "hono";
 
-import { instrumentEnv } from "@/lib/edge/observability-bindings";
+import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
   errorLogData,
   type InvocationCacheState,
   type InvocationDataSource,
   runWithInvocationLogger,
-} from "@/lib/edge/observability-logger";
+} from "@/lib/edge/observability/logger";
 import type { AppEnv } from "@/lib/hono/types";
 import { getRequestId } from "@/lib/response";
-
 function parseCacheState(
   value: string | null,
 ): InvocationCacheState | undefined {
@@ -19,7 +18,6 @@ function parseCacheState(
   }
   return undefined;
 }
-
 function parseDataSource(
   value: string | null,
 ): InvocationDataSource | undefined {
@@ -28,18 +26,15 @@ function parseDataSource(
   }
   return undefined;
 }
-
 function parseRowsRead(value: string | null): number | undefined {
   if (value === null || value === "unavailable") return undefined;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return undefined;
   return Math.trunc(parsed);
 }
-
 function routeForLog(routePath: string): string {
   return routePath && routePath !== "*" ? routePath : "unmatched";
 }
-
 export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     // Page routing can internally dispatch to Hono. That is not an external

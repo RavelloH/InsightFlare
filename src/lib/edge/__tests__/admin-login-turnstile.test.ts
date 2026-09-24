@@ -1,28 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { requireActor } from "@/lib/edge/admin-auth";
+import { requireActor } from "@/lib/edge/admin/auth";
 import {
   handleLoginTurnstileConfigAdmin,
   handleLoginTurnstileTestAdmin,
-} from "@/lib/edge/admin-login-turnstile";
-import { verifyTurnstileToken } from "@/lib/edge/turnstile-siteverify";
+} from "@/lib/edge/admin/auth/login-turnstile";
+import { verifyTurnstileToken } from "@/lib/edge/auth/turnstile-siteverify";
 import type { Env } from "@/lib/edge/types";
-
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   requireActor: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/turnstile-siteverify", () => ({
+vi.mock("@/lib/edge/auth/turnstile-siteverify", () => ({
   verifyTurnstileToken: vi.fn(),
 }));
-
 interface MockStatement {
   bind: ReturnType<typeof vi.fn>;
   first: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
   all: ReturnType<typeof vi.fn>;
 }
-
 const actor = {
   user: {
     id: "admin-1",
@@ -37,7 +33,6 @@ const actor = {
   },
   isAdmin: true,
 };
-
 function statement(options: { first?: unknown; runReject?: Error } = {}) {
   const stmt: MockStatement = {
     bind: vi.fn((..._args: unknown[]) => stmt),
@@ -49,7 +44,6 @@ function statement(options: { first?: unknown; runReject?: Error } = {}) {
   };
   return stmt;
 }
-
 function createEnv(
   statements: MockStatement[],
   kv?: {
@@ -77,14 +71,12 @@ function createEnv(
       : undefined,
   } as Env;
 }
-
 function request(path: string, init?: RequestInit) {
   return new Request(`https://app.test${path}`, {
     method: "GET",
     ...init,
   });
 }
-
 function jsonRequest(path: string, body: unknown, method = "PATCH") {
   return request(path, {
     method,
@@ -92,7 +84,6 @@ function jsonRequest(path: string, body: unknown, method = "PATCH") {
     body: JSON.stringify(body),
   });
 }
-
 function configRow(value: Record<string, unknown>) {
   return {
     value_json: JSON.stringify({
@@ -107,11 +98,9 @@ function configRow(value: Record<string, unknown>) {
     }),
   };
 }
-
 async function jsonOf(response: Response) {
   return (await response.json()) as Record<string, any>;
 }
-
 describe("login Turnstile admin handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();

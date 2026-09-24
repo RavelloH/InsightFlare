@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { RetentionClientPage } from "@/components/dashboard/site-pages/retention-client-page";
+import { RetentionClientPage } from "@/components/dashboard/site-pages/retention/retention-client-page";
 import { buildSitePath } from "@/lib/dashboard/paths";
 import { dashboardPageTitle } from "@/lib/page-title";
 

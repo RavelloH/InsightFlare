@@ -1,14 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
-import { apiV1AnalyticsListRouteRegistry } from "@/lib/api-v1/route-registry";
 import {
   handlePlannedSiteChannels,
   type SiteChannelsReader,
-} from "@/lib/api-v1/site-list-handler";
-import { AnalyticsChannelsResponseSchema } from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/analytics/site-list";
+import { apiV1AnalyticsListRouteRegistry } from "@/lib/api-v1/application/route-registry";
+import { AnalyticsChannelsResponseSchema } from "@/lib/api-v1/contract/wire";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -17,7 +16,6 @@ const principal: ApiKeyPrincipal = {
   scopes: ["analytics:read"],
   siteIds: ["site-1"],
 };
-
 const request = (body: unknown) =>
   new Request("https://app.test/api/v1/sites/site-1/analytics/channels", {
     method: "POST",
@@ -27,7 +25,6 @@ const request = (body: unknown) =>
     },
     body: JSON.stringify(body),
   });
-
 describe("site analytics channels API", () => {
   it("registers the exposed operation with its own route", () => {
     expect(apiV1AnalyticsListRouteRegistry).toContainEqual(

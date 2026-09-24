@@ -3,7 +3,7 @@ import {
   hasFilterDocument,
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
-} from "@/lib/edge/hourly-rollup";
+} from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -36,7 +36,6 @@ import {
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
 } from "./scoped-dataset";
-
 export async function queryOverviewFromD1(
   env: Env,
   siteId: string,
@@ -116,7 +115,6 @@ FROM ${metricSource}
     durationViews: Number(row.durationViews ?? 0),
   };
 }
-
 export async function queryTrendFromD1(
   env: Env,
   siteId: string,
@@ -294,7 +292,6 @@ ORDER BY bucket ASC
     durationViews: Number(row.durationViews ?? 0),
   }));
 }
-
 /**
  * Site-level activity is a composite concern, not a breakdown metric. Keep
  * the filter and half-open window aligned with the overview/trend readers.
@@ -355,7 +352,6 @@ FROM ${metricSource}
   const value = Number(raw);
   return Number.isSafeInteger(value) ? value : null;
 }
-
 export async function queryOverviewAggregate(
   env: Env,
   siteId: string,
@@ -388,7 +384,6 @@ export async function queryOverviewAggregate(
     approximateVisitors: false,
   };
 }
-
 export async function queryTrendAggregate(
   env: Env,
   siteId: string,
@@ -429,7 +424,6 @@ export async function queryTrendAggregate(
     diagnosticSource: "raw",
   };
 }
-
 export async function buildOverviewClientDimensionTabs(
   env: Env,
   siteId: string,
@@ -445,7 +439,6 @@ export async function buildOverviewClientDimensionTabs(
     limit,
   );
 }
-
 export async function buildOverviewGeoDimensionTabs(
   env: Env,
   siteId: string,
@@ -455,16 +448,12 @@ export async function buildOverviewGeoDimensionTabs(
 ) {
   return queryOverviewGeoDimensionsFromD1(env, siteId, window, filters, limit);
 }
-
 export type OverviewPageTabKey =
   "path" | "title" | "hostname" | "entry" | "exit";
-
 export type OverviewSourceTabKey = "domain" | "link";
-
 export type OverviewClientTabKey = Exclude<
   ClientDimensionKey,
   "operatingSystem"
 >;
-
 export type OverviewGeoTabKey =
   "country" | "region" | "city" | "continent" | "timezone" | "organization";

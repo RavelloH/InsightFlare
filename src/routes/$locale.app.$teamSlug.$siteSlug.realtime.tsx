@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { RealtimeClientPage } from "@/components/dashboard/site-pages/realtime-client-page";
+import { RealtimeClientPage } from "@/components/dashboard/site-pages/realtime/realtime-client-page";
 import { buildSitePath } from "@/lib/dashboard/paths";
 import { dashboardPageTitle } from "@/lib/page-title";
 

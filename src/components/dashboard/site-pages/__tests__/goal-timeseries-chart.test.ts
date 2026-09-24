@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeGoalTimeseries } from "@/components/dashboard/site-pages/goal-timeseries-chart";
-import type { GoalTimeseriesPoint } from "@/lib/edge-client";
+import { normalizeGoalTimeseries } from "@/components/dashboard/site-pages/goals/goal-timeseries-chart";
+import type { GoalTimeseriesPoint } from "@/lib/dashboard-api/client/edge";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const UTC_DAY_START = Date.parse("2024-01-01T00:00:00.000Z");

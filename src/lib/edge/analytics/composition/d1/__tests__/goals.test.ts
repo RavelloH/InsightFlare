@@ -27,7 +27,6 @@ const input = {
     reportingTimeZone: "UTC",
   },
   filters: { version: 1 as const, root: null },
-  scopedDataset: { scope: "event" },
 };
 
 describe("D1 Goal provider composition", () => {
@@ -65,7 +64,6 @@ describe("D1 Goal provider composition", () => {
         timeZone: "UTC",
       },
       filters: input.filters,
-      scopedDataset: input.scopedDataset,
     });
     expect(readSiteGoalTimeseries).toHaveBeenCalledWith({
       env,
@@ -79,7 +77,6 @@ describe("D1 Goal provider composition", () => {
         timeZone: "UTC",
       },
       filters: input.filters,
-      scopedDataset: input.scopedDataset,
     });
   });
 

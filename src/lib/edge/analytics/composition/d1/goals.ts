@@ -14,19 +14,18 @@ import { readSiteGoalSummary } from "@/lib/edge/analytics/providers/d1/operation
 import { readSiteGoalTimeseries } from "@/lib/edge/analytics/providers/d1/operations/site-goal-timeseries";
 
 import type { D1SiteQueryRuntimeOptions, RuntimeQuery } from "./shared";
-
 export {
+  archiveGoalDefinition,
+  createGoalDefinition,
   decodeGoalDefinitionCursor,
-  handleGoal,
   queryGoalDefinition,
   queryGoalDefinitionsPage,
+  updateGoalDefinition,
 } from "@/lib/edge/analytics/providers/d1/internal/goals";
-
 function query(input: RuntimeQuery | undefined): RuntimeQuery {
   if (!input) throw new Error("goal_query_missing");
   return input;
 }
-
 export function registerGoalProviders(
   registry: AnalyticsProviderRegistry,
   options: D1SiteQueryRuntimeOptions,
@@ -46,7 +45,6 @@ export function registerGoalProviders(
           timeZone: request.time.reportingTimeZone,
         },
         filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
-        scopedDataset: request.scopedDataset,
       });
       return { value: result };
     }),
@@ -69,7 +67,6 @@ export function registerGoalProviders(
           timeZone: request.time.reportingTimeZone,
         },
         filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
-        scopedDataset: request.scopedDataset,
       });
       return { value: result };
     }),

@@ -4,33 +4,29 @@ import {
   hasRequestFlag,
   REQUEST_ANALYTICS_FLAGS,
 } from "@/lib/edge/analytics-engine/request-schema";
+import { issueCollectToken } from "@/lib/edge/auth/collect-token";
 import {
   handleCollectOptionsRequest,
   handleCollectRequest,
-} from "@/lib/edge/collect";
-import { issueCollectToken } from "@/lib/edge/collect-token";
-import type * as SiteSettingsStoreModule from "@/lib/edge/site-settings-store";
-import { readSiteTrackingConfig } from "@/lib/edge/site-settings-store";
+} from "@/lib/edge/collector/collect";
+import type * as SiteSettingsStoreModule from "@/lib/edge/sites/settings-store";
+import { readSiteTrackingConfig } from "@/lib/edge/sites/settings-store";
 import type {
   SiteSettingsJsonValue,
   SiteTrackingConfig,
 } from "@/lib/site-settings";
-
-vi.mock("@/lib/edge/site-settings-store", async () => {
+vi.mock("@/lib/edge/sites/settings-store", async () => {
   const actual = await vi.importActual<typeof SiteSettingsStoreModule>(
-    "@/lib/edge/site-settings-store",
+    "@/lib/edge/sites/settings-store",
   );
   return {
     ...actual,
     readSiteTrackingConfig: vi.fn(),
   };
 });
-
 const readSiteTrackingConfigMock = vi.mocked(readSiteTrackingConfig);
-
 const CHROME_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-
 const baseSettings: SiteTrackingConfig = {
   siteId: "site-1",
   siteDomain: "example.com",
@@ -44,7 +40,6 @@ const baseSettings: SiteTrackingConfig = {
   ignoreDoNotTrack: true,
   performanceSampleRate: 100,
 };
-
 const env = {
   INGEST_DO: {
     idFromName: vi.fn(),
@@ -56,11 +51,9 @@ const env = {
   SITE_SETTINGS_KV: {},
   MAIN_SECRET: "main-secret",
 };
-
 const ctx = {
   waitUntil: vi.fn(),
 };
-
 async function makePayload(overrides: Record<string, unknown> = {}) {
   const tokenSiteId = String(
     overrides.collectTokenSiteId ?? overrides.siteId ?? "site-1",
@@ -89,7 +82,6 @@ async function makePayload(overrides: Record<string, unknown> = {}) {
     ...payloadOverrides,
   };
 }
-
 function makeRuntimeRequest(input: {
   url?: string;
   origin?: string;
@@ -133,7 +125,6 @@ function makeRuntimeRequest(input: {
 
   return request;
 }
-
 type BlockingCollectorCase = {
   name: string;
   rules: Record<string, string[]>;
@@ -141,7 +132,6 @@ type BlockingCollectorCase = {
   headers?: Record<string, string>;
   cf?: Record<string, unknown>;
 };
-
 async function readForwardedEnvelope() {
   const waitUntilPromise = ctx.waitUntil.mock.calls.at(-1)?.[0];
   await waitUntilPromise;
@@ -149,7 +139,6 @@ async function readForwardedEnvelope() {
   const fetchInit = stub.fetch.mock.calls[0]?.[1] as RequestInit;
   return JSON.parse(String(fetchInit.body)) as Record<string, unknown>;
 }
-
 describe("collect route", () => {
   beforeEach(() => {
     vi.useRealTimers();

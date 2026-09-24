@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
 vi.mock("@/lib/edge/analytics/providers/d1/internal/channels", () => ({
   queryChannelAggregate: vi.fn(),
 }));
@@ -22,21 +21,24 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/journeys", () => ({
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/pages", () => ({
   decodePagesCursor: vi.fn(),
-  decodeReferrersCursor: vi.fn(),
   queryDimensionAggregate: vi.fn(),
   queryPageCardMetricsFromD1: vi.fn(),
   queryPageTabsAggregate: vi.fn(),
   queryPagesAggregate: vi.fn(),
-  queryPagesDashboard: vi.fn(),
   queryPagesPageFromD1: vi.fn(),
+}));
+vi.mock("@/lib/edge/analytics/providers/d1/internal/referrers", () => ({
+  decodeReferrersCursor: vi.fn(),
   queryReferrerAggregate: vi.fn(),
   queryReferrerSummaryFromD1: vi.fn(),
   queryReferrersPageFromD1: vi.fn(),
 }));
+vi.mock("@/lib/edge/analytics/providers/d1/internal/pages-dashboard", () => ({
+  queryPagesDashboard: vi.fn(),
+}));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/performance", () => ({
   queryPerformanceDashboardFromD1: vi.fn(),
 }));
-
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
   dimensionExpression,
@@ -61,24 +63,24 @@ import {
 import { queryGeoPointAggregate } from "@/lib/edge/analytics/providers/d1/internal/journeys";
 import {
   decodePagesCursor,
-  decodeReferrersCursor,
   queryDimensionAggregate,
   queryPagesAggregate,
-  queryPagesDashboard,
   queryPagesPageFromD1,
   queryPageTabsAggregate,
+} from "@/lib/edge/analytics/providers/d1/internal/pages";
+import { queryPagesDashboard } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard";
+import { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
+import {
+  decodeReferrersCursor,
   queryReferrerAggregate,
   queryReferrersPageFromD1,
   queryReferrerSummaryFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/pages";
-import { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
+} from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import type { Env } from "@/lib/edge/types";
-
 const env = {} as Env;
 const siteId = "site-provider";
 const time = createQueryTime(0, 100, "UTC", 100);
 const context = siteQueryContext(siteId, "public-share");
-
 const dimensionPage = {
   items: [{ value: "Chrome", views: 5, sessions: 3, visitors: 2 }],
   pagination: {
@@ -106,7 +108,6 @@ const referrerPage = {
     nextCursor: null,
   },
 };
-
 function input(fields: Record<string, unknown> = {}) {
   return {
     context,
@@ -115,13 +116,11 @@ function input(fields: Record<string, unknown> = {}) {
     ...fields,
   } as never;
 }
-
 function providers() {
   const registry = new AnalyticsProviderRegistry();
   registerSiteContractProviders(registry, { env, siteId });
   return registry;
 }
-
 describe("D1 site contract provider pagination routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();

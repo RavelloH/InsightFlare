@@ -2,48 +2,6 @@
 import type { ZodType } from "zod";
 
 import {
-  CreateFunnelBodySchema,
-  CreateGoalBodySchema,
-  CreateSiteInputSchema,
-  type FunnelResource,
-  type FunnelResourcePage,
-  FunnelResourcePageSchema,
-  FunnelResourceSchema,
-  GetTeamVisibleSavedFilterInputSchema,
-  type GoalResource,
-  type GoalResourcePage,
-  GoalResourcePageSchema,
-  GoalResourceSchema,
-  type ListFunnelsInput,
-  ListFunnelsInputSchema,
-  type ListGoalsInput,
-  ListGoalsInputSchema,
-  type ListSitesInput,
-  ListSitesInputSchema,
-  type ListTeamVisibleSavedFiltersInput,
-  ListTeamVisibleSavedFiltersInputSchema,
-  type PrivacySettings,
-  PrivacySettingsSchema,
-  type SavedFilterDefinition,
-  type SavedFilterPage,
-  type SharingSettings,
-  SharingSettingsSchema,
-  type SiteResource,
-  type SiteResourcePage,
-  SiteResourcePageSchema,
-  SiteResourceSchema,
-  type TrackingScript,
-  TrackingScriptSchema,
-  type TrackingSettings,
-  TrackingSettingsSchema,
-  UpdateFunnelBodySchema,
-  UpdateGoalBodySchema,
-  UpdatePrivacySettingsBodySchema,
-  UpdateSharingSettingsBodySchema,
-  UpdateSiteBodySchema,
-  UpdateTrackingSettingsBodySchema,
-} from "@/lib/api-v1/application-registry";
-import {
   type CapabilitiesData,
   CapabilitiesDataSchema,
   type RootData,
@@ -58,7 +16,7 @@ import {
   TokenCheckSchema,
   type TokenData,
   TokenDataSchema,
-} from "@/lib/api-v1/core-registry";
+} from "@/lib/api-v1/application/core-registry";
 import {
   type SiteBreakdownQueryDtoInput,
   SiteBreakdownQueryDtoSchema,
@@ -146,15 +104,53 @@ import {
   TeamSitesQueryDtoSchema,
   type TeamTimeseriesQueryDto,
   TeamTimeseriesQueryDtoSchema,
-} from "@/lib/api-v1/dto/analytics";
+} from "@/lib/api-v1/contract/dto/analytics";
 import {
   type TypedBatchRequest,
   TypedBatchRequestSchema,
-} from "@/lib/api-v1/dto/batch";
+} from "@/lib/api-v1/contract/dto/batch";
 import {
-  apiV1GeneratedRouteMethod,
-  apiV1GeneratedRoutePath,
-} from "@/lib/api-v1/generated-client/route-metadata";
+  CreateFunnelBodySchema,
+  CreateGoalBodySchema,
+  CreateSiteInputSchema,
+  type FunnelResource,
+  type FunnelResourcePage,
+  FunnelResourcePageSchema,
+  FunnelResourceSchema,
+  GetTeamVisibleSavedFilterInputSchema,
+  type GoalResource,
+  type GoalResourcePage,
+  GoalResourcePageSchema,
+  GoalResourceSchema,
+  type ListFunnelsInput,
+  ListFunnelsInputSchema,
+  type ListGoalsInput,
+  ListGoalsInputSchema,
+  type ListSitesInput,
+  ListSitesInputSchema,
+  type ListTeamVisibleSavedFiltersInput,
+  ListTeamVisibleSavedFiltersInputSchema,
+  type PrivacySettings,
+  PrivacySettingsSchema,
+  type SavedFilterDefinition,
+  type SavedFilterPage,
+  type SharingSettings,
+  SharingSettingsSchema,
+  type SiteResource,
+  type SiteResourcePage,
+  SiteResourcePageSchema,
+  SiteResourceSchema,
+  type TrackingScript,
+  TrackingScriptSchema,
+  type TrackingSettings,
+  TrackingSettingsSchema,
+  UpdateFunnelBodySchema,
+  UpdateGoalBodySchema,
+  UpdatePrivacySettingsBodySchema,
+  UpdateSharingSettingsBodySchema,
+  UpdateSiteBodySchema,
+  UpdateTrackingSettingsBodySchema,
+} from "@/lib/api-v1/contract/resources";
 import {
   type AnalyticsBreakdownData,
   AnalyticsBreakdownResponseSchema,
@@ -239,22 +235,22 @@ import {
   TeamAnalyticsSitesResponseSchema,
   type TypedBatchData,
   TypedBatchResponseSchema,
-} from "@/lib/api-v1/wire";
-
+} from "@/lib/api-v1/contract/wire";
+import {
+  apiV1GeneratedRouteMethod,
+  apiV1GeneratedRoutePath,
+} from "@/lib/api-v1/generated-client/route-metadata";
 type ResourcePageInput = {
   readonly page?: Partial<ListSitesInput["page"]>;
 };
-
 export interface ApiV1GeneratedClientConfig {
   readonly baseUrl: string;
   readonly fetch?: typeof fetch;
   readonly bearer?: () => Promise<string | null> | string | null;
 }
-
 export interface ApiV1GeneratedRequestOptions {
   readonly signal?: AbortSignal;
 }
-
 export interface ApiV1GeneratedSuccess<T> {
   readonly ok: true;
   readonly status: number;
@@ -262,7 +258,6 @@ export interface ApiV1GeneratedSuccess<T> {
   readonly meta: Record<string, unknown>;
   readonly headers: Headers;
 }
-
 export interface ApiV1GeneratedFailure {
   readonly ok: false;
   readonly status: number;
@@ -279,31 +274,26 @@ export interface ApiV1GeneratedFailure {
   readonly meta: Record<string, unknown>;
   readonly headers: Headers;
 }
-
 export type ApiV1GeneratedResult<T> =
   ApiV1GeneratedSuccess<T> | ApiV1GeneratedFailure;
-
 export class ApiV1GeneratedTransportError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ApiV1GeneratedTransportError";
   }
 }
-
 export class ApiV1GeneratedAbortError extends Error {
   constructor() {
     super("API v1 request was aborted.");
     this.name = "ApiV1GeneratedAbortError";
   }
 }
-
 export class ApiV1GeneratedContractError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ApiV1GeneratedContractError";
   }
 }
-
 function normalizeBaseUrl(value: string): string {
   const parsed = new URL(value);
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
@@ -311,7 +301,6 @@ function normalizeBaseUrl(value: string): string {
   }
   return parsed.toString().replace(/\/+$/u, "");
 }
-
 async function readJson(response: Response): Promise<unknown> {
   const contentType = response.headers
     .get("content-type")
@@ -332,7 +321,6 @@ async function readJson(response: Response): Promise<unknown> {
     throw new ApiV1GeneratedContractError("Response body is not valid JSON.");
   }
 }
-
 async function request<T>(
   config: Required<Pick<ApiV1GeneratedClientConfig, "baseUrl">> &
     Pick<ApiV1GeneratedClientConfig, "fetch" | "bearer">,
@@ -395,7 +383,6 @@ async function request<T>(
     headers: response.headers,
   };
 }
-
 async function requestNoContent(
   config: Required<Pick<ApiV1GeneratedClientConfig, "baseUrl">> &
     Pick<ApiV1GeneratedClientConfig, "fetch" | "bearer">,
@@ -448,7 +435,6 @@ async function requestNoContent(
     headers: response.headers,
   };
 }
-
 export interface ApiV1GeneratedClient {
   getRoot(
     options?: ApiV1GeneratedRequestOptions,
@@ -809,7 +795,6 @@ export interface ApiV1GeneratedClient {
     options?: ApiV1GeneratedRequestOptions,
   ): Promise<ApiV1GeneratedResult<TypedBatchData>>;
 }
-
 export function createApiV1GeneratedClient(
   config: ApiV1GeneratedClientConfig,
 ): ApiV1GeneratedClient {

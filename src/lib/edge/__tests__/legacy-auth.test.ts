@@ -1,34 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleAuthLoginAdmin } from "@/lib/edge/admin-users";
+import { handleAuthLoginAdmin } from "@/lib/edge/admin/users/handlers";
 import {
   handleLegacyAuthLogin,
   handleLegacyAuthLogout,
-} from "@/lib/edge/legacy-auth";
-import { readLoginTurnstileRuntimeConfig } from "@/lib/edge/login-turnstile-runtime";
-import { decryptLoginTurnstileSecret } from "@/lib/edge/secret-encryption";
-import { verifyTurnstileToken } from "@/lib/edge/turnstile-siteverify";
-
-vi.mock("@/lib/edge/admin-users", () => ({
+} from "@/lib/edge/auth/legacy-auth";
+import { readLoginTurnstileRuntimeConfig } from "@/lib/edge/auth/login-turnstile-runtime";
+import { decryptLoginTurnstileSecret } from "@/lib/edge/auth/secret-encryption";
+import { verifyTurnstileToken } from "@/lib/edge/auth/turnstile-siteverify";
+vi.mock("@/lib/edge/admin/users/handlers", () => ({
   handleAuthLoginAdmin: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/login-turnstile-runtime", () => ({
+vi.mock("@/lib/edge/auth/login-turnstile-runtime", () => ({
   readLoginTurnstileRuntimeConfig: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/secret-encryption", () => ({
+vi.mock("@/lib/edge/auth/secret-encryption", () => ({
   decryptLoginTurnstileSecret: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/turnstile-siteverify", () => ({
+vi.mock("@/lib/edge/auth/turnstile-siteverify", () => ({
   verifyTurnstileToken: vi.fn(),
 }));
-
 const env = {
   MAIN_SECRET: "test-main-secret",
 };
-
 function jsonRequest(path: string, body: Record<string, unknown>): Request {
   return new Request(`https://app.test${path}`, {
     method: "POST",
@@ -39,18 +33,15 @@ function jsonRequest(path: string, body: Record<string, unknown>): Request {
     body: JSON.stringify(body),
   });
 }
-
 async function responseJson(response: Response) {
   return (await response.json()) as Record<string, unknown>;
 }
-
 function errorCode(body: Record<string, unknown>): string {
   const error = body.error;
   return error && typeof error === "object" && "code" in error
     ? String((error as { code?: unknown }).code ?? "")
     : "";
 }
-
 describe("legacy auth edge adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();

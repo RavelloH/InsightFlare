@@ -1,14 +1,13 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import type { QueryExecutionContext } from "@/lib/edge/analytics/application/service";
-import {
-  TypedQueryApplicationService,
-  type TypedQueryOperationInvocation,
-} from "@/lib/edge/analytics/application/service";
+import type { TypedQueryOperationInvocation } from "@/lib/edge/analytics/application/service";
 import type {
   AnalyticsResult,
   BaseQuery,
   QueryOperation,
 } from "@/lib/edge/analytics/contract";
+
+import { createAnalyticsQueryApplicationService } from "./query-application-service";
 
 type CanonicalRuntimeQuery =
   BaseQuery | (BaseQuery & Readonly<Record<string, unknown>>);
@@ -30,7 +29,7 @@ export interface AnalyticsQueryRuntime {
  */
 export function createAnalyticsQueryRuntime(
   providerRegistry: AnalyticsProviderRegistry,
-  service = new TypedQueryApplicationService(),
+  service = createAnalyticsQueryApplicationService(),
 ): AnalyticsQueryRuntime {
   return {
     providerRegistry,

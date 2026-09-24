@@ -9,15 +9,18 @@ import {
   handleNotificationRulePreviewAdmin,
   handleNotifications,
   handleNotificationsReadAll,
-} from "@/lib/edge/admin-notifications";
-import { handleAuthMeAdmin, handleUsersAdmin } from "@/lib/edge/admin-users";
-import { handleAdminWs } from "@/lib/edge/admin-ws";
+} from "@/lib/edge/admin/notifications/handler";
+import { handleReleasesCompareRequest } from "@/lib/edge/admin/system/releases-compare";
+import {
+  handleAuthMeAdmin,
+  handleUsersAdmin,
+} from "@/lib/edge/admin/users/handlers";
+import { handleAdminWs } from "@/lib/edge/admin/ws";
 import {
   handleLegacyAuthLogin,
   handleLegacyAuthLogout,
-} from "@/lib/edge/legacy-auth";
-import { handleMapRelayRequest } from "@/lib/edge/map-relay";
-import { handleReleasesCompareRequest } from "@/lib/edge/releases-compare";
+} from "@/lib/edge/auth/legacy-auth";
+import { handleMapRelayRequest } from "@/lib/edge/resources/map-relay";
 import { privateAdminRoutes } from "@/lib/hono/routes/private/admin";
 import { privateNotificationRoutes } from "@/lib/hono/routes/private/notifications";
 import { privateRealtimeRoutes } from "@/lib/hono/routes/private/realtime";
@@ -26,21 +29,17 @@ import { privateSessionRoutes } from "@/lib/hono/routes/private/session";
 import { publicResourceRoutes } from "@/lib/hono/routes/public/resources";
 import { publicSessionRoutes } from "@/lib/hono/routes/public/session";
 import { wellKnownRoutes } from "@/lib/hono/routes/well-known";
-
-vi.mock("@/lib/edge/admin-ws", () => ({
+vi.mock("@/lib/edge/admin/ws", () => ({
   handleAdminWs: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/map-relay", () => ({
+vi.mock("@/lib/edge/resources/map-relay", () => ({
   handleMapRelayRequest: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-users", () => ({
+vi.mock("@/lib/edge/admin/users/handlers", () => ({
   handleAuthMeAdmin: vi.fn(),
   handleUsersAdmin: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-notifications", () => ({
+vi.mock("@/lib/edge/admin/notifications/handler", () => ({
   handleNotificationEmailPreviewAdmin: vi.fn(),
   handleNotificationPreferences: vi.fn(),
   handleNotificationRead: vi.fn(),
@@ -48,22 +47,17 @@ vi.mock("@/lib/edge/admin-notifications", () => ({
   handleNotifications: vi.fn(),
   handleNotificationsReadAll: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/legacy-auth", () => ({
+vi.mock("@/lib/edge/auth/legacy-auth", () => ({
   handleLegacyAuthLogin: vi.fn(),
   handleLegacyAuthLogout: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/releases-compare", () => ({
+vi.mock("@/lib/edge/admin/system/releases-compare", () => ({
   handleReleasesCompareRequest: vi.fn(),
 }));
-
 const env = { DB: {} };
-
 function request(path: string, init?: RequestInit) {
   return new Request(`https://app.test${path}`, init);
 }
-
 describe("thin Hono route modules", () => {
   beforeEach(() => {
     vi.clearAllMocks();

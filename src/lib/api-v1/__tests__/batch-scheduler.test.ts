@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { executeBoundedBatch } from "@/lib/api-v1/batch-scheduler";
+import { executeBoundedBatch } from "@/lib/api-v1/batch/scheduler";
 
 describe("executeBoundedBatch", () => {
   it("preserves item order while bounding concurrent execution", async () => {

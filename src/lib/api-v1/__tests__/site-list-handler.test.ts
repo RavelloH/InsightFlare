@@ -4,7 +4,7 @@ import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-regi
 import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
-} from "@/lib/api-v1/analysis-definition-reader";
+} from "@/lib/api-v1/analytics/analysis-definition-reader";
 import {
   handlePlannedSiteEventDetail,
   handlePlannedSiteEventFields,
@@ -60,7 +60,7 @@ import {
   type SiteVisitorEventsReader,
   type SiteVisitorSessionsReader,
   type SiteVisitorsSearchReader,
-} from "@/lib/api-v1/site-list-handler";
+} from "@/lib/api-v1/analytics/site-list";
 import {
   AnalyticsEventDetailResponseSchema,
   AnalyticsEventFieldsResponseSchema,
@@ -81,9 +81,8 @@ import {
   AnalyticsReferrersResponseSchema,
   AnalyticsRetentionCohortsResponseSchema,
   ApiV1ErrorEnvelopeSchema,
-} from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/contract/wire";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -97,7 +96,6 @@ const timeRange = {
   from: "2026-08-01T00:00:00.000Z",
   to: "2026-08-02T00:00:00.000Z",
 };
-
 function request(
   path:
     | "pages"
@@ -139,7 +137,6 @@ function request(
       : { body: JSON.stringify(body) }),
   });
 }
-
 describe("planned site list analytics adapters", () => {
   it("keeps API v1 preset cursors stable across captured times", async () => {
     const pages = vi.fn<SitePagesReader>().mockResolvedValue({

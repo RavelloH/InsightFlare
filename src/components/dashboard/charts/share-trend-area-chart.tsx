@@ -8,6 +8,10 @@ import {
 } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
+import {
+  useAnimationOnChartSwitch,
+  useChartVisibility,
+} from "@/components/dashboard/charts/use-chart-animation";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   type ChartConfig,
@@ -19,10 +23,6 @@ import {
 } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  useAnimationOnChartSwitch,
-  useChartVisibility,
-} from "@/hooks/use-chart-animation";
 import {
   type ChartAxisDateFormat,
   createChartAxisDateFormatter,

@@ -8,13 +8,12 @@ import {
   siteQueryHeaders,
   siteQueryResponse,
   unauthorized,
-} from "@/lib/edge/analytics/providers/d1/internal/core-responses";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
 import {
   PRIVATE_CACHE_HEADERS,
   PUBLIC_CACHE_HEADERS,
   PUBLIC_PRIVACY,
-} from "@/lib/edge/analytics/providers/d1/internal/core-types";
-
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
 describe("edge query response helpers", () => {
   it("serializes JSON responses with status and extra headers", async () => {
     const response = jsonResponse({ ok: true }, 202, {

@@ -1,0 +1,662 @@
+import {
+  GOAL_TIMESERIES_MAX_BUCKETS,
+  goalQueryCost,
+} from "@/lib/edge/analytics/application/goal-cost";
+import { createSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
+import {
+  analyticsDiagnosticHeaders,
+  createAnalyticsReadDiagnostics,
+} from "@/lib/edge/analytics/composition";
+import { queryGoalDefinition } from "@/lib/edge/analytics/composition/d1/goals";
+import {
+  createTeamDashboardQueryRuntime,
+  type SsrTeamDashboardData,
+} from "@/lib/edge/analytics/composition/ssr-query-runtime";
+import {
+  buildCalendarBucketPlan,
+  createQueryTime,
+  createTimeRange,
+  filterConditionCount,
+  normalizeReportingTimeZone,
+  parseFilterUrlForAudience,
+  parseGoalFilter,
+  siteQueryContext,
+  teamQueryContext,
+} from "@/lib/edge/analytics/contract";
+import type { SimpleDimensionKey } from "@/lib/edge/analytics/interfaces/dashboard/protocol/dimensions";
+import type { OverviewTab } from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview-tabs";
+import {
+  parseInterval,
+  parseWindow,
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/parsers";
+import {
+  badRequest,
+  getRequestId,
+  jsonResponseWith,
+  PRIVATE_CACHE_HEADERS,
+  queryErrorResponse,
+  type ResponseContext,
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import { notFound } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import { operationForQueryRoute } from "@/lib/edge/analytics/interfaces/dashboard/protocol/router";
+import type { Env } from "@/lib/edge/types";
+const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
+export interface PrivateQueryAdapterInput {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly pathname: string;
+  readonly url: URL;
+  readonly request?: Request;
+  readonly dashboardMode?: boolean;
+  readonly deferJsonSerialization?: boolean;
+}
+export interface PrivateTeamDashboardAdapterInput {
+  readonly env: Env;
+  readonly teamId: string;
+  readonly allowedSiteIds?: readonly string[];
+  readonly url: URL;
+  readonly request?: Request;
+  readonly deferJsonSerialization?: boolean;
+}
+const SIMPLE_DIMENSIONS: Readonly<Record<string, SimpleDimensionKey>> = {
+  countries: "country",
+  "page-hash": "page.hash",
+  "utm-source": "utm.source",
+  "utm-medium": "utm.medium",
+  "utm-campaign": "utm.campaign",
+  "utm-term": "utm.term",
+  "utm-content": "utm.content",
+};
+type TechnologyHandlerName =
+  | "handleBrowserTrendContract"
+  | "handleBrowserEngineTrendContract"
+  | "handleBrowserVersionBreakdownContract"
+  | "handleBrowserCrossBreakdownContract"
+  | "handleBrowserRadarContract"
+  | "handleReferrerRadarContract"
+  | "handleReferrerDimensionTrendContract"
+  | "handleReferrerChannelTrendContract"
+  | "handleClientDimensionTrendContract"
+  | "handleUtmDimensionTrendContract"
+  | "handleCrossBreakdownContract";
+const TECHNOLOGY_HANDLERS: Readonly<Record<string, TechnologyHandlerName>> = {
+  "browser-trend": "handleBrowserTrendContract",
+  "browser-engine-trend": "handleBrowserEngineTrendContract",
+  "browser-version-breakdown": "handleBrowserVersionBreakdownContract",
+  "browser-cross-breakdown": "handleBrowserCrossBreakdownContract",
+  "browser-radar": "handleBrowserRadarContract",
+  "referrer-radar": "handleReferrerRadarContract",
+  "referrer-dimension-trend": "handleReferrerDimensionTrendContract",
+  "referrer-channel-dimension-trend": "handleReferrerChannelTrendContract",
+  "client-dimension-trend": "handleClientDimensionTrendContract",
+  "utm-dimension-trend": "handleUtmDimensionTrendContract",
+  "client-cross-breakdown": "handleCrossBreakdownContract",
+};
+const OVERVIEW_TABS: Readonly<Record<string, OverviewTab>> = {
+  "page-query": "page.query",
+  "overview-page-path": "page.path",
+  "overview-page-title": "page.title",
+  "overview-page-hostname": "page.hostname",
+  "overview-page-entry": "page.entry",
+  "overview-page-exit": "page.exit",
+  "overview-source-domain": "source.domain",
+  "overview-source-link": "source.link",
+  "overview-source-channel": "source.channel",
+  "overview-client-browser": "client.browser",
+  "overview-client-os-version": "client.osVersion",
+  "overview-client-device-type": "client.deviceType",
+  "overview-client-language": "client.language",
+  "overview-client-screen-size": "client.screenSize",
+  "overview-geo-country": "geo.country",
+  "overview-geo-region": "geo.region",
+  "overview-geo-city": "geo.city",
+  "overview-geo-continent": "geo.continent",
+  "overview-geo-timezone": "geo.timezone",
+  "overview-geo-organization": "geo.organization",
+};
+function responseContext(
+  input: PrivateQueryAdapterInput,
+): ResponseContext | undefined {
+  return input.request
+    ? {
+        requestId: getRequestId(input.request),
+        deferJsonSerialization: input.deferJsonSerialization,
+      }
+    : undefined;
+}
+/** Private dashboard protocol adapter. Authentication and cache ownership stay
+ * at the Hono boundary; this module owns only private query protocol options. */
+export function executePrivateQuery(
+  input: PrivateQueryAdapterInput,
+): Promise<Response> {
+  const ctx = responseContext(input);
+  const queryContext = siteQueryContext(input.siteId, "private-dashboard");
+  if (isDemoBuild) {
+    const operation = operationForQueryRoute(input.pathname);
+    return import("@/lib/edge/analytics/interfaces/mock").then(
+      ({ executeMockQuery }) =>
+        executeMockQuery({
+          operation,
+          request: input.request ?? new Request(input.url, { method: "GET" }),
+          url: input.url,
+          siteId: input.siteId,
+          queryContext,
+          context: ctx,
+        }),
+    );
+  }
+  if (input.pathname === "overview") {
+    return import("./protocol/overview").then(({ handleOverviewContract }) =>
+      handleOverviewContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "trend") {
+    return import("./protocol/overview").then(({ handleTrendContract }) =>
+      handleTrendContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "pages") {
+    return import("./protocol/pages").then(({ handlePagesContract }) =>
+      handlePagesContract(
+        input.env,
+        input.siteId,
+        input.url,
+        true,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "referrers") {
+    return import("./protocol/pages").then(({ handleReferrersContract }) =>
+      handleReferrersContract(
+        input.env,
+        input.siteId,
+        input.url,
+        20,
+        true,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "referrer-summary") {
+    return import("./protocol/pages").then(
+      ({ handleReferrerSummaryContract }) =>
+        handleReferrerSummaryContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "pages-dashboard") {
+    return import("./protocol/pages").then(({ handlePagesDashboardContract }) =>
+      handlePagesDashboardContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "retention") {
+    return import("./protocol/analysis").then(({ handleRetentionContract }) =>
+      handleRetentionContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "performance") {
+    return import("./protocol/analysis").then(({ handlePerformanceContract }) =>
+      handlePerformanceContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "event-types") {
+    return import("./protocol/events").then(({ handleEventTypesContract }) =>
+      handleEventTypesContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "events-summary") {
+    return import("./protocol/events").then(({ handleEventsSummaryContract }) =>
+      handleEventsSummaryContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "events-trend") {
+    return import("./protocol/events").then(({ handleEventsTrendContract }) =>
+      handleEventsTrendContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "events-records") {
+    return import("./protocol/events").then(({ handleEventRecordsContract }) =>
+      handleEventRecordsContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "event-type-field-values") {
+    return import("./protocol/events").then(
+      ({ handleEventFieldValuesContract }) =>
+        handleEventFieldValuesContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "event-type-fields") {
+    return import("./protocol/events").then(
+      ({ handleEventTypeFieldsContract }) =>
+        handleEventTypeFieldsContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "event-type-context") {
+    return import("./protocol/events").then(
+      ({ handleEventTypeContextContract }) =>
+        handleEventTypeContextContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "event-type-detail") {
+    return import("./protocol/events").then(
+      ({ handleEventTypeDetailContract }) =>
+        handleEventTypeDetailContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+          input.dashboardMode
+            ? {
+                includeContext:
+                  input.url.searchParams.get("includeContext") !== "false",
+                includeBreakdowns:
+                  input.url.searchParams.get("includeBreakdowns") !== "false",
+              }
+            : undefined,
+        ),
+    );
+  }
+  if (input.pathname === "event-record-detail") {
+    return import("./protocol/events").then(
+      ({ handleEventRecordDetailContract }) =>
+        handleEventRecordDetailContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "journey-event-detail") {
+    return import("./protocol/journeys").then(
+      ({ handleJourneyEventDetailContract }) =>
+        handleJourneyEventDetailContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "visitors") {
+    return import("./protocol/journeys").then(({ handleVisitorsContract }) =>
+      handleVisitorsContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "sessions") {
+    return import("./protocol/journeys").then(({ handleSessionsContract }) =>
+      handleSessionsContract(
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  if (input.pathname === "visitor-detail") {
+    return import("./protocol/journeys").then(
+      ({ handleVisitorDetailContract }) =>
+        handleVisitorDetailContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "session-detail") {
+    return import("./protocol/journeys").then(
+      ({ handleSessionDetailContract }) =>
+        handleSessionDetailContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (
+    input.pathname === "visitor-events" ||
+    input.pathname === "visitor-sessions" ||
+    input.pathname === "session-events"
+  ) {
+    return import("./protocol/journeys").then(
+      ({ handleJourneyCollectionContract }) =>
+        handleJourneyCollectionContract(
+          input.env,
+          input.siteId,
+          input.url,
+          input.pathname as
+            "visitor-events" | "visitor-sessions" | "session-events",
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "filter-values") {
+    return import("./protocol/filter-values").then(
+      ({ handleFilterValuesContract }) =>
+        handleFilterValuesContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "overview-geo-points") {
+    return import("./protocol/overview-extras").then(
+      ({ handleOverviewGeoPointsContract }) =>
+        handleOverviewGeoPointsContract(
+          input.env,
+          input.siteId,
+          input.url,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  if (input.pathname === "funnels") {
+    if ((input.request?.method ?? "GET") === "GET") {
+      return import("./protocol/funnels").then(
+        ({ handleFunnelAnalysisContract }) =>
+          handleFunnelAnalysisContract(
+            input.env,
+            input.siteId,
+            input.url,
+            ctx,
+            queryContext,
+          ),
+      );
+    }
+    return import("./protocol/funnels").then(({ handleFunnel }) =>
+      handleFunnel(input.env, input.siteId, input.url, ctx, input.request),
+    );
+  }
+  if (
+    input.pathname === "goal-summary" ||
+    input.pathname === "goal-timeseries"
+  ) {
+    return (async () => {
+      const operation = operationForQueryRoute(input.pathname);
+      const window = parseWindow(input.url);
+      if (!window) return badRequest("Invalid time window");
+      const interval = parseInterval(input.url);
+      const filters = parseFilterUrlForAudience("private-dashboard", input.url);
+      const goalId = input.url.searchParams.get("id")?.trim() ?? "";
+      let goal;
+      try {
+        goal = await queryGoalDefinition(input.env, input.siteId, goalId);
+      } catch {
+        return queryErrorResponse({ kind: "internal", operation });
+      }
+      if (!goal) return notFound();
+      const cost = goalQueryCost({
+        filters,
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+        timeZone: window.timeZone,
+        goalFilterComplexity: filterConditionCount(parseGoalFilter(goal)),
+        ...(input.pathname === "goal-timeseries" ? { interval } : {}),
+      });
+      if ((cost.bucketCount ?? 1) > GOAL_TIMESERIES_MAX_BUCKETS) {
+        return queryErrorResponse({
+          kind: "range-not-supported",
+          reason: "too-many-buckets",
+        });
+      }
+      const diagnostics = createAnalyticsReadDiagnostics();
+      const query = {
+        context: queryContext,
+        time: createQueryTime(
+          window.startMs,
+          window.endExclusiveMs,
+          window.timeZone,
+          window.nowMs,
+        ),
+        filters,
+        goalId,
+        ...(input.pathname === "goal-timeseries" ? { interval } : {}),
+      };
+      return createSiteAnalyticsRuntime({
+        env: input.env,
+        siteId: input.siteId,
+        diagnostics,
+      })
+        .execute(operation, query, { cost })
+        .then((result) => {
+          if (!result.ok) return queryErrorResponse(result.error);
+          if (!result.data) return notFound();
+          return jsonResponseWith(
+            ctx!,
+            { ok: true, data: result.data },
+            200,
+            analyticsDiagnosticHeaders(result.meta.source, diagnostics),
+          );
+        });
+    })();
+  }
+  if (input.pathname === "goals") {
+    return import("./protocol/goals").then(({ handleGoal }) =>
+      handleGoal(input.env, input.siteId, input.url, ctx, input.request),
+    );
+  }
+  const dimension = SIMPLE_DIMENSIONS[input.pathname];
+  if (dimension) {
+    return import("./protocol/dimensions").then(
+      ({ handleSimpleDimensionContract }) =>
+        handleSimpleDimensionContract(
+          input.env,
+          input.siteId,
+          input.url,
+          dimension,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  const technologyHandler = TECHNOLOGY_HANDLERS[input.pathname];
+  if (technologyHandler) {
+    return import("./protocol/technology").then((module) =>
+      module[technologyHandler](
+        input.env,
+        input.siteId,
+        input.url,
+        ctx,
+        queryContext,
+      ),
+    );
+  }
+  const overviewTab = OVERVIEW_TABS[input.pathname];
+  if (overviewTab) {
+    return import("./protocol/overview-tabs").then(
+      ({ handleOverviewTabContract }) =>
+        handleOverviewTabContract(
+          input.env,
+          input.siteId,
+          input.url,
+          overviewTab,
+          ctx,
+          queryContext,
+        ),
+    );
+  }
+  return Promise.resolve(notFound());
+}
+function teamResponseContext(
+  input: PrivateTeamDashboardAdapterInput,
+): ResponseContext | undefined {
+  return input.request
+    ? {
+        requestId: getRequestId(input.request),
+        deferJsonSerialization: input.deferJsonSerialization,
+      }
+    : undefined;
+}
+function teamDashboardBucketError(
+  window: ReturnType<typeof parseWindow> extends infer Window
+    ? Exclude<Window, null>
+    : never,
+  interval: ReturnType<typeof parseInterval>,
+): Response | null {
+  // Keep the HTTP boundary aligned with the D1 provider's 2,000-bucket
+  // calendar plan limit. The provider intentionally truncates plans for
+  // callers that need partial data, but a dashboard trend must reject before
+  // that truncated plan is interpolated into a large SQL CASE expression.
+  if (
+    !Number.isSafeInteger(window.startMs) ||
+    !Number.isSafeInteger(window.endExclusiveMs)
+  ) {
+    return badRequest("Invalid time window");
+  }
+  const plan = buildCalendarBucketPlan({
+    range: createTimeRange(window.startMs, window.endExclusiveMs),
+    granularity: interval,
+    reportingTimeZone: normalizeReportingTimeZone(window.timeZone),
+  });
+  return plan.truncated
+    ? queryErrorResponse({
+        kind: "range-not-supported",
+        reason: "too-many-buckets",
+      })
+    : null;
+}
+/** Private team-dashboard adapter after authentication has resolved its team
+ * scope. Caching remains at the Hono boundary. */
+export async function executePrivateTeamDashboard(
+  input: PrivateTeamDashboardAdapterInput,
+): Promise<Response> {
+  const window = parseWindow(input.url);
+  if (!window) return badRequest("Invalid time window");
+  const interval = parseInterval(input.url);
+  const bucketError = teamDashboardBucketError(window, interval);
+  if (bucketError) return bucketError;
+  const diagnostics = createAnalyticsReadDiagnostics();
+  const filters = parseFilterUrlForAudience("private-dashboard", input.url);
+  const result = await createTeamDashboardQueryRuntime({
+    env: input.env,
+    teamId: input.teamId,
+    window,
+    interval,
+    allowedSiteIds: input.allowedSiteIds,
+    diagnostics,
+  }).execute<SsrTeamDashboardData>("team-dashboard", {
+    context: teamQueryContext(
+      input.teamId,
+      "private-dashboard",
+      input.allowedSiteIds,
+    ),
+    time: createQueryTime(
+      window.startMs,
+      window.endExclusiveMs,
+      window.timeZone,
+      window.nowMs,
+    ),
+    filters,
+  });
+  if (!result.ok) {
+    return queryErrorResponse(result.error);
+  }
+  return jsonResponseWith(
+    teamResponseContext(input)!,
+    { ok: true, data: result.data },
+    200,
+    {
+      ...PRIVATE_CACHE_HEADERS,
+      ...analyticsDiagnosticHeaders(result.meta.source, diagnostics),
+    },
+  );
+}

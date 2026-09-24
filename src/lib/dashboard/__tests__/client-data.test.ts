@@ -50,13 +50,12 @@ import {
   normalizeOverviewRows,
   toQueryString,
   withFilters,
-} from "@/lib/dashboard/client-data";
-import { withComparison } from "@/lib/dashboard/client-utils";
+} from "@/lib/dashboard/client/data";
+import { withComparison } from "@/lib/dashboard/client/utils";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
+import { isErrorEnvelope } from "@/lib/demo/realtime/envelope";
+import { handleDemoRequest } from "@/lib/demo/runtime";
 import { attachFilterScopePreference } from "@/lib/filter-contract";
-import { handleDemoRequest } from "@/lib/realtime/mock";
-import { isErrorEnvelope } from "@/lib/realtime/mock/envelope";
-
 describe("Dashboard Client Data Processing Utilities", () => {
   const emptyPaginatedCollection = {
     items: [],

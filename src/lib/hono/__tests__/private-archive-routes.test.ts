@@ -4,31 +4,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   handlePrivateArchiveFile,
   handlePrivateArchiveManifest,
-} from "@/lib/edge/archive-query";
+} from "@/lib/edge/admin/archive-query";
 import { privateArchiveRoutes } from "@/lib/hono/routes/private/archive";
 import type { AppEnv } from "@/lib/hono/types";
-
-vi.mock("@/lib/edge/archive-query", () => ({
+vi.mock("@/lib/edge/admin/archive-query", () => ({
   handlePrivateArchiveFile: vi.fn(),
   handlePrivateArchiveManifest: vi.fn(),
 }));
-
 const env = { DB: {}, ARCHIVE_BUCKET: {} };
 const ctx = {
   passThroughOnException: vi.fn(),
   waitUntil: vi.fn(),
 } as unknown as ExecutionContext;
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://app.test${path}`, init);
 }
-
 function createApp() {
   const app = new Hono<AppEnv>();
   app.route("/api/private/archive", privateArchiveRoutes);
   return app;
 }
-
 describe("Hono private archive routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();

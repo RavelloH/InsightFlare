@@ -1,13 +1,12 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 
+import { AnalyticsSchemaResponseSchema } from "@/lib/api-v1/contract/wire";
 import {
   handlePlannedSiteAnalyticsSchema,
   handlePlannedTeamAnalyticsSchema,
-} from "@/lib/api-v1/analytics-schema-handler";
-import { AnalyticsSchemaResponseSchema } from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/schema/handler";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -16,7 +15,6 @@ const principal: ApiKeyPrincipal = {
   siteIds: ["site-1"],
   status: "active",
 };
-
 describe("planned analytics schema HTTP adapter", () => {
   it("returns a private typed catalog with matching request ID headers", async () => {
     const app = new Hono();

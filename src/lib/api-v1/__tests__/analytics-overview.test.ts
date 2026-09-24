@@ -4,20 +4,18 @@ import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-regi
 import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
-} from "@/lib/api-v1/analysis-definition-reader";
+} from "@/lib/api-v1/analytics/analysis-definition-reader";
 import {
   aggregateCache,
   type AnalysisDefinitionReader,
   executeApiV1SiteOverview,
-} from "@/lib/api-v1/analytics-overview";
+} from "@/lib/api-v1/analytics/overview";
 import {
   EMPTY_FILTER_DOCUMENT,
   type OverviewReader,
 } from "@/lib/edge/analytics/contract";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 beforeEach(() => aggregateCache.clear());
-
 const principal = (
   overrides: Partial<ApiKeyPrincipal> = {},
 ): ApiKeyPrincipal => ({
@@ -29,7 +27,6 @@ const principal = (
   status: "active",
   ...overrides,
 });
-
 const body = {
   timeRange: {
     kind: "absolute",
@@ -38,7 +35,6 @@ const body = {
     timeZone: "UTC",
   },
 };
-
 function overviewReader(): OverviewReader {
   return {
     readOverview: vi.fn().mockResolvedValue({
@@ -56,7 +52,6 @@ function overviewReader(): OverviewReader {
     readTrend: vi.fn(),
   };
 }
-
 describe("API v1 overview adapter", () => {
   it("authorizes before resolving definitions or reading analytics", async () => {
     const reader = overviewReader();

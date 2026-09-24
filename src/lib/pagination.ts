@@ -1,5 +1,5 @@
-import { sha256Hex } from "@/lib/edge/utils";
 import { rootSecret, type SecretSource } from "@/lib/secrets";
+import { sha256Hex } from "@/lib/sha256";
 
 export const MAX_CURSOR_LENGTH = 12_288;
 export const MAX_CURSOR_PAYLOAD_BYTES = 8_192;

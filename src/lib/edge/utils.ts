@@ -1,3 +1,5 @@
+import { sha256Hex } from "@/lib/sha256";
+
 export const TEN_MINUTES_MS = 10 * 60 * 1000;
 export const ONE_HOUR_MS = 60 * 60 * 1000;
 export const ONE_DAY_MS = 24 * ONE_HOUR_MS;
@@ -79,15 +81,6 @@ export function clampString(input: string, maxLen: number): string {
     return input;
   }
   return input.slice(0, maxLen);
-}
-
-export async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  const bytes = new Uint8Array(digest);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 export async function deriveDailySalt(

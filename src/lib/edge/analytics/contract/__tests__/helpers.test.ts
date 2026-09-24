@@ -1,28 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { validateTypedQueryFilters } from "@/lib/edge/analytics/application/query-validation";
+import {
+  AnalyticsProviderRegistry,
+  createTypedQueryProviderRegistry,
+  executeTypedApplicationOperation,
+} from "@/lib/edge/analytics/application/typed-application";
 import {
   analyticsFilterRegistry,
-  AnalyticsProviderRegistry,
   buildCalendarBucketPlan,
   createQueryTime,
   createTimeRange,
-  createTypedQueryProviderRegistry,
   EMPTY_FILTER_DOCUMENT,
   exclusiveRangeToInclusive,
   executeOverview,
   executePages,
   executeReferrers,
   executeTrend,
-  executeTypedApplicationOperation,
   hasFilters,
   inclusiveRangeToExclusive,
   normalizeFilterDocument,
   normalizeReportingTimeZone,
   previousComparableRange,
   siteQueryContext,
-  validateTypedQueryFilters,
 } from "@/lib/edge/analytics/contract/index";
-
 describe("query contract time helpers", () => {
   it("enforces half-open range boundaries", () => {
     const range = createTimeRange(100, 200);

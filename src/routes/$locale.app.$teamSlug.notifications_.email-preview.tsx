@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { NotificationEmailPreviewClient } from "@/components/dashboard/notification-email-preview-client";
+import { NotificationEmailPreviewClient } from "@/components/dashboard/notifications/notification-email-preview-client";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { dashboardPageTitle } from "@/lib/page-title";
 

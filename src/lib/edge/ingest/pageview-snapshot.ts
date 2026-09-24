@@ -1,0 +1,47 @@
+import type { TrafficVisitSnapshot } from "@/lib/edge/analytics-engine/index";
+import type { NormalizedPageview } from "@/lib/edge/types";
+
+export function pageviewTrafficSnapshot(
+  record: NormalizedPageview,
+  visitId = record.visitId,
+  startedAt = record.startedAt,
+): TrafficVisitSnapshot {
+  return {
+    siteId: record.siteId,
+    visitId,
+    visitorId: record.visitorId,
+    sessionId: record.sessionId,
+    startedAt,
+    pathname: record.pathname,
+    queryString: record.queryString,
+    hashFragment: record.hashFragment,
+    title: record.title,
+    hostname: record.hostname,
+    referrerUrl: record.referrerUrl,
+    referrerHost: record.referrerHost,
+    utmSource: record.utmSource,
+    utmMedium: record.utmMedium,
+    utmCampaign: record.utmCampaign,
+    utmTerm: record.utmTerm,
+    utmContent: record.utmContent,
+    region: record.region,
+    city: record.city,
+    continent: record.continent,
+    country: record.country,
+    regionCode: record.regionCode,
+    postalCode: record.postalCode,
+    metroCode: record.metroCode,
+    timezone: record.timezone,
+    asOrganization: record.asOrganization,
+    browser: record.browser,
+    browserVersion: record.browserVersion,
+    os: record.os,
+    osVersion: record.osVersion,
+    deviceType: record.deviceType,
+    language: record.language,
+    latitude: record.latitude,
+    longitude: record.longitude,
+    screenWidth: record.screenWidth,
+    screenHeight: record.screenHeight,
+  };
+}

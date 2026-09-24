@@ -3,18 +3,6 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { handleFilterValuesContract } from "@/lib/edge/analytics/composition/protocol/filter-values-contract-adapter";
-import {
-  handleOverviewContract as handleOverview,
-  handleTrendContract as handleTrend,
-} from "@/lib/edge/analytics/composition/protocol/overview-contract-adapter";
-import { handleOverviewGeoPointsContract as handleOverviewGeoPoints } from "@/lib/edge/analytics/composition/protocol/overview-extras-contract-adapter";
-import { handleOverviewTabContract } from "@/lib/edge/analytics/composition/protocol/overview-tabs-contract-adapter";
-import {
-  handlePagesContract as handlePages,
-  handlePagesDashboardContract as handlePagesDashboard,
-  handleReferrersContract as handleReferrers,
-} from "@/lib/edge/analytics/composition/protocol/pages-contract-adapter";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
@@ -22,6 +10,18 @@ import {
   prepareScopedQuery,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import { handleFilterValuesContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/filter-values";
+import {
+  handleOverviewContract as handleOverview,
+  handleTrendContract as handleTrend,
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview";
+import { handleOverviewGeoPointsContract as handleOverviewGeoPoints } from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview-extras";
+import { handleOverviewTabContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview-tabs";
+import {
+  handlePagesContract as handlePages,
+  handlePagesDashboardContract as handlePagesDashboard,
+  handleReferrersContract as handleReferrers,
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/pages";
 import {
   mapDimensionRows,
   type QueryWindow,
@@ -34,36 +34,35 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import {
   decodePagesCursor,
-  decodeReferrersCursor,
   queryDimensionAggregate,
   queryPageCardMetricsFromD1,
   queryPageCardTitlesFromD1,
   queryPageCardTrendFromD1,
   queryPagesAggregate,
-  queryPagesDashboard,
   queryPagesFromD1,
   queryPagesPageFromD1,
   queryPagesWithTabsFromD1,
   queryPageTabsAggregate,
+  queryTopPagesFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/pages";
+import { queryPagesDashboard } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard";
+import {
+  decodeReferrersCursor,
   queryReferrerAggregate,
   queryReferrersPageFromD1,
   queryReferrerSummaryFromD1,
-  queryTopPagesFromD1,
   queryTopReferrersFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/pages";
+} from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
 import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
-
 type D1Row = Record<string, unknown>;
 type QueryBinding = string | number | null;
-
 interface QueryCall {
   sql: string;
   bindings: QueryBinding[];
 }
-
 const siteId = "site-pages";
 const baseMs = Date.UTC(2026, 0, 2, 1);
 const window: QueryWindow = {
@@ -72,7 +71,6 @@ const window: QueryWindow = {
   nowMs: baseMs + 3 * 60 * 60 * 1000,
   timeZone: "UTC",
 };
-
 function createD1Env(
   resultSets: D1Row[][],
   rowsRead?: number,
@@ -105,7 +103,6 @@ function createD1Env(
     prepare,
   };
 }
-
 function installDirectEventFilterTables(database: DatabaseSync): void {
   const columns = database
     .prepare("PRAGMA table_info(custom_events)")
@@ -130,7 +127,6 @@ function installDirectEventFilterTables(database: DatabaseSync): void {
     );
   `);
 }
-
 function createScopedOverviewSqliteEnv(): {
   env: Env;
   database: DatabaseSync;
@@ -181,11 +177,9 @@ function createScopedOverviewSqliteEnv(): {
   } as unknown as Env;
   return { env, database, close: () => database.close() };
 }
-
 function visitBindings(targetWindow = window): QueryBinding[] {
   return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
-
 function url(path: string, params: Record<string, string | number | boolean>) {
   const parsed = new URL(`https://edge.test${path}`);
   for (const [key, value] of Object.entries(params)) {
@@ -193,7 +187,6 @@ function url(path: string, params: Record<string, string | number | boolean>) {
   }
   return parsed;
 }
-
 describe("edge pages D1 queries", () => {
   it("queries top pages with details, filters, numeric mapping, and limit binding", async () => {
     const { env, calls } = createD1Env([
@@ -1072,7 +1065,6 @@ describe("edge pages D1 queries", () => {
     expect(dashboard.calls[0]?.sql).toContain("current_scope_final_visits");
   });
 });
-
 describe("edge paginated page and referrer readers", () => {
   it("returns a signed page cursor and accepts it on the next request", async () => {
     const filters = EMPTY_FILTER_DOCUMENT;
@@ -1711,7 +1703,6 @@ describe("edge paginated page and referrer readers", () => {
     }
   });
 });
-
 describe("edge pages handlers", () => {
   it("maps pages and all tabs from D1 when includeTabs is enabled", async () => {
     const { env, calls } = createD1Env([
@@ -2237,7 +2228,6 @@ describe("edge pages handlers", () => {
     expect(calls[2].sql).toContain("filtered_visits AS MATERIALIZED");
   });
 });
-
 describe("edge overview D1 queries and handlers", () => {
   it("reads the latest filtered site activity without turning an absent value into epoch", async () => {
     const { env, calls } = createD1Env([

@@ -3,25 +3,26 @@ import {
   isValidTimeZone,
   normalizeTimeZone,
   startOfZonedInterval,
-} from "@/lib/dashboard/time-zone";
+} from "@/lib/analytics/time-zone";
+import {
+  FILTER_DOCUMENT_VERSION,
+  type FilterDocument,
+} from "@/lib/filter-contract/filters";
 
-import { FILTER_DOCUMENT_VERSION, type FilterDocument } from "./filters";
 import type {
   CalendarBucket,
   CalendarBucketPlan,
   CalendarGranularity,
   EpochMs,
   QueryTime,
+  QueryWindow,
   ReportingTimeZone,
   TimeRange,
 } from "./types";
-
 const UTC = "UTC" as ReportingTimeZone;
-
 function epoch(value: number): EpochMs {
   return value as EpochMs;
 }
-
 export function createTimeRange(
   startMs: number,
   endExclusiveMs: number,
@@ -36,7 +37,6 @@ export function createTimeRange(
   }
   return { startMs: epoch(startMs), endExclusiveMs: epoch(endExclusiveMs) };
 }
-
 export function createQueryTime(
   startMs: number,
   endExclusiveMs: number,
@@ -54,7 +54,20 @@ export function createQueryTime(
     capturedAtMs: epoch(capturedAtMs),
   };
 }
-
+export function queryWindowToTime(window: QueryWindow): QueryTime {
+  return {
+    range: {
+      startMs: window.startMs as QueryTime["range"]["startMs"],
+      endExclusiveMs:
+        window.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
+    },
+    reportingTimeZone: window.timeZone as QueryTime["reportingTimeZone"],
+    capturedAtMs: window.nowMs as QueryTime["capturedAtMs"],
+    ...(window.paginationBinding
+      ? { paginationBinding: window.paginationBinding }
+      : {}),
+  };
+}
 export function inclusiveRangeToExclusive(
   startMs: number,
   endMs: number,
@@ -64,14 +77,12 @@ export function inclusiveRangeToExclusive(
   }
   return createTimeRange(startMs, endMs + 1);
 }
-
 export function exclusiveRangeToInclusive(range: TimeRange): {
   readonly startMs: number;
   readonly endMs: number;
 } {
   return { startMs: range.startMs, endMs: range.endExclusiveMs - 1 };
 }
-
 export function normalizeReportingTimeZone(
   value: string | null | undefined,
   fallback = "UTC",
@@ -81,27 +92,44 @@ export function normalizeReportingTimeZone(
   const fallbackNormalized = normalizeTimeZone(fallback);
   return (fallbackNormalized || UTC) as ReportingTimeZone;
 }
-
 export function isReportingTimeZone(value: string): value is ReportingTimeZone {
   return isValidTimeZone(value);
 }
-
 export function previousComparableRange(range: TimeRange): TimeRange {
   const duration = range.endExclusiveMs - range.startMs;
   return createTimeRange(range.startMs - duration, range.startMs);
 }
-
+export function previousComparableWindow(window: QueryWindow): QueryWindow {
+  const range = previousComparableRange(
+    createTimeRange(window.startMs, window.endExclusiveMs),
+  );
+  return {
+    startMs: range.startMs,
+    endExclusiveMs: range.endExclusiveMs,
+    nowMs: window.nowMs,
+    timeZone: window.timeZone,
+    ...(window.paginationBinding
+      ? { paginationBinding: window.paginationBinding }
+      : {}),
+  };
+}
+export function percentChange(
+  current: number,
+  previous: number,
+): number | null {
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous <= 0)
+    return null;
+  return ((current - previous) / previous) * 100;
+}
 export const EMPTY_FILTER_DOCUMENT: FilterDocument = Object.freeze({
   version: FILTER_DOCUMENT_VERSION,
   root: null,
 });
-
 export function hasFilters(
   filters: FilterDocument | null | undefined,
 ): boolean {
   return Boolean(filters?.root);
 }
-
 export function buildCalendarBucketPlan(input: {
   readonly range: TimeRange;
   readonly granularity: CalendarGranularity;

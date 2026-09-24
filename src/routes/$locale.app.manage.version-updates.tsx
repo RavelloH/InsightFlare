@@ -9,7 +9,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { PageHeading } from "@/components/dashboard/page-heading";
+import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { VersionUpdateDetailsButton } from "@/components/dashboard/version-update-details-button";
 import { AutoResizer } from "@/components/ui/auto-resizer";
 import { AutoTransition } from "@/components/ui/auto-transition";
@@ -28,17 +28,14 @@ import {
 } from "@/lib/release-index";
 import Link from "@/lib/router";
 import { cn } from "@/lib/utils";
-
 const REPO_RELEASES_URL = "https://github.com/RavelloH/InsightFlare/releases";
 const CURRENT_VERSION = import.meta.env.VITE_APP_VERSION || "0.0.0";
 const CURRENT_COMMIT = import.meta.env.VITE_COMMIT_SHA || null;
-
 function formatCommit(hash: string | null | undefined): string {
   const value = hash?.trim();
   if (!value) return "-";
   return value.length > 12 ? value.slice(0, 12) : value;
 }
-
 function isCommitMatch(
   left: string | null | undefined,
   right: string | null | undefined,
@@ -53,17 +50,14 @@ function isCommitMatch(
     normalizedRight.startsWith(normalizedLeft)
   );
 }
-
 function normalizeVersion(value: string | null | undefined): string {
   return (value || "").trim().replace(/^v/i, "").toLowerCase();
 }
-
 function releaseDate(
   release: Pick<ReleaseIndexEntry, "publishedAt" | "createdAt">,
 ): string {
   return release.publishedAt ?? release.createdAt;
 }
-
 function formatDateTime(locale: Locale, value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -76,7 +70,6 @@ function formatDateTime(locale: Locale, value: string): string {
     minute: "2-digit",
   }).format(date);
 }
-
 function releaseStatus(
   release: Pick<ReleaseIndexEntry, "draft" | "prerelease">,
   labels: AppMessages["managementPages"]["versionUpdates"],
@@ -91,7 +84,6 @@ function releaseStatus(
 
   return { label: labels.statusStable, variant: "default" };
 }
-
 export const Route = createFileRoute("/$locale/app/manage/version-updates")({
   beforeLoad: ({ context }) => {
     if (context.dashboardRoot?.user.systemRole !== "admin") throw notFound();
@@ -108,7 +100,6 @@ export const Route = createFileRoute("/$locale/app/manage/version-updates")({
   }),
   component: Page,
 });
-
 function Page() {
   const { locale, messages } = Route.useRouteContext();
   const resolvedLocale = resolveLocale(locale);
@@ -350,7 +341,6 @@ function Page() {
     </div>
   );
 }
-
 function LazyReleaseNotes({
   release,
   locale,
@@ -443,7 +433,6 @@ function LazyReleaseNotes({
     </div>
   );
 }
-
 function VersionMetric({
   icon,
   label,

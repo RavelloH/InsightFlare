@@ -1,12 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Env } from "@/lib/edge/types";
-
 vi.mock("@/lib/scheduled-tasks", () => ({
   SCHEDULED_TASK_LOG_RETENTION_DAYS: 30,
 }));
-
-vi.mock("@/lib/edge/admin-response", () => ({
+vi.mock("@/lib/edge/admin/response", () => ({
   bad: vi.fn(
     (msg: string, _code?: string, _req?: Request) =>
       new Response(JSON.stringify({ ok: false, error: msg }), { status: 400 }),
@@ -36,8 +34,7 @@ vi.mock("@/lib/edge/admin-response", () => ({
     (value: unknown) => value === true || value === "true" || value === 1,
   ),
 }));
-
-vi.mock("@/lib/edge/scheduled-task-registry", () => ({
+vi.mock("@/lib/edge/scheduled-tasks/registry", () => ({
   SCHEDULED_TASKS: [
     {
       key: "hourly-rollup",
@@ -57,16 +54,13 @@ vi.mock("@/lib/edge/scheduled-task-registry", () => ({
     },
   ],
 }));
-
-import { handleScheduledTasksAdmin } from "@/lib/edge/admin-scheduled-tasks";
-
+import { handleScheduledTasksAdmin } from "@/lib/edge/admin/scheduled-tasks/handler";
 interface MockStatement {
   bind: ReturnType<typeof vi.fn>;
   first: ReturnType<typeof vi.fn>;
   all: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
 }
-
 function statement(
   input: {
     first?: unknown;
@@ -88,7 +82,6 @@ function statement(
   stmt.run.mockResolvedValue("run" in input ? input.run : undefined);
   return stmt;
 }
-
 function createEnv(overrides: Record<string, unknown> = {}): Env {
   return {
     DB: {
@@ -98,7 +91,6 @@ function createEnv(overrides: Record<string, unknown> = {}): Env {
     DAILY_SALT_SECRET: "test-pagination-secret",
   } as unknown as Env;
 }
-
 function makeUrl(path: string, params?: Record<string, string>): URL {
   const url = new URL(`https://app.test${path}`);
   if (params) {
@@ -106,10 +98,8 @@ function makeUrl(path: string, params?: Record<string, string>): URL {
   }
   return url;
 }
-
 const adminActor = { isAdmin: true };
 const nonAdminActor = { isAdmin: false };
-
 async function resolveAdmin() {
   return adminActor;
 }
@@ -119,7 +109,6 @@ async function resolveNonAdmin() {
 async function resolveAsResponse() {
   return new Response("unauthorized", { status: 401 });
 }
-
 describe("handleScheduledTasksAdmin", () => {
   it("uses cursor pagination instead of removed page-number parameters", async () => {
     const req = new Request(

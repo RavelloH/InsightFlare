@@ -2,7 +2,6 @@ import {
   createScopedFilterPlan,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
-  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
@@ -12,6 +11,7 @@ import {
   compileScopedDatasetSql,
   executeObservationFilterOnScopedDataset,
   scopedDatasetFor,
+  type ScopedDatasetSql,
 } from "./scoped-dataset";
 
 /** The one-row aggregate returned by the summary statement. */

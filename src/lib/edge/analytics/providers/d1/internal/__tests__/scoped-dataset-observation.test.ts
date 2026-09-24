@@ -2,13 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
 import {
   buildSessionFactsSql,
   buildVisitorFactsSql,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-aggregation-sql";
 import { executeObservationFilterOnScopedDataset } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { parseFilterDsl } from "@/lib/filter-contract";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 
 const dataset = {
   ctes: "scope_raw_visits AS (...), scope_raw_events AS (...)",

@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleReleasesCompareRequest } from "@/lib/edge/releases-compare";
-import { requireSession } from "@/lib/edge/session-auth";
+import { handleReleasesCompareRequest } from "@/lib/edge/admin/system/releases-compare";
+import { requireSession } from "@/lib/edge/auth/session-auth";
 import { fetchGithubCompare } from "@/lib/github-releases";
 
 vi.mock("@/lib/github-releases", () => ({
   fetchGithubCompare: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
 

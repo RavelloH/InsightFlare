@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { AdminSitesManagementClient } from "@/components/dashboard/admin-sites-management-client";
+import { AdminSitesManagementClient } from "@/components/dashboard/admin/admin-sites-management-client";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { dashboardPageTitle } from "@/lib/page-title";
 

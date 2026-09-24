@@ -1,29 +1,27 @@
 import type { Context } from "hono";
 import type { Hono } from "hono";
 
-import { handlePlannedTeamAnalyticsSchema } from "@/lib/api-v1/analytics-schema-handler";
 import {
+  handlePlannedTeamAnalyticsSchema,
+  handlePlannedTeamOverview,
+  handlePlannedTeamSites,
+  handlePlannedTeamTimeseries,
+  handleTeamBreakdown,
   handleTeamComparison,
   handleTeamComparisonBreakdown,
-} from "@/lib/api-v1/comparison-handler";
-import { handleTeamBreakdown } from "@/lib/api-v1/team-breakdown-handler";
-import { handlePlannedTeamOverview } from "@/lib/api-v1/team-overview-handler";
-import { handlePlannedTeamSites } from "@/lib/api-v1/team-sites-handler";
-import { handlePlannedTeamTimeseries } from "@/lib/api-v1/team-timeseries-handler";
+} from "@/lib/api-v1";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
 import { createApiV1ProviderRegistry } from "@/lib/edge/analytics/composition/api-v1-provider-registry";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { createComparisonRuntime } from "@/lib/edge/analytics/composition/comparison-runtime";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { AppEnv } from "@/lib/hono/types";
-
 interface TeamAnalyticsRouteDependencies {
   readonly resolvePrincipal: (c: Context<AppEnv>) => ApiKeyPrincipal;
   readonly resourceNotFound: (c: Context<AppEnv>) => Response;
 }
-
 function providerRegistry(c: Context<AppEnv>, operation: AnalyticsOperationId) {
   return createApiV1ProviderRegistry({ env: c.env, operation });
 }
-
 function typedTeamOverview(
   c: Context<AppEnv>,
   deps: TeamAnalyticsRouteDependencies,
@@ -35,7 +33,6 @@ function typedTeamOverview(
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
-
 function typedTeamTimeseries(
   c: Context<AppEnv>,
   deps: TeamAnalyticsRouteDependencies,
@@ -47,7 +44,6 @@ function typedTeamTimeseries(
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
-
 function typedTeamSites(
   c: Context<AppEnv>,
   deps: TeamAnalyticsRouteDependencies,
@@ -59,7 +55,6 @@ function typedTeamSites(
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
-
 function typedTeamBreakdown(
   c: Context<AppEnv>,
   deps: TeamAnalyticsRouteDependencies,
@@ -74,7 +69,6 @@ function typedTeamBreakdown(
     { signal: c.req.raw.signal, capturedAtMs: Date.now() },
   );
 }
-
 export function registerV1TeamAnalyticsRoutes(
   routes: Hono<AppEnv>,
   deps: TeamAnalyticsRouteDependencies,
@@ -82,16 +76,30 @@ export function registerV1TeamAnalyticsRoutes(
   routes.post("/team/analytics/breakdowns/:dimension", (c) =>
     typedTeamBreakdown(c, deps),
   );
-  routes.post("/team/analytics/comparison", (c) =>
-    handleTeamComparison(c.req.raw, deps.resolvePrincipal(c), c.env),
-  );
+  routes.post("/team/analytics/comparison", (c) => {
+    const principal = deps.resolvePrincipal(c);
+    return handleTeamComparison(
+      c.req.raw,
+      principal,
+      createComparisonRuntime({
+        env: c.env,
+        teamId: principal.teamId,
+        allowedSiteIds: [...principal.siteIds].sort(),
+      }),
+    );
+  });
   routes.post("/team/analytics/comparison/breakdowns/:dimension", (c) => {
     const dimension = c.req.param("dimension");
     if (!dimension) return deps.resourceNotFound(c);
+    const principal = deps.resolvePrincipal(c);
     return handleTeamComparisonBreakdown(
       c.req.raw,
-      deps.resolvePrincipal(c),
-      c.env,
+      principal,
+      createComparisonRuntime({
+        env: c.env,
+        teamId: principal.teamId,
+        allowedSiteIds: [...principal.siteIds].sort(),
+      }),
       dimension,
     );
   });

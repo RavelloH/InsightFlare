@@ -1,3 +1,5 @@
+import { resolveReportingTimeZone } from "@/lib/analytics/time-zone";
+
 import {
   type CustomTimeRange,
   type DashboardInterval,
@@ -7,22 +9,15 @@ import {
   resolveTimeWindow,
   type TimeWindow,
 } from "./query-state";
-import {
-  REPORTING_TIME_ZONE_COOKIE,
-  resolveReportingTimeZone,
-} from "./time-zone";
-
+import { REPORTING_TIME_ZONE_COOKIE } from "./time-zone";
 export const DASHBOARD_QUERY_PREFERENCES_COOKIE =
   "insightflare-dashboard-query";
-
 const COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
-
 export interface DashboardQueryPreferences {
   range: RangePreset;
   interval?: DashboardInterval;
   customRange: CustomTimeRange | null;
 }
-
 const VALID_INTERVALS = new Set<DashboardInterval>([
   "minute",
   "hour",
@@ -30,7 +25,6 @@ const VALID_INTERVALS = new Set<DashboardInterval>([
   "week",
   "month",
 ]);
-
 function normalizeCustomRange(value: unknown): CustomTimeRange | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<CustomTimeRange>;
@@ -43,7 +37,6 @@ function normalizeCustomRange(value: unknown): CustomTimeRange | null {
     to: Math.max(1, Math.floor(candidate.to ?? 1)),
   };
 }
-
 function cookieValue(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) return null;
   for (const entry of cookieHeader.split(";")) {
@@ -57,7 +50,6 @@ function cookieValue(cookieHeader: string | null, name: string): string | null {
   }
   return null;
 }
-
 export function readReportingTimeZoneFromCookie(
   cookieHeader: string | null,
 ): string {
@@ -65,7 +57,6 @@ export function readReportingTimeZoneFromCookie(
     cookieValue(cookieHeader, REPORTING_TIME_ZONE_COOKIE),
   );
 }
-
 export function readDashboardQueryPreferences(
   cookieHeader: string | null,
 ): DashboardQueryPreferences {
@@ -92,7 +83,6 @@ export function readDashboardQueryPreferences(
     return { range: DEFAULT_RANGE_PRESET, customRange: null };
   }
 }
-
 export function resolveDashboardInitialWindow(
   cookieHeader: string | null,
   now = Date.now(),
@@ -104,7 +94,6 @@ export function resolveDashboardInitialWindow(
     timeZone: readReportingTimeZoneFromCookie(cookieHeader),
   });
 }
-
 /** Persists only range controls. Filters remain represented by the URL. */
 export function writeDashboardQueryPreferences(
   preferences: DashboardQueryPreferences,

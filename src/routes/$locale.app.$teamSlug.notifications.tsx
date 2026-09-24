@@ -1,7 +1,7 @@
 import { RiNotification3Line } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { TeamNotificationsClient } from "@/components/dashboard/team-notifications-client";
+import { TeamNotificationsClient } from "@/components/dashboard/admin/team-notifications/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { loadTeamNotificationsInitialData } from "@/lib/dashboard/route-data";

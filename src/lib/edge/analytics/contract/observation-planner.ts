@@ -2,13 +2,13 @@ import {
   analyticsFilterDefinition,
   analyticsFilterRegistry,
   type FilterObservationKind,
-} from "./filter-registry";
+} from "@/lib/filter-contract/filter-registry";
 import {
   type FilterDocument,
   type FilterExpression,
   FilterValidationError,
   normalizeFilterDocument,
-} from "./filters";
+} from "@/lib/filter-contract/filters";
 
 export type ObservationPredicatePlan =
   | { readonly kind: "all" }

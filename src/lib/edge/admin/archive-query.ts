@@ -1,0 +1,280 @@
+import {
+  canAccessMemberSite,
+  parseMemberSiteIdsJson,
+} from "@/lib/edge/auth/member-site-access";
+import { requireSession } from "@/lib/edge/auth/session-auth";
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
+import type { Env } from "@/lib/edge/types";
+import { coerceNumber, ONE_HOUR_MS } from "@/lib/edge/utils";
+import {
+  bad as badRequest,
+  j as jsonResponse,
+  na as notAllowed,
+  nf as notFound,
+  una as unauthorized,
+} from "@/lib/response";
+function normalizeRange(
+  range: R2Range | undefined,
+  size: number,
+): { start: number; end: number; length: number } | null {
+  if (!range || !Number.isFinite(size) || size <= 0) {
+    return null;
+  }
+
+  if ("suffix" in range && typeof range.suffix === "number") {
+    const suffix = Math.max(0, Math.floor(range.suffix));
+    if (suffix <= 0) return null;
+    const length = Math.min(size, suffix);
+    const start = size - length;
+    const end = size - 1;
+    return { start, end, length };
+  }
+
+  const offsetRange = range as Exclude<R2Range, { suffix: number }>;
+  const start = Math.max(0, Math.floor(offsetRange.offset ?? 0));
+  const maxLength = Math.max(0, size - start);
+  const requestedLength =
+    offsetRange.length === undefined
+      ? maxLength
+      : Math.max(0, Math.floor(offsetRange.length));
+  const length = Math.min(maxLength, requestedLength);
+  if (length <= 0) return null;
+  const end = start + length - 1;
+  return { start, end, length };
+}
+async function assertSiteAccess(
+  env: Env,
+  siteId: string,
+  userId: string,
+): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `
+      SELECT
+        s.id,
+        t.owner_user_id AS ownerUserId,
+        tm.role,
+        tm.site_ids_json AS siteIdsJson
+      FROM sites s
+      INNER JOIN teams t ON t.id = s.team_id
+      LEFT JOIN team_members tm ON tm.team_id = s.team_id AND tm.user_id = ?
+      WHERE s.id = ?
+      LIMIT 1
+    `,
+  )
+    .bind(userId, siteId)
+    .first<{
+      id: string;
+      ownerUserId: string;
+      role: string | null;
+      siteIdsJson: string | null;
+    }>();
+  if (!row?.id) return false;
+  if (row.ownerUserId === userId) return true;
+  if (row.role === "owner" || row.role === "admin") return true;
+  if (!row.role) return false;
+  return canAccessMemberSite(parseMemberSiteIdsJson(row.siteIdsJson), siteId);
+}
+function parseWindowHours(
+  url: URL,
+): { fromHour: number; toHour: number } | null {
+  const nowMs = Date.now();
+  const defaultFrom = nowMs - 365 * 24 * ONE_HOUR_MS;
+  const rawFrom = url.searchParams.get("from");
+  const rawTo = url.searchParams.get("to");
+  const parsedFrom = coerceNumber(rawFrom, null);
+  const parsedTo = coerceNumber(rawTo, null);
+  if (
+    (rawFrom !== null && parsedFrom === null) ||
+    (rawTo !== null && parsedTo === null)
+  ) {
+    return null;
+  }
+  const fromMs = Math.floor(parsedFrom ?? defaultFrom);
+  const toMs = Math.floor(parsedTo ?? nowMs);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs < fromMs) {
+    return null;
+  }
+  return {
+    fromHour: Math.floor(fromMs / ONE_HOUR_MS),
+    toHour: Math.floor(toMs / ONE_HOUR_MS),
+  };
+}
+export async function handlePrivateArchiveManifest(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return notAllowed();
+  }
+  const siteId = (url.searchParams.get("siteId") || "").trim();
+  if (siteId.length === 0) {
+    return badRequest("Missing siteId");
+  }
+
+  const session = await requireSession(request, env);
+  if (!session) {
+    return unauthorized();
+  }
+
+  const allowed =
+    session.systemRole === "admin"
+      ? true
+      : await assertSiteAccess(env, siteId, session.userId);
+  if (!allowed) {
+    return unauthorized("Site access denied for current user");
+  }
+
+  const window = parseWindowHours(url);
+  if (!window) {
+    return badRequest("Invalid time window");
+  }
+
+  const result = await env.DB.prepare(
+    `
+      SELECT
+        archive_key AS archiveKey,
+        site_id AS siteId,
+        start_hour AS startHour,
+        end_hour AS endHour,
+        granularity,
+        format,
+        row_count AS rowCount,
+        size_bytes AS sizeBytes,
+        created_at AS createdAt
+      FROM archive_objects
+      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+        AND end_hour >= ?
+        AND start_hour <= ?
+      ORDER BY start_hour ASC
+    `,
+  )
+    .bind(siteId, window.fromHour, window.toHour)
+    .all<{
+      archiveKey: string;
+      siteId: string;
+      startHour: number;
+      endHour: number;
+      granularity: string;
+      format: string;
+      rowCount: number;
+      sizeBytes: number;
+      createdAt: number;
+    }>();
+
+  const files = result.results.map((row) => ({
+    ...row,
+    fetchUrl: `/api/private/archive/file?key=${encodeURIComponent(row.archiveKey)}`,
+  }));
+
+  return jsonResponse({
+    ok: true,
+    siteId,
+    fromHour: window.fromHour,
+    toHour: window.toHour,
+    files,
+  });
+}
+export async function handlePrivateArchiveFile(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return notAllowed();
+  }
+  if (!env.ARCHIVE_BUCKET) {
+    return notFound("Archive bucket is not configured");
+  }
+
+  const session = await requireSession(request, env);
+  if (!session) {
+    return unauthorized();
+  }
+
+  const key = (url.searchParams.get("key") || "").trim();
+  if (key.length === 0) {
+    return badRequest("Missing key");
+  }
+
+  const row = await env.DB.prepare(
+    `
+      SELECT archive_key AS archiveKey, format, site_id AS siteId
+      FROM archive_objects
+      WHERE archive_key = ?
+      LIMIT 1
+    `,
+  )
+    .bind(key)
+    .first<{ archiveKey: string; format: string; siteId: string }>();
+  if (!row?.archiveKey) {
+    return notFound("Archive object not found");
+  }
+  if (row.format !== "parquet") {
+    return notFound("Archive object is not queryable in precise mode");
+  }
+
+  const allowed =
+    session.systemRole === "admin"
+      ? true
+      : await assertSiteAccess(env, row.siteId, session.userId);
+  if (!allowed) {
+    return unauthorized("Site access denied for current user");
+  }
+
+  const rangeHeader = request.headers.get("range");
+  const object = await env.ARCHIVE_BUCKET.get(
+    key,
+    rangeHeader ? { range: request.headers } : undefined,
+  );
+  if (!object) {
+    return notFound("Archive object content is missing");
+  }
+
+  const headers = new Headers();
+  headers.set(
+    "content-type",
+    object.httpMetadata?.contentType || "application/vnd.apache.parquet",
+  );
+  headers.set("cache-control", "private, max-age=120");
+  headers.set("accept-ranges", "bytes");
+  headers.set("etag", object.httpEtag);
+
+  let status = 200;
+  let contentLength = object.size;
+  const normalizedRange = normalizeRange(object.range, object.size);
+  if (rangeHeader && normalizedRange) {
+    status = 206;
+    contentLength = normalizedRange.length;
+    headers.set(
+      "content-range",
+      `bytes ${normalizedRange.start}-${normalizedRange.end}/${object.size}`,
+    );
+  }
+
+  headers.set("content-length", String(contentLength));
+
+  if (request.method === "HEAD") {
+    return new Response(null, { status, headers });
+  }
+
+  return new Response(object.body, { status, headers });
+}
+/**
+ * Compatibility wrapper. Production routing lives in src/lib/hono/routes.
+ */
+export async function handlePrivateArchive(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response> {
+  const pathname = url.pathname;
+  if (pathname === "/api/private/archive/manifest") {
+    return handlePrivateArchiveManifest(request, env, url);
+  }
+  if (pathname === "/api/private/archive/file") {
+    return handlePrivateArchiveFile(request, env, url);
+  }
+
+  return notFound();
+}

@@ -2,16 +2,14 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("@/lib/dashboard/client-data", () => ({
+vi.mock("@/lib/dashboard/client/data", () => ({
   fetchGoalDefinition: vi.fn(),
   fetchGoalSummary: vi.fn(),
   fetchGoalTimeseries: vi.fn(),
   fetchSessions: vi.fn(),
   fetchVisitors: vi.fn(),
 }));
-
-vi.mock("@/components/dashboard/filter-editor", () => ({
+vi.mock("@/components/dashboard/filters/filter-editor", () => ({
   FilterEditor: (props: {
     audience: string;
     initialFilterDsl: string;
@@ -37,30 +35,31 @@ vi.mock("@/components/dashboard/filter-editor", () => ({
       ),
     ),
 }));
-
-vi.mock("@/components/dashboard/site-pages/analysis-journey-table", () => ({
-  AnalysisJourneyTable: (props: {
-    entity: string;
-    toolbarLeading?: ReactNode;
-  }) =>
-    createElement(
-      "div",
-      { "data-analysis-entity": props.entity },
-      props.toolbarLeading,
-    ),
-}));
-
-import { FunnelStepFilterDialog } from "@/components/dashboard/site-pages/funnel-step-filter-dialog";
+vi.mock(
+  "@/components/dashboard/site-pages/journeys/analysis-journey-table",
+  () => ({
+    AnalysisJourneyTable: (props: {
+      entity: string;
+      toolbarLeading?: ReactNode;
+    }) =>
+      createElement(
+        "div",
+        { "data-analysis-entity": props.entity },
+        props.toolbarLeading,
+      ),
+  }),
+);
+import { FunnelStepFilterDialog } from "@/components/dashboard/site-pages/funnels/funnel-step-filter-dialog";
 import {
   GoalCard,
   goalSummaryQueryKey,
-} from "@/components/dashboard/site-pages/goal-card";
+} from "@/components/dashboard/site-pages/goals/goal-card";
 import {
   GoalDetail,
   goalTimeseriesQueryKey,
-} from "@/components/dashboard/site-pages/goal-detail";
-import { GoalEditor } from "@/components/dashboard/site-pages/goal-editor";
-import { goalDefinitionQueryKey } from "@/components/dashboard/site-pages/goals-client-page";
+} from "@/components/dashboard/site-pages/goals/goal-detail";
+import { GoalEditor } from "@/components/dashboard/site-pages/goals/goal-editor";
+import { goalDefinitionQueryKey } from "@/components/dashboard/site-pages/goals/goals-client-page";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
 import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import {
@@ -68,15 +67,14 @@ import {
   fetchGoalTimeseries,
   fetchSessions,
   fetchVisitors,
-} from "@/lib/dashboard/client-data";
+} from "@/lib/dashboard/client/data";
 import type {
   GoalDefinition,
   GoalSummaryData,
   GoalTimeseriesData,
-} from "@/lib/edge-client";
+} from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument } from "@/lib/filter-contract";
 import { getMessages } from "@/lib/i18n/messages";
-
 const messages = getMessages("en");
 const labels = messages.goals;
 const filters: FilterDocument = { version: 1, root: null };
@@ -121,7 +119,6 @@ const timeseries: GoalTimeseriesData = {
     ],
   },
 };
-
 function renderWithQueryClient(
   element: ReactNode,
   client = new QueryClient({
@@ -152,7 +149,6 @@ function renderWithQueryClient(
   });
   return { client, container, root };
 }
-
 describe("Goal dashboard components", () => {
   let intersectionCallback:
     ((entries: IntersectionObserverEntry[]) => void) | undefined;

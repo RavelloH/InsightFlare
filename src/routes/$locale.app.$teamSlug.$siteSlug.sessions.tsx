@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { SessionsClientPage } from "@/components/dashboard/site-pages/sessions-client-page";
+import { SessionsClientPage } from "@/components/dashboard/site-pages/sessions/sessions-client-page";
 import { buildSitePath } from "@/lib/dashboard/paths";
 import { dashboardPageTitle } from "@/lib/page-title";
 

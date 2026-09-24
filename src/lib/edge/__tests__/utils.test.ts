@@ -17,9 +17,9 @@ import {
   ONE_HOUR_MS,
   resolveSessionWindowMinutes,
   safeHostname,
-  sha256Hex,
   TEN_MINUTES_MS,
 } from "@/lib/edge/utils";
+import { sha256Hex } from "@/lib/sha256";
 
 describe("edge utility helpers", () => {
   it("exports millisecond duration constants", () => {

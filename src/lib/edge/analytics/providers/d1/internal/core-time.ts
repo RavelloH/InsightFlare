@@ -2,12 +2,14 @@ import {
   buildCalendarBucketPlan,
   createTimeRange,
   normalizeReportingTimeZone,
-  previousComparableRange,
 } from "@/lib/edge/analytics/contract";
 import { ONE_DAY_MS, ONE_HOUR_MS } from "@/lib/edge/utils";
 
 import { type Interval, type QueryWindow } from "./core-types";
-
+export {
+  percentChange,
+  previousComparableWindow,
+} from "@/lib/edge/analytics/contract";
 export function appendSqlConditions(
   baseClause: string,
   conditions: string[],
@@ -21,30 +23,17 @@ export function appendSqlConditions(
   }
   return `WHERE ${normalizedConditions.join(" AND ")}`;
 }
-
 export function sourceLabel(_window: QueryWindow): "detail" {
   return "detail";
 }
-
 export function avgDuration(totalDuration: number, sessions: number): number {
   if (sessions <= 0) return 0;
   return Math.round(totalDuration / sessions);
 }
-
 export function bounceRate(bounces: number, sessions: number): number {
   if (sessions <= 0) return 0;
   return Number((bounces / sessions).toFixed(6));
 }
-
-export function percentChange(
-  current: number,
-  previous: number,
-): number | null {
-  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous <= 0)
-    return null;
-  return ((current - previous) / previous) * 100;
-}
-
 export function intervalBucketMs(interval: Interval): number {
   if (interval === "minute") return 60_000;
   if (interval === "hour") return ONE_HOUR_MS;
@@ -52,26 +41,22 @@ export function intervalBucketMs(interval: Interval): number {
   if (interval === "week") return 7 * ONE_DAY_MS;
   return 30 * ONE_DAY_MS;
 }
-
 export interface TimeBucket {
   index: number;
   timestampMs: number;
   startMs: number;
   endExclusiveMs: number;
 }
-
 export interface TimeBucketCase {
   sql: string;
   bindings: number[];
 }
-
 export function sqlIntegerLiteral(value: number): string {
   if (!Number.isFinite(value)) {
     throw new Error("Invalid time bucket boundary");
   }
   return String(Math.trunc(value));
 }
-
 export function buildTimeBuckets(
   window: QueryWindow,
   interval: Interval,
@@ -88,19 +73,6 @@ export function buildTimeBuckets(
     endExclusiveMs: bucket.endExclusiveMs,
   }));
 }
-
-export function previousComparableWindow(window: QueryWindow): QueryWindow {
-  const range = previousComparableRange(
-    createTimeRange(window.startMs, window.endExclusiveMs),
-  );
-  return {
-    startMs: range.startMs,
-    endExclusiveMs: range.endExclusiveMs,
-    nowMs: window.nowMs,
-    timeZone: window.timeZone,
-  };
-}
-
 export function timeBucketCase(
   buckets: TimeBucket[],
   columnExpression: string,
@@ -113,7 +85,6 @@ export function timeBucketCase(
     bindings: [],
   };
 }
-
 export function timeBucketTimestamp(
   buckets: TimeBucket[],
   bucketIndex: number,

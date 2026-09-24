@@ -1,27 +1,19 @@
-import { parseGeoLocationValue } from "@/lib/dashboard/geo-location";
+import { parseGeoLocationValue } from "@/lib/analytics/geo-location";
 import {
-  analyticsFilterRegistry,
-  attachFilterScopePreference,
-  attachSavedFilterScopePreference,
-  compileFilterDocument,
   type FilterDocument,
   type FilterExpression,
-  filterScopePreferenceFromDocument,
-  normalizeFilterDocument,
   planObservationFilter,
-  savedFilterScopePreferenceFromDocument,
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 
 import type { EventRecordSortKey, ListSort, QueryWindow } from "./core-types";
-
+import { compileFilterDocument } from "./filter-compiler";
 export interface ParsedGeoFilter {
   country: string;
   regionCode?: string;
   regionName?: string;
   city?: string;
 }
-
 /** Presentation-only location decoder. It is not part of the SQL filter contract. */
 export function parseGeoFilterValue(
   value: string | undefined,
@@ -37,55 +29,10 @@ export function parseGeoFilterValue(
       : {}),
   };
 }
-
-function removeFields(
-  expression: FilterExpression | null,
-  fields: ReadonlySet<string>,
-): FilterExpression | null {
-  if (!expression) return null;
-  if (expression.kind === "condition") {
-    return expression.target.kind === "field" &&
-      fields.has(expression.target.field)
-      ? null
-      : expression;
-  }
-  if (expression.kind === "not") {
-    const child = removeFields(expression.child, fields);
-    return child ? { kind: "not", child } : null;
-  }
-  const children = expression.children
-    .map((child) => removeFields(child, fields))
-    .filter((child): child is FilterExpression => child !== null);
-  if (children.length === 0) return null;
-  if (children.length === 1) return children[0]!;
-  return { kind: expression.kind, children };
-}
-
-export function withoutFilterKey(
-  filters: FilterDocument,
-  field: string,
-): FilterDocument {
-  const normalized = normalizeFilterDocument(
-    { version: 1, root: removeFields(filters.root, new Set([field])) },
-    analyticsFilterRegistry,
-  );
-  const callerPreference = filterScopePreferenceFromDocument(filters);
-  const savedPreference = savedFilterScopePreferenceFromDocument(filters);
-  const withCallerPreference = callerPreference
-    ? attachFilterScopePreference(normalized, callerPreference)
-    : normalized;
-  return savedPreference
-    ? attachSavedFilterScopePreference(withCallerPreference, savedPreference)
-    : withCallerPreference;
-}
-
-export function withoutGeoFilter(filters: FilterDocument): FilterDocument {
-  return withoutFilterKey(
-    withoutFilterKey(withoutFilterKey(filters, "geo.country"), "geo.region"),
-    "geo.city",
-  );
-}
-
+export {
+  withoutFilterKey,
+  withoutGeoFilter,
+} from "@/lib/edge/analytics/contract";
 export function usesSessionBoundaryFilter(filters: FilterDocument): boolean {
   const visit = (expression: FilterExpression | null): boolean => {
     if (!expression) return false;
@@ -101,7 +48,6 @@ export function usesSessionBoundaryFilter(filters: FilterDocument): boolean {
   };
   return visit(filters.root);
 }
-
 function compileObservationPredicate(
   filters: FilterDocument,
   observationKind: "visit" | "event",
@@ -121,7 +67,6 @@ function compileObservationPredicate(
   );
   return { clause: compiled.clause, bindings: [...compiled.bindings] };
 }
-
 function matchingEventExistsSql(
   filters: FilterDocument,
   outerAlias: string,
@@ -173,7 +118,6 @@ function matchingEventExistsSql(
       : eventPredicate.bindings,
   };
 }
-
 export function buildVisitFilterSql(
   filters: FilterDocument,
   alias = "visit_source",
@@ -205,7 +149,6 @@ export function buildVisitFilterSql(
   }
   return { clause: `WHERE (${clauses.join(" OR ")})`, bindings };
 }
-
 export function buildEventFilterSql(
   filters: FilterDocument,
   alias = "es",
@@ -245,7 +188,6 @@ export function buildEventFilterSql(
     ? { clause: `WHERE ${clauses.join(" AND ")}`, bindings }
     : { clause: "", bindings };
 }
-
 export function eventRecordOrderBy(sort: ListSort<EventRecordSortKey>): string {
   const direction = sort.direction === "asc" ? "ASC" : "DESC";
   if (sort.key === "eventName")

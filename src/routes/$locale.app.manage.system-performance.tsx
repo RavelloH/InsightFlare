@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { SystemPerformanceClient } from "@/components/dashboard/system-performance-client";
+import { SystemPerformanceClient } from "@/components/dashboard/admin/system-performance-client";
 import { loadSystemPerformanceInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 export const Route = createFileRoute("/$locale/app/manage/system-performance")({

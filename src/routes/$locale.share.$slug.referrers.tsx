@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { ReferrersClientPage } from "@/components/dashboard/site-pages/referrers-client-page";
+import { ReferrersClientPage } from "@/components/dashboard/site-pages/referrers/referrers-client-page";
 import { sharePath } from "@/lib/dashboard/share-path";
 export const Route = createFileRoute("/$locale/share/$slug/referrers")({
   component: Page,

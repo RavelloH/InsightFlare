@@ -6,9 +6,8 @@ import {
   REQUEST_ANALYTICS_DOUBLES,
   writeRequestAnalyticsPoint,
 } from "@/lib/edge/analytics-engine/index";
-import { classifyCollectBotTraffic } from "@/lib/edge/bot-protection";
+import { classifyCollectBotTraffic } from "@/lib/edge/collector/bot-protection";
 import type { Env, TrackerClientPayload } from "@/lib/edge/types";
-
 vi.mock("asn-blocklist", () => ({
   classifyASN: vi.fn((asn: unknown) => {
     if (Number(asn) === 13335) return "hosting";
@@ -18,10 +17,8 @@ vi.mock("asn-blocklist", () => ({
     return "unknown";
   }),
 }));
-
 const CHROME_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-
 function request(headers: HeadersInit, cf?: Record<string, unknown>): Request {
   const inputHeaders = new Headers(headers);
   const req = new Request("https://collector.test/collect", {
@@ -39,7 +36,6 @@ function request(headers: HeadersInit, cf?: Record<string, unknown>): Request {
   }
   return req;
 }
-
 const payload: TrackerClientPayload = {
   siteId: "site-1",
   kind: "pageview",
@@ -47,7 +43,6 @@ const payload: TrackerClientPayload = {
   pathname: "/pricing",
   hostname: "example.com",
 };
-
 describe("bot protection", () => {
   it("keeps the Analytics Engine schema within data point limits", () => {
     expect(REQUEST_ANALYTICS_BLOBS).toHaveLength(20);

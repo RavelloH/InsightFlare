@@ -10,7 +10,6 @@ import {
   type FilterDocument,
   type FilterFieldId,
   normalizeFilterDocument,
-  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
@@ -18,6 +17,7 @@ import {
   queryGoalTimeseriesFromD1,
   withGoalTimeseriesTimestamps,
 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
+import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { parseFilterDsl } from "@/lib/filter-contract";
 
 type Binding = string | number | null;

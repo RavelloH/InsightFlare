@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { PageHeading } from "@/components/dashboard/page-heading";
+import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { AnalyticsEngineSettingsClient } from "@/components/dashboard/system-settings/analytics-engine-settings-client";
 import { LoginTurnstileSettingsClient } from "@/components/dashboard/system-settings/login-turnstile-settings-client";
 import { NotificationEmailSettingsClient } from "@/components/dashboard/system-settings/notification-email-settings-client";

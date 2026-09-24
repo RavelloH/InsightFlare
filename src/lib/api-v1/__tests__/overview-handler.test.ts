@@ -2,18 +2,17 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
-import { aggregateCache } from "@/lib/api-v1/analytics-overview";
-import { handlePlannedSiteOverview } from "@/lib/api-v1/overview-handler";
+import { aggregateCache } from "@/lib/api-v1/analytics/overview";
+import { handlePlannedSiteOverview } from "@/lib/api-v1/analytics/overview-handler";
 import {
   AnalyticsOverviewResponseSchema,
   ApiV1ErrorEnvelopeSchema,
-} from "@/lib/api-v1/wire";
+} from "@/lib/api-v1/contract/wire";
 import {
   EMPTY_FILTER_DOCUMENT,
   type OverviewReader,
 } from "@/lib/edge/analytics/contract";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -22,7 +21,6 @@ const principal: ApiKeyPrincipal = {
   siteIds: ["site-1"],
   status: "active",
 };
-
 const input = {
   timeRange: {
     kind: "absolute",
@@ -31,9 +29,7 @@ const input = {
     timeZone: "UTC",
   },
 };
-
 beforeEach(() => aggregateCache.clear());
-
 function reader(): OverviewReader {
   return {
     readOverview: vi.fn().mockResolvedValue({
@@ -51,7 +47,6 @@ function reader(): OverviewReader {
     readTrend: vi.fn(),
   };
 }
-
 describe("planned site overview HTTP adapter", () => {
   it("returns the typed analytics envelope and request headers", async () => {
     const app = new Hono();

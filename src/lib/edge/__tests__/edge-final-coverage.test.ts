@@ -1,41 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { withDashboardCache } from "@/lib/edge/analytics/composition/dashboard-cache";
 import {
   geoTabLabel,
   mapEventField,
   mapGeoRowsToFilterOptions,
 } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
-import {
-  customEventJsonTypeCode,
-  customEventJsonTypeLabel,
-  parseEventRecordSort,
-  parseFilterOptionKey,
-  parseListSearch,
-  parseSessionListSort,
-} from "@/lib/edge/analytics/providers/d1/internal/core-parsers";
-import { withDashboardCache } from "@/lib/edge/dashboard-cache";
-import { insertVisit } from "@/lib/edge/ingest-buffer-store";
-import { flushCustomEventRowIndividually } from "@/lib/edge/ingest-custom-event-flush";
-import { flushPendingToD1 } from "@/lib/edge/ingest-flush";
-import type { IngestFlushContext } from "@/lib/edge/ingest-flush-types";
+import { insertVisit } from "@/lib/edge/ingest/buffer-store";
+import { flushCustomEventRowIndividually } from "@/lib/edge/ingest/custom-event-flush";
+import { flushPendingToD1 } from "@/lib/edge/ingest/flush";
+import type { IngestFlushContext } from "@/lib/edge/ingest/flush-types";
 import type {
   BufferedCustomEventRow,
   BufferedVisitRow,
-} from "@/lib/edge/ingest-types";
+} from "@/lib/edge/ingest/types";
 import {
   readSiteScriptSettings,
   readSiteTrackingConfig,
-} from "@/lib/edge/site-settings-store";
+} from "@/lib/edge/sites/settings-store";
 import type { Env, NormalizedPageview } from "@/lib/edge/types";
-
 type SqlBinding = string | number | null;
-
 const NOW = Date.UTC(2026, 4, 25, 12, 0, 0);
-
 function envWithKv(kv: Partial<KVNamespace>): Env {
   return { SITE_SETTINGS_KV: kv as KVNamespace } as Env;
 }
-
 function pageview(overrides: Partial<NormalizedPageview> = {}) {
   return {
     kind: "pageview",
@@ -84,7 +72,6 @@ function pageview(overrides: Partial<NormalizedPageview> = {}) {
     ...overrides,
   } satisfies NormalizedPageview;
 }
-
 function bufferedVisit(
   overrides: Partial<BufferedVisitRow> = {},
 ): BufferedVisitRow {
@@ -151,7 +138,6 @@ function bufferedVisit(
     ...overrides,
   };
 }
-
 function bufferedCustomEvent(
   overrides: Partial<BufferedCustomEventRow> = {},
 ): BufferedCustomEventRow {
@@ -174,7 +160,6 @@ function bufferedCustomEvent(
     ...overrides,
   };
 }
-
 function flushContext(
   visitRows: BufferedVisitRow[] = [],
   eventRows: BufferedCustomEventRow[] = [],
@@ -204,7 +189,6 @@ function flushContext(
     pushRealtimeRecord: vi.fn(async () => undefined),
   };
 }
-
 describe("edge cache fallback coverage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: NOW });
@@ -288,7 +272,6 @@ describe("edge cache fallback coverage", () => {
     expect(kv.get).toHaveBeenCalledTimes(2);
   });
 });
-
 describe("edge ingest flush edge coverage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: NOW });
@@ -377,7 +360,6 @@ describe("edge ingest flush edge coverage", () => {
     );
   });
 });
-
 describe("edge query parser and mapper edge coverage", () => {
   function url(params: Record<string, string>) {
     const parsed = new URL("https://edge.test/query");

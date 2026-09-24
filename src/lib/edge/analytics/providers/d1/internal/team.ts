@@ -5,8 +5,8 @@ import {
 import {
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollupsPartial,
-} from "@/lib/edge/hourly-rollup";
-import { sitePksFromSiteIdsSql } from "@/lib/edge/site-identity-sql";
+} from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+import { sitePksFromSiteIdsSql } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -32,12 +32,10 @@ import {
   recordD1RowsRead,
 } from "./diagnostics";
 import { compileScopedDatasetSql } from "./scoped-dataset";
-
 // D1 permits at most 100 bound parameters per statement; visit sources use
 // two additional bindings for the half-open time window.
 const MAX_SITE_IDS_PER_D1_QUERY = 98;
 const MAX_D1_BINDINGS = 100;
-
 function hasEffectiveFilter(
   filters?: FilterDocument,
 ): filters is FilterDocument {
@@ -52,7 +50,6 @@ function hasEffectiveFilter(
     (filters?.root !== null && filters?.root !== undefined)
   );
 }
-
 function scopedDatasetsForSites(
   siteIds: string[],
   window: QueryWindow,
@@ -100,7 +97,6 @@ function scopedDatasetsForSites(
   }
   return datasets;
 }
-
 function siteIdChunks(siteIds: string[]): string[][] {
   const chunks: string[][] = [];
   for (
@@ -112,7 +108,6 @@ function siteIdChunks(siteIds: string[]): string[][] {
   }
   return chunks;
 }
-
 function buildTeamOverviewSourceCte(siteCount: number): string {
   return `
 visit_source AS MATERIALIZED (
@@ -122,7 +117,6 @@ visit_source AS MATERIALIZED (
     AND started_at >= ? AND started_at < ?
 )`;
 }
-
 export async function queryTeamOverviewFromD1(
   env: Env,
   siteIds: string[],
@@ -207,7 +201,6 @@ GROUP BY siteId
   }
   return result;
 }
-
 async function queryTeamOverviewAggregate(
   env: Env,
   siteIds: string[],
@@ -251,7 +244,6 @@ async function queryTeamOverviewAggregate(
     source: rawSiteIds.length === siteIds.length ? "raw" : "mixed",
   };
 }
-
 export interface TeamTrendRow {
   siteId: string;
   bucket: number;
@@ -259,7 +251,6 @@ export interface TeamTrendRow {
   views: number;
   visitors: number;
 }
-
 export async function queryTeamTrendFromD1(
   env: Env,
   siteIds: string[],
@@ -321,7 +312,6 @@ ORDER BY bucket ASC, siteId ASC
       left.bucket - right.bucket || left.siteId.localeCompare(right.siteId),
   );
 }
-
 async function queryTeamCurrentAggregates(
   env: Env,
   siteIds: string[],
@@ -409,7 +399,6 @@ async function queryTeamCurrentAggregates(
     trend: { value: trendValue, source: trendSource },
   };
 }
-
 export async function listTeamSites(
   env: Env,
   teamId: string,
@@ -436,7 +425,6 @@ export async function listTeamSites(
   recordD1RowsRead(diagnostics, result);
   return result.results;
 }
-
 export interface TeamSiteListPage {
   readonly rows: readonly TeamSiteRow[];
   readonly nextCursor: {
@@ -444,7 +432,6 @@ export interface TeamSiteListPage {
     readonly id: string;
   } | null;
 }
-
 export async function queryTeamSitesPageFromD1(
   env: Env,
   teamId: string,
@@ -498,12 +485,10 @@ export async function queryTeamSitesPageFromD1(
       hasMore && last ? { createdAt: last.createdAt, id: last.id } : null,
   };
 }
-
 export interface TeamDashboardQueryResult {
   readonly data: TeamDashboardData;
   readonly source: AnalyticsDataSource;
 }
-
 export interface TeamDashboardOverview {
   readonly views: number;
   readonly sessions: number;
@@ -514,7 +499,6 @@ export interface TeamDashboardOverview {
   readonly bounceRate: number;
   readonly approximateVisitors: boolean;
 }
-
 export interface TeamDashboardSite extends TeamSiteRow {
   readonly overview: TeamDashboardOverview;
   readonly changeRates: Readonly<
@@ -529,7 +513,6 @@ export interface TeamDashboardSite extends TeamSiteRow {
     >
   >;
 }
-
 export interface TeamDashboardTrendBucket {
   readonly bucket: number;
   readonly timestampMs: number;
@@ -539,12 +522,10 @@ export interface TeamDashboardTrendBucket {
     readonly visitors: number;
   }[];
 }
-
 export interface TeamDashboardData {
   readonly sites: readonly TeamDashboardSite[];
   readonly trend: readonly TeamDashboardTrendBucket[];
 }
-
 /** Typed team dashboard reader shared by private and API v1 adapters. */
 export async function queryTeamDashboardForTeam(
   env: Env,

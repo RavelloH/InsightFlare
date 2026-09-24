@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { ScheduledTasksClient } from "@/components/dashboard/scheduled-tasks-client";
+import { ScheduledTasksClient } from "@/components/dashboard/admin/scheduled-tasks-client";
 import { loadScheduledTasksInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 export const Route = createFileRoute("/$locale/app/manage/scheduled-tasks")({

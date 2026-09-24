@@ -1,26 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { canManageTeam } from "@/lib/edge/admin-access";
-import { handleApiKeysAdmin } from "@/lib/edge/admin-api-keys";
-import { requireActor } from "@/lib/edge/admin-auth";
+import { canManageTeam } from "@/lib/edge/admin/access";
+import { handleApiKeysAdmin } from "@/lib/edge/admin/api-keys/handler";
+import { requireActor } from "@/lib/edge/admin/auth";
 import {
   createApiKeyRecord,
   getApiKeyById,
   listApiKeys,
   revokeApiKeyRecord,
-} from "@/lib/edge/api-key-store";
+} from "@/lib/edge/auth/api-key-store";
 import type { Env } from "@/lib/edge/types";
-
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   requireActor: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-access", () => ({
+vi.mock("@/lib/edge/admin/access", () => ({
   canManageTeam: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/api-key-store", async () => {
-  const actual = await vi.importActual("@/lib/edge/api-key-store");
+vi.mock("@/lib/edge/auth/api-key-store", async () => {
+  const actual = await vi.importActual("@/lib/edge/auth/api-key-store");
   return {
     ...(actual as Record<string, unknown>),
     createApiKeyRecord: vi.fn(),
@@ -29,14 +26,12 @@ vi.mock("@/lib/edge/api-key-store", async () => {
     revokeApiKeyRecord: vi.fn(),
   };
 });
-
 const requireActorMock = vi.mocked(requireActor);
 const canManageTeamMock = vi.mocked(canManageTeam);
 const listApiKeysMock = vi.mocked(listApiKeys);
 const createApiKeyRecordMock = vi.mocked(createApiKeyRecord);
 const getApiKeyByIdMock = vi.mocked(getApiKeyById);
 const revokeApiKeyRecordMock = vi.mocked(revokeApiKeyRecord);
-
 const actor = {
   user: {
     id: "user-1",
@@ -51,7 +46,6 @@ const actor = {
   },
   isAdmin: false,
 };
-
 const env = {
   DB: {
     prepare: vi.fn(() => ({
@@ -62,11 +56,9 @@ const env = {
     })),
   } as unknown as D1Database,
 } as Env;
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://edge.test${path}`, init);
 }
-
 describe("api key admin handler", () => {
   beforeEach(() => {
     requireActorMock.mockReset();

@@ -4,9 +4,8 @@ import {
   extractSessionToken,
   requireSession,
   verifySessionToken,
-} from "@/lib/edge/session-auth";
+} from "@/lib/edge/auth/session-auth";
 import type { Env } from "@/lib/edge/types";
-
 function base64UrlEncode(input: string | Uint8Array): string {
   const bytes =
     typeof input === "string" ? new TextEncoder().encode(input) : input;
@@ -16,7 +15,6 @@ function base64UrlEncode(input: string | Uint8Array): string {
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 }
-
 async function createToken(payload: unknown, secret: string): Promise<string> {
   const payloadPart = base64UrlEncode(JSON.stringify(payload));
   const key = await crypto.subtle.importKey(
@@ -33,7 +31,6 @@ async function createToken(payload: unknown, secret: string): Promise<string> {
   );
   return `${payloadPart}.${base64UrlEncode(new Uint8Array(signature))}`;
 }
-
 function requestWithHeaders(headers: Record<string, string>): Request {
   return {
     headers: {
@@ -43,7 +40,6 @@ function requestWithHeaders(headers: Record<string, string>): Request {
     },
   } as unknown as Request;
 }
-
 describe("edge session authentication", () => {
   beforeEach(() => {
     vi.useRealTimers();

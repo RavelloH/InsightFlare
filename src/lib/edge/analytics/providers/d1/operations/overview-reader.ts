@@ -5,15 +5,13 @@ import type {
   OverviewMetrics,
   OverviewReader,
   OverviewReaderInput,
-  QueryTime,
   TrendPoint,
   TrendReaderInput,
   TrendReaderResult,
 } from "@/lib/edge/analytics/contract";
-import type {
-  QueryWindow,
-  TrendAggregateRow,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+import type { QueryWindow } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract";
+import type { TrendAggregateRow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   createD1ReadDiagnostics,
   type D1ReadDiagnostics,
@@ -24,28 +22,12 @@ import {
   queryTrendAggregate,
 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import type { Env } from "@/lib/edge/types";
-
-export function toQueryTime(window: QueryWindow): QueryTime {
-  return {
-    range: {
-      startMs: window.startMs as QueryTime["range"]["startMs"],
-      endExclusiveMs:
-        window.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
-    },
-    reportingTimeZone: window.timeZone as QueryTime["reportingTimeZone"],
-    capturedAtMs: window.nowMs as QueryTime["capturedAtMs"],
-    ...(window.paginationBinding
-      ? { paginationBinding: window.paginationBinding }
-      : {}),
-  };
-}
-
+export const toQueryTime = queryWindowToTime;
 function sourceFromDiagnostic(
   result: { diagnosticSource?: "raw" | "rollup" } | undefined,
 ): "raw" | "rollup" {
   return result?.diagnosticSource ?? "raw";
 }
-
 export function createOverviewReader(
   env: Env,
   siteId: string,
@@ -109,7 +91,6 @@ export function createOverviewReader(
     },
   };
 }
-
 export async function readLatestSiteActivity(
   env: Env,
   siteId: string,
@@ -119,5 +100,4 @@ export async function readLatestSiteActivity(
 ): Promise<number | null> {
   return queryLatestSiteActivity(env, siteId, window, filters, diagnostics);
 }
-
 export type { OverviewMetrics };

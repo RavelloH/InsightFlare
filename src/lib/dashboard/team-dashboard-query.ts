@@ -1,10 +1,12 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 
-import type { SiteData } from "@/lib/edge-client";
+import {
+  addZonedInterval,
+  startOfZonedInterval,
+} from "@/lib/analytics/time-zone";
+import type { SiteData } from "@/lib/dashboard-api/client/edge";
 
 import type { RangePreset, TimeWindow } from "./query-state";
-import { addZonedInterval, startOfZonedInterval } from "./time-zone";
-
 export interface TeamDashboardOverview {
   views: number;
   sessions: number;
@@ -15,7 +17,6 @@ export interface TeamDashboardOverview {
   bounceRate: number;
   approximateVisitors: boolean;
 }
-
 export interface TeamDashboardSite extends SiteData {
   overview: TeamDashboardOverview;
   changeRates: Record<
@@ -28,7 +29,6 @@ export interface TeamDashboardSite extends SiteData {
     number | null
   >;
 }
-
 export interface TeamDashboardTrendBucket {
   bucket: number;
   timestampMs: number;
@@ -38,35 +38,29 @@ export interface TeamDashboardTrendBucket {
     readonly visitors: number;
   }[];
 }
-
 export interface TeamDashboardData {
   sites: readonly TeamDashboardSite[];
   trend: readonly TeamDashboardTrendBucket[];
 }
-
 export type TeamDashboardWindow = Pick<
   TimeWindow,
   "from" | "to" | "interval" | "timeZone"
 >;
-
 export interface TeamDashboardSnapshot {
   data: TeamDashboardData;
   window: TeamDashboardWindow;
   range: RangePreset;
   fetchedAt: number;
 }
-
 export interface TeamTrafficPoint {
   timestampMs: number;
   views: number;
   visitors: number;
 }
-
 export interface TeamAggregateTrendPoint {
   timestampMs: number;
   sites: Array<{ siteId: string; views: number; visitors: number }>;
 }
-
 function intervalStepMs(interval: TeamDashboardWindow["interval"]): number {
   if (interval === "minute") return 60_000;
   if (interval === "hour") return 60 * 60_000;
@@ -74,11 +68,9 @@ function intervalStepMs(interval: TeamDashboardWindow["interval"]): number {
   if (interval === "week") return 7 * 24 * 60 * 60_000;
   return 30 * 24 * 60 * 60_000;
 }
-
 function safeCount(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
-
 function bucketStarts(
   window: TeamDashboardWindow,
   firstDataTimestamp?: number,
@@ -102,7 +94,6 @@ function bucketStarts(
   }
   return starts;
 }
-
 export function teamDashboardQueryKey(
   teamId: string,
   window: TeamDashboardWindow,
@@ -117,7 +108,6 @@ export function teamDashboardQueryKey(
     window.timeZone,
   ] as const;
 }
-
 export function sameTeamDashboardWindow(
   left: TeamDashboardWindow,
   right: TeamDashboardWindow,
@@ -129,7 +119,6 @@ export function sameTeamDashboardWindow(
     left.timeZone === right.timeZone
   );
 }
-
 export async function fetchTeamDashboard(
   teamId: string,
   window: TeamDashboardWindow,
@@ -159,7 +148,6 @@ export async function fetchTeamDashboard(
     trend: Array.isArray(payload.data.trend) ? payload.data.trend : [],
   };
 }
-
 export function teamDashboardQueryOptions(input: {
   teamId: string;
   window: TeamDashboardWindow;
@@ -186,7 +174,6 @@ export function teamDashboardQueryOptions(input: {
     placeholderData: keepPreviousData,
   });
 }
-
 export function buildTeamAggregateTrend(
   trend: readonly TeamDashboardTrendBucket[],
   window: TeamDashboardWindow,
@@ -241,7 +228,6 @@ export function buildTeamAggregateTrend(
       sites: [...point.sites].map(([siteId, value]) => ({ siteId, ...value })),
     }));
 }
-
 export function buildTeamSiteTrends(
   siteIds: readonly string[],
   trend: readonly TeamDashboardTrendBucket[],

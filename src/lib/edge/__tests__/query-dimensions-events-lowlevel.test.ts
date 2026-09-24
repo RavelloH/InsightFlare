@@ -4,6 +4,13 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createQueryTime,
+  EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
+  prepareScopedQuery,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
+import {
   handleEventFieldValuesContract as handleEventTypeFieldValues,
   handleEventRecordDetailContract as handleEventRecordDetail,
   handleEventRecordsContract as handleEventsRecords,
@@ -13,18 +20,12 @@ import {
   handleEventTypeDetailContract as handleEventTypeDetail,
   handleEventTypeFieldsContract as handleEventTypeFields,
   handleEventTypesContract as handleEventTypes,
-} from "@/lib/edge/analytics/composition/protocol/events-contract-adapter";
-import {
-  createQueryTime,
-  EMPTY_FILTER_DOCUMENT,
-  type FilterDocument,
-  prepareScopedQuery,
-  siteQueryContext,
-} from "@/lib/edge/analytics/contract";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/events";
 import type {
   EventRecordRow,
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { readCustomEventDetail } from "@/lib/edge/analytics/providers/d1/internal/custom-event-read";
 import {
   decodeDimensionCursor,
   decodeSessionPathDimensionCursor,
@@ -54,30 +55,24 @@ import {
   queryEventTypePageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import { queryJourneyTargetExistsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
-import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
 import {
   createInvocationLogger,
   runWithInvocationLogger,
-} from "@/lib/edge/observability-logger";
+} from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
 import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
-
-vi.mock("@/lib/edge/custom-event-read", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/custom-event-read", () => ({
   readCustomEventDetail: vi.fn(),
 }));
-
 type D1Row = Record<string, unknown> | EventRecordRow;
 type QueryBinding = string | number | null;
-
 interface QueryCall {
   sql: string;
   bindings: QueryBinding[];
 }
-
 const readCustomEventDetailMock = vi.mocked(readCustomEventDetail);
-
 const siteId = "site-lowlevel";
 const baseMs = Date.UTC(2026, 0, 4, 8);
 const window: QueryWindow = {
@@ -86,7 +81,6 @@ const window: QueryWindow = {
   nowMs: baseMs + 3 * 60 * 60 * 1000,
   timeZone: "UTC",
 };
-
 function createD1Env(resultSets: D1Row[][]): {
   env: Env;
   calls: QueryCall[];
@@ -113,15 +107,12 @@ function createD1Env(resultSets: D1Row[][]): {
     prepare,
   };
 }
-
 function visitBindings(targetWindow = window): QueryBinding[] {
   return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
-
 function eventBindings(targetWindow = window): QueryBinding[] {
   return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
 }
-
 function url(
   path: string,
   params: Record<string, string | number | boolean>,
@@ -132,7 +123,6 @@ function url(
   }
   return parsed;
 }
-
 function eventRecord(overrides: Partial<EventRecordRow> = {}): EventRecordRow {
   return {
     eventId: "evt-1",
@@ -160,7 +150,6 @@ function eventRecord(overrides: Partial<EventRecordRow> = {}): EventRecordRow {
     ...overrides,
   };
 }
-
 describe("edge query dimensions low-level coverage", () => {
   it("normalizes sparse visit dimension and referrer aggregate rows", async () => {
     const { env, calls } = createD1Env([
@@ -788,7 +777,6 @@ describe("edge query dimensions low-level coverage", () => {
     expect(present.calls[0].sql).toContain("session_id");
   });
 });
-
 describe("edge query event fields and records low-level coverage", () => {
   it("queries event fields and skips D1 for unsupported field value types", async () => {
     const { env, calls, prepare } = createD1Env([
@@ -935,7 +923,6 @@ describe("edge query event fields and records low-level coverage", () => {
     });
   });
 });
-
 describe("edge query event handlers low-level coverage", () => {
   it("rejects event handler requests with missing identifiers or invalid windows", async () => {
     const { env, prepare } = createD1Env([]);
@@ -1393,7 +1380,6 @@ describe("edge query event handlers low-level coverage", () => {
     });
   });
 });
-
 describe("edge query event type overview low-level coverage", () => {
   it("uses zero summary fallbacks when scoped and event rows are empty", async () => {
     const { env, calls } = createD1Env([[]]);
@@ -1426,7 +1412,6 @@ describe("edge query event type overview low-level coverage", () => {
     expect(calls).toHaveLength(1);
   });
 });
-
 describe("edge paginated event types low-level coverage", () => {
   it("paginates searched event types and validates the next cursor", async () => {
     const first = createD1Env([
@@ -1481,7 +1466,6 @@ describe("edge paginated event types low-level coverage", () => {
     expect(last.calls[0].bindings).toContain(7);
   });
 });
-
 describe("edge paginated event fields low-level coverage", () => {
   it("paginates event fields and preserves the typed cursor binding", async () => {
     const first = createD1Env([
@@ -1672,7 +1656,6 @@ describe("edge paginated event fields low-level coverage", () => {
     expect(boolean.calls[0].sql).toContain("CASE v.boolean_value");
   });
 });
-
 describe("edge paginated dimensions low-level coverage", () => {
   it("paginates dimensions with search, empty filtering, visitor sorting, and cursors", async () => {
     const first = createD1Env([

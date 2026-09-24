@@ -5,27 +5,24 @@ import {
   createQueryTime,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
-
-vi.mock("@/lib/edge/analytics/providers/d1/internal/core", () => ({
+vi.mock("@/lib/edge/auth/site-access", () => ({
   resolvePrivateTeamForSession: vi.fn(),
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   queryTeamDashboardForTeam: vi.fn(),
 }));
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
-
-import { resolvePrivateTeamForSession } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryTeamDashboardForTeam } from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
   readTeamDashboard,
   resolveDashboardSession,
   resolveTeamDashboardScope,
 } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
-import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
-import { requireSession } from "@/lib/edge/session-auth";
-
+import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
+import { requireSession } from "@/lib/edge/auth/session-auth";
+import { resolvePrivateTeamForSession } from "@/lib/edge/auth/site-access";
 const env = {} as never;
 const request = new Request("https://app.test/api/private/team-dashboard");
 const session: EdgeSessionClaims = {
@@ -35,7 +32,6 @@ const session: EdgeSessionClaims = {
   systemRole: "user",
   exp: 1,
 };
-
 describe("team dashboard runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();

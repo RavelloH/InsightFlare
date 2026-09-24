@@ -2,8 +2,7 @@ import type { Locale } from "@/lib/i18n/config";
 
 import { buildNotificationContent } from "./content";
 import { renderNotificationPlainText } from "./email-text";
-import type { NotificationMessageDraft } from "./evaluator";
-import type { NotificationMessage } from "./message-store";
+import type { NotificationMessage, NotificationMessageDraft } from "./message";
 
 export interface BuildLocalizedNotificationMessageInput {
   draft: NotificationMessageDraft;

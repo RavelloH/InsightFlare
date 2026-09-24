@@ -1,14 +1,18 @@
-import { type FilterCodecOptions, parseFilterParams } from "./filter-codec";
-import { analyticsFilterRegistry } from "./filter-registry";
+import {
+  type FilterCodecOptions,
+  parseFilterParams,
+} from "@/lib/filter-contract/filter-codec";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import {
   assertFilterAudience,
   type FilterDocument,
   normalizeFilterDocument,
-} from "./filters";
+} from "@/lib/filter-contract/filters";
 import {
   attachFilterScopePreference,
   parseFilterScopePreference,
-} from "./scoped-filter";
+} from "@/lib/filter-contract/scope-preference";
+
 import type { QueryAudience } from "./types";
 
 export class FilterAdapterError extends Error {

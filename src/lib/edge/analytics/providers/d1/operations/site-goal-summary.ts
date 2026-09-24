@@ -2,7 +2,6 @@ import type { GoalDefinition } from "@/lib/edge/analytics/contract";
 import {
   type FilterDocument,
   parseGoalFilter,
-  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import {
@@ -10,6 +9,7 @@ import {
   queryGoalSummaryFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
 import { queryGoalDefinition } from "@/lib/edge/analytics/providers/d1/internal/goals";
+import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 
 export interface GoalMetricSummary {

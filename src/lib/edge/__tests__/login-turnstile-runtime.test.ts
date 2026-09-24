@@ -5,9 +5,8 @@ import {
   readLoginTurnstileRuntimeConfig,
   readPublicLoginTurnstileRuntimeConfig,
   writeLoginTurnstileRuntimeConfig,
-} from "@/lib/edge/login-turnstile-runtime";
+} from "@/lib/edge/auth/login-turnstile-runtime";
 import type { Env } from "@/lib/edge/types";
-
 function kv(raw: string | null = null) {
   return {
     get: vi.fn().mockResolvedValue(raw),
@@ -15,7 +14,6 @@ function kv(raw: string | null = null) {
     delete: vi.fn().mockResolvedValue(undefined),
   };
 }
-
 function env(kvNamespace?: ReturnType<typeof kv>, extras: Partial<Env> = {}) {
   return {
     DB: {} as D1Database,
@@ -24,7 +22,6 @@ function env(kvNamespace?: ReturnType<typeof kv>, extras: Partial<Env> = {}) {
     ...extras,
   } as Env;
 }
-
 describe("login Turnstile runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();

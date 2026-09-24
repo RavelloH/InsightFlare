@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-
 const readers = vi.hoisted(() => ({
   queryBrowserRadarFromD1: vi.fn(),
   queryFunnelAnalysis: vi.fn(),
@@ -8,7 +7,6 @@ const readers = vi.hoisted(() => ({
   queryFunnelDefinitionsPage: vi.fn(),
   decodeFunnelDefinitionCursor: vi.fn(),
 }));
-
 vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
   queryFunnelAnalysis: readers.queryFunnelAnalysis,
   queryFunnelDefinition: readers.queryFunnelDefinition,
@@ -16,26 +14,22 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
   queryFunnelDefinitionsPage: readers.queryFunnelDefinitionsPage,
   decodeFunnelDefinitionCursor: readers.decodeFunnelDefinitionCursor,
 }));
-
 vi.mock("@/lib/edge/analytics/providers/d1/internal/technology/radar", () => ({
   queryBrowserRadarFromD1: readers.queryBrowserRadarFromD1,
   queryReferrerRadarFromD1: vi.fn(),
 }));
-
-import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/composition/protocol/funnels-contract-adapter";
+import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/funnels";
 import {
   handleBrowserRadarContract,
   handleBrowserVersionBreakdownContract,
   handleClientDimensionTrendContract,
   handleCrossBreakdownContract,
   handleUtmDimensionTrendContract,
-} from "@/lib/edge/analytics/composition/protocol/technology-contract-adapter";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/technology";
 import type { Env } from "@/lib/edge/types";
-
 const env = { DB: {} } as unknown as Env;
 const siteId = "site-contract-branches";
 const base = "from=1767225600000&to=1767312000000";
-
 describe("typed contract adapter data branches", () => {
   it("runs funnel analysis only for a complete definition", async () => {
     readers.queryFunnelDefinition.mockResolvedValue({

@@ -1,9 +1,6 @@
-import {
-  EMPTY_FILTER_DOCUMENT,
-  type ScopedDatasetSql,
-} from "@/lib/edge/analytics/contract";
-import { readCustomEventDetail } from "@/lib/edge/custom-event-read";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { readCustomEventDetail } from "@/lib/edge/analytics/providers/d1/internal/custom-event-read";
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -24,8 +21,8 @@ import {
   visitSourceBindings,
 } from "./core";
 import { mapVisitPerformanceMetrics } from "./core-performance";
+import type { ScopedDatasetSql } from "./scoped-dataset";
 import { scopedDatasetFor } from "./scoped-dataset";
-
 // Event-record lists only need this projection for their output, filters, and
 // cursor predicates. Keeping it explicit prevents the shared analytics source
 // from carrying unrelated visit columns through every page query.
@@ -55,7 +52,6 @@ const EVENT_RECORD_BASE_SOURCE_COLUMNS = [
   "v.os_version",
   "v.device_type",
 ] as const;
-
 const EVENT_RECORD_FILTER_SOURCE_COLUMNS: Readonly<
   Record<string, readonly string[]>
 > = {
@@ -81,7 +77,6 @@ const EVENT_RECORD_FILTER_SOURCE_COLUMNS: Readonly<
   "geo.timeZone": ["v.timezone"],
   "geo.organization": ["v.as_organization"],
 };
-
 function eventRecordSourceColumns(filters: FilterDocument): string {
   const columns = new Set<string>(EVENT_RECORD_BASE_SOURCE_COLUMNS);
   const collect = (expression: FilterDocument["root"]): void => {
@@ -105,18 +100,15 @@ function eventRecordSourceColumns(filters: FilterDocument): string {
   collect(filters.root);
   return [...columns].join(",\n    ");
 }
-
 export interface EventRecordCursor {
   readonly sortValue?: string | number;
   occurredAt: number;
   eventId: string;
   eventPk: number;
 }
-
 interface EventRecordCursorRow extends EventRecordRow {
   eventPk: number;
 }
-
 interface EventRecordDetailRow extends EventRecordRow {
   userId: string;
   userName: string;
@@ -158,12 +150,10 @@ interface EventRecordDetailRow extends EventRecordRow {
   perfCls: number | null;
   perfInpMs: number | null;
 }
-
 export interface EventRecordPage {
   rows: EventRecordRow[];
   nextCursor: EventRecordCursor | null;
 }
-
 function eventRecordCursorFromRow(
   row: EventRecordCursorRow,
   sort: ListSort<EventRecordSortKey>,
@@ -181,7 +171,6 @@ function eventRecordCursorFromRow(
         eventPk: row.eventPk,
       };
 }
-
 function eventRecordCursorFilter(
   cursor: EventRecordCursor,
   sort: ListSort<EventRecordSortKey>,
@@ -238,7 +227,6 @@ function eventRecordCursorFilter(
     ],
   };
 }
-
 function eventRecordsSql(
   filterClause: string,
   cursorClause: string,
@@ -289,12 +277,10 @@ ORDER BY ${eventRecordOrderBy(sort)}
 LIMIT ?
 `;
 }
-
 function withoutEventPk(row: EventRecordCursorRow): EventRecordRow {
   const { eventPk: _eventPk, ...event } = row;
   return event;
 }
-
 export async function queryEventRecordPageFromD1(
   env: Env,
   siteId: string,
@@ -358,7 +344,6 @@ export async function queryEventRecordPageFromD1(
         : null,
   };
 }
-
 export async function queryEventRecordDetailFromD1(
   env: Env,
   siteId: string,

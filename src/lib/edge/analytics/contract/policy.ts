@@ -1,7 +1,8 @@
 import {
   ANALYTICS_FILTER_REGISTRY_REVISION,
   filterIdsForAudience,
-} from "./filter-registry";
+} from "@/lib/filter-contract/filter-registry";
+
 import type {
   AnalyticsDomainError,
   DetailCapability,

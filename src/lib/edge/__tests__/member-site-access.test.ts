@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { assertSitesBelongToTeam } from "@/lib/edge/member-site-access";
+import { assertSitesBelongToTeam } from "@/lib/edge/auth/member-site-access";
 import type { Env } from "@/lib/edge/types";
 
 function teamSiteEnv() {

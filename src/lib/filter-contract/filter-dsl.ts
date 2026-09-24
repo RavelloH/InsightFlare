@@ -11,7 +11,7 @@ import {
   FilterValidationError,
   type FilterValue,
   normalizeFilterDocument,
-} from "@/lib/edge/analytics/contract/filters";
+} from "./filters";
 
 /** The version of the human-readable filter expression language. */
 export const FILTER_DSL_VERSION = 1 as const;

@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createAccountActionToken } from "@/lib/edge/account-action-tokens";
-import { handleAccountLinksAdmin } from "@/lib/edge/admin-account-links";
-import { byId, requireActor } from "@/lib/edge/admin-auth";
+import { handleAccountLinksAdmin } from "@/lib/edge/admin/account-links";
+import { byId, requireActor } from "@/lib/edge/admin/auth";
+import { createAccountActionToken } from "@/lib/edge/auth/account-action-tokens";
 import type { Env } from "@/lib/edge/types";
 
-vi.mock("@/lib/edge/account-action-tokens", () => ({
+vi.mock("@/lib/edge/auth/account-action-tokens", () => ({
   createAccountActionToken: vi.fn(),
 }));
 
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   byId: vi.fn(),
   requireActor: vi.fn(),
 }));

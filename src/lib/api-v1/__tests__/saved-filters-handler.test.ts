@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { dispatchApiV1ApplicationRoute } from "@/lib/api-v1/application-dispatcher";
-import type { ApiV1ApplicationService } from "@/lib/api-v1/application-registry";
-import { handlePlannedSavedFilters } from "@/lib/api-v1/saved-filters-handler";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { dispatchApiV1ApplicationRoute } from "@/lib/api-v1/application/dispatcher";
+import type { ApiV1ApplicationService } from "@/lib/api-v1/application/registry";
+import { handlePlannedSavedFilters } from "@/lib/api-v1/resources/saved-filters-handler";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 
 const principal = (
   overrides: Partial<ApiKeyPrincipal> = {},

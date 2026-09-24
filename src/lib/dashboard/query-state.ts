@@ -8,7 +8,7 @@ import {
   startOfZonedYear,
   zonedParts,
   zonedTimeToUtcMs,
-} from "@/lib/dashboard/time-zone";
+} from "@/lib/analytics/time-zone";
 import {
   analyticsFilterRegistry,
   FILTER_DOCUMENT_VERSION,
@@ -25,7 +25,6 @@ import {
 } from "@/lib/filter-contract";
 
 import { serializeDashboardSearchParams } from "./filter-state";
-
 export type RangePreset =
   | "30m"
   | "1h"
@@ -41,14 +40,11 @@ export type RangePreset =
   | "6m"
   | "12m"
   | "custom";
-
 export type DashboardInterval = "minute" | "hour" | "day" | "week" | "month";
-
 export interface CustomTimeRange {
   from: number;
   to: number;
 }
-
 export interface TimeWindow {
   preset: RangePreset;
   from: number;
@@ -56,9 +52,7 @@ export interface TimeWindow {
   interval: DashboardInterval;
   timeZone: string;
 }
-
 export const DEFAULT_RANGE_PRESET: RangePreset = "30d";
-
 const RANGE_PRESETS: readonly RangePreset[] = [
   "30m",
   "1h",
@@ -75,7 +69,6 @@ const RANGE_PRESETS: readonly RangePreset[] = [
   "12m",
   "custom",
 ] as const;
-
 const INTERVAL_ORDER: readonly DashboardInterval[] = [
   "minute",
   "hour",
@@ -83,22 +76,18 @@ const INTERVAL_ORDER: readonly DashboardInterval[] = [
   "week",
   "month",
 ] as const;
-
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const YEAR_MS = 366 * DAY_MS;
-
 function cacheAlignedPresetNow(now: number): number {
   // Keep rolling preset requests stable for one minute so separate dashboard
   // loads resolve to the same Cache API key without hiding the current minute.
   return Math.floor(now / MINUTE_MS) * MINUTE_MS + MINUTE_MS - 1;
 }
-
 function isRangePreset(value: string): value is RangePreset {
   return RANGE_PRESETS.includes(value as RangePreset);
 }
-
 function isValidCustomRange(
   value: CustomTimeRange | null | undefined,
 ): value is CustomTimeRange {
@@ -111,7 +100,6 @@ function isValidCustomRange(
     value.from < value.to
   );
 }
-
 function subtractZonedMonths(
   now: number,
   months: number,
@@ -126,7 +114,6 @@ function subtractZonedMonths(
     day: target.day,
   });
 }
-
 function rangeBounds(
   preset: RangePreset,
   now: number,
@@ -191,18 +178,15 @@ function rangeBounds(
   }
   return rangeBounds(DEFAULT_RANGE_PRESET, now, timeZone);
 }
-
 function spanMs(from: number, to: number): number {
   return Math.max(1, to - from);
 }
-
 export function resolveRangePreset(
   value: string | null | undefined,
 ): RangePreset {
   if (!value) return DEFAULT_RANGE_PRESET;
   return isRangePreset(value) ? value : DEFAULT_RANGE_PRESET;
 }
-
 export function allowedIntervalsForRange(
   from: number,
   to: number,
@@ -218,7 +202,6 @@ export function allowedIntervalsForRange(
 
   return [...allowed];
 }
-
 export function finestIntervalForRange(
   from: number,
   to: number,
@@ -229,7 +212,6 @@ export function finestIntervalForRange(
   if (span < 91 * DAY_MS) return "day";
   return "month";
 }
-
 export function clampIntervalForRange(
   interval: DashboardInterval | null | undefined,
   from: number,
@@ -240,7 +222,6 @@ export function clampIntervalForRange(
   if (allowed.includes(interval)) return interval;
   return finestIntervalForRange(from, to);
 }
-
 export function resolveTimeWindow(
   range: string | null | undefined,
   now = Date.now(),
@@ -273,7 +254,6 @@ export function resolveTimeWindow(
     timeZone,
   };
 }
-
 export function parseFilterDocumentFromSearchParams(
   searchParams: URLSearchParams,
 ): FilterDocument {
@@ -282,20 +262,17 @@ export function parseFilterDocumentFromSearchParams(
     parseFilterScopePreference(searchParams),
   );
 }
-
 export function parseFilterScopeFromSearchParams(
   searchParams: URLSearchParams,
 ): FilterScopePreference {
   return parseFilterScopePreference(searchParams);
 }
-
 export function serializeFilterScopeToSearchParams(
   searchParams: URLSearchParams,
   preference: FilterScopePreference,
 ): URLSearchParams {
   return serializeFilterScopePreference(searchParams, preference);
 }
-
 export function withRangeAndFilters(
   pathname: string,
   range: RangePreset,
@@ -314,7 +291,6 @@ export function withRangeAndFilters(
   }
   return `${pathname}?${serializeDashboardSearchParams(params)}`;
 }
-
 export function normalizeCustomDateRange(
   range: { from?: Date; to?: Date } | null | undefined,
   timeZone?: string | null,

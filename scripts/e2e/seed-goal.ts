@@ -1,27 +1,23 @@
-import { hashCustomEventStringValue } from "../../src/lib/edge/custom-event-json";
+import { hashCustomEventStringValue } from "../../src/lib/edge/ingest/custom-event-json";
 import {
   type SqlBinding,
   VISIT_D1_COLUMNS,
   type VisitBindingRow,
   visitBindings,
-} from "../../src/lib/edge/ingest-sql";
-
+} from "../../src/lib/edge/ingest/sql";
 const DAY_MS = 24 * 60 * 60 * 1000;
-
 export interface GoalSeedInput {
   eventName: string;
   nowMs: number;
   runId: string;
   siteId: string;
 }
-
 function sqlLiteral(value: SqlBinding): string {
   if (value === null) return "NULL";
   if (typeof value === "number")
     return Number.isFinite(value) ? String(value) : "NULL";
   return `'${value.replaceAll("'", "''")}'`;
 }
-
 function visitRow(
   input: GoalSeedInput,
   visitId: string,
@@ -87,7 +83,6 @@ function visitRow(
     visitId,
   };
 }
-
 function visitSql(input: GoalSeedInput, row: VisitBindingRow): string {
   const sitePk = `(SELECT site_pk FROM site_identities WHERE site_id = ${sqlLiteral(row.siteId)})`;
   const bindings = visitBindings(row);
@@ -96,7 +91,6 @@ function visitSql(input: GoalSeedInput, row: VisitBindingRow): string {
   );
   return `INSERT OR IGNORE INTO visits (${VISIT_D1_COLUMNS.join(", ")}) VALUES (${values.join(", ")});`;
 }
-
 function customEventSql(
   input: GoalSeedInput,
   eventId: string,
@@ -122,7 +116,6 @@ function customEventSql(
     `INSERT OR IGNORE INTO custom_event_json_values (event_pk, node_id, site_id, event_name_id, path_id, occurred_at, scope_node_id, value_type, string_value, string_hash, number_value, boolean_value, site_pk) VALUES (${eventPk}, 2, ${site}, ${eventNameId}, ${planPathId}, ${sqlLiteral(occurredAt)}, NULL, 1, 'pro', ${proHash}, NULL, NULL, ${sitePk});`,
   ];
 }
-
 export function buildGoalSeed(input: GoalSeedInput): string {
   const visitorA = `${input.runId}-goal-visitor-a`;
   const visitorB = `${input.runId}-goal-visitor-b`;

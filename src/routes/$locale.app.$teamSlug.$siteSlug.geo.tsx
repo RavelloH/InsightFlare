@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { GeoClientPage } from "@/components/dashboard/site-pages/geo-client-page";
+import { GeoClientPage } from "@/components/dashboard/site-pages/geo/geo-client-page";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute("/$locale/app/$teamSlug/$siteSlug/geo")({

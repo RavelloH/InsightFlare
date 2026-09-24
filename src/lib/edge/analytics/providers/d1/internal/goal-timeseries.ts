@@ -2,7 +2,6 @@ import {
   createScopedFilterPlan,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
-  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
@@ -17,6 +16,7 @@ import {
   compileScopedDatasetSql,
   executeObservationFilterOnScopedDataset,
   scopedDatasetFor,
+  type ScopedDatasetSql,
 } from "./scoped-dataset";
 
 export interface GoalTimeseriesAggregateRow {

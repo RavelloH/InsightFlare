@@ -4,10 +4,9 @@ import {
   fetchPageCardTabs,
   fetchPagesDashboard,
   fetchPagesShareTrend,
-} from "@/lib/dashboard/client-page-data";
+} from "@/lib/dashboard/client/data/pages";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-
 describe("dashboard client page data helpers", () => {
   const realFetch = globalThis.fetch;
   const realDemoMode = process.env.VITE_DEMO_MODE;

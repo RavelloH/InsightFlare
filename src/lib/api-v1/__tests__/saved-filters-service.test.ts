@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createSavedFilterApplicationService } from "@/lib/api-v1/saved-filters-service";
+import { createSavedFilterApplicationService } from "@/lib/api-v1/resources/saved-filters-service";
 
 function database(rows: readonly Record<string, unknown>[]) {
   const all = vi.fn().mockResolvedValue({ results: rows });

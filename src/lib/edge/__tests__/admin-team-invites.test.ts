@@ -1,22 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { canManageTeam, teamById } from "@/lib/edge/admin/access";
+import { requireActor } from "@/lib/edge/admin/auth";
+import { handleTeamInvitesAdmin } from "@/lib/edge/admin/teams/invites";
 import {
   createAccountActionToken,
   getAccountActionTokenById,
   listTeamInviteTokens,
   revokeAccountActionToken,
-} from "@/lib/edge/account-action-tokens";
-import { canManageTeam, teamById } from "@/lib/edge/admin-access";
-import { requireActor } from "@/lib/edge/admin-auth";
-import { handleTeamInvitesAdmin } from "@/lib/edge/admin-team-invites";
+} from "@/lib/edge/auth/account-action-tokens";
 import {
   decryptTeamInviteToken,
   encryptTeamInviteToken,
-} from "@/lib/edge/secret-encryption";
+} from "@/lib/edge/auth/secret-encryption";
 import { readConfig } from "@/lib/edge/system-config";
 import type { Env } from "@/lib/edge/types";
-
-vi.mock("@/lib/edge/account-action-tokens", () => ({
+vi.mock("@/lib/edge/auth/account-action-tokens", () => ({
   createAccountActionToken: vi.fn(),
   getAccountActionTokenById: vi.fn(),
   listTeamInviteTokens: vi.fn(),
@@ -50,21 +49,17 @@ vi.mock("@/lib/edge/account-action-tokens", () => ({
     status: row.revoked_at ? "revoked" : row.used_at ? "used" : "active",
   }),
 }));
-
-vi.mock("@/lib/edge/admin-access", () => ({
+vi.mock("@/lib/edge/admin/access", () => ({
   canManageTeam: vi.fn(),
   teamById: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   requireActor: vi.fn(),
 }));
-
 vi.mock("@/lib/edge/system-config", () => ({
   readConfig: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/secret-encryption", () => ({
+vi.mock("@/lib/edge/auth/secret-encryption", () => ({
   decryptTeamInviteToken: vi.fn(async (_env: Env, encrypted: string) =>
     encrypted.replace(/^encrypted:/, ""),
   ),
@@ -72,7 +67,6 @@ vi.mock("@/lib/edge/secret-encryption", () => ({
     async (_env: Env, token: string) => `encrypted:${token}`,
   ),
 }));
-
 const actor = {
   user: {
     id: "actor-1",
@@ -87,7 +81,6 @@ const actor = {
   },
   isAdmin: false,
 };
-
 const inviteRecord = {
   id: "invite-1",
   type: "team_invite" as const,
@@ -107,7 +100,6 @@ const inviteRecord = {
   revokedAt: null,
   status: "active" as const,
 };
-
 const inviteRow = {
   id: "invite-1",
   type: "team_invite",
@@ -123,7 +115,6 @@ const inviteRow = {
   used_by_user_id: null,
   revoked_at: null,
 };
-
 const requireActorMock = vi.mocked(requireActor);
 const canManageTeamMock = vi.mocked(canManageTeam);
 const teamByIdMock = vi.mocked(teamById);
@@ -134,15 +125,12 @@ const getAccountActionTokenByIdMock = vi.mocked(getAccountActionTokenById);
 const revokeAccountActionTokenMock = vi.mocked(revokeAccountActionToken);
 const decryptTeamInviteTokenMock = vi.mocked(decryptTeamInviteToken);
 const encryptTeamInviteTokenMock = vi.mocked(encryptTeamInviteToken);
-
 function env(): Env {
   return { DB: {} as D1Database } as Env;
 }
-
 function request(path: string, init?: RequestInit) {
   return new Request(`https://app.example.test${path}`, init);
 }
-
 function jsonInit(body: unknown, method: "POST" | "PATCH" = "POST") {
   return {
     method,
@@ -150,11 +138,9 @@ function jsonInit(body: unknown, method: "POST" | "PATCH" = "POST") {
     body: JSON.stringify(body),
   };
 }
-
 async function jsonOf(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
-
 describe("team invite admin handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();

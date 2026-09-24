@@ -2,7 +2,6 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type * as Motion from "motion/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 vi.mock("motion/react", async (importOriginal) => {
   const actual = await importOriginal<typeof Motion>();
 
@@ -60,16 +59,13 @@ vi.mock("motion/react", async (importOriginal) => {
     useDragControls: () => ({ start: () => undefined }),
   };
 });
-
 import {
   AnalyticsTableColumnSettings,
   useAnalyticsTableColumns,
-} from "@/components/dashboard/analytics-table-column-settings";
+} from "@/components/dashboard/common/analytics-table-column-settings";
 import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import { TooltipProvider } from "@/components/ui/tooltip";
-
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-
 describe("useAnalyticsTableColumns", () => {
   let container: HTMLDivElement;
   let root: Root;

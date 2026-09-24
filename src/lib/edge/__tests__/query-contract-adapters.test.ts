@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { handleSimpleDimensionContract } from "@/lib/edge/analytics/composition/protocol/dimensions-contract-adapter";
+import {
+  type QueryOperation,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
+import { handleSimpleDimensionContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/dimensions";
 import {
   handleEventFieldValuesContract,
   handleEventRecordDetailContract,
@@ -11,9 +15,9 @@ import {
   handleEventTypeDetailContract,
   handleEventTypeFieldsContract,
   handleEventTypesContract,
-} from "@/lib/edge/analytics/composition/protocol/events-contract-adapter";
-import { handleFilterValuesContract } from "@/lib/edge/analytics/composition/protocol/filter-values-contract-adapter";
-import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/composition/protocol/funnels-contract-adapter";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/events";
+import { handleFilterValuesContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/filter-values";
+import { handleFunnelAnalysisContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/funnels";
 import {
   handleJourneyCollectionContract,
   handleJourneyEventDetailContract,
@@ -21,26 +25,21 @@ import {
   handleSessionsContract,
   handleVisitorDetailContract,
   handleVisitorsContract,
-} from "@/lib/edge/analytics/composition/protocol/journeys-contract-adapter";
-import { handleOverviewGeoPointsContract } from "@/lib/edge/analytics/composition/protocol/overview-extras-contract-adapter";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/journeys";
+import { handleOverviewGeoPointsContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview-extras";
 import {
   handlePagesContract,
   handlePagesDashboardContract,
   handleReferrersContract,
   handleReferrerSummaryContract,
-} from "@/lib/edge/analytics/composition/protocol/pages-contract-adapter";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/pages";
 import {
   handleBrowserVersionBreakdownContract,
   handleClientDimensionTrendContract,
   handleCrossBreakdownContract,
   handleUtmDimensionTrendContract,
-} from "@/lib/edge/analytics/composition/protocol/technology-contract-adapter";
-import {
-  type QueryOperation,
-  siteQueryContext,
-} from "@/lib/edge/analytics/contract";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/technology";
 import type { Env } from "@/lib/edge/types";
-
 function emptyEnv(): Env {
   const statement = {
     bind() {
@@ -54,12 +53,10 @@ function emptyEnv(): Env {
     DAILY_SALT_SECRET: "contract-test-secret",
   } as unknown as Env;
 }
-
 const env = emptyEnv();
 const siteId = "site-contract";
 const invalidWindow = new URL("https://edge.test/query?from=20&to=10");
 const context = undefined;
-
 describe("typed query adapter validation branches", () => {
   it("validates and forwards comparison options for UTM dimensions", async () => {
     const base = "https://edge.test/query?from=1767225600000&to=1767312000000";

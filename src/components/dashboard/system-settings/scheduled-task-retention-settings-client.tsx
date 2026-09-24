@@ -13,19 +13,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { requestAdminService } from "@/lib/admin-service-client";
 import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
+import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type {
   ScheduledTaskRetentionConfig,
   ScheduledTasksData,
 } from "@/lib/scheduled-tasks";
-
 interface ScheduledTaskRetentionSettingsClientProps {
   messages: AppMessages;
   initialData?: SystemSettingsInitialData | null;
 }
-
 const FIELDS: Array<{
   key: keyof ScheduledTaskRetentionConfig;
   label: keyof AppMessages["systemSettings"];
@@ -41,14 +39,12 @@ const FIELDS: Array<{
     label: "notificationDefaultDaysLabel",
   },
 ];
-
 const DEFAULTS: ScheduledTaskRetentionConfig = {
   scheduledTaskLogsDays: 30,
   notificationTestDays: 30,
   notificationAttentionDays: 180,
   notificationDefaultDays: 120,
 };
-
 export function ScheduledTaskRetentionSettingsClient({
   messages,
   initialData = null,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { visitorDisplayName } from "@/components/dashboard/journey-display";
+import { visitorDisplayName } from "@/components/dashboard/journeys/journey-display";
 
 describe("visitorDisplayName", () => {
   it.each([

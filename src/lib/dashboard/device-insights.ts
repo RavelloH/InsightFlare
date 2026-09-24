@@ -1,8 +1,7 @@
 import type {
   BrowserCrossBreakdownDimensionData,
   BrowserTrendSeries,
-} from "@/lib/edge-client";
-
+} from "@/lib/dashboard-api/client/edge";
 export type ScreenBucketKey =
   | "phoneCompact"
   | "phone"
@@ -10,19 +9,16 @@ export type ScreenBucketKey =
   | "laptop"
   | "desktopWide"
   | "unclassified";
-
 export interface ScreenBucketSummary {
   key: ScreenBucketKey;
   visitors: number;
   share: number;
 }
-
 export interface ParsedScreenSize {
   width: number;
   height: number;
   viewportWidth: number;
 }
-
 export function parseScreenSizeLabel(label: string): ParsedScreenSize | null {
   const match = String(label ?? "")
     .trim()
@@ -44,7 +40,6 @@ export function parseScreenSizeLabel(label: string): ParsedScreenSize | null {
     viewportWidth: Math.min(width, height),
   };
 }
-
 export function classifyScreenBucket(label: string): ScreenBucketKey {
   const parsed = parseScreenSizeLabel(label);
   if (!parsed) return "unclassified";
@@ -54,7 +49,6 @@ export function classifyScreenBucket(label: string): ScreenBucketKey {
   if (parsed.viewportWidth < 1440) return "laptop";
   return "desktopWide";
 }
-
 export function aggregateScreenBuckets(series: BrowserTrendSeries[]): {
   buckets: ScreenBucketSummary[];
   totalVisitors: number;
@@ -95,7 +89,6 @@ export function aggregateScreenBuckets(series: BrowserTrendSeries[]): {
     classifiedVisitors,
   };
 }
-
 export function pickTopVisibleSeries(
   series: BrowserTrendSeries[],
 ): BrowserTrendSeries | null {
@@ -106,7 +99,6 @@ export function pickTopVisibleSeries(
     return item.visitors > top.visitors ? item : top;
   }, null);
 }
-
 export function pickTopCrossCell(data: BrowserCrossBreakdownDimensionData): {
   primaryLabel: string;
   secondaryLabel: string;

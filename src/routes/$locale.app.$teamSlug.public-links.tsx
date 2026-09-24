@@ -1,9 +1,9 @@
 import { RiExternalLinkLine, RiLinksLine } from "@remixicon/react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { PageHeading } from "@/components/dashboard/page-heading";
-import { PublicLinkCopyButton } from "@/components/dashboard/public-link-copy-button";
-import { PublicLinkSettingsButton } from "@/components/dashboard/public-link-settings-button";
+import { PageHeading } from "@/components/dashboard/common/page-heading";
+import { PublicLinkCopyButton } from "@/components/dashboard/sharing/public-link-copy-button";
+import { PublicLinkSettingsButton } from "@/components/dashboard/sharing/public-link-settings-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -18,7 +18,6 @@ import { canManageTeam } from "@/lib/dashboard/permissions";
 import { loadRequestOrigin } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
-
 export const Route = createFileRoute("/$locale/app/$teamSlug/public-links")({
   beforeLoad: ({ context }) => {
     if (
@@ -43,7 +42,6 @@ export const Route = createFileRoute("/$locale/app/$teamSlug/public-links")({
   }),
   component: PublicLinksPage,
 });
-
 function PublicLinksPage() {
   const { locale, messages, teamContext } = Route.useRouteContext();
   const origin = Route.useLoaderData();

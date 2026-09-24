@@ -1,5 +1,5 @@
+import type { RealtimeSocketLike } from "@/lib/demo/realtime/socket";
 import { broadcastRealtimeMessage } from "@/lib/realtime/broadcast-store";
-import type { RealtimeSocketLike } from "@/lib/realtime/mock/socket";
 import type {
   RealtimeChannelState,
   RealtimeConnectionState,
@@ -9,7 +9,6 @@ import type {
   RealtimeVisit,
   RealtimeVisitorPoint,
 } from "@/lib/realtime/types";
-
 const RECORD_WINDOW_MS = 30 * 60 * 1000;
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -23,14 +22,11 @@ const CHANNEL_IDLE_GRACE_MS = 30_000;
 const MAX_RENDERABLE_POINTS = 800;
 const PRESENCE_LEAVE_EVENT = "__presence_leave";
 const VIEW_EVENT_TYPES = new Set(["visit", "pageview"]);
-
 const SOCKET_STATE = {
   CONNECTING: 0,
   OPEN: 1,
 } as const;
-
 const USE_REALTIME_MOCK = import.meta.env.VITE_DEMO_MODE === "1";
-
 interface ChannelContext {
   siteId: string;
   refCount: number;
@@ -48,13 +44,10 @@ interface ChannelContext {
   releaseTimer: ReturnType<typeof setTimeout> | null;
   running: boolean;
 }
-
 const channels = new Map<string, ChannelContext>();
-
 export function isRealtimeMockEnabled(): boolean {
   return USE_REALTIME_MOCK;
 }
-
 export function createIdleRealtimeChannelState(
   status: RealtimeConnectionState = "disconnected",
 ): RealtimeChannelState {
@@ -70,23 +63,19 @@ export function createIdleRealtimeChannelState(
     visits: [],
   };
 }
-
 const EMPTY_REALTIME_CHANNEL_STATE = createIdleRealtimeChannelState();
-
 export function getRealtimeChannelState(siteId?: string): RealtimeChannelState {
   if (!siteId) return createIdleRealtimeChannelState();
   const channel = channels.get(siteId);
   if (!channel) return createIdleRealtimeChannelState();
   return cloneState(channel.snapshot, true);
 }
-
 export function getRealtimeChannelSnapshot(
   siteId?: string,
 ): RealtimeChannelState {
   if (!siteId) return EMPTY_REALTIME_CHANNEL_STATE;
   return channels.get(siteId)?.snapshot ?? EMPTY_REALTIME_CHANNEL_STATE;
 }
-
 export function subscribeRealtimeChannel(
   siteId: string | undefined,
   listener: () => void,
@@ -99,7 +88,6 @@ export function subscribeRealtimeChannel(
     channel.subscribers.delete(listener);
   };
 }
-
 export function acquireRealtimeChannel(siteId: string): () => void {
   if (!siteId) {
     return () => {
@@ -124,7 +112,6 @@ export function acquireRealtimeChannel(siteId: string): () => void {
     releaseRealtimeChannel(siteId);
   };
 }
-
 function getOrCreateChannel(siteId: string): ChannelContext {
   const existing = channels.get(siteId);
   if (existing) return existing;
@@ -149,7 +136,6 @@ function getOrCreateChannel(siteId: string): ChannelContext {
   channels.set(siteId, context);
   return context;
 }
-
 function releaseRealtimeChannel(siteId: string): void {
   const channel = channels.get(siteId);
   if (!channel) return;
@@ -165,7 +151,6 @@ function releaseRealtimeChannel(siteId: string): void {
     channels.delete(siteId);
   }, CHANNEL_IDLE_GRACE_MS);
 }
-
 function startChannel(channel: ChannelContext): void {
   channel.running = true;
   channel.reconnectFailures = 0;
@@ -178,7 +163,6 @@ function startChannel(channel: ChannelContext): void {
     pruneExpiredChannelState(channel);
   }, RECORD_RECOMPUTE_INTERVAL_MS);
 }
-
 function stopChannel(channel: ChannelContext): void {
   channel.running = false;
   if (channel.releaseTimer) {
@@ -212,14 +196,13 @@ function stopChannel(channel: ChannelContext): void {
   }
   channel.socket = null;
 }
-
 function connect(channel: ChannelContext): void {
   if (channel.refCount <= 0) return;
 
   setChannelStatus(channel, "connecting");
 
   if (USE_REALTIME_MOCK) {
-    import("@/lib/realtime/mock/socket").then(
+    import("@/lib/demo/realtime/socket").then(
       ({ createMockRealtimeSocket }) => {
         if (channel.refCount <= 0) return;
         channel.socket = createMockRealtimeSocket({
@@ -234,7 +217,6 @@ function connect(channel: ChannelContext): void {
     attachSocketHandlers(channel);
   }
 }
-
 function attachSocketHandlers(channel: ChannelContext): void {
   if (!channel.socket) return;
 
@@ -310,7 +292,6 @@ function attachSocketHandlers(channel: ChannelContext): void {
     }, RECONNECT_DELAY_MS);
   };
 }
-
 function startHeartbeat(channel: ChannelContext): void {
   stopHeartbeat(channel);
   channel.heartbeatTimer = setInterval(() => {
@@ -331,13 +312,11 @@ function startHeartbeat(channel: ChannelContext): void {
     }
   }, REALTIME_HEARTBEAT_INTERVAL_MS);
 }
-
 function stopHeartbeat(channel: ChannelContext): void {
   if (!channel.heartbeatTimer) return;
   clearInterval(channel.heartbeatTimer);
   channel.heartbeatTimer = null;
 }
-
 function applySnapshot(channel: ChannelContext, payload: unknown): void {
   if (channel.eventFlushTimer) {
     clearTimeout(channel.eventFlushTimer);
@@ -352,7 +331,6 @@ function applySnapshot(channel: ChannelContext, payload: unknown): void {
   channel.state.snapshotActiveNow = snapshot.activeNow;
   recomputeDerivedState(channel, now);
 }
-
 function applyEvent(channel: ChannelContext, payload: unknown): void {
   const event = normalizeRealtimeEvent(payload);
   if (!event) return;
@@ -364,7 +342,6 @@ function applyEvent(channel: ChannelContext, payload: unknown): void {
     flushPendingEvents(channel);
   }, EVENT_BATCH_INTERVAL_MS);
 }
-
 function flushPendingEvents(channel: ChannelContext): void {
   if (channel.pendingEvents.length === 0) return;
   const pendingEvents = channel.pendingEvents;
@@ -377,7 +354,6 @@ function flushPendingEvents(channel: ChannelContext): void {
   recomputeDerivedState(channel, Date.now());
   publishChannelState(channel);
 }
-
 function pruneExpiredChannelState(channel: ChannelContext): void {
   const events = sortAndPruneEvents(channel.state.events, Date.now());
   if (events === channel.state.events) return;
@@ -391,7 +367,6 @@ function pruneExpiredChannelState(channel: ChannelContext): void {
   channel.state.visits = derived.visits;
   publishChannelState(channel);
 }
-
 function recomputeDerivedState(
   channel: ChannelContext,
   now = Date.now(),
@@ -406,7 +381,6 @@ function recomputeDerivedState(
   channel.state.points = derived.points;
   channel.state.visits = derived.visits;
 }
-
 function setChannelStatus(
   channel: ChannelContext,
   status: RealtimeConnectionState,
@@ -414,7 +388,6 @@ function setChannelStatus(
   channel.state.status = status;
   publishChannelState(channel);
 }
-
 function publishChannelState(channel: ChannelContext): void {
   channel.snapshot = cloneState(channel.state, true);
   for (const subscriber of channel.subscribers) {
@@ -430,7 +403,6 @@ function publishChannelState(channel: ChannelContext): void {
     state: cloneState(channel.snapshot, true),
   });
 }
-
 function cloneState(
   state: RealtimeChannelState,
   copyCollections = false,
@@ -447,7 +419,6 @@ function cloneState(
     visits: copyCollections ? [...state.visits] : state.visits,
   };
 }
-
 function resolveSnapshotEvents(snapshot: RealtimeSnapshot): RealtimeEvent[] {
   if (snapshot.events.length > 0) {
     return snapshot.events;
@@ -531,7 +502,6 @@ function resolveSnapshotEvents(snapshot: RealtimeSnapshot): RealtimeEvent[] {
     longitude: point.longitude,
   }));
 }
-
 function buildDerivedState(
   events: RealtimeEvent[],
   now: number,
@@ -631,7 +601,6 @@ function buildDerivedState(
     ),
   };
 }
-
 function upsertRecentVisit(
   visitsById: Map<string, RealtimeVisit>,
   event: RealtimeEvent,
@@ -734,7 +703,6 @@ function upsertRecentVisit(
   previous.latitude ??= event.latitude;
   previous.longitude ??= event.longitude;
 }
-
 function sortAndPruneEvents(
   events: RealtimeEvent[],
   now = Date.now(),
@@ -773,7 +741,6 @@ function sortAndPruneEvents(
 
   return Array.from(deduped.values()).sort(compareRealtimeEventsDesc);
 }
-
 function mergeEvents(
   next: RealtimeEvent[],
   previous: RealtimeEvent[],
@@ -781,7 +748,6 @@ function mergeEvents(
 ): RealtimeEvent[] {
   return sortAndPruneEvents([...next, ...previous], now);
 }
-
 function compareRealtimeEventsDesc(
   left: Pick<RealtimeEvent, "eventAt" | "eventType">,
   right: Pick<RealtimeEvent, "eventAt" | "eventType">,
@@ -794,11 +760,9 @@ function compareRealtimeEventsDesc(
     realtimeEventPriority(left.eventType)
   );
 }
-
 function realtimeEventPriority(eventType: string): number {
   return eventType === PRESENCE_LEAVE_EVENT ? 0 : 1;
 }
-
 function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
@@ -913,7 +877,6 @@ function normalizeRealtimeEvent(payload: unknown): RealtimeEvent | null {
     longitude,
   };
 }
-
 function normalizeRealtimeEventKind(
   value: unknown,
   eventType: string,
@@ -933,13 +896,11 @@ function normalizeRealtimeEventKind(
   if (eventType === "identify") return "identify";
   return "custom_event";
 }
-
 function normalizeNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
-
 function normalizeBoolean(value: unknown): boolean | undefined {
   if (value === null || value === undefined || value === "") {
     return undefined;
@@ -952,7 +913,6 @@ function normalizeBoolean(value: unknown): boolean | undefined {
   }
   return undefined;
 }
-
 function normalizeScreenSize(
   value: unknown,
   width: unknown,
@@ -965,7 +925,6 @@ function normalizeScreenSize(
   if (normalizedWidth === null || normalizedHeight === null) return "";
   return `${Math.round(normalizedWidth)}x${Math.round(normalizedHeight)}`;
 }
-
 function normalizeCoordinate(
   value: unknown,
   min: number,
@@ -976,7 +935,6 @@ function normalizeCoordinate(
   if (numeric < min || numeric > max) return null;
   return numeric;
 }
-
 function isValidCoordinate(
   latitude: number | null,
   longitude: number | null,
@@ -988,7 +946,6 @@ function isValidCoordinate(
   if (lon < -180 || lon > 180) return false;
   return true;
 }
-
 function normalizeRealtimeSnapshot(payload: unknown): RealtimeSnapshot {
   if (!payload || typeof payload !== "object") {
     return { activeNow: null, events: [], points: [], visits: [] };
@@ -1016,7 +973,6 @@ function normalizeRealtimeSnapshot(payload: unknown): RealtimeSnapshot {
 
   return { activeNow, events, points, visits };
 }
-
 function normalizeRealtimePoint(payload: unknown): RealtimeVisitorPoint | null {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
@@ -1036,7 +992,6 @@ function normalizeRealtimePoint(payload: unknown): RealtimeVisitorPoint | null {
     country: String(record.country ?? ""),
   };
 }
-
 function normalizeRealtimeVisit(payload: unknown): RealtimeVisit | null {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
@@ -1131,7 +1086,6 @@ function normalizeRealtimeVisit(payload: unknown): RealtimeVisit | null {
     longitude,
   };
 }
-
 function decodeRealtimeEnvelope(data: unknown): {
   type: "snapshot" | "event";
   data?: unknown;
@@ -1153,7 +1107,6 @@ function decodeRealtimeEnvelope(data: unknown): {
     return null;
   }
 }
-
 function toRealtimeWsUrl(siteId: string): string {
   const url = new URL("/api/private/realtime/ws", window.location.origin);
   url.searchParams.set("siteId", siteId);

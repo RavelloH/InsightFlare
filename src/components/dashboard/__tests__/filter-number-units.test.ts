@@ -13,8 +13,7 @@ import {
   getFilterNumberUnitDefinition,
   splitFilterNumberRange,
   toDisplayNumberMetadata,
-} from "@/components/dashboard/filter-number-units";
-
+} from "@/components/dashboard/filters/filter-number-units";
 describe("filter number units", () => {
   it("converts time units in both directions", () => {
     expect(convertCanonicalNumberToDisplay(3_600_000, "ms", "hours")).toBe(1);

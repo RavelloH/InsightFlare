@@ -6,31 +6,27 @@ import type {
   QueryWindow,
   TeamSiteRow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { resolvePrivateTeamForSession } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import {
   queryTeamDashboardForTeam,
   type TeamDashboardQueryResult,
 } from "@/lib/edge/analytics/providers/d1/internal/team";
-import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
-import { requireSession } from "@/lib/edge/session-auth";
+import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
+import { requireSession } from "@/lib/edge/auth/session-auth";
+import { resolvePrivateTeamForSession } from "@/lib/edge/auth/site-access";
 import type { Env } from "@/lib/edge/types";
-
 const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
-
 export interface TeamDashboardScope {
   readonly session: EdgeSessionClaims;
   readonly teamId: string;
   readonly allowedSiteIds?: readonly string[];
 }
-
 export interface ResolveTeamDashboardScopeInput {
   readonly request: Request;
   readonly env: Env;
   readonly teamId: string;
   readonly session?: EdgeSessionClaims;
 }
-
 export interface ReadTeamDashboardInput {
   readonly env: Env;
   readonly teamId: string;
@@ -41,7 +37,6 @@ export interface ReadTeamDashboardInput {
   readonly preloadedSites?: readonly TeamSiteRow[];
   readonly diagnostics?: D1ReadDiagnostics;
 }
-
 /**
  * Resolves a dashboard session for the active build target. Demo credentials
  * never reach the production session verifier.
@@ -57,7 +52,6 @@ export async function resolveDashboardSession(
   }
   return requireSession(request, env);
 }
-
 /** Resolves team ACLs through the same runtime selected for data reads. */
 export async function resolveTeamDashboardScope(
   input: ResolveTeamDashboardScopeInput,
@@ -88,7 +82,6 @@ export async function resolveTeamDashboardScope(
     allowedSiteIds: team.allowedSiteIds,
   };
 }
-
 /**
  * Reads the team dashboard through the selected typed reader. Both readers
  * return the same contract consumed by API routes and server loaders.

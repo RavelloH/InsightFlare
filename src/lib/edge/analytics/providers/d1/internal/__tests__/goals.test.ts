@@ -1,17 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { handleGoal } from "@/lib/edge/analytics/interfaces/dashboard/protocol/goals";
 import {
   decodeGoalDefinitionCursor,
-  handleGoal,
   queryGoalDefinitionsPage,
 } from "@/lib/edge/analytics/providers/d1/internal/goals";
 import type { Env } from "@/lib/edge/types";
-
 const config = {
   filterDslVersion: 1,
   filterDsl: 'event.name eq "purchase"',
 } as const;
-
 function createEnv(
   selectResults: (sql: string) => Record<string, unknown>[] = () => [],
 ) {
@@ -39,12 +37,10 @@ function createEnv(
   } as unknown as Env;
   return { env, calls };
 }
-
 function makeRequest(path: string, init?: RequestInit) {
   const request = new Request(`https://app.test${path}`, init);
   return { request, url: new URL(request.url) };
 }
-
 function storedGoal(overrides: Record<string, unknown> = {}) {
   return {
     id: "goal-1",
@@ -57,7 +53,6 @@ function storedGoal(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
 describe("private Goal definitions", () => {
   it("supports list and detail reads with definition-only payloads", async () => {
     const { env, calls } = createEnv((sql) =>

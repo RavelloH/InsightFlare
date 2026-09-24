@@ -13,6 +13,10 @@ import {
 } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  addZonedInterval,
+  startOfZonedInterval,
+} from "@/lib/analytics/time-zone";
 import { buildComplementaryOklchPalette } from "@/lib/dashboard/chart-colors";
 import {
   createChartAxisDateFormatter,
@@ -20,36 +24,29 @@ import {
 } from "@/lib/dashboard/chart-time";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
-import {
-  addZonedInterval,
-  startOfZonedInterval,
-} from "@/lib/dashboard/time-zone";
-import type { EventsTrendData, EventTrendSeries } from "@/lib/edge-client";
+import type {
+  EventsTrendData,
+  EventTrendSeries,
+} from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import { cn } from "@/lib/utils";
-
 export const EVENT_TREND_MAX_SERIES = 18;
-
 const MAX_INITIAL_CHART_POINTS = 2_000;
 const COMPARISON_DATA_PREFIX = "comparison:";
 const COMPARISON_PATTERN_PREFIX = "event-comparison-pattern-";
-
 export interface EventTrendChartSeries extends EventTrendSeries {
   displayLabel: string;
   color: string;
 }
-
 export interface EventTrendChartDataPoint {
   timestampMs: number;
   totalEvents: number;
   [seriesKey: string]: number;
 }
-
 interface EventTrendComparisonChartDataPoint extends EventTrendChartDataPoint {
   comparisonTimestampMs: number;
   comparisonTotalEvents: number;
 }
-
 export interface EventTrendLegendProps {
   data: ReadonlyArray<EventTrendChartDataPoint>;
   series: ReadonlyArray<EventTrendChartSeries>;
@@ -65,7 +62,6 @@ export interface EventTrendLegendProps {
   comparisonLabel?: string;
   onSelectEvent?: (eventName: string) => void;
 }
-
 export interface EventTrendBarChartProps {
   data: ReadonlyArray<EventTrendChartDataPoint>;
   series: ReadonlyArray<EventTrendChartSeries>;
@@ -87,7 +83,6 @@ export interface EventTrendBarChartProps {
   onSelectEvent?: (eventName: string) => void;
   className?: string;
 }
-
 export function createEventTrendChartSeries(
   series: ReadonlyArray<EventTrendSeries>,
   otherLabel: string,
@@ -117,7 +112,6 @@ export function createEventTrendChartSeries(
     };
   });
 }
-
 export function createEventTrendComparisonChartSeries(
   currentSeries: ReadonlyArray<EventTrendSeries>,
   comparisonSeries: ReadonlyArray<EventTrendSeries>,
@@ -183,7 +177,6 @@ export function createEventTrendComparisonChartSeries(
 
   return { current, comparison };
 }
-
 export function createEventTrendChartData(
   data: ReadonlyArray<EventsTrendData["data"][number]>,
   series: ReadonlyArray<EventTrendChartSeries>,
@@ -199,7 +192,6 @@ export function createEventTrendChartData(
     return chartPoint;
   });
 }
-
 function createEventTrendRenderData(
   data: ReadonlyArray<EventTrendChartDataPoint>,
   series: ReadonlyArray<EventTrendChartSeries>,
@@ -251,11 +243,9 @@ function createEventTrendRenderData(
 
   return rows;
 }
-
 function comparisonDataKey(key: string): string {
   return `${COMPARISON_DATA_PREFIX}${key}`;
 }
-
 function createEventTrendComparisonRenderData(
   data: ReadonlyArray<EventTrendChartDataPoint>,
   comparisonData: ReadonlyArray<EventTrendChartDataPoint>,
@@ -317,7 +307,6 @@ function createEventTrendComparisonRenderData(
     return point;
   });
 }
-
 function EventTrendTooltip({
   active,
   payload,
@@ -471,7 +460,6 @@ function EventTrendTooltip({
     </div>
   );
 }
-
 export const EventTrendLegend = memo(function EventTrendLegend({
   data,
   series,
@@ -607,7 +595,6 @@ export const EventTrendLegend = memo(function EventTrendLegend({
     </div>
   );
 });
-
 export const EventTrendBarChart = memo(function EventTrendBarChart({
   data,
   series,

@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-
 const mocks = vi.hoisted(() => ({
   decodeDimensionCursor: vi.fn(),
   decodeSessionPathDimensionCursor: vi.fn(),
@@ -15,14 +14,13 @@ const mocks = vi.hoisted(() => ({
   queryReferrersPageFromD1: vi.fn(),
   resolveCrossBreakdownDimension: vi.fn(),
 }));
-
 vi.mock("../dimensions", () => mocks);
 vi.mock("../events-summary", () => mocks);
 vi.mock("../pages", () => mocks);
+vi.mock("../referrers", () => mocks);
 vi.mock("../core-dimensions", () => ({
   resolveCrossBreakdownDimension: mocks.resolveCrossBreakdownDimension,
 }));
-
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
@@ -30,7 +28,6 @@ import {
   queryFilterValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import type { Env } from "@/lib/edge/types";
-
 const window: QueryWindow = {
   startMs: 1,
   endExclusiveMs: 2,
@@ -38,7 +35,6 @@ const window: QueryWindow = {
   timeZone: "UTC",
 };
 const env = {} as Env;
-
 function page(items: Array<Record<string, unknown>>) {
   return {
     items,
@@ -50,7 +46,6 @@ function page(items: Array<Record<string, unknown>>) {
     },
   };
 }
-
 describe("filter-values dispatch coverage", () => {
   it("handles boolean, unsupported, unknown, and search-only candidates", async () => {
     await expect(

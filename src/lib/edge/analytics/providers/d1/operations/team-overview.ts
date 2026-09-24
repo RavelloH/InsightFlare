@@ -4,6 +4,7 @@ import type {
   FilterDocument,
   OverviewMetrics,
   QuerySource,
+  TeamOverviewQueryResult,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
@@ -12,7 +13,6 @@ import {
   toQueryTime,
 } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
-
 export interface ReadTeamOverviewInput {
   readonly env: Env;
   readonly teamId: string;
@@ -20,19 +20,11 @@ export interface ReadTeamOverviewInput {
   readonly filters: FilterDocument;
   readonly allowedSiteIds?: readonly string[];
 }
-
-export interface TeamOverviewQueryResult {
-  readonly data: OverviewMetrics;
-  readonly source: QuerySource;
-  readonly approximateVisitors: boolean;
-}
-
 function source(values: readonly QuerySource[]): QuerySource {
   if (values.length === 0) return "raw";
   if (values.every((value) => value === values[0])) return values[0]!;
   return "mixed";
 }
-
 export async function readTeamOverview(
   input: ReadTeamOverviewInput,
 ): Promise<TeamOverviewQueryResult> {

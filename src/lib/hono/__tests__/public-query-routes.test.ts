@@ -1,75 +1,61 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleOverviewContract } from "@/lib/edge/analytics/composition/protocol/overview-contract-adapter";
-import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
-import { fetchPublicSite } from "@/lib/edge/analytics/providers/d1/internal/core";
-import type * as DashboardCacheModule from "@/lib/edge/dashboard-cache";
+import type * as DashboardCacheModule from "@/lib/edge/analytics/composition/dashboard-cache";
 import {
   PUBLIC_QUERY_CACHE_OPTIONS,
   withDashboardCache,
-} from "@/lib/edge/dashboard-cache";
+} from "@/lib/edge/analytics/composition/dashboard-cache";
+import { handleOverviewContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview";
+import type * as SiteAccessModule from "@/lib/edge/auth/site-access";
+import { fetchPublicSite } from "@/lib/edge/auth/site-access";
 import { publicQueryRoutes } from "@/lib/hono/routes/public/query";
 import type { AppEnv } from "@/lib/hono/types";
-
-vi.mock("@/lib/edge/dashboard-cache", async (importOriginal) => {
-  const actual = await importOriginal<typeof DashboardCacheModule>();
-  return {
-    ...actual,
-    withDashboardCache: vi.fn(
-      async (
-        _ctx: ExecutionContext,
-        _url: URL,
-        loader: () => Promise<Response>,
-      ) => loader(),
-    ),
-  };
-});
-
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/core",
+  "@/lib/edge/analytics/composition/dashboard-cache",
   async (importOriginal) => {
-    const actual = await importOriginal<typeof QueryCoreModule>();
+    const actual = await importOriginal<typeof DashboardCacheModule>();
     return {
       ...actual,
-      fetchPublicSite: vi.fn(),
+      withDashboardCache: vi.fn(
+        async (
+          _ctx: ExecutionContext,
+          _url: URL,
+          loader: () => Promise<Response>,
+        ) => loader(),
+      ),
     };
   },
 );
-
-vi.mock(
-  "@/lib/edge/analytics/composition/protocol/overview-contract-adapter",
-  () => ({
-    handleOverviewContract: vi.fn(),
-    handleTrendContract: vi.fn(),
-  }),
-);
-
-vi.mock(
-  "@/lib/edge/analytics/composition/protocol/pages-contract-adapter",
-  () => ({
-    handlePagesContract: vi.fn(),
-    handleReferrersContract: vi.fn(),
-  }),
-);
-
+vi.mock("@/lib/edge/auth/site-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof SiteAccessModule>();
+  return {
+    ...actual,
+    fetchPublicSite: vi.fn(),
+  };
+});
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/overview", () => ({
+  handleOverviewContract: vi.fn(),
+  handleTrendContract: vi.fn(),
+}));
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/pages", () => ({
+  handlePagesContract: vi.fn(),
+  handleReferrersContract: vi.fn(),
+}));
 const env = { DB: {} };
 const dispatchQueryRoute = vi.fn();
 const ctx = {
   passThroughOnException: vi.fn(),
   waitUntil: vi.fn(),
 } as unknown as ExecutionContext;
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://app.test${path}`, init);
 }
-
 function createApp() {
   const app = new Hono<AppEnv>();
   app.route("/api/public/share", publicQueryRoutes);
   return app;
 }
-
 describe("Hono public query routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -1,7 +1,7 @@
 import "@tanstack/react-start/server-only";
 
-import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
 import { type FilterDocument } from "@/lib/edge/analytics/contract";
+import { SitePerformanceBreakdownDimensionSchema } from "@/lib/edge/analytics/contract/performance-dimensions";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type {
   PerformanceMetricKey,
@@ -15,7 +15,6 @@ import {
   queryPerformanceSummariesFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/performance";
 import type { Env } from "@/lib/edge/types";
-
 type PerformanceMetrics = Record<PerformanceMetricKey, PerformanceSummaryRow>;
 type PerformanceSeries = Record<
   PerformanceMetricKey,
@@ -28,14 +27,12 @@ type PerformanceSeries = Record<
     readonly samples: number;
   }[]
 >;
-
 export interface ReadSitePerformanceInput {
   readonly env: Env;
   readonly siteId: string;
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
 }
-
 export interface ReadSitePerformanceTimeseriesInput extends ReadSitePerformanceInput {
   readonly interval: "minute" | "hour" | "day" | "week" | "month";
 }
@@ -44,7 +41,6 @@ export interface ReadSitePerformanceBreakdownInput extends ReadSitePerformanceIn
   readonly metric: PerformanceMetricKey;
   readonly limit: number;
 }
-
 export async function readSitePerformanceSummary(
   input: ReadSitePerformanceInput,
 ): Promise<{ readonly metrics: PerformanceMetrics }> {
@@ -57,7 +53,6 @@ export async function readSitePerformanceSummary(
     ),
   };
 }
-
 function serializePoint(point: PerformanceTrendPointRow) {
   return {
     timestamp: new Date(point.timestampMs).toISOString(),
@@ -68,7 +63,6 @@ function serializePoint(point: PerformanceTrendPointRow) {
     samples: point.samples,
   };
 }
-
 export async function readSitePerformanceTimeseries(
   input: ReadSitePerformanceTimeseriesInput,
 ): Promise<{ readonly interval: string; readonly series: PerformanceSeries }> {
@@ -90,7 +84,6 @@ export async function readSitePerformanceTimeseries(
     },
   };
 }
-
 export async function readSitePerformanceBreakdown(
   input: ReadSitePerformanceBreakdownInput,
 ): Promise<{

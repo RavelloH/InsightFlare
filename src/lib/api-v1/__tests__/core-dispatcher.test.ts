@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { dispatchApiV1CoreRoute } from "@/lib/api-v1/core-dispatcher";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { dispatchApiV1CoreRoute } from "@/lib/api-v1/application/core-dispatcher";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",

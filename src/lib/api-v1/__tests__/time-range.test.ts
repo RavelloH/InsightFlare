@@ -4,8 +4,7 @@ import {
   resolveApiV1ComparisonDatasetTimeRange,
   resolveApiV1PreviousPeriod,
   resolveApiV1TimeRange,
-} from "@/lib/api-v1/time-range";
-
+} from "@/lib/api-v1/analytics/time-range";
 describe("API v1 typed time ranges", () => {
   const capturedAtMs = Date.parse("2026-08-19T12:34:56.000Z");
 

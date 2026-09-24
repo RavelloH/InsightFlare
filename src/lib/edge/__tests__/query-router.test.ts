@@ -9,8 +9,7 @@ import {
   DASHBOARD_QUERY_PATHS,
   operationForQueryRoute,
   PUBLIC_QUERY_PATHS,
-} from "@/lib/edge/analytics/providers/d1/internal/router";
-
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/router";
 describe("query route policy", () => {
   it("exposes only the intended public paths", () => {
     expect(PUBLIC_QUERY_PATHS).toContain("overview");

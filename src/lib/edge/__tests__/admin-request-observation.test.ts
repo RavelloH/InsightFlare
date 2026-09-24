@@ -4,9 +4,9 @@ import {
   REQUEST_ANALYTICS_DATASET,
   SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY,
 } from "@/lib/analytics-engine-config";
-import { handleAnalyticsEngineConfigAdmin } from "@/lib/edge/admin-analytics-engine-config";
-import { requireActor } from "@/lib/edge/admin-auth";
-import { handleRequestObservationAdmin } from "@/lib/edge/admin-request-observation";
+import { handleAnalyticsEngineConfigAdmin } from "@/lib/edge/admin/analytics-engine/config";
+import { requireActor } from "@/lib/edge/admin/auth";
+import { handleRequestObservationAdmin } from "@/lib/edge/admin/observability/request-observation";
 import {
   REQUEST_ANALYTICS_FLAGS,
   REQUEST_ANALYTICS_SCHEMA_VERSION,
@@ -14,26 +14,22 @@ import {
 import {
   encryptAnalyticsEngineSecret,
   encryptSecret,
-} from "@/lib/edge/secret-encryption";
+} from "@/lib/edge/auth/secret-encryption";
 import type { Env } from "@/lib/edge/types";
 import { SECRET_PURPOSES } from "@/lib/secrets";
-
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   requireActor: vi.fn(),
 }));
-
 interface MockStatement {
   bind: ReturnType<typeof vi.fn>;
   first: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
   all: ReturnType<typeof vi.fn>;
 }
-
 const actor = {
   user: { id: "admin-1" },
   isAdmin: true,
 };
-
 function statement(options: { first?: unknown; all?: unknown[] } = {}) {
   const stmt: MockStatement = {
     bind: vi.fn((..._args: unknown[]) => stmt),
@@ -43,7 +39,6 @@ function statement(options: { first?: unknown; all?: unknown[] } = {}) {
   };
   return stmt;
 }
-
 function createEnv(statements: MockStatement[], configured = true) {
   let index = 0;
   return {
@@ -63,7 +58,6 @@ function createEnv(statements: MockStatement[], configured = true) {
       : {}),
   } as Env;
 }
-
 function configRow(encrypted: string) {
   return {
     value_json: JSON.stringify({
@@ -75,24 +69,20 @@ function configRow(encrypted: string) {
     }),
   };
 }
-
 function jsonEachRow(rows: Record<string, unknown>[]) {
   return `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
 }
-
 function analyticsResponse(rows: Record<string, unknown>[] = []) {
   return new Response(jsonEachRow(rows), {
     headers: { "content-type": "application/x-ndjson" },
     status: 200,
   });
 }
-
 const dispositionBlockedFlag = Number(
   (REQUEST_ANALYTICS_FLAGS as Record<string, unknown>).dispositionBlocked ??
     1 << 7,
 );
 const metricFlags = 127;
-
 function blockedAnalyticsRow(overrides: Record<string, unknown> = {}) {
   return {
     asOrganization: "E2E Bot Network",
@@ -130,7 +120,6 @@ function blockedAnalyticsRow(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
 function normalAnalyticsRow(overrides: Record<string, unknown> = {}) {
   return {
     asOrganization: "E2E Normal Network",
@@ -164,11 +153,9 @@ function normalAnalyticsRow(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
 function request(path: string) {
   return new Request(`https://app.test${path}`);
 }
-
 function jsonRequest(path: string, body: unknown, method = "PATCH") {
   return new Request(`https://app.test${path}`, {
     method,
@@ -176,7 +163,6 @@ function jsonRequest(path: string, body: unknown, method = "PATCH") {
     body: JSON.stringify(body),
   });
 }
-
 describe("request observation admin reader", () => {
   beforeEach(() => {
     vi.clearAllMocks();

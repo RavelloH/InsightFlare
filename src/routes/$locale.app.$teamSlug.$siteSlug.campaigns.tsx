@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { CampaignsClientPage } from "@/components/dashboard/site-pages/campaigns-client-page";
+import { CampaignsClientPage } from "@/components/dashboard/site-pages/campaigns/campaigns-client-page";
 import { buildSitePath } from "@/lib/dashboard/paths";
 import { dashboardPageTitle } from "@/lib/page-title";
 

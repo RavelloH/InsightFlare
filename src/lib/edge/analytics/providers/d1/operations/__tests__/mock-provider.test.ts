@@ -16,8 +16,8 @@ vi.mock("@/lib/edge/analytics/providers/mock/demo-query", () => ({
   executeDemoQueryPayload: mocks.executeDemoQueryPayload,
 }));
 
-import { executeMockQuery } from "@/lib/edge/analytics/adapters/mock";
 import { siteQueryContext } from "@/lib/edge/analytics/contract";
+import { executeMockQuery } from "@/lib/edge/analytics/interfaces/mock";
 
 describe("mock query provider", () => {
   it("forwards an authorized typed operation to the demo source", async () => {

@@ -3,6 +3,7 @@ import "@tanstack/react-start/server-only";
 import type {
   FilterDocument,
   QuerySource,
+  TeamTimeseriesQueryResult,
   TrendPoint,
   TrendResult,
 } from "@/lib/edge/analytics/contract";
@@ -13,7 +14,6 @@ import {
   toQueryTime,
 } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
-
 export interface ReadTeamTimeseriesInput {
   readonly env: Env;
   readonly teamId: string;
@@ -22,19 +22,11 @@ export interface ReadTeamTimeseriesInput {
   readonly filters: FilterDocument;
   readonly allowedSiteIds?: readonly string[];
 }
-
-export interface TeamTimeseriesQueryResult {
-  readonly data: TrendResult;
-  readonly source: QuerySource;
-  readonly approximateVisitors: boolean;
-}
-
 function source(values: readonly QuerySource[]): QuerySource {
   if (values.length === 0) return "raw";
   if (values.every((value) => value === values[0])) return values[0]!;
   return "mixed";
 }
-
 function mergePoints(points: readonly TrendPoint[]): readonly TrendPoint[] {
   const merged = new Map<number, TrendPoint>();
   for (const point of points) {
@@ -55,7 +47,6 @@ function mergePoints(points: readonly TrendPoint[]): readonly TrendPoint[] {
   }
   return [...merged.values()].sort((left, right) => left.bucket - right.bucket);
 }
-
 export async function readTeamTimeseries(
   input: ReadTeamTimeseriesInput,
 ): Promise<TeamTimeseriesQueryResult> {

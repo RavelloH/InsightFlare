@@ -5,18 +5,17 @@ import {
   fetchEventTypeFieldValues,
   fetchFunnels,
   fetchPages,
-} from "@/lib/dashboard/client-core-data";
-import { fetchPageCardTabs } from "@/lib/dashboard/client-page-data";
-import { fetchReferrers } from "@/lib/dashboard/client-referrer-data";
-import { publicDashboardSiteId } from "@/lib/dashboard/client-request";
+} from "@/lib/dashboard/client/data/core";
+import { fetchPageCardTabs } from "@/lib/dashboard/client/data/pages";
+import { fetchReferrers } from "@/lib/dashboard/client/data/referrers";
 import {
   fetchEventTypesTab,
   fetchFilterValues,
   fetchOverviewSourceCardTab,
-} from "@/lib/dashboard/client-tab-data";
-import { normalizePaginatedCollection } from "@/lib/dashboard/client-utils";
+} from "@/lib/dashboard/client/data/tabs";
+import { publicDashboardSiteId } from "@/lib/dashboard/client/request";
+import { normalizePaginatedCollection } from "@/lib/dashboard/client/utils";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-
 describe("paginated dashboard client requests", () => {
   const realFetch = globalThis.fetch;
 

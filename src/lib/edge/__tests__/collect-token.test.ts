@@ -5,17 +5,14 @@ import {
   issueCollectToken,
   requestIp,
   verifyCollectToken,
-} from "@/lib/edge/collect-token";
-import { setE2eClock } from "@/lib/edge/e2e-clock";
+} from "@/lib/edge/auth/collect-token";
+import { setE2eClock } from "@/lib/edge/runtime/e2e-clock";
 import { collectTokenSigningSecret } from "@/lib/secrets";
-
 const env = { MAIN_SECRET: "main-secret" };
 const CLOCK_KEY = "__insightflare_e2e_clock__";
-
 afterEach(() => {
   Reflect.deleteProperty(globalThis, CLOCK_KEY);
 });
-
 function b64u(input: unknown): string {
   const json = typeof input === "string" ? input : JSON.stringify(input);
   let binary = "";
@@ -27,7 +24,6 @@ function b64u(input: unknown): string {
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 }
-
 function b64uBytes(input: Uint8Array): string {
   let binary = "";
   for (const byte of input) {
@@ -38,7 +34,6 @@ function b64uBytes(input: Uint8Array): string {
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 }
-
 async function signToken(input: {
   env: { MAIN_SECRET?: string; DAILY_SALT_SECRET?: string };
   header?: unknown;
@@ -69,7 +64,6 @@ async function signToken(input: {
   );
   return `${header}.${payload}.${b64uBytes(signature)}`;
 }
-
 describe("collect token", () => {
   it("issues and verifies IP-bound JWT collect tokens", async () => {
     const token = await issueCollectToken({

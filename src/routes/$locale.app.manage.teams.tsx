@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { AdminTeamsManagementClient } from "@/components/dashboard/admin-teams-management-client";
+import { AdminTeamsManagementClient } from "@/components/dashboard/admin/admin-teams-management-client";
 import { loadAdminTeamsInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 export const Route = createFileRoute("/$locale/app/manage/teams")({

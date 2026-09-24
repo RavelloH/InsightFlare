@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { apiV1RouteRegistry } from "@/lib/api-v1/application/route-registry";
+import { AnalyticsSchemaDataSchema } from "@/lib/api-v1/contract/wire";
 import {
   buildSiteAnalyticsSchema,
   buildTeamAnalyticsSchema,
-} from "@/lib/api-v1/analytics-schema";
-import { apiV1RouteRegistry } from "@/lib/api-v1/route-registry";
-import { AnalyticsSchemaDataSchema } from "@/lib/api-v1/wire";
-
+} from "@/lib/api-v1/schema/analytics";
 function expectedOperations(subject: "site" | "team", siteId?: string) {
   return apiV1RouteRegistry
     .filter(
@@ -23,7 +22,6 @@ function expectedOperations(subject: "site" | "team", siteId?: string) {
         : route.path,
     }));
 }
-
 describe("typed analytics schema catalog", () => {
   it("derives every exposed site analytics operation from the canonical registry", () => {
     const schema = buildSiteAnalyticsSchema("site/a", {
@@ -108,7 +106,6 @@ describe("typed analytics schema catalog", () => {
     }
   });
 });
-
 describe("team analytics schema", () => {
   it("derives exposed team operations without a caller-controlled team ID", () => {
     const schema = buildTeamAnalyticsSchema({

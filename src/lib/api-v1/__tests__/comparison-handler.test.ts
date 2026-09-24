@@ -1,28 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { createComparisonRuntime } from "@/lib/edge/analytics/composition/comparison-runtime";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { Env } from "@/lib/edge/types";
-
 const mocks = vi.hoisted(() => ({
   createComparisonProviders: vi.fn(),
   listTeamSites: vi.fn(),
 }));
 const providerCalls = { overview: 0, trend: 0, breakdown: 0 };
-
 vi.mock("@/lib/edge/analytics/providers/d1/comparison", () => ({
   createComparisonProviders: mocks.createComparisonProviders,
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   listTeamSites: mocks.listTeamSites,
 }));
-
 import {
-  handleSiteComparison,
-  handleSiteComparisonBreakdown,
-  handleTeamComparison,
-  handleTeamComparisonBreakdown,
-} from "@/lib/api-v1/comparison-handler";
-
+  handleSiteComparison as handleSiteComparisonWithRuntime,
+  handleSiteComparisonBreakdown as handleSiteComparisonBreakdownWithRuntime,
+  handleTeamComparison as handleTeamComparisonWithRuntime,
+  handleTeamComparisonBreakdown as handleTeamComparisonBreakdownWithRuntime,
+} from "@/lib/api-v1/analytics/comparison";
 const env = {} as Env;
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
@@ -32,7 +29,6 @@ const principal: ApiKeyPrincipal = {
   siteIds: ["site-1"],
   status: "active",
 };
-
 const baseBody = {
   version: 2,
   timeZone: "UTC",
@@ -50,7 +46,6 @@ const baseBody = {
     trend: { interval: "day", metrics: ["views"] },
   },
 };
-
 function rawMetrics(seed: number) {
   return {
     views: seed,
@@ -62,7 +57,6 @@ function rawMetrics(seed: number) {
     events: seed * 2,
   };
 }
-
 function request(body: unknown, init: RequestInit = {}) {
   const { headers: initHeaders, ...rest } = init;
   return new Request("https://example.test/api/v1/comparison", {
@@ -76,7 +70,69 @@ function request(body: unknown, init: RequestInit = {}) {
     ...rest,
   });
 }
-
+function handleSiteComparison(
+  request: Request,
+  principal: ApiKeyPrincipal,
+  _env: Env,
+  siteId: string,
+  definitions?: Parameters<typeof handleSiteComparisonWithRuntime>[4],
+) {
+  return handleSiteComparisonWithRuntime(
+    request,
+    principal,
+    createComparisonRuntime({ env, siteId }),
+    siteId,
+    definitions,
+  );
+}
+function handleSiteComparisonBreakdown(
+  request: Request,
+  principal: ApiKeyPrincipal,
+  _env: Env,
+  siteId: string,
+  dimension: string,
+  definitions?: Parameters<typeof handleSiteComparisonBreakdownWithRuntime>[5],
+) {
+  return handleSiteComparisonBreakdownWithRuntime(
+    request,
+    principal,
+    createComparisonRuntime({ env, siteId }),
+    siteId,
+    dimension,
+    definitions,
+  );
+}
+function teamComparisonRuntime(principal: ApiKeyPrincipal) {
+  return createComparisonRuntime({
+    env,
+    teamId: principal.teamId,
+    allowedSiteIds: [...principal.siteIds].sort(),
+  });
+}
+function handleTeamComparison(
+  request: Request,
+  principal: ApiKeyPrincipal,
+  _env: Env,
+) {
+  return handleTeamComparisonWithRuntime(
+    request,
+    principal,
+    teamComparisonRuntime(principal),
+  );
+}
+function handleTeamComparisonBreakdown(
+  request: Request,
+  principal: ApiKeyPrincipal,
+  _env: Env,
+  dimension: string,
+) {
+  return handleTeamComparisonBreakdownWithRuntime(
+    request,
+    principal,
+    teamComparisonRuntime(principal),
+    dimension,
+  );
+}
 function configureProviders() {
   mocks.createComparisonProviders.mockImplementation(() => ({
     overview: vi.fn(async ({ side, query }) => {
@@ -140,14 +196,12 @@ function configureProviders() {
     }),
   }));
 }
-
 async function json(response: Response) {
   return (await response.json()) as {
     readonly data?: Record<string, unknown>;
     readonly error?: { readonly code: string };
   };
 }
-
 beforeEach(() => {
   vi.clearAllMocks();
   providerCalls.overview = 0;
@@ -156,7 +210,6 @@ beforeEach(() => {
   configureProviders();
   mocks.listTeamSites.mockResolvedValue([{ id: "site-1" }, { id: "site-2" }]);
 });
-
 describe("API v1 comparison v2 handler", () => {
   it("enforces the JSON POST protocol and strict request schema", async () => {
     const getResponse = await handleSiteComparison(

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleTrackerScriptRequest } from "@/lib/edge/script-endpoint";
-import type * as SiteSettingsStoreModule from "@/lib/edge/site-settings-store";
-import { readSiteTrackingConfig } from "@/lib/edge/site-settings-store";
+import { handleTrackerScriptRequest } from "@/lib/edge/collector/script-endpoint";
+import type * as SiteSettingsStoreModule from "@/lib/edge/sites/settings-store";
+import { readSiteTrackingConfig } from "@/lib/edge/sites/settings-store";
 import type { Env } from "@/lib/edge/types";
 import type { SiteTrackingConfig } from "@/lib/site-settings";
 
@@ -14,9 +14,9 @@ vi.mock("@/tracker/sdk.no-perf.min", () => ({
   SDK_MIN: "no-perf-sdk",
 }));
 
-vi.mock("@/lib/edge/site-settings-store", async () => {
+vi.mock("@/lib/edge/sites/settings-store", async () => {
   const actual = await vi.importActual<typeof SiteSettingsStoreModule>(
-    "@/lib/edge/site-settings-store",
+    "@/lib/edge/sites/settings-store",
   );
   return {
     ...actual,

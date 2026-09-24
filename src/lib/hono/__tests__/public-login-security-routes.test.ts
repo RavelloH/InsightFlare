@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readPublicLoginTurnstileRuntimeConfig } from "@/lib/edge/login-turnstile-runtime";
+import { readPublicLoginTurnstileRuntimeConfig } from "@/lib/edge/auth/login-turnstile-runtime";
 import { publicRoutes } from "@/lib/hono/routes/public";
 import type { AppEnv } from "@/lib/hono/types";
 
-vi.mock("@/lib/edge/login-turnstile-runtime", () => ({
+vi.mock("@/lib/edge/auth/login-turnstile-runtime", () => ({
   readPublicLoginTurnstileRuntimeConfig: vi.fn(),
 }));
 

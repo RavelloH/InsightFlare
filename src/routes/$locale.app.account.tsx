@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { AccountSettingsClient } from "@/components/dashboard/account-settings-client";
+import { AccountSettingsClient } from "@/components/dashboard/admin/account-settings-client";
 import { loadAccountNotificationPreferences } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 

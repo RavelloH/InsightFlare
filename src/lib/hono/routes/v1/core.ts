@@ -1,8 +1,8 @@
 import type { Context } from "hono";
 import type { Hono } from "hono";
 
-import { dispatchApiV1CoreRoute } from "@/lib/api-v1/core-dispatcher";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { dispatchApiV1CoreRoute } from "@/lib/api-v1";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { AppEnv } from "@/lib/hono/types";
 
 type PrincipalResolver = (c: Context<AppEnv>) => ApiKeyPrincipal;

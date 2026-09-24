@@ -4,8 +4,7 @@ import {
   fetchPrivateJson,
   fetchPrivateJsonMutate,
   publicDashboardSiteId,
-} from "@/lib/dashboard/client-request";
-
+} from "@/lib/dashboard/client/request";
 describe("dashboard client request helpers", () => {
   const realFetch = globalThis.fetch;
   const realDemoMode = process.env.VITE_DEMO_MODE;

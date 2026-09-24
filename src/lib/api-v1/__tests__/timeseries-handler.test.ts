@@ -2,12 +2,12 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-registry";
-import { aggregateCache } from "@/lib/api-v1/analytics-overview";
-import { executeApiV1SiteTimeseries } from "@/lib/api-v1/analytics-timeseries";
-import { handlePlannedSiteTimeseries } from "@/lib/api-v1/timeseries-handler";
-import { AnalyticsTimeseriesResponseSchema } from "@/lib/api-v1/wire";
+import { aggregateCache } from "@/lib/api-v1/analytics/overview";
+import { executeApiV1SiteTimeseries } from "@/lib/api-v1/analytics/timeseries";
+import { handlePlannedSiteTimeseries } from "@/lib/api-v1/analytics/timeseries-handler";
+import { AnalyticsTimeseriesResponseSchema } from "@/lib/api-v1/contract/wire";
 import type { OverviewReader } from "@/lib/edge/analytics/contract";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 
 beforeEach(() => aggregateCache.clear());
 

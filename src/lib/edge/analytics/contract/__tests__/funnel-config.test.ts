@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { analyticsFilterRegistry } from "@/lib/edge/analytics/contract/filter-registry";
-import { FilterValidationError } from "@/lib/edge/analytics/contract/filters";
 import {
   decodeFunnelConfig,
   encodeFunnelConfig,
-  estimateFunnelSqlBindingCount,
   type FunnelConfigV2,
   funnelSemanticFingerprint,
   MAX_FUNNEL_STEPS,
@@ -13,6 +10,8 @@ import {
   validateFunnelConfigForWrite,
 } from "@/lib/edge/analytics/contract/funnel-config";
 import { parseFilterDsl } from "@/lib/filter-contract";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import { FilterValidationError } from "@/lib/filter-contract/filters";
 
 const step = (id: string, filterDsl: string) => ({ id, filterDsl });
 
@@ -325,22 +324,6 @@ describe("funnel v2 config contract", () => {
         conversionWindowMs: 1,
       }),
     ).toThrow("session_funnel_conversion_window_must_be_null");
-
-    const highBindingDsl = Array.from(
-      { length: 10 },
-      (_, index) => `page.path eq "/candidate-${index}"`,
-    ).join(" AND ");
-    const highBindingConfig = writeConfig({
-      steps: Array.from({ length: MAX_FUNNEL_STEPS }, (_, index) =>
-        step(`step-${index}`, highBindingDsl),
-      ),
-    });
-    expect(estimateFunnelSqlBindingCount(highBindingConfig)).toBeGreaterThan(
-      100 - 6,
-    );
-    expect(() => validateFunnelConfigForWrite(highBindingConfig)).toThrow(
-      "funnel_sql_binding_limit_exceeded",
-    );
   });
 
   it("excludes display name while including scope, window, IDs and filter semantics", async () => {

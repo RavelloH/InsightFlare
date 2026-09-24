@@ -21,22 +21,21 @@ import {
 } from "@/components/ui/chart";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  addZonedInterval,
+  startOfZonedInterval,
+} from "@/lib/analytics/time-zone";
+import {
   type ChartAxisDateFormat,
   createChartAxisDateFormatter,
   createChartTooltipDateFormatter,
 } from "@/lib/dashboard/chart-time";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
-import {
-  addZonedInterval,
-  startOfZonedInterval,
-} from "@/lib/dashboard/time-zone";
 import { safeChartCount } from "@/lib/dashboard/traffic-chart-data";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 import { cn } from "@/lib/utils";
-
 export interface SiteTrafficStackChartProps {
   data?: ReadonlyArray<{
     timestampMs: number;
@@ -62,7 +61,6 @@ export interface SiteTrafficStackChartProps {
   loading?: boolean;
   className?: string;
 }
-
 interface SiteTrafficSeriesItem {
   siteId: string;
   siteName: string;
@@ -71,15 +69,12 @@ interface SiteTrafficSeriesItem {
   visitorsColor: string;
   viewsColor: string;
 }
-
 type SiteTrafficChartRow = Record<string, number> & {
   timestampMs: number;
 };
-
 const MAX_INITIAL_CHART_POINTS = 2_000;
 const BAR_LAYER_FADE_DURATION_MS = 200;
 const BAR_LAYER_FADE_FALLBACK_DELAY_MS = BAR_LAYER_FADE_DURATION_MS + 100;
-
 function createZeroValueChartData(
   from: number,
   to: number,
@@ -116,7 +111,6 @@ function createZeroValueChartData(
 
   return rows;
 }
-
 function createChartData(
   data: NonNullable<SiteTrafficStackChartProps["data"]>,
   series: readonly SiteTrafficSeriesItem[],
@@ -141,38 +135,31 @@ function createChartData(
     return row;
   });
 }
-
 interface RGB {
   r: number;
   g: number;
   b: number;
 }
-
 interface OKLCh {
   l: number;
   c: number;
   h: number;
 }
-
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
-
 function isHexColor(color: string): boolean {
   return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(color);
 }
-
 function isOKLChColor(color: string): boolean {
   return /^oklch\s*\(\s*[\d.]+%?\s+[\d.]+%?\s+[\d.]+\s*\)$/i.test(color.trim());
 }
-
 function expandHex(hex: string): string {
   if (hex.length === 4) {
     return `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
   }
   return hex;
 }
-
 function hexToRgb(hex: string): RGB {
   const normalized = expandHex(hex);
   return {
@@ -181,7 +168,6 @@ function hexToRgb(hex: string): RGB {
     b: parseInt(normalized.slice(5, 7), 16),
   };
 }
-
 function rgbToHex(rgb: RGB): string {
   const toHex = (n: number) => {
     const hex = Math.round(clamp(n, 0, 255)).toString(16);
@@ -189,7 +175,6 @@ function rgbToHex(rgb: RGB): string {
   };
   return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
 }
-
 function parseOKLCh(color: string): OKLCh {
   const match = color
     .trim()
@@ -208,7 +193,6 @@ function parseOKLCh(color: string): OKLCh {
     h: hRaw,
   };
 }
-
 function oklchToRgb(oklch: OKLCh): RGB {
   const hRad = (oklch.h * Math.PI) / 180;
   const a = oklch.c * Math.cos(hRad);
@@ -238,7 +222,6 @@ function oklchToRgb(oklch: OKLCh): RGB {
     b: clamp(toSrgb(lb) * 255, 0, 255),
   };
 }
-
 function rgbToOklch(rgb: RGB): OKLCh {
   const fromSrgb = (channel: number) => {
     const abs = Math.abs(channel);
@@ -268,7 +251,6 @@ function rgbToOklch(rgb: RGB): OKLCh {
 
   return { l: L, c: C, h: H };
 }
-
 function interpolateGradient(
   color1: string,
   color2: string,
@@ -301,7 +283,6 @@ function interpolateGradient(
     return rgbToHex(oklchToRgb(mixed));
   });
 }
-
 function toHexColor(color: string): string {
   if (isHexColor(color)) return expandHex(color);
   const [hex] = interpolateGradient(color, color, 2);
@@ -310,7 +291,6 @@ function toHexColor(color: string): string {
   }
   return expandHex(hex);
 }
-
 function generateComplementary(color: string): string {
   const rgb = hexToRgb(toHexColor(color));
   return rgbToHex({
@@ -319,7 +299,6 @@ function generateComplementary(color: string): string {
     b: 255 - rgb.b,
   });
 }
-
 function buildSiteColorPairs(
   count: number,
   baseColor = "oklch(0.85 0.13 165)",
@@ -339,7 +318,6 @@ function buildSiteColorPairs(
     };
   });
 }
-
 function SiteTrafficStackTooltip({
   active,
   payload,
@@ -418,7 +396,6 @@ function SiteTrafficStackTooltip({
     </div>
   );
 }
-
 function useBarLayerTransition(
   chartData: SiteTrafficChartRow[],
   transitionKey: string,
@@ -520,7 +497,6 @@ function useBarLayerTransition(
 
   return { displayedChartData, barsVisible, onBarLayerTransitionEnd };
 }
-
 const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
   chartData,
   config,
@@ -718,7 +694,6 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
     </div>
   );
 });
-
 export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   data,
   sites,

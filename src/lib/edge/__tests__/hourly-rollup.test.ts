@@ -5,13 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
-  runHourlyAggregation,
-} from "@/lib/edge/hourly-rollup";
+} from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+import { runHourlyAggregation } from "@/lib/edge/scheduled-tasks/hourly-rollup";
 import type { Env } from "@/lib/edge/types";
-
 type Binding = string | number | null;
 type Row = Record<string, unknown>;
-
 class BoundStatement {
   constructor(
     private readonly db: DatabaseSync,
@@ -38,7 +36,6 @@ class BoundStatement {
     return { meta: { changes: Number(result.changes ?? 0) } };
   }
 }
-
 class FakeD1Database {
   readonly db = new DatabaseSync(":memory:");
 
@@ -59,7 +56,6 @@ class FakeD1Database {
     this.db.close();
   }
 }
-
 function createEnv() {
   const d1 = new FakeD1Database();
   d1.db.exec(`
@@ -152,7 +148,6 @@ function createEnv() {
     } as Env,
   };
 }
-
 function insertVisit(
   d1: FakeD1Database,
   row: {
@@ -189,7 +184,6 @@ function insertVisit(
       100,
     );
 }
-
 describe("hourly visit rollups", () => {
   afterEach(() => {
     vi.restoreAllMocks();

@@ -16,19 +16,13 @@ import type {
   ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract";
 import { prepareScopedQuery } from "@/lib/edge/analytics/contract/scoped-filter";
-import {
-  currentInvocationLogger,
-  errorLogData,
-} from "@/lib/edge/observability-logger";
 import { InvalidCursorError } from "@/lib/pagination";
 
 import type { AnalyticsProviderRegistry } from "./provider-registry";
 import type { TypedQueryProviderResult } from "./provider-registry";
 import { validateTypedQueryInput } from "./query-validation";
-
 export type { AnalyticsServiceError, AnalyticsServiceResult } from "./errors";
 export { AnalyticsProviderRegistry } from "./provider-registry";
-
 export interface QueryExecutionContext {
   readonly signal?: AbortSignal;
   readonly deadlineMs?: number;
@@ -43,7 +37,6 @@ export interface QueryExecutionContext {
   readonly onProviderError?: (error: unknown) => void;
   readonly operation?: string;
 }
-
 export interface AnalyticsQueryEvent {
   readonly operation: string;
   readonly phase:
@@ -54,7 +47,10 @@ export interface AnalyticsQueryEvent {
   readonly requiredSources?: readonly string[];
   readonly requiresRawSource?: boolean;
 }
-
+export type AnalyticsApplicationErrorHandler = (
+  error: unknown,
+  operation: string,
+) => void;
 /**
  * The only application invocation shape. Route, SSR, and protocol adapters
  * normalize their own inputs before creating this object.
@@ -70,14 +66,12 @@ export interface TypedQueryOperationInvocation<Result> {
     readonly isCacheable?: (value: Result) => boolean;
   };
 }
-
 type ExecutionFailure = {
   readonly ok: false;
   readonly error:
     | { readonly kind: "request-cancelled" }
     | { readonly kind: "deadline-exceeded" };
 };
-
 function executionDomainError(
   context: QueryExecutionContext,
 ): ExecutionFailure | null {
@@ -90,7 +84,6 @@ function executionDomainError(
   }
   return null;
 }
-
 function emit(
   context: QueryExecutionContext,
   phase: AnalyticsQueryEvent["phase"],
@@ -116,7 +109,6 @@ function emit(
     // Observability must never change query behavior.
   }
 }
-
 function entityExpressionComplexity(
   expression: EntitySetExpression | null,
 ): number {
@@ -133,7 +125,6 @@ function entityExpressionComplexity(
       ),
   );
 }
-
 function scopeAwareCostInput(
   input: QueryCostInput | undefined,
   query: QueryInput,
@@ -152,13 +143,11 @@ function scopeAwareCostInput(
     requiresRawSource: plan.requiresRawSource,
   };
 }
-
 class UncacheableResult extends Error {
   constructor(readonly value: unknown) {
     super("analytics result must not enter cache");
   }
 }
-
 /**
  * Provider payloads for the legacy API overview/timeseries adapters contain
  * an inner AnalyticsResult envelope. That envelope is still a provider
@@ -187,11 +176,11 @@ function rehydrateScopedProviderValue<Result>(
     },
   } as Result;
 }
-
 export class TypedQueryApplicationService {
   constructor(
     private readonly cache?: OperationResultCache,
     private readonly costPolicy: QueryCostPolicy = defaultQueryCostPolicy,
+    private readonly onApplicationError?: AnalyticsApplicationErrorHandler,
   ) {}
 
   private costError(costInput: QueryCostInput | undefined): {
@@ -372,10 +361,11 @@ export class TypedQueryApplicationService {
       } catch {
         // Error reporting must never change query behavior.
       }
-      currentInvocationLogger()?.error("query.application-operation.failed", {
-        operation: invocation.operation,
-        ...errorLogData(error),
-      });
+      try {
+        this.onApplicationError?.(error, invocation.operation);
+      } catch {
+        // Application error reporting must never change query behavior.
+      }
       emit(executionContext, "failure");
       if (error instanceof InvalidCursorError) {
         return {

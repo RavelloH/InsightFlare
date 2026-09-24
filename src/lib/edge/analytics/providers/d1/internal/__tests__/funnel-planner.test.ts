@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import {
   analyticsFilterRegistry,
   type FunnelConfigV2,
-  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/contract";
 import {
   assertFunnelSqlShapeWithinBudget,
@@ -18,6 +17,7 @@ import {
 import {
   applyObservationFilterToScopedDataset,
   assertSafeScopedObservationCtePrefix,
+  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { parseFilterDsl } from "@/lib/filter-contract";
 

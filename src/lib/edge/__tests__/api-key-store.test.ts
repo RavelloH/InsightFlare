@@ -19,9 +19,8 @@ import {
   serializeSiteIds,
   timingSafeEqualString,
   toPublicApiKey,
-} from "@/lib/edge/api-key-store";
+} from "@/lib/edge/auth/api-key-store";
 import type { Env } from "@/lib/edge/types";
-
 function createMockEnv(
   matchFirst?: ApiKeyRow | Record<string, unknown> | null,
   matchAll?: Array<ApiKeyRow | Record<string, unknown>>,
@@ -44,7 +43,6 @@ function createMockEnv(
     } as unknown as D1Database,
   } as unknown as Env;
 }
-
 function makeRow(overrides: Partial<ApiKeyRow> = {}): ApiKeyRow {
   return {
     id: "key-1",
@@ -65,7 +63,6 @@ function makeRow(overrides: Partial<ApiKeyRow> = {}): ApiKeyRow {
     ...overrides,
   };
 }
-
 describe("api key store utilities", () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -175,7 +172,6 @@ describe("api key store utilities", () => {
     expect(apiKeyStatus({ expires_at: 1, revoked_at: 2 })).toBe("revoked");
   });
 });
-
 describe("toPublicApiKey", () => {
   it("converts a row to public representation", () => {
     const row = makeRow();
@@ -227,7 +223,6 @@ describe("toPublicApiKey", () => {
     vi.useRealTimers();
   });
 });
-
 describe("serializeScopes / serializeSiteIds", () => {
   it("serializes scopes to JSON", () => {
     const result = serializeScopes(["site:read", "analytics:read"]);
@@ -253,7 +248,6 @@ describe("serializeScopes / serializeSiteIds", () => {
     expect(JSON.parse(result)).toEqual(["site-1"]);
   });
 });
-
 describe("expiresAtFromDays", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -284,7 +278,6 @@ describe("expiresAtFromDays", () => {
     expect(result).toBe(Math.floor(Date.now() / 1000) + 180 * 86400);
   });
 });
-
 describe("DB operations", () => {
   it("listApiKeys returns mapped public keys", async () => {
     const env = createMockEnv(null, [makeRow()]);

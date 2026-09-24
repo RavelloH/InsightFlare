@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 
-import { handleMapRelayRequest } from "@/lib/edge/map-relay";
-import { handleWikiSummaryRequest } from "@/lib/edge/wiki-summary";
-import { handleWorldCountriesRequest } from "@/lib/edge/world-countries";
+import { handleMapRelayRequest } from "@/lib/edge/resources/map-relay";
+import { handleWikiSummaryRequest } from "@/lib/edge/resources/wiki-summary";
+import { handleWorldCountriesRequest } from "@/lib/edge/resources/world-countries";
 import type { AppEnv } from "@/lib/hono/types";
 
 export const publicResourceRoutes = new Hono<AppEnv>();

@@ -29,7 +29,7 @@ export interface SiteSettingsConfig extends Omit<
   botProtectionEnabled?: boolean;
   /** Legacy/raw KV values may omit newly introduced settings. */
   hostingProxyBlockingEnabled?: boolean;
-  /** Raw versioned rules are kept for the shared blocking-rules parser. */
+  /** Raw versioned rules are kept for the shared blocking parser. */
   blockingRules?: SiteSettingsJsonValue;
 }
 

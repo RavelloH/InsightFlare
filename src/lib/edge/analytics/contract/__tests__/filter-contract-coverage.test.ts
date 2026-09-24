@@ -12,7 +12,6 @@ import {
   analyticsFilterRegistry,
   applyFiltersToUrl,
   assertFilterAudience,
-  compileFilterDocument,
   createTimeRange,
   executeOverview,
   executePages,
@@ -35,6 +34,7 @@ import {
   buildEventAnalyticsSourceCte,
   VISIT_SOURCE_COLUMNS,
 } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
+import { compileFilterDocument } from "@/lib/edge/analytics/providers/d1/internal/filter-compiler";
 
 const field = (fieldId: string, operator: string, value?: unknown) => ({
   kind: "condition",

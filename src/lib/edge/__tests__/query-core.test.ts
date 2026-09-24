@@ -10,6 +10,23 @@ import {
   savedFilterScopePreferenceFromDocument,
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
+import { type QueryWindow } from "@/lib/edge/analytics/contract";
+import {
+  parseBooleanFlag,
+  parseEventFieldPath,
+  parseEventFieldValueType,
+  parseEventId,
+  parseEventName,
+  parseEventRecordSort,
+  parseFilterOptionKey,
+  parseInterval,
+  parseLimit,
+  parseListSearch,
+  parseQueryLimit,
+  parseSessionListSort,
+  parseVisitorListSort,
+  parseWindow,
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/parsers";
 import {
   addDimensionValue,
   addGeoDimensionValue,
@@ -27,7 +44,6 @@ import {
   emptyOverviewAggregateRow,
   emptyPerformanceRouteMetrics,
   eventRecordOrderBy,
-  fetchPublicSite,
   finalizeDimensionBuckets,
   finalizeGeoDimensionBuckets,
   formatPageLabel,
@@ -47,23 +63,7 @@ import {
   mapTrendRows,
   mapVisitors,
   mapVisitPerformanceMetrics,
-  parseBooleanFlag,
-  parseEventFieldPath,
-  parseEventFieldValueType,
-  parseEventId,
-  parseEventName,
-  parseEventRecordSort,
-  parseFilterOptionKey,
-  parseGeoFilterValue,
-  parseInterval,
-  parseLimit,
-  parseListSearch,
-  parseQueryLimit,
-  parseSessionListSort,
-  parseVisitorListSort,
-  parseWindow,
   performanceMetricColumn,
-  type QueryWindow,
   scopedDatasetFor,
   shareTrendSeriesKey,
   sourceLabel,
@@ -73,16 +73,15 @@ import {
   withoutFilterKey,
   withoutGeoFilter,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { parseGeoFilterValue } from "@/lib/edge/analytics/providers/d1/internal/core-filters";
+import { fetchPublicSite } from "@/lib/edge/auth/site-access";
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
-
 const fixedNow = Date.UTC(2026, 4, 26, 8);
-
 function url(search = "") {
   return new URL(`https://edge.test/query${search}`);
 }
-
 describe("edge query core parsers", () => {
   beforeEach(() => {
     vi.spyOn(Date, "now").mockReturnValue(fixedNow);
@@ -292,7 +291,6 @@ describe("edge query core parsers", () => {
     expect(emptiedAnd.root).toBeNull();
   });
 });
-
 describe("edge public site lookup", () => {
   function envWithPublicSite(row: Record<string, unknown> | null) {
     const first = vi.fn().mockResolvedValue(row);
@@ -351,7 +349,6 @@ describe("edge public site lookup", () => {
     expect((malformed as Response).status).toBe(404);
   });
 });
-
 describe("edge query core dimensions", () => {
   it("formats page labels with optional query and hash details", () => {
     expect(formatPageLabel("", "", "", false)).toBe("/");
@@ -381,7 +378,6 @@ describe("edge query core dimensions", () => {
     );
   });
 });
-
 describe("edge query core time helpers", () => {
   const nowMs = Date.UTC(2026, 4, 26);
 
@@ -490,7 +486,6 @@ describe("edge query core time helpers", () => {
     ]);
   });
 });
-
 describe("edge query core mappers", () => {
   it("maps overview aggregate rows with derived rates", () => {
     expect(
@@ -942,7 +937,6 @@ describe("edge query core mappers", () => {
     });
   });
 });
-
 describe("edge query core share trend keys", () => {
   it("normalizes labels and avoids collisions", () => {
     const usedKeys = new Set<string>();
@@ -963,7 +957,6 @@ describe("edge query core share trend keys", () => {
     ]);
   });
 });
-
 describe("edge query core SQL helpers", () => {
   it("appends SQL conditions without dropping existing clauses", () => {
     expect(
@@ -1279,7 +1272,6 @@ describe("edge query core SQL helpers", () => {
     );
   });
 });
-
 describe("edge query core performance helpers", () => {
   it("maps visit performance metrics with nullable and rounded values", () => {
     expect(

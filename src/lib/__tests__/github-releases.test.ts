@@ -3,9 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createInvocationLogger,
   runWithInvocationLogger,
-} from "@/lib/edge/observability-logger";
+} from "@/lib/edge/observability/logger";
 import { fetchGithubCompare } from "@/lib/github-releases";
-
 describe("github-releases", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 

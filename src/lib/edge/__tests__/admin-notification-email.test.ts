@@ -1,27 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { requireActor } from "@/lib/edge/admin-auth";
+import { requireActor } from "@/lib/edge/admin/auth";
 import {
   handleNotificationEmailConfigAdmin,
   handleNotificationEmailTestAdmin,
-} from "@/lib/edge/admin-notification-email";
+} from "@/lib/edge/admin/notifications/email";
 import {
   decryptNotificationSecret,
   encryptNotificationSecret,
-} from "@/lib/edge/secret-encryption";
+} from "@/lib/edge/auth/secret-encryption";
 import type { Env } from "@/lib/edge/types";
 import type { NotificationEmailConfig } from "@/lib/notifications/email-config";
-
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   requireActor: vi.fn(),
 }));
-
 interface MockStatement {
   bind: ReturnType<typeof vi.fn>;
   first: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
 }
-
 const actor = {
   user: {
     id: "admin-1",
@@ -36,14 +33,12 @@ const actor = {
   },
   isAdmin: true,
 };
-
 function request(init?: RequestInit): Request {
   return new Request("https://app.test/api/private/admin/notification-email", {
     method: "GET",
     ...init,
   });
 }
-
 function jsonRequest(body: unknown, method: "POST" | "PATCH" = "PATCH") {
   return request({
     method,
@@ -51,7 +46,6 @@ function jsonRequest(body: unknown, method: "POST" | "PATCH" = "PATCH") {
     body: JSON.stringify(body),
   });
 }
-
 function statement(options: { first?: unknown } = {}): MockStatement {
   const stmt = {
     bind: vi.fn(function (this: MockStatement) {
@@ -62,7 +56,6 @@ function statement(options: { first?: unknown } = {}): MockStatement {
   };
   return stmt;
 }
-
 function createEnv(statements: MockStatement[], extras: Partial<Env> = {}) {
   let index = 0;
   return {
@@ -78,7 +71,6 @@ function createEnv(statements: MockStatement[], extras: Partial<Env> = {}) {
     ...extras,
   } as Env;
 }
-
 function row(config: Partial<NotificationEmailConfig>) {
   return {
     value_json: JSON.stringify({
@@ -99,11 +91,9 @@ function row(config: Partial<NotificationEmailConfig>) {
     }),
   };
 }
-
 async function jsonOf(response: Response) {
   return (await response.json()) as Record<string, any>;
 }
-
 describe("admin notification email handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();

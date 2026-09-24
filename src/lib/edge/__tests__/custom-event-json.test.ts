@@ -12,8 +12,7 @@ import {
   expandCustomEventData,
   expandCustomEventDataJson,
   hashCustomEventStringValue,
-} from "@/lib/edge/custom-event-json";
-
+} from "@/lib/edge/ingest/custom-event-json";
 describe("custom event JSON expansion", () => {
   it("hashes strings deterministically", () => {
     expect(hashCustomEventStringValue("hello")).toMatch(/^[0-9a-f]{16}$/);

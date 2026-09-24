@@ -4,22 +4,20 @@ import { cache } from "react";
 import { getRequest } from "@tanstack/react-start/server";
 
 import {
-  type AdminServiceReadMap,
-  readAdminService,
-} from "@/lib/edge/admin-service";
-import { resolveEdgeRuntime } from "@/lib/edge/runtime";
-import {
   type AccountUserData,
   type SessionTeamGroups,
   type SiteData,
   type TeamData,
-} from "@/lib/edge-client-types";
+} from "@/lib/dashboard-api/contract/types";
+import {
+  type AdminServiceReadMap,
+  readAdminService,
+} from "@/lib/edge/admin/service/index";
+import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 export { buildSitePath } from "@/lib/dashboard/paths";
-
 export interface SiteWithSlug extends SiteData {
   slug: string;
 }
-
 export interface DashboardContext {
   user: AccountUserData;
   teams: TeamData[];
@@ -28,7 +26,6 @@ export interface DashboardContext {
   sites: SiteWithSlug[];
   activeSite: SiteWithSlug;
 }
-
 export interface DashboardTeamContext {
   user: AccountUserData;
   teams: TeamData[];
@@ -37,14 +34,12 @@ export interface DashboardTeamContext {
   sites: SiteWithSlug[];
   unreadAttentionCount: number;
 }
-
 export interface DashboardRootContext {
   user: AccountUserData;
   teams: TeamData[];
   teamGroups: SessionTeamGroups;
   unreadAttentionCount: number;
 }
-
 function safeSlug(value: string): string {
   return value
     .trim()
@@ -52,21 +47,18 @@ function safeSlug(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
-
 export function getSiteSlug(site: SiteData): string {
   const domain = String(site.domain || "").trim();
   const candidate = safeSlug(domain);
   if (candidate.length > 0) return candidate;
   return site.id.slice(0, 8);
 }
-
 function withSiteSlug(site: SiteData): SiteWithSlug {
   return {
     ...site,
     slug: getSiteSlug(site),
   };
 }
-
 function findSiteBySlug(
   sites: SiteWithSlug[],
   siteSlug: string,
@@ -76,7 +68,6 @@ function findSiteBySlug(
   const byId = sites.find((site) => site.id === siteSlug);
   return byId ?? null;
 }
-
 const getMe = cache(async () => {
   try {
     return await readAdmin("session");
@@ -84,12 +75,10 @@ const getMe = cache(async () => {
     return null;
   }
 });
-
 const getUnreadAttentionCount = cache(async (): Promise<number> => {
   const notifications = await readAdmin("notifications", { limit: 1 });
   return notifications?.unreadAttentionCount ?? 0;
 });
-
 const getAdminRuntime = cache(async () => {
   const runtime = await resolveEdgeRuntime(getRequest());
   return {
@@ -98,7 +87,6 @@ const getAdminRuntime = cache(async () => {
     url: runtime.url,
   };
 });
-
 async function readAdmin<K extends keyof AdminServiceReadMap>(
   route: K,
   params?: Record<string, string | number>,
@@ -120,7 +108,6 @@ async function readAdmin<K extends keyof AdminServiceReadMap>(
     return null;
   }
 }
-
 /** Server-only typed reads shared by route-level SSR loaders. */
 export async function readDashboardAdmin<K extends keyof AdminServiceReadMap>(
   route: K,
@@ -128,7 +115,6 @@ export async function readDashboardAdmin<K extends keyof AdminServiceReadMap>(
 ): Promise<AdminServiceReadMap[K] | null> {
   return readAdmin(route, params);
 }
-
 function teamGroupsForProfile(
   me: Awaited<ReturnType<typeof readAdmin<"session">>>,
 ) {
@@ -142,11 +128,9 @@ function teamGroupsForProfile(
     }
   );
 }
-
 export const getDashboardProfile = cache(async () => {
   return getMe();
 });
-
 export const getDashboardRootContext = cache(
   async (): Promise<DashboardRootContext | null> => {
     const me = await getMe();
@@ -162,7 +146,6 @@ export const getDashboardRootContext = cache(
     };
   },
 );
-
 export const getDashboardTeamSites = cache(
   async (teamId: string): Promise<SiteWithSlug[]> => {
     try {
@@ -174,7 +157,6 @@ export const getDashboardTeamSites = cache(
     }
   },
 );
-
 export const getDashboardTeamContext = cache(
   async (teamSlug: string): Promise<DashboardTeamContext | null> => {
     const me = await getMe();
@@ -198,7 +180,6 @@ export const getDashboardTeamContext = cache(
     };
   },
 );
-
 export const getTeamSiteContext = cache(
   async (
     teamSlug: string,
@@ -220,7 +201,6 @@ export const getTeamSiteContext = cache(
     };
   },
 );
-
 export const getDefaultTeamSite = cache(
   async (): Promise<{ teamSlug: string; siteSlug: string } | null> => {
     const me = await getMe();
@@ -238,7 +218,6 @@ export const getDefaultTeamSite = cache(
     };
   },
 );
-
 export const getTeamDefaultSite = cache(
   async (
     teamSlug: string,

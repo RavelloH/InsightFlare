@@ -3,30 +3,25 @@ import {
   VISIT_D1_COLUMNS,
   type VisitBindingRow,
   visitBindings,
-} from "../../src/lib/edge/ingest-sql";
-
+} from "../../src/lib/edge/ingest/sql";
 const DAY_MS = 24 * 60 * 60 * 1000;
-
 export interface HistorySeedInput {
   nowMs: number;
   runId: string;
   siteId: string;
 }
-
 export interface HistorySeedManifest {
   fromMs: number;
   pages: Record<string, number>;
   totalVisits: number;
   toMs: number;
 }
-
 function sqlLiteral(value: SqlBinding): string {
   if (value === null) return "NULL";
   if (typeof value === "number")
     return Number.isFinite(value) ? String(value) : "NULL";
   return `'${value.replaceAll("'", "''")}'`;
 }
-
 function visitRow(input: HistorySeedInput, index: number): VisitBindingRow {
   const pages = ["/", "/pricing", "/docs", "/checkout"] as const;
   const countries = ["CN", "US", "JP", "DE"] as const;
@@ -100,7 +95,6 @@ function visitRow(input: HistorySeedInput, index: number): VisitBindingRow {
     visitId: `${input.runId}-history-visit-${index}`,
   };
 }
-
 export function buildHistorySeed(input: HistorySeedInput): {
   manifest: HistorySeedManifest;
   sql: string;

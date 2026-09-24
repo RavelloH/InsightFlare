@@ -1,5 +1,5 @@
+// @generated from src/i18n/*.yaml by scripts/i18n-check.
 import type { Locale } from "./config";
-
 export interface AppMessages {
   appName: string;
   navigation: {
@@ -2717,7 +2717,6 @@ export interface AppMessages {
     description: string;
   };
 }
-
 const enMessages = {
   appName: "InsightFlare",
   navigation: {
@@ -5739,7 +5738,6 @@ const enMessages = {
     description: "You have access to multiple teams. Choose where to continue.",
   },
 } as AppMessages;
-
 const zhMessages = {
   appName: "InsightFlare",
   navigation: {
@@ -8672,7 +8670,6 @@ const zhMessages = {
     description: "你当前可访问多个团队，请先选择要进入的团队。",
   },
 } as AppMessages;
-
 const jaMessages = {
   appName: "InsightFlare",
   navigation: {
@@ -11696,13 +11693,11 @@ const jaMessages = {
       "複数のチームにアクセスできます。続行するチームを選択してください。",
   },
 } as AppMessages;
-
 const DICTIONARIES: Record<Locale, AppMessages> = {
   en: enMessages,
   zh: zhMessages,
   ja: jaMessages,
 };
-
 export function getMessages(locale: Locale): AppMessages {
   return DICTIONARIES[locale];
 }

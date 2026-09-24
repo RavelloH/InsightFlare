@@ -1,47 +1,29 @@
 import {
-  FUNNEL_SQL_MAX_BINDINGS as FUNNEL_CONFIG_MAX_SQL_BINDINGS,
   type FunnelConfigV2,
   type FunnelStepV2,
   MAX_FUNNEL_STEPS,
   parseFunnelStepFilter,
-  type ScopedDatasetSql,
-  type SqlBinding,
 } from "@/lib/edge/analytics/contract";
 
+import {
+  FUNNEL_SQL_CTES_PER_STEP,
+  FUNNEL_SQL_MAX_BINDINGS as FUNNEL_CONFIG_MAX_SQL_BINDINGS,
+  FUNNEL_SQL_MAX_LENGTH as FUNNEL_CONFIG_MAX_SQL_LENGTH,
+  FUNNEL_SQL_STRUCTURAL_BUDGET,
+  type FunnelSqlStructuralBudget,
+} from "./funnel-budget";
+import type { ScopedDatasetSql, SqlBinding } from "./scoped-dataset";
+export { FUNNEL_SQL_CTES_PER_STEP, FUNNEL_SQL_STRUCTURAL_BUDGET };
+export type { FunnelSqlStructuralBudget };
 import {
   executeObservationFilterOnScopedDataset,
   type ScopedObservationFilterSql,
 } from "./scoped-dataset";
-
 /** D1's existing provider code treats one hundred parameters as the safe cap. */
 export const FUNNEL_SQL_MAX_BINDINGS = FUNNEL_CONFIG_MAX_SQL_BINDINGS;
 /** A bounded statement budget for a ten-step plan and its filter expansion. */
-export const FUNNEL_SQL_MAX_LENGTH = 1_000_000;
-export const FUNNEL_SQL_CTES_PER_STEP = 6 as const;
+export const FUNNEL_SQL_MAX_LENGTH = FUNNEL_CONFIG_MAX_SQL_LENGTH;
 export const MAX_HISTORICAL_FUNNEL_STEPS = 12 as const;
-
-export interface FunnelSqlStructuralBudget {
-  readonly maxSteps: number;
-  readonly maxStagedCtes: number;
-  readonly maxFunnelCtes: number;
-  readonly maxSqlLength: number;
-  readonly maxBindings: number;
-}
-
-/**
- * The staged part is exactly one `reached_i` CTE per step.  Each step also
- * contributes four filter relations, one witness relation, and that reached
- * relation; visitor mode adds one parameter CTE.
- */
-export const FUNNEL_SQL_STRUCTURAL_BUDGET: FunnelSqlStructuralBudget =
-  Object.freeze({
-    maxSteps: MAX_FUNNEL_STEPS,
-    maxStagedCtes: MAX_FUNNEL_STEPS,
-    maxFunnelCtes: MAX_FUNNEL_STEPS * FUNNEL_SQL_CTES_PER_STEP + 1,
-    maxSqlLength: FUNNEL_SQL_MAX_LENGTH,
-    maxBindings: FUNNEL_SQL_MAX_BINDINGS,
-  });
-
 /** Compatibility budget for the pre-v2 database maximum. It is only used for
  * an already-stored definition; all new writes remain on the ten-step budget. */
 export const FUNNEL_SQL_HISTORICAL_STRUCTURAL_BUDGET: FunnelSqlStructuralBudget =
@@ -52,7 +34,6 @@ export const FUNNEL_SQL_HISTORICAL_STRUCTURAL_BUDGET: FunnelSqlStructuralBudget 
     maxSqlLength: FUNNEL_SQL_MAX_LENGTH,
     maxBindings: FUNNEL_SQL_MAX_BINDINGS,
   });
-
 export interface FunnelSqlShape {
   readonly stepCount: number;
   readonly stagedCteCount: number;
@@ -60,27 +41,23 @@ export interface FunnelSqlShape {
   readonly sqlLength: number;
   readonly bindingCount: number;
 }
-
 export interface FunnelSqlStepLayer {
   readonly stepId: string;
   readonly stepIndex: number;
   readonly reachedRelation: string;
 }
-
 export interface FunnelSqlResultRow {
   readonly stepId: string;
   readonly stepIndex: number;
   readonly sessions: number;
   readonly visitors: number;
 }
-
 export interface FunnelSqlPlan {
   readonly sql: string;
   readonly bindings: readonly SqlBinding[];
   readonly steps: readonly FunnelSqlStepLayer[];
   readonly shape: FunnelSqlShape;
 }
-
 export interface FunnelMembershipSqlPlan {
   readonly ctes: string;
   readonly bindings: readonly SqlBinding[];
@@ -88,7 +65,6 @@ export interface FunnelMembershipSqlPlan {
   readonly identity: "session_id" | "visitor_id";
   readonly shape: FunnelSqlShape;
 }
-
 function mergedBudget(
   budget: Partial<FunnelSqlStructuralBudget>,
 ): FunnelSqlStructuralBudget {
@@ -97,7 +73,6 @@ function mergedBudget(
     ...budget,
   };
 }
-
 export function measureFunnelSqlShape(input: {
   readonly sql: string;
   readonly bindings: readonly unknown[];
@@ -112,7 +87,6 @@ export function measureFunnelSqlShape(input: {
     bindingCount: input.bindings.length,
   };
 }
-
 export function assertFunnelSqlShapeWithinBudget(
   shape: FunnelSqlShape,
   budget: Partial<FunnelSqlStructuralBudget> = {},
@@ -134,20 +108,17 @@ export function assertFunnelSqlShapeWithinBudget(
     throw new Error("funnel_sql_binding_limit_exceeded");
   }
 }
-
 function identityColumn(
   scope: FunnelConfigV2["progressionScope"],
 ): "session_id" | "visitor_id" {
   return scope === "session" ? "session_id" : "visitor_id";
 }
-
 function identityPredicate(
   alias: string,
   identity: "session_id" | "visitor_id",
 ): string {
   return `TRIM(COALESCE(${alias}.${identity}, '')) != ''`;
 }
-
 function observationAfter(candidate: string, previous: string): string {
   return `(
     ${candidate}.observed_at > ${previous}.last_observed_at
@@ -169,7 +140,6 @@ function observationAfter(candidate: string, previous: string): string {
     )
   )`;
 }
-
 function witnessCte(
   stepIndex: number,
   filter: ScopedObservationFilterSql,
@@ -231,7 +201,6 @@ ${name} AS (
   WHERE deduped.source_rank = 1
 )`;
 }
-
 function reachedZeroCte(
   filter: string,
   identity: "session_id" | "visitor_id",
@@ -262,7 +231,6 @@ reached_0 AS (
   WHERE ranked.reached_rank = 1
 )`;
 }
-
 function reachedNextCte(
   stepIndex: number,
   previous: string,
@@ -313,7 +281,6 @@ reached_${stepIndex} AS (
   WHERE ranked.reached_rank = 1
 )`;
 }
-
 function countRelation(
   reached: string,
   column: "session_id" | "visitor_id",
@@ -326,7 +293,6 @@ function countRelation(
         AND TRIM(COALESCE(${column}, '')) != ''
     ))`;
 }
-
 function resultSql(
   steps: readonly FunnelStepV2[],
   firstFilter: ScopedObservationFilterSql,
@@ -349,7 +315,6 @@ SELECT
     .join("\nUNION ALL\n")
     .concat("\nORDER BY stepIndex ASC");
 }
-
 interface FunnelCteParts {
   readonly funnelCtes: readonly string[];
   readonly filterBindings: readonly SqlBinding[];
@@ -357,7 +322,6 @@ interface FunnelCteParts {
   readonly identity: "session_id" | "visitor_id";
   readonly firstFilter: ScopedObservationFilterSql;
 }
-
 function buildFunnelCteParts(
   config: FunnelConfigV2,
   dataset: ScopedDatasetSql,
@@ -418,7 +382,6 @@ function buildFunnelCteParts(
     firstFilter,
   };
 }
-
 export function assertFunnelStructuralBudget(stepCount: number): void {
   if (!Number.isSafeInteger(stepCount) || stepCount < 1) {
     throw new Error("funnel_steps_required");
@@ -431,7 +394,6 @@ export function assertFunnelStructuralBudget(stepCount: number): void {
     throw new Error("funnel_sql_cte_limit_exceeded");
   }
 }
-
 function assertConfigShape(config: FunnelConfigV2): void {
   assertFunnelStructuralBudget(config.steps.length);
   if (config.progressionScope === "visitor") {
@@ -446,7 +408,6 @@ function assertConfigShape(config: FunnelConfigV2): void {
     throw new Error("session_funnel_conversion_window_must_be_null");
   }
 }
-
 function assertHistoricalConfigShape(config: FunnelConfigV2): void {
   if (!Number.isSafeInteger(config.steps.length) || config.steps.length < 1) {
     throw new Error("funnel_steps_required");
@@ -466,7 +427,6 @@ function assertHistoricalConfigShape(config: FunnelConfigV2): void {
     throw new Error("session_funnel_conversion_window_must_be_null");
   }
 }
-
 /**
  * Build one D1 statement for a Funnel v2 config over a prepared dataset.
  * Every step owns an independent observation-filter bundle.  The progression
@@ -512,7 +472,6 @@ ${resultSql(config.steps, parts.firstFilter)}`;
     shape,
   };
 }
-
 /**
  * Build the progression CTEs needed to restrict a journey list to one funnel
  * stage.  The caller owns the surrounding dataset CTEs and can then project
@@ -585,6 +544,5 @@ export function buildFunnelMembershipSqlPlan(
     shape,
   };
 }
-
 /** Alias kept concise for callers that use planner terminology. */
 export const planFunnelSql = buildFunnelSqlPlan;

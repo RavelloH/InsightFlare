@@ -40,17 +40,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { requestAdminService } from "@/lib/admin-service-client";
 import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
+import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { AppMessages } from "@/lib/i18n/messages";
 
 import { SystemSettingsGuideDialog } from "./system-settings-guide-dialog";
-
 interface LoginTurnstileSettingsClientProps {
   messages: AppMessages;
   initialData?: SystemSettingsInitialData | null;
 }
-
 interface PublicLoginTurnstileAdminConfig {
   enabled: boolean;
   siteKey: string;
@@ -59,9 +57,7 @@ interface PublicLoginTurnstileAdminConfig {
   secretKeyHint: string;
   updatedAt: number;
 }
-
 type FormState = Pick<PublicLoginTurnstileAdminConfig, "enabled" | "siteKey">;
-
 interface TurnstileApi {
   render: (
     container: HTMLElement,
@@ -77,16 +73,13 @@ interface TurnstileApi {
   reset: (widgetId: string) => void;
   remove?: (widgetId: string) => void;
 }
-
 declare global {
   interface Window {
     turnstile?: TurnstileApi;
   }
 }
-
 const TURNSTILE_SCRIPT_ID = "cloudflare-turnstile-script";
 let turnstileScriptPromise: Promise<void> | null = null;
-
 function defaultConfig(): PublicLoginTurnstileAdminConfig {
   return {
     enabled: false,
@@ -97,14 +90,12 @@ function defaultConfig(): PublicLoginTurnstileAdminConfig {
     updatedAt: 0,
   };
 }
-
 function toFormState(config: PublicLoginTurnstileAdminConfig): FormState {
   return {
     enabled: config.enabled,
     siteKey: config.siteKey,
   };
 }
-
 async function fetchConfig(
   signal?: AbortSignal,
 ): Promise<PublicLoginTurnstileAdminConfig> {
@@ -113,7 +104,6 @@ async function fetchConfig(
     { signal },
   );
 }
-
 async function saveConfig(
   body: Record<string, unknown>,
 ): Promise<PublicLoginTurnstileAdminConfig> {
@@ -122,14 +112,12 @@ async function saveConfig(
     { method: "PATCH", body },
   );
 }
-
 async function deleteConfig(): Promise<PublicLoginTurnstileAdminConfig> {
   return requestAdminService<PublicLoginTurnstileAdminConfig>(
     "login-turnstile",
     { method: "DELETE" },
   );
 }
-
 async function testConfig(body: {
   siteKey: string;
   secretKey: string;
@@ -140,7 +128,6 @@ async function testConfig(body: {
     body,
   });
 }
-
 function loadTurnstileScript(): Promise<void> {
   if (window.turnstile) return Promise.resolve();
   if (turnstileScriptPromise) return turnstileScriptPromise;
@@ -172,7 +159,6 @@ function loadTurnstileScript(): Promise<void> {
 
   return turnstileScriptPromise;
 }
-
 export function LoginTurnstileSettingsClient({
   messages,
   initialData = null,

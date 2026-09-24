@@ -1,23 +1,20 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
-import { resolvePrivateSiteForSession } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { handleSavedFilters } from "@/lib/edge/saved-filters";
+import { handleSavedFilters } from "@/lib/edge/analytics/interfaces/dashboard/saved-filters";
+import type * as SiteAccessModule from "@/lib/edge/auth/site-access";
+import { resolvePrivateSiteForSession } from "@/lib/edge/auth/site-access";
 import { privateSavedFilterRoutes } from "@/lib/hono/routes/private/saved-filters";
 import type { AppEnv } from "@/lib/hono/types";
 
-vi.mock("@/lib/edge/saved-filters", () => ({
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/saved-filters", () => ({
   handleSavedFilters: vi.fn(),
 }));
 
-vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/core",
-  async (importOriginal) => {
-    const actual = await importOriginal<typeof QueryCoreModule>();
-    return { ...actual, resolvePrivateSiteForSession: vi.fn() };
-  },
-);
+vi.mock("@/lib/edge/auth/site-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof SiteAccessModule>();
+  return { ...actual, resolvePrivateSiteForSession: vi.fn() };
+});
 
 const env = { DB: {} };
 const session = {
@@ -84,5 +81,20 @@ describe("Hono private saved-filter routes", () => {
       session,
       filterId: "filter-1",
     });
+  });
+
+  it("returns private-site access failures without dispatching the handler", async () => {
+    vi.mocked(resolvePrivateSiteForSession).mockResolvedValue(
+      new Response("forbidden", { status: 403 }),
+    );
+
+    const response = await createApp().fetch(
+      new Request("https://app.test/api/private/saved-filters?siteId=site-1"),
+      env as never,
+      ctx,
+    );
+
+    expect(response.status).toBe(403);
+    expect(handleSavedFilters).not.toHaveBeenCalled();
   });
 });

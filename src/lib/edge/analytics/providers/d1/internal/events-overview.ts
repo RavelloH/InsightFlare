@@ -1,4 +1,4 @@
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -15,7 +15,6 @@ import {
   usesSessionBoundaryFilter,
 } from "./core";
 import { scopedDatasetFor } from "./scoped-dataset";
-
 export async function queryEventTypeOverviewFromD1(
   env: Env,
   siteId: string,

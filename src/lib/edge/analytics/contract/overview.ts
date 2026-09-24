@@ -1,7 +1,8 @@
-import { type FilterDocument } from "./filters";
+import { type FilterDocument } from "@/lib/filter-contract/filters";
+
+import { validateTypedQueryFilters } from "./filter-validation";
 import { EMPTY_FILTER_DOCUMENT } from "./helpers";
 import { assertOperationAllowed } from "./policy";
-import { validateTypedQueryFilters } from "./typed-operations";
 import type {
   AnalyticsResult,
   OverviewMetrics,
@@ -13,39 +14,32 @@ import type {
   TrendQuery,
   TrendResult,
 } from "./types";
-
 export interface OverviewReaderInput {
   readonly time: QueryTime;
   readonly filters: FilterDocument;
 }
-
 export interface TrendReaderInput extends OverviewReaderInput {
   readonly interval: TrendQuery["interval"];
 }
-
 export interface OverviewReaderResult {
   readonly value: OverviewMetrics;
   readonly source: QuerySource;
   readonly approximateVisitors: boolean;
 }
-
 export interface TrendReaderResult {
   readonly value: readonly TrendPoint[];
   readonly source: QuerySource;
   readonly approximateVisitors: boolean;
 }
-
 export interface OverviewReader {
   readOverview(input: OverviewReaderInput): Promise<OverviewReaderResult>;
   readTrend(input: TrendReaderInput): Promise<TrendReaderResult>;
 }
-
 function denied<T>(
   error: NonNullable<ReturnType<typeof assertOperationAllowed>>,
 ): AnalyticsResult<T> {
   return { ok: false, error };
 }
-
 export async function executeOverview(
   reader: OverviewReader,
   input: OverviewQuery,
@@ -96,7 +90,6 @@ export async function executeOverview(
     },
   };
 }
-
 export async function executeTrend(
   reader: OverviewReader,
   input: TrendQuery,

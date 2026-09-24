@@ -1,24 +1,22 @@
 import "@tanstack/react-start/server-only";
 
+import {
+  getDemoSites,
+  getDemoTeams,
+  getDemoUser,
+} from "@/lib/demo/admin/users";
+import { generateDemoTeamDashboard } from "@/lib/demo/realtime/team-dashboard";
 import type { TeamDashboardQueryResult } from "@/lib/edge/analytics/providers/d1/internal/team";
 import type {
   ReadTeamDashboardInput,
   ResolveTeamDashboardScopeInput,
   TeamDashboardScope,
 } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
-import type { EdgeSessionClaims } from "@/lib/edge/session-auth";
-import {
-  getDemoSites,
-  getDemoTeams,
-  getDemoUser,
-} from "@/lib/realtime/mock/admin";
-import { generateDemoTeamDashboard } from "@/lib/realtime/mock/team-dashboard";
-
+import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
 type DemoTeamDashboardEnvelope = {
   readonly ok: boolean;
   readonly data?: TeamDashboardQueryResult["data"];
 };
-
 function demoSession(): EdgeSessionClaims {
   const user = getDemoUser();
   return {
@@ -30,13 +28,11 @@ function demoSession(): EdgeSessionClaims {
     exp: Number.MAX_SAFE_INTEGER,
   };
 }
-
 export async function resolveDemoDashboardSession(
   _request: Request,
 ): Promise<EdgeSessionClaims> {
   return demoSession();
 }
-
 export async function resolveDemoTeamDashboardScope(
   input: ResolveTeamDashboardScopeInput,
 ): Promise<TeamDashboardScope | Response> {
@@ -52,7 +48,6 @@ export async function resolveDemoTeamDashboardScope(
     allowedSiteIds: getDemoSites(team.id).map((site) => site.id),
   };
 }
-
 export async function readDemoTeamDashboard(
   input: ReadTeamDashboardInput,
 ): Promise<TeamDashboardQueryResult> {

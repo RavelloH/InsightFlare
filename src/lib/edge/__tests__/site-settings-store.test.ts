@@ -7,13 +7,11 @@ import {
   readSiteTrackingConfig,
   upsertSiteScriptSettings,
   upsertSiteTrackingConfig,
-} from "@/lib/edge/site-settings-store";
+} from "@/lib/edge/sites/settings-store";
 import type { Env } from "@/lib/edge/types";
-
 function envWithKv(kv: Partial<KVNamespace>): Env {
   return { SITE_SETTINGS_KV: kv as KVNamespace } as Env;
 }
-
 function cacheWithResponse(response: Response | null = null) {
   return {
     match: vi.fn().mockResolvedValue(response),
@@ -21,7 +19,6 @@ function cacheWithResponse(response: Response | null = null) {
     delete: vi.fn().mockResolvedValue(true),
   };
 }
-
 describe("edge site settings store", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();

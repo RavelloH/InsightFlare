@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/dashboard/time-zone", () => ({
+vi.mock("@/lib/analytics/time-zone", () => ({
   addZonedInterval: vi.fn(() => Number.NaN),
   startOfZonedInterval: vi.fn((timestampMs: number) => timestampMs),
 }));

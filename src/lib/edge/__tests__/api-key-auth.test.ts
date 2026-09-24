@@ -8,17 +8,15 @@ import {
   hasApiScope,
   hasFullSiteAccess,
   requireApiScope,
-} from "@/lib/edge/api-key-auth";
+} from "@/lib/edge/auth/api-key-auth";
 import {
   generateApiKeySecret,
   hashApiKeySecret,
-} from "@/lib/edge/api-key-store";
+} from "@/lib/edge/auth/api-key-store";
 import type { Env } from "@/lib/edge/types";
-
 afterEach(() => {
   vi.useRealTimers();
 });
-
 function createMockEnv(keyRow?: Record<string, unknown> | null) {
   return {
     MAIN_SECRET: "api-secret",
@@ -33,7 +31,6 @@ function createMockEnv(keyRow?: Record<string, unknown> | null) {
     } as unknown as D1Database,
   } as unknown as Env;
 }
-
 async function makeKey(overrides: Record<string, unknown> = {}) {
   const generated = generateApiKeySecret();
   const env = { MAIN_SECRET: "api-secret" } as Env;
@@ -59,7 +56,6 @@ async function makeKey(overrides: Record<string, unknown> = {}) {
     },
   };
 }
-
 describe("extractApiKeyToken", () => {
   it("extracts token from Bearer header", () => {
     const req = new Request("https://test.example", {
@@ -87,7 +83,6 @@ describe("extractApiKeyToken", () => {
     expect(extractApiKeyToken(req)).toBe("ifk_live_prefix.secret");
   });
 });
-
 describe("authenticateApiKey", () => {
   it("returns principal for valid key", async () => {
     const key = await makeKey();
@@ -243,7 +238,6 @@ describe("authenticateApiKey", () => {
     }
   });
 });
-
 describe("scope helpers", () => {
   const principal = {
     keyId: "k",

@@ -1,71 +1,52 @@
-import { sha256Hex } from "@/lib/edge/utils";
+import { FILTER_DSL_MAX_LENGTH, parseFilterDsl } from "@/lib/filter-contract";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import {
-  FILTER_DSL_MAX_LENGTH,
-  type FilterDocument,
-  parseFilterDsl,
-} from "@/lib/filter-contract";
+  assertFilterAudience,
+  filterFingerprint,
+} from "@/lib/filter-contract/filters";
+import { sha256Hex } from "@/lib/sha256";
 
-import { compileFilterDocument } from "./filter-compiler";
-import { analyticsFilterRegistry } from "./filter-registry";
-import { assertFilterAudience, filterFingerprint } from "./filters";
-import {
-  assertObservationFilterCompatible,
-  planObservationFilter,
-} from "./observation-planner";
-
+import { assertObservationFilterCompatible } from "./observation-planner";
 export const FUNNEL_CONFIG_VERSION = 2 as const;
 export const FUNNEL_FILTER_DSL_VERSION = 1 as const;
 export const MIN_FUNNEL_STEPS = 2;
 export const MAX_FUNNEL_STEPS = 10;
 export const MAX_FUNNEL_STEP_ID_LENGTH = 128;
 export const MAX_FUNNEL_STEP_NAME_LENGTH = 120;
-/** The D1 planner's hard parameter limit. */
-export const FUNNEL_SQL_MAX_BINDINGS = 100;
-/** A one-site scoped dataset always contributes two IDs and two time bounds
- * for both visits and events before a Funnel is composed on top. */
-export const FUNNEL_SQL_BASE_DATASET_BINDINGS = 6;
-
 export type FunnelProgressionScope = "session" | "visitor";
-
 export interface FunnelStepV2 {
   readonly id: string;
   readonly name?: string;
   /** Exact user-authored DSL. Validation must never rewrite this value. */
   readonly filterDsl: string;
 }
-
 export interface FunnelConfigV2 {
   readonly filterDslVersion: typeof FUNNEL_FILTER_DSL_VERSION;
   readonly progressionScope: FunnelProgressionScope;
   readonly conversionWindowMs: number | null;
   readonly steps: readonly FunnelStepV2[];
 }
-
 export interface EncodedFunnelConfig {
   readonly configVersion: typeof FUNNEL_CONFIG_VERSION;
   readonly configJson: string;
 }
-
 export class FunnelConfigDecodeError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "FunnelConfigDecodeError";
   }
 }
-
 export class FunnelConfigValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "FunnelConfigValidationError";
   }
 }
-
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
-
 function exactKeys(
   value: Record<string, unknown>,
   required: readonly string[],
@@ -78,7 +59,6 @@ function exactKeys(
     keys.every((key) => allowed.has(key))
   );
 }
-
 function decodeV1Steps(value: unknown): FunnelStepV2[] {
   const root = Array.isArray(value) ? value : record(value)?.steps;
   if (!Array.isArray(root)) {
@@ -106,7 +86,6 @@ function decodeV1Steps(value: unknown): FunnelStepV2[] {
     };
   });
 }
-
 function decodeV2(value: unknown): FunnelConfigV2 {
   const root = record(value);
   if (
@@ -192,7 +171,6 @@ function decodeV2(value: unknown): FunnelConfigV2 {
     );
   }
 }
-
 /** Decode a stored config without truncating historical over-limit funnels. */
 export function decodeFunnelConfig(
   version: number,
@@ -218,7 +196,6 @@ export function decodeFunnelConfig(
   if (version === FUNNEL_CONFIG_VERSION) return decodeV2(parsed);
   throw new FunnelConfigDecodeError(`funnel_config_version_unknown:${version}`);
 }
-
 function assertFinitePositiveWindow(config: FunnelConfigV2): void {
   if (config.progressionScope === "session") {
     if (config.conversionWindowMs !== null) {
@@ -238,37 +215,6 @@ function assertFinitePositiveWindow(config: FunnelConfigV2): void {
     );
   }
 }
-
-function predicateBindingCount(
-  predicate: ReturnType<typeof planObservationFilter>["visit"],
-  alias: string,
-): number {
-  if (predicate.kind !== "expression") return 0;
-  const document: FilterDocument = { version: 1, root: predicate.expression };
-  return compileFilterDocument(document, {
-    alias,
-    eventAlias: alias,
-    sessionSource: "scope_raw_visits",
-  }).bindings.length;
-}
-
-/**
- * Estimate the bindings owned by a persisted Funnel definition.  Dataset
- * bindings are request-scoped, so this deliberately counts the Funnel's
- * projected Observation Filters, the visitor window, and result step IDs.
- * The write contract reserves the fixed one-site dataset budget as headroom.
- */
-export function estimateFunnelSqlBindingCount(config: FunnelConfigV2): number {
-  let count =
-    config.steps.length + (config.progressionScope === "visitor" ? 1 : 0);
-  for (const step of config.steps) {
-    const plan = planObservationFilter(parseFunnelStepFilter(step).root);
-    count += predicateBindingCount(plan.visit, "funnel_visit_filter");
-    count += predicateBindingCount(plan.event, "funnel_event_filter");
-  }
-  return count;
-}
-
 /** Validate a decoded config for a new V2 write. */
 export function validateFunnelConfigForWrite(
   config: FunnelConfigV2,
@@ -337,15 +283,8 @@ export function validateFunnelConfigForWrite(
       );
     }
   }
-  if (
-    estimateFunnelSqlBindingCount(config) + FUNNEL_SQL_BASE_DATASET_BINDINGS >
-    FUNNEL_SQL_MAX_BINDINGS
-  ) {
-    throw new FunnelConfigValidationError("funnel_sql_binding_limit_exceeded");
-  }
   return config;
 }
-
 export function encodeFunnelConfig(
   config: FunnelConfigV2,
 ): EncodedFunnelConfig {
@@ -355,14 +294,12 @@ export function encodeFunnelConfig(
     configJson: JSON.stringify(validated),
   };
 }
-
 export function parseFunnelStepFilter(step: FunnelStepV2) {
   const document = parseFilterDsl(step.filterDsl, analyticsFilterRegistry);
   assertFilterAudience(document, analyticsFilterRegistry, "private-dashboard");
   assertObservationFilterCompatible(document);
   return document;
 }
-
 function semanticPayload(config: FunnelConfigV2): string {
   const steps = config.steps.map((step) => ({
     id: step.id,
@@ -378,7 +315,6 @@ function semanticPayload(config: FunnelConfigV2): string {
     steps,
   });
 }
-
 /** Backend-computed analysis semantics; display metadata is intentionally absent. */
 export async function funnelSemanticFingerprint(
   config: FunnelConfigV2,

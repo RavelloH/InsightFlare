@@ -1,10 +1,8 @@
 import { type Context, Hono } from "hono";
 
-import {
-  getRequestId,
-  resolvePrivateSiteForSession,
-} from "@/lib/edge/analytics/composition/query-protocol";
-import { handleSavedFilters } from "@/lib/edge/saved-filters";
+import { getRequestId } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import { handleSavedFilters } from "@/lib/edge/analytics/interfaces/dashboard/saved-filters";
+import { resolvePrivateSiteForSession } from "@/lib/edge/auth/site-access";
 import type { AppEnv } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
 

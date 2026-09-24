@@ -9,9 +9,11 @@ const { runHourlyAggregation, runNotificationTick, runScheduledTask } =
     runScheduledTask: vi.fn().mockResolvedValue(undefined),
   }));
 
-vi.mock("@/lib/edge/hourly-rollup", () => ({ runHourlyAggregation }));
-vi.mock("@/lib/edge/scheduled-task-runner", () => ({ runScheduledTask }));
-vi.mock("@/lib/notifications/notification-task", () => ({
+vi.mock("@/lib/edge/scheduled-tasks/hourly-rollup", () => ({
+  runHourlyAggregation,
+}));
+vi.mock("@/lib/edge/scheduled-tasks/runner", () => ({ runScheduledTask }));
+vi.mock("@/lib/notifications/edge/notification-task", () => ({
   runNotificationTick,
 }));
 

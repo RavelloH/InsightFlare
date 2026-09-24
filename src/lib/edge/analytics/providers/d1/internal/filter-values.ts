@@ -23,25 +23,21 @@ import {
   queryEventTypeAggregate,
   queryEventTypePageFromD1,
 } from "./events-summary";
+import type { PageResult } from "./pagination";
 import {
   decodeReferrersCursor,
   queryReferrerAggregate,
   queryReferrersPageFromD1,
-} from "./pages";
-import type { PageResult } from "./pagination";
-
+} from "./referrers";
 export interface FilterValueRow {
   readonly value: string;
   readonly occurrences: number;
 }
-
 export type FilterValuePage = PageResult<FilterValueRow>;
-
 function matchesSearch(value: string, search?: string): boolean {
   const needle = search?.trim().toLocaleLowerCase();
   return !needle || value.toLocaleLowerCase().includes(needle);
 }
-
 function mapRows(
   rows: readonly DimensionRow[],
   search?: string,
@@ -53,7 +49,6 @@ function mapRows(
     }))
     .filter((row) => row.value.length > 0 && matchesSearch(row.value, search));
 }
-
 /**
  * Candidate values for registered canonical fields. Dynamic event payload
  * paths deliberately do not enter this reader; they use event-field-values.
@@ -151,7 +146,6 @@ export async function queryFilterValuesFromD1(
   }
   return mapRows(rows, search).slice(0, limit);
 }
-
 export async function queryFilterValuesPageFromD1(
   env: Env,
   siteId: string,

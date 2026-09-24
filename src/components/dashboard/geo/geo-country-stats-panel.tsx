@@ -1,0 +1,686 @@
+import {
+  memo,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  RiArrowDownSLine,
+  RiArrowLeftLine,
+  RiArrowUpSLine,
+  RiExternalLinkLine,
+  RiInformationLine,
+} from "@remixicon/react";
+import type { PartialOptions } from "overlayscrollbars";
+import { OverlayScrollbars } from "overlayscrollbars";
+
+import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
+import {
+  ComparisonMetricToggle,
+  type ComparisonTableMetric,
+} from "@/components/dashboard/comparison/comparison-table";
+import { AutoResizer } from "@/components/ui/auto-resizer";
+import { AutoTransition } from "@/components/ui/auto-transition";
+import { Card } from "@/components/ui/card";
+import { Clickable } from "@/components/ui/clickable";
+import {
+  prepareNativeScrollbarHost,
+  useNativeScrollbars,
+} from "@/components/ui/overlay-scrollbar";
+import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { numberFormat } from "@/lib/dashboard/format";
+import type { Locale } from "@/lib/i18n/config";
+import type { AppMessages } from "@/lib/i18n/messages";
+import { formatI18nTemplate } from "@/lib/i18n/template";
+import { cn } from "@/lib/utils";
+interface GeoCountryStatsPanelProps {
+  locale: Locale;
+  messages: AppMessages;
+  loading: boolean;
+  comparisonLabel?: string;
+  stacked?: boolean;
+  columnLabel: string;
+  currentLocationInfo?: {
+    lines: string[];
+  } | null;
+  wikiSummary?: {
+    title: string;
+    description: string | null;
+    extract: string | null;
+    pageUrl: string | null;
+  } | null;
+  investigationRows?: Array<{
+    label: string;
+    value: ReactNode;
+    fullWidth?: boolean;
+  }> | null;
+  entries: Array<{
+    key: string;
+    label: string;
+    views: number;
+    sessions: number;
+    visitors: number;
+    reference?: GeoComparisonValues;
+    change?: GeoComparisonChange;
+  }>;
+  selectedEntryKey?: string | null;
+  onSelectEntry?: ((key: string) => void) | undefined;
+  onBack?: (() => void) | undefined;
+}
+type SortKey = "visitors" | "views" | "reference" | "current" | "change";
+type SortDirection = "asc" | "desc";
+type GeoComparisonValues = {
+  views: number;
+  sessions: number;
+  visitors: number;
+};
+type GeoComparisonChange = {
+  views: { absolute: number; relative: number | null };
+  sessions: { absolute: number; relative: number | null };
+  visitors: { absolute: number; relative: number | null };
+};
+const PANEL_SCROLLBAR_OPTIONS = {
+  overflow: {
+    x: "hidden",
+    y: "scroll",
+  },
+  scrollbars: {
+    theme: "os-theme-insightflare",
+    autoHide: "move",
+  },
+} satisfies PartialOptions;
+export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
+  locale,
+  messages,
+  loading,
+  comparisonLabel,
+  stacked = false,
+  columnLabel,
+  currentLocationInfo,
+  wikiSummary,
+  investigationRows,
+  entries,
+  selectedEntryKey,
+  onSelectEntry,
+  onBack,
+}: GeoCountryStatsPanelProps) {
+  const [sort, setSort] = useState<{
+    key: SortKey;
+    direction: SortDirection;
+  }>({
+    key: "visitors",
+    direction: "desc",
+  });
+  const [comparisonMetric, setComparisonMetric] =
+    useState<ComparisonTableMetric>("views");
+  const comparisonMode = Boolean(comparisonLabel);
+  const effectiveSortKey: SortKey = comparisonMode
+    ? sort.key === "reference" ||
+      sort.key === "current" ||
+      sort.key === "change"
+      ? sort.key
+      : "current"
+    : sort.key === "visitors" || sort.key === "views"
+      ? sort.key
+      : "views";
+  const scrollHostRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarsRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
+    null,
+  );
+  const nativeScrollbars = useNativeScrollbars();
+
+  useEffect(() => {
+    if (stacked) {
+      scrollbarsRef.current?.destroy();
+      scrollbarsRef.current = null;
+      return;
+    }
+
+    const host = scrollHostRef.current;
+    if (!host) return;
+    if (prepareNativeScrollbarHost(host)) return;
+
+    const existing = OverlayScrollbars(host);
+    const instance =
+      existing ?? OverlayScrollbars(host, PANEL_SCROLLBAR_OPTIONS);
+    scrollbarsRef.current = instance;
+
+    instance.options(PANEL_SCROLLBAR_OPTIONS);
+
+    return () => {
+      if (scrollbarsRef.current === instance) {
+        scrollbarsRef.current = null;
+      }
+      if (!existing) {
+        instance.destroy();
+      }
+    };
+  }, [stacked]);
+
+  const toggleSort = (key: SortKey) => {
+    setSort((previous) =>
+      previous.key === key
+        ? {
+            key,
+            direction: previous.direction === "desc" ? "asc" : "desc",
+          }
+        : {
+            key,
+            direction: "desc",
+          },
+    );
+  };
+
+  const renderSortIndicator = (key: SortKey) => {
+    if (effectiveSortKey === key) {
+      return sort.direction === "desc" ? (
+        <RiArrowDownSLine className="size-3.5" />
+      ) : (
+        <RiArrowUpSLine className="size-3.5" />
+      );
+    }
+
+    return (
+      <span className="flex flex-col text-muted-foreground/70">
+        <RiArrowUpSLine className="-mb-1 size-3.5" />
+        <RiArrowDownSLine className="-mt-1 size-3.5" />
+      </span>
+    );
+  };
+
+  const sortedEntries = useMemo(() => {
+    return [...entries].sort((left, right) => {
+      const direction = sort.direction === "asc" ? 1 : -1;
+      const valueFor = (entry: (typeof entries)[number]) => {
+        if (!comparisonMode) {
+          return Number(entry[effectiveSortKey as "visitors" | "views"] ?? 0);
+        }
+        if (effectiveSortKey === "reference") {
+          return Number(entry.reference?.[comparisonMetric] ?? 0);
+        }
+        if (effectiveSortKey === "change") {
+          return entry.change?.[comparisonMetric]?.relative ?? Infinity;
+        }
+        return Number(entry[comparisonMetric] ?? 0);
+      };
+      const delta = (valueFor(left) - valueFor(right)) * direction;
+      if (delta !== 0) return delta;
+      return String(left.label).localeCompare(String(right.label), locale);
+    });
+  }, [
+    comparisonMetric,
+    comparisonMode,
+    effectiveSortKey,
+    entries,
+    locale,
+    sort.direction,
+  ]);
+
+  const progressTotal = useMemo(
+    () =>
+      sortedEntries.reduce(
+        (sum, entry) =>
+          sum +
+          Math.max(
+            0,
+            Number(
+              entry[
+                comparisonMode
+                  ? comparisonMetric
+                  : (effectiveSortKey as "visitors" | "views")
+              ] ?? 0,
+            ),
+          ),
+        0,
+      ),
+    [comparisonMetric, comparisonMode, effectiveSortKey, sortedEntries],
+  );
+  const hasVisibleContent = sortedEntries.length > 0;
+  const hasTopSectionContent = Boolean(
+    onBack || (currentLocationInfo && currentLocationInfo.lines.length > 0),
+  );
+  const geoInvestigationNotice = messages.geo.investigationNotice;
+  const topSectionTransitionKey = useMemo(() => {
+    const linesKey =
+      currentLocationInfo?.lines.map((line) => line.trim()).join("|") ?? "";
+    const rowsKey =
+      investigationRows?.map((row) => row.label.trim()).join("|") ?? "";
+    const wikiKey = [
+      wikiSummary?.title,
+      wikiSummary?.description,
+      wikiSummary?.extract,
+      wikiSummary?.pageUrl,
+    ]
+      .map((value) => String(value ?? "").trim())
+      .filter((value) => value.length > 0)
+      .join("|");
+    return `${onBack ? "back" : "root"}::${linesKey}::${rowsKey}::${wikiKey}`;
+  }, [currentLocationInfo?.lines, investigationRows, onBack, wikiSummary]);
+
+  useEffect(() => {
+    if (stacked) return;
+    scrollbarsRef.current?.update();
+  }, [
+    hasTopSectionContent,
+    investigationRows,
+    loading,
+    onBack,
+    sortedEntries.length,
+    stacked,
+    wikiSummary?.description,
+    wikiSummary?.extract,
+    wikiSummary?.pageUrl,
+  ]);
+
+  const comparisonMetricLabel =
+    comparisonMetric === "views"
+      ? messages.common.views
+      : messages.common.visitors;
+  const tableHeader = comparisonMode ? (
+    <TableRow className="hover:bg-transparent">
+      <TableHead className="h-8 p-0">
+        <div className="px-4">{columnLabel}</div>
+      </TableHead>
+      <TableHead
+        aria-sort={
+          effectiveSortKey === "reference"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[4.75rem] p-0"
+      >
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: comparisonLabel ?? "",
+            })}
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              effectiveSortKey === "reference"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSort("reference")}
+          >
+            {comparisonLabel}
+            {renderSortIndicator("reference")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead
+        aria-sort={
+          effectiveSortKey === "current"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[5.75rem] p-0"
+      >
+        <div className="flex items-center justify-end gap-1 px-2">
+          <ComparisonMetricToggle
+            metric={comparisonMetric}
+            metrics={["views", "visitors"]}
+            messages={messages}
+            onMetricChange={setComparisonMetric}
+          />
+          <button
+            type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: comparisonMetricLabel,
+            })}
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              effectiveSortKey === "current"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSort("current")}
+          >
+            {comparisonMetricLabel}
+            {renderSortIndicator("current")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead
+        aria-sort={
+          effectiveSortKey === "change"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[4.75rem] p-0"
+      >
+        <div className="flex justify-end px-4">
+          <button
+            type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: messages.common.change,
+            })}
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              effectiveSortKey === "change"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSort("change")}
+          >
+            {messages.common.change}
+            {renderSortIndicator("change")}
+          </button>
+        </div>
+      </TableHead>
+    </TableRow>
+  ) : (
+    <TableRow className="hover:bg-transparent">
+      <TableHead className="h-8 p-0">
+        <div className="px-4">{columnLabel}</div>
+      </TableHead>
+      <TableHead
+        aria-sort={
+          effectiveSortKey === "visitors"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[4.75rem] p-0"
+      >
+        <div className="flex justify-end px-2">
+          <button
+            type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: messages.common.visitors,
+            })}
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              effectiveSortKey === "visitors"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSort("visitors")}
+          >
+            {messages.common.visitors}
+            {renderSortIndicator("visitors")}
+          </button>
+        </div>
+      </TableHead>
+      <TableHead
+        aria-sort={
+          effectiveSortKey === "views"
+            ? sort.direction === "asc"
+              ? "ascending"
+              : "descending"
+            : "none"
+        }
+        className="h-8 w-[4.75rem] p-0"
+      >
+        <div className="flex justify-end px-4">
+          <button
+            type="button"
+            aria-label={formatI18nTemplate(messages.common.sortBy, {
+              label: messages.common.views,
+            })}
+            className={cn(
+              "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
+              effectiveSortKey === "views"
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+            onClick={() => toggleSort("views")}
+          >
+            {messages.common.views}
+            {renderSortIndicator("views")}
+          </button>
+        </div>
+      </TableHead>
+    </TableRow>
+  );
+
+  const rows = sortedEntries.map((entry) => {
+    const rowValue = Math.max(
+      0,
+      Number(
+        entry[
+          comparisonMode
+            ? comparisonMetric
+            : (effectiveSortKey as "visitors" | "views")
+        ] ?? 0,
+      ),
+    );
+    const progressPercent =
+      progressTotal > 0 ? Math.min(100, (rowValue / progressTotal) * 100) : 0;
+    const progressWidth = `${progressPercent.toFixed(2)}%`;
+    const isSelected = entry.key === String(selectedEntryKey ?? "").trim();
+    const comparisonChange = comparisonMode
+      ? entry.change?.[comparisonMetric]
+      : null;
+    const comparisonChangeValue = comparisonChange?.relative;
+    const comparisonChangeClass =
+      comparisonChangeValue === null || comparisonChangeValue === undefined
+        ? "text-muted-foreground"
+        : comparisonChangeValue >= 0
+          ? "text-emerald-600"
+          : "text-rose-600";
+    const comparisonChangeText =
+      comparisonChange === undefined || comparisonChange === null
+        ? "—"
+        : comparisonChangeValue === null || comparisonChangeValue === undefined
+          ? entry[comparisonMetric] > 0
+            ? messages.common.new
+            : "—"
+          : `${comparisonChangeValue >= 0 ? "+" : ""}${(comparisonChangeValue * 100).toFixed(1)}%`;
+
+    return (
+      <TableRow
+        key={entry.key}
+        className={cn(
+          "bg-no-repeat transition-[background-size,filter] duration-300 ease-out",
+          onSelectEntry && "cursor-pointer hover:brightness-95",
+          isSelected && "brightness-95",
+        )}
+        style={{
+          backgroundImage:
+            "linear-gradient(90deg, var(--muted) 0%, var(--muted) 100%)",
+          backgroundSize: `${progressWidth} 100%`,
+          backgroundPosition: "left top",
+        }}
+        onClick={() => onSelectEntry?.(entry.key)}
+      >
+        <TableCell className="p-0 align-top">
+          <div className="px-4 py-2 leading-5 whitespace-normal break-words">
+            {entry.label}
+          </div>
+        </TableCell>
+        {comparisonMode ? (
+          <>
+            <TableCell className="p-0">
+              <div className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground">
+                {numberFormat(locale, entry.reference?.[comparisonMetric] ?? 0)}
+              </div>
+            </TableCell>
+            <TableCell className="p-0">
+              <div className="px-2 py-2 text-right font-mono tabular-nums">
+                {numberFormat(locale, entry[comparisonMetric])}
+              </div>
+            </TableCell>
+            <TableCell className="p-0">
+              <div
+                className={cn(
+                  "px-2 py-2 text-right font-mono tabular-nums",
+                  comparisonChangeClass,
+                )}
+              >
+                {comparisonChangeText}
+              </div>
+            </TableCell>
+          </>
+        ) : (
+          <>
+            <TableCell className="p-0">
+              <div className="px-2 py-2 text-right font-mono tabular-nums">
+                {numberFormat(locale, entry.visitors)}
+              </div>
+            </TableCell>
+            <TableCell className="p-0">
+              <div className="px-2 py-2 text-right font-mono tabular-nums">
+                {numberFormat(locale, entry.views)}
+              </div>
+            </TableCell>
+          </>
+        )}
+      </TableRow>
+    );
+  });
+
+  const wrapperClassName = stacked
+    ? "relative z-0 w-full"
+    : "pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[44svh] p-3 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-full sm:w-[23.5rem]";
+  const cardClassName = stacked
+    ? "pointer-events-auto border border-border/70 bg-background/90 py-0 shadow-sm"
+    : "pointer-events-auto h-full overflow-hidden border-x-0 border-y border-border/70 bg-background/75 py-0 ring-0 backdrop-blur-xl";
+  const scrollHostClassName = stacked
+    ? "overflow-visible"
+    : nativeScrollbars
+      ? "h-full overflow-y-auto"
+      : "h-full overflow-hidden";
+
+  return (
+    <aside className={wrapperClassName}>
+      <Card className={cardClassName}>
+        <div
+          ref={scrollHostRef}
+          className={scrollHostClassName}
+          data-overlayscrollbars-initialize={
+            stacked || nativeScrollbars ? undefined : ""
+          }
+        >
+          <div className="min-h-full">
+            <AutoResizer initial className="shrink-0">
+              <AutoTransition initial>
+                <div
+                  key={topSectionTransitionKey}
+                  className={cn(hasTopSectionContent ? "py-3" : "py-0")}
+                >
+                  <div className="space-y-3">
+                    {onBack ? (
+                      <div className="px-4">
+                        <Clickable
+                          onClick={onBack}
+                          hoverScale={1.05}
+                          tapScale={0.98}
+                          aria-label={messages.geo.back}
+                          className={cn(
+                            "peer/menu-button group/menu-button flex h-8 w-full items-center justify-start gap-2 overflow-hidden rounded-none p-2 text-left text-xs outline-hidden transition-[width,height,padding]",
+                            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                            "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                            "active:bg-sidebar-accent active:text-sidebar-accent-foreground",
+                            "[&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+                          )}
+                        >
+                          <RiArrowLeftLine />
+                          <span>{messages.geo.back}</span>
+                        </Clickable>
+                      </div>
+                    ) : null}
+
+                    {currentLocationInfo &&
+                    currentLocationInfo.lines.length > 0 ? (
+                      <div className="border-y border-border/70 px-4 py-3">
+                        <div className="space-y-1">
+                          {currentLocationInfo.lines.map((line) => (
+                            <div
+                              key={line}
+                              className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-[1.9rem]"
+                            >
+                              {line}
+                            </div>
+                          ))}
+                        </div>
+                        {wikiSummary?.description ? (
+                          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                            {wikiSummary.description}
+                          </p>
+                        ) : null}
+                        {(investigationRows && investigationRows.length > 0) ||
+                        wikiSummary?.extract ||
+                        wikiSummary?.pageUrl ? (
+                          <div className="mt-3 space-y-3">
+                            {investigationRows &&
+                            investigationRows.length > 0 ? (
+                              <dl className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2">
+                                {investigationRows.map((row, index) => (
+                                  <div
+                                    key={`${row.label}-${index}`}
+                                    className={cn(
+                                      "min-w-0",
+                                      row.fullWidth && "sm:col-span-2",
+                                    )}
+                                  >
+                                    <dt className="text-[11px] leading-4 text-muted-foreground">
+                                      {row.label}
+                                    </dt>
+                                    <dd className="mt-0.5 break-words text-sm leading-5 font-medium whitespace-pre-line text-foreground">
+                                      {row.value}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            ) : null}
+                            {wikiSummary?.extract ? (
+                              <p className="text-sm leading-6 text-foreground/80">
+                                {wikiSummary.extract}
+                              </p>
+                            ) : null}
+                            {wikiSummary?.pageUrl ? (
+                              <a
+                                href={wikiSummary.pageUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground transition-colors hover:text-primary"
+                              >
+                                {messages.geo.viewOnWikipedia}
+                                <RiExternalLinkLine className="size-3.5 shrink-0" />
+                              </a>
+                            ) : null}
+                            <p className="text-[11px] leading-4 text-muted-foreground">
+                              <span className="mr-1.5 inline-flex h-4 align-top items-center">
+                                <RiInformationLine className="size-3.5" />
+                              </span>
+                              {geoInvestigationNotice}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </AutoTransition>
+            </AutoResizer>
+
+            <AutoResizer initial className="shrink-0">
+              <div className="py-3">
+                <DataTableSwitch
+                  loading={loading}
+                  hasContent={hasVisibleContent}
+                  loadingLabel={messages.common.loading}
+                  emptyLabel={messages.common.noData}
+                  colSpan={comparisonMode ? 4 : 3}
+                  contentKey={`${comparisonMode ? comparisonLabel : "current"}-${comparisonMetric}-${effectiveSortKey}-${sort.direction}-${selectedEntryKey ?? "none"}`}
+                  header={tableHeader}
+                  rows={rows}
+                />
+              </div>
+            </AutoResizer>
+          </div>
+        </div>
+      </Card>
+    </aside>
+  );
+});

@@ -1,19 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { CUSTOM_EVENT_JSON_TYPE } from "@/lib/edge/custom-event-json";
 import {
   readCustomEventDetail,
   readCustomEventsForVisit,
   readCustomEventVisitId,
-} from "@/lib/edge/custom-event-read";
+} from "@/lib/edge/analytics/providers/d1/internal/custom-event-read";
+import { CUSTOM_EVENT_JSON_TYPE } from "@/lib/edge/ingest/custom-event-json";
 import type { Env } from "@/lib/edge/types";
-
 interface MockStatement {
   bind: ReturnType<typeof vi.fn>;
   all?: ReturnType<typeof vi.fn>;
   first?: ReturnType<typeof vi.fn>;
 }
-
 function statement(input: { all?: unknown[]; first?: unknown }): MockStatement {
   const stmt: MockStatement = {
     bind: vi.fn(function (this: MockStatement) {
@@ -28,7 +26,6 @@ function statement(input: { all?: unknown[]; first?: unknown }): MockStatement {
   }
   return stmt;
 }
-
 function envWithStatements(statements: MockStatement[]): {
   env: Env;
   prepare: ReturnType<typeof vi.fn>;
@@ -42,7 +39,6 @@ function envWithStatements(statements: MockStatement[]): {
     prepare,
   };
 }
-
 describe("custom event read helpers", () => {
   it("reads custom event list items and clamps limits", async () => {
     const listStatement = statement({

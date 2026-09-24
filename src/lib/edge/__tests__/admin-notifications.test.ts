@@ -10,8 +10,7 @@ import {
   handleNotifications,
   handleNotificationsReadAll,
   handleNotificationTestAdmin,
-} from "@/lib/edge/admin-notifications";
-
+} from "@/lib/edge/admin/notifications/handler";
 const requireActor = vi.hoisted(() => vi.fn());
 const canManageTeam = vi.hoisted(() => vi.fn());
 const canManageSite = vi.hoisted(() => vi.fn());
@@ -33,54 +32,45 @@ const createNotificationRulePreview = vi.hoisted(() => vi.fn());
 const runNotificationRuleManually = vi.hoisted(() => vi.fn());
 const runScheduledTask = vi.hoisted(() => vi.fn());
 const renderNotificationEmail = vi.hoisted(() => vi.fn());
-
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   requireActor,
 }));
-
-vi.mock("@/lib/edge/admin-access", () => ({
+vi.mock("@/lib/edge/admin/access", () => ({
   canManageSite,
   canManageTeam,
   canReadTeam,
 }));
-
-vi.mock("@/lib/notifications/rule-store", () => ({
+vi.mock("@/lib/notifications/edge/rule-store", () => ({
   createNotificationRule,
   deleteNotificationRule,
   getNotificationRule,
   listNotificationRules,
   updateNotificationRule,
 }));
-
-vi.mock("@/lib/notifications/message-store", () => ({
+vi.mock("@/lib/notifications/edge/message-store", () => ({
   countUnreadAttentionMessages,
   listNotificationMessagesForTeam,
   listNotificationMessagesForUser,
   markAllNotificationMessagesRead,
   markNotificationMessageRead,
 }));
-
-vi.mock("@/lib/notifications/preferences", () => ({
+vi.mock("@/lib/notifications/edge/preferences", () => ({
   getUserNotificationPreferences,
   updateUserNotificationPreferences,
 }));
-
-vi.mock("@/lib/notifications/notification-task", () => ({
+vi.mock("@/lib/notifications/edge/notification-task", () => ({
   createManualTestNotification,
   createNotificationRulePreview,
   runNotificationRuleManually,
   NOTIFICATION_TASK_KEY: "notification_tick",
   NOTIFICATION_TASK_NAME: "Notification dispatch",
 }));
-
-vi.mock("@/lib/edge/scheduled-task-runner", () => ({
+vi.mock("@/lib/edge/scheduled-tasks/runner", () => ({
   runScheduledTask,
 }));
-
-vi.mock("@/lib/notifications/email-renderer", () => ({
+vi.mock("@/lib/notifications/edge/email-renderer", () => ({
   renderNotificationEmail,
 }));
-
 function request(path: string, body: Record<string, unknown>): Request {
   return new Request(`https://edge.test${path}`, {
     method: "POST",
@@ -88,11 +78,9 @@ function request(path: string, body: Record<string, unknown>): Request {
     body: JSON.stringify(body),
   });
 }
-
 function getRequest(path: string): Request {
   return new Request(`https://edge.test${path}`);
 }
-
 function methodRequest(
   method: string,
   path: string,
@@ -104,7 +92,6 @@ function methodRequest(
     body: body ? JSON.stringify(body) : undefined,
   });
 }
-
 function patchRequest(body: Record<string, unknown>): Request {
   return new Request("https://edge.test/api/private/admin/notification-rules", {
     method: "PATCH",
@@ -112,7 +99,6 @@ function patchRequest(body: Record<string, unknown>): Request {
     body: JSON.stringify(body),
   });
 }
-
 function rule() {
   return {
     id: "rule-1",
@@ -121,7 +107,6 @@ function rule() {
     type: "report",
   };
 }
-
 describe("admin notification handlers", () => {
   beforeEach(() => {
     vi.resetAllMocks();

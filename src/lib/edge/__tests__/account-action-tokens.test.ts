@@ -11,9 +11,8 @@ import {
   listTeamInviteTokens,
   markAccountActionTokenUsed,
   revokeAccountActionToken,
-} from "@/lib/edge/account-action-tokens";
+} from "@/lib/edge/auth/account-action-tokens";
 import type { Env } from "@/lib/edge/types";
-
 interface MockStatement {
   sql: string;
   bound: unknown[];
@@ -22,11 +21,9 @@ interface MockStatement {
   all: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
 }
-
 function cloneRow(row: AccountActionTokenRow): AccountActionTokenRow {
   return { ...row };
 }
-
 function createEnv() {
   const rows: AccountActionTokenRow[] = [];
   const prepare = vi.fn((sql: string): MockStatement => {
@@ -119,7 +116,6 @@ function createEnv() {
     prepare,
   };
 }
-
 describe("account action token utilities", () => {
   beforeEach(() => {
     vi.useFakeTimers();

@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { handleSystemPerformanceAdmin } from "@/lib/edge/admin-system";
+import { handleSystemPerformanceAdmin } from "@/lib/edge/admin/system/handler";
 import type { Env } from "@/lib/edge/types";
 
 type QueryBinding = string | number | null;

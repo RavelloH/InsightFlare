@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { NotificationCenterClient } from "@/components/dashboard/notification-center-client";
+import { NotificationCenterClient } from "@/components/dashboard/notifications/notification-center-client";
 import { loadNotificationCenterInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 export const Route = createFileRoute("/$locale/app/inbox")({

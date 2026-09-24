@@ -1,16 +1,22 @@
 import {
   analyticsFilterDefinition,
   type FilterFieldSource,
-} from "./filter-registry";
+} from "@/lib/filter-contract/filter-registry";
 import type {
   FilterCondition,
   FilterDocument,
   FilterExpression,
-} from "./filters";
-import type { QueryInput, QueryOperation, QueryTime } from "./types";
+} from "@/lib/filter-contract/filters";
+import {
+  copyFilterScopePreferenceMetadata,
+  type FilterScope,
+  type FilterScopePreference,
+  filterScopePreferenceFromDocument,
+  normalizeFilterScopePreference,
+  savedFilterScopePreferenceFromDocument,
+} from "@/lib/filter-contract/scope-preference";
 
-export type FilterScope = "event" | "session" | "visitor";
-export type FilterScopePreference = FilterScope | "auto";
+import type { QueryInput, QueryOperation, QueryTime } from "./types";
 
 export type ObservationSource = FilterFieldSource;
 
@@ -43,20 +49,6 @@ export interface ScopedFilterPlan {
     "matching-observations" | "matching-sessions" | "matching-visitors";
   readonly requiredSources: ReadonlySet<ObservationSource>;
   readonly requiresRawSource: boolean;
-}
-
-export interface SqlBinding {
-  readonly value: string | number | null;
-}
-
-export interface ScopedDatasetSql {
-  readonly ctes: string;
-  readonly bindings: readonly SqlBinding[];
-  readonly visitRelation: string;
-  readonly eventRelation: string;
-  readonly sessionRelation: string;
-  readonly visitorRelation: string;
-  readonly scope: FilterScope;
 }
 
 export interface ScopedFilteringCapability {
@@ -223,52 +215,6 @@ export function filterScopeCapabilityFor(
     throw new Error(`missing_filter_scope_capability:${operation}`);
   }
   return capability;
-}
-
-export function normalizeFilterScopePreference(
-  value: unknown,
-): FilterScopePreference {
-  if (value === undefined || value === null || value === "") return "auto";
-  if (
-    value === "auto" ||
-    value === "event" ||
-    value === "session" ||
-    value === "visitor"
-  ) {
-    return value;
-  }
-  throw new Error("invalid_filter_scope");
-}
-
-function scopeSearchParams(
-  input: string | URL | URLSearchParams,
-): URLSearchParams {
-  if (input instanceof URLSearchParams) return input;
-  if (input instanceof URL) return input.searchParams;
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(input)) {
-    return new URL(input).searchParams;
-  }
-  return new URLSearchParams(input.startsWith("?") ? input.slice(1) : input);
-}
-
-export function parseFilterScopePreference(
-  input: string | URL | URLSearchParams,
-  parameter = "scope",
-): FilterScopePreference {
-  return normalizeFilterScopePreference(
-    scopeSearchParams(input).get(parameter),
-  );
-}
-
-export function serializeFilterScopePreference(
-  input: URLSearchParams,
-  preference: FilterScopePreference,
-  parameter = "scope",
-): URLSearchParams {
-  const result = new URLSearchParams(input);
-  if (preference === "auto") result.delete(parameter);
-  else result.set(parameter, preference);
-  return result;
 }
 
 export function reconcileFilterScopePreferences(
@@ -504,10 +450,6 @@ function prepareScopedComparisonQuery(
 }
 
 const SCOPED_FILTER_METADATA = Symbol("insightflare.scoped-filter-metadata");
-const FILTER_SCOPE_PREFERENCE = Symbol("insightflare.filter-scope-preference");
-const SAVED_FILTER_SCOPE_PREFERENCE = Symbol(
-  "insightflare.saved-filter-scope-preference",
-);
 
 export interface ScopedFilterMetadata {
   readonly requestedScope: FilterScopePreference;
@@ -519,8 +461,6 @@ export interface ScopedFilterMetadata {
 
 export type ScopedFilterDocument = FilterDocument & {
   readonly [SCOPED_FILTER_METADATA]?: ScopedFilterMetadata;
-  readonly [FILTER_SCOPE_PREFERENCE]?: FilterScopePreference;
-  readonly [SAVED_FILTER_SCOPE_PREFERENCE]?: FilterScopePreference;
 };
 
 function copyScopedMetadata(
@@ -528,66 +468,17 @@ function copyScopedMetadata(
   target: ScopedFilterDocument,
   skip?: symbol,
 ): void {
-  const sourceRecord = source as ScopedFilterDocument;
-  const entries = [
-    [FILTER_SCOPE_PREFERENCE, sourceRecord[FILTER_SCOPE_PREFERENCE]],
-    [
-      SAVED_FILTER_SCOPE_PREFERENCE,
-      sourceRecord[SAVED_FILTER_SCOPE_PREFERENCE],
-    ],
-    [SCOPED_FILTER_METADATA, sourceRecord[SCOPED_FILTER_METADATA]],
-  ] as const;
-  for (const [key, value] of entries) {
-    if (key !== skip && value !== undefined) {
-      Object.defineProperty(target, key, {
-        value,
-        enumerable: false,
-        writable: false,
-      });
-    }
+  copyFilterScopePreferenceMetadata(source, target);
+  const scopedMetadata = (source as ScopedFilterDocument)[
+    SCOPED_FILTER_METADATA
+  ];
+  if (skip !== SCOPED_FILTER_METADATA && scopedMetadata !== undefined) {
+    Object.defineProperty(target, SCOPED_FILTER_METADATA, {
+      value: scopedMetadata,
+      enumerable: false,
+      writable: false,
+    });
   }
-}
-
-export function attachFilterScopePreference(
-  filters: FilterDocument,
-  preference: FilterScopePreference,
-): ScopedFilterDocument {
-  const scopedFilters = { ...filters } as ScopedFilterDocument;
-  copyScopedMetadata(filters, scopedFilters, FILTER_SCOPE_PREFERENCE);
-  Object.defineProperty(scopedFilters, FILTER_SCOPE_PREFERENCE, {
-    value: preference,
-    enumerable: false,
-    writable: false,
-  });
-  return scopedFilters;
-}
-
-export function filterScopePreferenceFromDocument(
-  filters: FilterDocument | undefined,
-): FilterScopePreference | undefined {
-  if (!filters) return undefined;
-  return (filters as ScopedFilterDocument)[FILTER_SCOPE_PREFERENCE];
-}
-
-export function attachSavedFilterScopePreference(
-  filters: FilterDocument,
-  preference: FilterScopePreference,
-): ScopedFilterDocument {
-  const scopedFilters = { ...filters } as ScopedFilterDocument;
-  copyScopedMetadata(filters, scopedFilters, SAVED_FILTER_SCOPE_PREFERENCE);
-  Object.defineProperty(scopedFilters, SAVED_FILTER_SCOPE_PREFERENCE, {
-    value: preference,
-    enumerable: false,
-    writable: false,
-  });
-  return scopedFilters;
-}
-
-export function savedFilterScopePreferenceFromDocument(
-  filters: FilterDocument | undefined,
-): FilterScopePreference | undefined {
-  if (!filters) return undefined;
-  return (filters as ScopedFilterDocument)[SAVED_FILTER_SCOPE_PREFERENCE];
 }
 
 export function attachScopedFilterMetadata(

@@ -3,27 +3,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executePrivateQuery,
   executePrivateTeamDashboard,
-} from "@/lib/edge/analytics/adapters/private";
-import { executePublicQuery } from "@/lib/edge/analytics/adapters/public";
+} from "@/lib/edge/analytics/interfaces/dashboard/private";
+import { parseWindow } from "@/lib/edge/analytics/interfaces/dashboard/protocol/parsers";
 import {
   badRequest,
-  fetchPublicSite,
   notAllowed,
-  parseWindow,
-  resolvePrivateSite,
-  resolvePrivateTeam,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import { executePublicQuery } from "@/lib/edge/analytics/interfaces/dashboard/public";
 import {
   type EdgeSessionClaims,
   requireSession,
-} from "@/lib/edge/session-auth";
+} from "@/lib/edge/auth/session-auth";
+import {
+  fetchPublicSite,
+  resolvePrivateSite,
+  resolvePrivateTeam,
+} from "@/lib/edge/auth/site-access";
 import type { Env } from "@/lib/edge/types";
-
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/dashboard-cache", () => ({
+vi.mock("@/lib/edge/analytics/composition/dashboard-cache", () => ({
   PUBLIC_QUERY_CACHE_OPTIONS: {
     ttlSeconds: 300,
     cacheName: "insightflare-public-query",
@@ -37,15 +37,12 @@ vi.mock("@/lib/edge/dashboard-cache", () => ({
     ) => generate(),
   ),
 }));
-
-vi.mock("@/lib/edge/custom-event-read", () => ({
+vi.mock("@/lib/edge/analytics/providers/d1/internal/custom-event-read", () => ({
   readCustomEventDetail: vi.fn().mockResolvedValue({
     eventData: { plan: "pro", value: 99 },
   }),
 }));
-
 const requireSessionMock = vi.mocked(requireSession);
-
 interface MockStatement {
   sql: string;
   bindings: Array<string | number | null>;
@@ -54,19 +51,16 @@ interface MockStatement {
   first: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
 }
-
 interface SqlMatch {
   match: (sql: string, bindings: Array<string | number | null>) => boolean;
   all?: Record<string, unknown>[];
   first?: Record<string, unknown> | null;
   run?: Record<string, unknown>;
 }
-
 interface MockEnvOptions {
   matches?: SqlMatch[];
   fallbackAll?: Record<string, unknown>[];
 }
-
 const adminSession: EdgeSessionClaims = {
   userId: "admin-1",
   username: "admin",
@@ -74,7 +68,6 @@ const adminSession: EdgeSessionClaims = {
   systemRole: "admin",
   exp: 9_999_999_999,
 };
-
 const userSession: EdgeSessionClaims = {
   userId: "user-1",
   username: "user",
@@ -82,26 +75,21 @@ const userSession: EdgeSessionClaims = {
   systemRole: "user",
   exp: 9_999_999_999,
 };
-
 const siteRow = {
   id: "site-1",
   name: "InsightFlare",
   domain: "example.com",
 };
-
 const publicSiteRow = {
   id: "site-1",
   name: "Public Insight",
   domain: "public.example",
 };
-
 const from = 1_700_000_000_000;
 const to = from + 3_600_000;
-
 function includesAll(...needles: string[]) {
   return (sql: string) => needles.every((needle) => sql.includes(needle));
 }
-
 function sqlMatch(
   needles: string[],
   output: Omit<SqlMatch, "match"> = {},
@@ -111,15 +99,12 @@ function sqlMatch(
     ...output,
   };
 }
-
 function firstMatch(needles: string[], first: Record<string, unknown> | null) {
   return sqlMatch(needles, { first });
 }
-
 function allMatch(needles: string[], all: Record<string, unknown>[]) {
   return sqlMatch(needles, { all });
 }
-
 function createStatement(
   sql: string,
   matches: SqlMatch[],
@@ -160,7 +145,6 @@ function createStatement(
   statements.push(statement);
   return statement;
 }
-
 function createEnv(options: MockEnvOptions = {}) {
   const statements: MockStatement[] = [];
   const matches = options.matches ?? [];
@@ -174,24 +158,20 @@ function createEnv(options: MockEnvOptions = {}) {
   } as Env;
   return { env, prepare, statements };
 }
-
 function authMatches(site = siteRow): SqlMatch[] {
   return [
     firstMatch(["FROM sites", "WHERE id=? LIMIT 1"], site),
     firstMatch(["FROM sites s", "INNER JOIN teams"], site),
   ];
 }
-
 function publicAuthMatches(site = publicSiteRow): SqlMatch[] {
   return [
     firstMatch(["FROM sites", "public_enabled=1", "public_slug=?"], site),
   ];
 }
-
 function request(path: string, init?: RequestInit) {
   return new Request(`https://edge.test${path}`, init);
 }
-
 async function privateQuery(
   path: string,
   env: Env,
@@ -229,7 +209,6 @@ async function privateQuery(
     dashboardMode: true,
   });
 }
-
 async function publicQuery(
   path: string,
   env: Env,
@@ -249,9 +228,7 @@ async function publicQuery(
     request: edgeRequest,
   });
 }
-
 const windowParams = `from=${from}&to=${to}`;
-
 function expectPublicPayloadWithoutIdentity(value: unknown): void {
   if (Array.isArray(value)) {
     for (const item of value) expectPublicPayloadWithoutIdentity(item);
@@ -264,17 +241,14 @@ function expectPublicPayloadWithoutIdentity(value: unknown): void {
     expectPublicPayloadWithoutIdentity(child);
   }
 }
-
 function privatePath(pathname: string, params = "") {
   const suffix = params ? `&${params}` : "";
   return `/api/private/${pathname}?siteId=site-1&${windowParams}${suffix}`;
 }
-
 function publicPath(pathname: string, params = "") {
   const suffix = params ? `&${params}` : "";
   return `/api/public-sites/public-slug/${pathname}?${windowParams}${suffix}`;
 }
-
 const overviewRows = [
   {
     views: 20,
@@ -293,7 +267,6 @@ const overviewRows = [
     durationViews: 3,
   },
 ];
-
 function overviewMatch(): SqlMatch {
   let index = 0;
   return {
@@ -310,7 +283,6 @@ function overviewMatch(): SqlMatch {
     },
   } as SqlMatch;
 }
-
 const trendRows = [
   {
     bucket: 0,
@@ -331,12 +303,10 @@ const trendRows = [
     durationViews: 3,
   },
 ];
-
 const dimensionRows = [
   { value: "/pricing", views: 9, sessions: 6, visitors: 5 },
   { value: "/docs", views: 4, sessions: 3, visitors: 2 },
 ];
-
 const eventRecordRow = {
   eventPk: 1,
   eventId: "evt-1",
@@ -361,7 +331,6 @@ const eventRecordRow = {
   nodeCount: 4,
   valueCount: 3,
 };
-
 function sessionRow(overrides: Record<string, unknown> = {}) {
   return {
     sessionId: "session-1",
@@ -398,7 +367,6 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
 function commonQueryMatches(): SqlMatch[] {
   return [
     overviewMatch(),
@@ -1130,7 +1098,6 @@ function commonQueryMatches(): SqlMatch[] {
     allMatch(["GROUP BY country", "ORDER BY views DESC"], []),
   ];
 }
-
 describe("edge query handlers", () => {
   beforeEach(() => {
     requireSessionMock.mockReset();

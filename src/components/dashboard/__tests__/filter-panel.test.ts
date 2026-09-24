@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { allowedFields } from "@/components/dashboard/filter-editor-internals";
+import { allowedFields } from "@/components/dashboard/filters/filter-editor/field-catalog";
 import {
   systemPresetGroupLabel,
   systemPresetMatchesScope,
   systemPresetScopeForApply,
-} from "@/components/dashboard/filter-panel";
+} from "@/components/dashboard/filters/filter-panel";
 import { resolveSuggestionScope } from "@/lib/dashboard/filter-suggestion-scope";
 import {
   SYSTEM_FILTER_PRESETS,
@@ -13,7 +13,6 @@ import {
   systemFilterPresetOptionValue,
 } from "@/lib/dashboard/system-filter-presets";
 import { getMessages } from "@/lib/i18n/messages";
-
 describe("resolveSuggestionScope", () => {
   it.each([
     ["auto", "event", "event"],
@@ -36,7 +35,6 @@ describe("resolveSuggestionScope", () => {
     expect(resolveSuggestionScope("auto")).toBeUndefined();
   });
 });
-
 describe("system preset scope behavior", () => {
   it("uses a fixed scope when applying a preset", () => {
     const preset = SYSTEM_FILTER_PRESETS.find(
@@ -72,7 +70,6 @@ describe("system preset scope behavior", () => {
     ).toBe("mobileOrganicDiscovery");
   });
 });
-
 describe("registry-driven editor metadata", () => {
   it("keeps fields in the explicit product order", () => {
     expect(allowedFields("private-dashboard").map((field) => field.id)).toEqual(

@@ -1,0 +1,57 @@
+/* c8 ignore file -- this module bridges mock transport and typed queries. */
+
+import {
+  createDemoQueryResponse,
+  type DemoQueryPayloadResult,
+} from "@/lib/edge/analytics/composition/mock-provider";
+import {
+  createMockProviderRegistry,
+  type MockQueryProviderInput,
+} from "@/lib/edge/analytics/composition/mock-provider";
+import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
+import {
+  filterScopePreferenceFromDocument,
+  parseFilterUrlForAudience,
+  queryWindowToTime,
+} from "@/lib/edge/analytics/contract";
+import { parseWindow } from "@/lib/edge/analytics/interfaces/dashboard/protocol/parsers";
+import { queryErrorResponse } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import { badRequest } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import { getRequestId } from "@/lib/response";
+export type MockQueryInput = Omit<MockQueryProviderInput, "query">;
+export async function executeMockQuery(
+  input: MockQueryInput,
+): Promise<Response> {
+  const window = parseWindow(input.url);
+  if (!window) return badRequest("Invalid time window");
+  let filters;
+  try {
+    filters = parseFilterUrlForAudience(
+      input.queryContext.policy.audience,
+      input.url,
+    );
+  } catch (error) {
+    return badRequest(
+      error instanceof Error ? error.message : "Invalid filters",
+    );
+  }
+  const query = {
+    context: input.queryContext,
+    time: queryWindowToTime(window),
+    filters,
+    scopePreference: filterScopePreferenceFromDocument(filters),
+  };
+  const result = await createAnalyticsQueryRuntime(
+    createMockProviderRegistry({ ...input, query }),
+  ).execute<DemoQueryPayloadResult>(input.operation, query);
+  if (!result.ok) return queryErrorResponse(result.error);
+
+  return createDemoQueryResponse(
+    result.data.payload,
+    result.data.status,
+    Boolean(input.publicQuery),
+    input.context ?? {
+      requestId: getRequestId(input.request),
+    },
+  );
+}

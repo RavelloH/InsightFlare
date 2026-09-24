@@ -5,13 +5,12 @@ import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-regi
 import {
   handlePlannedTeamTimeseries,
   type TeamTimeseriesReader,
-} from "@/lib/api-v1/team-timeseries-handler";
+} from "@/lib/api-v1/analytics/team-timeseries";
 import {
   AnalyticsTimeseriesResponseSchema,
   ApiV1ErrorEnvelopeSchema,
-} from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/contract/wire";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -29,7 +28,6 @@ const input = {
   },
   interval: "hour" as const,
 };
-
 function reader() {
   return vi.fn<TeamTimeseriesReader>().mockResolvedValue({
     source: "raw",
@@ -51,7 +49,6 @@ function reader() {
     },
   });
 }
-
 function request(
   body: BodyInit | null = JSON.stringify(input),
   init: RequestInit = {},
@@ -64,7 +61,6 @@ function request(
     ...(method === "GET" || method === "HEAD" ? {} : { body }),
   });
 }
-
 describe("planned team timeseries HTTP adapter", () => {
   it("serves a typed Hono response with team-derived scope", async () => {
     const provider = reader();

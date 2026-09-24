@@ -1,29 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handlePrivateArchive } from "@/lib/edge/archive-query";
+import { handlePrivateArchive } from "@/lib/edge/admin/archive-query";
 import {
   type EdgeSessionClaims,
   requireSession,
-} from "@/lib/edge/session-auth";
+} from "@/lib/edge/auth/session-auth";
 import type { Env } from "@/lib/edge/types";
 import { ONE_HOUR_MS } from "@/lib/edge/utils";
-
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
-
 const requireSessionMock = vi.mocked(requireSession);
-
 interface MockStatement {
   bind: ReturnType<typeof vi.fn>;
   all?: ReturnType<typeof vi.fn>;
   first?: ReturnType<typeof vi.fn>;
 }
-
 interface MockBucket {
   get: ReturnType<typeof vi.fn>;
 }
-
 const adminSession: EdgeSessionClaims = {
   userId: "admin-1",
   username: "admin",
@@ -31,7 +26,6 @@ const adminSession: EdgeSessionClaims = {
   systemRole: "admin",
   exp: 9_999_999_999,
 };
-
 const userSession: EdgeSessionClaims = {
   userId: "user-1",
   username: "user",
@@ -39,7 +33,6 @@ const userSession: EdgeSessionClaims = {
   systemRole: "user",
   exp: 9_999_999_999,
 };
-
 function statement(input: {
   all?: Record<string, unknown>[];
   first?: Record<string, unknown> | null;
@@ -57,7 +50,6 @@ function statement(input: {
   }
   return stmt;
 }
-
 function createEnv(
   statements: MockStatement[] = [],
   bucket?: MockBucket,
@@ -83,13 +75,11 @@ function createEnv(
     bucket,
   };
 }
-
 function createBucket(object: unknown): MockBucket {
   return {
     get: vi.fn().mockResolvedValue(object),
   };
 }
-
 function r2Object(
   input: {
     body?: BodyInit;
@@ -110,16 +100,13 @@ function r2Object(
     range: input.range,
   } as unknown as R2ObjectBody;
 }
-
 function edgeRequest(path: string, init?: RequestInit): Request {
   return new Request(`https://edge.test${path}`, init);
 }
-
 async function dispatch(path: string, env: Env, init?: RequestInit) {
   const request = edgeRequest(path, init);
   return handlePrivateArchive(request, env, new URL(request.url));
 }
-
 describe("private archive edge query handler", () => {
   beforeEach(() => {
     requireSessionMock.mockReset();

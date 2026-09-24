@@ -309,7 +309,6 @@ function registerSiteOperation(
             goalId: stringField(input, "goalId"),
             window: timeWindow(input.time),
             filters: filters(input),
-            scopedDataset: input.scopedDataset,
           }),
         ),
       );
@@ -325,7 +324,6 @@ function registerSiteOperation(
             interval: input.interval as never,
             window: timeWindow(input.time),
             filters: filters(input),
-            scopedDataset: input.scopedDataset,
           }),
         ),
       );

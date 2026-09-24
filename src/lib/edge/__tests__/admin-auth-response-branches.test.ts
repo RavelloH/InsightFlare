@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { uniqueTeamSlug } from "@/lib/edge/admin-access";
+import { uniqueTeamSlug } from "@/lib/edge/admin/access";
 import {
   ensureDefaultTeam,
   normE,
@@ -10,7 +10,7 @@ import {
   teamsFor,
   toPublicUser,
   verifyPassword,
-} from "@/lib/edge/admin-auth";
+} from "@/lib/edge/admin/auth";
 import {
   bad,
   bool,
@@ -21,10 +21,9 @@ import {
   parseJson,
   toRole,
   una,
-} from "@/lib/edge/admin-response";
-import { requireSession } from "@/lib/edge/session-auth";
+} from "@/lib/edge/admin/response";
+import { requireSession } from "@/lib/edge/auth/session-auth";
 import type { Env } from "@/lib/edge/types";
-
 const deriveMockBytes = vi.hoisted(
   () =>
     (password: Uint8Array, nonce: Uint8Array, length: number): Uint8Array => {
@@ -38,7 +37,6 @@ const deriveMockBytes = vi.hoisted(
       return out;
     },
 );
-
 vi.mock("@noble/hashes/argon2.js", () => ({
   argon2id: vi.fn(
     (
@@ -48,15 +46,12 @@ vi.mock("@noble/hashes/argon2.js", () => ({
     ) => deriveMockBytes(password, nonce, options.dkLen ?? 32),
   ),
 }));
-
-vi.mock("@/lib/edge/admin-access", () => ({
+vi.mock("@/lib/edge/admin/access", () => ({
   uniqueTeamSlug: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
-
 type UserRow = {
   id: string;
   username: string;
@@ -68,7 +63,6 @@ type UserRow = {
   created_at: number;
   updated_at: number;
 };
-
 interface MockStatement {
   sql?: string;
   bind: ReturnType<typeof vi.fn>;
@@ -76,10 +70,8 @@ interface MockStatement {
   all: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
 }
-
 const requireSessionMock = vi.mocked(requireSession);
 const uniqueTeamSlugMock = vi.mocked(uniqueTeamSlug);
-
 function b64u(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -88,7 +80,6 @@ function b64u(bytes: Uint8Array): string {
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
 }
-
 function argonHash(
   password: string,
   nonce = new Uint8Array([
@@ -100,7 +91,6 @@ function argonHash(
   const expected = deriveMockBytes(passwordBytes, nonce, expectedLength);
   return `argon2id$v=19$m=4096,t=1,p=1$${b64u(nonce)}$${b64u(expected)}`;
 }
-
 function userRow(overrides: Partial<UserRow> = {}): UserRow {
   return {
     id: "user-1",
@@ -115,7 +105,6 @@ function userRow(overrides: Partial<UserRow> = {}): UserRow {
     ...overrides,
   };
 }
-
 function statement(
   input: {
     first?: unknown;
@@ -133,7 +122,6 @@ function statement(
   } satisfies MockStatement;
   return stmt;
 }
-
 function createEnv(statements: MockStatement[] = []): {
   env: Env;
   prepare: ReturnType<typeof vi.fn>;
@@ -156,11 +144,9 @@ function createEnv(statements: MockStatement[] = []): {
     prepare,
   };
 }
-
 async function jsonOf(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
-
 describe("admin response low branches", () => {
   it("wraps JSON responses and maps status helpers, roles, and booleans", async () => {
     const accepted = j({ ok: true }, 202);
@@ -222,7 +208,6 @@ describe("admin response low branches", () => {
     ).resolves.toEqual({});
   });
 });
-
 describe("admin auth low branches", () => {
   beforeEach(() => {
     vi.clearAllMocks();

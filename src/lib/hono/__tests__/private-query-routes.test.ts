@@ -1,19 +1,18 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type * as PrivateQueryAdapter from "@/lib/edge/analytics/adapters/private";
-import { executePrivateTeamDashboard } from "@/lib/edge/analytics/adapters/private";
-import { handleOverviewContract } from "@/lib/edge/analytics/composition/protocol/overview-contract-adapter";
-import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
+import { withDashboardCache } from "@/lib/edge/analytics/composition/dashboard-cache";
+import type * as PrivateQueryAdapter from "@/lib/edge/analytics/interfaces/dashboard/private";
+import { executePrivateTeamDashboard } from "@/lib/edge/analytics/interfaces/dashboard/private";
+import { handleOverviewContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview";
+import type * as SiteAccessModule from "@/lib/edge/auth/site-access";
 import {
   resolvePrivateSiteForSession,
   resolvePrivateTeamForSession,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
-import { withDashboardCache } from "@/lib/edge/dashboard-cache";
+} from "@/lib/edge/auth/site-access";
 import { privateQueryRoutes } from "@/lib/hono/routes/private/query";
 import type { AppEnv } from "@/lib/hono/types";
-
-vi.mock("@/lib/edge/dashboard-cache", () => ({
+vi.mock("@/lib/edge/analytics/composition/dashboard-cache", () => ({
   withDashboardCache: vi.fn(
     async (
       _ctx: ExecutionContext,
@@ -22,55 +21,38 @@ vi.mock("@/lib/edge/dashboard-cache", () => ({
     ) => loader(),
   ),
 }));
-
+vi.mock("@/lib/edge/auth/site-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof SiteAccessModule>();
+  return {
+    ...actual,
+    resolvePrivateSiteForSession: vi.fn(),
+    resolvePrivateTeamForSession: vi.fn(),
+  };
+});
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/overview", () => ({
+  handleOverviewContract: vi.fn(),
+  handleTrendContract: vi.fn(),
+}));
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/pages", () => ({
+  handlePagesContract: vi.fn(),
+  handleReferrersContract: vi.fn(),
+}));
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/core",
+  "@/lib/edge/analytics/interfaces/dashboard/private",
   async (importOriginal) => {
-    const actual = await importOriginal<typeof QueryCoreModule>();
-    return {
-      ...actual,
-      resolvePrivateSiteForSession: vi.fn(),
-      resolvePrivateTeamForSession: vi.fn(),
-    };
+    const actual = await importOriginal<typeof PrivateQueryAdapter>();
+    return { ...actual, executePrivateTeamDashboard: vi.fn() };
   },
 );
-
-vi.mock(
-  "@/lib/edge/analytics/composition/protocol/overview-contract-adapter",
-  () => ({
-    handleOverviewContract: vi.fn(),
-    handleTrendContract: vi.fn(),
-  }),
-);
-
-vi.mock(
-  "@/lib/edge/analytics/composition/protocol/pages-contract-adapter",
-  () => ({
-    handlePagesContract: vi.fn(),
-    handleReferrersContract: vi.fn(),
-  }),
-);
-
-vi.mock("@/lib/edge/analytics/adapters/private", async (importOriginal) => {
-  const actual = await importOriginal<typeof PrivateQueryAdapter>();
-  return { ...actual, executePrivateTeamDashboard: vi.fn() };
-});
-
-vi.mock("@/lib/edge/analytics/providers/d1/internal/funnels", () => ({
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/funnels", () => ({
   handleFunnel: vi.fn(async () => new Response("funnel")),
 }));
-
-vi.mock("@/lib/edge/analytics/providers/d1/internal/goals", () => ({
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/goals", () => ({
   handleGoal: vi.fn(async () => new Response("goal")),
 }));
-
-vi.mock(
-  "@/lib/edge/analytics/composition/protocol/events-contract-adapter",
-  () => ({
-    handleEventTypeDetailContract: vi.fn(async () => new Response("query")),
-  }),
-);
-
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/events", () => ({
+  handleEventTypeDetailContract: vi.fn(async () => new Response("query")),
+}));
 const env = { DB: {} };
 const dispatchQueryRoute = vi.fn();
 const ctx = {
@@ -84,11 +66,9 @@ const session = {
   systemRole: "user" as const,
   exp: 9999999999,
 };
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://app.test${path}`, init);
 }
-
 function createApp() {
   const app = new Hono<AppEnv>();
   app.use("/api/private/*", async (c, next) => {
@@ -98,7 +78,6 @@ function createApp() {
   app.route("/api/private", privateQueryRoutes);
   return app;
 }
-
 describe("Hono private query routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -6,11 +6,10 @@ import {
   UpdateSharingSettingsInputSchema,
   UpdateSiteInputSchema,
   UpdateTrackingSettingsInputSchema,
-} from "@/lib/api-v1/application-registry";
-import { createResourceApplicationService } from "@/lib/api-v1/resource-application-service";
-import { handlePlannedResourceRoute } from "@/lib/api-v1/resource-handler";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/contract/resources";
+import { createResourceApplicationService } from "@/lib/api-v1/resources/application-service";
+import { handlePlannedResourceRoute } from "@/lib/api-v1/resources/handler";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const resourceDependencies = vi.hoisted(() => ({
   createSiteWithDefaultSettings: vi.fn(),
   deleteSiteData: vi.fn(),
@@ -18,19 +17,16 @@ const resourceDependencies = vi.hoisted(() => ({
   readSiteScriptSettings: vi.fn(),
   upsertSiteScriptSettings: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-sites", () => ({
+vi.mock("@/lib/edge/admin/sites/handler", () => ({
   createSiteWithDefaultSettings:
     resourceDependencies.createSiteWithDefaultSettings,
   deleteSiteData: resourceDependencies.deleteSiteData,
   ensurePublicSlugAvailable: resourceDependencies.ensurePublicSlugAvailable,
 }));
-
-vi.mock("@/lib/edge/site-settings-store", () => ({
+vi.mock("@/lib/edge/sites/settings-store", () => ({
   readSiteScriptSettings: resourceDependencies.readSiteScriptSettings,
   upsertSiteScriptSettings: resourceDependencies.upsertSiteScriptSettings,
 }));
-
 const principal = (
   scopes: ApiKeyPrincipal["scopes"] = ["site:read"],
 ): ApiKeyPrincipal => ({
@@ -40,7 +36,6 @@ const principal = (
   scopes,
   siteIds: ["site-1"],
 });
-
 const siteRow = {
   id: "site-1",
   teamId: "team-1",
@@ -51,7 +46,6 @@ const siteRow = {
   createdAt: 1_700_000_000,
   updatedAt: 1_700_000_001,
 };
-
 function envWithSite() {
   const first = vi.fn().mockResolvedValue(siteRow);
   const all = vi.fn().mockResolvedValue({ results: [siteRow] });
@@ -63,7 +57,6 @@ function envWithSite() {
     all,
   };
 }
-
 const scriptSettings = {
   trackingStrength: "smart" as const,
   trackQueryParams: true,
@@ -74,7 +67,6 @@ const scriptSettings = {
   ignoreDoNotTrack: true,
   performanceSampleRate: 100,
 };
-
 const funnelRow = {
   id: "funnel-1",
   site_id: "site-1",
@@ -88,7 +80,6 @@ const funnelRow = {
   created_at: 1_700_000_000,
   updated_at: 1_700_000_001,
 };
-
 function resourceEnv(
   rows: {
     readonly site: typeof siteRow | null;
@@ -130,7 +121,6 @@ function resourceEnv(
     runs,
   };
 }
-
 describe("typed API v1 resource boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();

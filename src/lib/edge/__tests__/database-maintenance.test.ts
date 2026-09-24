@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { runDatabaseMaintenance } from "@/lib/edge/database-maintenance";
+import { runDatabaseMaintenance } from "@/lib/edge/scheduled-tasks/database-maintenance";
 
 class FakeD1Database {
   readonly db = new DatabaseSync(":memory:");

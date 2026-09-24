@@ -93,18 +93,18 @@ export default defineConfig({
         "src/lib/i18n/messages.ts",
         "src/tracker/*.min.ts",
         "src/tracker/sdk.no-perf.min.ts",
-        "src/lib/edge-client-types/**",
+        "src/lib/dashboard-api/contract/types/**",
         // Hono route registration is covered through endpoint integration tests;
         // keep its large callback matrix out of the global query-logic budget.
         "src/lib/hono/routes/v1/site-analytics.ts",
         // API v1 provider assembly is a source-wiring matrix; operation
         // behavior is covered by the handler and route integration suites.
         "src/lib/edge/analytics/composition/api-v1-provider-registry.ts",
-        "src/lib/realtime/demo-site-profiles-types.ts",
-        "src/lib/realtime/mock.ts",
-        "src/lib/edge/ingest-flush-types.ts",
-        "src/lib/edge/ingest-types.ts",
-        "src/lib/realtime/mock/events-helpers.ts",
+        "src/lib/demo/data/site-profiles-types.ts",
+        "src/lib/demo/realtime/handler.ts",
+        "src/lib/edge/ingest/flush-types.ts",
+        "src/lib/edge/ingest/types.ts",
+        "src/lib/demo/realtime/events-helpers.ts",
         "src/lib/system-performance.ts",
         "src/components/dashboard/site-pages/use-dashboard-query.ts",
         // The query provider is browser orchestration. Its hydration and

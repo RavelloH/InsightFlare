@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleMapRelayRequest } from "@/lib/edge/map-relay";
+import { handleMapRelayRequest } from "@/lib/edge/resources/map-relay";
 import type { Env } from "@/lib/edge/types";
 
 const env = { MAP_RELAY_BASE_URL: "https://maprelay.test" } as unknown as Env;

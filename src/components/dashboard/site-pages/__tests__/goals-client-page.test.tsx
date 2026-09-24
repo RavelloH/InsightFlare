@@ -2,15 +2,13 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 const testState = vi.hoisted(() => ({
   editorInput: {
     name: "Renamed goal",
     filterDsl: 'event.name eq "purchase"',
   },
 }));
-
-vi.mock("@/lib/dashboard/client-data", () => ({
+vi.mock("@/lib/dashboard/client/data", () => ({
   createGoal: vi.fn(),
   deleteGoal: vi.fn(),
   fetchGoalDefinition: vi.fn(),
@@ -19,14 +17,12 @@ vi.mock("@/lib/dashboard/client-data", () => ({
   fetchGoals: vi.fn(),
   updateGoal: vi.fn(),
 }));
-
-vi.mock("@/components/dashboard/site-pages/detail-query-modal", () => ({
+vi.mock("@/components/dashboard/site-pages/common/detail-query-modal", () => ({
   DETAIL_QUERY_PARAM: "detail",
   DetailDrawer: (props: { children: ReactNode }) =>
     createElement("div", { "data-detail-drawer": true }, props.children),
 }));
-
-vi.mock("@/components/dashboard/site-pages/goal-card", () => ({
+vi.mock("@/components/dashboard/site-pages/goals/goal-card", () => ({
   GoalCard: (props: { goal: GoalDefinition; onEdit: () => void }) =>
     createElement(
       "button",
@@ -39,17 +35,14 @@ vi.mock("@/components/dashboard/site-pages/goal-card", () => ({
     ),
   GoalCardSkeleton: () => createElement("div"),
 }));
-
-vi.mock("@/components/dashboard/site-pages/goal-detail", () => ({
+vi.mock("@/components/dashboard/site-pages/goals/goal-detail", () => ({
   GoalDetail: () => createElement("div", { "data-goal-detail": true }),
 }));
-
 vi.mock("@/components/ui/auto-transition", () => ({
   AutoTransition: (props: { children: ReactNode }) =>
     createElement("div", null, props.children),
 }));
-
-vi.mock("@/components/dashboard/site-pages/goal-editor", () => ({
+vi.mock("@/components/dashboard/site-pages/goals/goal-editor", () => ({
   GoalEditor: (props: {
     open: boolean;
     onSubmit: (input: { name: string; filterDsl: string }) => Promise<void>;
@@ -66,20 +59,18 @@ vi.mock("@/components/dashboard/site-pages/goal-editor", () => ({
         )
       : null,
 }));
-
 import {
   goalDefinitionQueryKey,
   GoalsClientPage,
-} from "@/components/dashboard/site-pages/goals-client-page";
+} from "@/components/dashboard/site-pages/goals/goals-client-page";
 import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
-import { fetchGoals, updateGoal } from "@/lib/dashboard/client-data";
+import { fetchGoals, updateGoal } from "@/lib/dashboard/client/data";
 import type {
   GoalDefinition,
   GoalListData,
   GoalMutationData,
-} from "@/lib/edge-client";
+} from "@/lib/dashboard-api/client/edge";
 import { getMessages } from "@/lib/i18n/messages";
-
 const messages = getMessages("en");
 const goal: GoalDefinition = {
   id: "goal-1",
@@ -91,7 +82,6 @@ const goal: GoalDefinition = {
   createdAt: 1,
   updatedAt: 2,
 };
-
 function listData(item: GoalDefinition = goal): GoalListData {
   return {
     ok: true,
@@ -106,11 +96,9 @@ function listData(item: GoalDefinition = goal): GoalListData {
     },
   };
 }
-
 function mutationData(item: GoalDefinition): GoalMutationData {
   return { ok: true, data: { goal: item } };
 }
-
 function renderPage(client: QueryClient): {
   readonly container: HTMLDivElement;
   readonly root: Root;
@@ -139,7 +127,6 @@ function renderPage(client: QueryClient): {
   });
   return { container, root };
 }
-
 describe("GoalsClientPage mutations", () => {
   beforeEach(() => {
     vi.clearAllMocks();

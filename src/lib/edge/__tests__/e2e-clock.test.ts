@@ -6,15 +6,12 @@ import {
   e2eClockNow,
   initializeE2eClock,
   setE2eClock,
-} from "@/lib/edge/e2e-clock";
-
+} from "@/lib/edge/runtime/e2e-clock";
 const CLOCK_KEY = "__insightflare_e2e_clock__";
-
 afterEach(() => {
   Reflect.deleteProperty(globalThis, CLOCK_KEY);
   vi.restoreAllMocks();
 });
-
 describe("E2E clock", () => {
   it("uses system time until the E2E control plane sets a clock", () => {
     vi.spyOn(Date, "now").mockReturnValue(123);

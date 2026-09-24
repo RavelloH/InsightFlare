@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { instrumentEnv } from "@/lib/edge/observability-bindings";
-import { measureExternalFetch } from "@/lib/edge/observability-bindings";
+import { instrumentEnv } from "@/lib/edge/observability/bindings";
+import { measureExternalFetch } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
   currentD1Operation,
@@ -11,9 +11,7 @@ import {
   measureCurrentExternalFetch,
   runWithD1Operation,
   runWithInvocationLogger,
-} from "@/lib/edge/observability-logger";
-import type { Env } from "@/lib/edge/types";
-
+} from "@/lib/edge/observability/logger";
 describe("edge observability logger", () => {
   beforeEach(() => {
     vi.spyOn(console, "log").mockImplementation(() => {});

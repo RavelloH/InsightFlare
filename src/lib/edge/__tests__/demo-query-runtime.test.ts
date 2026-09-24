@@ -1,28 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DEMO_SITE_PROFILES,
+  demoSitePublicSlug,
+} from "@/lib/demo/data/site-profiles";
+import { demoBadRequest, demoNotFound } from "@/lib/demo/realtime/envelope";
+import type * as DemoMockModule from "@/lib/demo/runtime";
+import { handleDemoRequest } from "@/lib/demo/runtime";
+import {
   executeDemoQuery,
   executeDemoQueryPayload,
 } from "@/lib/edge/analytics/providers/mock/demo-query";
-import {
-  DEMO_SITE_PROFILES,
-  demoSitePublicSlug,
-} from "@/lib/realtime/demo-site-profiles";
-import type * as DemoMockModule from "@/lib/realtime/mock";
-import { handleDemoRequest } from "@/lib/realtime/mock";
-import { demoBadRequest, demoNotFound } from "@/lib/realtime/mock/envelope";
-
-vi.mock("@/lib/realtime/mock", async (importOriginal) => {
+vi.mock("@/lib/demo/runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof DemoMockModule>();
   return { ...actual, handleDemoRequest: vi.fn() };
 });
-
 const handleDemoRequestMock = vi.mocked(handleDemoRequest);
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://app.test${path}`, init);
 }
-
 describe("server demo query runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -317,7 +313,7 @@ describe("server demo query runtime", () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
     vi.resetModules();
     const { executePublicQuery } =
-      await import("@/lib/edge/analytics/adapters/public");
+      await import("@/lib/edge/analytics/interfaces/dashboard/public");
 
     for (const pathname of [
       "page-query",
@@ -343,7 +339,7 @@ describe("server demo query runtime", () => {
     vi.stubEnv("VITE_DEMO_MODE", "1");
     vi.resetModules();
     const { fetchPublicSite, resolvePrivateSiteForSession } =
-      await import("@/lib/edge/analytics/providers/d1/internal/core-sites");
+      await import("@/lib/edge/auth/site-access");
     const prepare = vi.fn(() => {
       throw new Error("D1 must not be used in demo site resolution");
     });

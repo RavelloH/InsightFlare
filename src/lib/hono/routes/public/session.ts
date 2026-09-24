@@ -4,14 +4,11 @@ import { SESSION_COOKIE, SESSION_DURATION_SECONDS } from "@/lib/constants";
 import {
   handleLegacyAuthLogin,
   handleLegacyAuthLogout,
-} from "@/lib/edge/legacy-auth";
+} from "@/lib/edge/auth/legacy-auth";
 import type { AppEnv } from "@/lib/hono/types";
 import { jsonResponseFor, nf as notFound } from "@/lib/response";
-
 const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
-
 export const publicSessionRoutes = new Hono<AppEnv>();
-
 async function demoLogin(request: Request): Promise<Response> {
   let body: Record<string, unknown> = {};
   try {
@@ -28,8 +25,7 @@ async function demoLogin(request: Request): Promise<Response> {
     !cleanNext.endsWith("/login")
       ? requestedNext
       : "/app";
-  const { getDemoTeams, getDemoUser } =
-    await import("@/lib/realtime/mock/admin");
+  const { getDemoTeams, getDemoUser } = await import("@/lib/demo/admin/users");
   const response = jsonResponseFor(request, {
     ok: true,
     data: { next, user: getDemoUser(), teams: getDemoTeams() },
@@ -40,7 +36,6 @@ async function demoLogin(request: Request): Promise<Response> {
   );
   return response;
 }
-
 publicSessionRoutes.post("/", (c) =>
   isDemoBuild ? demoLogin(c.req.raw) : handleLegacyAuthLogin(c.req.raw, c.env),
 );

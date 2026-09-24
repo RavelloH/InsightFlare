@@ -1,0 +1,674 @@
+import {
+  BLOCKING_FIELD_IDS,
+  type BlockingFieldId,
+  type BlockingRequestContext,
+  matchBlockingRules,
+  parseBlockingRules,
+} from "@/lib/blocking";
+import { writeRequestAnalyticsPoint } from "@/lib/edge/analytics-engine/request-writer";
+import { requestIp, verifyCollectToken } from "@/lib/edge/auth/collect-token";
+import { classifyCollectBotTraffic } from "@/lib/edge/collector/bot-protection";
+import { normalizeTrackerUaClientHints } from "@/lib/edge/collector/client-hints";
+import { expandCustomEventData } from "@/lib/edge/ingest/custom-event-json";
+import type { InvocationLogger } from "@/lib/edge/observability/logger";
+import {
+  normalizeSiteSettingsKey,
+  readSiteTrackingConfig,
+} from "@/lib/edge/sites/settings-store";
+import type { Env } from "@/lib/edge/types";
+import type {
+  IngestEnvelopePayload,
+  IngestTracePayload,
+  SerializedRequestPayload,
+  TrackerClientPayload,
+} from "@/lib/edge/types";
+import type { TrackerPayloadKind } from "@/lib/edge/types";
+import { jsonCloneRecord } from "@/lib/edge/utils";
+import { assertContentSize, BODY_SIZE_LIMITS } from "@/lib/form-helpers";
+import { jsonResponse } from "@/lib/response";
+import { normalizeSiteScriptSettings } from "@/lib/site-settings";
+const CORS_BASE_HEADERS = {
+  "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
+  "access-control-allow-headers": "content-type",
+  "access-control-max-age": "86400",
+};
+const SUPPORTED_KINDS = new Set<TrackerPayloadKind>([
+  "pageview",
+  "leave",
+  "visibility",
+  "custom_event",
+  "identify",
+]);
+const CUSTOM_BLOCK_REASON_BY_FIELD: Readonly<Record<BlockingFieldId, string>> =
+  {
+    domains: "blocked_domains",
+    paths: "blocked_paths",
+    queryParameters: "blocked_query_parameters",
+    referrers: "blocked_referrers",
+    userAgents: "blocked_user_agents",
+    ips: "blocked_ips",
+    asns: "blocked_asns",
+    countries: "blocked_countries",
+    regions: "blocked_regions",
+  };
+function customBlockReasons(fields: readonly BlockingFieldId[]): string[] {
+  const fieldSet = new Set(fields);
+  return [
+    "custom_block",
+    ...BLOCKING_FIELD_IDS.filter((field) => fieldSet.has(field)).map(
+      (field) => CUSTOM_BLOCK_REASON_BY_FIELD[field],
+    ),
+  ];
+}
+function pickSiteIdFromPayload(
+  payload: TrackerClientPayload,
+  requestUrl: URL,
+): string {
+  if (typeof payload.siteId === "string" && payload.siteId.length > 0) {
+    return payload.siteId;
+  }
+  const fromQuery = requestUrl.searchParams.get("siteId");
+  if (fromQuery && fromQuery.length > 0) {
+    return fromQuery;
+  }
+  return "default";
+}
+function sanitizeInputPayload(payload: unknown): TrackerClientPayload | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  return payload as TrackerClientPayload;
+}
+function collectTokenFromPayload(payload: TrackerClientPayload): string {
+  return coerceTrimmedString(payload.collectToken, 4096);
+}
+function coerceTrimmedString(input: unknown, maxLength: number): string {
+  if (typeof input !== "string") return "";
+  return input.trim().slice(0, maxLength);
+}
+function isSupportedKind(input: unknown): input is TrackerPayloadKind {
+  return (
+    typeof input === "string" &&
+    SUPPORTED_KINDS.has(input as TrackerPayloadKind)
+  );
+}
+function normalizeClientHostname(input: unknown): string {
+  const value = coerceTrimmedString(input, 255)
+    .toLowerCase()
+    .replace(/\.+$/, "");
+  if (!value || value.includes("/") || value.includes(":")) return "";
+  return value;
+}
+function normalizePayloadPathname(input: unknown): string {
+  let value = coerceTrimmedString(input, 4096);
+  if (!value) value = "/";
+
+  if (value.includes("://")) {
+    try {
+      value = new URL(value).pathname || "/";
+    } catch {
+      return "";
+    }
+  }
+
+  value = value.split(/[?#]/)[0] ?? value;
+  value = value.trim().replace(/\s+/g, "");
+  if (!value) value = "/";
+  if (!value.startsWith("/")) value = `/${value.replace(/^\/+/, "")}`;
+  value = value.replace(/\/{2,}/g, "/");
+  return value.slice(0, 2048);
+}
+function serializeHeaders(request: Request): Record<string, string> {
+  const headers: Record<string, string> = {};
+  request.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
+  return headers;
+}
+function serializeRequestPayload(
+  request: Request,
+  body: string,
+): SerializedRequestPayload {
+  return {
+    method: request.method,
+    url: request.url,
+    headers: serializeHeaders(request),
+    cf: jsonCloneRecord((request as Request & { cf?: unknown }).cf),
+    body,
+    receivedAt: Date.now(),
+  };
+}
+function parseOrigin(request: Request): string | null {
+  const raw = (request.headers.get("origin") || "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+function parseOriginHostname(origin: string | null): string {
+  if (!origin) return "";
+  try {
+    return new URL(origin).hostname.trim().toLowerCase().replace(/\.+$/, "");
+  } catch {
+    return "";
+  }
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+function workerMetadata(request: Request): {
+  readonly asn?: number;
+  readonly country?: string;
+  readonly region?: string;
+} {
+  const cf = (request as Request & { readonly cf?: unknown }).cf;
+  if (!isRecord(cf)) return {};
+  const country = typeof cf.country === "string" ? cf.country.trim() : "";
+  const regionCode =
+    typeof cf.regionCode === "string" ? cf.regionCode.trim() : "";
+  return {
+    ...(typeof cf.asn === "number" && Number.isSafeInteger(cf.asn)
+      ? { asn: cf.asn }
+      : {}),
+    ...(country ? { country } : {}),
+    ...(country && regionCode ? { region: `${country}-${regionCode}` } : {}),
+  };
+}
+function canCheckPath(
+  payload: TrackerClientPayload,
+  kind: TrackerPayloadKind,
+): boolean {
+  return (
+    kind === "pageview" ||
+    kind === "custom_event" ||
+    kind === "visibility" ||
+    (kind === "leave" && coerceTrimmedString(payload.pathname, 4096).length > 0)
+  );
+}
+function blockingContext(
+  request: Request,
+  payload: TrackerClientPayload,
+  normalizedPayload: TrackerClientPayload,
+  originHostname: string,
+  kind: TrackerPayloadKind,
+): BlockingRequestContext {
+  const metadata = workerMetadata(request);
+  const hostname = normalizeClientHostname(
+    normalizedPayload.hostname ?? payload.hostname,
+  );
+  return {
+    hostname: hostname || originHostname,
+    originHostname,
+    pathname: canCheckPath(payload, kind)
+      ? normalizedPayload.pathname
+      : undefined,
+    query: payload.query,
+    referrer:
+      request.headers.get("referer") ||
+      request.headers.get("referrer") ||
+      payload.referrerUrl,
+    userAgent: request.headers.get("user-agent"),
+    ip: requestIp(request),
+    ...metadata,
+  };
+}
+function toCorsHeaders(origin: string | null): Record<string, string> {
+  if (!origin) {
+    return {
+      ...CORS_BASE_HEADERS,
+      vary: "Origin",
+    };
+  }
+  return {
+    ...CORS_BASE_HEADERS,
+    "access-control-allow-origin": origin,
+    "access-control-allow-credentials": "true",
+    vary: "Origin",
+  };
+}
+type CollectionDecision =
+  | {
+      shouldForward: false;
+      allowOrigin: string | null;
+      siteId: string;
+      payload: null;
+      normalizedPayload?: TrackerClientPayload;
+      blockedFields?: readonly BlockingFieldId[];
+      reason: string;
+      detail?: Record<string, unknown>;
+    }
+  | {
+      shouldForward: true;
+      allowOrigin: string | null;
+      siteId: string;
+      payload: TrackerClientPayload;
+      scriptSettings: ReturnType<typeof normalizeSiteScriptSettings>;
+    };
+async function decideCollectionPolicy(
+  request: Request,
+  env: Env,
+  payload: TrackerClientPayload | null,
+  requestUrl: URL,
+  logger?: InvocationLogger,
+): Promise<CollectionDecision> {
+  const origin = parseOrigin(request);
+  const originHostname = parseOriginHostname(origin);
+  if (!payload) {
+    return {
+      shouldForward: false,
+      allowOrigin: origin,
+      siteId: "",
+      payload: null,
+      reason: "missing_payload",
+    };
+  }
+
+  const kind = payload.kind;
+  if (!isSupportedKind(kind)) {
+    return {
+      shouldForward: false,
+      allowOrigin: origin,
+      siteId: "",
+      payload: null,
+      reason: "unsupported_kind",
+      detail: { kind: String(kind || "") },
+    };
+  }
+
+  const siteId = normalizeSiteSettingsKey(
+    pickSiteIdFromPayload(payload, requestUrl),
+  );
+  if (!siteId) {
+    return {
+      shouldForward: false,
+      allowOrigin: origin,
+      siteId: "",
+      payload: null,
+      reason: "missing_site_id",
+    };
+  }
+
+  let settings = null;
+  try {
+    // `readSiteTrackingConfig` already caches KV results for 1 hour.
+    settings = await readSiteTrackingConfig(env, siteId);
+  } catch {
+    logger?.warn("collect.settings_read_failed");
+    settings = null;
+  }
+
+  if (!settings?.siteDomain) {
+    return {
+      shouldForward: false,
+      allowOrigin: origin,
+      siteId,
+      payload: null,
+      reason: "missing_site_settings",
+    };
+  }
+
+  const normalizedPayloadResult = normalizeForwardPayload(
+    payload,
+    siteId,
+    kind,
+  );
+  if (!normalizedPayloadResult.payload) {
+    return {
+      shouldForward: false,
+      allowOrigin: origin,
+      siteId,
+      payload: null,
+      reason: normalizedPayloadResult.reason,
+      detail: normalizedPayloadResult.detail,
+    };
+  }
+
+  const parsedBlockingRules = parseBlockingRules(settings);
+  if (!parsedBlockingRules.ok) {
+    logger?.warn("collect.blocking_rules_invalid");
+  }
+  const legacyDomainRules = parsedBlockingRules.fields.domains;
+  if (
+    legacyDomainRules.sourceVersion === 1 &&
+    legacyDomainRules.rules.length > 0 &&
+    !originHostname
+  ) {
+    return {
+      shouldForward: false,
+      allowOrigin: origin,
+      siteId,
+      payload: null,
+      normalizedPayload: normalizedPayloadResult.payload,
+      blockedFields: ["domains"],
+      reason: "origin_not_allowed",
+      detail: { origin, originHostname },
+    };
+  }
+  const blocking = matchBlockingRules(
+    parsedBlockingRules,
+    blockingContext(
+      request,
+      payload,
+      normalizedPayloadResult.payload,
+      originHostname,
+      kind,
+    ),
+  );
+  if (!blocking.allowed) {
+    const firstBlock = blocking.blockedBy[0];
+    return {
+      shouldForward: false,
+      allowOrigin: origin,
+      siteId,
+      payload: null,
+      normalizedPayload: normalizedPayloadResult.payload,
+      blockedFields: firstBlock
+        ? BLOCKING_FIELD_IDS.filter((field) =>
+            blocking.blockedBy.some((match) => match.field === field),
+          )
+        : undefined,
+      reason: firstBlock ? `blocked_${firstBlock.field}` : "blocked_by_rule",
+      detail: firstBlock ? { match: firstBlock } : undefined,
+    };
+  }
+
+  return {
+    shouldForward: true,
+    allowOrigin: origin,
+    siteId,
+    payload: normalizedPayloadResult.payload,
+    scriptSettings: normalizeSiteScriptSettings(settings),
+  };
+}
+function normalizeForwardPayload(
+  payload: TrackerClientPayload,
+  siteId: string,
+  kind: TrackerPayloadKind,
+): {
+  payload: TrackerClientPayload | null;
+  reason: string;
+  detail?: Record<string, unknown>;
+} {
+  const visitId = coerceTrimmedString(payload.visitId, 128);
+  if (!visitId) return { payload: null, reason: "missing_visit_id" };
+
+  const normalizedPayload: TrackerClientPayload = {
+    ...payload,
+    siteId,
+    kind,
+    visitId,
+  };
+  delete normalizedPayload.collectToken;
+  const uaClientHints = normalizeTrackerUaClientHints(payload.uaClientHints);
+  if (uaClientHints) {
+    normalizedPayload.uaClientHints = uaClientHints;
+  } else {
+    delete normalizedPayload.uaClientHints;
+  }
+
+  if (canCheckPath(payload, kind)) {
+    const pathname = normalizePayloadPathname(payload.pathname);
+    if (!pathname) {
+      return {
+        payload: null,
+        reason: "invalid_pathname",
+        detail: { pathname: String(payload.pathname || "") },
+      };
+    }
+    normalizedPayload.pathname = pathname;
+  }
+
+  if (kind === "pageview") {
+    const hostname = normalizeClientHostname(payload.hostname);
+    if (!hostname) {
+      return {
+        payload: null,
+        reason: "missing_hostname",
+        detail: { hostname: String(payload.hostname || "") },
+      };
+    }
+    normalizedPayload.hostname = hostname;
+  }
+
+  if (kind === "custom_event") {
+    const eventName = coerceTrimmedString(payload.eventName, 120);
+    if (!eventName) return { payload: null, reason: "missing_event_name" };
+    normalizedPayload.eventName = eventName;
+  }
+
+  if (kind === "visibility") {
+    const visibilityState = coerceTrimmedString(payload.visibilityState, 20);
+    if (visibilityState !== "hidden" && visibilityState !== "visible") {
+      return {
+        payload: null,
+        reason: "invalid_visibility_state",
+        detail: { visibilityState },
+      };
+    }
+    normalizedPayload.visibilityState = visibilityState;
+  }
+
+  return { payload: normalizedPayload, reason: "" };
+}
+function createTraceId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+function noContent(origin: string | null): Response {
+  return new Response(null, { status: 204, headers: toCorsHeaders(origin) });
+}
+function jsonError(
+  origin: string | null,
+  message: string,
+  status: 400 | 413 | 422 = 400,
+): Response {
+  return jsonResponse(
+    { ok: false, error: message },
+    status,
+    toCorsHeaders(origin),
+  );
+}
+export async function handleCollectOptionsRequest(
+  request: Request,
+): Promise<Response> {
+  return noContent(parseOrigin(request));
+}
+export async function handleCollectRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  url = new URL(request.url),
+  logger?: InvocationLogger,
+): Promise<Response> {
+  // Body 大小限制检查
+  const sizeError = assertContentSize(request, BODY_SIZE_LIMITS.COLLECT);
+  if (sizeError) return sizeError;
+
+  const requestWithCf = request;
+  const origin = parseOrigin(requestWithCf);
+  const trace: IngestTracePayload = {
+    id: createTraceId(),
+    source: "collect",
+    acceptedAt: Date.now(),
+  };
+
+  const body = logger
+    ? await logger.measure("collect.request_body_read", () =>
+        requestWithCf.text(),
+      )
+    : await requestWithCf.text();
+  let payload: TrackerClientPayload | null = null;
+  if (body) {
+    try {
+      payload = sanitizeInputPayload(JSON.parse(body));
+    } catch {
+      logger?.warn("collect.rejected.invalid_json");
+      return jsonError(origin, "Invalid JSON payload", 400);
+    }
+  }
+
+  if (payload) {
+    const siteId = normalizeSiteSettingsKey(
+      pickSiteIdFromPayload(payload, url),
+    );
+    const verify = () =>
+      verifyCollectToken({
+        env,
+        token: collectTokenFromPayload(payload),
+        siteId,
+        ip: requestIp(requestWithCf),
+      });
+    const verification = logger
+      ? await logger.measure("collect.token_verify", verify)
+      : await verify();
+    if (!verification.ok) {
+      logger?.warn(`collect.rejected.${verification.reason}`);
+      return noContent(origin);
+    }
+  }
+
+  if (payload?.kind === "custom_event") {
+    const eventDataResult = expandCustomEventData(payload.eventData);
+    if (!eventDataResult.ok) {
+      logger?.warn("collect.rejected.invalid_custom_event_data");
+      return jsonError(origin, eventDataResult.error, eventDataResult.status);
+    }
+  }
+
+  const decide = () =>
+    decideCollectionPolicy(requestWithCf, env, payload, url, logger);
+  const decision = logger
+    ? await logger.measure("collect.policy", decide)
+    : await decide();
+  if (!decision.shouldForward) {
+    if (
+      decision.normalizedPayload &&
+      decision.blockedFields &&
+      decision.blockedFields.length > 0
+    ) {
+      logger?.info("collect.custom_blocked");
+      writeRequestAnalyticsPoint(
+        env,
+        {
+          request: requestWithCf,
+          payload: decision.normalizedPayload,
+          siteId: decision.siteId,
+          origin: decision.allowOrigin,
+          traceId: trace.id,
+          receivedAt: trace.acceptedAt,
+          category: "custom_block",
+          disposition: "blocked",
+          reasons: customBlockReasons(decision.blockedFields),
+        },
+        logger,
+      );
+    }
+    logger?.warn(`collect.rejected.${decision.reason}`);
+    return noContent(decision.allowOrigin);
+  }
+
+  const classification = classifyCollectBotTraffic({
+    request: requestWithCf,
+    payload: decision.payload,
+    origin,
+  });
+
+  if (
+    classification.category === "bot" &&
+    decision.scriptSettings.botProtectionEnabled !== false
+  ) {
+    logger?.info("collect.bot_diverted");
+    writeRequestAnalyticsPoint(
+      env,
+      {
+        request: requestWithCf,
+        payload: decision.payload,
+        siteId: decision.siteId,
+        origin: decision.allowOrigin,
+        traceId: trace.id,
+        receivedAt: trace.acceptedAt,
+        category: "bot",
+        disposition: "blocked",
+        reasons: classification.reasons,
+      },
+      logger,
+    );
+    return noContent(decision.allowOrigin);
+  }
+
+  if (
+    classification.category === "suspected_bot" &&
+    decision.scriptSettings.hostingProxyBlockingEnabled === true &&
+    (classification.reasons.includes("hosting_asn") ||
+      classification.reasons.includes("network_service_asn"))
+  ) {
+    logger?.info("collect.bot_diverted");
+    writeRequestAnalyticsPoint(
+      env,
+      {
+        request: requestWithCf,
+        payload: decision.payload,
+        siteId: decision.siteId,
+        origin: decision.allowOrigin,
+        traceId: trace.id,
+        receivedAt: trace.acceptedAt,
+        category: "suspected_bot",
+        disposition: "blocked",
+        reasons: classification.reasons,
+      },
+      logger,
+    );
+    return noContent(decision.allowOrigin);
+  }
+
+  const doId = env.INGEST_DO.idFromName(decision.siteId);
+  const stub = env.INGEST_DO.get(doId);
+
+  const envelope: IngestEnvelopePayload = {
+    request: serializeRequestPayload(
+      requestWithCf,
+      JSON.stringify(decision.payload),
+    ),
+    client: decision.payload,
+    trace,
+  };
+
+  logger?.info("collect.forward_queued");
+
+  writeRequestAnalyticsPoint(
+    env,
+    {
+      request: requestWithCf,
+      payload: decision.payload,
+      siteId: decision.siteId,
+      origin: decision.allowOrigin,
+      traceId: trace.id,
+      receivedAt: trace.acceptedAt,
+      category: classification.category,
+      disposition: "included",
+      reasons: classification.reasons,
+    },
+    logger,
+  );
+
+  const forward = stub
+    .fetch("https://ingest.internal/ingest", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(envelope),
+    })
+    .then((response) => {
+      void response;
+    })
+    .catch(() => undefined);
+  ctx.waitUntil(logger ? logger.track(forward) : forward);
+
+  return noContent(decision.allowOrigin);
+}

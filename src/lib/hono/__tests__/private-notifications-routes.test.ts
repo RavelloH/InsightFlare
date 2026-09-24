@@ -6,38 +6,32 @@ import {
   handleNotificationRead,
   handleNotifications,
   handleNotificationsReadAll,
-} from "@/lib/edge/admin-notifications";
-import { nf } from "@/lib/edge/admin-response";
+} from "@/lib/edge/admin/notifications/handler";
+import { nf } from "@/lib/edge/admin/response";
 import { privateNotificationRoutes } from "@/lib/hono/routes/private/notifications";
 import type { AppEnv } from "@/lib/hono/types";
-
-vi.mock("@/lib/edge/admin-notifications", () => ({
+vi.mock("@/lib/edge/admin/notifications/handler", () => ({
   handleNotificationRead: vi.fn(),
   handleNotifications: vi.fn(),
   handleNotificationPreferences: vi.fn(),
   handleNotificationsReadAll: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-response", () => ({
+vi.mock("@/lib/edge/admin/response", () => ({
   nf: vi.fn(() => new Response("not found", { status: 404 })),
 }));
-
 const env = { DB: {} };
 const ctx = {
   passThroughOnException: vi.fn(),
   waitUntil: vi.fn(),
 } as unknown as ExecutionContext;
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://app.test${path}`, init);
 }
-
 function createApp() {
   const app = new Hono<AppEnv>();
   app.route("/api/private/notifications", privateNotificationRoutes);
   return app;
 }
-
 describe("Hono private notification routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();

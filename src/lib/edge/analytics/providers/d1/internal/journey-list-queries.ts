@@ -3,9 +3,8 @@ import {
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   type FunnelConfigV2,
-  type ScopedDatasetSql,
 } from "@/lib/edge/analytics/contract";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 import { pageResult } from "@/lib/pagination";
 
@@ -43,13 +42,13 @@ import {
   visitorListOrderBy,
   whereClauseWithTarget,
 } from "./journey-helpers";
+import type { ScopedDatasetSql } from "./scoped-dataset";
 import {
   applyObservationFilterToScopedDataset,
   compileScopedDatasetSql,
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
 } from "./scoped-dataset";
-
 export type JourneyListAnalysis =
   | { readonly type: "goal"; readonly filter: FilterDocument }
   | {
@@ -58,34 +57,28 @@ export type JourneyListAnalysis =
       readonly stepIndex: number;
       readonly outcome?: "converted" | "dropoff";
     };
-
 export interface VisitorListCursor {
   sortValue: number;
   lastSeenAt?: number;
   visitorId: string;
 }
-
 export interface SessionListCursor {
   sortValue: number;
   startedAt?: number;
   sessionId: string;
 }
-
 export interface VisitorListPage {
   rows: VisitorRow[];
   nextCursor: VisitorListCursor | null;
 }
-
 export interface SessionListPage {
   rows: SessionRow[];
   nextCursor: SessionListCursor | null;
 }
-
 export interface JourneyEventCursor {
   readonly occurredAt: number;
   readonly id: string;
 }
-
 export interface JourneyEventPage {
   readonly items: readonly JourneyEventRow[];
   readonly pagination: {
@@ -95,7 +88,6 @@ export interface JourneyEventPage {
     readonly nextCursor: JourneyEventCursor | null;
   };
 }
-
 /**
  * Direct readers receive normalized filters without scoped-query metadata.
  * Resolve filter/search membership first, then expand each matching entity to
@@ -125,7 +117,6 @@ filtered_visits AS (
     ON entity_ids.${column} = v.${column}
 )`;
 }
-
 const EVENT_ONLY_VISIT_PROJECTION = `
     e.visit_id,
     e.site_id,
@@ -182,7 +173,6 @@ const EVENT_ONLY_VISIT_PROJECTION = `
     NULL,
     NULL,
     0 AS is_visit_observation`;
-
 function scopedAggregationFilteredVisitsCte(
   dataset: ScopedDatasetSql,
   entity: "visitor" | "session",
@@ -209,7 +199,6 @@ function scopedAggregationFilteredVisitsCte(
   ${eventTargetClause ? eventTargetClause.replace(/^WHERE\s+/i, "AND ") : ""}
 )`;
 }
-
 function baseAnalysisDataset(
   siteId: string,
   window: QueryWindow,
@@ -243,7 +232,6 @@ function baseAnalysisDataset(
     window,
   });
 }
-
 function analysisEntityDataset(
   base: ScopedDatasetSql,
   membership: {
@@ -310,7 +298,6 @@ ${visitors} AS (
     scope: base.scope,
   };
 }
-
 function analysisDatasetFor(
   siteId: string,
   window: QueryWindow,
@@ -352,7 +339,6 @@ function analysisDatasetFor(
     column: funnel.identity,
   });
 }
-
 /**
  * Establishes a target's site/window scope before reading its trajectory.
  * Empty trajectories are valid. Presence is established from the unfiltered
@@ -398,7 +384,6 @@ LIMIT 1
   );
   return rows.length > 0;
 }
-
 function visitorCursorFromRow(
   row: VisitorRow,
   sort: ListSort<VisitorListSortKey>,
@@ -411,7 +396,6 @@ function visitorCursorFromRow(
         visitorId: row.visitorId,
       };
 }
-
 function sessionCursorFromRow(
   row: SessionRow,
   sort: ListSort<SessionListSortKey>,
@@ -424,7 +408,6 @@ function sessionCursorFromRow(
         sessionId: row.sessionId,
       };
 }
-
 function visitorCursorFilter(
   cursor: VisitorListCursor,
   sort: ListSort<VisitorListSortKey>,
@@ -457,7 +440,6 @@ function visitorCursorFilter(
     ],
   };
 }
-
 function sessionCursorFilter(
   cursor: SessionListCursor,
   sort: ListSort<SessionListSortKey>,
@@ -489,7 +471,6 @@ function sessionCursorFilter(
     ],
   };
 }
-
 export async function queryVisitorsFromD1(
   env: Env,
   siteId: string,
@@ -525,7 +506,6 @@ export async function queryVisitorsFromD1(
   }
   return rows;
 }
-
 export async function queryVisitorListPageFromD1(
   env: Env,
   siteId: string,
@@ -607,7 +587,6 @@ ${buildVisitorAggregationSql({
       hasMore && lastRow ? visitorCursorFromRow(lastRow, options.sort) : null,
   };
 }
-
 export async function querySessionsFromD1(
   env: Env,
   siteId: string,
@@ -641,7 +620,6 @@ export async function querySessionsFromD1(
   }
   return rows;
 }
-
 export async function querySessionListPageFromD1(
   env: Env,
   siteId: string,
@@ -743,7 +721,6 @@ ${buildSessionAggregationSql({
       hasMore && lastRow ? sessionCursorFromRow(lastRow, options.sort) : null,
   };
 }
-
 export async function queryJourneyEventsPageFromD1(
   env: Env,
   siteId: string,
@@ -914,7 +891,6 @@ LIMIT ?
     },
   };
 }
-
 export async function queryJourneyEventsFromD1(
   env: Env,
   siteId: string,

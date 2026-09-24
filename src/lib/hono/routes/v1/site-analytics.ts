@@ -1,25 +1,14 @@
 import type { Context } from "hono";
 import type { Hono } from "hono";
 
-import { createAnalysisDefinitionReader } from "@/lib/api-v1/analysis-definition-reader";
-import { handlePlannedSiteAnalyticsSchema } from "@/lib/api-v1/analytics-schema-handler";
 import {
-  handleSiteComparison,
-  handleSiteComparisonBreakdown,
-} from "@/lib/api-v1/comparison-handler";
-import { SitePerformanceBreakdownDimensionSchema } from "@/lib/api-v1/dto/analytics";
-import { fromZodIssues } from "@/lib/api-v1/errors";
-import { handlePlannedSiteFunnelAnalysis } from "@/lib/api-v1/funnel-analysis-handler";
-import {
-  handlePlannedSiteGoalSummary,
-  handlePlannedSiteGoalTimeseries,
-} from "@/lib/api-v1/goal-analysis-handler";
-import { handlePlannedSiteOverview } from "@/lib/api-v1/overview-handler";
-import { handlePlannedSavedFilters } from "@/lib/api-v1/saved-filters-handler";
-import { handlePlannedSiteBreakdown } from "@/lib/api-v1/site-breakdown-handler";
-import { handlePlannedSiteCrossBreakdown } from "@/lib/api-v1/site-cross-breakdown-handler";
-import {
+  createAnalysisDefinitionReader,
+  fromZodIssues,
+  handlePlannedSavedFilters,
+  handlePlannedSiteAnalyticsSchema,
+  handlePlannedSiteBreakdown,
   handlePlannedSiteChannels,
+  handlePlannedSiteCrossBreakdown,
   handlePlannedSiteEventDetail,
   handlePlannedSiteEventFields,
   handlePlannedSiteEventFieldValues,
@@ -29,7 +18,11 @@ import {
   handlePlannedSiteEventTypeDetail,
   handlePlannedSiteEventTypes,
   handlePlannedSiteFilterValues,
+  handlePlannedSiteFunnelAnalysis,
+  handlePlannedSiteGoalSummary,
+  handlePlannedSiteGoalTimeseries,
   handlePlannedSiteJourneyEventDetail,
+  handlePlannedSiteOverview,
   handlePlannedSitePages,
   handlePlannedSitePerformanceBreakdown,
   handlePlannedSitePerformanceSummary,
@@ -43,23 +36,25 @@ import {
   handlePlannedSiteSessionDetail,
   handlePlannedSiteSessionEvents,
   handlePlannedSiteSessionsSearch,
+  handlePlannedSiteTimeseries,
   handlePlannedSiteVisitorDetail,
   handlePlannedSiteVisitorEvents,
   handlePlannedSiteVisitorSessions,
   handlePlannedSiteVisitorsSearch,
-} from "@/lib/api-v1/site-list-handler";
-import { handlePlannedSiteTimeseries } from "@/lib/api-v1/timeseries-handler";
-import { jsonError } from "@/lib/api-v1/wire-helpers";
+  handleSiteComparison,
+  handleSiteComparisonBreakdown,
+  jsonError,
+  SitePerformanceBreakdownDimensionSchema,
+} from "@/lib/api-v1";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
 import { createApiV1ProviderRegistry } from "@/lib/edge/analytics/composition/api-v1-provider-registry";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
+import { createComparisonRuntime } from "@/lib/edge/analytics/composition/comparison-runtime";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { AppEnv } from "@/lib/hono/types";
-
 interface SiteAnalyticsRouteDependencies {
   readonly resolvePrincipal: (c: Context<AppEnv>) => ApiKeyPrincipal;
   readonly resourceNotFound: (c: Context<AppEnv>) => Response;
 }
-
 function providerRegistry(
   c: Context<AppEnv>,
   operation: AnalyticsOperationId,
@@ -72,7 +67,6 @@ function providerRegistry(
     performanceDimension,
   });
 }
-
 export function registerV1SiteAnalyticsRoutes(
   routes: Hono<AppEnv>,
   deps: SiteAnalyticsRouteDependencies,
@@ -83,7 +77,7 @@ export function registerV1SiteAnalyticsRoutes(
     return handleSiteComparison(
       c.req.raw,
       deps.resolvePrincipal(c),
-      c.env,
+      createComparisonRuntime({ env: c.env, siteId }),
       siteId,
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
@@ -97,7 +91,7 @@ export function registerV1SiteAnalyticsRoutes(
       return handleSiteComparisonBreakdown(
         c.req.raw,
         deps.resolvePrincipal(c),
-        c.env,
+        createComparisonRuntime({ env: c.env, siteId }),
         siteId,
         dimension,
         createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),

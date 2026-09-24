@@ -39,8 +39,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { requestAdminService } from "@/lib/admin-service-client";
 import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
+import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type {
@@ -49,7 +49,6 @@ import type {
 } from "@/lib/notifications/email-config";
 
 import { SystemSettingsGuideDialog } from "./system-settings-guide-dialog";
-
 interface NotificationEmailSettingsClientProps {
   locale: Locale;
   messages: AppMessages;
@@ -57,18 +56,15 @@ interface NotificationEmailSettingsClientProps {
   showHeading?: boolean;
   initialData?: SystemSettingsInitialData | null;
 }
-
 interface TestEmailResponse {
   provider: "resend";
   messageId: string;
   durationMs: number;
 }
-
 type FormState = Pick<
   PublicNotificationEmailConfig,
   "enabled" | "provider" | "fromName" | "fromEmail" | "replyTo"
 >;
-
 function defaultConfig(): PublicNotificationEmailConfig {
   return {
     enabled: false,
@@ -83,7 +79,6 @@ function defaultConfig(): PublicNotificationEmailConfig {
     updatedAt: 0,
   };
 }
-
 function toFormState(config: PublicNotificationEmailConfig): FormState {
   return {
     enabled: config.enabled,
@@ -93,7 +88,6 @@ function toFormState(config: PublicNotificationEmailConfig): FormState {
     replyTo: config.replyTo,
   };
 }
-
 async function fetchEmailConfig(
   signal?: AbortSignal,
 ): Promise<PublicNotificationEmailConfig> {
@@ -102,7 +96,6 @@ async function fetchEmailConfig(
     { signal },
   );
 }
-
 async function saveEmailConfig(
   body: Record<string, unknown>,
 ): Promise<PublicNotificationEmailConfig> {
@@ -111,14 +104,12 @@ async function saveEmailConfig(
     { method: "PATCH", body },
   );
 }
-
 async function deleteEmailConfig(): Promise<PublicNotificationEmailConfig> {
   return requestAdminService<PublicNotificationEmailConfig>(
     "notification-email",
     { method: "DELETE" },
   );
 }
-
 async function sendTestEmail(to: string): Promise<TestEmailResponse> {
   const body = { to };
   return requestAdminService<TestEmailResponse>("notification-email/test", {
@@ -126,7 +117,6 @@ async function sendTestEmail(to: string): Promise<TestEmailResponse> {
     body,
   });
 }
-
 export function NotificationEmailSettingsClient({
   messages,
   currentUserEmail,

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { GoalsClientPage } from "@/components/dashboard/site-pages/goals-client-page";
+import { GoalsClientPage } from "@/components/dashboard/site-pages/goals/goals-client-page";
 import { buildSitePath } from "@/lib/dashboard/paths";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { dashboardPageTitle } from "@/lib/page-title";

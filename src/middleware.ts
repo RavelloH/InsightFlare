@@ -1,5 +1,5 @@
 import { SESSION_COOKIE } from "@/lib/constants";
-import { appNow, initializeE2eClock } from "@/lib/edge/e2e-clock";
+import { appNow, initializeE2eClock } from "@/lib/edge/runtime/e2e-clock";
 import type { Env } from "@/lib/edge/types";
 import {
   DEFAULT_LOCALE,
@@ -10,23 +10,18 @@ import {
 } from "@/lib/i18n/config";
 import { dashboardSessionSecret } from "@/lib/secrets";
 import { verifySessionToken } from "@/lib/session";
-
 type AuthState = "authenticated" | "unauthenticated" | "unknown";
 type InternalFetch = (request: Request) => Promise<Response>;
-
 const DEMO_DEFAULT_TEAM_SLUG = "xeoos-team";
 const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-
 interface RedirectProfile {
   teams: Array<{ slug: string }>;
 }
-
 export interface PageRequestDecision {
   locale: string | null;
   pathname: string;
   response: Response | null;
 }
-
 function cookieValue(request: Request, name: string): string {
   const header = request.headers.get("cookie") || "";
   for (const part of header.split(";")) {
@@ -41,14 +36,12 @@ function cookieValue(request: Request, name: string): string {
   }
   return "";
 }
-
 function hasRootSecret(env: Env): boolean {
   return Boolean(
     String(env.MAIN_SECRET || "").trim() ||
     String(env.DAILY_SALT_SECRET || "").trim(),
   );
 }
-
 async function authState(request: Request, env: Env): Promise<AuthState> {
   const token = cookieValue(request, SESSION_COOKIE);
   if (!token) return "unauthenticated";
@@ -58,7 +51,6 @@ async function authState(request: Request, env: Env): Promise<AuthState> {
     ? "authenticated"
     : "unauthenticated";
 }
-
 async function fetchRedirectProfile(
   request: Request,
   internalFetch: InternalFetch,
@@ -90,7 +82,6 @@ async function fetchRedirectProfile(
     return null;
   }
 }
-
 function requestLocale(request: Request): string {
   const acceptLanguage = request.headers.get("accept-language");
   if (acceptLanguage) {
@@ -104,32 +95,26 @@ function requestLocale(request: Request): string {
   const locale = cookieValue(request, LOCALE_COOKIE);
   return isValidLocale(locale) ? locale : DEFAULT_LOCALE;
 }
-
 function pathnameHasLocale(pathname: string): boolean {
   return SUPPORTED_LOCALES.some(
     (locale) => pathname === `/${locale}` || pathname.startsWith(`/${locale}/`),
   );
 }
-
 function normalizePathname(pathname: string): string {
   if (pathname === "/") return pathname;
   return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
 }
-
 function localizedPath(pathname: string, locale: string): string {
   const normalized = normalizePathname(pathname);
   return normalized === "/" ? `/${locale}/app` : `/${locale}${normalized}`;
 }
-
 function localeFromPathname(pathname: string): string | null {
   const segment = pathname.split("/")[1];
   return isValidLocale(segment) ? segment : null;
 }
-
 export function localeCookie(locale: string): string {
   return `${LOCALE_COOKIE}=${encodeURIComponent(resolveLocale(locale))}; Path=/; Max-Age=${LOCALE_COOKIE_MAX_AGE}; SameSite=Lax`;
 }
-
 function redirectResponse(
   request: Request,
   pathname: string,
@@ -146,7 +131,6 @@ function redirectResponse(
   if (locale) headers.append("set-cookie", localeCookie(locale));
   return new Response(null, { status: 307, headers });
 }
-
 export async function resolvePageRequest(
   request: Request,
   env: Env,
@@ -301,7 +285,6 @@ export async function resolvePageRequest(
 
   return { locale: localeFromPath, pathname, response: null };
 }
-
 export async function middleware(
   request: Request,
   env?: Env,

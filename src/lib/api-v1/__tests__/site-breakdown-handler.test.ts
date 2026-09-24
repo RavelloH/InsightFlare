@@ -6,17 +6,16 @@ import {
   AnalysisDefinitionIntegrityError,
   AnalysisDefinitionReadCancelledError,
   type AnalysisDefinitionReader,
-} from "@/lib/api-v1/analysis-definition-reader";
+} from "@/lib/api-v1/analytics/analysis-definition-reader";
 import {
   handlePlannedSiteBreakdown,
   type SiteBreakdownReader,
-} from "@/lib/api-v1/site-breakdown-handler";
+} from "@/lib/api-v1/analytics/site-breakdown";
 import {
   AnalyticsBreakdownResponseSchema,
   ApiV1ErrorEnvelopeSchema,
-} from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/contract/wire";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -34,7 +33,6 @@ const input = {
   },
   limit: 10,
 };
-
 function reader() {
   return vi.fn<SiteBreakdownReader>().mockResolvedValue({
     items: [
@@ -48,7 +46,6 @@ function reader() {
     ],
   });
 }
-
 function request(
   body: BodyInit | null = JSON.stringify(input),
   init: RequestInit = {},
@@ -64,7 +61,6 @@ function request(
     },
   );
 }
-
 describe("planned site breakdown HTTP adapter", () => {
   it("serves typed path-scoped breakdowns through a live Hono route", async () => {
     const provider = reader();

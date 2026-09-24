@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   mergeUaClientHintsIntoHeaders,
   normalizeTrackerUaClientHints,
-} from "@/lib/edge/client-hints";
-
+} from "@/lib/edge/collector/client-hints";
 describe("tracker UA client hints normalization", () => {
   it("returns undefined for empty, non-object, and empty-normalized inputs", () => {
     expect(normalizeTrackerUaClientHints(null)).toBeUndefined();

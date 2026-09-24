@@ -5,13 +5,12 @@ import { createTestProviderRegistry } from "@/lib/api-v1/__tests__/provider-regi
 import {
   handlePlannedTeamOverview,
   type TeamOverviewReader,
-} from "@/lib/api-v1/team-overview-handler";
+} from "@/lib/api-v1/analytics/team-overview";
 import {
   AnalyticsOverviewResponseSchema,
   ApiV1ErrorEnvelopeSchema,
-} from "@/lib/api-v1/wire";
-import type { ApiKeyPrincipal } from "@/lib/edge/api-key-auth";
-
+} from "@/lib/api-v1/contract/wire";
+import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 const principal: ApiKeyPrincipal = {
   keyId: "key-1",
   teamId: "team-1",
@@ -20,7 +19,6 @@ const principal: ApiKeyPrincipal = {
   siteIds: ["site-1"],
   status: "active",
 };
-
 const input = {
   timeRange: {
     kind: "absolute",
@@ -38,7 +36,6 @@ const input = {
     },
   },
 };
-
 function reader() {
   return vi.fn<TeamOverviewReader>().mockResolvedValue({
     source: "raw",
@@ -53,7 +50,6 @@ function reader() {
     },
   });
 }
-
 function request(
   body: BodyInit | null = JSON.stringify(input),
   init: RequestInit = {},
@@ -66,7 +62,6 @@ function request(
     ...(method === "GET" || method === "HEAD" ? {} : { body }),
   });
 }
-
 describe("planned team overview HTTP adapter", () => {
   it("serves the typed envelope through a live Hono route", async () => {
     const provider = reader();

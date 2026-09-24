@@ -1,4 +1,4 @@
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/site-identity-sql";
+import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -36,7 +36,6 @@ import {
   summarizeJourneyPerformance,
   summarizeVisitedPages,
 } from "./journey-helpers";
-
 export async function queryVisitorForDetailFromD1(
   env: Env,
   siteId: string,
@@ -57,7 +56,6 @@ ${buildVisitorAggregationSql({ orderBy: "lastSeenAt DESC, visitorId ASC", limitO
   ]);
   return rows[0] ? mapVisitorRow(rows[0]) : null;
 }
-
 export async function querySessionsForDetailFromD1(
   env: Env,
   siteId: string,
@@ -79,7 +77,6 @@ ${buildSessionAggregationSql({ orderBy: "startedAt DESC, sessionId ASC" })}`;
     ])
   ).map(mapSessionRow);
 }
-
 export async function queryJourneyEventsForDetailFromD1(
   env: Env,
   siteId: string,
@@ -174,9 +171,7 @@ ORDER BY occurredAt DESC, id DESC
     ])
   ).map(mapJourneyEventRow);
 }
-
 type JourneyEventDetailKind = Exclude<JourneyEventRow["kind"], "custom">;
-
 function nullableDetailNumber(
   row: Record<string, unknown>,
   key: string,
@@ -185,11 +180,9 @@ function nullableDetailNumber(
   const value = Number(row[key]);
   return Number.isFinite(value) ? value : null;
 }
-
 function detailBoolean(value: unknown): boolean {
   return value === true || value === 1 || value === "1";
 }
-
 function journeyEventDetailContext(
   event: JourneyEventRow,
   row: Record<string, unknown> = {},
@@ -263,7 +256,6 @@ function journeyEventDetailContext(
     performance: event.performance,
   };
 }
-
 function journeyEventDetailRecord(event: JourneyEventRow) {
   return {
     eventId: event.id,
@@ -290,7 +282,6 @@ function journeyEventDetailRecord(event: JourneyEventRow) {
     valueCount: 0,
   };
 }
-
 function mapJourneyPageviewDetail(row: Record<string, unknown>): {
   event: ReturnType<typeof journeyEventDetailRecord>;
   context: ReturnType<typeof journeyEventDetailContext>;
@@ -331,7 +322,6 @@ function mapJourneyPageviewDetail(row: Record<string, unknown>): {
     context: journeyEventDetailContext(event, row),
   };
 }
-
 /**
  * Resolve one standard JourneyEvent without touching custom event payloads.
  * Pageviews use their visit id; session boundary events use the stable ids
@@ -460,19 +450,15 @@ LIMIT 1
     context: journeyEventDetailContext(event, {}, detail.session),
   };
 }
-
 type VisitorDetailSourceRow = Record<string, unknown> & {
   sourceType: "visit" | "custom";
 };
-
 function detailNumber(row: Record<string, unknown>, key: string): number {
   return Number(row[key] ?? 0);
 }
-
 function detailText(row: Record<string, unknown>, key: string): string {
   return String(row[key] ?? "");
 }
-
 function latestIdentityVisit(
   visits: Record<string, unknown>[],
 ): Record<string, unknown> | null {
@@ -482,7 +468,6 @@ function latestIdentityVisit(
   }
   return null;
 }
-
 function compareDetailVisits(
   left: Record<string, unknown>,
   right: Record<string, unknown>,
@@ -492,7 +477,6 @@ function compareDetailVisits(
     detailText(left, "visitId").localeCompare(detailText(right, "visitId"))
   );
 }
-
 async function queryDetailSourceFromD1(
   env: Env,
   siteId: string,
@@ -596,7 +580,6 @@ FROM event_source
     ...detailCustomEventSourceBindings(siteId),
   ]);
 }
-
 function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
   visitor: VisitorRow | null;
   sessions: SessionRow[];
@@ -788,7 +771,6 @@ function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
   ];
   return { visitor, sessions, events };
 }
-
 function deriveSessionLocationPoints(
   rows: VisitorDetailSourceRow[],
 ): GeoPointRow[] {
@@ -814,7 +796,6 @@ function deriveSessionLocationPoints(
       }),
     );
 }
-
 export async function queryVisitorDetailFromD1(
   env: Env,
   siteId: string,
@@ -885,7 +866,6 @@ export async function queryVisitorDetailFromD1(
     performance: summarizeJourneyPerformance(events),
   };
 }
-
 export async function querySessionDetailFromD1(
   env: Env,
   siteId: string,
@@ -926,7 +906,6 @@ export async function querySessionDetailFromD1(
     performance: summarizeJourneyPerformance(events),
   };
 }
-
 export function stripVisitorDetailCollections<
   T extends {
     readonly sessions: readonly unknown[];
@@ -936,7 +915,6 @@ export function stripVisitorDetailCollections<
   const { sessions: _sessions, events: _events, ...summary } = detail;
   return summary;
 }
-
 export function stripSessionDetailCollections<
   T extends { readonly events: readonly unknown[] },
 >(detail: T) {

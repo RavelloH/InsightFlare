@@ -8,40 +8,29 @@ import {
   EMPTY_FILTER_DOCUMENT,
   type QueryInput,
   type QueryTime,
+  type TeamOverviewQueryResult,
+  type TeamSitesQueryResult,
+  type TeamTimeseriesQueryResult,
 } from "@/lib/edge/analytics/contract";
 import { readTeamBreakdown } from "@/lib/edge/analytics/providers/d1/operations/team-breakdown";
-import {
-  readTeamOverview,
-  type TeamOverviewQueryResult,
-} from "@/lib/edge/analytics/providers/d1/operations/team-overview";
-import {
-  readTeamSites,
-  type TeamSitesQueryResult,
-} from "@/lib/edge/analytics/providers/d1/operations/team-sites";
-import {
-  readTeamTimeseries,
-  type TeamTimeseriesQueryResult,
-} from "@/lib/edge/analytics/providers/d1/operations/team-timeseries";
+import { readTeamOverview } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
+import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
+import { readTeamTimeseries } from "@/lib/edge/analytics/providers/d1/operations/team-timeseries";
 import type { Env } from "@/lib/edge/types";
-
 type RuntimeQuery = QueryInput & {
   readonly time: QueryTime;
   readonly [key: string]: unknown;
 };
-
 export interface D1TeamQueryRuntimeOptions {
   readonly env: Env;
 }
-
 function query(input: QueryInput): RuntimeQuery {
   return input as RuntimeQuery;
 }
-
 function stringField(input: RuntimeQuery, name: string, fallback = ""): string {
   const value = input[name];
   return typeof value === "string" ? value : fallback;
 }
-
 function numberField(
   input: RuntimeQuery,
   name: string,
@@ -50,14 +39,12 @@ function numberField(
   const value = input[name];
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
-
 function allowedSiteIds(input: RuntimeQuery): readonly string[] | undefined {
   const value = input.allowedSiteIds;
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? value
     : undefined;
 }
-
 function timeWindow(time: QueryTime) {
   return {
     startMs: time.range.startMs,
@@ -66,7 +53,6 @@ function timeWindow(time: QueryTime) {
     timeZone: time.reportingTimeZone,
   };
 }
-
 export function createD1TeamQueryRuntime(options: D1TeamQueryRuntimeOptions) {
   const registry = new AnalyticsProviderRegistry()
     .register(

@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   epochSecondsToIso,
   normalizeUnknownDirect,
-} from "@/lib/api-v1/normalization";
-
+} from "@/lib/api-v1/contract/normalization";
 describe("API v1 normalization helpers", () => {
   it("normalizes missing epoch seconds to null", () => {
     expect(epochSecondsToIso(null)).toBeNull();

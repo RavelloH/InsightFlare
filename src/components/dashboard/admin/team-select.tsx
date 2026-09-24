@@ -1,0 +1,313 @@
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { RiAddLine, RiCloseLine } from "@remixicon/react";
+import { toast } from "sonner";
+
+import { AutoResizer } from "@/components/ui/auto-resizer";
+import { AutoTransition } from "@/components/ui/auto-transition";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
+import type { TeamData } from "@/lib/dashboard-api/client/edge";
+import type { Locale } from "@/lib/i18n/config";
+import type { AppMessages } from "@/lib/i18n/messages";
+import { navigateWithTransition } from "@/lib/page-transition";
+import { useRouter } from "@/lib/router";
+interface TeamSelectOption {
+  slug: string;
+  name: string;
+  href: string;
+}
+interface TeamSelectProps {
+  locale: Locale;
+  messages: AppMessages;
+  options: TeamSelectOption[];
+  groups?: {
+    created: TeamSelectOption[];
+    managed: TeamSelectOption[];
+    member: TeamSelectOption[];
+    system: TeamSelectOption[];
+  };
+  activeTeamSlug: string;
+}
+const CREATE_TEAM_VALUE = "__create_team__";
+export const TeamSelect = memo(function TeamSelect({
+  locale,
+  messages,
+  options,
+  groups,
+  activeTeamSlug,
+}: TeamSelectProps) {
+  const router = useRouter();
+  const copy = messages.teamSelect;
+  const [openCreateDialog, setOpenCreateDialog] = useState(false);
+  const [teamName, setTeamName] = useState("");
+  const [teamSlug, setTeamSlug] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const openCreateDialogTimeoutRef = useRef<ReturnType<
+    typeof globalThis.setTimeout
+  > | null>(null);
+
+  const selectedSlug = useMemo(
+    () =>
+      options.some((option) => option.slug === activeTeamSlug)
+        ? activeTeamSlug
+        : options[0]?.slug || "",
+    [options, activeTeamSlug],
+  );
+  const groupedOptions = useMemo(() => {
+    if (!groups) return [];
+    const seen = new Set<string>();
+    return [
+      { key: "created", label: copy.groups.created, options: groups.created },
+      { key: "managed", label: copy.groups.managed, options: groups.managed },
+      { key: "member", label: copy.groups.member, options: groups.member },
+      { key: "system", label: copy.groups.system, options: groups.system },
+    ]
+      .map((group) => {
+        const uniqueOptions = group.options.filter((option) => {
+          if (seen.has(option.slug)) return false;
+          seen.add(option.slug);
+          return true;
+        });
+        return { ...group, options: uniqueOptions };
+      })
+      .filter((group) => group.options.length > 0);
+  }, [copy.groups, groups]);
+
+  useEffect(() => {
+    return () => {
+      if (openCreateDialogTimeoutRef.current !== null) {
+        globalThis.clearTimeout(openCreateDialogTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function resetCreateDialogState() {
+    setTeamName("");
+    setTeamSlug("");
+    setSubmitError("");
+  }
+
+  function queueOpenCreateDialog() {
+    resetCreateDialogState();
+    if (openCreateDialogTimeoutRef.current !== null) {
+      globalThis.clearTimeout(openCreateDialogTimeoutRef.current);
+    }
+    openCreateDialogTimeoutRef.current = globalThis.setTimeout(() => {
+      openCreateDialogTimeoutRef.current = null;
+      setOpenCreateDialog(true);
+    }, 0);
+  }
+
+  async function handleCreateTeam() {
+    if (submitting) return;
+    const normalizedName = teamName.trim();
+    const normalizedSlug = teamSlug.trim();
+    if (normalizedName.length < 2) {
+      setSubmitError(copy.invalidName);
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const data = await requestAdminService<TeamData>("teams", {
+        method: "POST",
+        body: {
+          name: normalizedName,
+          slug: normalizedSlug || undefined,
+        },
+      });
+      setOpenCreateDialog(false);
+      setTeamName("");
+      setTeamSlug("");
+      toast.success(copy.createSuccess);
+      navigateWithTransition(router, `/${locale}/app/${data.slug}`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : copy.createFailed;
+      setSubmitError(message || copy.createFailed);
+      toast.error(message || copy.createFailed);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const createTeamDialog = (
+    <Dialog
+      open={openCreateDialog}
+      onOpenChange={(next) => {
+        if (!next && submitting) return;
+        setOpenCreateDialog(next);
+        if (!next) {
+          setSubmitError("");
+        }
+      }}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle icon={RiAddLine}>{copy.createTitle}</DialogTitle>
+          <DialogDescription>{copy.createDescription}</DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleCreateTeam();
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="create-team-name">{copy.nameLabel}</Label>
+            <Input
+              id="create-team-name"
+              value={teamName}
+              onChange={(event) => setTeamName(event.target.value)}
+              placeholder={copy.namePlaceholder}
+              minLength={2}
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="create-team-slug">{copy.slugLabel}</Label>
+            <Input
+              id="create-team-slug"
+              value={teamSlug}
+              onChange={(event) => setTeamSlug(event.target.value)}
+              placeholder={copy.slugPlaceholder}
+            />
+          </div>
+          <AutoResizer>
+            <AutoTransition>
+              {submitError ? (
+                <p key="error" className="text-xs text-destructive">
+                  {submitError}
+                </p>
+              ) : (
+                <div key="no-error" />
+              )}
+            </AutoTransition>
+          </AutoResizer>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpenCreateDialog(false)}
+              disabled={submitting}
+            >
+              <RiCloseLine className="size-4" />
+              <span>{copy.cancel}</span>
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              <AutoTransition className="inline-flex items-center gap-2">
+                {submitting ? (
+                  <span
+                    key="creating"
+                    className="inline-flex items-center gap-2"
+                  >
+                    <Spinner className="size-4" />
+                    {copy.creating}
+                  </span>
+                ) : (
+                  <span key="create" className="inline-flex items-center gap-2">
+                    <RiAddLine className="size-4" />
+                    {copy.create}
+                  </span>
+                )}
+              </AutoTransition>
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+
+  if (options.length === 0) {
+    return (
+      <>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full justify-start"
+          onClick={queueOpenCreateDialog}
+        >
+          <RiAddLine />
+          <span>{copy.createHint}</span>
+        </Button>
+        {createTeamDialog}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Select
+        value={selectedSlug}
+        onValueChange={(value) => {
+          if (value === CREATE_TEAM_VALUE) {
+            queueOpenCreateDialog();
+            return;
+          }
+          const next = options.find((option) => option.slug === value);
+          if (!next || next.slug === selectedSlug) return;
+          navigateWithTransition(router, next.href);
+        }}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {groupedOptions.length > 0 ? (
+            groupedOptions.map((group, index) => (
+              <SelectGroup key={group.key}>
+                {index > 0 ? <SelectSeparator /> : null}
+                <SelectLabel>{group.label}</SelectLabel>
+                {group.options.map((option) => (
+                  <SelectItem key={option.slug} value={option.slug}>
+                    {option.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))
+          ) : (
+            <SelectGroup>
+              <SelectLabel>{copy.groupLabel}</SelectLabel>
+              {options.map((option) => (
+                <SelectItem key={option.slug} value={option.slug}>
+                  {option.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          )}
+          <SelectSeparator />
+          <SelectItem value={CREATE_TEAM_VALUE}>
+            <RiAddLine />
+            {copy.createHint}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      {createTeamDialog}
+    </>
+  );
+});

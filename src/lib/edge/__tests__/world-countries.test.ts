@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleWorldCountriesRequest } from "@/lib/edge/world-countries";
+import { handleWorldCountriesRequest } from "@/lib/edge/resources/world-countries";
 
 describe("world countries handler", () => {
   beforeEach(() => {

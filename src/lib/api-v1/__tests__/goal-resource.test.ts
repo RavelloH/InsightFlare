@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createResourceApplicationService } from "@/lib/api-v1/resource-application-service";
+import { createResourceApplicationService } from "@/lib/api-v1/resources/application-service";
 
 const site = {
   id: "site-1",

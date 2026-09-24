@@ -2,81 +2,70 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleUsersAdmin } from "@/lib/edge/admin-users";
-import { handleAdminWs } from "@/lib/edge/admin-ws";
-import { handleOverviewContract } from "@/lib/edge/analytics/composition/protocol/overview-contract-adapter";
-import type * as QueryCoreModule from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  fetchPublicSite,
-  resolvePrivateSiteForSession,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
-import type * as QueryRouterModule from "@/lib/edge/analytics/providers/d1/internal/router";
-import { authenticateApiKey } from "@/lib/edge/api-key-auth";
 import {
   handlePrivateArchive,
   handlePrivateArchiveFile,
   handlePrivateArchiveManifest,
-} from "@/lib/edge/archive-query";
-import {
-  handleCollectOptionsRequest,
-  handleCollectRequest,
-} from "@/lib/edge/collect";
+} from "@/lib/edge/admin/archive-query";
+import { handleReleasesCompareRequest } from "@/lib/edge/admin/system/releases-compare";
+import { handleUsersAdmin } from "@/lib/edge/admin/users/handlers";
+import { handleAdminWs } from "@/lib/edge/admin/ws";
+import { handleOverviewContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview";
+import type * as QueryRouterModule from "@/lib/edge/analytics/interfaces/dashboard/protocol/router";
+import { authenticateApiKey } from "@/lib/edge/auth/api-key-auth";
 import {
   handleLegacyAuthLogin,
   handleLegacyAuthLogout,
-} from "@/lib/edge/legacy-auth";
-import { handleMapRelayRequest } from "@/lib/edge/map-relay";
-import { handleReleasesCompareRequest } from "@/lib/edge/releases-compare";
-import { handleTrackerScriptRequest } from "@/lib/edge/script-endpoint";
-import { handleWikiSummaryRequest } from "@/lib/edge/wiki-summary";
-import { handleWorldCountriesRequest } from "@/lib/edge/world-countries";
+} from "@/lib/edge/auth/legacy-auth";
+import type * as SiteAccessModule from "@/lib/edge/auth/site-access";
+import {
+  fetchPublicSite,
+  resolvePrivateSiteForSession,
+} from "@/lib/edge/auth/site-access";
+import {
+  handleCollectOptionsRequest,
+  handleCollectRequest,
+} from "@/lib/edge/collector/collect";
+import { handleTrackerScriptRequest } from "@/lib/edge/collector/script-endpoint";
+import { handleMapRelayRequest } from "@/lib/edge/resources/map-relay";
+import { handleWikiSummaryRequest } from "@/lib/edge/resources/wiki-summary";
+import { handleWorldCountriesRequest } from "@/lib/edge/resources/world-countries";
 import apiApp from "@/lib/hono/app";
-
-vi.mock("@/lib/edge/admin-ws", () => ({
+vi.mock("@/lib/edge/admin/ws", () => ({
   handleAdminWs: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/archive-query", () => ({
+vi.mock("@/lib/edge/admin/archive-query", () => ({
   handlePrivateArchiveFile: vi.fn(),
   handlePrivateArchive: vi.fn(),
   handlePrivateArchiveManifest: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-users", () => ({
+vi.mock("@/lib/edge/admin/users/handlers", () => ({
   handleAuthLoginAdmin: vi.fn(),
   handleAuthMeAdmin: vi.fn(),
   handleProfileAdmin: vi.fn(),
   handleUsersAdmin: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/collect", () => ({
+vi.mock("@/lib/edge/collector/collect", () => ({
   handleCollectOptionsRequest: vi.fn(),
   handleCollectRequest: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/legacy-auth", () => ({
+vi.mock("@/lib/edge/auth/legacy-auth", () => ({
   handleLegacyAuthLogin: vi.fn(),
   handleLegacyAuthLogout: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/releases-compare", () => ({
+vi.mock("@/lib/edge/admin/system/releases-compare", () => ({
   handleReleasesCompareRequest: vi.fn(),
 }));
-
+vi.mock("@/lib/edge/auth/site-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof SiteAccessModule>();
+  return {
+    ...actual,
+    fetchPublicSite: vi.fn(),
+    resolvePrivateSiteForSession: vi.fn(),
+  };
+});
 vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/core",
-  async (importOriginal) => {
-    const actual = await importOriginal<typeof QueryCoreModule>();
-    return {
-      ...actual,
-      fetchPublicSite: vi.fn(),
-      resolvePrivateSiteForSession: vi.fn(),
-    };
-  },
-);
-
-vi.mock(
-  "@/lib/edge/analytics/providers/d1/internal/router",
+  "@/lib/edge/analytics/interfaces/dashboard/protocol/router",
   async (importOriginal) => {
     const actual = await importOriginal<typeof QueryRouterModule>();
     return {
@@ -84,49 +73,33 @@ vi.mock(
     };
   },
 );
-
-vi.mock(
-  "@/lib/edge/analytics/composition/protocol/overview-contract-adapter",
-  () => ({
-    handleOverviewContract: vi.fn(),
-    handleTrendContract: vi.fn(),
-  }),
-);
-
-vi.mock(
-  "@/lib/edge/analytics/composition/protocol/pages-contract-adapter",
-  () => ({
-    handlePagesContract: vi.fn(),
-    handleReferrersContract: vi.fn(),
-  }),
-);
-
-vi.mock("@/lib/edge/api-key-auth", () => ({
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/overview", () => ({
+  handleOverviewContract: vi.fn(),
+  handleTrendContract: vi.fn(),
+}));
+vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/pages", () => ({
+  handlePagesContract: vi.fn(),
+  handleReferrersContract: vi.fn(),
+}));
+vi.mock("@/lib/edge/auth/api-key-auth", () => ({
   authenticateApiKey: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/script-endpoint", () => ({
+vi.mock("@/lib/edge/collector/script-endpoint", () => ({
   handleTrackerScriptRequest: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/world-countries", () => ({
+vi.mock("@/lib/edge/resources/world-countries", () => ({
   handleWorldCountriesRequest: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/map-relay", () => ({
+vi.mock("@/lib/edge/resources/map-relay", () => ({
   handleMapRelayRequest: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/wiki-summary", () => ({
+vi.mock("@/lib/edge/resources/wiki-summary", () => ({
   handleWikiSummaryRequest: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/session-auth", () => ({
+vi.mock("@/lib/edge/auth/session-auth", () => ({
   requireSession: vi.fn(),
 }));
-
-const { requireSession } = await import("@/lib/edge/session-auth");
-
+const { requireSession } = await import("@/lib/edge/auth/session-auth");
 const env = { DB: {}, INGEST_DO: {}, ARCHIVE_BUCKET: {} };
 const dispatchQueryRoute = vi.fn();
 const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() };
@@ -138,11 +111,9 @@ const session = {
   systemRole: "admin" as const,
   exp: 9999999999,
 };
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://app.test${path}`, init);
 }
-
 function publicBrowserRequest(path: string, init?: RequestInit): Request {
   const headers = new Headers(init?.headers);
   headers.set(
@@ -154,7 +125,6 @@ function publicBrowserRequest(path: string, init?: RequestInit): Request {
   headers.set("sec-fetch-dest", "empty");
   return request(path, { ...init, headers });
 }
-
 describe("Hono API app routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();

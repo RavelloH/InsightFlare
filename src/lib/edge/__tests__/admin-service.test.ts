@@ -3,27 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   adminServicePath,
   adminServiceRouteForPath,
-} from "@/lib/admin-service-contract";
+} from "@/lib/dashboard-api/contract/admin-service";
+import { executeDemoAdminService } from "@/lib/demo/admin/service";
 import {
   executeAdminService,
   readAdminService,
-} from "@/lib/edge/admin-service";
-import { executeDemoAdminService } from "@/lib/edge/admin-service-demo";
-import { executeRealAdminService } from "@/lib/edge/admin-service-real";
-
-vi.mock("@/lib/edge/admin-service-real", () => ({
+} from "@/lib/edge/admin/service/index";
+import { executeRealAdminService } from "@/lib/edge/admin/service/real";
+vi.mock("@/lib/edge/admin/service/real", () => ({
   executeRealAdminService: vi.fn(),
 }));
-
 const executeRealAdminServiceMock = vi.mocked(executeRealAdminService);
-
 beforeEach(() => {
   executeRealAdminServiceMock.mockReset();
 });
 afterEach(() => {
   vi.unstubAllEnvs();
 });
-
 describe("admin service route contract", () => {
   it("round-trips static management routes", () => {
     const routes = [

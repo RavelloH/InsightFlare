@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handleWikiSummaryRequest } from "@/lib/edge/wiki-summary";
+import { handleWikiSummaryRequest } from "@/lib/edge/resources/wiki-summary";
 
 describe("wiki summary route", () => {
   beforeEach(() => {

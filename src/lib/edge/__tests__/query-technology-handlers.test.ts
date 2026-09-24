@@ -12,7 +12,7 @@ import {
   handleReferrerDimensionTrendContract as handleReferrerDimensionTrend,
   handleReferrerRadarContract as handleReferrerRadar,
   handleUtmDimensionTrendContract as handleUtmDimensionTrend,
-} from "@/lib/edge/analytics/composition/protocol/technology-contract-adapter";
+} from "@/lib/edge/analytics/interfaces/dashboard/protocol/technology";
 import type {
   BrowserCrossBreakdownDimensionDataRow,
   BrowserTrendPointRow,
@@ -21,7 +21,6 @@ import type {
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
-
 const queryMocks = vi.hoisted(() => ({
   queryBrowserCrossBreakdownFromD1: vi.fn(),
   queryBrowserEngineTrendFromD1: vi.fn(),
@@ -35,7 +34,6 @@ const queryMocks = vi.hoisted(() => ({
   queryReferrerTrendFromD1: vi.fn(),
   queryUtmDimensionTrendFromD1: vi.fn(),
 }));
-
 vi.mock(
   "@/lib/edge/analytics/providers/d1/internal/technology/browser",
   () => ({
@@ -47,19 +45,16 @@ vi.mock(
       queryMocks.queryBrowserVersionBreakdownFromD1,
   }),
 );
-
 vi.mock(
   "@/lib/edge/analytics/providers/d1/internal/technology/client-cross",
   () => ({
     queryCrossDimensionFromD1: queryMocks.queryCrossDimensionFromD1,
   }),
 );
-
 vi.mock("@/lib/edge/analytics/providers/d1/internal/technology/radar", () => ({
   queryBrowserRadarFromD1: queryMocks.queryBrowserRadarFromD1,
   queryReferrerRadarFromD1: queryMocks.queryReferrerRadarFromD1,
 }));
-
 vi.mock(
   "@/lib/edge/analytics/providers/d1/internal/technology/share-trend",
   () => ({
@@ -70,7 +65,6 @@ vi.mock(
     queryUtmDimensionTrendFromD1: queryMocks.queryUtmDimensionTrendFromD1,
   }),
 );
-
 const env = {
   DB: {},
   DAILY_SALT_SECRET: "test-secret",
@@ -79,9 +73,7 @@ const env = {
 const siteId = "site-1";
 const fromMs = Date.UTC(2026, 0, 1, 0, 0);
 const toMs = Date.UTC(2026, 0, 1, 1, 0);
-
 type Handler = (env: Env, siteId: string, url: URL) => Promise<Response>;
-
 function testUrl(params: Record<string, string | number | undefined> = {}) {
   const url = new URL("https://edge.example.test/query");
   url.searchParams.set("from", String(fromMs));
@@ -92,11 +84,9 @@ function testUrl(params: Record<string, string | number | undefined> = {}) {
   }
   return url;
 }
-
 async function responseJson(response: Response): Promise<unknown> {
   return response.json() as Promise<unknown>;
 }
-
 function parsedWindow() {
   return expect.objectContaining({
     startMs: fromMs,
@@ -104,7 +94,6 @@ function parsedWindow() {
     timeZone: "Asia/Shanghai",
   });
 }
-
 function expectNoQueryCalls() {
   expect(queryMocks.queryBrowserCrossBreakdownFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryBrowserEngineTrendFromD1).not.toHaveBeenCalled();
@@ -118,7 +107,6 @@ function expectNoQueryCalls() {
   expect(queryMocks.queryReferrerTrendFromD1).not.toHaveBeenCalled();
   expect(queryMocks.queryUtmDimensionTrendFromD1).not.toHaveBeenCalled();
 }
-
 const trendSeries: BrowserTrendSeriesRow[] = [
   { key: "chrome", label: "Chrome", views: 12, visitors: 7, sessions: 5 },
 ];
@@ -136,7 +124,6 @@ const emptyCrossData: BrowserCrossBreakdownDimensionDataRow = {
   rows: [],
   totalVisitors: 0,
 };
-
 describe("edge query technology handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -651,8 +638,8 @@ describe("edge query technology handlers", () => {
       expect.any(Object),
       12,
       1,
-      expect.objectContaining({ fallbackKeyBase: "browser" }),
-      expect.objectContaining({ fallbackKeyBase: "device" }),
+      "client.browser",
+      "client.deviceType",
     );
   });
 
@@ -680,8 +667,8 @@ describe("edge query technology handlers", () => {
       expect.any(Object),
       5,
       6,
-      expect.objectContaining({ fallbackKeyBase: "device" }),
-      expect.objectContaining({ fallbackKeyBase: "os" }),
+      "deviceType",
+      "operatingSystem",
     );
   });
 });

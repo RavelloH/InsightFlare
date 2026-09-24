@@ -5,33 +5,27 @@ import {
   fetchAdminMe,
   fetchAdminSites,
   fetchNotificationMessages,
-} from "@/lib/edge-client";
-
+} from "@/lib/dashboard-api/client/edge";
 const adminServiceMocks = vi.hoisted(() => ({
   getRequest: vi.fn(() => new Request("https://app.test/app")),
   readAdminService:
     vi.fn<(input: { route: string; url: URL }) => Promise<unknown | null>>(),
   resolveEdgeRuntime: vi.fn(),
 }));
-
-vi.mock("@/lib/edge-client", () => ({
+vi.mock("@/lib/dashboard-api/client/edge", () => ({
   fetchAdminMe: vi.fn(),
   fetchAdminSites: vi.fn(),
   fetchNotificationMessages: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-service", () => ({
+vi.mock("@/lib/edge/admin/service/index", () => ({
   readAdminService: adminServiceMocks.readAdminService,
 }));
-
 vi.mock("@/lib/edge/runtime", () => ({
   resolveEdgeRuntime: adminServiceMocks.resolveEdgeRuntime,
 }));
-
 vi.mock("@tanstack/react-start/server", () => ({
   getRequest: adminServiceMocks.getRequest,
 }));
-
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof ReactModule>();
   return {
@@ -39,18 +33,15 @@ vi.mock("react", async (importOriginal) => {
     cache: <T extends (...args: never[]) => unknown>(fn: T) => fn,
   };
 });
-
 const fetchAdminMeMock = vi.mocked(fetchAdminMe);
 const fetchAdminSitesMock = vi.mocked(fetchAdminSites);
 const fetchNotificationMessagesMock = vi.mocked(fetchNotificationMessages);
 const readAdminServiceMock = vi.mocked(adminServiceMocks.readAdminService);
 const resolveEdgeRuntimeMock = vi.mocked(adminServiceMocks.resolveEdgeRuntime);
-
 async function loadServerModule() {
   vi.resetModules();
   return import("@/lib/dashboard/server");
 }
-
 function team(id: string, slug: string) {
   return {
     id,
@@ -62,7 +53,6 @@ function team(id: string, slug: string) {
     memberCount: 1,
   };
 }
-
 function site(
   input: Partial<Awaited<ReturnType<typeof fetchAdminSites>>[number]>,
 ) {
@@ -78,7 +68,6 @@ function site(
     ...input,
   };
 }
-
 describe("dashboard server helpers", () => {
   beforeEach(() => {
     fetchAdminMeMock.mockReset();

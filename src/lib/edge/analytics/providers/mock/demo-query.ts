@@ -1,25 +1,28 @@
 import "@tanstack/react-start/server-only";
 
-import type {
-  FilterScope,
-  QueryOperation,
-} from "@/lib/edge/analytics/contract";
-import {
-  getRequestId,
-  jsonResponseWith,
-  type ResponseContext,
-} from "@/lib/edge/analytics/providers/d1/internal/core-responses";
-import {
-  PRIVATE_CACHE_HEADERS,
-  PUBLIC_CACHE_HEADERS,
-} from "@/lib/edge/analytics/providers/d1/internal/core-types";
-import { analyticsDiagnosticHeaders } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import {
   demoBadRequest,
   demoErr,
   isErrorEnvelope,
-} from "@/lib/realtime/mock/envelope";
-
+} from "@/lib/demo/realtime/envelope";
+import type {
+  FilterScope,
+  QueryOperation,
+} from "@/lib/edge/analytics/contract";
+import { analyticsDiagnosticHeaders } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import {
+  getRequestId,
+  jsonResponseWith,
+  type ResponseContext,
+} from "@/lib/response";
+const PRIVATE_CACHE_HEADERS = {
+  "cache-control": "private, no-store",
+  vary: "authorization, cookie",
+};
+const PUBLIC_CACHE_HEADERS = {
+  "cache-control": "public, max-age=300, s-maxage=300",
+  "access-control-allow-origin": "*",
+};
 export interface DemoQueryRuntimeInput {
   readonly request: Request;
   readonly url: URL;
@@ -31,12 +34,10 @@ export interface DemoQueryRuntimeInput {
   /** Resolved by the canonical query service before demo data generation. */
   readonly resolvedScope?: FilterScope;
 }
-
 const EMPTY_D1_DIAGNOSTICS = {
   rowsRead: 0,
   rowsReadAvailable: true,
 };
-
 function responseHeaders(
   publicQuery: boolean,
   success: boolean,
@@ -49,7 +50,6 @@ function responseHeaders(
     "content-type": "application/json; charset=utf-8",
   };
 }
-
 export function createDemoQueryResponse(
   payload: unknown,
   status: number,
@@ -67,12 +67,10 @@ export function createDemoQueryResponse(
     responseHeaders(publicQuery, status < 400),
   );
 }
-
 export interface DemoQueryPayloadResult {
   readonly payload: unknown;
   readonly status: number;
 }
-
 function successStatus(request: Request, url: URL): number {
   if (request.method !== "POST") return 200;
   const lastPathSegment = url.pathname.split("/").filter(Boolean).at(-1);
@@ -82,13 +80,11 @@ function successStatus(request: Request, url: URL): number {
     ? 201
     : 200;
 }
-
 function requiresJsonBodyValidation(request: Request, url: URL): boolean {
   if (request.method !== "POST") return false;
   const last = url.pathname.split("/").filter(Boolean).at(-1);
   return last === "funnels" || last === "goals";
 }
-
 function unsupportedSavedFilterMethod(request: Request, url: URL): boolean {
   const marker = "/api/private/saved-filters";
   if (!url.pathname.startsWith(marker)) return false;
@@ -98,7 +94,6 @@ function unsupportedSavedFilterMethod(request: Request, url: URL): boolean {
     : new Set(["GET", "POST"]);
   return !allowedMethods.has(request.method);
 }
-
 async function requestBody(
   request: Request,
 ): Promise<
@@ -119,7 +114,6 @@ async function requestBody(
     return { valid: false };
   }
 }
-
 /**
  * Runs the existing demo generator at the server boundary. Keeping the
  * dispatcher import here prevents demo-only generators from entering the
@@ -158,7 +152,7 @@ export async function executeDemoQuery(
   if (input.resolvedScope) params.resolvedScope = input.resolvedScope;
 
   try {
-    const { handleDemoRequest } = await import("@/lib/realtime/mock");
+    const { handleDemoRequest } = await import("@/lib/demo/runtime");
     const result = handleDemoRequest({
       path: url.pathname,
       method: request.method,
@@ -183,7 +177,6 @@ export async function executeDemoQuery(
     );
   }
 }
-
 /**
  * Exposes the fixture result as provider data while keeping the legacy
  * response-producing entry point available to focused runtime tests.

@@ -4,18 +4,15 @@ import {
   handleDoDiagnosticAdmin,
   handleE2eFlushAdmin,
   handleSystemPerformanceAdmin,
-} from "@/lib/edge/admin-system";
+} from "@/lib/edge/admin/system/handler";
 import type { Env } from "@/lib/edge/types";
 import type { DoDiagnosticPayload } from "@/lib/system-performance";
-
 type QueryBinding = string | number | null;
-
 type AdminActor = { isAdmin: boolean };
 type AdminActorResolver = (
   env: Env,
   req: Request,
 ) => Promise<AdminActor | Response>;
-
 interface MockStatement {
   sql?: string;
   bindings?: QueryBinding[];
@@ -23,26 +20,21 @@ interface MockStatement {
   first: ReturnType<typeof vi.fn>;
   all: ReturnType<typeof vi.fn>;
 }
-
 interface MockDurableObjectNamespace {
   idFromName: ReturnType<typeof vi.fn>;
   get: ReturnType<typeof vi.fn>;
 }
-
 interface SystemPerformanceJson {
   topSites: Array<{ siteId: string; siteDomain: string }>;
   slowEvents: Array<{ siteName: string }>;
 }
-
 interface DiagnosticSiteJson {
   siteId: string;
   [key: string]: unknown;
 }
-
 interface DoDiagnosticJson {
   sites: DiagnosticSiteJson[];
 }
-
 function statement(
   input: {
     first?: unknown;
@@ -74,7 +66,6 @@ function statement(
 
   return stmt;
 }
-
 function createIngestDo(
   handlers: Record<string, { fetch: ReturnType<typeof vi.fn> }> = {},
 ): MockDurableObjectNamespace {
@@ -93,7 +84,6 @@ function createIngestDo(
   });
   return { idFromName, get };
 }
-
 function createEnv(
   statements: MockStatement[] = [],
   ingestDo: MockDurableObjectNamespace = createIngestDo(),
@@ -115,11 +105,9 @@ function createEnv(
     prepare,
   };
 }
-
 function adminResolver(): AdminActorResolver {
   return vi.fn().mockResolvedValue({ isAdmin: true });
 }
-
 function diagnosticPayload(
   overrides: Partial<DoDiagnosticPayload> = {},
 ): DoDiagnosticPayload {
@@ -167,7 +155,6 @@ function diagnosticPayload(
     ...overrides,
   };
 }
-
 describe("admin system handlers coverage", () => {
   afterEach(() => {
     vi.restoreAllMocks();

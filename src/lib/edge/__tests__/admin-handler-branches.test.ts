@@ -8,7 +8,7 @@ import {
   canReadTeam,
   teamById,
   uniqueTeamSlug,
-} from "@/lib/edge/admin-access";
+} from "@/lib/edge/admin/access";
 import {
   byId,
   byIdentifier,
@@ -18,25 +18,30 @@ import {
   teamGroupsForSession,
   teamsFor,
   verifyPassword,
-} from "@/lib/edge/admin-auth";
-import { handleSitesAdmin } from "@/lib/edge/admin-sites";
+} from "@/lib/edge/admin/auth";
+import { handleSitesAdmin } from "@/lib/edge/admin/sites/handler";
 import {
   handleDoDiagnosticAdmin,
   handleSystemPerformanceAdmin,
-} from "@/lib/edge/admin-system";
-import { handleMembersAdmin, handleTeamsAdmin } from "@/lib/edge/admin-teams";
-import { handleProfileAdmin, handleUsersAdmin } from "@/lib/edge/admin-users";
+} from "@/lib/edge/admin/system/handler";
+import {
+  handleMembersAdmin,
+  handleTeamsAdmin,
+} from "@/lib/edge/admin/teams/handlers";
+import {
+  handleProfileAdmin,
+  handleUsersAdmin,
+} from "@/lib/edge/admin/users/handlers";
 import {
   deleteSiteScriptSettings,
   readSiteScriptSettings,
   readSiteTrackingConfig,
   upsertSiteScriptSettings,
   upsertSiteTrackingConfig,
-} from "@/lib/edge/site-settings-store";
+} from "@/lib/edge/sites/settings-store";
 import type { Env } from "@/lib/edge/types";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
-
-vi.mock("@/lib/edge/admin-auth", () => ({
+vi.mock("@/lib/edge/admin/auth", () => ({
   byId: vi.fn(),
   byIdentifier: vi.fn(),
   ensureDefaultTeam: vi.fn(),
@@ -67,8 +72,7 @@ vi.mock("@/lib/edge/admin-auth", () => ({
   }),
   verifyPassword: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/admin-access", () => ({
+vi.mock("@/lib/edge/admin/access", () => ({
   canAdministerTeam: vi.fn(),
   canManageSite: vi.fn(),
   canManageTeam: vi.fn(),
@@ -84,15 +88,13 @@ vi.mock("@/lib/edge/admin-access", () => ({
       .slice(0, 80),
   uniqueTeamSlug: vi.fn(),
 }));
-
-vi.mock("@/lib/edge/site-settings-store", () => ({
+vi.mock("@/lib/edge/sites/settings-store", () => ({
   deleteSiteScriptSettings: vi.fn(),
   readSiteTrackingConfig: vi.fn(),
   readSiteScriptSettings: vi.fn(),
   upsertSiteTrackingConfig: vi.fn(),
   upsertSiteScriptSettings: vi.fn(),
 }));
-
 type Actor = {
   user: {
     id: string;
@@ -107,7 +109,6 @@ type Actor = {
   };
   isAdmin: boolean;
 };
-
 interface MockStatement {
   sql?: string;
   bind: ReturnType<typeof vi.fn>;
@@ -115,7 +116,6 @@ interface MockStatement {
   all: ReturnType<typeof vi.fn>;
   run: ReturnType<typeof vi.fn>;
 }
-
 const actor: Actor = {
   user: {
     id: "actor-1",
@@ -130,7 +130,6 @@ const actor: Actor = {
   },
   isAdmin: true,
 };
-
 const userActor: Actor = {
   ...actor,
   isAdmin: false,
@@ -142,7 +141,6 @@ const userActor: Actor = {
     system_role: "user",
   },
 };
-
 const requireActorMock = vi.mocked(requireActor);
 const canAdministerTeamMock = vi.mocked(canAdministerTeam);
 const canManageSiteMock = vi.mocked(canManageSite);
@@ -163,7 +161,6 @@ const readSiteTrackingConfigMock = vi.mocked(readSiteTrackingConfig);
 const readSiteScriptSettingsMock = vi.mocked(readSiteScriptSettings);
 const upsertSiteTrackingConfigMock = vi.mocked(upsertSiteTrackingConfig);
 const upsertSiteScriptSettingsMock = vi.mocked(upsertSiteScriptSettings);
-
 function statement(
   input: {
     first?: unknown;
@@ -181,7 +178,6 @@ function statement(
   } satisfies MockStatement;
   return stmt;
 }
-
 function createEnv(statements: MockStatement[] = []): {
   env: Env;
   prepare: ReturnType<typeof vi.fn>;
@@ -207,11 +203,9 @@ function createEnv(statements: MockStatement[] = []): {
     batch,
   };
 }
-
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://edge.test${path}`, init);
 }
-
 function jsonInit(
   body: unknown,
   method: "POST" | "PATCH" = "POST",
@@ -222,11 +216,9 @@ function jsonInit(
     body: JSON.stringify(body),
   };
 }
-
 async function jsonOf(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
-
 describe("admin handler low branches", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -640,7 +632,7 @@ describe("admin handler low branches", () => {
 
   it("returns default site config and builds script snippets from trimmed edge base URLs", async () => {
     const { handleSiteConfigAdmin, handleScriptSnippetAdmin } =
-      await import("@/lib/edge/admin-sites");
+      await import("@/lib/edge/admin/sites/handler");
 
     readSiteTrackingConfigMock.mockResolvedValueOnce(null);
     const config = await handleSiteConfigAdmin(

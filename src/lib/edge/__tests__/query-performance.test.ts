@@ -2,9 +2,9 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { handlePerformanceContract as handlePerformance } from "@/lib/edge/analytics/composition/protocol/analysis-contract-adapter";
 import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { handlePerformanceContract as handlePerformance } from "@/lib/edge/analytics/interfaces/dashboard/protocol/analysis";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryAllPerformanceTrendsFromD1,
@@ -17,12 +17,10 @@ import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
 import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
-
 interface PreparedQuery {
   sql: string;
   bindings: Array<string | number | null>;
 }
-
 function createD1Env(rowSets: Record<string, unknown>[][] = []) {
   const calls: PreparedQuery[] = [];
   const prepare = vi.fn((sql: string) => {
@@ -44,10 +42,8 @@ function createD1Env(rowSets: Record<string, unknown>[][] = []) {
     prepare,
   };
 }
-
 type D1Row = Record<string, unknown>;
 type Binding = string | number | null;
-
 class SqliteStatement {
   constructor(
     private readonly database: DatabaseSync,
@@ -64,7 +60,6 @@ class SqliteStatement {
     };
   }
 }
-
 class SqliteD1Database {
   readonly database = new DatabaseSync(":memory:");
   readonly calls: PreparedQuery[] = [];
@@ -82,7 +77,6 @@ class SqliteD1Database {
     this.database.close();
   }
 }
-
 function createSqlitePerformanceEnv(): { env: Env; d1: SqliteD1Database } {
   const d1 = new SqliteD1Database();
   d1.database.exec(`
@@ -139,7 +133,6 @@ function createSqlitePerformanceEnv(): { env: Env; d1: SqliteD1Database } {
     d1,
   };
 }
-
 const siteId = "site-1";
 const window: QueryWindow = {
   startMs: Date.UTC(2026, 0, 2, 1, 30),
@@ -148,7 +141,6 @@ const window: QueryWindow = {
   timeZone: "UTC",
 };
 const visitBindings = [siteId, window.startMs, window.endExclusiveMs];
-
 describe("edge query performance D1 helpers", () => {
   it("maps metric summaries, leaves missing metrics empty, and binds filters", async () => {
     const { env, calls } = createD1Env([

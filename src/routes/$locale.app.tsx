@@ -1,13 +1,12 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 
-import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { DashboardShell } from "@/components/dashboard/shell/dashboard-shell";
 import {
   loadDashboardInitialWindow,
   loadDashboardRoot,
 } from "@/lib/dashboard/route-data";
 import { buildManagementSections } from "@/lib/dashboard/team-sections";
 import { usePathname } from "@/lib/router";
-
 export const Route = createFileRoute("/$locale/app")({
   beforeLoad: async () => {
     const [dashboardRoot, initialDashboardWindow] = await Promise.all([
@@ -18,7 +17,6 @@ export const Route = createFileRoute("/$locale/app")({
   },
   component: AppLayout,
 });
-
 function AppLayout() {
   const { locale, messages, dashboardRoot, initialDashboardWindow } =
     Route.useRouteContext();

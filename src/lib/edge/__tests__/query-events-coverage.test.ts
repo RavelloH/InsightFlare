@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { siteQueryResponse } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
 import type * as QueryCore from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   addDimensionValue,
@@ -17,7 +18,6 @@ import {
   SHARE_TREND_OTHER_KEY,
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
-  siteQueryResponse,
   sqlIntegerLiteral,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
@@ -39,9 +39,7 @@ import {
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
-
 const queryD1AllMock = vi.hoisted(() => vi.fn());
-
 vi.mock("@/lib/edge/analytics/providers/d1/internal/core", async () => {
   const actual = await vi.importActual<typeof QueryCore>(
     "@/lib/edge/analytics/providers/d1/internal/core",
@@ -51,7 +49,6 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/core", async () => {
     queryD1All: queryD1AllMock,
   };
 });
-
 const env = {} as Env;
 const siteId = "site_123";
 const window: QueryWindow = {
@@ -60,7 +57,6 @@ const window: QueryWindow = {
   nowMs: Date.UTC(2026, 0, 2),
   timeZone: "UTC",
 };
-
 describe("edge query events summary coverage", () => {
   beforeEach(() => {
     queryD1AllMock.mockReset();
@@ -479,7 +475,6 @@ describe("edge query events summary coverage", () => {
     });
   });
 });
-
 describe("edge query events trend coverage", () => {
   beforeEach(() => {
     queryD1AllMock.mockReset();
@@ -619,7 +614,6 @@ describe("edge query events trend coverage", () => {
     expect(result.data[1]).toMatchObject({ bucket: 1, events: 0, visitors: 0 });
   });
 });
-
 describe("edge query core event helper coverage", () => {
   it("maps event fields and event field values across value types", () => {
     expect(

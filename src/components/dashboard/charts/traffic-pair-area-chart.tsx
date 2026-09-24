@@ -1,6 +1,10 @@
 import { memo, useCallback, useId, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
+import {
+  useAnimationOnChartSwitch,
+  useChartVisibility,
+} from "@/components/dashboard/charts/use-chart-animation";
 import { AutoTransition } from "@/components/ui/auto-transition";
 import {
   calculateChartYAxisWidth,
@@ -11,10 +15,6 @@ import {
   createChartNumberFormatter,
 } from "@/components/ui/chart";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  useAnimationOnChartSwitch,
-  useChartVisibility,
-} from "@/hooks/use-chart-animation";
 import {
   type ChartAxisDateFormat,
   createChartAxisDateFormatter,
