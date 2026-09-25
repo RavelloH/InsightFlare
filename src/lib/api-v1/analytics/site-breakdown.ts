@@ -287,10 +287,7 @@ export async function handlePlannedSiteBreakdown(
       filters,
       scopePreference: input.scope ?? "auto",
     };
-    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
-      SiteBreakdownReaderInput,
-      BreakdownResult
-    >(
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute(
       {
         operation: "site.analytics.breakdown",
         context: siteQueryContext(siteId, "api-v1"),
@@ -320,6 +317,7 @@ export async function handlePlannedSiteBreakdown(
       return errorResponse("unsupported_query");
     }
     const result = serviceResult.value;
+    if (!("items" in result)) return errorResponse("unsupported_query");
     if (executionContext.signal?.aborted) return cancelledResponse();
     if (
       typeof executionContext.deadlineMs === "number" &&

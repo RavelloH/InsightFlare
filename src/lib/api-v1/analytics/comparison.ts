@@ -44,9 +44,7 @@ import type { QueryExecutionContext } from "@/lib/edge/analytics/application/ser
 import type { AnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   type AnalyticsDomainError,
-  type AnalyticsResult,
   type ComparisonBreakdownQuery,
-  type ComparisonBreakdownResult,
   type ComparisonMetricKey,
   type ComparisonQuery,
   type ComparisonResult,
@@ -89,13 +87,12 @@ type ResolvedSide = {
   readonly to: string;
   readonly scopePreference: FilterScopePreference;
 };
-type ReportDomainResult = AnalyticsResult<
-  ComparisonResult & { readonly trend?: ComparisonTrendResult }
->;
+type ComparisonReportResult = ComparisonResult & {
+  readonly trend?: ComparisonTrendResult;
+};
 type ComparisonQueryRuntime = Pick<AnalyticsQueryRuntime, "execute"> & {
   readonly readSiteCount: () => Promise<number>;
 };
-type BreakdownDomainResult = AnalyticsResult<ComparisonBreakdownResult>;
 function response(
   status: number,
   body: unknown,
@@ -470,18 +467,18 @@ function rangeWire(side: ResolvedSide) {
   };
 }
 function reportWire(
-  result: Extract<ReportDomainResult, { readonly ok: true }>,
+  result: ComparisonReportResult,
   sides: { readonly current: ResolvedSide; readonly reference: ResolvedSide },
-  trend: ComparisonTrendResult | null,
   requestId: string,
   filterScope?: QueryResultMeta["filterScope"],
+  queryMeta?: QueryResultMeta,
 ) {
-  const trendData = trend;
+  const trendData = result.trend ?? null;
   return {
     data: {
-      current: { metrics: result.data.current },
-      reference: { metrics: result.data.reference },
-      change: result.data.change,
+      current: { metrics: result.current },
+      reference: { metrics: result.reference },
+      change: result.change,
       ...(trendData
         ? {
             trend: {
@@ -510,13 +507,13 @@ function reportWire(
       generatedAt: new Date().toISOString(),
       current: {
         range: rangeWire(sides.current),
-        source: result.meta.source,
-        accuracy: result.meta.approximateVisitors ? "approximate" : "exact",
+        source: queryMeta?.source ?? "raw",
+        accuracy: queryMeta?.approximateVisitors ? "approximate" : "exact",
       },
       reference: {
         range: rangeWire(sides.reference),
-        source: result.meta.source,
-        accuracy: result.meta.approximateVisitors ? "approximate" : "exact",
+        source: queryMeta?.source ?? "raw",
+        accuracy: queryMeta?.approximateVisitors ? "approximate" : "exact",
       },
       ...(filterScope ? { filterScope } : {}),
     },
@@ -550,7 +547,7 @@ async function executeReport(
       : {}),
   };
   const service = createApiV1QueryApplicationAdapter(comparisonCache);
-  return service.execute<ComparisonQuery, ReportDomainResult>(
+  return service.execute(
     {
       operation,
       context,
@@ -558,7 +555,6 @@ async function executeReport(
       cache: {
         key: cacheKey,
         policy: comparisonCachePolicy,
-        isCacheable: (value) => value.ok,
       },
       executor: runtime,
     },
@@ -587,10 +583,7 @@ async function executeBreakdown(
     limit,
     sort,
   };
-  return createApiV1QueryApplicationAdapter(comparisonCache).execute<
-    ComparisonBreakdownQuery,
-    BreakdownDomainResult
-  >(
+  return createApiV1QueryApplicationAdapter(comparisonCache).execute(
     {
       operation,
       context,
@@ -598,7 +591,6 @@ async function executeBreakdown(
       cache: {
         key: cacheKey,
         policy: comparisonCachePolicy,
-        isCacheable: (value) => value.ok,
       },
       executor: runtime,
     },
@@ -822,18 +814,26 @@ async function reportHandler(
     selection: input.select,
     operation,
   });
-  const result = await executeReport(
-    runtime,
-    context,
-    sides,
-    metricKeys(input),
-    interval,
-    trendMetrics(input),
-    operation,
-    { ...executionContextFor(request), cost },
-    cacheKey,
-  );
+  let result;
+  try {
+    result = await executeReport(
+      runtime,
+      context,
+      sides,
+      metricKeys(input),
+      interval,
+      trendMetrics(input),
+      operation,
+      { ...executionContextFor(request), cost },
+      cacheKey,
+    );
+  } catch {
+    return errorResponse("internal_error", request);
+  }
   if (!result.ok) {
+    if (result.error.kind === "domain-error") {
+      return domainErrorResponse(result.error.error, request);
+    }
     const code =
       result.error.kind === "query-cost-exceeded"
         ? "query_too_expensive"
@@ -858,13 +858,10 @@ async function reportHandler(
     );
   }
   const domain = result.value;
-  if (!domain.ok) return domainErrorResponse(domain.error, request);
   const requestId = crypto.randomUUID();
-  const trend =
-    "trend" in domain.data && domain.data.trend ? domain.data.trend : null;
   return response(
     200,
-    reportWire(domain, sides, trend, requestId, result.meta?.filterScope),
+    reportWire(domain, sides, requestId, result.meta?.filterScope, result.meta),
     requestId,
   );
 }
@@ -924,18 +921,26 @@ async function breakdownHandler(
     sort: input.sort,
     limit: input.limit,
   });
-  const result = await executeBreakdown(
-    runtime,
-    context,
-    sides,
-    dimension,
-    input.limit,
-    input.sort,
-    operation,
-    { ...executionContextFor(request), cost },
-    cacheKey,
-  );
+  let result;
+  try {
+    result = await executeBreakdown(
+      runtime,
+      context,
+      sides,
+      dimension,
+      input.limit,
+      input.sort,
+      operation,
+      { ...executionContextFor(request), cost },
+      cacheKey,
+    );
+  } catch {
+    return errorResponse("internal_error", request);
+  }
   if (!result.ok) {
+    if (result.error.kind === "domain-error") {
+      return domainErrorResponse(result.error.error, request);
+    }
     const code =
       result.error.kind === "query-cost-exceeded"
         ? "query_too_expensive"
@@ -960,16 +965,15 @@ async function breakdownHandler(
     );
   }
   const domain = result.value;
-  if (!domain.ok) return domainErrorResponse(domain.error, request);
   const requestId = crypto.randomUUID();
   return response(
     200,
     {
       data: {
         dimension,
-        items: domain.data.items,
+        items: domain.items,
         coverage: {
-          complete: domain.data.complete,
+          complete: domain.complete,
           strategy: "full_comparison_aggregate",
         },
       },
@@ -978,12 +982,12 @@ async function breakdownHandler(
         generatedAt: new Date().toISOString(),
         current: {
           range: rangeWire(sides.current),
-          source: domain.meta.source,
+          source: result.meta?.source ?? "raw",
           accuracy: "exact",
         },
         reference: {
           range: rangeWire(sides.reference),
-          source: domain.meta.source,
+          source: result.meta?.source ?? "raw",
           accuracy: "exact",
         },
         ...(result.meta?.filterScope

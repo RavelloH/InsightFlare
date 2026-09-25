@@ -32,7 +32,6 @@ import {
   type FilterDocument,
   type FilterScopePreference,
   isReportingTimeZone,
-  type OverviewQuery,
   type OverviewResult,
   parseApiV1FilterDocument,
   reconcileFilterScopePreferences,
@@ -360,10 +359,7 @@ export async function executeApiV1SiteOverview(
 
   return {
     ok: true,
-    value: await createApiV1AnalyticsResultAdapter(aggregateCache).execute<
-      OverviewQuery,
-      OverviewResult
-    >(
+    value: await createApiV1AnalyticsResultAdapter(aggregateCache).execute(
       {
         operation: "site.analytics.overview",
         context: context.context,

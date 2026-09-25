@@ -272,10 +272,7 @@ export async function handlePlannedSiteCrossBreakdown(
       filters,
       scopePreference: input.scope ?? "auto",
     };
-    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
-      SiteCrossBreakdownReaderInput,
-      CrossBreakdownResult
-    >(
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute(
       {
         operation: "site.analytics.crossBreakdown",
         context: siteQueryContext(siteId, "api-v1"),

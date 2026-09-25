@@ -1,4 +1,10 @@
-import type { QueryOperation } from "@/lib/edge/analytics/contract";
+import type {
+  CanonicalQuery,
+  CanonicalResult,
+  QueryContext,
+  QueryOperation,
+  QueryTime,
+} from "@/lib/edge/analytics/contract";
 import type {
   PerformanceQueryMode,
   RealtimeQueryMode,
@@ -56,6 +62,51 @@ export const API_V1_QUERY_OPERATION_MAP = {
   "site.analytics.realtimeSessions": "realtime",
 } as const satisfies Record<AnalyticsOperationId, QueryOperation>;
 
+/** Canonical operation mapping derived directly from the API operation table. */
+export type ApiV1CanonicalOperationMap = typeof API_V1_QUERY_OPERATION_MAP;
+export type ApiV1CanonicalOperation<Operation extends AnalyticsOperationId> =
+  ApiV1CanonicalOperationMap[Operation];
+export type ApiV1CanonicalQuery<Operation extends AnalyticsOperationId> =
+  CanonicalQuery<ApiV1CanonicalOperation<Operation>>;
+export type ApiV1CanonicalResult<Operation extends AnalyticsOperationId> =
+  CanonicalResult<ApiV1CanonicalOperation<Operation>>;
+
+type ApiV1QueryVariantMap = typeof API_V1_QUERY_VARIANT_MAP;
+export type ApiV1CanonicalMode<Operation extends AnalyticsOperationId> =
+  Operation extends keyof ApiV1QueryVariantMap
+    ? ApiV1QueryVariantMap[Operation]
+    : never;
+
+type DistributiveOmit<Value, Key extends PropertyKey> = Value extends unknown
+  ? Omit<Value, Key>
+  : never;
+
+/**
+ * The route-level query is the canonical operation query before the adapter
+ * binds request context/time and the API operation's canonical mode.
+ */
+export type ApiV1InvocationQuery<Operation extends AnalyticsOperationId> =
+  DistributiveOmit<
+    ApiV1CanonicalQuery<Operation>,
+    "context" | "time" | "mode"
+  > & {
+    readonly context?: QueryContext;
+    readonly time?: QueryTime;
+    readonly mode?: ApiV1CanonicalMode<Operation>;
+    readonly startMs?: number;
+    readonly endExclusiveMs?: number;
+    readonly timeZone?: string;
+    readonly siteId?: string;
+    readonly teamId?: string;
+    readonly allowedSiteIds?: readonly string[];
+    readonly window?: {
+      readonly startMs?: number;
+      readonly endExclusiveMs?: number;
+      readonly timeZone?: string;
+      readonly nowMs?: number;
+    };
+  };
+
 const API_V1_QUERY_VARIANT_MAP = {
   "site.analytics.breakdown": "breakdown",
   "team.analytics.breakdown": "breakdown",
@@ -86,15 +137,10 @@ export function canonicalQueryOperationFor<
   return API_V1_QUERY_OPERATION_MAP[operation];
 }
 
-export function canonicalQueryVariantFor(
-  operation: AnalyticsOperationId,
-):
-  | Exclude<PerformanceQueryMode, "dashboard">
-  | RealtimeQueryMode
-  | "breakdown"
-  | "list"
-  | undefined {
+export function canonicalQueryVariantFor<
+  Operation extends AnalyticsOperationId,
+>(operation: Operation): ApiV1CanonicalMode<Operation> | undefined {
   return API_V1_QUERY_VARIANT_MAP[
     operation as keyof typeof API_V1_QUERY_VARIANT_MAP
-  ];
+  ] as ApiV1CanonicalMode<Operation> | undefined;
 }

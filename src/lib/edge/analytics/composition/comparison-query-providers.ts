@@ -23,7 +23,7 @@ export function registerComparisonQueryProviders(
         runtime.providers.overview,
         execution?.signal,
       );
-      if (!report.ok || !query.interval) return { value: report };
+      if (!query.interval) return report;
 
       const trendQuery: ComparisonTrendQuery = {
         ...query,
@@ -35,34 +35,27 @@ export function registerComparisonQueryProviders(
         runtime.providers.trend,
         execution?.signal,
       );
-      if (!trend.ok) return { value: trend };
 
       return {
         value: {
-          ok: true as const,
-          data: { ...report.data, trend: trend.data },
-          meta: {
-            ...report.meta,
-            source:
-              report.meta.source === trend.meta.source
-                ? report.meta.source
-                : "mixed",
-            approximateVisitors:
-              report.meta.approximateVisitors || trend.meta.approximateVisitors,
-          },
+          ...report.value,
+          trend: trend.value,
         },
+        source: report.source === trend.source ? report.source : "mixed",
+        approximateVisitors:
+          report.approximateVisitors || trend.approximateVisitors,
       };
     }),
   );
 
   registry.register(
     "comparison-breakdown",
-    typedQueryProviderFor("comparison-breakdown", async (input, execution) => ({
-      value: await executeComparisonBreakdown(
+    typedQueryProviderFor("comparison-breakdown", async (input, execution) => {
+      return executeComparisonBreakdown(
         input,
         runtime.providers.breakdown,
         execution?.signal,
-      ),
-    })),
+      );
+    }),
   );
 }

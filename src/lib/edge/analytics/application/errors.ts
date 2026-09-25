@@ -1,4 +1,5 @@
 import type { QueryResultMeta } from "@/lib/edge/analytics/contract";
+import type { AnalyticsDomainError } from "@/lib/edge/analytics/contract";
 
 import type { AnalyticsOperationId } from "./operation-registry";
 
@@ -17,6 +18,10 @@ export type AnalyticsServiceError =
   | {
       readonly kind: "operation-not-allowed";
       readonly operation: AnalyticsOperationId;
+    }
+  | {
+      readonly kind: "domain-error";
+      readonly error: AnalyticsDomainError;
     };
 
 export type AnalyticsServiceResult<T> =

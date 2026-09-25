@@ -4,6 +4,10 @@ import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/prov
 import { registerComparisonQueryProviders } from "@/lib/edge/analytics/composition/comparison-query-providers";
 import { createComparisonRuntime } from "@/lib/edge/analytics/composition/comparison-runtime";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
+import {
+  type AnalyticsDomainError,
+  ComparisonDomainError,
+} from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { Env } from "@/lib/edge/types";
 const mocks = vi.hoisted(() => ({
@@ -150,23 +154,18 @@ function handleTeamComparisonBreakdown(
 }
 function configureProviders() {
   mocks.createComparisonProviders.mockImplementation(() => ({
-    overview: vi.fn(async ({ side, query }) => {
+    overview: vi.fn(async ({ side }) => {
       providerCalls.overview += 1;
       return {
-        ok: true as const,
-        data: rawMetrics(side === "current" ? 120 : 100),
-        meta: {
-          time: query.time,
-          source: "raw" as const,
-          approximateVisitors: false,
-        },
+        value: rawMetrics(side === "current" ? 120 : 100),
+        source: "raw" as const,
+        approximateVisitors: false,
       };
     }),
     trend: vi.fn(async ({ side, query, comparison }) => {
       providerCalls.trend += 1;
       return {
-        ok: true as const,
-        data: {
+        value: {
           interval: comparison.interval,
           points: [
             {
@@ -178,18 +177,14 @@ function configureProviders() {
             },
           ],
         },
-        meta: {
-          time: query.time,
-          source: "raw" as const,
-          approximateVisitors: false,
-        },
+        source: "raw" as const,
+        approximateVisitors: false,
       };
     }),
-    breakdown: vi.fn(async ({ side, query }) => {
+    breakdown: vi.fn(async ({ side }) => {
       providerCalls.breakdown += 1;
       return {
-        ok: true as const,
-        data: {
+        value: {
           complete: true,
           items: [
             {
@@ -202,11 +197,8 @@ function configureProviders() {
               : []),
           ],
         },
-        meta: {
-          time: query.time,
-          source: "raw" as const,
-          approximateVisitors: false,
-        },
+        source: "raw" as const,
+        approximateVisitors: false,
       };
     }),
   }));
@@ -292,24 +284,16 @@ describe("API v1 comparison v2 handler", () => {
     expect(providerCalls.trend).toBe(2);
 
     mocks.createComparisonProviders.mockImplementationOnce(() => ({
-      overview: vi.fn(async ({ query }) => ({
-        ok: true as const,
-        data: rawMetrics(100),
-        meta: {
-          time: query.time,
-          source: "raw" as const,
-          approximateVisitors: false,
-        },
+      overview: vi.fn(async () => ({
+        value: rawMetrics(100),
+        source: "raw" as const,
+        approximateVisitors: false,
       })),
-      trend: vi.fn(async ({ query }) => ({
-        ok: false as const,
-        error: { kind: "comparison-alignment-mismatch" as const },
-        meta: {
-          time: query.time,
-          source: "raw" as const,
-          approximateVisitors: false,
-        },
-      })),
+      trend: vi.fn(async () => {
+        throw new ComparisonDomainError({
+          kind: "comparison-alignment-mismatch",
+        });
+      }),
       breakdown: vi.fn(),
     }));
     const trendError = await handleSiteComparison(
@@ -373,10 +357,12 @@ describe("API v1 comparison v2 handler", () => {
     mocks.createComparisonProviders.mockImplementationOnce(() => ({
       overview: vi.fn(),
       trend: vi.fn(),
-      breakdown: vi.fn(async () => ({
-        ok: false as const,
-        error: { kind: "query-cost-exceeded" as const, cost: 10_000 },
-      })),
+      breakdown: vi.fn(async () => {
+        throw new ComparisonDomainError({
+          kind: "query-cost-exceeded",
+          cost: 10_000,
+        });
+      }),
     }));
     const breakdownError = await handleSiteComparisonBreakdown(
       request({
@@ -499,10 +485,11 @@ describe("API v1 comparison v2 handler", () => {
     expect(invalidTimezone.status).toBe(400);
 
     mocks.createComparisonProviders.mockImplementationOnce(() => ({
-      overview: vi.fn(async () => ({
-        ok: false as const,
-        error: { kind: "comparison-alignment-mismatch" as const },
-      })),
+      overview: vi.fn(async () => {
+        throw new ComparisonDomainError({
+          kind: "comparison-alignment-mismatch",
+        });
+      }),
       trend: vi.fn(),
       breakdown: vi.fn(),
     }));
@@ -517,23 +504,32 @@ describe("API v1 comparison v2 handler", () => {
       "comparison_alignment_mismatch",
     );
 
-    const domainCases = [
-      ["range-not-supported", "range_too_wide"],
-      ["dimension-not-supported", "dimension_not_supported"],
-      ["capability-denied", "dimension_not_supported"],
-      ["invalid-input", "validation_failed"],
-      ["data-unavailable", "data_unavailable"],
-      ["query-cost-exceeded", "query_too_expensive"],
-      ["request-cancelled", "request_cancelled"],
-      ["deadline-exceeded", "deadline_exceeded"],
+    const domainCases: readonly [
+      AnalyticsDomainError | "unexpected",
+      string,
+    ][] = [
+      [{ kind: "range-not-supported", reason: "too-wide" }, "range_too_wide"],
+      [
+        { kind: "dimension-not-supported", dimension: "page.path" },
+        "dimension_not_supported",
+      ],
+      [
+        { kind: "capability-denied", capability: "comparison" },
+        "dimension_not_supported",
+      ],
+      [{ kind: "invalid-input", issues: [] }, "validation_failed"],
+      [{ kind: "data-unavailable", retryable: true }, "data_unavailable"],
+      [{ kind: "query-cost-exceeded", cost: 10_000 }, "query_too_expensive"],
+      [{ kind: "request-cancelled" }, "request_cancelled"],
+      [{ kind: "deadline-exceeded" }, "deadline_exceeded"],
       ["unexpected", "internal_error"],
-    ] as const;
-    for (const [kind, expected] of domainCases) {
+    ];
+    for (const [error, expected] of domainCases) {
       mocks.createComparisonProviders.mockImplementationOnce(() => ({
-        overview: vi.fn(async () => ({
-          ok: false as const,
-          error: { kind } as { readonly kind: string },
-        })),
+        overview: vi.fn(async () => {
+          if (error === "unexpected") throw new Error("provider failed");
+          throw new ComparisonDomainError(error);
+        }),
         trend: vi.fn(),
         breakdown: vi.fn(),
       }));

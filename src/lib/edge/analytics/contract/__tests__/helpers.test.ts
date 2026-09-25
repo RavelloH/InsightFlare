@@ -9,6 +9,7 @@ import {
 import {
   analyticsFilterRegistry,
   buildCalendarBucketPlan,
+  ComparisonDomainError,
   createQueryTime,
   createTimeRange,
   EMPTY_FILTER_DOCUMENT,
@@ -302,15 +303,12 @@ describe("query contract time helpers", () => {
       executeTypedApplicationOperation(
         "comparison",
         input as never,
-        createTypedQueryProviderRegistry("comparison", async () => ({
-          value: {
-            ok: false as const,
-            error: {
-              kind: "capability-denied" as const,
-              capability: "comparison",
-            },
-          },
-        })),
+        createTypedQueryProviderRegistry("comparison", async () => {
+          throw new ComparisonDomainError({
+            kind: "capability-denied",
+            capability: "comparison",
+          });
+        }),
       ),
     ).resolves.toMatchObject({
       ok: false,

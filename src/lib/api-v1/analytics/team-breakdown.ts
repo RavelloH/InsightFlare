@@ -224,10 +224,7 @@ export async function handleTeamBreakdown(
       filters,
       scopePreference: input.scope ?? "auto",
     };
-    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
-      TeamBreakdownReaderInput,
-      BreakdownResult
-    >(
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute(
       {
         operation: "team.analytics.breakdown",
         context: teamQueryContext(
@@ -266,6 +263,9 @@ export async function handleTeamBreakdown(
       (executionContext.now?.() ?? Date.now()) >= executionContext.deadlineMs
     )
       return errorResponse("deadline_exceeded");
+    if (!("items" in serviceResult.value)) {
+      return errorResponse("unsupported_query");
+    }
     const requestId = crypto.randomUUID();
     return response(
       200,

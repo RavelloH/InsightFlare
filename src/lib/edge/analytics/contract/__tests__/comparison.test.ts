@@ -96,15 +96,13 @@ describe("typed comparison contract", () => {
               ],
             };
       return {
-        ok: true as const,
-        data: items,
-        meta: { time, source: "raw" as const, approximateVisitors: false },
+        value: items,
+        source: "raw" as const,
+        approximateVisitors: false,
       };
     };
     const result = await executeComparisonBreakdown(query, provider);
-    expect(result.ok).toBe(true);
-    if (result.ok)
-      expect(result.data.items.map((item) => item.key)).toEqual(["/a", "/b"]);
+    expect(result.value.items.map((item) => item.key)).toEqual(["/a", "/b"]);
   });
 
   it("canonicalizes cache identity independently of JSON key order", async () => {

@@ -221,10 +221,7 @@ export async function handlePlannedTeamOverview(
       filters,
       scopePreference: input.scope ?? "auto",
     };
-    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
-      TeamOverviewReaderInput,
-      TeamOverviewQueryResult
-    >(
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute(
       {
         operation: "team.analytics.overview",
         context: teamQueryContext(
@@ -263,7 +260,7 @@ export async function handlePlannedTeamOverview(
     ) {
       return errorResponse("deadline_exceeded");
     }
-    const value = result.data;
+    const value = result.current;
     const requestId = crypto.randomUUID();
     return response(
       200,
@@ -280,7 +277,7 @@ export async function handlePlannedTeamOverview(
               ? Math.round(value.totalDurationMs / value.sessions)
               : 0,
           bounceRate: value.sessions > 0 ? value.bounces / value.sessions : 0,
-          approximateVisitors: result.approximateVisitors,
+          approximateVisitors: serviceResult.meta?.approximateVisitors ?? false,
         },
         {
           generatedAt: new Date().toISOString(),
@@ -289,8 +286,10 @@ export async function handlePlannedTeamOverview(
             to: new Date(endExclusiveMs).toISOString(),
             timeZone,
           },
-          source: result.source,
-          accuracy: result.approximateVisitors ? "approximate" : "exact",
+          source: serviceResult.meta?.source ?? "raw",
+          accuracy: serviceResult.meta?.approximateVisitors
+            ? "approximate"
+            : "exact",
           ...(serviceResult.meta?.filterScope
             ? { filterScope: serviceResult.meta.filterScope }
             : {}),

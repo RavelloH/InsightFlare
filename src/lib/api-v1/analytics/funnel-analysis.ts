@@ -265,10 +265,7 @@ export async function handlePlannedSiteFunnelAnalysis(
   }
 
   try {
-    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
-      SiteFunnelAnalysisProviderInput,
-      SiteFunnelAnalysisProviderResult | null
-    >(
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute(
       {
         operation: "site.analytics.funnelAnalysis",
         context: siteQueryContext(siteId, "api-v1"),

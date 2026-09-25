@@ -24,7 +24,6 @@ import type { PagesDashboardResult } from "./pages-dashboard";
 import type { TeamSitesQueryResult } from "./team-results";
 import type { TeamDashboardData } from "./team-results";
 import type {
-  AnalyticsResult,
   BaseQuery,
   BreakdownResult,
   CalendarGranularity,
@@ -362,11 +361,9 @@ export type CanonicalTeamSitesQuery = PageQuery & {
   readonly allowedSiteIds?: readonly string[];
   readonly interval?: Interval;
 };
-export type CanonicalComparisonResult =
-  | AnalyticsResult<
-      ComparisonResult & { readonly trend?: ComparisonTrendResult }
-    >
-  | AnalyticsResult<ComparisonBreakdownResult>;
+export type CanonicalComparisonResult = ComparisonResult & {
+  readonly trend?: ComparisonTrendResult;
+};
 export interface CanonicalComparisonQuery extends ComparisonQuery {
   readonly interval?: ComparisonTrendQuery["interval"];
   readonly trendMetrics?: readonly ComparisonMetricKey[];
@@ -392,7 +389,7 @@ export interface CanonicalOperationMap {
   };
   readonly "comparison-breakdown": {
     readonly query: ComparisonBreakdownQuery;
-    readonly result: AnalyticsResult<ComparisonBreakdownResult>;
+    readonly result: ComparisonBreakdownResult;
   };
   readonly dimension: {
     readonly query: CanonicalDimensionQuery;

@@ -35,7 +35,30 @@ export function createTestProviderRegistry(
           signal: execution?.signal,
         };
         if (typeof reader === "function") {
-          return { value: await reader(input as never) };
+          const legacyResult = await reader(input as never);
+          if (
+            legacyResult &&
+            typeof legacyResult === "object" &&
+            "data" in legacyResult &&
+            "source" in legacyResult &&
+            "approximateVisitors" in legacyResult
+          ) {
+            const { data, source, approximateVisitors } = legacyResult as {
+              readonly data: unknown;
+              readonly source: "raw" | "rollup" | "realtime" | "mixed" | "mock";
+              readonly approximateVisitors: boolean;
+            };
+            const value =
+              operation.id === "team.analytics.overview" &&
+              data &&
+              typeof data === "object" &&
+              !Array.isArray(data) &&
+              !("current" in data)
+                ? { current: data }
+                : data;
+            return { value, source, approximateVisitors };
+          }
+          return { value: legacyResult };
         }
         const result = operation.id.endsWith("timeseries")
           ? await executeTrend(reader, input as unknown as TrendQuery)

@@ -220,10 +220,7 @@ export async function handlePlannedTeamTimeseries(
       filters,
       scopePreference: input.scope ?? "auto",
     };
-    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
-      TeamTimeseriesReaderInput,
-      TeamTimeseriesQueryResult
-    >(
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute(
       {
         operation: "team.analytics.timeseries",
         context: teamQueryContext(
@@ -268,8 +265,8 @@ export async function handlePlannedTeamTimeseries(
       200,
       {
         data: {
-          interval: result.data.interval,
-          points: result.data.points.map((point) => ({
+          interval: result.interval,
+          points: result.points.map((point) => ({
             timestamp: new Date(point.timestampMs).toISOString(),
             views: point.views,
             sessions: point.sessions,
@@ -291,8 +288,10 @@ export async function handlePlannedTeamTimeseries(
             to: new Date(endExclusiveMs).toISOString(),
             timeZone,
           },
-          source: result.source,
-          accuracy: result.approximateVisitors ? "approximate" : "exact",
+          source: serviceResult.meta?.source ?? "raw",
+          accuracy: serviceResult.meta?.approximateVisitors
+            ? "approximate"
+            : "exact",
           ...(serviceResult.meta?.filterScope
             ? { filterScope: serviceResult.meta.filterScope }
             : {}),

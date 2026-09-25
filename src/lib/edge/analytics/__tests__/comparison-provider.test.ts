@@ -140,9 +140,9 @@ describe("comparison providers", () => {
       comparison: providerQuery(siteContext),
     });
     expect(overview).toMatchObject({
-      ok: true,
-      data: { views: 100, events: 7 },
-      meta: { source: "rollup", approximateVisitors: false },
+      value: { views: 100, events: 7 },
+      source: "rollup",
+      approximateVisitors: false,
     });
 
     const trend = await providers.trend({
@@ -155,12 +155,10 @@ describe("comparison providers", () => {
         trendMetrics: ["views", "events"],
       } satisfies ComparisonTrendQuery,
     });
-    expect(trend).toMatchObject({ ok: true, data: { interval: "day" } });
-    if (trend.ok) {
-      expect(trend.data.points).toHaveLength(2);
-      expect(trend.data.points[0]).toMatchObject({ views: 100, events: 9 });
-      expect(trend.data.points[1]).toMatchObject({ views: 0, events: 0 });
-    }
+    expect(trend.value).toMatchObject({ interval: "day" });
+    expect(trend.value.points).toHaveLength(2);
+    expect(trend.value.points[0]).toMatchObject({ views: 100, events: 9 });
+    expect(trend.value.points[1]).toMatchObject({ views: 0, events: 0 });
   });
 
   it("aggregates all authorized team sites for overview and trend", async () => {
@@ -177,9 +175,9 @@ describe("comparison providers", () => {
       comparison: query,
     });
     expect(overview).toMatchObject({
-      ok: true,
-      data: { views: 300, events: 14 },
-      meta: { source: "mixed", approximateVisitors: true },
+      value: { views: 300, events: 14 },
+      source: "mixed",
+      approximateVisitors: true,
     });
 
     const trend = await providers.trend({
@@ -192,8 +190,7 @@ describe("comparison providers", () => {
         trendMetrics: ["views", "events"],
       } satisfies ComparisonTrendQuery,
     });
-    expect(trend.ok).toBe(true);
-    if (trend.ok) expect(trend.data.points[0]).toMatchObject({ views: 300 });
+    expect(trend.value.points[0]).toMatchObject({ views: 300 });
   });
 
   it("merges complete breakdowns across sites without a per-site limit", async () => {
@@ -214,18 +211,16 @@ describe("comparison providers", () => {
       query: query.current,
       comparison: query,
     });
-    expect(result).toMatchObject({ ok: true, data: { complete: true } });
+    expect(result).toMatchObject({ value: { complete: true } });
     expect(mocks.readSiteBreakdown).toHaveBeenCalledTimes(2);
     expect(mocks.readSiteBreakdown).toHaveBeenCalledWith(
       expect.objectContaining({ siteId: "site-1", limit: 0 }),
     );
-    if (result.ok) {
-      expect(result.data.items).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ key: "/shared", views: 30 }),
-          expect.objectContaining({ key: "/team-only", views: 5 }),
-        ]),
-      );
-    }
+    expect(result.value.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "/shared", views: 30 }),
+        expect.objectContaining({ key: "/team-only", views: 5 }),
+      ]),
+    );
   });
 });

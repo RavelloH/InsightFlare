@@ -209,10 +209,7 @@ export async function handlePlannedTeamSites(
       filters,
       scopePreference: input.scope ?? "auto",
     };
-    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
-      TeamSitesReaderInput,
-      TeamSitesQueryResult
-    >(
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute(
       {
         operation: "team.analytics.sites",
         context: teamQueryContext(
@@ -260,7 +257,7 @@ export async function handlePlannedTeamSites(
       200,
       {
         data: {
-          items: result.data.items.map((site) => ({
+          items: result.items.map((site) => ({
             siteId: site.siteId,
             name: site.name,
             domain: site.domain,
@@ -284,7 +281,8 @@ export async function handlePlannedTeamSites(
                 site.metrics.sessions > 0
                   ? site.metrics.bounces / site.metrics.sessions
                   : 0,
-              approximateVisitors: result.approximateVisitors,
+              approximateVisitors:
+                serviceResult.meta?.approximateVisitors ?? false,
             },
             ...(site.trend
               ? {
@@ -309,7 +307,7 @@ export async function handlePlannedTeamSites(
                 ? null
                 : new Date(site.lastEventAtMs).toISOString(),
           })),
-          pagination: result.data.pagination,
+          pagination: result.pagination,
         },
         meta: {
           requestId,
@@ -319,8 +317,10 @@ export async function handlePlannedTeamSites(
             to: new Date(endExclusiveMs).toISOString(),
             timeZone,
           },
-          source: result.source,
-          accuracy: result.approximateVisitors ? "approximate" : "exact",
+          source: serviceResult.meta?.source ?? "raw",
+          accuracy: serviceResult.meta?.approximateVisitors
+            ? "approximate"
+            : "exact",
           ...(serviceResult.meta?.filterScope
             ? { filterScope: serviceResult.meta.filterScope }
             : {}),

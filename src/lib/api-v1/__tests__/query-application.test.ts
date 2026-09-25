@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { executeApiV1Query } from "@/lib/api-v1/analytics/query-application";
+import {
+  createApiV1AnalyticsResultAdapter,
+  executeApiV1Query,
+} from "@/lib/api-v1/analytics/query-application";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
@@ -39,6 +42,23 @@ function invocation(
   };
 }
 describe("API v1 query application adapter", () => {
+  it("requires runtime metadata when preserving the AnalyticsResult envelope", async () => {
+    const adapter = createApiV1AnalyticsResultAdapter();
+    const noMetadataExecutor = {
+      execute: async () => ({ ok: true, data: overviewData }),
+    } as never;
+
+    await expect(
+      adapter.execute(
+        {
+          ...invocation(new AnalyticsProviderRegistry()),
+          executor: noMetadataExecutor,
+        },
+        {},
+      ),
+    ).rejects.toThrow("analytics_result_metadata_missing");
+  });
+
   it("fails closed when the external provider is missing", async () => {
     await expect(
       executeApiV1Query(
@@ -378,6 +398,11 @@ describe("API v1 query application adapter", () => {
         },
       },
       {
+        operation: "site.analytics.retentionCohorts",
+        result: { granularity: "day" },
+        expected: { granularity: "day", cohorts: [] },
+      },
+      {
         operation: "site.analytics.eventFields",
         result: {
           eventName: "signup",
@@ -454,6 +479,16 @@ describe("API v1 query application adapter", () => {
             ],
           },
         },
+      },
+      {
+        operation: "site.analytics.eventTypeDetail",
+        result: { trend: {} },
+        expected: { trend: { data: [] } },
+      },
+      {
+        operation: "site.analytics.eventTypeDetail",
+        result: { trend: null },
+        expected: { trend: null },
       },
       {
         operation: "site.analytics.funnelAnalysis",

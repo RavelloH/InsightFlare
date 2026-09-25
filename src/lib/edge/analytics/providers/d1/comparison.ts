@@ -351,14 +351,6 @@ async function readBreakdownForSites(
   return { items: [...merged.values()], complete: true };
 }
 
-function providerMeta(
-  time: QueryTime,
-  source: QuerySource,
-  approximateVisitors: boolean,
-) {
-  return { time, source, approximateVisitors };
-}
-
 export function createComparisonProviders(options: ComparisonProviderOptions) {
   const overview: ComparisonProvider<
     ComparisonRawMetrics,
@@ -376,9 +368,9 @@ export function createComparisonProviders(options: ComparisonProviderOptions) {
           query.filters ?? EMPTY_FILTER,
         );
     return {
-      ok: true,
-      data: result.data,
-      meta: providerMeta(query.time, result.source, result.approximateVisitors),
+      value: result.data,
+      source: result.source,
+      approximateVisitors: result.approximateVisitors,
     };
   };
   const trend: ComparisonProvider<
@@ -399,23 +391,23 @@ export function createComparisonProviders(options: ComparisonProviderOptions) {
           comparison.interval,
         );
     return {
-      ok: true,
-      data: result.data,
-      meta: providerMeta(query.time, result.source, result.approximateVisitors),
+      value: result.data,
+      source: result.source,
+      approximateVisitors: result.approximateVisitors,
     };
   };
   const breakdown: ComparisonProvider<
     ComparisonRawBreakdownResult,
     ComparisonBreakdownQuery
   > = async ({ query, comparison }) => ({
-    ok: true,
-    data: await readBreakdownForSites(
+    value: await readBreakdownForSites(
       options,
       query.time,
       query.filters ?? EMPTY_FILTER,
       comparison.dimension,
     ),
-    meta: providerMeta(query.time, "raw", false),
+    source: "raw",
+    approximateVisitors: false,
   });
   return { overview, trend, breakdown };
 }

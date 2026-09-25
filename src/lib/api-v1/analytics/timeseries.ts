@@ -18,7 +18,6 @@ import type {
 import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import type {
   AnalyticsResult,
-  TrendQuery,
   TrendResult,
 } from "@/lib/edge/analytics/contract";
 import { filterConditionCount } from "@/lib/edge/analytics/contract";
@@ -76,10 +75,7 @@ export async function executeApiV1SiteTimeseries(
   if (!filter.ok) return filter;
   return {
     ok: true,
-    value: await createApiV1AnalyticsResultAdapter(aggregateCache).execute<
-      TrendQuery,
-      TrendResult
-    >(
+    value: await createApiV1AnalyticsResultAdapter(aggregateCache).execute(
       {
         operation: "site.analytics.timeseries",
         context: context.context,

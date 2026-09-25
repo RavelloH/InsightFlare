@@ -398,7 +398,6 @@ async function handlePlannedSiteList<
     readonly filter?: SiteAnalyticsQueryBaseDto["filter"];
     readonly scope?: SiteAnalyticsQueryBaseDto["scope"];
   },
-  Result,
 >(
   request: Request,
   principal: ApiKeyPrincipal,
@@ -524,10 +523,7 @@ async function handlePlannedSiteList<
       scopePreference: input.scope ?? "auto",
       ...queryOverrides,
     };
-    const serviceResult = await createApiV1QueryApplicationAdapter().execute<
-      typeof query,
-      Result
-    >(
+    const serviceResult = await createApiV1QueryApplicationAdapter().execute(
       {
         operation,
         context: siteQueryContext(siteId, "api-v1"),

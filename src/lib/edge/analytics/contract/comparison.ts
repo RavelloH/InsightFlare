@@ -3,7 +3,7 @@ import {
   projectComparisonMetrics,
 } from "./comparison-metrics";
 import type {
-  AnalyticsResult,
+  AnalyticsDomainError,
   ComparisonBreakdownItem,
   ComparisonBreakdownQuery,
   ComparisonBreakdownResult,
@@ -16,6 +16,7 @@ import type {
   ComparisonTrendQuery,
   ComparisonTrendResult,
   QueryContext,
+  QuerySource,
 } from "./types";
 
 export type ComparisonSide = "current" | "reference";
@@ -28,9 +29,22 @@ export interface ComparisonProviderInput<Query> {
   readonly signal?: AbortSignal;
 }
 
+export interface ComparisonProviderResult<Result> {
+  readonly value: Result;
+  readonly source: QuerySource;
+  readonly approximateVisitors: boolean;
+}
+
+export class ComparisonDomainError extends Error {
+  constructor(readonly domainError: AnalyticsDomainError) {
+    super(domainError.kind);
+    this.name = "ComparisonDomainError";
+  }
+}
+
 export type ComparisonProvider<Result, Query> = (
   input: ComparisonProviderInput<Query>,
-) => Promise<AnalyticsResult<Result>>;
+) => Promise<ComparisonProviderResult<Result>>;
 
 function compareMetrics(
   current: ComparisonRawMetrics,
@@ -50,18 +64,15 @@ function compareMetrics(
   };
 }
 
-function combineMeta<T>(
-  current: AnalyticsResult<T> & { readonly ok: true },
-  reference: AnalyticsResult<T> & { readonly ok: true },
+function combineProvenance<T>(
+  current: ComparisonProviderResult<T>,
+  reference: ComparisonProviderResult<T>,
 ) {
   return {
-    time: current.meta.time,
     source:
-      current.meta.source === reference.meta.source
-        ? current.meta.source
-        : ("mixed" as const),
+      current.source === reference.source ? current.source : ("mixed" as const),
     approximateVisitors:
-      current.meta.approximateVisitors || reference.meta.approximateVisitors,
+      current.approximateVisitors || reference.approximateVisitors,
   };
 }
 
@@ -101,14 +112,11 @@ export async function executeComparison(
   },
   provider: ComparisonProvider<ComparisonRawMetrics, typeof query>,
   signal?: AbortSignal,
-): Promise<AnalyticsResult<ComparisonResult>> {
+): Promise<ComparisonProviderResult<ComparisonResult>> {
   const [current, reference] = await both(query, provider, signal);
-  if (!current.ok) return current;
-  if (!reference.ok) return reference;
   return {
-    ok: true,
-    data: compareMetrics(current.data, reference.data, query.metrics),
-    meta: combineMeta(current, reference),
+    value: compareMetrics(current.value, reference.value, query.metrics),
+    ...combineProvenance(current, reference),
   };
 }
 
@@ -116,25 +124,19 @@ export async function executeComparisonTrend(
   query: ComparisonTrendQuery,
   provider: ComparisonProvider<ComparisonRawTrendResult, ComparisonTrendQuery>,
   signal?: AbortSignal,
-): Promise<AnalyticsResult<ComparisonTrendResult>> {
+): Promise<ComparisonProviderResult<ComparisonTrendResult>> {
   const [current, reference] = await both(query, provider, signal);
-  if (!current.ok) return current;
-  if (!reference.ok) return reference;
   if (
-    current.data.points.length !== reference.data.points.length ||
-    current.data.interval !== reference.data.interval
+    current.value.points.length !== reference.value.points.length ||
+    current.value.interval !== reference.value.interval
   ) {
-    return {
-      ok: false,
-      error: { kind: "comparison-alignment-mismatch" },
-    };
+    throw new ComparisonDomainError({ kind: "comparison-alignment-mismatch" });
   }
   return {
-    ok: true,
-    data: {
-      interval: current.data.interval,
-      points: current.data.points.map((point, index) => {
-        const other = reference.data.points[index]!;
+    value: {
+      interval: current.value.interval,
+      points: current.value.points.map((point, index) => {
+        const other = reference.value.points[index]!;
         const compared = compareMetrics(point, other, query.trendMetrics);
         return {
           index,
@@ -152,7 +154,7 @@ export async function executeComparisonTrend(
         };
       }),
     },
-    meta: combineMeta(current, reference),
+    ...combineProvenance(current, reference),
   };
 }
 
@@ -215,20 +217,18 @@ export async function executeComparisonBreakdown(
     ComparisonBreakdownQuery
   >,
   signal?: AbortSignal,
-): Promise<AnalyticsResult<ComparisonBreakdownResult>> {
+): Promise<ComparisonProviderResult<ComparisonBreakdownResult>> {
   const [current, reference] = await both(query, provider, signal);
-  if (!current.ok) return current;
-  if (!reference.ok) return reference;
   const currentByKey = new Map(
-    current.data.items.map((item) => [item.key, item]),
+    current.value.items.map((item) => [item.key, item]),
   );
   const referenceByKey = new Map(
-    reference.data.items.map((item) => [item.key, item]),
+    reference.value.items.map((item) => [item.key, item]),
   );
   const keys = [
     ...new Set([
-      ...current.data.items.map((item) => item.key),
-      ...reference.data.items.map((item) => item.key),
+      ...current.value.items.map((item) => item.key),
+      ...reference.value.items.map((item) => item.key),
     ]),
   ];
   const items: ComparisonBreakdownItem[] = keys.map((key) => {
@@ -249,11 +249,10 @@ export async function executeComparisonBreakdown(
   });
   items.sort((left, right) => compareBreakdownItems(left, right, query));
   return {
-    ok: true,
-    data: {
+    value: {
       items: items.slice(0, query.limit),
-      complete: current.data.complete && reference.data.complete,
+      complete: current.value.complete && reference.value.complete,
     },
-    meta: combineMeta(current, reference),
+    ...combineProvenance(current, reference),
   };
 }

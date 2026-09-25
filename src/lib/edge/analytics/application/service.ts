@@ -17,6 +17,7 @@ import type {
   QueryTime,
   ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract";
+import { ComparisonDomainError } from "@/lib/edge/analytics/contract/comparison";
 import { prepareScopedQuery } from "@/lib/edge/analytics/contract/scoped-filter";
 import { InvalidCursorError } from "@/lib/pagination";
 
@@ -353,6 +354,9 @@ export class TypedQueryApplicationService {
         // Application error reporting must never change query behavior.
       }
       emit(executionContext, "failure");
+      if (error instanceof ComparisonDomainError) {
+        return { ok: false, error: error.domainError };
+      }
       if (error instanceof InvalidCursorError) {
         return {
           ok: false,

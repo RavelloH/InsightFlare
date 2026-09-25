@@ -2,6 +2,8 @@ import type { OperationResultCache } from "@/lib/edge/analytics/application/cach
 import type { OperationCachePolicy } from "@/lib/edge/analytics/application/cache";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
 import {
+  type ApiV1CanonicalResult,
+  type ApiV1InvocationQuery,
   canonicalQueryOperationFor,
   canonicalQueryVariantFor,
 } from "@/lib/edge/analytics/application/query-operation-map";
@@ -12,23 +14,22 @@ import {
 import type { AnalyticsQueryExecutor } from "@/lib/edge/analytics/composition/query-runtime";
 import type {
   AnalyticsResult,
-  CanonicalQuery,
   QueryInput,
   QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { paginationBinding } from "@/lib/pagination";
-export interface ApiV1QueryInvocation<Query, Result> {
-  readonly operation: AnalyticsOperationId;
+export interface ApiV1QueryInvocation<Operation extends AnalyticsOperationId> {
+  readonly operation: Operation;
   readonly context: QueryInput["context"];
-  readonly query: Query;
+  readonly query: ApiV1InvocationQuery<Operation>;
   /** Canonical request DTO, before it is expanded into a provider query. */
   readonly rawRequest?: unknown;
   readonly executor: AnalyticsQueryExecutor;
   readonly cache?: {
     readonly key: string;
     readonly policy: OperationCachePolicy;
-    readonly isCacheable?: (value: Result) => boolean;
+    readonly isCacheable?: (value: ApiV1CanonicalResult<Operation>) => boolean;
   };
 }
 function queryTime(
@@ -138,6 +139,14 @@ function serviceError<Result>(
   }
   if (result.error.kind === "internal") {
     return null;
+  }
+  if (
+    operation === "site.analytics.comparison" ||
+    operation === "team.analytics.comparison" ||
+    operation === "site.analytics.comparisonBreakdown" ||
+    operation === "team.analytics.comparisonBreakdown"
+  ) {
+    return { ok: false, error: { kind: "domain-error", error: result.error } };
   }
   return {
     ok: false,
@@ -296,11 +305,11 @@ function serializeApiV1Result(operation: AnalyticsOperationId, value: unknown) {
  * API v1 adapter entry point. The external operation id is translated here;
  * the runtime sees only a canonical QueryOperation and canonical query.
  */
-export async function executeApiV1Query<Query, Result>(
+export async function executeApiV1Query<Operation extends AnalyticsOperationId>(
   cache: OperationResultCache | undefined,
-  invocation: ApiV1QueryInvocation<Query, Result>,
+  invocation: ApiV1QueryInvocation<Operation>,
   executionContext: QueryExecutionContext,
-): Promise<AnalyticsServiceResult<Result>> {
+): Promise<AnalyticsServiceResult<ApiV1CanonicalResult<Operation>>> {
   const time = queryTime(invocation.query, executionContext);
   if (!time) {
     return {
@@ -320,32 +329,38 @@ export async function executeApiV1Query<Query, Result>(
     invocation.context,
   );
   const canonicalVariant = canonicalQueryVariantFor(invocation.operation);
-  const query = {
+  const canonicalQuery = {
     ...invocation.query,
     context: invocation.context,
     time: { ...time, paginationBinding: requestBinding },
     ...(canonicalVariant ? { mode: canonicalVariant } : {}),
-  } as CanonicalQuery<typeof operation>;
+  };
   let providerError: unknown;
-  const canonicalResult = await invocation.executor.execute(operation, query, {
-    ...executionContext,
-    operation: invocation.operation,
-    ...(invocation.cache
-      ? {
-          cache: {
-            ...invocation.cache,
-            isCacheable: (value: unknown) =>
-              invocation.cache?.isCacheable?.(value as Result) ?? true,
-          },
-        }
-      : {}),
-    ...(cache ? { cacheStore: cache } : {}),
-    onProviderError: (error) => {
-      providerError = error;
-      executionContext.onProviderError?.(error);
+  const canonicalResult = await invocation.executor.execute(
+    operation,
+    canonicalQuery,
+    {
+      ...executionContext,
+      operation: invocation.operation,
+      ...(invocation.cache
+        ? {
+            cache: {
+              ...invocation.cache,
+              isCacheable: (value: unknown) =>
+                invocation.cache?.isCacheable?.(
+                  value as ApiV1CanonicalResult<Operation>,
+                ) ?? true,
+            },
+          }
+        : {}),
+      ...(cache ? { cacheStore: cache } : {}),
+      onProviderError: (error) => {
+        providerError = error;
+        executionContext.onProviderError?.(error);
+      },
     },
-  });
-  const result = canonicalResult as AnalyticsResult<Result>;
+  );
+  const result = canonicalResult;
   if (!result.ok && result.error.kind === "internal") {
     if (providerError) {
       return Promise.reject(
@@ -365,7 +380,10 @@ export async function executeApiV1Query<Query, Result>(
   const protocolResult = result.ok
     ? {
         ...result,
-        data: serializeApiV1Result(invocation.operation, result.data) as Result,
+        data: serializeApiV1Result(
+          invocation.operation,
+          result.data,
+        ) as ApiV1CanonicalResult<Operation>,
       }
     : result;
   return (
@@ -381,10 +399,10 @@ export function createApiV1QueryApplicationAdapter(
   cache?: OperationResultCache,
 ) {
   return {
-    execute<Query, Result>(
-      invocation: ApiV1QueryInvocation<Query, Result>,
+    execute<Operation extends AnalyticsOperationId>(
+      invocation: ApiV1QueryInvocation<Operation>,
       executionContext: QueryExecutionContext,
-    ): Promise<AnalyticsServiceResult<Result>> {
+    ): Promise<AnalyticsServiceResult<ApiV1CanonicalResult<Operation>>> {
       return executeApiV1Query(cache, invocation, executionContext);
     },
   };
@@ -396,10 +414,12 @@ export function createApiV1AnalyticsResultAdapter(
 ) {
   const adapter = createApiV1QueryApplicationAdapter(cache);
   return {
-    async execute<Query, Result>(
-      invocation: ApiV1QueryInvocation<Query, Result>,
+    async execute<Operation extends AnalyticsOperationId>(
+      invocation: ApiV1QueryInvocation<Operation>,
       executionContext: QueryExecutionContext,
-    ): Promise<AnalyticsServiceResult<AnalyticsResult<Result>>> {
+    ): Promise<
+      AnalyticsServiceResult<AnalyticsResult<ApiV1CanonicalResult<Operation>>>
+    > {
       const result = await adapter.execute(invocation, executionContext);
       if (!result.ok) return result;
       if (!result.meta) throw new Error("analytics_result_metadata_missing");
