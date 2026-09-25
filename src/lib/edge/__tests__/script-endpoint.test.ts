@@ -166,9 +166,7 @@ describe("edge script endpoint", () => {
       "application/javascript; charset=utf-8",
     );
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
-    expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=12, s-maxage=12",
-    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(script).toMatch(
       /^"use strict";globalThis\["__insightflare_tracker_runtime_config__"\] = \{"siteId":"site-1","isEUMode":true,"trackQueryParams":false,"trackHash":true,"ignoreDoNotTrack":false,"autoTrackOutboundLinks":true,"performanceSampleRate":100,"sessionWindowMs":1800000,"collectToken":"eyJ/,
     );
@@ -176,6 +174,10 @@ describe("edge script endpoint", () => {
     expect(storage.open).toHaveBeenCalledWith("insightflare-script-cache");
     expect(cache.match).toHaveBeenCalledTimes(1);
     expect(cache.put).toHaveBeenCalledTimes(1);
+    const cachedResponse = cache.put.mock.calls[0]![1] as Response;
+    expect(cachedResponse.headers.get("cache-control")).toBe(
+      "public, max-age=12, s-maxage=12",
+    );
     expect((cache.put.mock.calls[0]![0] as Request).url).toContain(
       "https://insightflare.internal/__script/site-1?eu=1&fp=",
     );
@@ -183,7 +185,10 @@ describe("edge script endpoint", () => {
 
   it("uses cached script responses before rendering a new SDK", async () => {
     const cached = new Response("cached script", {
-      headers: { "x-cache-hit": "1" },
+      headers: {
+        "cache-control": "public, max-age=600, s-maxage=600",
+        "x-cache-hit": "1",
+      },
     });
     const cache = {
       match: vi.fn().mockResolvedValue(cached),
@@ -198,6 +203,7 @@ describe("edge script endpoint", () => {
 
     await expect(response.text()).resolves.toBe("cached script");
     expect(response.headers.get("x-cache-hit")).toBe("1");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(cache.put).not.toHaveBeenCalled();
   });
 
@@ -223,9 +229,7 @@ describe("edge script endpoint", () => {
     await expect(response.text()).resolves.toMatch(
       /^globalThis\["__insightflare_tracker_runtime_config__"\] = \{"siteId":"site-1","isEUMode":true,"trackQueryParams":true,"trackHash":false,"ignoreDoNotTrack":true,"autoTrackOutboundLinks":false,"performanceSampleRate":0,"sessionWindowMs":86400000,"collectToken":"eyJ/,
     );
-    expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=43200, s-maxage=43200",
-    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 
   it("forces strong-mode non-EU scripts and ignores unavailable caches", async () => {
@@ -249,9 +253,7 @@ describe("edge script endpoint", () => {
     );
 
     await expect(response.text()).resolves.toContain('"isEUMode":false');
-    expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=600, s-maxage=600",
-    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 
   it("varies script cache entries by client IP because collect tokens are IP-bound", async () => {

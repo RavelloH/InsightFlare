@@ -127,6 +127,18 @@ function resolveScriptCacheTtlSeconds(env: Env): number {
     ),
   );
 }
+function withPrivateNoStore(response: Response): Response {
+  // The IP-scoped Worker cache may reuse this response, but clients and shared
+  // CDN caches must not store the token-bearing script.
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", "private, no-store");
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 export async function handleTrackerScriptRequest(
   request: Request,
   env: Env,
@@ -179,7 +191,7 @@ export async function handleTrackerScriptRequest(
   if (scriptCache) {
     const cached = await scriptCache.match(cacheKey);
     if (cached) {
-      return cached;
+      return withPrivateNoStore(cached);
     }
   }
 
@@ -224,5 +236,5 @@ export async function handleTrackerScriptRequest(
     await scriptCache.put(cacheKey, response.clone());
   }
 
-  return response;
+  return withPrivateNoStore(response);
 }
