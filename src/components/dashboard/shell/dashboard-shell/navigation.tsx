@@ -85,11 +85,11 @@ export const DASHBOARD_SCROLLBAR_OPTIONS = {
   },
 } satisfies PartialOptions;
 export const SIDEBAR_COLLAPSE_SECTION_CLASS =
-  "max-h-20 overflow-hidden transition-[max-height,opacity,transform,padding,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:max-h-0 group-data-[collapsible=icon]:-translate-y-1 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:opacity-0";
+  "max-h-20 overflow-hidden transition-[max-height,opacity,transform,padding,margin] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:max-h-0 group-data-[collapsible=icon]:-translate-y-1 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:opacity-0";
 export const SIDEBAR_COLLAPSE_SEPARATOR_CLASS =
-  "transition-[opacity,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-data-[collapsible=icon]:my-0 group-data-[collapsible=icon]:opacity-0";
+  "transition-[opacity,margin] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none group-data-[collapsible=icon]:my-0 group-data-[collapsible=icon]:opacity-0";
 export const SIDEBAR_COLLAPSE_MARGIN_CLASS =
-  "transition-[margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-data-[collapsible=icon]:mb-0";
+  "transition-[margin] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none group-data-[collapsible=icon]:mb-0";
 export function analyticsTabLabel(
   item: {
     key: AnalyticsNavKey;

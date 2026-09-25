@@ -1,6 +1,7 @@
 import * as React from "react";
 import { RiSideBarLine } from "@remixicon/react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { motion, useReducedMotion } from "motion/react";
 import { Slot } from "radix-ui";
 
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,7 @@ const SIDEBAR_WIDTH_MOBILE = "18rem";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 const SIDEBAR_TRANSITION_CLASS =
-  "duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+  "duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none";
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed";
@@ -217,8 +218,7 @@ function Sidebar({
       <div
         data-slot="sidebar-gap"
         className={cn(
-          "relative w-(--sidebar-width) bg-transparent transition-[width]",
-          SIDEBAR_TRANSITION_CLASS,
+          "relative w-(--sidebar-width) bg-transparent",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -311,10 +311,25 @@ function SidebarRail({
   );
 }
 
-function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
+function SidebarInset({
+  className,
+  ...props
+}: React.ComponentProps<typeof motion.main>) {
+  const { state, isMobile } = useSidebar();
+  const reduceMotion = useReducedMotion();
+
   return (
-    <main
+    <motion.main
+      layout={isMobile ? false : "position"}
+      initial={false}
+      transition={{
+        layout: {
+          duration: reduceMotion ? 0 : 0.38,
+          ease: [0.4, 0, 0.2, 1],
+        },
+      }}
       data-slot="sidebar-inset"
+      data-sidebar-state={state}
       className={cn(
         "relative flex min-w-0 flex-1 flex-col bg-background md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className,
@@ -478,7 +493,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center justify-start gap-2 overflow-hidden rounded-none p-2 text-left text-xs ring-sidebar-ring outline-hidden transition-[width,height,padding,gap,background-color,color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:block [&>span:last-child]:min-w-0 [&>span:last-child]:max-w-[12rem] [&>span:last-child]:truncate [&>span:last-child]:transition-[max-width,opacity,transform] [&>span:last-child]:duration-300 [&>span:last-child]:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:[&>span:last-child]:transition-none group-data-[collapsible=icon]:[&>span:last-child]:max-w-0 group-data-[collapsible=icon]:[&>span:last-child]:translate-x-1 group-data-[collapsible=icon]:[&>span:last-child]:opacity-0",
+  "peer/menu-button group/menu-button flex w-full items-center justify-start gap-2 overflow-hidden rounded-none p-2 text-left text-xs ring-sidebar-ring outline-hidden transition-[width,height,padding,background-color,color] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:block [&>span:last-child]:min-w-0 [&>span:last-child]:max-w-[12rem] [&>span:last-child]:truncate [&>span:last-child]:transition-[max-width,opacity,transform] [&>span:last-child]:duration-[380ms] [&>span:last-child]:ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:[&>span:last-child]:transition-none group-data-[collapsible=icon]:[&>span:last-child]:max-w-0 group-data-[collapsible=icon]:[&>span:last-child]:translate-x-1 group-data-[collapsible=icon]:[&>span:last-child]:opacity-0",
   {
     variants: {
       variant: {

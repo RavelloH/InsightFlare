@@ -58,8 +58,6 @@ export interface TrafficPairBarChartProps {
   comparisonLabel?: string;
 }
 
-const COMPACT_CHART_ANIMATION_DURATION = 220;
-
 const TrafficPairRegularBarChart = memo(function TrafficPairRegularBarChart({
   data,
   locale,
@@ -374,40 +372,46 @@ const TrafficPairCompactBarChart = memo(function TrafficPairCompactBarChart({
       ),
     [data, interval, timeZone, maxPoints, range, dataIsComplete],
   );
+  const paths = useMemo(() => {
+    const maxViews = Math.max(1, ...chartData.map((point) => point.views));
+    const visitors: string[] = [];
+    const remainingViews: string[] = [];
+
+    chartData.forEach((point, index) => {
+      const visitorHeight = (point.visitors / maxViews) * 16;
+      const remainingHeight = (point.nonVisitorViews / maxViews) * 16;
+      const x = index + 0.1;
+      const visitorY = 16 - visitorHeight;
+
+      if (visitorHeight > 0) {
+        visitors.push(
+          `M${x.toFixed(2)} ${visitorY.toFixed(2)}h0.8v${visitorHeight.toFixed(2)}h-0.8Z`,
+        );
+      }
+      if (remainingHeight > 0) {
+        remainingViews.push(
+          `M${x.toFixed(2)} ${(visitorY - remainingHeight).toFixed(2)}h0.8v${remainingHeight.toFixed(2)}h-0.8Z`,
+        );
+      }
+    });
+
+    return {
+      visitors: visitors.join(""),
+      remainingViews: remainingViews.join(""),
+    };
+  }, [chartData]);
 
   return (
-    <ChartContainer
-      className={cn(
-        "h-4 w-full aspect-auto [&_.recharts-bar-rectangles]:transition-[filter] [&_.recharts-bar-rectangles]:duration-200 motion-reduce:[&_.recharts-bar-rectangles]:transition-none",
-        loading
-          ? "[&_.recharts-bar-rectangles]:brightness-50"
-          : "[&_.recharts-bar-rectangles]:brightness-100",
-        className,
-      )}
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      className={cn("block h-4 !w-full", loading && "brightness-50", className)}
+      viewBox={`0 0 ${Math.max(1, chartData.length)} 16`}
+      preserveAspectRatio="none"
     >
-      <BarChart
-        data={chartData}
-        margin={{ left: 0, right: 0, top: 0, bottom: 0 }}
-        barGap={0}
-      >
-        <Bar
-          dataKey="visitors"
-          stackId="traffic"
-          fill="var(--color-chart-3)"
-          radius={0}
-          isAnimationActive
-          animationDuration={COMPACT_CHART_ANIMATION_DURATION}
-        />
-        <Bar
-          dataKey="nonVisitorViews"
-          stackId="traffic"
-          fill="var(--color-chart-1)"
-          radius={0}
-          isAnimationActive
-          animationDuration={COMPACT_CHART_ANIMATION_DURATION}
-        />
-      </BarChart>
-    </ChartContainer>
+      <path d={paths.visitors} fill="var(--color-chart-3)" />
+      <path d={paths.remainingViews} fill="var(--color-chart-1)" />
+    </svg>
   );
 });
 

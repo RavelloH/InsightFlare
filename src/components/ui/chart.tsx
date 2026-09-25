@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
+// Resize the chart once after the sidebar's layout motion has settled.
+const CHART_RESIZE_DEBOUNCE_MS = 600;
 
 export type ChartConfig = {
   [k in string]: {
@@ -67,10 +69,20 @@ function ChartContainer({
 }: ChartContainerProps) {
   const uniqueId = React.useId();
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const chartRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!onChartResize) return;
+    const bounds = chartRef.current?.getBoundingClientRect();
+    if (bounds && bounds.width > 0 && bounds.height > 0) {
+      onChartResize(bounds.width, bounds.height);
+    }
+  }, [onChartResize]);
 
   return (
     <ChartContext.Provider value={{ config }}>
       <div
+        ref={chartRef}
         data-slot="chart"
         data-chart={chartId}
         className={cn(
@@ -80,7 +92,10 @@ function ChartContainer({
         {...props}
       >
         <ChartStyle id={chartId} config={config} />
-        <ResponsiveContainer onResize={onChartResize}>
+        <ResponsiveContainer
+          debounce={CHART_RESIZE_DEBOUNCE_MS}
+          onResize={onChartResize}
+        >
           {children}
         </ResponsiveContainer>
       </div>

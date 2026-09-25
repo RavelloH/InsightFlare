@@ -58,9 +58,9 @@ function userInitial(name: string, username: string): string {
   return first ? first.toUpperCase() : "?";
 }
 const triggerBaseClass =
-  "flex h-10 w-full items-center justify-center bg-transparent text-sidebar-foreground outline-hidden transition-[background-color,color,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none hover:bg-sidebar-accent/60 focus-visible:ring-1 focus-visible:ring-sidebar-ring";
+  "absolute top-0 flex h-10 w-1/3 items-center justify-center bg-transparent text-sidebar-foreground outline-hidden transition-[left,top,width,background-color,color,border-color] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[collapsible=icon]:w-full motion-reduce:transition-none hover:bg-sidebar-accent/60 focus-visible:ring-1 focus-visible:ring-sidebar-ring";
 const footerGridClass =
-  "m-0 grid w-full grid-cols-3 p-0 transition-[grid-template-columns] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-data-[collapsible=icon]:grid-cols-1";
+  "relative m-0 h-10 w-full p-0 transition-[height] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[collapsible=icon]:h-[7.5rem] motion-reduce:transition-none";
 export const SidebarFooterMenus = memo(function SidebarFooterMenus({
   locale,
   switchToEn,
@@ -129,7 +129,7 @@ export const SidebarFooterMenus = memo(function SidebarFooterMenus({
         <DropdownMenuTrigger
           className={cn(
             triggerBaseClass,
-            "border-r border-sidebar-border group-data-[collapsible=icon]:border-r-0 group-data-[collapsible=icon]:border-b",
+            "left-0 border-r border-sidebar-border group-data-[collapsible=icon]:border-r-0 group-data-[collapsible=icon]:border-b",
           )}
           aria-label={messages.common.theme}
         >
@@ -170,7 +170,7 @@ export const SidebarFooterMenus = memo(function SidebarFooterMenus({
         <DropdownMenuTrigger
           className={cn(
             triggerBaseClass,
-            "border-r border-sidebar-border group-data-[collapsible=icon]:border-r-0 group-data-[collapsible=icon]:border-b",
+            "left-1/3 border-r border-sidebar-border group-data-[collapsible=icon]:left-0 group-data-[collapsible=icon]:top-10 group-data-[collapsible=icon]:border-r-0 group-data-[collapsible=icon]:border-b",
           )}
           aria-label={messages.common.language}
         >
@@ -196,7 +196,10 @@ export const SidebarFooterMenus = memo(function SidebarFooterMenus({
 
       <DropdownMenu>
         <DropdownMenuTrigger
-          className={cn(triggerBaseClass, "relative")}
+          className={cn(
+            triggerBaseClass,
+            "left-2/3 group-data-[collapsible=icon]:left-0 group-data-[collapsible=icon]:top-20",
+          )}
           aria-label={messages.common.account}
         >
           <span className="relative inline-flex size-6 items-center justify-center">

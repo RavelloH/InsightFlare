@@ -519,9 +519,9 @@ export function DashboardShell({
             <Link
               href="https://github.com/RavelloH/InsightFlare"
               target="_black"
-              className="block"
+              className="relative block h-10 overflow-hidden"
             >
-              <div className="py-2 group-data-[collapsible=icon]:hidden">
+              <div className="absolute inset-y-0 left-0 flex items-center whitespace-nowrap transition-[opacity,transform] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[collapsible=icon]:-translate-x-2 group-data-[collapsible=icon]:opacity-0 motion-reduce:transition-none">
                 <p className="flex items-center justify-center gap-2 text-xl text-primary md:justify-start">
                   <span>{messages.appName}</span>
                   <span className="text-muted-foreground">
@@ -529,7 +529,7 @@ export function DashboardShell({
                   </span>
                 </p>
               </div>
-              <div className="hidden size-8 items-center justify-center group-data-[collapsible=icon]:flex">
+              <div className="absolute inset-y-0 left-0 flex w-8 items-center justify-center opacity-0 transition-[opacity,transform] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[collapsible=icon]:opacity-100 motion-reduce:transition-none">
                 <Image
                   src="/android-chrome-192x192.png"
                   alt={messages.appName}

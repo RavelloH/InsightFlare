@@ -1,3 +1,4 @@
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   RiArrowDownLine,
   RiArrowRightSLine,
@@ -29,6 +30,38 @@ import {
   formatChangeRate,
   SITE_CARD_MAX_TREND_POINTS,
 } from "./model";
+
+function DeferredSiteChart({ children }: { children: ReactNode }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setReady(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        setReady(true);
+        observer.disconnect();
+      },
+      { rootMargin: "240px 0px" },
+    );
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} className="h-[180px] w-full">
+      {ready ? children : null}
+    </div>
+  );
+}
+
 export function TeamManagementSitesPanel() {
   const {
     activeTab,
@@ -137,18 +170,20 @@ export function TeamManagementSitesPanel() {
                   </CardHeader>
 
                   <CardContent className="space-y-4">
-                    <TrafficPairBarChart
-                      data={trend}
-                      locale={locale}
-                      timeZone={dashboardWindow.timeZone}
-                      interval={dashboardWindow.interval}
-                      viewsLabel={messages.common.views}
-                      visitorsLabel={messages.common.visitors}
-                      axisDateFormat="compact"
-                      maxPoints={SITE_CARD_MAX_TREND_POINTS}
-                      loading={dashboardQuery.isFetching}
-                      range={dashboardWindow}
-                    />
+                    <DeferredSiteChart>
+                      <TrafficPairBarChart
+                        data={trend}
+                        locale={locale}
+                        timeZone={dashboardWindow.timeZone}
+                        interval={dashboardWindow.interval}
+                        viewsLabel={messages.common.views}
+                        visitorsLabel={messages.common.visitors}
+                        axisDateFormat="compact"
+                        maxPoints={SITE_CARD_MAX_TREND_POINTS}
+                        loading={dashboardQuery.isFetching}
+                        range={dashboardWindow}
+                      />
+                    </DeferredSiteChart>
 
                     <div className="grid grid-cols-2 gap-x-4 gap-y-4 text-[11px] sm:grid-cols-3">
                       <div className="space-y-1">

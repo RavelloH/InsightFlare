@@ -45,10 +45,9 @@ interface SidebarSiteDetailsProps {
     visitors: string;
   };
 }
-const SIDEBAR_EXPAND_CHART_DELAY_MS = 220;
-const SIDEBAR_COLLAPSE_CHART_DELAY_MS = 300;
+const SIDEBAR_EXPAND_CHART_DELAY_MS = 380;
 const SITE_ROW_DETAIL_CLASS =
-  "grid min-w-0 max-w-[20rem] flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:translate-x-1 group-data-[collapsible=icon]:opacity-0";
+  "grid min-w-0 max-w-[20rem] flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 overflow-hidden transition-[max-width,opacity,transform] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:translate-x-1 group-data-[collapsible=icon]:opacity-0";
 function buildSitePath(
   locale: Locale,
   teamSlug: string,
@@ -119,6 +118,30 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
     sidebarState === "collapsed"
       ? `sidebar-site:${site.id}:collapsed`
       : `sidebar-site:${site.id}:expanded:${metrics?.views ?? "pending"}:${metrics?.visitors ?? "pending"}`;
+  const chartTransitionKey = useMemo(() => {
+    if (!shouldRenderCharts) return "hidden";
+
+    const trendKey = trend
+      .map(({ timestampMs, views, visitors }) =>
+        [timestampMs, views, visitors].join(":"),
+      )
+      .join("|");
+
+    return [
+      dashboardWindow.from,
+      dashboardWindow.to,
+      dashboardWindow.interval,
+      dashboardWindow.timeZone,
+      trendKey,
+    ].join(":");
+  }, [
+    dashboardWindow.from,
+    dashboardWindow.interval,
+    dashboardWindow.timeZone,
+    dashboardWindow.to,
+    shouldRenderCharts,
+    trend,
+  ]);
 
   const siteLink = (
     <SidebarMenuButton asChild isActive={isActive} className="h-8 rounded-none">
@@ -135,20 +158,29 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
             <span className="block truncate text-xs">{site.name}</span>
           </div>
           <div className="min-w-0">
-            {shouldRenderCharts ? (
-              <TrafficPairBarChart
-                data={trend}
-                locale={locale}
-                timeZone={dashboardWindow.timeZone}
-                interval={dashboardWindow.interval}
-                viewsLabel={viewsLabel}
-                visitorsLabel={visitorsLabel}
-                compact
-                dataIsComplete
-              />
-            ) : (
-              <div className="h-4 w-full" />
-            )}
+            <AutoTransition
+              type="crossFade"
+              transitionKey={chartTransitionKey}
+              duration={0.2}
+              className="h-4 w-full"
+            >
+              {shouldRenderCharts ? (
+                <div className="h-4 w-full">
+                  <TrafficPairBarChart
+                    data={trend}
+                    locale={locale}
+                    timeZone={dashboardWindow.timeZone}
+                    interval={dashboardWindow.interval}
+                    viewsLabel={viewsLabel}
+                    visitorsLabel={visitorsLabel}
+                    compact
+                    dataIsComplete
+                  />
+                </div>
+              ) : (
+                <div key="hidden" aria-hidden="true" className="h-4 w-full" />
+              )}
+            </AutoTransition>
           </div>
         </div>
       </Link>
@@ -200,10 +232,8 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
     }
 
     if (sidebarState === "collapsed") {
-      const timeout = setTimeout(() => {
-        setShouldRenderCharts(false);
-      }, SIDEBAR_COLLAPSE_CHART_DELAY_MS);
-      return () => clearTimeout(timeout);
+      setShouldRenderCharts(false);
+      return;
     }
 
     const timeout = setTimeout(() => {
