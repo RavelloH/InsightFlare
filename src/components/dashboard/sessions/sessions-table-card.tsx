@@ -627,7 +627,7 @@ export const SessionsTableCard = memo(function SessionsTableCard({
   error = false,
   appendError = false,
   hasMore = false,
-  skeletonRows = 25,
+  skeletonRows = 50,
   onLoadMore,
   visibleColumnIds = SESSION_TABLE_COLUMN_IDS,
 }: SessionsTableCardProps) {

@@ -9,7 +9,7 @@ import {
   type EventRecordSortState,
 } from "./types";
 export const EVENT_PAGE_SIZE = 50;
-export const EVENT_SKELETON_ROWS = 25;
+export const EVENT_SKELETON_ROWS = EVENT_PAGE_SIZE;
 export const FIELD_TREE_CHILD_TRANSITION = {
   initial: { opacity: 0, y: -6 },
   animate: { opacity: 1, y: 0 },

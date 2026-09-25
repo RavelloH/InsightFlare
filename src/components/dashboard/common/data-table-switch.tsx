@@ -18,6 +18,7 @@ interface DataTableSwitchProps {
   colSpan: number;
   header: ReactNode;
   rows: ReactNode;
+  loadingRows?: ReactNode;
   footer?: ReactNode;
   contentKey?: string | number;
   animate?: boolean;
@@ -30,6 +31,7 @@ export function DataTableSwitch({
   colSpan,
   header,
   rows,
+  loadingRows,
   footer,
   contentKey,
   animate = true,
@@ -38,17 +40,19 @@ export function DataTableSwitch({
     <Table key="loading">
       <TableHeader>{header}</TableHeader>
       <TableBody>
-        <TableRow>
-          <TableCell
-            colSpan={colSpan}
-            className="h-32 text-center text-muted-foreground"
-          >
-            <span className="inline-flex items-center gap-2">
-              <Spinner className="size-4" />
-              {loadingLabel}
-            </span>
-          </TableCell>
-        </TableRow>
+        {loadingRows ?? (
+          <TableRow>
+            <TableCell
+              colSpan={colSpan}
+              className="h-32 text-center text-muted-foreground"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Spinner className="size-4" />
+                {loadingLabel}
+              </span>
+            </TableCell>
+          </TableRow>
+        )}
       </TableBody>
     </Table>
   ) : hasContent ? (

@@ -48,17 +48,22 @@ vi.mock("@/components/dashboard/common/data-table-switch", () => ({
     loading,
     hasContent,
     header,
+    loadingRows,
     rows,
     footer,
   }: {
     loading: boolean;
     hasContent: boolean;
     header: ReactNode;
+    loadingRows?: ReactNode;
     rows: ReactNode;
     footer?: ReactNode;
   }) =>
     loading ? (
-      <div data-testid="loading">Loading</div>
+      <table data-testid="loading">
+        <thead>{header}</thead>
+        <tbody>{loadingRows}</tbody>
+      </table>
     ) : hasContent ? (
       <table>
         <thead>{header}</thead>
@@ -169,6 +174,18 @@ describe("TabbedDataTableCard loader contract", () => {
     root = undefined;
     client = undefined;
     container = undefined;
+  });
+
+  it("renders a loading skeleton row for each item in the requested page", () => {
+    const loader = vi.fn(
+      (_options: TabbedDataTableLoaderOptions<TestTab, TestSortKey>) =>
+        new Promise<TabbedDataTablePage<TestRow>>(() => undefined),
+    );
+    ({ client, container, root } = renderTable(loader));
+
+    expect(
+      container!.querySelectorAll('[data-testid="loading"] tbody tr'),
+    ).toHaveLength(2);
   });
 
   it("renders rows in the order returned by the loader", async () => {

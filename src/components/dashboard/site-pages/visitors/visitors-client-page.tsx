@@ -72,7 +72,7 @@ interface VisitorsClientPageProps {
 }
 export type VisitorRow = VisitorsData["data"]["items"][number];
 export const VISITOR_PAGE_SIZE = 50;
-export const VISITOR_SKELETON_ROWS = 25;
+export const VISITOR_SKELETON_ROWS = VISITOR_PAGE_SIZE;
 export const VISITOR_TABLE_COLUMNS_STORAGE_KEY =
   "insightflare:analytics-table-columns:visitors";
 export type SortDirection = "asc" | "desc";

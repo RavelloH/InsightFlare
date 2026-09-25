@@ -42,7 +42,7 @@ interface SessionsClientPageProps {
   pathname: string;
 }
 const SESSION_PAGE_SIZE = 50;
-const SESSION_SKELETON_ROWS = 25;
+const SESSION_SKELETON_ROWS = SESSION_PAGE_SIZE;
 const DEFAULT_SESSION_SORT: SessionSortState = {
   key: "startedAt",
   direction: "desc",

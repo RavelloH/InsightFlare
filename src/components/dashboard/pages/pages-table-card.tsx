@@ -68,7 +68,6 @@ export const PAGES_TABLE_COLUMNS_STORAGE_KEY =
   "insightflare:analytics-table-columns:pages:v2";
 export const LEGACY_PAGES_TABLE_COLUMNS_STORAGE_KEY =
   "insightflare:analytics-table-columns:pages";
-const PAGE_SKELETON_ROWS = 16;
 const PAGES_PER_SESSION_FORMATTERS = new Map<Locale, Intl.NumberFormat>();
 const CHANGE_FORMATTERS = new Map<Locale, Intl.NumberFormat>();
 export type PagesSortState = {
@@ -162,6 +161,7 @@ interface PagesTableCardProps {
   appendError: boolean;
   appendErrorContent: ReactNode;
   hasMore: boolean;
+  skeletonRows: number;
   onLoadMore: () => void;
 }
 function SortIndicator({
@@ -314,13 +314,13 @@ function PageSkeletonRow({
         <TableCell key={columnId}>
           {columnId === "trend" ? (
             <Skeleton className="h-4 w-full" />
+          ) : columnId === "page" ? (
+            <div className="space-y-0">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-4 w-36" />
+            </div>
           ) : (
-            <Skeleton
-              className={cn(
-                "h-4",
-                columnId === "page" ? "w-48" : "ml-auto w-20",
-              )}
-            />
+            <Skeleton className={cn("h-4", "ml-auto w-20")} />
           )}
         </TableCell>
       ))}
@@ -356,6 +356,7 @@ export function PagesTableCard({
   appendError,
   appendErrorContent,
   hasMore,
+  skeletonRows,
   onLoadMore,
 }: PagesTableCardProps) {
   const headers = useMemo(() => {
@@ -663,7 +664,7 @@ export function PagesTableCard({
           <PageSkeletonRow columnIds={visibleColumnIds} />
         )}
         getRowKey={(row) => row.pathname}
-        skeletonRows={PAGE_SKELETON_ROWS}
+        skeletonRows={skeletonRows}
         columnCount={visibleColumnIds.length}
         loading={loading}
         loadingMore={loadingMore}

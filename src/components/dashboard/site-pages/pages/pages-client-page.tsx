@@ -332,6 +332,7 @@ export function PagesClientPage({
         appendError={appendError}
         appendErrorContent={messages.pages.loadMoreError}
         hasMore={hasMore}
+        skeletonRows={PAGE_LIST_PAGE_SIZE}
         onLoadMore={loadNextPage}
       />
 

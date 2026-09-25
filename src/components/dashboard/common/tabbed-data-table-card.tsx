@@ -690,7 +690,7 @@ function TabbedDataTableCardImpl<
         <TableCell className="whitespace-normal p-0 align-top">
           <div className="px-4 py-2">
             <Skeleton
-              className={cn("h-4", rowIndex === 1 ? "w-[72%]" : "w-[58%]")}
+              className={cn("h-5", rowIndex === 1 ? "w-[72%]" : "w-[58%]")}
             />
           </div>
         </TableCell>
@@ -702,6 +702,40 @@ function TabbedDataTableCardImpl<
                   ? loadMoreSentinelRef
                   : undefined
               }
+              className={cn(
+                "flex justify-end px-2 py-2",
+                columnIndex === metricColumns.length - 1 && "px-4",
+              )}
+            >
+              <Skeleton className="h-4 w-14" />
+            </div>
+          </TableCell>
+        ))}
+      </TableRow>
+    ));
+  }
+
+  function renderInitialLoadingRows(
+    tab: TTab,
+    metricColumns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[],
+    source: "card" | "search",
+  ) {
+    return Array.from({ length: Math.max(1, limit) }, (_, rowIndex) => (
+      <TableRow
+        key={`initial-loading-skeleton-${source}-${tab}-${rowIndex}`}
+        aria-hidden="true"
+        className="pointer-events-none hover:bg-transparent"
+      >
+        <TableCell className="whitespace-normal p-0 align-top">
+          <div className="px-4 py-2 leading-5">
+            <Skeleton
+              className={cn("h-5", rowIndex % 3 === 1 ? "w-[72%]" : "w-[58%]")}
+            />
+          </div>
+        </TableCell>
+        {metricColumns.map((column, columnIndex) => (
+          <TableCell key={column.key} className="p-0">
+            <div
               className={cn(
                 "flex justify-end px-2 py-2",
                 columnIndex === metricColumns.length - 1 && "px-4",
@@ -931,6 +965,15 @@ function TabbedDataTableCardImpl<
             emptyLabel={emptyLabel}
             colSpan={searchColSpan}
             header={renderTableHeader(activeSearchTab, activeSearchColumns)}
+            loadingRows={
+              searchLoading
+                ? renderInitialLoadingRows(
+                    activeSearchTab,
+                    activeSearchColumns,
+                    "search",
+                  )
+                : undefined
+            }
             rows={renderRows(
               activeSearchTab,
               searchedRows,
@@ -1159,6 +1202,11 @@ function TabbedDataTableCardImpl<
           emptyLabel={emptyLabel}
           colSpan={colSpan}
           header={renderTableHeader(activeTab, activeColumns)}
+          loadingRows={
+            activeLoading
+              ? renderInitialLoadingRows(activeTab, activeColumns, "card")
+              : undefined
+          }
           rows={renderRows(activeTab, activeRows, activeColumns, "card")}
           footer={
             activeHasMore ? renderLoadMoreRows(activeTab, activeColumns) : null
