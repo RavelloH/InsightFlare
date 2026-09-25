@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type ApiV1WireResult,
   createApiV1AnalyticsResultAdapter,
   executeApiV1Query,
 } from "@/lib/api-v1/analytics/query-application";
+import type { AnalyticsFilterValuesData } from "@/lib/api-v1/contract/wire";
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import type { ApiV1CanonicalResult } from "@/lib/edge/analytics/application/query-operation-map";
 import { canonicalQueryOperationFor } from "@/lib/edge/analytics/application/query-operation-map";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
@@ -14,6 +17,36 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { InvalidCursorError } from "@/lib/pagination";
+
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends <
+    Value,
+  >() => Value extends Right ? 1 : 2
+    ? true
+    : false;
+type Assert<Value extends true> = Value;
+
+type _FilterValuesWireResultUsesFlattenedResponseShape = Assert<
+  Equal<
+    ApiV1WireResult<"site.analytics.filterValues">,
+    AnalyticsFilterValuesData
+  >
+>;
+type _FilterValuesWireResultDoesNotExposeCanonicalDataWrapper = Assert<
+  Equal<
+    "data" extends keyof ApiV1WireResult<"site.analytics.filterValues">
+      ? true
+      : false,
+    false
+  >
+>;
+type _OverviewWireResultRemainsCanonical = Assert<
+  Equal<
+    ApiV1WireResult<"site.analytics.overview">,
+    ApiV1CanonicalResult<"site.analytics.overview">
+  >
+>;
+
 const context = siteQueryContext("site-1", "api-v1");
 const time = createQueryTime(1_000, 2_000, "UTC", 2_000);
 const overviewData = {

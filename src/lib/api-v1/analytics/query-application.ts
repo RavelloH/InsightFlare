@@ -1,3 +1,12 @@
+import type {
+  AnalyticsEventFieldsData,
+  AnalyticsEventFieldValuesData,
+  AnalyticsEventsTimeseriesData,
+  AnalyticsEventTypeDetailData,
+  AnalyticsEventTypesData,
+  AnalyticsFilterValuesData,
+  AnalyticsRetentionCohortsData,
+} from "@/lib/api-v1/contract/wire";
 import type { OperationResultCache } from "@/lib/edge/analytics/application/cache";
 import type { OperationCachePolicy } from "@/lib/edge/analytics/application/cache";
 import type { AnalyticsOperationId } from "@/lib/edge/analytics/application/operation-registry";
@@ -19,6 +28,32 @@ import type {
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { paginationBinding } from "@/lib/pagination";
+
+type ApiV1FunnelAnalysisWireValue<Value> = Value extends {
+  readonly funnel: infer Funnel;
+}
+  ? Omit<Value, "funnel"> & { readonly funnel: NonNullable<Funnel> }
+  : Value;
+
+interface ApiV1WireResultOverrides {
+  readonly "site.analytics.filterValues": AnalyticsFilterValuesData;
+  readonly "site.analytics.retentionCohorts": AnalyticsRetentionCohortsData;
+  readonly "site.analytics.eventsTimeseries": AnalyticsEventsTimeseriesData;
+  readonly "site.analytics.eventTypes": AnalyticsEventTypesData;
+  readonly "site.analytics.eventFields": AnalyticsEventFieldsData;
+  readonly "site.analytics.eventFieldValues": AnalyticsEventFieldValuesData;
+  readonly "site.analytics.eventTypeDetail": AnalyticsEventTypeDetailData;
+  readonly "site.analytics.funnelAnalysis": ApiV1FunnelAnalysisWireValue<
+    ApiV1CanonicalResult<"site.analytics.funnelAnalysis">
+  > | null;
+}
+
+/** The protocol result after API v1's operation-specific serialization. */
+export type ApiV1WireResult<Operation extends AnalyticsOperationId> =
+  Operation extends keyof ApiV1WireResultOverrides
+    ? ApiV1WireResultOverrides[Operation]
+    : ApiV1CanonicalResult<Operation>;
+
 export interface ApiV1QueryInvocation<Operation extends AnalyticsOperationId> {
   readonly operation: Operation;
   readonly context: QueryInput["context"];
@@ -153,7 +188,14 @@ function serviceError<Result>(
     error: { kind: "operation-not-allowed", operation },
   };
 }
-function serializeApiV1Result(operation: AnalyticsOperationId, value: unknown) {
+function serializeApiV1Result<Operation extends AnalyticsOperationId>(
+  operation: Operation,
+  value: ApiV1CanonicalResult<Operation>,
+): ApiV1WireResult<Operation>;
+function serializeApiV1Result(
+  operation: AnalyticsOperationId,
+  value: unknown,
+): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const result = value as Record<string, unknown>;
   if (
@@ -309,7 +351,7 @@ export async function executeApiV1Query<Operation extends AnalyticsOperationId>(
   cache: OperationResultCache | undefined,
   invocation: ApiV1QueryInvocation<Operation>,
   executionContext: QueryExecutionContext,
-): Promise<AnalyticsServiceResult<ApiV1CanonicalResult<Operation>>> {
+): Promise<AnalyticsServiceResult<ApiV1WireResult<Operation>>> {
   const time = queryTime(invocation.query, executionContext);
   if (!time) {
     return {
@@ -377,13 +419,10 @@ export async function executeApiV1Query<Operation extends AnalyticsOperationId>(
       },
     };
   }
-  const protocolResult = result.ok
+  const protocolResult: AnalyticsResult<ApiV1WireResult<Operation>> = result.ok
     ? {
         ...result,
-        data: serializeApiV1Result(
-          invocation.operation,
-          result.data,
-        ) as ApiV1CanonicalResult<Operation>,
+        data: serializeApiV1Result(invocation.operation, result.data),
       }
     : result;
   return (
@@ -402,7 +441,7 @@ export function createApiV1QueryApplicationAdapter(
     execute<Operation extends AnalyticsOperationId>(
       invocation: ApiV1QueryInvocation<Operation>,
       executionContext: QueryExecutionContext,
-    ): Promise<AnalyticsServiceResult<ApiV1CanonicalResult<Operation>>> {
+    ): Promise<AnalyticsServiceResult<ApiV1WireResult<Operation>>> {
       return executeApiV1Query(cache, invocation, executionContext);
     },
   };
@@ -418,7 +457,7 @@ export function createApiV1AnalyticsResultAdapter(
       invocation: ApiV1QueryInvocation<Operation>,
       executionContext: QueryExecutionContext,
     ): Promise<
-      AnalyticsServiceResult<AnalyticsResult<ApiV1CanonicalResult<Operation>>>
+      AnalyticsServiceResult<AnalyticsResult<ApiV1WireResult<Operation>>>
     > {
       const result = await adapter.execute(invocation, executionContext);
       if (!result.ok) return result;
