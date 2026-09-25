@@ -211,6 +211,64 @@ describe("useAnalyticsTableColumns", () => {
     ).toBe("id,time,site");
   });
 
+  it("inserts newly added columns beside their metric and respects default visibility", () => {
+    const storageKey = "test:analytics-table-columns-new-columns";
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        version: 1,
+        order: ["page", "views", "visitors", "bounceRate"],
+        visible: ["page", "views", "visitors", "bounceRate"],
+      }),
+    );
+
+    function Probe() {
+      const tableColumns = useAnalyticsTableColumns({
+        storageKey,
+        columns: [
+          { id: "page", label: "Page", required: true },
+          { id: "views", label: "Views" },
+          { id: "viewsChange", label: "Views change", defaultVisible: true },
+          { id: "visitors", label: "Visitors" },
+          {
+            id: "visitorsChange",
+            label: "Visitors change",
+            defaultVisible: true,
+          },
+          { id: "bounceRate", label: "Bounce rate" },
+          {
+            id: "bounceRateChange",
+            label: "Bounce rate change",
+            defaultVisible: false,
+          },
+        ] as const,
+      });
+
+      return createElement(
+        "div",
+        null,
+        createElement(
+          "span",
+          { "data-testid": "order" },
+          tableColumns.orderedIds.join(","),
+        ),
+        createElement(
+          "span",
+          { "data-testid": "visible" },
+          tableColumns.visibleIds.join(","),
+        ),
+      );
+    }
+
+    act(() => root.render(createElement(Probe)));
+    expect(container.querySelector('[data-testid="order"]')?.textContent).toBe(
+      "page,views,viewsChange,visitors,visitorsChange,bounceRate,bounceRateChange",
+    );
+    expect(
+      container.querySelector('[data-testid="visible"]')?.textContent,
+    ).toBe("page,views,viewsChange,visitors,visitorsChange,bounceRate");
+  });
+
   it("commits column visibility and reordered drafts from the settings dialog", () => {
     const onOrderChange = vi.fn();
     const onVisibilityChange = vi.fn();

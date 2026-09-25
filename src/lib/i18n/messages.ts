@@ -1,5 +1,6 @@
 // @generated from src/i18n/*.yaml by scripts/i18n-check.
 import type { Locale } from "./config";
+
 export interface AppMessages {
   appName: string;
   navigation: {
@@ -582,6 +583,9 @@ export interface AppMessages {
     title: string;
     subtitle: string;
     pagesPerSession: string;
+    changePercentColumnLabel: string;
+    changePointsColumnLabel: string;
+    percentagePointSuffix: string;
     untitled: string;
     empty: string;
     loadError: string;
@@ -2717,6 +2721,7 @@ export interface AppMessages {
     description: string;
   };
 }
+
 const enMessages = {
   appName: "InsightFlare",
   navigation: {
@@ -3400,6 +3405,9 @@ const enMessages = {
     title: "Pages",
     subtitle: "Most visited paths in the selected range.",
     pagesPerSession: "Pages / Session",
+    changePercentColumnLabel: "{metric} change (%)",
+    changePointsColumnLabel: "{metric} change (pp)",
+    percentagePointSuffix: "pp",
     untitled: "Untitled Page",
     empty: "No page data matches the current filters.",
     loadError: "Failed to load page data. Please try again later.",
@@ -5738,6 +5746,7 @@ const enMessages = {
     description: "You have access to multiple teams. Choose where to continue.",
   },
 } as AppMessages;
+
 const zhMessages = {
   appName: "InsightFlare",
   navigation: {
@@ -6406,6 +6415,9 @@ const zhMessages = {
     title: "页面分析",
     subtitle: "选定时间范围内访问最多的路径。",
     pagesPerSession: "每会话页面数",
+    changePercentColumnLabel: "{metric}变化（%）",
+    changePointsColumnLabel: "{metric}变化（百分点）",
+    percentagePointSuffix: "个百分点",
     untitled: "未命名页面",
     empty: "当前筛选条件下暂无页面数据。",
     loadError: "页面数据加载失败，请稍后重试。",
@@ -8670,6 +8682,7 @@ const zhMessages = {
     description: "你当前可访问多个团队，请先选择要进入的团队。",
   },
 } as AppMessages;
+
 const jaMessages = {
   appName: "InsightFlare",
   navigation: {
@@ -9354,6 +9367,9 @@ const jaMessages = {
     title: "ページ",
     subtitle: "選択範囲で最も訪問されたパスです。",
     pagesPerSession: "ページ / セッション",
+    changePercentColumnLabel: "{metric}の変化（%）",
+    changePointsColumnLabel: "{metric}の変化（ポイント）",
+    percentagePointSuffix: "ポイント",
     untitled: "無題のページ",
     empty: "現在のフィルターに一致するページデータはありません。",
     loadError:
@@ -11693,11 +11709,13 @@ const jaMessages = {
       "複数のチームにアクセスできます。続行するチームを選択してください。",
   },
 } as AppMessages;
+
 const DICTIONARIES: Record<Locale, AppMessages> = {
   en: enMessages,
   zh: zhMessages,
   ja: jaMessages,
 };
+
 export function getMessages(locale: Locale): AppMessages {
   return DICTIONARIES[locale];
 }

@@ -30,6 +30,7 @@ export interface AnalyticsTableColumnDefinition<TId extends string = string> {
   id: TId;
   label: string;
   required?: boolean;
+  defaultVisible?: boolean;
 }
 export interface AnalyticsTableColumnSettingsLabels {
   action: string;
@@ -90,31 +91,57 @@ function normalizeColumnState(
   if (!stored) {
     return {
       order: defaultOrder,
-      visible: defaultOrder,
+      visible: columns
+        .filter((column) => column.required || column.defaultVisible !== false)
+        .map((column) => column.id),
     };
   }
 
-  const order = [...(stored?.order ?? []), ...defaultOrder].filter(
-    (id, index, values) => {
-      return availableIds.has(id) && values.indexOf(id) === index;
-    },
+  const order = (stored.order ?? []).filter(
+    (id, index, values) => availableIds.has(id) && values.indexOf(id) === index,
   );
-  const storedIds = new Set([
-    ...(stored?.order ?? []),
-    ...(stored?.visible ?? []),
-  ]);
-  const newColumnIds = defaultOrder.filter((id) => !storedIds.has(id));
+  for (const [index, id] of defaultOrder.entries()) {
+    if (order.includes(id)) continue;
+
+    const previousId = defaultOrder
+      .slice(0, index)
+      .reverse()
+      .find((candidate) => order.includes(candidate));
+    if (previousId) {
+      order.splice(order.indexOf(previousId) + 1, 0, id);
+      continue;
+    }
+
+    const nextId = defaultOrder
+      .slice(index + 1)
+      .find((candidate) => order.includes(candidate));
+    if (nextId) order.splice(order.indexOf(nextId), 0, id);
+    else order.push(id);
+  }
+  const storedIds = new Set([...stored.order, ...stored.visible]);
+  const newVisibleColumnIds = columns
+    .filter(
+      (column) => !storedIds.has(column.id) && column.defaultVisible !== false,
+    )
+    .map((column) => column.id);
   const visible = [
-    ...(stored?.visible ?? []),
+    ...stored.visible,
     ...requiredIds,
-    ...newColumnIds,
+    ...newVisibleColumnIds,
   ].filter((id, index, values) => {
     return availableIds.has(id) && values.indexOf(id) === index;
   });
 
   return {
     order,
-    visible: visible.length > 0 ? visible : defaultOrder,
+    visible:
+      visible.length > 0
+        ? visible
+        : columns
+            .filter(
+              (column) => column.required || column.defaultVisible !== false,
+            )
+            .map((column) => column.id),
   };
 }
 export function useAnalyticsTableColumns<TId extends string = string>({
@@ -127,7 +154,10 @@ export function useAnalyticsTableColumns<TId extends string = string>({
   const schemaKey = useMemo(
     () =>
       columns
-        .map((column) => `${column.id}:${column.required ? "required" : ""}`)
+        .map(
+          (column) =>
+            `${column.id}:${column.required ? "required" : ""}:${column.defaultVisible === false ? "hidden" : "visible"}`,
+        )
         .join("|"),
     [columns],
   );

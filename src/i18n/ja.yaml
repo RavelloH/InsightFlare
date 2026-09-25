@@ -601,6 +601,9 @@ pages:
   title: ページ
   subtitle: 選択範囲で最も訪問されたパスです。
   pagesPerSession: ページ / セッション
+  changePercentColumnLabel: "{metric}の変化（%）"
+  changePointsColumnLabel: "{metric}の変化（ポイント）"
+  percentagePointSuffix: ポイント
   untitled: 無題のページ
   empty: 現在のフィルターに一致するページデータはありません。
   loadError: ページデータを読み込めませんでした。後でもう一度お試しください。

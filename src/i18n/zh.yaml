@@ -600,6 +600,9 @@ pages:
   title: 页面分析
   subtitle: 选定时间范围内访问最多的路径。
   pagesPerSession: 每会话页面数
+  changePercentColumnLabel: "{metric}变化（%）"
+  changePointsColumnLabel: "{metric}变化（百分点）"
+  percentagePointSuffix: 个百分点
   untitled: 未命名页面
   empty: 当前筛选条件下暂无页面数据。
   loadError: 页面数据加载失败，请稍后重试。

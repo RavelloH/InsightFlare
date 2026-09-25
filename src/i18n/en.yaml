@@ -603,6 +603,9 @@ pages:
   title: Pages
   subtitle: Most visited paths in the selected range.
   pagesPerSession: Pages / Session
+  changePercentColumnLabel: "{metric} change (%)"
+  changePointsColumnLabel: "{metric} change (pp)"
+  percentagePointSuffix: pp
   untitled: Untitled Page
   empty: No page data matches the current filters.
   loadError: Failed to load page data. Please try again later.
