@@ -40,6 +40,7 @@ import {
 } from "@/lib/edge/analytics/contract";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import { filterUsesRequestClock } from "@/lib/filter-contract/filter-types";
 import { sha256Hex } from "@/lib/sha256";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_JSON_DEPTH = 16;
@@ -91,6 +92,9 @@ export async function aggregateCacheKey(input: {
       from: input.time.range.startMs,
       to: input.time.range.endExclusiveMs,
       timeZone: input.time.reportingTimeZone,
+      ...(filterUsesRequestClock(input.filters)
+        ? { capturedAtMs: input.time.capturedAtMs }
+        : {}),
       filters: input.filters,
       resolvedScope,
       scopePlan,

@@ -3,11 +3,13 @@ import {
   FILTER_OPERATOR_IDS,
   type FilterCondition,
   type FilterDocument,
+  type FilterDurationUnit,
   type FilterExpression,
   type FilterFieldId,
   type FilterFieldRegistry,
   type FilterOperator,
-  type FilterTarget,
+  type FilterTargetExpression,
+  type FilterTimeAnchorTarget,
   FilterValidationError,
   type FilterValue,
   normalizeFilterDocument,
@@ -24,13 +26,23 @@ export const FILTER_DSL_OPERATOR_IDS = FILTER_OPERATOR_IDS;
 
 /** Syntax guidance shared by API discovery and the dashboard editor. */
 export const FILTER_DSL_SYNTAX = {
-  condition: "<field> <operator> <value>",
+  condition: "<target-expression> <operator> <condition-value>",
+  targetExpression:
+    "A registered field, entity root, selector, projection, reducer, arithmetic or temporal expression.",
   boolean:
     "Combine expressions with <expression> AND <expression> or <expression> OR <expression>; prefix an expression with NOT to negate it.",
   grouping:
     "Use parentheses for precedence, or use AND(<expression>) and OR(<expression>) for an explicit single-child group.",
-  value: "A JSON string, number, boolean, or null.",
+  value:
+    "A JSON scalar; time conditions may also use @now, @range.start, or @range.end with elapsed duration offsets.",
   list: "Use [<value>, ...] for in and notIn values.",
+  selector: "Select a collection with <collection> { <filter-expression> }.",
+  reducer:
+    "Use count, first, last, nth, sum, avg, min, max, or countDistinct with a collection.",
+  temporal:
+    "Use bucket(collection.time, <calendar-period>), periods(collection, <calendar-period>), or window(collection, anchor, [<start-offset>, <end-offset>]).",
+  relation:
+    "Use sequence([...]), adjacent(sequence), and without(sequence, collection) inside an explicit session or visitor selector.",
   payloadTarget:
     'Use event.payload("<json-pointer>") for event payload fields.',
   caseSensitivity:
@@ -124,6 +136,17 @@ type Token =
   | (TokenBase & { readonly kind: "identifier"; readonly value: string })
   | (TokenBase & { readonly kind: "string"; readonly value: string })
   | (TokenBase & { readonly kind: "number"; readonly value: number })
+  | (TokenBase & {
+      readonly kind: "duration";
+      readonly value: {
+        readonly amount: number;
+        readonly unit: FilterDurationUnit;
+      };
+    })
+  | (TokenBase & {
+      readonly kind: "time-anchor";
+      readonly value: FilterTimeAnchorTarget;
+    })
   | (TokenBase & { readonly kind: "boolean"; readonly value: boolean })
   | (TokenBase & {
       readonly kind:
@@ -133,6 +156,9 @@ type Token =
         | "list-open"
         | "list-close"
         | "comma"
+        | "dot"
+        | "brace-open"
+        | "brace-close"
         | "end";
     });
 
@@ -152,7 +178,7 @@ interface NodeLocation {
 }
 
 interface ParsedTarget {
-  readonly target: FilterTarget;
+  readonly target: FilterTargetExpression;
   readonly location: {
     readonly target: Span;
     readonly path?: Span;
@@ -160,7 +186,7 @@ interface ParsedTarget {
 }
 
 interface ParsedValue {
-  readonly value: FilterValue | readonly FilterValue[];
+  readonly value: FilterCondition["value"];
   readonly span: Span;
   readonly elements: readonly Span[];
 }
@@ -215,6 +241,46 @@ function tokenize(source: string): readonly Token[] {
 
     const start = index;
     const character = source[index]!;
+    const timeAnchor = rest.match(
+      /^@(now|range\.start|range\.end)(?:([+-])(\d+(?:\.\d+)?)(ms|mo|s|m|h|d|w|y))?/i,
+    );
+    if (timeAnchor) {
+      const anchor =
+        timeAnchor[1]!.toLowerCase() as FilterTimeAnchorTarget["anchor"];
+      const sign = timeAnchor[2] === "-" ? -1 : 1;
+      const amount = timeAnchor[3] ? Number(timeAnchor[3]) * sign : undefined;
+      const unit = timeAnchor[4]?.toLowerCase() as
+        FilterDurationUnit | undefined;
+      const end = start + timeAnchor[0].length;
+      tokens.push({
+        kind: "time-anchor",
+        value: {
+          kind: "time-anchor",
+          anchor,
+          ...(amount === undefined || unit === undefined
+            ? {}
+            : { offset: { kind: "duration", amount, unit } }),
+        },
+        start,
+        end,
+      });
+      index = end;
+      continue;
+    }
+    const duration = rest.match(/^(-?\d+(?:\.\d+)?)(ms|mo|s|m|h|d|w|y)\b/i);
+    if (duration) {
+      tokens.push({
+        kind: "duration",
+        value: {
+          amount: Number(duration[1]),
+          unit: duration[2]!.toLowerCase() as FilterDurationUnit,
+        },
+        start,
+        end: start + duration[0].length,
+      });
+      index += duration[0].length;
+      continue;
+    }
     if (character === '"') {
       let end = index + 1;
       while (end < source.length) {
@@ -314,13 +380,24 @@ function tokenize(source: string): readonly Token[] {
 
     const punctuation: Record<
       string,
-      "open" | "close" | "list-open" | "list-close" | "comma" | undefined
+      | "open"
+      | "close"
+      | "list-open"
+      | "list-close"
+      | "comma"
+      | "dot"
+      | "brace-open"
+      | "brace-close"
+      | undefined
     > = {
       "(": "open",
       ")": "close",
       "[": "list-open",
       "]": "list-close",
       ",": "comma",
+      ".": "dot",
+      "{": "brace-open",
+      "}": "brace-close",
     };
     const kind = punctuation[character];
     if (kind) {
@@ -346,6 +423,7 @@ class Parser {
     private readonly source: string,
     private readonly tokens: readonly Token[],
     private readonly locations: WeakMap<object, NodeLocation>,
+    private readonly registry: FilterFieldRegistry,
   ) {}
 
   parse(): FilterExpression {
@@ -504,8 +582,8 @@ class Parser {
   }
 
   private condition(): FilterCondition {
-    const fieldToken = this.expectIdentifier();
-    const parsedTarget = this.target(fieldToken);
+    const fieldToken = this.current;
+    const parsedTarget = this.targetExpression();
     const operatorToken = this.expectIdentifier();
     const operator = OPERATORS.get(operatorToken.value.toLowerCase());
     if (!operator) {
@@ -553,12 +631,34 @@ class Parser {
     return expression;
   }
 
-  private target(
-    fieldToken: Token & { readonly kind: "identifier" },
-  ): ParsedTarget {
-    if (fieldToken.value === "event.payload") {
-      const open = this.consume("open");
-      if (open) {
+  private targetExpression(): ParsedTarget {
+    const start = this.current.start;
+    let target = this.primaryTarget();
+    let path: Span | undefined = this.locations.get(target)?.path;
+    let end = this.tokens[this.index - 1]?.end ?? start;
+    for (;;) {
+      if (this.consume("brace-open")) {
+        const predicate = this.orExpression();
+        const close = this.consume("brace-close");
+        if (!close) {
+          throw sourceError(
+            this.source,
+            "missing_selector_brace",
+            this.current.start,
+            "Missing closing brace for selector.",
+            this.current.end - this.current.start,
+            "`}`",
+          );
+        }
+        target = { kind: "selector", collection: target, predicate };
+        end = close.end;
+        this.locations.set(target, { span: { start, end } });
+        continue;
+      }
+      if (!this.consume("dot")) break;
+      const member = this.expectIdentifier();
+      end = member.end;
+      if (member.value === "payload" && this.consume("open")) {
         if (this.current.kind !== "string") {
           throw tokenError(
             this.source,
@@ -576,32 +676,442 @@ class Parser {
             this.source,
             "missing_payload_parenthesis",
             this.current.start,
-            "Missing closing parenthesis for the event payload target.",
+            "Missing closing parenthesis for the payload projection.",
             this.current.end - this.current.start,
             "`)`",
           );
         }
-        return {
-          target: {
-            kind: "event-payload",
-            path: pathToken.value as CanonicalJsonPath,
-          },
-          location: {
-            target: { start: fieldToken.start, end: close.end },
-            path: spanFromToken(pathToken),
-          },
-        };
+        target =
+          target.kind === "entity-root" && target.entity === "event"
+            ? {
+                kind: "event-payload",
+                path: pathToken.value as CanonicalJsonPath,
+              }
+            : {
+                kind: "projection",
+                collection: target,
+                member: "payload",
+                path: pathToken.value as CanonicalJsonPath,
+              };
+        path = spanFromToken(pathToken);
+        end = close.end;
+      } else {
+        const parts = member.value.split(".");
+        for (const part of parts) {
+          target = { kind: "member", object: target, member: part };
+        }
       }
+      this.locations.set(target, {
+        span: { start, end },
+        ...(path ? { path } : {}),
+      });
     }
     return {
-      target: { kind: "field", field: fieldToken.value as FilterFieldId },
-      location: {
-        target: spanFromToken(fieldToken),
-      },
+      target,
+      location: { target: { start, end }, ...(path ? { path } : {}) },
     };
   }
 
+  private primaryTarget(): FilterTargetExpression {
+    if (this.current.kind === "time-anchor") {
+      const target = this.current.value;
+      this.index += 1;
+      return target;
+    }
+    if (this.current.kind === "duration") {
+      const token = this.current;
+      this.index += 1;
+      return { kind: "duration", ...token.value };
+    }
+    if (this.current.kind !== "identifier") {
+      throw tokenError(
+        this.source,
+        this.current.kind === "string"
+          ? "expected_identifier"
+          : "expected_target",
+        this.current,
+        this.current.kind === "string"
+          ? "Expected a filter field or operator identifier."
+          : "Expected a filter target expression.",
+        this.current.kind === "string"
+          ? "an identifier"
+          : "a field, entity root, reducer, or temporal expression",
+      );
+    }
+    const token = this.current;
+    this.index += 1;
+    const name = token.value;
+    const normalized = name.toLowerCase();
+    if (normalized === "event.payload" && this.consume("open")) {
+      const payloadToken = this.tokens[this.index]!;
+      if (payloadToken.kind !== "string") {
+        throw tokenError(
+          this.source,
+          "expected_payload_path",
+          payloadToken,
+          "Expected a JSON pointer string for the event payload target.",
+          'a JSON string such as `"/metadata/value"`',
+        );
+      }
+      const pathToken = payloadToken;
+      this.index += 1;
+      const close = this.consume("close");
+      if (!close) {
+        throw sourceError(
+          this.source,
+          "missing_payload_parenthesis",
+          this.tokens[this.index]!.start,
+          "Missing closing parenthesis for the event payload target.",
+          this.tokens[this.index]!.end - this.tokens[this.index]!.start,
+          "`)`",
+        );
+      }
+      const target: FilterTargetExpression = {
+        kind: "event-payload",
+        path: pathToken.value as CanonicalJsonPath,
+      };
+      this.locations.set(target, {
+        span: { start: token.start, end: close.end },
+        target: { start: token.start, end: close.end },
+        path: spanFromToken(pathToken),
+      });
+      return target;
+    }
+    if (this.tokens[this.index]!.kind === "open") {
+      return this.functionTarget(token);
+    }
+    if (["event", "page", "session", "visitor"].includes(normalized)) {
+      return {
+        kind: "entity-root",
+        entity: normalized as "event" | "page" | "session" | "visitor",
+      };
+    }
+    const contextMatch = /^(sequence|period|bucket)\.(.+)$/i.exec(name);
+    if (contextMatch) {
+      return contextMatch[2]!
+        .split(".")
+        .reduce<FilterTargetExpression>(
+          (object, member) => ({ kind: "member", object, member }),
+          {
+            kind: "context-root",
+            context: contextMatch[1]!.toLowerCase() as
+              "sequence" | "period" | "bucket",
+          },
+        );
+    }
+    if (normalized === "time") {
+      return {
+        kind: "member",
+        object: { kind: "context-root", context: "current" },
+        member: "time",
+      };
+    }
+    if (this.registry.has(name)) {
+      return { kind: "field", field: name as FilterFieldId };
+    }
+    const entityMember = /^(event|page|session|visitor)\.(.+)$/i.exec(name);
+    if (entityMember) {
+      return entityMember[2]!
+        .split(".")
+        .reduce<FilterTargetExpression>(
+          (object, member) => ({ kind: "member", object, member }),
+          {
+            kind: "entity-root",
+            entity: entityMember[1]!.toLowerCase() as
+              "event" | "page" | "session" | "visitor",
+          },
+        );
+    }
+    return { kind: "field", field: name as FilterFieldId };
+  }
+
+  private functionTarget(
+    token: Token & { readonly kind: "identifier" },
+  ): FilterTargetExpression {
+    const name = token.value.toLowerCase();
+    this.index += 1; // opening parenthesis
+    if (name === "sequence") {
+      if (!this.consume("list-open")) {
+        throw tokenError(
+          this.source,
+          "expected_sequence_steps",
+          this.current,
+          "sequence requires a step list.",
+          "`[` ",
+        );
+      }
+      const steps: FilterTargetExpression[] = [];
+      if (this.current.kind !== "list-close") {
+        do {
+          steps.push(this.targetExpression().target);
+        } while (this.consume("comma"));
+      }
+      if (!this.consume("list-close") || !this.consume("close")) {
+        throw sourceError(
+          this.source,
+          "invalid_sequence",
+          this.current.start,
+          "Expected `])` after sequence steps.",
+          this.current.end - this.current.start,
+          "`])`",
+        );
+      }
+      return { kind: "sequence", steps };
+    }
+    if (name === "window") {
+      const collection = this.targetExpression().target;
+      if (!this.consume("comma"))
+        throw tokenError(
+          this.source,
+          "expected_argument_separator",
+          this.current,
+          "window arguments must be separated by commas.",
+          "`,`",
+        );
+      const anchor = this.targetExpression().target;
+      if (!this.consume("comma") || !this.consume("list-open"))
+        throw tokenError(
+          this.source,
+          "expected_duration_range",
+          this.current,
+          "window requires a two-value duration range.",
+          "`[start, end]`",
+        );
+      const startOffset = this.requireDuration();
+      if (!this.consume("comma"))
+        throw tokenError(
+          this.source,
+          "expected_argument_separator",
+          this.current,
+          "Duration bounds must be separated by a comma.",
+          "`,`",
+        );
+      const endOffset = this.requireDuration();
+      if (!this.consume("list-close") || !this.consume("close"))
+        throw tokenError(
+          this.source,
+          "invalid_window",
+          this.current,
+          "Expected `])` after window bounds.",
+          "`])`",
+        );
+      return { kind: "window", collection, anchor, startOffset, endOffset };
+    }
+    if (name === "bucket" || name === "periods") {
+      const collection = this.collectionArgument(
+        this.targetExpression().target,
+      );
+      if (!this.consume("comma")) {
+        throw tokenError(
+          this.source,
+          "expected_argument_separator",
+          this.current,
+          `${token.value} arguments must be separated by commas.`,
+          "`,`",
+        );
+      }
+      const interval = this.requireDuration();
+      if (!this.consume("close")) {
+        throw tokenError(
+          this.source,
+          "missing_closing_parenthesis",
+          this.current,
+          "Missing closing parenthesis.",
+          "`)`",
+        );
+      }
+      return name === "bucket"
+        ? { kind: "bucket", input: collection, interval }
+        : { kind: "periods", collection, interval };
+    }
+    const first = this.targetExpression().target;
+    let second: FilterTargetExpression | undefined;
+    if (this.consume("comma")) {
+      if (name === "nth") {
+        const index = this.current;
+        if (
+          index.kind !== "number" ||
+          !Number.isSafeInteger(index.value) ||
+          index.value < 1
+        ) {
+          throw tokenError(
+            this.source,
+            "invalid_index",
+            index,
+            "nth requires a positive integer index.",
+            "a positive integer",
+          );
+        }
+        this.index += 1;
+        if (!this.consume("close"))
+          throw tokenError(
+            this.source,
+            "missing_closing_parenthesis",
+            this.current,
+            "Missing closing parenthesis.",
+            "`)`",
+          );
+        return {
+          kind: "reducer",
+          reducer: "nth",
+          input: first,
+          index: index.value,
+        };
+      }
+      second = this.targetExpression().target;
+    }
+    if (!this.consume("close")) {
+      throw tokenError(
+        this.source,
+        "missing_closing_parenthesis",
+        this.current,
+        "Missing closing parenthesis.",
+        "`)`",
+      );
+    }
+    if (
+      [
+        "count",
+        "first",
+        "last",
+        "sum",
+        "avg",
+        "min",
+        "max",
+        "countdistinct",
+      ].includes(name)
+    ) {
+      if (second)
+        throw tokenError(
+          this.source,
+          "unexpected_argument",
+          token,
+          `${token.value} accepts one argument.`,
+        );
+      return {
+        kind: "reducer",
+        reducer:
+          name === "countdistinct"
+            ? "countDistinct"
+            : (name as
+                "count" | "first" | "last" | "sum" | "avg" | "min" | "max"),
+        input: this.collectionArgument(first),
+      };
+    }
+    if (["add", "sub", "mul", "div"].includes(name)) {
+      if (!second)
+        throw tokenError(
+          this.source,
+          "missing_argument",
+          token,
+          `${token.value} requires two arguments.`,
+        );
+      return {
+        kind: "arithmetic",
+        operator: name as "add" | "sub" | "mul" | "div",
+        left: first,
+        right: second,
+      };
+    }
+    if (name === "adjacent") {
+      if (second)
+        throw tokenError(
+          this.source,
+          "unexpected_argument",
+          token,
+          "adjacent accepts one sequence.",
+        );
+      return { kind: "adjacent", sequence: first };
+    }
+    if (name === "without") {
+      if (!second)
+        throw tokenError(
+          this.source,
+          "missing_argument",
+          token,
+          "without requires a sequence and an excluded collection.",
+        );
+      return { kind: "without", sequence: first, excluded: second };
+    }
+    throw tokenError(
+      this.source,
+      "unknown_function",
+      token,
+      `Unknown filter expression function ${JSON.stringify(token.value)}.`,
+    );
+  }
+
+  /** In a reducer argument, a legacy entity field names that field's ordered
+   * collection across matching entities (for example page.path or
+   * event.payload("/amount")). Bare v1 conditions keep their existing scalar
+   * target and evaluation behavior. */
+  private collectionArgument(
+    target: FilterTargetExpression,
+  ): FilterTargetExpression {
+    if (target.kind === "event-payload") {
+      return {
+        kind: "projection",
+        collection: { kind: "entity-root", entity: "event" },
+        member: "payload",
+        path: target.path,
+      };
+    }
+    if (target.kind !== "field") return target;
+    const [entity, ...members] = target.field.split(".");
+    if (
+      !members.length ||
+      !["event", "page", "session", "visitor"].includes(entity!)
+    )
+      return target;
+    return members.reduce<FilterTargetExpression>(
+      (object, member) => ({ kind: "member", object, member }),
+      {
+        kind: "entity-root",
+        entity: entity as "event" | "page" | "session" | "visitor",
+      },
+    );
+  }
+
+  private requireDuration(): FilterTargetExpression & {
+    readonly kind: "duration";
+  } {
+    if (this.current.kind !== "duration") {
+      throw tokenError(
+        this.source,
+        "expected_duration",
+        this.current,
+        "Expected a duration literal.",
+        "a duration such as `7d`",
+      );
+    }
+    const token = this.current;
+    this.index += 1;
+    return { kind: "duration", ...token.value };
+  }
+
   private value(): ParsedValue {
+    if (this.current.kind === "time-anchor") {
+      const token = this.current;
+      this.index += 1;
+      return {
+        value: token.value,
+        span: spanFromToken(token),
+        elements: [spanFromToken(token)],
+      };
+    }
+    if (this.current.kind === "duration") {
+      const token = this.current;
+      this.index += 1;
+      const value: FilterTargetExpression = {
+        kind: "duration",
+        ...token.value,
+      };
+      return {
+        value,
+        span: spanFromToken(token),
+        elements: [spanFromToken(token)],
+      };
+    }
     const open = this.consume("list-open");
     if (open) {
       const values: FilterValue[] = [];
@@ -801,7 +1311,12 @@ export function parseFilterDsl(
   }
 
   const locations = new WeakMap<object, NodeLocation>();
-  const root = new Parser(source, tokenize(source), locations).parse();
+  const root = new Parser(
+    source,
+    tokenize(source),
+    locations,
+    registry,
+  ).parse();
   try {
     normalizeFilterDocument(
       {
@@ -826,15 +1341,79 @@ const PRECEDENCE: Readonly<Record<FilterExpression["kind"], number>> = {
   or: 1,
 };
 
+function formatDuration(duration: {
+  readonly amount: number;
+  readonly unit: FilterDurationUnit;
+}): string {
+  return `${duration.amount}${duration.unit}`;
+}
+
+export function formatFilterTargetExpression(
+  target: FilterTargetExpression,
+): string {
+  switch (target.kind) {
+    case "field":
+      return target.field;
+    case "event-payload":
+      return `event.payload(${JSON.stringify(target.path)})`;
+    case "entity-root":
+      return target.entity;
+    case "context-root":
+      return target.context === "current" ? "" : target.context;
+    case "member": {
+      const object = formatFilterTargetExpression(target.object);
+      return object ? `${object}.${target.member}` : target.member;
+    }
+    case "selector":
+      return `${formatFilterTargetExpression(target.collection)} { ${formatExpression(target.predicate)} }`;
+    case "projection":
+      return `${formatFilterTargetExpression(target.collection)}.${target.member}${target.path === undefined ? "" : `(${JSON.stringify(target.path)})`}`;
+    case "reducer":
+      return target.reducer === "nth"
+        ? `nth(${formatFilterTargetExpression(target.input)}, ${target.index})`
+        : `${target.reducer}(${formatFilterTargetExpression(target.input)})`;
+    case "arithmetic":
+      return `${target.operator}(${formatFilterTargetExpression(target.left)}, ${formatFilterTargetExpression(target.right)})`;
+    case "duration":
+      return formatDuration(target);
+    case "time-anchor": {
+      if (!target.offset) return `@${target.anchor}`;
+      const signed = `${target.offset.amount >= 0 ? "+" : ""}${formatDuration(target.offset)}`;
+      return `@${target.anchor}${signed}`;
+    }
+    case "bucket":
+      return `bucket(${formatFilterTargetExpression(target.input)}, ${formatDuration(target.interval)})`;
+    case "window":
+      return `window(${formatFilterTargetExpression(target.collection)}, ${formatFilterTargetExpression(target.anchor)}, [${formatDuration(target.startOffset)}, ${formatDuration(target.endOffset)}])`;
+    case "periods":
+      return `periods(${formatFilterTargetExpression(target.collection)}, ${formatDuration(target.interval)})`;
+    case "sequence":
+      return `sequence([${target.steps.map(formatFilterTargetExpression).join(", ")}])`;
+    case "adjacent":
+      return `adjacent(${formatFilterTargetExpression(target.sequence)})`;
+    case "without":
+      return `without(${formatFilterTargetExpression(target.sequence)}, ${formatFilterTargetExpression(target.excluded)})`;
+  }
+}
+
+function formatConditionValue(value: FilterCondition["value"]): string {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "kind" in value
+  ) {
+    return formatFilterTargetExpression(value as FilterTargetExpression);
+  }
+  return JSON.stringify(value);
+}
+
 function formatCondition(condition: FilterCondition): string {
-  const target =
-    condition.target.kind === "event-payload"
-      ? `event.payload(${JSON.stringify(condition.target.path)})`
-      : condition.target.field;
+  const target = formatFilterTargetExpression(condition.target);
   if (VALUELESS_OPERATORS.has(condition.operator)) {
     return `${target} ${condition.operator}`;
   }
-  return `${target} ${condition.operator} ${JSON.stringify(condition.value)}`;
+  return `${target} ${condition.operator} ${formatConditionValue(condition.value)}`;
 }
 
 function formatExpression(

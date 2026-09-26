@@ -203,6 +203,7 @@ conditionDescription:
   filterNotEmpty: "{field} 不为空"
 filterBuilder:
   fieldGroups:
+    advanced: 高级
     page: 页面
     session: 会话
     visitor: 访客
@@ -213,25 +214,30 @@ filterBuilder:
     event: 事件
     acquisition: 获客
     device: 设备
-    geo: 地理位置
+    geo: 地理
     performance: 性能
     user: 用户
+    time: 时间
+    aggregation: 聚合
+    calculation: 计算
+    relation: 行为关系
   fieldLabels:
     page.path: 页面路径
     page.title: 页面标题
-    page.hostname: 页面主机名
-    page.query: 查询字符串
-    page.hash: Hash 片段
+    page.collection: 页面集合
+    page.hostname: 页面域名
+    page.query: 查询参数
+    page.hash: URL Hash
     session.entryPath: 入口页面
     session.exitPath: 出口页面
     referrer.domain: 来源域名
     referrer.url: 来源 URL
     traffic.channel: 流量渠道
-    utm.source: 活动来源
-    utm.medium: 活动媒介
-    utm.campaign: 活动名称
-    utm.term: 活动关键词
-    utm.content: 活动内容
+    utm.source: UTM 来源
+    utm.medium: UTM 媒介
+    utm.campaign: UTM 活动
+    utm.term: UTM 关键词
+    utm.content: UTM 内容
     client.browser: 浏览器
     client.browserVersion: 浏览器版本
     client.browserEngine: 浏览器引擎
@@ -240,32 +246,55 @@ filterBuilder:
     client.deviceType: 设备类型
     client.language: 语言
     client.screenSize: 屏幕尺寸
-    geo.country: 国家/地区
-    geo.region: 地区
+    geo.country: 国家 / 地区
+    geo.region: 省 / 州 / 地区
     geo.city: 城市
     geo.continent: 大洲
     geo.timeZone: 时区
-    geo.organization: 组织
+    geo.organization: 网络组织
+    event.collection: 事件集合
     event.name: 事件名称
-    event.payload: 事件载荷
-    page.durationMs: 页面时长
+    event.payload: 事件属性
+    page.durationMs: 页面停留时长
+    session.collection: 会话集合
     session.durationMs: 会话时长
-    session.views: 会话浏览量
-    session.events: 会话事件数
-    session.bounce: 跳出会话
-    visitor.sessions: 访客会话数
-    visitor.views: 访客浏览量
-    visitor.events: 访客事件数
-    performance.ttfbMs: 首字节时间
-    performance.fcpMs: 首次内容绘制
-    performance.lcpMs: 最大内容绘制
-    performance.cls: 累积布局偏移
-    performance.inpMs: 交互到下一次绘制
+    session.views: 页面浏览数
+    session.events: 事件数
+    session.bounce: 是否跳出
+    visitor.collection: 访客集合
+    visitor.sessions: 会话数
+    visitor.views: 页面浏览数
+    visitor.events: 事件数
+    performance.ttfbMs: TTFB
+    performance.fcpMs: FCP
+    performance.lcpMs: LCP
+    performance.cls: CLS
+    performance.inpMs: INP
     user.id: 用户 ID
     user.name: 用户名称
     client.screenWidth: 屏幕宽度
     client.screenHeight: 屏幕高度
-    geo.isEU: 欧盟访客
+    geo.isEU: 是否欧盟地区
+    time: 时间
+    bucket(...): 时间分桶
+    window(...): 相对时间窗口
+    periods(...): 周期分组
+    count(...): 计数
+    first(...): 第一个
+    last(...): 最后一个
+    nth(...): 第 N 个
+    countDistinct(...): 去重计数
+    sum(...): 求和
+    avg(...): 平均值
+    min(...): 最小值
+    max(...): 最大值
+    add(...): 相加
+    sub(...): 相减
+    mul(...): 相乘
+    div(...): 相除
+    sequence(...): 行为序列
+    adjacent(...): 连续序列
+    without(...): 排除中间行为
   operatorLabels:
     eq: 等于
     neq: 不等于
@@ -331,6 +360,55 @@ filterBuilder:
   expressionHelpFieldType: 类型
   expressionHelpFieldOperators: 操作符
   expressionHelpOtherFields: 其他
+  advancedEditor:
+    not: 非
+    removeNot: 移除“非”
+    matchAll: 全部匹配
+    matchAny: 任意匹配
+    addCondition: 添加条件
+    addGroup: 添加分组
+    wrapInNot: 添加“非”
+    remove: 移除
+    condition: 条件
+    literalValue: 字面值
+    compareWithExpression: 与表达式比较
+    valuesAsJson: 筛选值（JSON）
+    scalarArrayHelp: 输入由 JSON 标量值组成的数组。
+    chooseValue: 选择一个值
+    filterValue: 筛选值
+    durationAmount: 时间长度
+    jsonPointer: 事件载荷 JSON 指针
+    jsonPointerPlaceholder: /属性/路径
+    entityMember: 实体成员
+    nthIndex: 第 N 项索引
+    nestedTooDeep: 表达式嵌套过深。
+    applyOffset: 应用偏移量
+    removeStep: 移除步骤
+    addStep: 添加序列步骤
+    excludedActivity: 排除的活动
+    coreRelation: 高级筛选
+    coreRelationExpression: 高级筛选表达式
+    structuredEditor: 高级筛选控件
+    unavailableForObservation: Goal 和 Funnel 步骤不支持高级筛选。
+    targetKinds:
+      time: 时间
+      field: 字段
+      event-payload: 事件载荷
+      entity-root: 实体集合
+      context-root: 上下文
+      member: 成员
+      selector: 选择器
+      projection: 投影
+      reducer: 归约器
+      arithmetic: 算术表达式
+      duration: 时间长度
+      time-anchor: 相对时间
+      bucket: 时间桶
+      window: 时间窗口
+      periods: 周期集合
+      sequence: 序列
+      adjacent: 相邻序列
+      without: 排除活动的序列
   savedFiltersLoading: 正在获取已保存的筛选...
   noSavedFilter: 不使用已保存的筛选
   systemPresets: 系统预设
@@ -2440,7 +2518,8 @@ requestObservation:
   notConfiguredTitle: 尚未配置 Analytics Engine 读取凭据
   notConfiguredDescription: 请先在系统设置中填写 Cloudflare Account ID 和 API Token，用于读取请求观测 Analytics Engine 数据集。
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用
-  analyticsEngineDisabledDescription: 当前部署未绑定 Analytics Engine，因为 Cloudflare
+  analyticsEngineDisabledDescription:
+    当前部署未绑定 Analytics Engine，因为 Cloudflare
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用，然后重新部署以采集请求观测数据。
   openAnalyticsEngine: 打开 Analytics Engine
   openSettings: 打开设置
@@ -2548,7 +2627,8 @@ systemSettings:
   analyticsEngineDeleteFailed: 删除分析引擎配置失败。
   analyticsEngineDeleteConfirm: 确认删除分析引擎读取凭据吗？删除后，依赖 Analytics Engine 的功能将显示为未配置。
   analyticsEngineDisabledTitle: Analytics Engine 尚未启用
-  analyticsEngineDisabledDescription: 当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare
+  analyticsEngineDisabledDescription:
+    当前部署已自动禁用 Analytics Engine 绑定，因为 Cloudflare
     账户尚未启用 Analytics Engine。请先在 Cloudflare 中启用 Analytics Engine，然后重新部署
     InsightFlare 以激活相关分析功能。
   analyticsEngineDisabledHint: 在启用 Analytics Engine 并重新部署 Worker 前，分析引擎设置不可修改。

@@ -1,5 +1,6 @@
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
+import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 
@@ -31,6 +32,7 @@ export function createD1SiteProviderRegistry(options: D1SiteRuntimeBindings) {
   registerTechnologyProviders(registry, options);
   registerFunnelProvider(registry, options);
   registerGoalProviders(registry, options);
+  registry.useMiddleware(d1AdvancedFilterMiddleware(options.env, diagnostics));
 
   return registry;
 }

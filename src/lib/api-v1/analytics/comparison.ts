@@ -66,6 +66,7 @@ import {
 import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
 import { buildCalendarBucketPlan } from "@/lib/edge/analytics/contract/helpers";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
+import { filterUsesRequestClock } from "@/lib/filter-contract/filter-types";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_COMPARISON_RANGE_MS = 366 * 24 * 60 * 60 * 1000;
 const comparisonCache = new OperationResultCache();
@@ -443,6 +444,9 @@ function cacheQuery(input: {
         to: input.current.to,
         timeZone: input.current.time.reportingTimeZone,
         filters: input.current.filters,
+        ...(filterUsesRequestClock(input.current.filters)
+          ? { capturedAtMs: input.current.time.capturedAtMs }
+          : {}),
         ...currentScope,
       },
       reference: {
@@ -450,6 +454,9 @@ function cacheQuery(input: {
         to: input.reference.to,
         timeZone: input.reference.time.reportingTimeZone,
         filters: input.reference.filters,
+        ...(filterUsesRequestClock(input.reference.filters)
+          ? { capturedAtMs: input.reference.time.capturedAtMs }
+          : {}),
         ...referenceScope,
       },
       selection: input.selection,
@@ -635,6 +642,7 @@ async function prepareSiteReport(
       response: errorResponse("missing_scope", executionContext.request),
     };
   }
+  const request = executionContext.request;
   const filters = await Promise.all([
     resolveSiteFilter(
       siteId,
@@ -649,7 +657,6 @@ async function prepareSiteReport(
       executionContext.signal,
     ),
   ]);
-  const request = executionContext.request;
   if (filters.some((value) => value instanceof Error)) {
     const errorIndex = filters.findIndex((value) => value instanceof Error);
     const error = filters[errorIndex] as Error;

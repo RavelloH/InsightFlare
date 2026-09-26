@@ -8,6 +8,18 @@
 
 export interface DemoQueryFilters {
   filterDocument?: FilterDocument;
+  /** Candidate entities remain bounded separately from historical evaluation. */
+  candidateRange?: {
+    readonly startMs: number;
+    readonly endExclusiveMs: number;
+  };
+  /** Optional historical window for Core/Relation evaluation. */
+  evaluationRange?: {
+    readonly startMs: number;
+    readonly endExclusiveMs: number;
+  };
+  reportingTimeZone?: string;
+  capturedAtMs?: number;
   /** Resolved by the canonical operation registry before demo execution. */
   scope?: FilterScope;
   country?: string;

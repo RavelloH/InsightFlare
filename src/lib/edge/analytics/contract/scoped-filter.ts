@@ -2,11 +2,15 @@ import {
   analyticsFilterDefinition,
   type FilterFieldSource,
 } from "@/lib/filter-contract/filter-registry";
+import { prepareFilterTimeRange } from "@/lib/filter-contract/filter-time-range";
+import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
 import type {
   FilterCondition,
   FilterDocument,
   FilterExpression,
+  FilterTargetExpression,
 } from "@/lib/filter-contract/filters";
+import { isLegacyFilterTarget } from "@/lib/filter-contract/filters";
 import {
   copyFilterScopePreferenceMetadata,
   type FilterScope,
@@ -49,6 +53,19 @@ export interface ScopedFilterPlan {
     "matching-observations" | "matching-sessions" | "matching-visitors";
   readonly requiredSources: ReadonlySet<ObservationSource>;
   readonly requiresRawSource: boolean;
+  /** Resolved once by the D1 runtime for Core/Relation documents. */
+  readonly advancedMatches?: AdvancedFilterMatches;
+}
+
+export interface AdvancedFilterIdentity {
+  readonly siteId: string;
+  readonly id: string;
+}
+
+export interface AdvancedFilterMatches {
+  readonly entityIds?: readonly AdvancedFilterIdentity[];
+  readonly visitIds?: readonly AdvancedFilterIdentity[];
+  readonly eventIds?: readonly AdvancedFilterIdentity[];
 }
 
 export interface ScopedFilteringCapability {
@@ -129,6 +146,9 @@ function entityExpression(
 ): EntitySetExpression | null {
   if (!expression) return null;
   if (expression.kind === "condition") {
+    if (!isLegacyFilterTarget(expression.target)) {
+      throw new Error("unsupported_filter_expression");
+    }
     return { kind: "condition", condition: expression };
   }
   if (expression.kind === "not") {
@@ -186,15 +206,63 @@ function requiredSources(
   expression: FilterExpression | null,
 ): ReadonlySet<ObservationSource> {
   const sources = new Set<ObservationSource>();
+  const visitTarget = (target: FilterTargetExpression): void => {
+    if (target.kind === "event-payload") {
+      sources.add("payload");
+      return;
+    }
+    if (target.kind === "field") {
+      const definition = analyticsFilterDefinition(target.field);
+      if (definition) sources.add(definition.source);
+      return;
+    }
+    switch (target.kind) {
+      case "member":
+        visitTarget(target.object);
+        break;
+      case "selector":
+        visitTarget(target.collection);
+        visit(target.predicate);
+        break;
+      case "projection":
+        visitTarget(target.collection);
+        if (target.member === "payload") sources.add("payload");
+        break;
+      case "reducer":
+        visitTarget(target.input);
+        break;
+      case "arithmetic":
+        visitTarget(target.left);
+        visitTarget(target.right);
+        break;
+      case "bucket":
+        visitTarget(target.input);
+        break;
+      case "window":
+        visitTarget(target.collection);
+        visitTarget(target.anchor);
+        break;
+      case "periods":
+        visitTarget(target.collection);
+        break;
+      case "sequence":
+        target.steps.forEach(visitTarget);
+        break;
+      case "adjacent":
+        visitTarget(target.sequence);
+        break;
+      case "without":
+        visitTarget(target.sequence);
+        visitTarget(target.excluded);
+        break;
+      default:
+        break;
+    }
+  };
   const visit = (item: FilterExpression | null): void => {
     if (!item) return;
     if (item.kind === "condition") {
-      if (item.target.kind === "event-payload") {
-        sources.add("payload");
-        return;
-      }
-      const definition = analyticsFilterDefinition(item.target.field);
-      if (definition) sources.add(definition.source);
+      visitTarget(item.target);
       return;
     }
     if (item.kind === "not") {
@@ -268,6 +336,7 @@ export function createScopedFilterPlan(
   const expression = filters.root;
   const sources = requiredSources(expression);
   const factKinds = factEntityKindsForFilter(expression);
+  const hasAdvancedExpressions = filterDocumentUsesAdvancedExpressions(filters);
   const entityKind =
     scope === "session"
       ? "session"
@@ -276,16 +345,26 @@ export function createScopedFilterPlan(
         : factKinds.has("session")
           ? "session"
           : "visitor";
-  const usesEntityMembership = scope !== "event" || factKinds.size > 0;
+  const mode =
+    scope === "event"
+      ? hasAdvancedExpressions
+        ? "observation"
+        : factKinds.size > 0
+          ? "entity"
+          : "observation"
+      : "entity";
+  const usesEntityMembership = mode === "entity";
   return {
     scope,
-    mode: usesEntityMembership ? "entity" : "observation",
+    mode,
     membership: !usesEntityMembership
       ? { kind: "observation", expression }
       : {
           kind: "entity",
           entityKind,
-          expression: entityExpression(expression),
+          expression: hasAdvancedExpressions
+            ? null
+            : entityExpression(expression),
         },
     expansion:
       scope === "event"
@@ -310,8 +389,12 @@ export function prepareScopedQuery(
       operation === "channels") &&
     isComparisonQuery(query)
   ) {
-    return prepareScopedComparisonQuery(operation, query);
+    return prepareScopedComparisonQuery(
+      operation,
+      prepareComparisonFilterTimeRanges(query),
+    );
   }
+  query = prepareFilterTimeWindow(query);
   const requestedScope = normalizeFilterScopePreference(
     query.scopePreference ?? filterScopePreferenceFromDocument(query.filters),
   );
@@ -350,6 +433,66 @@ export function prepareScopedQuery(
         siteIds,
       },
     ),
+  };
+}
+
+function prepareFilterTimeWindow(query: QueryInput): QueryInput {
+  if (!("time" in query) || !query.time || !query.filters?.root) return query;
+  const time = query.time as QueryTime;
+  const prepared = prepareFilterTimeRange(
+    query.filters,
+    time.range,
+    time.capturedAtMs,
+  );
+  if (!prepared.evaluationRange) return query;
+  if (!filterDocumentUsesAdvancedExpressions(prepared.filters))
+    throw new TypeError("filter_time_range_requires_advanced_expression");
+  return {
+    ...query,
+    filters: prepared.filters,
+    time: {
+      ...time,
+      evaluationRange: {
+        startMs: prepared.evaluationRange
+          .startMs as QueryTime["range"]["startMs"],
+        endExclusiveMs: prepared.evaluationRange
+          .endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
+      },
+    },
+  } as QueryInput;
+}
+
+function prepareComparisonFilterTimeRanges(
+  query: ComparisonQueryInput,
+): ComparisonQueryInput {
+  const prepareSide = (side: ComparisonSideInput): ComparisonSideInput => {
+    if (!side.filters?.root) return side;
+    const prepared = prepareFilterTimeRange(
+      side.filters,
+      side.time.range,
+      side.time.capturedAtMs,
+    );
+    if (!prepared.evaluationRange) return side;
+    if (!filterDocumentUsesAdvancedExpressions(prepared.filters))
+      throw new TypeError("filter_time_range_requires_advanced_expression");
+    return {
+      ...side,
+      filters: prepared.filters,
+      time: {
+        ...side.time,
+        evaluationRange: {
+          startMs: prepared.evaluationRange
+            .startMs as QueryTime["range"]["startMs"],
+          endExclusiveMs: prepared.evaluationRange
+            .endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
+        },
+      },
+    };
+  };
+  return {
+    ...query,
+    current: prepareSide(query.current),
+    reference: prepareSide(query.reference),
   };
 }
 

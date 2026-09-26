@@ -11,7 +11,9 @@ import type {
   CanonicalQuery,
   CanonicalResult,
   EntitySetExpression,
+  FilterExpression,
   FilterScope,
+  FilterTargetExpression,
   QueryInput,
   QueryOperation,
   QueryTime,
@@ -21,6 +23,7 @@ import { ComparisonDomainError } from "@/lib/edge/analytics/contract/comparison"
 import { prepareScopedQuery } from "@/lib/edge/analytics/contract/scoped-filter";
 import { InvalidCursorError } from "@/lib/pagination";
 
+import { AnalyticsProviderDomainError } from "./errors";
 import type { AnalyticsProviderRegistry } from "./provider-registry";
 import type { TypedQueryProviderResult } from "./provider-registry";
 import { validateTypedQueryInput } from "./query-validation";
@@ -142,9 +145,53 @@ function scopeAwareCostInput(
   query: QueryInput,
 ): QueryCostInput | undefined {
   const plan: ScopedFilterPlan | undefined = query.scopePlan;
-  if (!input || !plan) return input;
+  const dimensions = advancedFilterCostDimensions(query.filters?.root);
+  const times: QueryTime[] = [];
+  const record = query as QueryInput & Record<string, unknown>;
+  const directTime = record.time;
+  if (directTime && typeof directTime === "object" && "range" in directTime)
+    times.push(directTime as QueryTime);
+  for (const sideName of ["current", "reference"] as const) {
+    const side = record[sideName];
+    if (
+      side &&
+      typeof side === "object" &&
+      "time" in side &&
+      (side as { time?: unknown }).time &&
+      typeof (side as { time: unknown }).time === "object"
+    )
+      times.push((side as { time: QueryTime }).time);
+  }
+  const candidateRangeMs = Math.max(
+    1,
+    ...times.map((time) => time.range.endExclusiveMs - time.range.startMs),
+  );
+  const evaluationRangeMs = Math.max(
+    1,
+    ...times.map((time) => {
+      const range = time.evaluationRange ?? time.range;
+      return range.endExclusiveMs - range.startMs;
+    }),
+  );
+  const base: QueryCostInput = {
+    ...(input ?? { rangeMs: candidateRangeMs }),
+    rangeMs: input?.rangeMs ?? candidateRangeMs,
+    evaluationRangeMs,
+    expressionDepth: Math.max(input?.expressionDepth ?? 1, dimensions.depth),
+    relationStepCount: Math.max(
+      input?.relationStepCount ?? 1,
+      dimensions.relationSteps,
+    ),
+    relationMatchScale: Math.max(
+      input?.relationMatchScale ?? 1,
+      dimensions.matchScale,
+    ),
+    filterComplexity: Math.max(input?.filterComplexity ?? 1, dimensions.nodes),
+    sideCount: Math.max(input?.sideCount ?? 1, times.length || 1),
+  };
+  if (!plan) return base;
   return {
-    ...input,
+    ...base,
     scope: plan.scope,
     requiredSourceCount: Math.max(1, plan.requiredSources.size),
     entityAlgebraComplexity:
@@ -154,6 +201,78 @@ function scopeAwareCostInput(
     eventPayloadComplexity: plan.requiredSources.has("payload") ? 2 : 1,
     requiresRawSource: plan.requiresRawSource,
   };
+}
+
+function advancedFilterCostDimensions(
+  expression: FilterExpression | null | undefined,
+) {
+  const result = { depth: 1, nodes: 0, relationSteps: 1, matchScale: 1 };
+  const targetVisit = (target: FilterTargetExpression, depth: number): void => {
+    result.depth = Math.max(result.depth, depth);
+    result.nodes += 1;
+    switch (target.kind) {
+      case "member":
+        targetVisit(target.object, depth + 1);
+        break;
+      case "selector":
+        targetVisit(target.collection, depth + 1);
+        expressionVisit(target.predicate, depth + 1);
+        break;
+      case "projection":
+        targetVisit(target.collection, depth + 1);
+        break;
+      case "reducer":
+        targetVisit(target.input, depth + 1);
+        break;
+      case "arithmetic":
+        targetVisit(target.left, depth + 1);
+        targetVisit(target.right, depth + 1);
+        break;
+      case "bucket":
+        targetVisit(target.input, depth + 1);
+        break;
+      case "window":
+        targetVisit(target.collection, depth + 1);
+        targetVisit(target.anchor, depth + 1);
+        break;
+      case "periods":
+        targetVisit(target.collection, depth + 1);
+        break;
+      case "sequence":
+        result.relationSteps += target.steps.length;
+        result.matchScale = Math.min(
+          1_000_000,
+          result.matchScale *
+            Math.max(1, target.steps.length - 1) ** target.steps.length,
+        );
+        target.steps.forEach((step) => targetVisit(step, depth + 1));
+        break;
+      case "adjacent":
+        targetVisit(target.sequence, depth + 1);
+        break;
+      case "without":
+        targetVisit(target.sequence, depth + 1);
+        targetVisit(target.excluded, depth + 1);
+        break;
+    }
+  };
+  const expressionVisit = (item: FilterExpression, depth: number): void => {
+    result.depth = Math.max(result.depth, depth);
+    result.nodes += 1;
+    if (item.kind === "condition") {
+      targetVisit(item.target, depth + 1);
+      if (
+        item.value &&
+        typeof item.value === "object" &&
+        !Array.isArray(item.value) &&
+        "kind" in item.value
+      )
+        targetVisit(item.value as FilterTargetExpression, depth + 1);
+    } else if (item.kind === "not") expressionVisit(item.child, depth + 1);
+    else item.children.forEach((child) => expressionVisit(child, depth + 1));
+  };
+  if (expression) expressionVisit(expression, 1);
+  return result;
 }
 class UncacheableResult extends Error {
   constructor(readonly value: unknown) {
@@ -229,7 +348,12 @@ export class TypedQueryApplicationService {
         ok: false,
         error: {
           kind: "invalid-input",
-          issues: [{ path: "scope", code }],
+          issues: [
+            {
+              path: code.startsWith("filter_time_") ? "filters" : "scope",
+              code,
+            },
+          ],
         },
       };
     }
@@ -353,8 +477,21 @@ export class TypedQueryApplicationService {
       } catch {
         // Application error reporting must never change query behavior.
       }
+      const executionFailure = executionDomainError(executionContext);
+      if (executionFailure) {
+        emit(
+          executionContext,
+          executionFailure.error.kind === "deadline-exceeded"
+            ? "deadline"
+            : "cancelled",
+        );
+        return executionFailure;
+      }
       emit(executionContext, "failure");
       if (error instanceof ComparisonDomainError) {
+        return { ok: false, error: error.domainError };
+      }
+      if (error instanceof AnalyticsProviderDomainError) {
         return { ok: false, error: error.domainError };
       }
       if (error instanceof InvalidCursorError) {

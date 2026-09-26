@@ -256,6 +256,8 @@ describe("Dashboard Client Data Processing Utilities", () => {
         {
           siteId: "123",
           "compareFilter[page.path]": "/old",
+          compareEvaluationFromMs: 50,
+          compareEvaluationToMs: 80,
         },
         {
           mode: "same",
@@ -280,9 +282,16 @@ describe("Dashboard Client Data Processing Utilities", () => {
         "compareFilter[page.path]": "/pricing",
       });
       expect(result["compareFilter[page.path]"]).toBe("/pricing");
+      expect(result).not.toHaveProperty("compareEvaluationFromMs");
+      expect(result).not.toHaveProperty("compareEvaluationToMs");
       expect(
         withComparison(
-          { siteId: "123", "compareFilter[page.path]": "/old" },
+          {
+            siteId: "123",
+            "compareFilter[page.path]": "/old",
+            compareEvaluationFromMs: 50,
+            compareEvaluationToMs: 80,
+          },
           null,
         ),
       ).toEqual({ siteId: "123" });

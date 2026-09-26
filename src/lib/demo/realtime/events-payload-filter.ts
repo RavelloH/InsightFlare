@@ -21,6 +21,10 @@ import type {
   FilterExpression,
   FilterValue,
 } from "@/lib/filter-contract";
+import {
+  isLegacyFilterTarget,
+  legacyConditionValue,
+} from "@/lib/filter-contract";
 function demoPayloadValue(value: unknown): FilterValue | undefined {
   if (value === null) return null;
   if (typeof value === "boolean") return value;
@@ -144,11 +148,13 @@ function matchesDemoPayloadCondition(
   event: DemoCustomEventFact,
   condition: FilterCondition,
 ): boolean {
+  if (!isLegacyFilterTarget(condition.target)) return false;
   if (condition.target.kind !== "event-payload") return true;
+  const conditionValue = legacyConditionValue(condition.value);
   const expectedType =
-    condition.value === undefined || Array.isArray(condition.value)
+    conditionValue === undefined || Array.isArray(conditionValue)
       ? null
-      : demoPayloadFilterValueType(condition.value as FilterValue);
+      : demoPayloadFilterValueType(conditionValue as FilterValue);
   const values = collectDemoPayloadValuesAtPath(
     demoEventRecordPayload(event),
     condition.target.path,
@@ -166,7 +172,7 @@ function matchesDemoPayloadCondition(
   return values.some((value) => {
     if (expectedType && demoPayloadFilterValueType(value) !== expectedType)
       return false;
-    return comparePayloadValue(value, condition.operator, condition.value);
+    return comparePayloadValue(value, condition.operator, conditionValue);
   });
 }
 function matchesDemoEventCondition(
@@ -177,6 +183,7 @@ function matchesDemoEventCondition(
   if (condition.target.kind === "event-payload") {
     return matchesDemoPayloadCondition(event, condition);
   }
+  if (condition.target.kind !== "field") return false;
   const fieldId = condition.target.field;
   const actual = canonicalFieldValue(event.visit, fieldId, facts);
   if (condition.operator === "exists" || condition.operator === "notNull")

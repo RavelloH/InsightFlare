@@ -203,6 +203,7 @@ conditionDescription:
   filterNotEmpty: "{field} は空ではない"
 filterBuilder:
   fieldGroups:
+    advanced: 高度なフィルター
     page: ページ
     session: セッション
     visitor: 訪問者
@@ -213,25 +214,30 @@ filterBuilder:
     event: イベント
     acquisition: 獲得
     device: デバイス
-    geo: 地域
+    geo: 地理
     performance: パフォーマンス
     user: ユーザー
+    time: 時間
+    aggregation: 集計
+    calculation: 計算
+    relation: 行動関係
   fieldLabels:
     page.path: ページパス
     page.title: ページタイトル
-    page.hostname: ページホスト名
-    page.query: クエリ文字列
-    page.hash: ハッシュフラグメント
+    page.collection: ページ集合
+    page.hostname: ページドメイン
+    page.query: クエリパラメーター
+    page.hash: URL ハッシュ
     session.entryPath: 入口ページ
     session.exitPath: 出口ページ
     referrer.domain: リファラードメイン
     referrer.url: リファラー URL
     traffic.channel: トラフィックチャネル
-    utm.source: キャンペーンソース
-    utm.medium: キャンペーンメディア
-    utm.campaign: キャンペーン名
-    utm.term: キャンペーン用語
-    utm.content: キャンペーンコンテンツ
+    utm.source: UTM ソース
+    utm.medium: UTM メディア
+    utm.campaign: UTM キャンペーン
+    utm.term: UTM キーワード
+    utm.content: UTM コンテンツ
     client.browser: ブラウザー
     client.browserVersion: ブラウザーのバージョン
     client.browserEngine: ブラウザーエンジン
@@ -241,31 +247,54 @@ filterBuilder:
     client.language: 言語
     client.screenSize: 画面サイズ
     geo.country: 国・地域
-    geo.region: 地域
+    geo.region: 都道府県 / 州 / 地域
     geo.city: 市区町村
     geo.continent: 大陸
     geo.timeZone: タイムゾーン
-    geo.organization: 組織
+    geo.organization: ネットワーク組織
+    event.collection: イベント集合
     event.name: イベント名
-    event.payload: イベントペイロード
+    event.payload: イベント属性
     page.durationMs: ページ滞在時間
+    session.collection: セッション集合
     session.durationMs: セッション時間
-    session.views: セッションビュー数
-    session.events: セッションイベント数
-    session.bounce: バウンスセッション
-    visitor.sessions: 訪問者セッション数
-    visitor.views: 訪問者ビュー数
-    visitor.events: 訪問者イベント数
-    performance.ttfbMs: Time to First Byte
-    performance.fcpMs: First Contentful Paint
-    performance.lcpMs: Largest Contentful Paint
-    performance.cls: Cumulative Layout Shift
-    performance.inpMs: Interaction to Next Paint
+    session.views: ページ閲覧数
+    session.events: イベント数
+    session.bounce: 直帰したか
+    visitor.collection: 訪問者集合
+    visitor.sessions: セッション数
+    visitor.views: ページ閲覧数
+    visitor.events: イベント数
+    performance.ttfbMs: TTFB
+    performance.fcpMs: FCP
+    performance.lcpMs: LCP
+    performance.cls: CLS
+    performance.inpMs: INP
     user.id: ユーザー ID
     user.name: ユーザー名
     client.screenWidth: 画面幅
     client.screenHeight: 画面の高さ
-    geo.isEU: 欧州連合の訪問者
+    geo.isEU: EU 地域か
+    time: 時間
+    bucket(...): 時間バケット
+    window(...): 相対時間ウィンドウ
+    periods(...): 期間グループ
+    count(...): 件数
+    first(...): 最初
+    last(...): 最後
+    nth(...): N 番目
+    countDistinct(...): 個別件数
+    sum(...): 合計
+    avg(...): 平均
+    min(...): 最小
+    max(...): 最大
+    add(...): 加算
+    sub(...): 減算
+    mul(...): 乗算
+    div(...): 除算
+    sequence(...): 行動シーケンス
+    adjacent(...): 連続行動
+    without(...): 中間行動を除外
   operatorLabels:
     eq: 等しい
     neq: 等しくない
@@ -324,7 +353,8 @@ filterBuilder:
   expressionHelpSyntax: 構文
   expressionHelpLogicDescription: AND は OR より優先されます。ネストには括弧を使用し、AND(...) と OR(...) は明示的な単一条件グループを保持します。
   expressionHelpValues: 値
-  expressionHelpValuesDescription: 文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値]
+  expressionHelpValuesDescription:
+    文字列は JSON の二重引用符を使います。数値と真偽値は引用しません。集合には [値, 値]
     を使い、between には順序付きの値を 2 つ指定します。
   expressionHelpOperators: 利用可能な演算子
   expressionHelpUnaryOperators: 値を取らない演算子
@@ -332,6 +362,55 @@ filterBuilder:
   expressionHelpFieldType: 型
   expressionHelpFieldOperators: 演算子
   expressionHelpOtherFields: その他
+  advancedEditor:
+    not: NOT
+    removeNot: NOT を削除
+    matchAll: すべて一致
+    matchAny: いずれかに一致
+    addCondition: 条件を追加
+    addGroup: グループを追加
+    wrapInNot: NOT で囲む
+    remove: 削除
+    condition: 条件
+    literalValue: リテラル値
+    compareWithExpression: 式と比較
+    valuesAsJson: JSON 形式のフィルター値
+    scalarArrayHelp: JSON スカラー値の配列を入力してください。
+    chooseValue: 値を選択
+    filterValue: フィルター値
+    durationAmount: 期間
+    jsonPointer: ペイロード JSON ポインター
+    jsonPointerPlaceholder: /property/path
+    entityMember: エンティティメンバー
+    nthIndex: N 番目のインデックス
+    nestedTooDeep: 式のネストが深すぎます。
+    applyOffset: オフセットを適用
+    removeStep: ステップを削除
+    addStep: シーケンスステップを追加
+    excludedActivity: 除外するアクティビティ
+    coreRelation: 高度なフィルター
+    coreRelationExpression: 高度なフィルター式
+    structuredEditor: 高度なフィルター設定
+    unavailableForObservation: Goal と Funnel のステップでは高度なフィルターを使用できません。
+    targetKinds:
+      time: 時刻
+      field: フィールド
+      event-payload: イベントペイロード
+      entity-root: エンティティコレクション
+      context-root: コンテキスト
+      member: メンバー
+      selector: セレクター
+      projection: 射影
+      reducer: リデューサー
+      arithmetic: 算術式
+      duration: 期間
+      time-anchor: 相対時間
+      bucket: 時間バケット
+      window: ウィンドウ
+      periods: 期間コレクション
+      sequence: シーケンス
+      adjacent: 隣接シーケンス
+      without: アクティビティを除外するシーケンス
   savedFiltersLoading: 保存済みフィルターを取得中...
   noSavedFilter: 保存済みフィルターを使用しない
   systemPresets: システムプリセット
@@ -1141,7 +1220,8 @@ performance:
   poor: 不良
   datasetTitle: データセット概要
   interpretationTitle: 現在の読み取り
-  currentReading: "{metric} の P75 は {value}、{samples} 件のサンプルに基づく体験スコアは {score}
+  currentReading:
+    "{metric} の P75 は {value}、{samples} 件のサンプルに基づく体験スコアは {score}
     です。現在の判定：{status}。"
   metricThresholdText: "良好：{good} 以下、要改善：{good} から {poor}、不良：{poor} 超。"
   scoreThresholdText: "良好：90 超、要改善：50 から 90、不良：50 未満。"
@@ -1269,7 +1349,8 @@ siteSettings:
         - "-example.com"
         - "-*.example.com"
         - "admin.example.com"
-      exampleDescription: この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する
+      exampleDescription:
+        この設定はすべてのドメインをブロックし、example.com とそのサブドメインを許可した後、完全一致する
         admin.example.com を再びブロックします。
       testLabel: ホスト名
       testPlaceholder: www.example.com
@@ -1333,7 +1414,8 @@ siteSettings:
         - "*.example.com"
         - "social.example.com"
         - "-trusted.example.com"
-      exampleDescription: この設定は example.com の参照元ドメインと social.example.com
+      exampleDescription:
+        この設定は example.com の参照元ドメインと social.example.com
         をブロックし、trusted.example.com を許可します。
       testLabel: 参照元
       testPlaceholder: https://social.example.com/article
@@ -1711,7 +1793,8 @@ runtimeConfigError:
   title: ランタイム設定が必要です
   eyebrow: デプロイを一時停止中
   heading: UI を読み込む前に、InsightFlare にはランタイムシークレットが 1 つ必要です。
-  description: アプリは起動していますが、現在のランタイム環境で必須の root secret
+  description:
+    アプリは起動していますが、現在のランタイム環境で必須の root secret
     を取得できないため、ダッシュボードへのアクセスを一時的にブロックしています。
   requiredTitle: 必須のランタイムシークレット
   requiredDescription: Cloudflare のランタイムシークレットに、次の値のいずれかを少なくとも 1 つ設定してください。
@@ -2445,7 +2528,8 @@ requestObservation:
   refresh: 更新
   loadFailed: リクエスト監視データを読み込めません。
   notConfiguredTitle: Analytics Engine リーダーが設定されていません
-  notConfiguredDescription: リクエスト監視用の Analytics Engine データセットを読むには、システム設定で
+  notConfiguredDescription:
+    リクエスト監視用の Analytics Engine データセットを読むには、システム設定で
     Cloudflare Account ID と API トークンを追加してください。
   analyticsEngineDisabledTitle: Analytics Engine が有効ではありません
   analyticsEngineDisabledDescription: Cloudflare アカウントで Analytics Engine
@@ -2594,7 +2678,8 @@ systemSettings:
   retentionSaved: 保持期間を保存しました。
   retentionSaveFailed: 保持期間を保存できません。
   loginTurnstileTitle: ログイン Turnstile 保護
-  loginTurnstileDescription: 有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile
+  loginTurnstileDescription:
+    有効にすると、ログインページはバックグラウンドで Cloudflare Turnstile
     Invisible 検証を実行し、サーバー側のサインイン処理で強制します。
   loginTurnstileEnabledLabel: ログイン保護を有効化
   loginTurnstileSiteKeyLabel: Site Key
@@ -2736,7 +2821,8 @@ systemPerformance:
   doDiagnosticSiteNextDueHidden: 非表示フォールバック
   doDiagnosticSiteNextDueTimeout: 訪問タイムアウト
   doDiagnosticSiteResponseMs: 応答時間
-  doDiagnosticThresholdsHint: "しきい値：stale {stale}、timeout {timeout}、hardAged
+  doDiagnosticThresholdsHint:
+    "しきい値：stale {stale}、timeout {timeout}、hardAged
     {hardAged}、stuck flush_attempts ≥ {stuck}"
   doDiagnosticHealthy: 異常なバッファ行は検出されませんでした。
 loginForm:

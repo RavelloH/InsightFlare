@@ -66,6 +66,23 @@ describe("observation filter planner", () => {
     }
   });
 
+  it("rejects Core and Relation nodes from Goal and Funnel observation predicates", () => {
+    for (const source of [
+      "count(event) gte 1",
+      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+    ]) {
+      expect(() =>
+        assertObservationFilterCompatible(
+          parseFilterDsl(source, analyticsFilterRegistry),
+        ),
+      ).toThrow(
+        expect.objectContaining({
+          code: "observation_filter_target_unsupported",
+        }),
+      );
+    }
+  });
+
   it("treats an empty filter as all observations", () => {
     expect(planObservationFilter(null)).toEqual({
       visit: { kind: "all" },

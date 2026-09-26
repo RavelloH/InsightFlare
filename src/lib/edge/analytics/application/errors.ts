@@ -3,6 +3,13 @@ import type { AnalyticsDomainError } from "@/lib/edge/analytics/contract";
 
 import type { AnalyticsOperationId } from "./operation-registry";
 
+export class AnalyticsProviderDomainError extends Error {
+  constructor(readonly domainError: AnalyticsDomainError) {
+    super(domainError.kind);
+    this.name = "AnalyticsProviderDomainError";
+  }
+}
+
 export type AnalyticsServiceError =
   | { readonly kind: "deadline-exceeded" }
   | { readonly kind: "request-cancelled" }

@@ -1479,10 +1479,15 @@ const AnalyticsSchemaFilterProtocolDslSchema = z
     syntax: z
       .object({
         condition: z.string().min(1),
+        targetExpression: z.string().min(1),
         boolean: z.string().min(1),
         grouping: z.string().min(1),
         value: z.string().min(1),
         list: z.string().min(1),
+        selector: z.string().min(1),
+        reducer: z.string().min(1),
+        temporal: z.string().min(1),
+        relation: z.string().min(1),
         payloadTarget: z.string().min(1),
         caseSensitivity: z.string().min(1),
       })

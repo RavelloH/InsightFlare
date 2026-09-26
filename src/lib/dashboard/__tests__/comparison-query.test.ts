@@ -125,6 +125,22 @@ describe("resolveDashboardComparisonQuery", () => {
     });
   });
 
+  it("ignores legacy comparison evaluation parameters", () => {
+    const result = resolveDashboardComparisonQuery(
+      new URLSearchParams(
+        "compare=previous&compareEvalFrom=2026-01-01T00%3A00%3A00Z&compareEvalTo=2026-02-01T00%3A00%3A00Z",
+      ),
+      currentWindow,
+      currentFilters,
+    );
+
+    expect(result?.window).toEqual({
+      ...currentWindow,
+      from: 395_199,
+      to: 999_999,
+    });
+  });
+
   it("returns null when no previous window is available", () => {
     expect(
       resolveDashboardComparisonQuery(

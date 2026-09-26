@@ -20,6 +20,7 @@ import type { QueryOperation } from "@/lib/edge/analytics/contract";
 import { resolveFilterScope } from "@/lib/edge/analytics/contract/scoped-filter";
 import {
   analyticsFilterRegistry,
+  parseFilterDsl,
   parseFilterParams,
 } from "@/lib/filter-contract";
 import {
@@ -53,7 +54,10 @@ export function parseDemoFilters(
   for (const [key, value] of Object.entries(params)) {
     if (key.startsWith("filter[")) search.append(key, String(value));
   }
-  const document = parseFilterParams(search, analyticsFilterRegistry);
+  const document =
+    typeof params.__filterDsl === "string"
+      ? parseFilterDsl(params.__filterDsl, analyticsFilterRegistry)
+      : parseFilterParams(search, analyticsFilterRegistry);
   const presentation = dashboardFilterPresentation(document);
   const requestedScope = normalizeFilterScopePreference(params.scope);
   const explicitResolvedScope = normalizeDemoScope(params.resolvedScope);
@@ -68,8 +72,31 @@ export function parseDemoFilters(
       : requestedScope === "auto"
         ? undefined
         : requestedScope);
+  const evaluationStartMs = Number(params.evaluationFromMs);
+  const evaluationEndExclusiveMs = Number(params.evaluationToMs);
+  const hasEvaluationRange =
+    params.evaluationFromMs !== undefined &&
+    params.evaluationToMs !== undefined &&
+    Number.isSafeInteger(evaluationStartMs) &&
+    Number.isSafeInteger(evaluationEndExclusiveMs) &&
+    evaluationEndExclusiveMs > evaluationStartMs;
+  const capturedAtMs = Number(params.nowMs);
   return {
     filterDocument: document,
+    ...(hasEvaluationRange
+      ? {
+          evaluationRange: {
+            startMs: evaluationStartMs,
+            endExclusiveMs: evaluationEndExclusiveMs,
+          },
+        }
+      : {}),
+    ...(typeof params.timeZone === "string"
+      ? { reportingTimeZone: params.timeZone }
+      : {}),
+    ...(Number.isSafeInteger(capturedAtMs) && capturedAtMs >= 0
+      ? { capturedAtMs }
+      : {}),
     ...(scope ? { scope } : {}),
     ...presentation,
   };

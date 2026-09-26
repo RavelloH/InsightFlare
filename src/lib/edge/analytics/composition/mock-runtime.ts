@@ -33,8 +33,8 @@ export function createMockAnalyticsQueryRuntime(input: MockQueryRuntimeInput) {
       const resolvedScope =
         "scopePlan" in query ? query.scopePlan?.scope : undefined;
       const demoInput = resolvedScope
-        ? { ...input, query, resolvedScope }
-        : { ...input, query };
+        ? { ...input, query, canonicalQuery: query, resolvedScope }
+        : { ...input, query, canonicalQuery: query };
       return {
         value: (await executeDemoQueryPayload(
           demoInput,

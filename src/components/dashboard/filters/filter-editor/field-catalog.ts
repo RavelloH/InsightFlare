@@ -1,5 +1,11 @@
 import type { EventField } from "@/lib/dashboard-api/client/edge";
 import {
+  FILTER_PICKER_GROUP_ORDER,
+  FILTER_PICKER_TARGET_REGISTRY,
+  type FilterPickerGroup,
+  type FilterPickerTargetRegistration,
+} from "@/lib/filter-contract/filter-picker-registry";
+import {
   analyticsFilterFieldDisplayOrder,
   type RegisteredFilterField,
 } from "@/lib/filter-contract/filter-registry";
@@ -57,18 +63,80 @@ export function registryFieldGroups(
   readonly label: string;
   readonly fields: readonly RegisteredFilterField[];
 }[] {
-  const groups = new Map<string, RegisteredFilterField[]>();
+  const fieldsByGroup = new Map<string, RegisteredFilterField[]>();
   for (const field of fields) {
     const key = field.group ?? "other";
-    const group = groups.get(key);
+    const group = fieldsByGroup.get(key);
     if (group) group.push(field);
-    else groups.set(key, [field]);
+    else fieldsByGroup.set(key, [field]);
   }
-  return [...groups].map(([key, group]) => ({
+  return [...fieldsByGroup].map(([key, group]) => ({
     key,
     label: fieldGroupLabel(messages, key),
     fields: group,
   }));
+}
+
+export function filterPickerGroups(
+  fields: readonly RegisteredFilterField[],
+  messages: AppMessages,
+): readonly {
+  readonly key: FilterPickerGroup;
+  readonly label: string;
+  readonly fields: readonly FilterPickerEntry[];
+}[] {
+  const fieldsByGroup = new Map<string, RegisteredFilterField[]>();
+  for (const field of fields) {
+    const group = fieldsByGroup.get(field.group);
+    if (group) group.push(field);
+    else fieldsByGroup.set(field.group, [field]);
+  }
+
+  const targetsByGroup = new Map<
+    FilterPickerGroup,
+    FilterPickerTargetRegistration[]
+  >();
+  for (const target of FILTER_PICKER_TARGET_REGISTRY) {
+    const group = targetsByGroup.get(target.group);
+    if (group) group.push(target);
+    else targetsByGroup.set(target.group, [target]);
+  }
+
+  return FILTER_PICKER_GROUP_ORDER.flatMap((key) => {
+    const entries: FilterPickerEntry[] = [
+      ...(targetsByGroup.get(key) ?? []).map((target) => {
+        const label =
+          messages.filterBuilder.fieldLabels[target.labelKey] ?? target.id;
+        return {
+          id: target.id,
+          value: target.value,
+          label,
+          searchText: `${label} ${target.id} ${target.value}`,
+        };
+      }),
+      ...(fieldsByGroup.get(key) ?? []).map((field) => {
+        const label = fieldLabel(field, messages);
+        return {
+          id: field.id,
+          value: field.id,
+          label,
+          searchText: `${label} ${field.id}`,
+          registeredField: field,
+        };
+      }),
+    ];
+    return entries.length > 0
+      ? [{ key, label: fieldGroupLabel(messages, key), fields: entries }]
+      : [];
+  });
+}
+
+export interface FilterPickerEntry {
+  readonly id: string;
+  readonly value: string;
+  readonly label: string;
+  readonly searchText: string;
+  readonly registeredField?: RegisteredFilterField;
 }
 export function allowedFields(
   audience: FilterPanelAudience,

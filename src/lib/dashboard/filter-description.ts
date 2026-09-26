@@ -6,7 +6,10 @@ import {
   type FilterCondition,
   type FilterExpression,
   type FilterFieldRegistry,
+  type FilterTargetExpression,
   type FilterValue,
+  formatFilterTargetExpression,
+  isLegacyFilterTarget,
 } from "@/lib/filter-contract";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -38,7 +41,25 @@ function formatValue(value: FilterValue): string {
 function isFilterValueList(
   value: FilterCondition["value"],
 ): value is readonly FilterValue[] {
-  return Array.isArray(value);
+  return Array.isArray(value) && value.every(isFilterValue);
+}
+
+function isFilterValue(value: unknown): value is FilterValue {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
+}
+
+function targetText(condition: FilterCondition): string {
+  if (!isLegacyFilterTarget(condition.target)) {
+    return formatFilterTargetExpression(condition.target);
+  }
+  return condition.target.kind === "event-payload"
+    ? `event.payload(${JSON.stringify(condition.target.path)})`
+    : condition.target.field;
 }
 
 function formatValues(
@@ -53,6 +74,7 @@ function fieldDescription(
   registry: FilterFieldRegistry,
   messages: FilterDescriptionMessages,
 ): string {
+  if (!isLegacyFilterTarget(condition.target)) return targetText(condition);
   if (condition.target.kind === "event-payload") {
     const label =
       messages.filterBuilder.fieldLabels["event.payload"] ?? "event.payload";
@@ -70,6 +92,26 @@ function conditionDescription(
   registry: FilterFieldRegistry,
   messages: FilterDescriptionMessages,
 ): string {
+  if (!isLegacyFilterTarget(condition.target)) {
+    const field = targetText(condition);
+    const operator =
+      messages.filterBuilder.operatorLabels[condition.operator] ??
+      condition.operator;
+    if (condition.value === undefined) return `${field} ${operator}`;
+    const value = condition.value;
+    const formattedValue =
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      "kind" in value
+        ? formatFilterTargetExpression(value as FilterTargetExpression)
+        : isFilterValueList(value)
+          ? formatValues(value, messages)
+          : isFilterValue(value)
+            ? formatValue(value)
+            : String(value);
+    return `${field} ${operator} ${formattedValue}`;
+  }
   const field = fieldDescription(condition, registry, messages);
   const operator =
     messages.filterBuilder.operatorLabels[condition.operator] ??
@@ -108,6 +150,9 @@ function conditionDescription(
     return `${field} ${operator}`;
   }
   const value = condition.value;
+  if (!isFilterValue(value) && !isFilterValueList(value)) {
+    return `${field} ${operator} ${JSON.stringify(value)}`;
+  }
   if (condition.operator === "eq" && !isFilterValueList(value)) {
     return formatI18nTemplate(messages.conditionDescription.filterEquals, {
       field,

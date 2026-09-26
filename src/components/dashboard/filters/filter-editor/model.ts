@@ -1,4 +1,8 @@
 import {
+  FILTER_PICKER_TARGET_VALUE_PREFIX,
+  filterPickerValueForSelection,
+} from "@/lib/filter-contract/filter-picker-registry";
+import {
   analyticsFilterRegistry,
   type CanonicalJsonPath,
   FILTER_DOCUMENT_VERSION,
@@ -8,13 +12,60 @@ import {
   type FilterFieldDefinition,
   type FilterFieldId,
   type FilterOperator,
+  type FilterTargetExpression,
   type FilterValue,
   type FilterValueKind,
   formatFilterDsl,
+  isLegacyFilterTarget,
+  legacyConditionValue,
   normalizeFilterDocument,
+  parseFilterDsl,
 } from "@/lib/filter-contract/index";
 export type FilterPanelAudience = "private-dashboard" | "public-share";
 export type ScalarKind = "string" | "number" | "boolean";
+export const ADVANCED_FILTER_FIELD_PREFIX = FILTER_PICKER_TARGET_VALUE_PREFIX;
+export const ADVANCED_FILTER_TARGET_KINDS = [
+  "time",
+  "entity-root",
+  "context-root",
+  "member",
+  "selector",
+  "projection",
+  "reducer",
+  "arithmetic",
+  "duration",
+  "time-anchor",
+  "bucket",
+  "window",
+  "periods",
+  "sequence",
+  "adjacent",
+  "without",
+] as const;
+export type AdvancedFilterTargetKind =
+  (typeof ADVANCED_FILTER_TARGET_KINDS)[number];
+export const FILTER_TARGET_EDITOR_KINDS = [
+  "time",
+  "field",
+  "event-payload",
+  "entity-root",
+  "context-root",
+  "member",
+  "selector",
+  "projection",
+  "reducer",
+  "arithmetic",
+  "duration",
+  "time-anchor",
+  "bucket",
+  "window",
+  "periods",
+  "sequence",
+  "adjacent",
+  "without",
+] as const;
+export type FilterTargetEditorKind =
+  (typeof FILTER_TARGET_EDITOR_KINDS)[number];
 type ValueSuggestion = {
   readonly value: string | number | boolean | null;
   readonly occurrences?: number;
@@ -42,6 +93,10 @@ export interface EditorCondition {
   readonly valueText: string;
   readonly scalarKind: ScalarKind;
   readonly valueDirty: boolean;
+  /** Typed advanced filter condition represented by the outer condition row. */
+  readonly advancedExpression?: FilterExpression;
+  /** Legacy fallback retained for drafts created by older editor state. */
+  readonly advancedText?: string;
 }
 export interface EditorGroup {
   readonly id: string;
@@ -52,6 +107,83 @@ export interface EditorGroup {
   readonly children: readonly EditorNode[];
 }
 export type EditorNode = EditorCondition | EditorGroup;
+
+export function advancedFilterFieldValue(
+  kind: AdvancedFilterTargetKind,
+): string {
+  return `${ADVANCED_FILTER_FIELD_PREFIX}${kind}`;
+}
+
+export function advancedFilterFieldValueForTarget(
+  target: FilterTargetExpression,
+): string {
+  if (
+    target.kind === "member" &&
+    target.object.kind === "context-root" &&
+    target.object.context === "current" &&
+    target.member === "time"
+  )
+    return advancedFilterFieldValue("time");
+  if (
+    target.kind === "selector" &&
+    target.collection.kind === "entity-root" &&
+    (target.collection.entity === "session" ||
+      target.collection.entity === "visitor") &&
+    target.predicate.kind === "condition" &&
+    (target.predicate.target.kind === "sequence" ||
+      target.predicate.target.kind === "adjacent" ||
+      target.predicate.target.kind === "without")
+  )
+    return advancedFilterFieldValue(target.predicate.target.kind);
+  if (target.kind === "field") return target.field;
+  if (target.kind === "event-payload") return "event.payload";
+  if (target.kind === "entity-root")
+    return (
+      filterPickerValueForSelection({
+        kind: "entity-root",
+        entity: target.entity,
+      }) ?? advancedFilterFieldValue("entity-root")
+    );
+  if (target.kind === "reducer")
+    return (
+      filterPickerValueForSelection({
+        kind: "reducer",
+        reducer: target.reducer,
+      }) ?? advancedFilterFieldValue("reducer")
+    );
+  if (target.kind === "arithmetic")
+    return (
+      filterPickerValueForSelection({
+        kind: "arithmetic",
+        operator: target.operator,
+      }) ?? advancedFilterFieldValue("arithmetic")
+    );
+  if (
+    target.kind === "bucket" ||
+    target.kind === "window" ||
+    target.kind === "periods" ||
+    target.kind === "sequence" ||
+    target.kind === "adjacent" ||
+    target.kind === "without"
+  )
+    return (
+      filterPickerValueForSelection({
+        kind: "target",
+        targetKind: target.kind,
+      }) ?? advancedFilterFieldValue(target.kind)
+    );
+  return advancedFilterFieldValue(target.kind);
+}
+
+export function advancedFilterTargetKindFromField(
+  field: string,
+): AdvancedFilterTargetKind | null {
+  if (!field.startsWith(ADVANCED_FILTER_FIELD_PREFIX)) return null;
+  const kind = field.slice(ADVANCED_FILTER_FIELD_PREFIX.length);
+  return (ADVANCED_FILTER_TARGET_KINDS as readonly string[]).includes(kind)
+    ? (kind as AdvancedFilterTargetKind)
+    : null;
+}
 export const VALUELESS_OPERATORS = new Set<FilterOperator>([
   "exists",
   "notExists",
@@ -197,6 +329,33 @@ function editorNodeFromExpression(
     return editorNodeFromExpression(expression.child, createId, notCount + 1);
   }
   if (expression.kind === "condition") {
+    const isAdvancedValue = Boolean(
+      expression.value &&
+      typeof expression.value === "object" &&
+      !Array.isArray(expression.value) &&
+      "kind" in expression.value,
+    );
+    if (!isLegacyFilterTarget(expression.target) || isAdvancedValue) {
+      const value = isAdvancedValue
+        ? undefined
+        : legacyConditionValue(expression.value);
+      return {
+        id: createId(),
+        kind: "condition",
+        negated: notCount % 2 === 1,
+        notCount,
+        field: advancedFilterFieldValueForTarget(expression.target),
+        payloadPath: "",
+        operator: expression.operator,
+        value,
+        listValues: Array.isArray(value) ? value : undefined,
+        valueText: value === undefined ? "" : valueTextFor(value),
+        scalarKind: scalarKindFor(value),
+        valueDirty: false,
+        advancedExpression: expression,
+      };
+    }
+    const value = legacyConditionValue(expression.value);
     const field =
       expression.target.kind === "field"
         ? expression.target.field
@@ -212,12 +371,10 @@ function editorNodeFromExpression(
           ? expression.target.path
           : "",
       operator: expression.operator,
-      value: expression.value,
-      listValues: Array.isArray(expression.value)
-        ? expression.value
-        : undefined,
-      valueText: valueTextFor(expression.value),
-      scalarKind: scalarKindFor(expression.value),
+      value,
+      listValues: Array.isArray(value) ? value : undefined,
+      valueText: valueTextFor(value),
+      scalarKind: scalarKindFor(value),
       valueDirty: false,
     };
   }
@@ -267,6 +424,15 @@ function requireValue(condition: EditorCondition): void {
   throw new Error("missing_value");
 }
 function conditionFromEditor(node: EditorCondition): FilterCondition {
+  if (node.advancedExpression?.kind === "condition") {
+    return node.advancedExpression;
+  }
+  if (node.advancedText !== undefined) {
+    const parsed = parseFilterDsl(node.advancedText, analyticsFilterRegistry);
+    if (parsed.root?.kind !== "condition")
+      throw new Error("advanced_node_must_be_condition");
+    return parsed.root;
+  }
   const definition = analyticsFilterRegistry.get(node.field);
   if (!definition) throw new Error("unknown_field");
   const target =

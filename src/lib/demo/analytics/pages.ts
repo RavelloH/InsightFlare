@@ -298,6 +298,7 @@ export function generateDemoPagesDashboard(
       interval,
       { ...filters, path: row.label },
       timeZone,
+      dataset,
     ).map((point) => ({
       timestampMs: point.timestampMs,
       views: point.views,

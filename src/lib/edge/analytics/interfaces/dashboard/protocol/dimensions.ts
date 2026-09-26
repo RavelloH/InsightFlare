@@ -94,6 +94,8 @@ export async function handleSimpleDimensionContract(
         ? filters
         : ({ version: 1, root: null } as FilterDocument);
     if (compare !== "same" || referenceFilters.root) {
+      const referenceWindow =
+        compare === "previous" ? previousComparableWindow(window) : window;
       const comparisonMetric = url.searchParams.get("metric");
       const comparisonSortBy = url.searchParams.get("sortBy");
       comparison = {
@@ -102,9 +104,7 @@ export async function handleSimpleDimensionContract(
           filters,
         },
         reference: {
-          time: queryWindowToTime(
-            compare === "previous" ? previousComparableWindow(window) : window,
-          ),
+          time: queryWindowToTime(referenceWindow),
           filters: referenceFilters,
         },
         metric:

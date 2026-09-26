@@ -7,6 +7,7 @@ import {
   EMPTY_FILTER_DOCUMENT,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
+import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { readTeamBreakdown } from "@/lib/edge/analytics/providers/d1/operations/team-breakdown";
 import { readTeamOverview } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
 import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
@@ -111,6 +112,7 @@ export function createD1TeamProviderRegistry(options: D1TeamRuntimeBindings) {
       }),
     );
 
+  registry.useMiddleware(d1AdvancedFilterMiddleware(options.env));
   return registry;
 }
 

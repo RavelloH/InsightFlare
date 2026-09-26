@@ -261,6 +261,103 @@ describe("API v1 comparison v2 handler", () => {
     expect((await json(invalidResponse)).error?.code).toBe("validation_failed");
   });
 
+  it("rejects an evaluationRange outside the DSL filter", async () => {
+    const response = await handleSiteComparison(
+      request({
+        ...baseBody,
+        current: {
+          ...baseBody.current,
+          evaluationRange: {
+            from: "2026-08-04T00:00:00.000Z",
+            to: "2026-08-03T00:00:00.000Z",
+          },
+        },
+      }),
+      principal,
+      env,
+      "site-1",
+    );
+
+    expect(response.status).toBe(400);
+    expect(await json(response)).toMatchObject({
+      error: {
+        code: "validation_failed",
+        issues: [
+          {
+            path: "/current",
+            code: "unrecognized_keys",
+          },
+        ],
+      },
+    });
+    expect(providerCalls.overview).toBe(0);
+  });
+
+  it("derives independent historical ranges from each comparison-side DSL", async () => {
+    const observed: Array<{
+      side: string;
+      evaluationRange?: {
+        readonly startMs: number;
+        readonly endExclusiveMs: number;
+      };
+    }> = [];
+    mocks.createComparisonProviders.mockImplementationOnce(() => ({
+      overview: vi.fn(async ({ side, query }) => {
+        observed.push({ side, evaluationRange: query.time.evaluationRange });
+        return {
+          value: rawMetrics(side === "current" ? 120 : 100),
+          source: "raw" as const,
+          approximateVisitors: false,
+        };
+      }),
+      trend: vi.fn(),
+      breakdown: vi.fn(),
+    }));
+    const response = await handleSiteComparison(
+      request({
+        ...baseBody,
+        select: { metrics: ["views"] },
+        current: {
+          ...baseBody.current,
+          filter: {
+            type: "dsl",
+            expression:
+              "time gte @range.start-1d AND time lt @range.start AND count(event) gte 1",
+          },
+        },
+        reference: {
+          ...baseBody.reference,
+          filter: {
+            type: "dsl",
+            expression:
+              "time gte @range.start-2d AND time lt @range.start AND count(page) gte 1",
+          },
+        },
+      }),
+      principal,
+      env,
+      "site-1",
+    );
+
+    expect(response.status, JSON.stringify(await json(response))).toBe(200);
+    expect(observed).toEqual([
+      {
+        side: "current",
+        evaluationRange: {
+          startMs: Date.parse("2026-07-31T00:00:00.000Z"),
+          endExclusiveMs: Date.parse("2026-08-01T00:00:00.000Z"),
+        },
+      },
+      {
+        side: "reference",
+        evaluationRange: {
+          startMs: Date.parse("2026-07-28T00:00:00.000Z"),
+          endExclusiveMs: Date.parse("2026-07-30T00:00:00.000Z"),
+        },
+      },
+    ]);
+  });
+
   it("executes a site report, returns trend boundaries, and reuses the cache", async () => {
     const first = await handleSiteComparison(
       request(baseBody),

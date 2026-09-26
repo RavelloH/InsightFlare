@@ -327,7 +327,8 @@ export function SearchableValueInput({
     ? undefined
     : (analyticsFilterRegistry.get(condition.field) as
         RegisteredFilterField | undefined);
-  const suggestionMode = definition?.suggestionMode ?? "discrete";
+  const suggestionMode =
+    definition?.suggestionMode ?? (isPayload ? "discrete" : "none");
   const suggestionFilters = useMemo(
     () =>
       stripSuggestionFacet(document, condition.field, condition.payloadPath),

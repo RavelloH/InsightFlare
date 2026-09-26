@@ -67,13 +67,145 @@ export interface EventPayloadFilterTarget {
   readonly path: CanonicalJsonPath;
 }
 
+export type FilterEntityRoot = "event" | "page" | "session" | "visitor";
+export type FilterDurationUnit =
+  "ms" | "s" | "m" | "h" | "d" | "w" | "mo" | "y";
+
+export interface FilterEntityRootTarget {
+  readonly kind: "entity-root";
+  readonly entity: FilterEntityRoot;
+}
+
+export interface FilterContextRootTarget {
+  readonly kind: "context-root";
+  readonly context: "current" | "sequence" | "period" | "bucket";
+}
+
+export interface FilterMemberTarget {
+  readonly kind: "member";
+  readonly object: FilterTargetExpression;
+  readonly member: string;
+}
+
+export interface FilterSelectorTarget {
+  readonly kind: "selector";
+  readonly collection: FilterTargetExpression;
+  readonly predicate: FilterExpression;
+}
+
+export interface FilterProjectionTarget {
+  readonly kind: "projection";
+  readonly collection: FilterTargetExpression;
+  readonly member: string;
+  readonly path?: CanonicalJsonPath;
+}
+
+export interface FilterReducerTarget {
+  readonly kind: "reducer";
+  readonly reducer:
+    | "count"
+    | "first"
+    | "last"
+    | "nth"
+    | "sum"
+    | "avg"
+    | "min"
+    | "max"
+    | "countDistinct";
+  readonly input: FilterTargetExpression;
+  readonly index?: number;
+}
+
+export interface FilterArithmeticTarget {
+  readonly kind: "arithmetic";
+  readonly operator: "add" | "sub" | "mul" | "div";
+  readonly left: FilterTargetExpression;
+  readonly right: FilterTargetExpression;
+}
+
+export interface FilterDurationTarget {
+  readonly kind: "duration";
+  readonly amount: number;
+  readonly unit: FilterDurationUnit;
+}
+
+export interface FilterTimeAnchorTarget {
+  readonly kind: "time-anchor";
+  readonly anchor: "now" | "range.start" | "range.end";
+  readonly offset?: FilterDurationTarget;
+}
+
+export interface FilterBucketTarget {
+  readonly kind: "bucket";
+  readonly input: FilterTargetExpression;
+  readonly interval: FilterDurationTarget;
+}
+
+export interface FilterWindowTarget {
+  readonly kind: "window";
+  readonly collection: FilterTargetExpression;
+  readonly anchor: FilterTargetExpression;
+  readonly startOffset: FilterDurationTarget;
+  readonly endOffset: FilterDurationTarget;
+}
+
+export interface FilterPeriodsTarget {
+  readonly kind: "periods";
+  readonly collection: FilterTargetExpression;
+  readonly interval: FilterDurationTarget;
+}
+
+export interface FilterSequenceTarget {
+  readonly kind: "sequence";
+  readonly steps: readonly FilterTargetExpression[];
+}
+
+export interface FilterAdjacentTarget {
+  readonly kind: "adjacent";
+  readonly sequence: FilterTargetExpression;
+}
+
+export interface FilterWithoutTarget {
+  readonly kind: "without";
+  readonly sequence: FilterTargetExpression;
+  readonly excluded: FilterTargetExpression;
+}
+
+/**
+ * Core and Relation targets extend the original v1 field and payload targets.
+ * The document and DSL versions stay at 1; legacy targets retain their exact
+ * shape so old persisted filters continue to normalize as before.
+ */
+export type FilterTargetExpression =
+  | FieldFilterTarget
+  | EventPayloadFilterTarget
+  | FilterEntityRootTarget
+  | FilterContextRootTarget
+  | FilterMemberTarget
+  | FilterSelectorTarget
+  | FilterProjectionTarget
+  | FilterReducerTarget
+  | FilterArithmeticTarget
+  | FilterDurationTarget
+  | FilterTimeAnchorTarget
+  | FilterBucketTarget
+  | FilterWindowTarget
+  | FilterPeriodsTarget
+  | FilterSequenceTarget
+  | FilterAdjacentTarget
+  | FilterWithoutTarget;
+
+/** Legacy name retained for consumers that only accept field / payload paths. */
 export type FilterTarget = FieldFilterTarget | EventPayloadFilterTarget;
+
+export type FilterConditionValue =
+  FilterValue | readonly FilterValue[] | FilterTargetExpression;
 
 export interface FilterCondition {
   readonly kind: "condition";
-  readonly target: FilterTarget;
+  readonly target: FilterTargetExpression;
   readonly operator: FilterOperator;
-  readonly value?: FilterValue | readonly FilterValue[];
+  readonly value?: FilterConditionValue;
 }
 
 export interface FilterGroup {
@@ -245,6 +377,300 @@ function resolveTarget(
     };
   }
   fail("invalid_target", `${path}.target.kind`, "Unknown filter target kind.");
+}
+
+export function isLegacyFilterTarget(
+  target: FilterTargetExpression,
+): target is FilterTarget {
+  return target.kind === "field" || target.kind === "event-payload";
+}
+
+/** Returns the v1 scalar value shape or rejects expressions needing the new compiler. */
+export function legacyConditionValue(
+  value: FilterConditionValue | undefined,
+): FilterValue | readonly FilterValue[] | undefined {
+  if (value === undefined || isFilterValue(value)) return value;
+  if (Array.isArray(value) && value.every(isFilterValue)) {
+    return value as readonly FilterValue[];
+  }
+  throw new TypeError("unsupported_filter_condition_value");
+}
+
+const ENTITY_ROOTS = new Set<FilterEntityRoot>([
+  "event",
+  "page",
+  "session",
+  "visitor",
+]);
+const DURATION_UNITS = new Set<FilterDurationUnit>([
+  "ms",
+  "s",
+  "m",
+  "h",
+  "d",
+  "w",
+  "mo",
+  "y",
+]);
+const REDUCERS = new Set<FilterReducerTarget["reducer"]>([
+  "count",
+  "first",
+  "last",
+  "nth",
+  "sum",
+  "avg",
+  "min",
+  "max",
+  "countDistinct",
+]);
+
+function canonicalDuration(input: unknown, path: string): FilterDurationTarget {
+  if (
+    !isRecord(input) ||
+    input.kind !== "duration" ||
+    typeof input.amount !== "number" ||
+    !Number.isFinite(input.amount) ||
+    typeof input.unit !== "string" ||
+    !DURATION_UNITS.has(input.unit as FilterDurationUnit)
+  ) {
+    fail(
+      "invalid_duration",
+      path,
+      "Expected a finite duration with a supported unit.",
+    );
+  }
+  return {
+    kind: "duration",
+    amount: Object.is(input.amount, -0) ? 0 : input.amount,
+    unit: input.unit as FilterDurationUnit,
+  };
+}
+
+function canonicalTargetExpression(
+  input: unknown,
+  registry: FilterFieldRegistry,
+  limits: FilterLimits,
+  counters: Counters,
+  path: string,
+  depth: number,
+): FilterTargetExpression {
+  if (depth > limits.maxDepth) {
+    fail("too_deep", path, "Filter target depth limit exceeded.");
+  }
+  if (!isRecord(input) || typeof input.kind !== "string") {
+    fail("invalid_target", path, "Expected a typed target expression.");
+  }
+  if (input.kind === "field") {
+    const definition = definitionFor(input.field, registry, `${path}.field`);
+    return { kind: "field", field: definition.id as FilterFieldId };
+  }
+  if (input.kind === "event-payload") {
+    if (!registry.get("event.payload")) {
+      fail("unknown_field", path, "The event payload field is not registered.");
+    }
+    return {
+      kind: "event-payload",
+      path: canonicalJsonPath(input.path, `${path}.path`),
+    };
+  }
+  const target = (value: unknown, key: string) =>
+    canonicalTargetExpression(
+      value,
+      registry,
+      limits,
+      counters,
+      `${path}.${key}`,
+      depth + 1,
+    );
+  const memberName = (value: unknown, key: string): string => {
+    if (
+      typeof value !== "string" ||
+      !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value)
+    ) {
+      fail(
+        "invalid_member",
+        `${path}.${key}`,
+        "Expected a supported member name.",
+      );
+    }
+    return value;
+  };
+  switch (input.kind) {
+    case "entity-root":
+      if (
+        typeof input.entity !== "string" ||
+        !ENTITY_ROOTS.has(input.entity as FilterEntityRoot)
+      ) {
+        fail("invalid_entity_root", `${path}.entity`, "Unknown entity root.");
+      }
+      return { kind: "entity-root", entity: input.entity as FilterEntityRoot };
+    case "context-root":
+      if (
+        !["current", "sequence", "period", "bucket"].includes(
+          String(input.context),
+        )
+      ) {
+        fail(
+          "invalid_context_root",
+          `${path}.context`,
+          "Unknown expression context root.",
+        );
+      }
+      return {
+        kind: "context-root",
+        context: input.context as FilterContextRootTarget["context"],
+      };
+    case "member":
+      return {
+        kind: "member",
+        object: target(input.object, "object"),
+        member: memberName(input.member, "member"),
+      };
+    case "selector": {
+      if (!Object.prototype.hasOwnProperty.call(input, "predicate")) {
+        fail(
+          "missing_predicate",
+          `${path}.predicate`,
+          "Selector requires a predicate.",
+        );
+      }
+      return {
+        kind: "selector",
+        collection: target(input.collection, "collection"),
+        predicate: canonicalExpression(
+          input.predicate,
+          registry,
+          limits,
+          counters,
+          `${path}.predicate`,
+          depth + 1,
+        ),
+      };
+    }
+    case "projection":
+      return {
+        kind: "projection",
+        collection: target(input.collection, "collection"),
+        member: memberName(input.member, "member"),
+        ...(input.path === undefined
+          ? {}
+          : { path: canonicalJsonPath(input.path, `${path}.path`) }),
+      };
+    case "reducer": {
+      if (
+        typeof input.reducer !== "string" ||
+        !REDUCERS.has(input.reducer as FilterReducerTarget["reducer"])
+      ) {
+        fail("invalid_reducer", `${path}.reducer`, "Unknown reducer.");
+      }
+      const reducer = input.reducer as FilterReducerTarget["reducer"];
+      if (reducer === "nth") {
+        if (!Number.isSafeInteger(input.index) || (input.index as number) < 1) {
+          fail(
+            "invalid_index",
+            `${path}.index`,
+            "nth index must be a positive integer.",
+          );
+        }
+      } else if (input.index !== undefined) {
+        fail("unexpected_index", `${path}.index`, "Only nth accepts an index.");
+      }
+      return {
+        kind: "reducer",
+        reducer,
+        input: target(input.input, "input"),
+        ...(reducer === "nth" ? { index: input.index as number } : {}),
+      };
+    }
+    case "arithmetic":
+      if (!["add", "sub", "mul", "div"].includes(String(input.operator))) {
+        fail(
+          "invalid_arithmetic",
+          `${path}.operator`,
+          "Unknown arithmetic operator.",
+        );
+      }
+      return {
+        kind: "arithmetic",
+        operator: input.operator as FilterArithmeticTarget["operator"],
+        left: target(input.left, "left"),
+        right: target(input.right, "right"),
+      };
+    case "duration":
+      return canonicalDuration(input, path);
+    case "time-anchor":
+      if (!["now", "range.start", "range.end"].includes(String(input.anchor))) {
+        fail(
+          "invalid_time_anchor",
+          `${path}.anchor`,
+          "Unknown relative time anchor.",
+        );
+      }
+      return {
+        kind: "time-anchor",
+        anchor: input.anchor as FilterTimeAnchorTarget["anchor"],
+        ...(input.offset === undefined
+          ? {}
+          : { offset: canonicalDuration(input.offset, `${path}.offset`) }),
+      };
+    case "bucket":
+      return {
+        kind: "bucket",
+        input: target(input.input, "input"),
+        interval: canonicalDuration(input.interval, `${path}.interval`),
+      };
+    case "window": {
+      const startOffset = canonicalDuration(
+        input.startOffset,
+        `${path}.startOffset`,
+      );
+      const endOffset = canonicalDuration(input.endOffset, `${path}.endOffset`);
+      return {
+        kind: "window",
+        collection: target(input.collection, "collection"),
+        anchor: target(input.anchor, "anchor"),
+        startOffset,
+        endOffset,
+      };
+    }
+    case "periods":
+      return {
+        kind: "periods",
+        collection: target(input.collection, "collection"),
+        interval: canonicalDuration(input.interval, `${path}.interval`),
+      };
+    case "sequence":
+      if (!Array.isArray(input.steps) || input.steps.length < 2) {
+        fail(
+          "invalid_sequence",
+          `${path}.steps`,
+          "A sequence requires at least two steps.",
+        );
+      }
+      return {
+        kind: "sequence",
+        steps: input.steps.map((step, index) =>
+          target(step, `steps[${index}]`),
+        ),
+      };
+    case "adjacent":
+      return {
+        kind: "adjacent",
+        sequence: target(input.sequence, "sequence"),
+      };
+    case "without":
+      return {
+        kind: "without",
+        sequence: target(input.sequence, "sequence"),
+        excluded: target(input.excluded, "excluded"),
+      };
+    default:
+      fail(
+        "invalid_target",
+        `${path}.kind`,
+        "Unknown filter target expression kind.",
+      );
+  }
 }
 
 function validateLimits(limits: FilterLimits): void {
@@ -481,6 +907,7 @@ function setAlgebraCondition(
   expression: FilterExpression,
 ): SetAlgebraCondition | undefined {
   if (expression.kind !== "condition") return undefined;
+  if (!isLegacyFilterTarget(expression.target)) return undefined;
   if (
     expression.operator !== "eq" &&
     expression.operator !== "neq" &&
@@ -641,9 +1068,24 @@ function canonicalCondition(
   counters: Counters,
   path: string,
 ): FilterCondition {
-  const { target, definition } = resolveTarget(input, registry, path);
+  const rawTarget = input.target;
+  const legacy =
+    isRecord(rawTarget) &&
+    (rawTarget.kind === "field" || rawTarget.kind === "event-payload");
+  const resolved = legacy ? resolveTarget(input, registry, path) : null;
+  const target = resolved
+    ? resolved.target
+    : canonicalTargetExpression(
+        rawTarget,
+        registry,
+        limits,
+        counters,
+        `${path}.target`,
+        1,
+      );
+  const definition = resolved?.definition;
   const operator = requireOperator(input.operator, `${path}.operator`);
-  if (!definition.operators.has(operator)) {
+  if (definition && !definition.operators.has(operator)) {
     fail(
       "operator_not_allowed",
       `${path}.operator`,
@@ -678,6 +1120,139 @@ function canonicalCondition(
     );
   }
   const rawValue = input.value;
+
+  if (!definition) {
+    const canonicalDynamicValue = (
+      value: unknown,
+      valuePath: string,
+    ): FilterValue | FilterTargetExpression => {
+      if (isRecord(value) && typeof value.kind === "string") {
+        const expression = canonicalTargetExpression(
+          value,
+          registry,
+          limits,
+          counters,
+          valuePath,
+          1,
+        );
+        if (
+          expression.kind !== "time-anchor" &&
+          expression.kind !== "duration"
+        ) {
+          fail(
+            "invalid_condition_value",
+            valuePath,
+            "Only temporal anchors and durations may appear as comparison values.",
+          );
+        }
+        return expression;
+      }
+      if (!isFilterValue(value)) {
+        fail("invalid_value", valuePath, "Expected a scalar condition value.");
+      }
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        fail("invalid_number", valuePath, "Expected a finite number.");
+      }
+      if (typeof value === "string" && value.length > limits.maxValueLength) {
+        fail(
+          "value_too_long",
+          valuePath,
+          "Filter value exceeds the configured length limit.",
+        );
+      }
+      return value;
+    };
+    if (SET_OPERATORS.has(operator)) {
+      if (!Array.isArray(rawValue) || rawValue.length === 0) {
+        fail(
+          "invalid_set",
+          `${path}.value`,
+          "Set operators require a non-empty value array.",
+        );
+      }
+      if (rawValue.length > limits.maxSetValues) {
+        fail(
+          "too_many_set_values",
+          `${path}.value`,
+          "Filter set-value limit exceeded.",
+        );
+      }
+      return {
+        kind: "condition",
+        target,
+        operator,
+        value: rawValue.map((value, index) => {
+          if (isRecord(value) && typeof value.kind === "string") {
+            fail(
+              "invalid_set",
+              `${path}.value[${index}]`,
+              "Set values must be scalar literals.",
+            );
+          }
+          return canonicalDynamicValue(
+            value,
+            `${path}.value[${index}]`,
+          ) as FilterValue;
+        }),
+      };
+    }
+    if (operator === "between") {
+      if (!Array.isArray(rawValue) || rawValue.length !== 2) {
+        fail(
+          "invalid_range",
+          `${path}.value`,
+          "between requires exactly two values.",
+        );
+      }
+      const values = rawValue.map((value, index) =>
+        isRecord(value) && typeof value.kind === "string"
+          ? fail(
+              "invalid_range",
+              `${path}.value[${index}]`,
+              "Range endpoints must be scalar literals.",
+            )
+          : canonicalDynamicValue(value, `${path}.value[${index}]`),
+      );
+      if (
+        values.some(
+          (value) => typeof value !== "string" && typeof value !== "number",
+        )
+      ) {
+        fail(
+          "invalid_range",
+          `${path}.value`,
+          "Range endpoints must be ordered scalar values.",
+        );
+      }
+      if (values[0]! > values[1]!) {
+        fail(
+          "reversed_range",
+          `${path}.value`,
+          "Between endpoints must be ordered from lower to upper.",
+        );
+      }
+      return {
+        kind: "condition",
+        target,
+        operator,
+        value: values as readonly FilterValue[],
+      };
+    }
+    if (Array.isArray(rawValue)) {
+      fail(
+        "invalid_scalar",
+        `${path}.value`,
+        "Scalar operators require one scalar value.",
+      );
+    }
+    return {
+      kind: "condition",
+      target,
+      operator,
+      value: canonicalDynamicValue(rawValue, `${path}.value`),
+    };
+  }
+
   if (SET_OPERATORS.has(operator)) {
     if (!Array.isArray(rawValue) || rawValue.length === 0) {
       fail(
@@ -999,9 +1574,43 @@ export function stripTopLevelFacet(
 }
 
 export function filterConditionCount(document: FilterDocument): number {
+  const countTarget = (target: FilterTargetExpression): number => {
+    switch (target.kind) {
+      case "selector":
+        return countTarget(target.collection) + count(target.predicate);
+      case "projection":
+        return countTarget(target.collection);
+      case "context-root":
+        return 0;
+      case "member":
+        return countTarget(target.object);
+      case "reducer":
+        return countTarget(target.input);
+      case "arithmetic":
+        return countTarget(target.left) + countTarget(target.right);
+      case "bucket":
+        return countTarget(target.input);
+      case "window":
+        return countTarget(target.collection) + countTarget(target.anchor);
+      case "periods":
+        return countTarget(target.collection);
+      case "sequence":
+        return target.steps.reduce(
+          (total, step) => total + countTarget(step),
+          0,
+        );
+      case "adjacent":
+        return countTarget(target.sequence);
+      case "without":
+        return countTarget(target.sequence) + countTarget(target.excluded);
+      default:
+        return 0;
+    }
+  };
   const count = (expression: FilterExpression | null): number => {
     if (!expression) return 0;
-    if (expression.kind === "condition") return 1;
+    if (expression.kind === "condition")
+      return 1 + countTarget(expression.target);
     if (expression.kind === "not") return count(expression.child);
     return expression.children.reduce(
       (total, child) => total + count(child),
@@ -1017,21 +1626,158 @@ export function assertFilterAudience(
   audience: FilterAudience,
 ): void {
   const normalized = normalizeFilterDocument(document, registry);
+  const advancedFieldForTarget = (
+    target: FilterTargetExpression,
+  ): string | null => {
+    if (target.kind === "projection" && target.member === "payload") {
+      return "event.payload";
+    }
+    const members: string[] = [];
+    let entity: string | null = null;
+    const find = (item: FilterTargetExpression): void => {
+      switch (item.kind) {
+        case "member":
+          members.push(item.member);
+          find(item.object);
+          break;
+        case "entity-root":
+          entity = item.entity;
+          break;
+        case "selector":
+          find(item.collection);
+          break;
+        case "projection":
+          members.push(item.member);
+          find(item.collection);
+          break;
+        case "reducer":
+          find(item.input);
+          break;
+        default:
+          break;
+      }
+    };
+    find(target);
+    const parts = members.reverse();
+    const candidates = [
+      ...(entity && parts.length > 0 ? [`${entity}.${parts.join(".")}`] : []),
+      ...parts.slice(0).map((_, index) => parts.slice(index).join(".")),
+    ];
+    return candidates.find((candidate) => registry.has(candidate)) ?? null;
+  };
+  const assertFieldAudience = (field: string, operator?: FilterOperator) => {
+    const definition = registry.get(field);
+    if (!definition || !definition.audiences.has(audience)) {
+      fail(
+        "field_not_allowed",
+        "filters",
+        "Filter field is not allowed for this audience.",
+      );
+    }
+    if (operator && !definition.operators.has(operator)) {
+      fail(
+        "operator_not_allowed",
+        "filters",
+        "Filter operator is not allowed for this field.",
+      );
+    }
+  };
+  const visitTarget = (target: FilterTargetExpression): void => {
+    if (target.kind === "field" || target.kind === "event-payload") {
+      const field = target.kind === "field" ? target.field : "event.payload";
+      assertFieldAudience(field);
+      return;
+    }
+    switch (target.kind) {
+      case "member":
+        {
+          const field = advancedFieldForTarget(target);
+          if (field) assertFieldAudience(field);
+        }
+        visitTarget(target.object);
+        break;
+      case "selector":
+        visitTarget(target.collection);
+        visit(target.predicate);
+        break;
+      case "projection":
+        {
+          const field = advancedFieldForTarget(target);
+          if (field) assertFieldAudience(field);
+        }
+        visitTarget(target.collection);
+        break;
+      case "context-root":
+        break;
+      case "reducer":
+        visitTarget(target.input);
+        break;
+      case "arithmetic":
+        visitTarget(target.left);
+        visitTarget(target.right);
+        break;
+      case "bucket":
+        visitTarget(target.input);
+        break;
+      case "window":
+        visitTarget(target.collection);
+        visitTarget(target.anchor);
+        break;
+      case "periods":
+        visitTarget(target.collection);
+        break;
+      case "sequence":
+        if (
+          target.steps.some(
+            (step) => step.kind === "entity-root" && step.entity === "event",
+          ) &&
+          audience === "public-share"
+        ) {
+          fail(
+            "field_not_allowed",
+            "filters",
+            "Custom event filters are not allowed for this audience.",
+          );
+        }
+        target.steps.forEach(visitTarget);
+        break;
+      case "adjacent":
+        visitTarget(target.sequence);
+        break;
+      case "without":
+        if (
+          target.excluded.kind === "entity-root" &&
+          target.excluded.entity === "event" &&
+          audience === "public-share"
+        ) {
+          fail(
+            "field_not_allowed",
+            "filters",
+            "Custom event filters are not allowed for this audience.",
+          );
+        }
+        visitTarget(target.sequence);
+        visitTarget(target.excluded);
+        break;
+      case "entity-root":
+        if (target.entity === "event" && audience === "public-share") {
+          fail(
+            "field_not_allowed",
+            "filters",
+            "Custom event filters are not allowed for this audience.",
+          );
+        }
+        break;
+      default:
+        break;
+    }
+  };
   const visit = (expression: FilterExpression | null): void => {
     if (!expression) return;
     if (expression.kind === "condition") {
-      const field =
-        expression.target.kind === "field"
-          ? expression.target.field
-          : "event.payload";
-      const definition = registry.get(field);
-      if (!definition || !definition.audiences.has(audience)) {
-        fail(
-          "field_not_allowed",
-          "filters",
-          "Filter field is not allowed for this audience.",
-        );
-      }
+      const field = advancedFieldForTarget(expression.target);
+      if (field) assertFieldAudience(field, expression.operator);
+      visitTarget(expression.target);
       return;
     }
     if (expression.kind === "not") return visit(expression.child);

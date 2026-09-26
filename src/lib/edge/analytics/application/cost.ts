@@ -2,6 +2,7 @@ import type { FilterScope } from "@/lib/edge/analytics/contract";
 
 export interface QueryCostInput {
   readonly rangeMs: number;
+  readonly evaluationRangeMs?: number;
   readonly sideCount?: number;
   readonly siteCount?: number;
   readonly metricCount?: number;
@@ -20,6 +21,9 @@ export interface QueryCostInput {
   readonly requiredSourceCount?: number;
   readonly entityAlgebraComplexity?: number;
   readonly eventPayloadComplexity?: number;
+  readonly expressionDepth?: number;
+  readonly relationStepCount?: number;
+  readonly relationMatchScale?: number;
   readonly requiresRawSource?: boolean;
   /** Funnel planner dimensions. These are structural, not row-count guesses. */
   readonly funnelStepCount?: number;
@@ -54,6 +58,7 @@ export function calculateQueryCost(
 ): number {
   const values = [
     input.rangeMs,
+    input.evaluationRangeMs ?? 0,
     input.sideCount ?? 1,
     input.siteCount ?? 1,
     input.metricCount ?? 1,
@@ -68,6 +73,9 @@ export function calculateQueryCost(
     input.requiredSourceCount ?? 1,
     input.entityAlgebraComplexity ?? 1,
     input.eventPayloadComplexity ?? 1,
+    input.expressionDepth ?? 1,
+    input.relationStepCount ?? 1,
+    input.relationMatchScale ?? 1,
     input.funnelStepCount ?? 1,
     input.funnelCteCount ?? 1,
     input.funnelSqlLength ?? 1,
@@ -77,6 +85,10 @@ export function calculateQueryCost(
     return policy.maxCost;
   }
   const rangeFactor = Math.max(1, input.rangeMs / policy.rangeUnitMs);
+  const evaluationFactor = Math.max(
+    1,
+    (input.evaluationRangeMs ?? input.rangeMs) / Math.max(1, input.rangeMs),
+  );
   const providerFactor = input.provider
     ? policy.providerWeights[input.provider]
     : 1;
@@ -91,6 +103,7 @@ export function calculateQueryCost(
     (input.funnelWorstCase ? 1.5 : 1);
   const cost =
     rangeFactor *
+    evaluationFactor ** 0.5 *
     Math.max(1, input.sideCount ?? 1) *
     Math.max(1, input.siteCount ?? 1) *
     Math.max(1, input.metricCount ?? 1) *
@@ -103,6 +116,9 @@ export function calculateQueryCost(
     Math.max(1, input.requiredSourceCount ?? 1) ** 0.15 *
     Math.max(1, input.entityAlgebraComplexity ?? 1) ** 0.2 *
     Math.max(1, input.eventPayloadComplexity ?? 1) ** 0.2 *
+    Math.max(1, input.expressionDepth ?? 1) ** 0.35 *
+    Math.max(1, input.relationStepCount ?? 1) ** 0.75 *
+    Math.max(1, input.relationMatchScale ?? 1) ** 0.25 *
     scopeFactor *
     rawSourceFactor *
     funnelFactor *

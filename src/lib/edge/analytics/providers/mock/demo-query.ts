@@ -6,10 +6,13 @@ import {
   isErrorEnvelope,
 } from "@/lib/demo/realtime/envelope";
 import type {
+  FilterDocument,
   FilterScope,
   QueryOperation,
+  QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { analyticsDiagnosticHeaders } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import { formatFilterDsl } from "@/lib/filter-contract";
 import {
   getRequestId,
   jsonResponseWith,
@@ -33,6 +36,8 @@ export interface DemoQueryRuntimeInput {
   readonly operation?: QueryOperation;
   /** Resolved by the canonical query service before demo data generation. */
   readonly resolvedScope?: FilterScope;
+  /** Canonical query values, including the request-fixed clock and evaluation range. */
+  readonly canonicalQuery?: unknown;
 }
 const EMPTY_D1_DIAGNOSTICS = {
   rowsRead: 0,
@@ -150,6 +155,40 @@ export async function executeDemoQuery(
   params.siteId = siteId;
   if (input.operation) params.operation = input.operation;
   if (input.resolvedScope) params.resolvedScope = input.resolvedScope;
+  if (input.canonicalQuery && typeof input.canonicalQuery === "object") {
+    const canonical = input.canonicalQuery as {
+      readonly time?: QueryTime;
+      readonly filters?: FilterDocument;
+      readonly scopePreference?: string;
+      readonly current?: {
+        readonly time?: QueryTime;
+        readonly filters?: FilterDocument;
+        readonly scopePreference?: string;
+      };
+    };
+    const side = canonical.current ?? canonical;
+    const { time, filters, scopePreference } = side;
+    if (!time)
+      return createDemoQueryResponse(
+        demoBadRequest("Canonical query is missing its time range"),
+        400,
+        publicQuery,
+        context,
+      );
+    params.from = time.range.startMs;
+    params.to = time.range.endExclusiveMs;
+    params.timeZone = time.reportingTimeZone;
+    params.nowMs = time.capturedAtMs;
+    params.__filterDsl = formatFilterDsl(filters ?? { version: 1, root: null });
+    params.scope = scopePreference ?? "auto";
+    if (time.evaluationRange) {
+      params.evaluationFromMs = time.evaluationRange.startMs;
+      params.evaluationToMs = time.evaluationRange.endExclusiveMs;
+    } else {
+      delete params.evaluationFromMs;
+      delete params.evaluationToMs;
+    }
+  }
 
   try {
     const { handleDemoRequest } = await import("@/lib/demo/runtime");
@@ -169,6 +208,19 @@ export async function executeDemoQuery(
     return createDemoQueryResponse(result, status, publicQuery, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : "demo_query_error";
+    if (
+      message === "filter_evaluation_range_unavailable" ||
+      message === "filter_activity_limit_exceeded" ||
+      message === "filter_sequence_match_limit_exceeded" ||
+      message === "filter_sequence_work_limit_exceeded"
+    ) {
+      return createDemoQueryResponse(
+        demoBadRequest(message),
+        400,
+        publicQuery,
+        context,
+      );
+    }
     return createDemoQueryResponse(
       demoErr("internal_error", message),
       500,

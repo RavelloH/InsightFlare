@@ -1,4 +1,9 @@
 import {
+  formatFilterDsl,
+  formatFilterTargetExpression,
+  parseFilterDsl,
+} from "./filter-dsl";
+import {
   type CanonicalJsonPath,
   DEFAULT_FILTER_LIMITS,
   FILTER_DOCUMENT_VERSION,
@@ -10,6 +15,8 @@ import {
   type FilterOperator,
   FilterValidationError,
   type FilterValue,
+  isLegacyFilterTarget,
+  legacyConditionValue,
   normalizeFilterDocument,
 } from "./filters";
 
@@ -244,25 +251,91 @@ function parseCondition(
   };
 }
 
+function parseComplexCondition(
+  target: string,
+  raw: string,
+  registry: FilterFieldRegistry,
+  key: string,
+): FilterCondition {
+  const parse = (source: string) => {
+    const document = parseFilterDsl(source, registry);
+    if (!document.root || document.root.kind !== "condition") {
+      fail(
+        "invalid_complex_filter",
+        key,
+        "Expected one condition for the complex filter target.",
+      );
+    }
+    return document.root;
+  };
+  // Canonical DSL suffixes (emitted by this codec) keep computed literal
+  // types intact. The operator:value spelling also remains accepted for the
+  // compact form documented by Filter v1.
+  if (
+    /^(?:eq|neq|in|notIn|contains|startsWith|endsWith|gt|gte|lt|lte|between|exists|notExists|isNull|notNull|isEmpty|notEmpty)(?:\s|$)/i.test(
+      raw,
+    )
+  ) {
+    return parse(`${target} ${raw}`);
+  }
+  const colon = raw.indexOf(":");
+  if (colon > 0) {
+    const alias = raw.slice(0, colon);
+    const operand = raw.slice(colon + 1);
+    const operator = OPERATOR_ALIASES[alias];
+    if (operator) {
+      if (VALUELESS.has(operator)) return parse(`${target} ${operator}`);
+      const untyped = `${target} ${operator} ${operand}`;
+      try {
+        return parse(untyped);
+      } catch {
+        return parse(`${target} ${operator} ${JSON.stringify(operand)}`);
+      }
+    }
+  }
+  return parse(`${target} ${raw}`);
+}
+
 function parseKey(
   key: string,
 ): { field: string; payloadPath?: string; logic: string } | null {
-  const match = /^filter\[([^[]+?)\](.*)$/.exec(key);
-  if (!match) return null;
-  const field = match[1]!;
-  const rest = match[2]!;
+  if (!key.startsWith("filter[")) return null;
+  const readBracket = (
+    start: number,
+  ): { value: string; end: number } | null => {
+    if (key[start] !== "[") return null;
+    let depth = 1;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start + 1; index < key.length; index += 1) {
+      const character = key[index]!;
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') quoted = false;
+        continue;
+      }
+      if (character === '"') quoted = true;
+      else if (character === "[") depth += 1;
+      else if (character === "]") {
+        depth -= 1;
+        if (depth === 0)
+          return { value: key.slice(start + 1, index), end: index + 1 };
+      }
+    }
+    return null;
+  };
+  const targetPart = readBracket("filter".length);
+  if (!targetPart) return null;
+  const field = targetPart.value;
+  let cursor = targetPart.end;
   const parts: string[] = [];
-  const pattern = /\[([^[]*?)\]/g;
-  let cursor = 0;
-  let item: RegExpExecArray | null;
-  while ((item = pattern.exec(rest))) {
-    if (item.index !== cursor)
-      fail("invalid_filter_key", key, "Malformed filter key.");
-    parts.push(item[1]!);
-    cursor = pattern.lastIndex;
+  while (cursor < key.length) {
+    const part = readBracket(cursor);
+    if (!part) fail("invalid_filter_key", key, "Malformed filter key.");
+    parts.push(part.value);
+    cursor = part.end;
   }
-  if (cursor !== rest.length)
-    fail("invalid_filter_key", key, "Malformed filter key.");
   let payloadPath: string | undefined;
   let logic = "";
   if (field === "event.payload" && parts[0]?.startsWith("/")) {
@@ -383,11 +456,27 @@ export function parseFilterParams(
     }
     if (value.length > limits.maxValueLength)
       fail("value_too_long", key, "Filter value is too long.");
-    insert(
-      root,
-      parseLogic(parsed.logic, limits.maxDepth),
-      parseCondition(parsed.field, parsed.payloadPath, value, registry, limits),
-    );
+    let condition: FilterCondition;
+    if (!registry.has(parsed.field) && parsed.field !== "event.payload") {
+      try {
+        condition = parseComplexCondition(parsed.field, value, registry, key);
+      } catch {
+        fail(
+          "invalid_complex_filter",
+          key,
+          "Invalid complex filter target or value.",
+        );
+      }
+    } else {
+      condition = parseCondition(
+        parsed.field,
+        parsed.payloadPath,
+        value,
+        registry,
+        limits,
+      );
+    }
+    insert(root, parseLogic(parsed.logic, limits.maxDepth), condition);
     conditions += 1;
     if (conditions > limits.maxConditions)
       fail("too_many_conditions", key, "Filter condition limit exceeded.");
@@ -470,6 +559,19 @@ function serializeExpression(
   const notGroups = children.filter((child) => child.kind === "not");
   for (const child of children) {
     if (child.kind === "condition") {
+      if (!isLegacyFilterTarget(child.target)) {
+        const target = formatFilterTargetExpression(child.target);
+        const expressionText = formatFilterDsl({
+          version: FILTER_DOCUMENT_VERSION,
+          root: child,
+        });
+        const rawValue = expressionText.slice(target.length).trimStart();
+        pairs.push([
+          `filter[${target}]${path.length ? `[${path.join(".")}]` : ""}`,
+          rawValue,
+        ]);
+        continue;
+      }
       const field =
         child.target.kind === "field" ? child.target.field : "event.payload";
       const targetPath =
@@ -477,7 +579,11 @@ function serializeExpression(
       const isTypeless = registry.get(field)?.valueKind === "json-scalar";
       pairs.push([
         `filter[${field}]${targetPath}${path.length ? `[${path.join(".")}]` : ""}`,
-        conditionValue(child.value, child.operator, isTypeless),
+        conditionValue(
+          legacyConditionValue(child.value),
+          child.operator,
+          isTypeless,
+        ),
       ]);
     } else if (child.kind === "not") {
       const index = notGroups.indexOf(child);

@@ -7,6 +7,7 @@ import {
   type FilterDocument,
   type FilterExpression,
   FilterValidationError,
+  isLegacyFilterTarget,
   normalizeFilterDocument,
 } from "@/lib/filter-contract/filters";
 
@@ -36,6 +37,13 @@ export function assertObservationFilterCompatible(
   const visit = (expression: FilterExpression | null, path: string): void => {
     if (!expression) return;
     if (expression.kind === "condition") {
+      if (!isLegacyFilterTarget(expression.target)) {
+        throw new FilterValidationError(
+          "observation_filter_target_unsupported",
+          `${path}.target`,
+          "Goal and Funnel observation predicates support only registered fields and event payload paths.",
+        );
+      }
       const fieldId =
         expression.target.kind === "field"
           ? expression.target.field

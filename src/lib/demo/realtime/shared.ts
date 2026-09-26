@@ -133,9 +133,10 @@ export function buildDemoTrendBuckets(
   interval: "minute" | "hour" | "day" | "week" | "month",
   filters: DemoQueryFilters,
   timeZone: string,
+  datasetOverride?: DemoFactDataset,
 ) {
   const buckets = buildDemoTimeBuckets(from, to, interval, timeZone);
-  const dataset = buildDemoFactDataset(siteId, from, to);
+  const dataset = datasetOverride ?? buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
   const bucketStats = new Map<
     number,

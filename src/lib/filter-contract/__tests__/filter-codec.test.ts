@@ -56,6 +56,32 @@ describe("filter URL codec", () => {
     });
   });
 
+  it("round trips computed targets through stable filter URL keys", () => {
+    const document = parseFilterParams(
+      "filter[count(event)]=gte:5&filter[first(page).path]=eq:%2Fpricing",
+      analyticsFilterRegistry,
+    );
+    const serialized = serializeFilterParams(document, analyticsFilterRegistry);
+    expect(serialized.toString()).toBe(
+      "filter%5Bcount%28event%29%5D=gte+5&filter%5Bfirst%28page%29.path%5D=eq+%22%2Fpricing%22",
+    );
+    expect(parseFilterParams(serialized, analyticsFilterRegistry)).toEqual(
+      document,
+    );
+
+    const temporal = parseFilterParams(
+      "filter[countDistinct(page.path)]=gte:10&filter[time]=gte:@now-30d",
+      analyticsFilterRegistry,
+    );
+    const temporalSerialized = serializeFilterParams(
+      temporal,
+      analyticsFilterRegistry,
+    );
+    expect(
+      parseFilterParams(temporalSerialized, analyticsFilterRegistry),
+    ).toEqual(temporal);
+  });
+
   it("preserves escaped set operands and reconstructs nested OR and NOT", () => {
     const document = parseFilterParams(
       "filter[page.path]=in:/a\\,/b,/docs\\\\notes&filter[page.title][or.0]=Guide&filter[page.title][or.1.not]=Draft",
@@ -249,6 +275,120 @@ describe("filter URL codec", () => {
     ).toEqual(serialized);
   });
 
+  it("serializes OR branches that target different fields", () => {
+    const document = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
+          kind: "or",
+          children: [
+            {
+              kind: "condition",
+              target: { kind: "field", field: "page.path" },
+              operator: "eq",
+              value: "/docs",
+            },
+            {
+              kind: "condition",
+              target: { kind: "field", field: "geo.country" },
+              operator: "eq",
+              value: "US",
+            },
+          ],
+        },
+      },
+      analyticsFilterRegistry,
+    );
+    const params = serializeFilterParams(document, analyticsFilterRegistry);
+    expect([...params.keys()]).toEqual([
+      "filter[geo.country][or.0]",
+      "filter[page.path][or.1]",
+    ]);
+    expect(parseFilterParams(params, analyticsFilterRegistry)).toEqual(
+      document,
+    );
+  });
+
+  it("round-trips every valueless operator and separately indexed negations", () => {
+    const valueless: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "and",
+        children: [
+          "exists",
+          "notExists",
+          "isNull",
+          "notNull",
+          "isEmpty",
+          "notEmpty",
+        ].map((operator) => ({
+          kind: "condition" as const,
+          target: { kind: "field" as const, field: "page.path" as never },
+          operator: operator as never,
+        })),
+      },
+    };
+    const normalized = normalizeFilterDocument(
+      valueless,
+      analyticsFilterRegistry,
+    );
+    const params = serializeFilterParams(normalized, analyticsFilterRegistry);
+
+    expect(params.getAll("filter[page.path]")).toEqual([
+      "empty",
+      "ex",
+      "nempty",
+      "nex",
+      "nnull",
+      "null",
+    ]);
+    expect(parseFilterParams(params, analyticsFilterRegistry)).toEqual(
+      normalized,
+    );
+
+    const negations: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "and",
+        children: [
+          {
+            kind: "not",
+            child: {
+              kind: "condition",
+              target: { kind: "field", field: "page.path" as never },
+              operator: "eq",
+              value: "/private",
+            },
+          },
+          {
+            kind: "not",
+            child: {
+              kind: "condition",
+              target: { kind: "field", field: "geo.country" as never },
+              operator: "eq",
+              value: "US",
+            },
+          },
+        ],
+      },
+    };
+    const normalizedNegations = normalizeFilterDocument(
+      negations,
+      analyticsFilterRegistry,
+    );
+    const negationParams = serializeFilterParams(
+      normalizedNegations,
+      analyticsFilterRegistry,
+    );
+    expect([...negationParams.keys()]).toEqual([
+      "filter[geo.country][not:0]",
+      "filter[page.path][not:1]",
+    ]);
+    expect(parseFilterParams(negationParams, analyticsFilterRegistry)).toEqual(
+      normalizedNegations,
+    );
+  });
+
   it("rejects malformed keys, payload targets, unsupported operators, and unsafe branches", () => {
     expect(() =>
       parseFilterParams(
@@ -265,6 +405,87 @@ describe("filter URL codec", () => {
     expect(() =>
       parseFilterParams("filter[page.path]x=/docs", analyticsFilterRegistry),
     ).toThrow(/Malformed filter key/);
+  });
+
+  it("handles strict keys, typed parse failures, and invalid payload JSON", () => {
+    const custom: FilterFieldRegistry = new Map([
+      [
+        "metric.number",
+        {
+          id: "metric.number",
+          valueKind: "number",
+          operators: new Set(["eq", "in", "between"]),
+          audiences: new Set(["private-dashboard"]),
+        },
+      ],
+      [
+        "metric.boolean",
+        {
+          id: "metric.boolean",
+          valueKind: "boolean",
+          operators: new Set(["eq"]),
+          audiences: new Set(["private-dashboard"]),
+        },
+      ],
+    ]);
+    for (const [input, registry, code] of [
+      ["filter[metric.number]=eq:", custom, "invalid_number"],
+      ["filter[metric.number]=eq:NaN", custom, "invalid_number"],
+      ["filter[metric.boolean]=eq:yes", custom, "invalid_boolean"],
+      [
+        "filter[event.payload][/x]=json:{",
+        analyticsFilterRegistry,
+        "invalid_json_scalar",
+      ],
+      [
+        "filter[event.payload][/x]=json:{}",
+        analyticsFilterRegistry,
+        "invalid_json_scalar",
+      ],
+      [
+        "filter[unknown.field]=eq:value",
+        analyticsFilterRegistry,
+        "invalid_complex_filter",
+      ],
+      [
+        "filter[page.path][or]=/a",
+        analyticsFilterRegistry,
+        "invalid_logic_path",
+      ],
+      [
+        "filter[page.path][or:x]=/a",
+        analyticsFilterRegistry,
+        "invalid_logic_path",
+      ],
+    ] as const) {
+      expect(() => parseFilterParams(input, registry)).toThrow(
+        expect.objectContaining({ code }),
+      );
+    }
+
+    expect(
+      parseFilterParams("filter[page.path=/ignored", analyticsFilterRegistry, {
+        strictFilterKeys: false,
+      }).root,
+    ).toBeNull();
+    const fromUrl = parseFilterParams(
+      new URL("https://example.test/?filter%5Bpage.path%5D=%2Fdocs"),
+      analyticsFilterRegistry,
+    );
+    expect(fromUrl.root).toMatchObject({
+      kind: "condition",
+      target: { kind: "field", field: "page.path" },
+      value: "/docs",
+    });
+    expect(() =>
+      parseFilterParams(
+        "filter[page.path]=/docs&filter[page.path]=/other",
+        analyticsFilterRegistry,
+        {
+          limits: { maxConditions: 1 },
+        },
+      ),
+    ).toThrow(expect.objectContaining({ code: "too_many_conditions" }));
   });
 });
 

@@ -78,8 +78,14 @@ describe("typed analytics schema catalog", () => {
       examples: expect.arrayContaining(['page.path eq "/pricing"']),
     });
     expect(schema.filterProtocol.dsl.syntax.condition).toBe(
-      "<field> <operator> <value>",
+      "<target-expression> <operator> <condition-value>",
     );
+    expect(schema.filterProtocol.dsl.syntax).toMatchObject({
+      selector: expect.any(String),
+      reducer: expect.any(String),
+      temporal: expect.any(String),
+      relation: expect.any(String),
+    });
     expect(AnalyticsSchemaDataSchema.safeParse(schema).success).toBe(true);
   });
 

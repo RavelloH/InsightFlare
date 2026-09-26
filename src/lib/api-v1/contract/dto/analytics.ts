@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import { FILTER_DSL_MAX_LENGTH } from "@/lib/filter-contract";
 import { analyticsFilterDefinition } from "@/lib/filter-contract/filter-registry";
+import type {
+  FilterExpression,
+  FilterTargetExpression,
+} from "@/lib/filter-contract/filters";
 import type { FilterScopePreference } from "@/lib/filter-contract/scope-preference";
 
 const rfc3339 = z.string().datetime({ offset: true }).max(64);
@@ -24,48 +28,22 @@ const filterValue = z.union([
   z.boolean(),
   z.null(),
 ]);
-const filterTarget = z.discriminatedUnion("kind", [
-  z
-    .object({ kind: z.literal("field"), field: z.string().min(1).max(128) })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("event-payload"),
-      path: z.string().min(1).max(240),
-    })
-    .strict(),
-]);
-
-type PublicFilterExpression =
-  | {
-      readonly kind: "condition";
-      readonly target:
-        | { readonly kind: "field"; readonly field: string }
-        | { readonly kind: "event-payload"; readonly path: string };
-      readonly operator: string;
-      readonly value?:
-        | string
-        | number
-        | boolean
-        | null
-        | readonly (string | number | boolean | null)[];
-    }
-  | {
-      readonly kind: "and" | "or";
-      readonly children: readonly PublicFilterExpression[];
-    }
-  | { readonly kind: "not"; readonly child: PublicFilterExpression };
-
+type PublicFilterExpression = FilterExpression;
+type PublicFilterTarget = FilterTargetExpression;
 const publicFilterExpressionSchema: z.ZodType<PublicFilterExpression> = z.lazy(
   () =>
     z.discriminatedUnion("kind", [
       z
         .object({
           kind: z.literal("condition"),
-          target: filterTarget,
+          target: publicFilterTargetSchema,
           operator: z.string().min(1).max(32),
           value: z
-            .union([filterValue, z.array(filterValue).min(1).max(128)])
+            .union([
+              filterValue,
+              z.array(filterValue).min(1).max(128),
+              publicFilterTargetSchema,
+            ])
             .optional(),
         })
         .strict(),
@@ -84,7 +62,168 @@ const publicFilterExpressionSchema: z.ZodType<PublicFilterExpression> = z.lazy(
       z
         .object({ kind: z.literal("not"), child: publicFilterExpressionSchema })
         .strict(),
-    ]),
+    ]) as z.ZodType<PublicFilterExpression>,
+);
+const publicFilterTargetSchema: z.ZodType<PublicFilterTarget> = z.lazy(
+  () =>
+    z.discriminatedUnion("kind", [
+      z
+        .object({ kind: z.literal("field"), field: z.string().min(1).max(128) })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("event-payload"),
+          path: z.string().min(1).max(240),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("entity-root"),
+          entity: z.enum(["event", "page", "session", "visitor"]),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("context-root"),
+          context: z.enum(["current", "sequence", "period", "bucket"]),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("member"),
+          object: publicFilterTargetSchema,
+          member: z.string().min(1).max(64),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("selector"),
+          collection: publicFilterTargetSchema,
+          predicate: publicFilterExpressionSchema,
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("projection"),
+          collection: publicFilterTargetSchema,
+          member: z.string().min(1).max(64),
+          path: z.string().min(1).max(240).optional(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("reducer"),
+          reducer: z.enum([
+            "count",
+            "first",
+            "last",
+            "nth",
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "countDistinct",
+          ]),
+          input: publicFilterTargetSchema,
+          index: z.number().int().positive().optional(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("arithmetic"),
+          operator: z.enum(["add", "sub", "mul", "div"]),
+          left: publicFilterTargetSchema,
+          right: publicFilterTargetSchema,
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("duration"),
+          amount: z.number().finite(),
+          unit: z.enum(["ms", "s", "m", "h", "d", "w", "mo", "y"]),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("time-anchor"),
+          anchor: z.enum(["now", "range.start", "range.end"]),
+          offset: z
+            .object({
+              kind: z.literal("duration"),
+              amount: z.number().finite(),
+              unit: z.enum(["ms", "s", "m", "h", "d", "w", "mo", "y"]),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("bucket"),
+          input: publicFilterTargetSchema,
+          interval: z
+            .object({
+              kind: z.literal("duration"),
+              amount: z.number().positive(),
+              unit: z.enum(["ms", "s", "m", "h", "d", "w", "mo", "y"]),
+            })
+            .strict(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("window"),
+          collection: publicFilterTargetSchema,
+          anchor: publicFilterTargetSchema,
+          startOffset: z
+            .object({
+              kind: z.literal("duration"),
+              amount: z.number().finite(),
+              unit: z.enum(["ms", "s", "m", "h", "d", "w", "y"]),
+            })
+            .strict(),
+          endOffset: z
+            .object({
+              kind: z.literal("duration"),
+              amount: z.number().finite(),
+              unit: z.enum(["ms", "s", "m", "h", "d", "w", "y"]),
+            })
+            .strict(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("periods"),
+          collection: publicFilterTargetSchema,
+          interval: z
+            .object({
+              kind: z.literal("duration"),
+              amount: z.number().positive(),
+              unit: z.enum(["ms", "s", "m", "h", "d", "w", "mo", "y"]),
+            })
+            .strict(),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("sequence"),
+          steps: z.array(publicFilterTargetSchema).min(2).max(16),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("adjacent"),
+          sequence: publicFilterTargetSchema,
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("without"),
+          sequence: publicFilterTargetSchema,
+          excluded: publicFilterTargetSchema,
+        })
+        .strict(),
+    ]) as z.ZodType<PublicFilterTarget>,
 );
 
 export const AbsoluteTimeRangeDtoSchema = z
@@ -221,7 +360,12 @@ const comparisonDatasetV2 = <
   range: Range,
   filter: Filter,
 ) =>
-  z.object({ timeRange: range, filter: filter.nullable().optional() }).strict();
+  z
+    .object({
+      timeRange: range,
+      filter: filter.nullable().optional(),
+    })
+    .strict();
 const siteCurrentDatasetV2 = comparisonDatasetV2(
   ComparisonDatasetTimeRangeDtoSchema,
   SiteQueryFilterDtoSchema,

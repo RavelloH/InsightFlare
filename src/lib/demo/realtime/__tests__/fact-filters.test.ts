@@ -25,6 +25,17 @@ import {
   parseFilterDsl,
 } from "@/lib/filter-contract";
 describe("mock/fact-filters", () => {
+  it("executes Core expressions over the demo fact dataset", () => {
+    const result = applyDemoFilters(emptyDemoFactDataset(0, 1), {
+      filterDocument: parseFilterDsl(
+        "count(event) gte 1",
+        analyticsFilterRegistry,
+      ),
+      scope: "event",
+    });
+    expect(result.visits).toEqual([]);
+  });
+
   it("builds canonical session and visitor aggregates", () => {
     const dataset = makeDataset([
       makeVisit({
@@ -291,6 +302,17 @@ describe("mock/fact-filters", () => {
         facts,
       ),
     ).toBe(true);
+  });
+
+  it("does not let NOT IN match a missing Event field", () => {
+    const visit = makeVisit({ eventType: "pageview" });
+    const facts = buildCanonicalDemoFacts(makeDataset([visit]));
+    const condition = parseFilterDsl(
+      'event.name notIn ["purchase"]',
+      analyticsFilterRegistry,
+    ).root as FilterCondition;
+
+    expect(demoConditionMatches(visit, condition, facts)).toBe(false);
   });
 
   it("evaluates nested expressions and payload-aware candidate expressions", () => {

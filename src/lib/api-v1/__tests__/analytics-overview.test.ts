@@ -424,6 +424,32 @@ describe("API v1 overview adapter", () => {
         ],
       },
     });
+    const separateEvaluationRangeResult = await executeApiV1SiteOverview(
+      {
+        ...body,
+        evaluationRange: {
+          from: "2026-08-01T00:00:00.000Z",
+          to: "2026-08-02T00:00:00.000Z",
+        },
+      },
+      principal(),
+      "site-1",
+      createTestProviderRegistry(reader),
+      {},
+    );
+    expect(separateEvaluationRangeResult).toMatchObject({
+      ok: false,
+      error: {
+        kind: "invalid_input",
+        reason: "schema_validation_failed",
+        issues: [
+          {
+            path: "",
+            code: "unrecognized_keys",
+          },
+        ],
+      },
+    });
     const invalidTimeZoneResult = await executeApiV1SiteOverview(
       { ...body, timeRange: { ...body.timeRange, timeZone: "Not/AZone" } },
       principal(),

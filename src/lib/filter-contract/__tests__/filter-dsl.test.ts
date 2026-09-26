@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   analyticsFilterRegistry,
+  type CanonicalJsonPath,
   FILTER_DSL_EXAMPLES,
   FILTER_DSL_MAX_LENGTH,
   FILTER_DSL_OPERATOR_IDS,
@@ -9,9 +10,12 @@ import {
   FILTER_DSL_VERSION,
   FilterDslParseError,
   type FilterFieldDefinition,
+  type FilterFieldId,
   type FilterFieldRegistry,
+  type FilterTargetExpression,
   FilterValidationError,
   formatFilterDsl,
+  formatFilterTargetExpression,
   parseFilterDsl,
 } from "@/lib/filter-contract";
 
@@ -30,7 +34,9 @@ describe("filter DSL v1", () => {
     expect(FILTER_DSL_VERSION).toBe(1);
     expect(FILTER_DSL_MAX_LENGTH).toBe(65_536);
     expect(FILTER_DSL_OPERATOR_IDS).toContain("startsWith");
-    expect(FILTER_DSL_SYNTAX.condition).toBe("<field> <operator> <value>");
+    expect(FILTER_DSL_SYNTAX.condition).toBe(
+      "<target-expression> <operator> <condition-value>",
+    );
     for (const example of FILTER_DSL_EXAMPLES) {
       expect(parseFilterDsl(example, analyticsFilterRegistry).version).toBe(1);
     }
@@ -49,6 +55,37 @@ describe("filter DSL v1", () => {
     expect(
       parseFilterDsl(formatFilterDsl(document), analyticsFilterRegistry),
     ).toEqual(document);
+  });
+
+  it("round-trips Core selectors, reducers, projections, and relative time", () => {
+    const source =
+      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2 AND last(page).time gte @now-14d';
+    const document = parseFilterDsl(source, analyticsFilterRegistry);
+    const formatted = formatFilterDsl(document);
+
+    expect(document.version).toBe(1);
+    expect(formatted).toContain(
+      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2',
+    );
+    expect(formatted).toContain("last(page).time gte @now-14d");
+    expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
+      document,
+    );
+  });
+
+  it("round-trips windows, periods, and ordered Relation steps", () => {
+    const source =
+      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }).time, [0d, 7d]) notExists AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.span lte 30d } exists';
+    const document = parseFilterDsl(source, analyticsFilterRegistry);
+    const formatted = formatFilterDsl(document);
+
+    expect(formatted).toContain("[0d, 7d]");
+    expect(formatted).toContain(
+      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])',
+    );
+    expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
+      document,
+    );
   });
 
   it("supports every v1 operator spelling, typed values, precedence, and payload targets", () => {
@@ -435,5 +472,257 @@ describe("filter DSL v1", () => {
       expect(error.offset).toBeGreaterThanOrEqual(0);
       expect(error.offset).toBeLessThanOrEqual(source.length);
     }
+  });
+
+  it("reports malformed function arguments at their syntax boundary", () => {
+    const cases: readonly [string, string][] = [
+      ["sequence(event)", "expected_sequence_steps"],
+      [
+        'sequence([event { event.name eq "signup" }] exists',
+        "invalid_sequence",
+      ],
+      ["window(page, @now [0d, 1d]) exists", "expected_duration_range"],
+      ["window(page, @now, 1d) exists", "expected_duration_range"],
+      ["window(page, @now, [0d 1d]) exists", "expected_argument_separator"],
+      ["window(page, @now, [0d, 1d] exists", "invalid_window"],
+      ['window(page, @now, ["0d", 1d]) exists', "expected_duration"],
+      ["bucket(page.time 1d) exists", "expected_argument_separator"],
+      ['bucket(page.time, "1d") exists', "expected_duration"],
+      ["bucket(page.time, 1d exists", "missing_closing_parenthesis"],
+      ["first(page, event) exists", "unexpected_argument"],
+      ["add(page) exists", "missing_argument"],
+      [
+        'adjacent(sequence([event { event.name eq "signup" }, page]), page) exists',
+        "unexpected_argument",
+      ],
+      [
+        'without(sequence([event { event.name eq "signup" }, page])) exists',
+        "missing_argument",
+      ],
+      ["unknownFunction(page) exists", "unknown_function"],
+    ];
+
+    for (const [source, code] of cases) {
+      expect(parseError(source).code, source).toBe(code);
+    }
+  });
+
+  it("covers selector, projected payload, nth, and temporal syntax boundaries", () => {
+    const cases: readonly [string, string][] = [
+      ['"not a target" eq "value"', "expected_identifier"],
+      ['event { event.name eq "purchase"', "missing_selector_brace"],
+      [
+        "event { event.name exists }.payload(1) exists",
+        "expected_payload_path",
+      ],
+      [
+        'event { event.name eq "purchase" }.payload("/kind" eq "sale"',
+        "missing_payload_parenthesis",
+      ],
+      ["nth(event, 0) exists", "invalid_index"],
+      ["nth(event, 1 exists", "missing_closing_parenthesis"],
+      ["count(event exists", "missing_closing_parenthesis"],
+      ["window(page @now [0d, 1d]) exists", "expected_argument_separator"],
+      ["window(page, @now 1d) exists", "expected_duration_range"],
+      ["periods(page, 1d exists", "missing_closing_parenthesis"],
+    ];
+
+    for (const [source, code] of cases) {
+      expect(parseError(source).code, source).toBe(code);
+    }
+
+    const projectedPayload = parseFilterDsl(
+      'event { event.name eq "purchase" }.payload("/kind") exists',
+      analyticsFilterRegistry,
+    );
+    expect(formatFilterDsl(projectedPayload)).toContain(
+      '.payload("/kind") exists',
+    );
+
+    const timeField = parseFilterDsl(
+      "time gte @now-1d",
+      analyticsFilterRegistry,
+    );
+    expect(formatFilterDsl(timeField)).toBe("time gte @now-1d");
+  });
+
+  it("formats every target expression shape, including optional members and offsets", () => {
+    const duration = { kind: "duration", amount: 2, unit: "d" } as const;
+    const targets: readonly [FilterTargetExpression, string][] = [
+      [{ kind: "field", field: "page.path" as FilterFieldId }, "page.path"],
+      [
+        {
+          kind: "event-payload",
+          path: "/plan" as CanonicalJsonPath,
+        },
+        'event.payload("/plan")',
+      ],
+      [{ kind: "entity-root", entity: "visitor" }, "visitor"],
+      [{ kind: "context-root", context: "current" }, ""],
+      [{ kind: "context-root", context: "sequence" }, "sequence"],
+      [
+        {
+          kind: "member",
+          object: { kind: "context-root", context: "current" },
+          member: "time",
+        },
+        "time",
+      ],
+      [
+        {
+          kind: "selector",
+          collection: { kind: "entity-root", entity: "page" },
+          predicate: {
+            kind: "condition",
+            target: { kind: "field", field: "page.path" as FilterFieldId },
+            operator: "exists",
+          },
+        },
+        "page { page.path exists }",
+      ],
+      [
+        {
+          kind: "projection",
+          collection: { kind: "entity-root", entity: "page" },
+          member: "path",
+        },
+        "page.path",
+      ],
+      [
+        {
+          kind: "reducer",
+          reducer: "count",
+          input: { kind: "entity-root", entity: "event" },
+        },
+        "count(event)",
+      ],
+      [
+        {
+          kind: "reducer",
+          reducer: "nth",
+          input: { kind: "entity-root", entity: "event" },
+          index: 2,
+        },
+        "nth(event, 2)",
+      ],
+      [
+        {
+          kind: "arithmetic",
+          operator: "add",
+          left: {
+            kind: "reducer",
+            reducer: "count",
+            input: { kind: "entity-root", entity: "event" },
+          },
+          right: {
+            kind: "reducer",
+            reducer: "count",
+            input: { kind: "entity-root", entity: "page" },
+          },
+        },
+        "add(count(event), count(page))",
+      ],
+      [duration, "2d"],
+      [{ kind: "time-anchor", anchor: "now" }, "@now"],
+      [
+        { kind: "time-anchor", anchor: "range.start", offset: duration },
+        "@range.start+2d",
+      ],
+      [
+        {
+          kind: "time-anchor",
+          anchor: "range.end",
+          offset: { kind: "duration", amount: -2, unit: "d" },
+        },
+        "@range.end-2d",
+      ],
+      [
+        {
+          kind: "bucket",
+          input: { kind: "entity-root", entity: "page" },
+          interval: duration,
+        },
+        "bucket(page, 2d)",
+      ],
+      [
+        {
+          kind: "window",
+          collection: { kind: "entity-root", entity: "event" },
+          anchor: { kind: "time-anchor", anchor: "now" },
+          startOffset: duration,
+          endOffset: { kind: "duration", amount: 5, unit: "d" },
+        },
+        "window(event, @now, [2d, 5d])",
+      ],
+      [
+        {
+          kind: "periods",
+          collection: { kind: "entity-root", entity: "page" },
+          interval: duration,
+        },
+        "periods(page, 2d)",
+      ],
+      [
+        { kind: "sequence", steps: [{ kind: "entity-root", entity: "event" }] },
+        "sequence([event])",
+      ],
+      [
+        { kind: "adjacent", sequence: { kind: "sequence", steps: [] } },
+        "adjacent(sequence([]))",
+      ],
+      [
+        {
+          kind: "without",
+          sequence: { kind: "sequence", steps: [] },
+          excluded: { kind: "entity-root", entity: "page" },
+        },
+        "without(sequence([]), page)",
+      ],
+    ];
+
+    for (const [target, formatted] of targets) {
+      expect(formatFilterTargetExpression(target)).toBe(formatted);
+    }
+  });
+
+  it("parses duration targets and leaves registered non-entity fields intact", () => {
+    expect(
+      parseFilterDsl("1d eq 2d", analyticsFilterRegistry).root,
+    ).toMatchObject({
+      kind: "condition",
+      target: { kind: "duration", amount: 1, unit: "d" },
+      value: { kind: "duration", amount: 2, unit: "d" },
+    });
+
+    expect(
+      parseFilterDsl("count(utm.source) gt 0", analyticsFilterRegistry).root,
+    ).toMatchObject({
+      kind: "condition",
+      target: {
+        kind: "reducer",
+        input: { kind: "field", field: "utm.source" },
+      },
+    });
+  });
+
+  it("rethrows unexpected registry errors without converting them to DSL errors", () => {
+    const registry: FilterFieldRegistry = new Map([
+      [
+        "test.field",
+        {
+          id: "test.field",
+          valueKind: "string",
+          operators: new Set(["eq"]),
+          audiences: new Set(["private-dashboard"]),
+          canonicalize: () => {
+            throw new Error("unexpected registry failure");
+          },
+        },
+      ],
+    ]);
+
+    expect(() => parseFilterDsl('test.field eq "value"', registry)).toThrow(
+      "unexpected registry failure",
+    );
   });
 });

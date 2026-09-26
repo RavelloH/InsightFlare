@@ -29,7 +29,7 @@ const NON_SEMANTIC_KEYS = new Set([
   "responseBytes",
 ]);
 
-function canonicalJson(value: unknown): string {
+function canonicalJson(value: unknown, includeCapturedAtMs = false): string {
   if (
     value === null ||
     typeof value === "boolean" ||
@@ -38,18 +38,37 @@ function canonicalJson(value: unknown): string {
     return JSON.stringify(value);
   }
   if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (Array.isArray(value))
+    return `[${value.map((item) => canonicalJson(item, includeCapturedAtMs)).join(",")}]`;
   if (value instanceof Set) {
-    return `[${[...value].map(canonicalJson).sort().join(",")}]`;
+    return `[${[...value]
+      .map((item) => canonicalJson(item, includeCapturedAtMs))
+      .sort()
+      .join(",")}]`;
   }
   if (value && typeof value === "object") {
     return `{${Object.entries(value)
-      .filter(([key]) => !NON_SEMANTIC_KEYS.has(key))
+      .filter(
+        ([key]) =>
+          !NON_SEMANTIC_KEYS.has(key) ||
+          (includeCapturedAtMs && key === "capturedAtMs"),
+      )
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+      .map(
+        ([key, child]) =>
+          `${JSON.stringify(key)}:${canonicalJson(child, includeCapturedAtMs)}`,
+      )
       .join(",")}}`;
   }
   throw new TypeError("cache identity must be JSON-compatible");
+}
+
+function containsNowAnchor(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsNowAnchor);
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (record.kind === "time-anchor" && record.anchor === "now") return true;
+  return Object.values(record).some(containsNowAnchor);
 }
 
 /** Hashes canonical query semantics before they reach a cache map/key. */
@@ -61,7 +80,9 @@ export async function createOperationCacheKey(input: {
   readonly policyRevision: string;
   readonly query: unknown;
 }): Promise<string> {
-  const bytes = new TextEncoder().encode(canonicalJson(input));
+  const bytes = new TextEncoder().encode(
+    canonicalJson(input, containsNowAnchor(input.query)),
+  );
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   const hash = Array.from(digest, (value) =>
     value.toString(16).padStart(2, "0"),

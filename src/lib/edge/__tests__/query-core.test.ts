@@ -116,6 +116,21 @@ describe("edge query core parsers", () => {
     expect(parseWindow(url("?from=10&to=10"))).toBeNull();
   });
 
+  it("ignores legacy evaluation-range parameters", () => {
+    expect(
+      parseWindow(
+        url(
+          "?from=100&to=200&evaluationFromMs=10&evaluationToMs=90&compareEvaluationFromMs=20&compareEvaluationToMs=80",
+        ),
+      ),
+    ).toEqual({
+      startMs: 100,
+      endExclusiveMs: 200,
+      nowMs: fixedNow,
+      timeZone: "UTC",
+    });
+  });
+
   it("parses intervals and clamps limits", () => {
     expect(parseInterval(url("?interval=HOUR"))).toBe("hour");
     expect(parseInterval(url("?interval=minute"))).toBe("minute");

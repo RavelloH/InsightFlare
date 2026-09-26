@@ -191,7 +191,12 @@ export function withComparison(
 ): PrivateRequestParams {
   const next = { ...params };
   const cleanParams = Object.fromEntries(
-    Object.entries(next).filter(([key]) => !key.startsWith("compareFilter[")),
+    Object.entries(next).filter(
+      ([key]) =>
+        !key.startsWith("compareFilter[") &&
+        key !== "compareEvaluationFromMs" &&
+        key !== "compareEvaluationToMs",
+    ),
   ) as PrivateRequestParams;
   if (!comparison) return cleanParams;
   cleanParams.compare = comparison.mode;

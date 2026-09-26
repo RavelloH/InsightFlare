@@ -13,6 +13,8 @@ import {
   type FilterExpression,
   type FilterOperator,
   type FilterValue,
+  isLegacyFilterTarget,
+  legacyConditionValue,
   normalizeFilterDocument,
 } from "@/lib/filter-contract/filters";
 
@@ -432,7 +434,7 @@ function sessionBoundary(
     field,
     boundary,
     condition.operator,
-    condition.value,
+    legacyConditionValue(condition.value),
   );
   return `(${column(compiler, "site_pk")}, ${column(compiler, "session_id")}) IN (
     SELECT site_pk, session_id FROM (
@@ -475,6 +477,7 @@ function payloadComparison(
   const pathAlias = `filter_payload_path_${compiler.payloadIndex}`;
   compiler.payloadIndex += 1;
   const base = `${valueAlias}.event_pk = ${compiler.eventAlias}.event_pk AND ${valueAlias}.site_pk = ${compiler.eventAlias}.site_pk AND ${pathAlias}.site_pk = ${compiler.eventAlias}.site_pk AND ${pathAlias}.path = ${push(compiler, condition.target.path)}`;
+  const conditionValue = legacyConditionValue(condition.value);
   const exists = (extra = "") =>
     `EXISTS (SELECT 1 FROM custom_event_json_values ${valueAlias} INNER JOIN custom_event_json_paths ${pathAlias} ON ${pathAlias}.id = ${valueAlias}.path_id WHERE ${base}${extra})`;
   if (condition.operator === "exists") return exists();
@@ -491,9 +494,9 @@ function payloadComparison(
     return exists(
       ` AND ${valueAlias}.value_type = 1 AND ${valueAlias}.string_value != ''`,
     );
-  const values = Array.isArray(condition.value)
-    ? condition.value
-    : [condition.value!];
+  const values = Array.isArray(conditionValue)
+    ? conditionValue
+    : [conditionValue!];
   const types = [...new Set(values.map(payloadValueType))];
   if (types.length !== 1)
     throw new TypeError("Payload set filters require values of one JSON type.");
@@ -557,6 +560,9 @@ function payloadComparison(
 }
 
 function condition(compiler: Compiler, item: FilterCondition): string {
+  if (!isLegacyFilterTarget(item.target)) {
+    throw new TypeError("unsupported_filter_expression");
+  }
   if (item.target.kind === "event-payload")
     return payloadComparison(compiler, item);
   const field = analyticsFilterDefinition(item.target.field);
@@ -572,7 +578,7 @@ function condition(compiler: Compiler, item: FilterCondition): string {
     field,
     directColumn(compiler, strategy),
     item.operator,
-    item.value,
+    legacyConditionValue(item.value),
   );
 }
 

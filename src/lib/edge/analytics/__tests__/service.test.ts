@@ -185,6 +185,25 @@ describe("TypedQueryApplicationService", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it("passes Core expressions through the typed provider boundary", async () => {
+    const run = vi.fn().mockResolvedValue({ value: overviewValue(99) });
+    const result = await new TypedQueryApplicationService().execute({
+      kind: "typed-query",
+      operation: "overview",
+      query: {
+        context: siteQueryContext("site-1", "private-dashboard"),
+        time,
+        filters: parseFilterDsl("count(event) gte 1", analyticsFilterRegistry),
+      } as OverviewQuery,
+      providerRegistry: new AnalyticsProviderRegistry().register("overview", {
+        execute: run,
+      }),
+    });
+
+    expect(result).toMatchObject({ ok: true, data: overviewValue(99) });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
   it("returns an internal error when a result provider is missing", async () => {
     await expect(
       new TypedQueryApplicationService().execute({
@@ -559,6 +578,55 @@ describe("TypedQueryApplicationService", () => {
       ok: true,
       data: { current: { views: 1 } },
     });
+  });
+
+  it("walks Relation steps when estimating the complexity budget", async () => {
+    const overviewReader = reader();
+    const relationFilters = parseFilterDsl(
+      'visitor { sequence([event { event.name eq "signup" }, page { page.path eq "/pricing" }]) exists } exists',
+      analyticsFilterRegistry,
+    );
+    const result = await new TypedQueryApplicationService().execute(
+      {
+        kind: "typed-query",
+        operation: "overview",
+        query: {
+          context: siteQueryContext("site-1", "private-dashboard"),
+          time,
+          filters: relationFilters,
+          scopePreference: "visitor",
+        } as OverviewQuery,
+        providerRegistry: new AnalyticsProviderRegistry().register("overview", {
+          execute: async (input) => {
+            const overview = await overviewReader.readOverview(input as never);
+            return {
+              value: { current: overview.value },
+              source: overview.source,
+              approximateVisitors: overview.approximateVisitors,
+            };
+          },
+        }),
+      },
+      { cost: { rangeMs: 1, provider: "d1" } },
+    );
+
+    expect(result, JSON.stringify(result)).toMatchObject({
+      ok: true,
+      data: { current: { views: 1 } },
+    });
+    expect(overviewReader.readOverview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopePlan: expect.objectContaining({
+          scope: "visitor",
+          mode: "entity",
+          membership: {
+            kind: "entity",
+            expression: null,
+            entityKind: "visitor",
+          },
+        }),
+      }),
+    );
   });
 
   it("supports current-time query shapes and maps provider cursor failures", async () => {

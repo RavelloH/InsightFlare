@@ -240,12 +240,12 @@ export async function handlePagesDashboardContract(
         ? filters
         : ({ version: 1, root: null } as typeof filters);
     if (compare !== "same" || referenceFilters.root) {
+      const referenceWindow =
+        compare === "previous" ? previousComparableWindow(window) : window;
       comparison = {
         current: { time: queryWindowToTime(window), filters },
         reference: {
-          time: queryWindowToTime(
-            compare === "previous" ? previousComparableWindow(window) : window,
-          ),
+          time: queryWindowToTime(referenceWindow),
           filters: referenceFilters,
         },
         metric: comparisonMetric,

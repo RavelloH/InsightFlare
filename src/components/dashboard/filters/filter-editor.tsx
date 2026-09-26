@@ -26,6 +26,7 @@ import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   filterConditionCount,
   type FilterDocument,
+  filterDocumentUsesAdvancedExpressions,
   FilterValidationError,
   parseFilterDsl,
 } from "@/lib/filter-contract/index";
@@ -84,6 +85,17 @@ export interface FilterEditorProps {
   readonly headerContent?: ReactNode;
   readonly footerActions?: ReactNode;
 }
+function containsAdvancedEditorNode(node: EditorNode): boolean {
+  if (node.kind === "group")
+    return node.children.some(containsAdvancedEditorNode);
+  if (node.advancedExpression) {
+    return filterDocumentUsesAdvancedExpressions({
+      version: 1,
+      root: node.advancedExpression,
+    });
+  }
+  return node.advancedText !== undefined;
+}
 /**
  * Shared visual filter editor. The global filter panel and funnel step
  * dialogs use the same match/group/condition editor and expression footer.
@@ -123,13 +135,7 @@ export function FilterEditor({
   const nextIdRef = useRef(conditionIdFactory());
   const createId = useCallback(() => nextIdRef.current(), []);
   const expressionRegistry = useMemo(
-    () =>
-      new Map(
-        allowedFields(audience, observationOnly).map((field) => [
-          field.id,
-          field,
-        ]),
-      ),
+    () => new Map(allowedFields(audience).map((field) => [field.id, field])),
     [audience, observationOnly],
   );
   const [root, setRoot] = useState<EditorGroup>(() => {
@@ -143,7 +149,14 @@ export function FilterEditor({
     }
   });
   const [expressionText, setExpressionText] = useState(initialFilterDsl);
-  const [expressionError, setExpressionError] = useState<string | null>(null);
+  const [expressionError, setExpressionError] = useState<string | null>(() => {
+    try {
+      parseFilterDsl(initialFilterDsl, expressionRegistry);
+      return null;
+    } catch {
+      return invalidFilterLabel;
+    }
+  });
   const [validationError, setValidationError] = useState<string | null>(null);
   const [expressionHelpOpen, setExpressionHelpOpen] = useState(false);
   const expressionUpdateRef = useRef(false);
@@ -151,6 +164,7 @@ export function FilterEditor({
   useEffect(() => {
     if (isControlled) return;
     let nextRoot: EditorGroup;
+    let nextError: string | null = null;
     try {
       nextRoot = editorRootFromDocument(
         parseFilterDsl(initialFilterDsl, expressionRegistry),
@@ -158,22 +172,32 @@ export function FilterEditor({
       );
     } catch {
       nextRoot = emptyEditorGroup(createId);
+      nextError = invalidFilterLabel;
     }
     expressionUpdateRef.current = true;
     setRoot(nextRoot);
     setExpressionText(initialFilterDsl);
-    setExpressionError(null);
+    setExpressionError(nextError);
     setValidationError(null);
-  }, [createId, expressionRegistry, initialFilterDsl, isControlled]);
+  }, [
+    createId,
+    expressionRegistry,
+    initialFilterDsl,
+    invalidFilterLabel,
+    isControlled,
+  ]);
 
   useEffect(() => {
     if (isControlled) return;
+    // A source that cannot be parsed must remain visible until the user fixes
+    // it. Formatting the empty fallback tree here would silently erase it.
+    if (expressionError) return;
     if (expressionUpdateRef.current) {
       expressionUpdateRef.current = false;
       return;
     }
     setExpressionText(expressionTextFromEditor(root));
-  }, [isControlled, root]);
+  }, [expressionError, isControlled, root]);
 
   const renderedRoot = controlledRoot ?? root;
   const renderedExpressionText = controlledExpressionText ?? expressionText;
@@ -328,6 +352,10 @@ export function FilterEditor({
     }
     const nextRoot = commitExpressionText();
     if (!nextRoot) return;
+    if (observationOnly && containsAdvancedEditorNode(nextRoot)) {
+      setValidationError(messages.filterBuilder.expressionInvalid);
+      return;
+    }
     try {
       const document: FilterDocument = documentFromEditor(nextRoot);
       onApply?.(
@@ -346,6 +374,7 @@ export function FilterEditor({
   }, [
     commitExpressionText,
     isControlled,
+    messages.filterBuilder.expressionInvalid,
     invalidFilterLabel,
     messages.filterBuilder.invalid,
     onApply,
@@ -360,23 +389,32 @@ export function FilterEditor({
         contentClassName="min-h-0 min-w-0 pb-4"
       >
         {headerContent}
-        <GroupEditor
-          audience={audience}
-          document={editorDocument}
-          eventName={eventName}
-          group={renderedRoot}
-          isRoot
-          messages={messages}
-          observationOnly={observationOnly}
-          path={[]}
-          resolvedScope={resolvedScope}
-          onAddCondition={addCondition}
-          onAddGroup={addGroup}
-          onChange={updateNode}
-          onRemove={removeNode}
-          siteId={siteId}
-          window={window}
-        />
+        {renderedExpressionError ? (
+          <p
+            role="alert"
+            className="m-3 border-l-2 border-destructive px-2 text-xs text-destructive"
+          >
+            {renderedExpressionError}
+          </p>
+        ) : (
+          <GroupEditor
+            audience={audience}
+            document={editorDocument}
+            eventName={eventName}
+            group={renderedRoot}
+            isRoot
+            messages={messages}
+            observationOnly={observationOnly}
+            path={[]}
+            resolvedScope={resolvedScope}
+            onAddCondition={addCondition}
+            onAddGroup={addGroup}
+            onChange={updateNode}
+            onRemove={removeNode}
+            siteId={siteId}
+            window={window}
+          />
+        )}
         {renderedValidationError ? (
           <p className="mt-4 border-l-2 border-destructive px-2 text-xs text-destructive">
             {renderedValidationError}

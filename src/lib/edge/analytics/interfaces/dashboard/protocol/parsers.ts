@@ -68,7 +68,12 @@ export function parseWindow(url: URL): QueryWindow | null {
   ) {
     return null;
   }
-  return { startMs, endExclusiveMs, nowMs, timeZone };
+  return {
+    startMs,
+    endExclusiveMs,
+    nowMs,
+    timeZone,
+  };
 }
 export function parseLimit(url: URL, fallback = 20, max = 500): number {
   const value = Math.floor(

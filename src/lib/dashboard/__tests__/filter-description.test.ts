@@ -47,6 +47,7 @@ const messages = {
     },
     operatorLabels: {
       eq: "equals",
+      gte: "is greater than or equal to",
       in: "is one of",
       between: "is between",
       exists: "exists",
@@ -211,5 +212,78 @@ describe("filter descriptions", () => {
     ).toBe(
       'Page path contains "docs" and Page duration is greater than or equal to 1000 and Event name exists and Page path is not empty',
     );
+  });
+
+  it("formats advanced targets and expression values without exposing AST JSON", () => {
+    expect(
+      describeFilterExpression(
+        {
+          kind: "condition",
+          target: {
+            kind: "member",
+            object: { kind: "context-root", context: "current" },
+            member: "time",
+          },
+          operator: "gte",
+          value: { kind: "time-anchor", anchor: "range.start" },
+        },
+        analyticsFilterRegistry,
+        messages,
+      ),
+    ).toBe("time is greater than or equal to @range.start");
+  });
+
+  it("describes every legacy operator and retains typed advanced operands", () => {
+    const legacyCases = [
+      ["neq", "alpha", "does not equal"],
+      ["startsWith", "alpha", "starts with"],
+      ["endsWith", "alpha", "ends with"],
+      ["gt", 1, "greater than"],
+      ["lt", 2, "less than"],
+      ["lte", 2, "less than or equal to"],
+      ["notExists", undefined, "does not exist"],
+      ["isNull", undefined, "is null"],
+      ["notNull", undefined, "is not null"],
+      ["isEmpty", undefined, "is empty"],
+      ["notEmpty", undefined, "is not empty"],
+      ["notIn", ["a", "b"], "is none of"],
+    ] as const;
+
+    for (const [operator, value, expected] of legacyCases) {
+      const description = describeFilterExpression(
+        {
+          kind: "condition",
+          target: { kind: "field", field: fieldId("unknown.field") },
+          operator,
+          ...(value === undefined ? {} : { value }),
+        } as FilterExpression,
+        analyticsFilterRegistry,
+        messages,
+      );
+      expect(description).toContain(expected);
+      expect(description).toContain("unknown.field");
+    }
+
+    const dynamic = describeFilterExpression(
+      {
+        kind: "condition",
+        target: {
+          kind: "arithmetic",
+          operator: "sub",
+          left: {
+            kind: "reducer",
+            reducer: "count",
+            input: { kind: "entity-root", entity: "event" },
+          },
+          right: { kind: "duration", amount: 1, unit: "h" },
+        },
+        operator: "between",
+        value: [1, 2],
+      },
+      analyticsFilterRegistry,
+      messages,
+    );
+    expect(dynamic).toContain("sub(count(event), 1h)");
+    expect(dynamic).toContain("1 or 2");
   });
 });

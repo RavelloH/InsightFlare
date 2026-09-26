@@ -2,6 +2,8 @@ import {
   classifyTrafficChannel,
   type TrafficChannelId,
 } from "@/lib/analytics/traffic-channel-rules";
+import { createDemoCustomEventFacts } from "@/lib/demo/realtime/events-facts";
+import { demoEventRecordPayload } from "@/lib/demo/realtime/events-payload";
 import {
   DEMO_DIRECT_REFERRER_FILTER_VALUE,
   parseDemoGeoFilterValue,
@@ -17,10 +19,13 @@ import {
   analyticsFilterRegistry,
   type FilterCondition,
   type FilterDocument,
+  filterDocumentUsesAdvancedExpressions,
   type FilterExpression,
   type FilterValue,
+  isLegacyFilterTarget,
   normalizeFilterDocument,
 } from "@/lib/filter-contract";
+import { evaluateFilterDocument } from "@/lib/filter-contract/filter-evaluator";
 interface DemoSessionFacts {
   readonly sessionId: string;
   readonly visitorId: string;
@@ -244,6 +249,7 @@ export function demoConditionMatches(
 ): boolean {
   // Payload conditions are evaluated by events-payload-filter.ts against the
   // event JSON. They must not remove visit rows before that event-domain pass.
+  if (!isLegacyFilterTarget(condition.target)) return false;
   if (condition.target.kind === "event-payload") return true;
   const fieldId = condition.target.field;
   const actual = canonicalFieldValue(visit, fieldId, facts);
@@ -259,13 +265,15 @@ export function demoConditionMatches(
   const rawValues = Array.isArray(condition.value)
     ? condition.value
     : [condition.value as FilterValue];
+  // SQL NULL comparisons (including NOT IN) do not match. Keep the demo
+  // evaluator aligned with D1 when the visit fact is missing.
+  if (actual === undefined || actual === null) return false;
   if (operator === "in" || operator === "notIn") {
     const found = rawValues.some((value) =>
       demoScalarEqual(fieldId, actual, value),
     );
     return operator === "in" ? found : !found;
   }
-  if (actual === undefined || actual === null) return false;
   if (operator === "between") {
     const [lower, upper] = rawValues;
     return (
@@ -437,11 +445,70 @@ function finalizeDemoFilteredFacts(
 function applyCanonicalDemoFilters(
   dataset: DemoFactDataset,
   document: FilterDocument,
-  scope: DemoQueryFilters["scope"],
+  filters: DemoQueryFilters,
 ): DemoFilteredFacts {
+  const scope = filters.scope;
   const normalized = document.root
     ? normalizeFilterDocument(document, analyticsFilterRegistry)
     : document;
+  if (filterDocumentUsesAdvancedExpressions(normalized)) {
+    if (dataset.to <= dataset.from) return finalizeDemoFilteredFacts([]);
+    const facts = buildCanonicalDemoFacts(dataset);
+    const fieldsFor = (visit: DemoFactDataset["visits"][number]) =>
+      Object.fromEntries(
+        [...analyticsFilterRegistry.keys()].flatMap((fieldId) => {
+          const value = canonicalFieldValue(visit, fieldId, facts);
+          return value === undefined ? [] : [[fieldId, value]];
+        }),
+      );
+    const pages = dataset.visits.map((visit) => ({
+      kind: "page" as const,
+      id: visit.visitId,
+      visitId: visit.visitId,
+      sessionId: visit.sessionId,
+      visitorId: visit.visitorId,
+      time: visit.startedAt,
+      fields: fieldsFor(visit),
+    }));
+    const events = createDemoCustomEventFacts(dataset.visits).map((event) => ({
+      kind: "event" as const,
+      id: event.eventId,
+      visitId: event.visit.visitId,
+      sessionId: event.visit.sessionId,
+      visitorId: event.visit.visitorId,
+      time: event.occurredAt,
+      fields: {
+        ...fieldsFor(event.visit),
+        "event.name": event.eventName,
+      },
+      payload: demoEventRecordPayload(event),
+    }));
+    const evaluation = evaluateFilterDocument(
+      normalized,
+      {
+        pages,
+        events,
+        coverageRange: { startMs: dataset.from, endExclusiveMs: dataset.to },
+      },
+      {
+        scope: scope ?? "event",
+        candidateRange: filters.candidateRange ?? {
+          startMs: dataset.from,
+          endExclusiveMs: dataset.to,
+        },
+        ...(filters.evaluationRange
+          ? { evaluationRange: filters.evaluationRange }
+          : {}),
+        reportingTimeZone: filters.reportingTimeZone ?? "UTC",
+        capturedAtMs: filters.capturedAtMs ?? dataset.to - 1,
+      },
+    );
+    return finalizeDemoFilteredFacts(
+      dataset.visits.filter((visit) =>
+        evaluation.matchingVisitIds.has(visit.visitId),
+      ),
+    );
+  }
   const facts = buildCanonicalDemoFacts(dataset);
   if (!normalized.root) return finalizeDemoFilteredFacts(dataset.visits);
   if (!scope || scope === "event") {
@@ -475,11 +542,7 @@ export function applyDemoFilters(
   filters: DemoQueryFilters,
 ): DemoFilteredFacts {
   if (filters.filterDocument?.root) {
-    return applyCanonicalDemoFilters(
-      dataset,
-      filters.filterDocument,
-      filters.scope,
-    );
+    return applyCanonicalDemoFilters(dataset, filters.filterDocument, filters);
   }
   const result: DemoFilteredFacts = {
     visits: [],

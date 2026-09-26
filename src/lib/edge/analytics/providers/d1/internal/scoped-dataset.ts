@@ -1,4 +1,5 @@
 import {
+  type AdvancedFilterMatches,
   analyticsFilterDefinition,
   attachScopedFilterMetadata,
   createQueryTime,
@@ -18,6 +19,7 @@ import {
   SITE_PK_FROM_SITE_ID_SQL,
   sitePksFromSiteIdsSql,
 } from "@/lib/edge/sites/identity-sql";
+import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
 import type { FilterScope } from "@/lib/filter-contract/scope-preference";
 
 import { buildVisitFilterSql } from "./core-filters";
@@ -55,6 +57,53 @@ export interface ScopedDatasetCompilerInput {
    * callers keep the full structured projection.
    */
   readonly compatibilityEventSource?: boolean;
+}
+
+interface AdvancedIdentitySql {
+  readonly ctes: string;
+  readonly bindings: Array<string>;
+}
+
+function advancedIdentityRelation(
+  name: string,
+  identities: AdvancedFilterMatches["entityIds"] | undefined,
+): AdvancedIdentitySql {
+  if (!identities?.length) {
+    return {
+      ctes: `${name} AS (SELECT CAST(NULL AS INTEGER) AS site_pk, CAST(NULL AS TEXT) AS entity_id WHERE 0)`,
+      bindings: [],
+    };
+  }
+  const branches = identities.map(
+    () =>
+      "SELECT si.site_pk, ? AS entity_id FROM site_identities si WHERE si.site_id = ?",
+  );
+  return {
+    ctes: `${name} AS (${branches.join(" UNION ")})`,
+    bindings: identities.flatMap(({ siteId, id }) => [id, siteId]),
+  };
+}
+
+function advancedMatchesRelations(matches: AdvancedFilterMatches): {
+  readonly ctes: string;
+  readonly bindings: Array<string>;
+} {
+  const entities = advancedIdentityRelation(
+    "scope_advanced_matching_entities",
+    matches.entityIds,
+  );
+  const visits = advancedIdentityRelation(
+    "scope_advanced_matching_visit_ids",
+    matches.visitIds,
+  );
+  const events = advancedIdentityRelation(
+    "scope_advanced_matching_event_ids",
+    matches.eventIds,
+  );
+  return {
+    ctes: [entities.ctes, visits.ctes, events.ctes].join(",\n"),
+    bindings: [...entities.bindings, ...visits.bindings, ...events.bindings],
+  };
 }
 export function scopedDatasetFor(
   siteId: string,
@@ -848,8 +897,19 @@ export function compileScopedDatasetSql(
     throw new Error("scoped_dataset_metadata_required");
   }
 
+  const advancedMatches = input.plan.advancedMatches;
+  if (
+    input.filters.root &&
+    filterDocumentUsesAdvancedExpressions(input.filters) &&
+    !advancedMatches
+  ) {
+    throw new Error("advanced_filter_execution_context_required");
+  }
+
   const entityMembership =
-    input.plan.mode === "entity" && input.plan.membership.kind === "entity"
+    !advancedMatches &&
+    input.plan.mode === "entity" &&
+    input.plan.membership.kind === "entity"
       ? compileEntityMembership(
           input.plan.membership.expression,
           input.plan.membership.entityKind,
@@ -857,9 +917,12 @@ export function compileScopedDatasetSql(
         )
       : null;
   const observationPlan =
-    input.plan.mode === "observation"
+    !advancedMatches && input.plan.mode === "observation"
       ? planObservationFilter(input.filters.root)
       : null;
+  const advancedRelations = advancedMatches
+    ? advancedMatchesRelations(advancedMatches)
+    : null;
   const matchingVisits = observationPlan
     ? compileObservationRelation(
         "scope_matching_visits",
@@ -881,8 +944,27 @@ export function compileScopedDatasetSql(
       ? entityColumn(input.plan.membership.entityKind)
       : null;
   const finalVisitRelation =
-    input.plan.mode === "entity"
+    advancedMatches && input.plan.mode === "entity"
       ? `
+scope_final_visits AS (
+  SELECT rv.*
+  FROM scope_raw_visits rv
+  INNER JOIN scope_advanced_matching_entities matching_entities
+    ON matching_entities.site_pk = rv.site_pk
+   AND matching_entities.entity_id = rv.${entityColumnName}
+  WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
+)`
+      : advancedMatches
+        ? `
+scope_final_visits AS (
+  SELECT rv.*
+  FROM scope_raw_visits rv
+  INNER JOIN scope_advanced_matching_visit_ids matching_visits
+    ON matching_visits.site_pk = rv.site_pk
+   AND matching_visits.entity_id = rv.visit_id
+)`
+        : input.plan.mode === "entity"
+          ? `
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
@@ -891,7 +973,7 @@ scope_final_visits AS (
    AND matching_entities.entity_id = rv.${entityColumnName}
   WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
 )`
-      : `
+          : `
 scope_matching_visit_ids AS (
   SELECT site_pk, visit_id
   FROM scope_matching_visits
@@ -907,8 +989,27 @@ scope_final_visits AS (
    AND matching_visits.visit_id = rv.visit_id
 )`;
   const finalEventRelation =
-    input.plan.mode === "entity"
+    advancedMatches && input.plan.mode === "entity"
       ? `
+scope_final_events AS (
+  SELECT re.*
+  FROM scope_raw_events re
+  INNER JOIN scope_advanced_matching_entities matching_entities
+    ON matching_entities.site_pk = re.site_pk
+   AND matching_entities.entity_id = re.${entityColumnName}
+  WHERE TRIM(COALESCE(re.${entityColumnName}, '')) != ''
+)`
+      : advancedMatches
+        ? `
+scope_final_events AS (
+  SELECT re.*
+  FROM scope_raw_events re
+  INNER JOIN scope_advanced_matching_event_ids matching_events
+    ON matching_events.site_pk = re.site_pk
+   AND matching_events.entity_id = re.event_id
+)`
+        : input.plan.mode === "entity"
+          ? `
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
@@ -917,7 +1018,7 @@ scope_final_events AS (
    AND matching_entities.entity_id = re.${entityColumnName}
   WHERE TRIM(COALESCE(re.${entityColumnName}, '')) != ''
 )`
-      : `
+          : `
 scope_final_events AS (
   SELECT *
   FROM scope_matching_events
@@ -927,6 +1028,7 @@ ${visitSource(input.siteIds)},
 ${eventSource(input.siteIds, input.compatibilityEventSource)},
 visit_source AS (SELECT * FROM scope_raw_visits),
 ${entityMembership ? `${entityMembership.ctes.join(",")},` : ""}
+${advancedRelations ? `${advancedRelations.ctes},` : ""}
 ${matchingVisits ? `${matchingVisits.cte},` : ""}
 ${matchingEvents ? `${matchingEvents.cte},` : ""}
 ${finalVisitRelation},
@@ -960,6 +1062,7 @@ scope_final_visitors AS (
       input.window.startMs,
       input.window.endExclusiveMs,
       ...(entityMembership?.bindings ?? []),
+      ...(advancedRelations?.bindings ?? []),
       ...(matchingVisits?.bindings ?? []),
       ...(matchingEvents?.bindings ?? []),
     ].map((value) => ({ value })),

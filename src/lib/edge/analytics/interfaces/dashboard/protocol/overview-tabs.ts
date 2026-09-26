@@ -102,6 +102,8 @@ export async function handleOverviewTabContract(
     if (compare === "same" && !referenceComparisonFilters.root) {
       comparison = undefined;
     } else {
+      const referenceWindow =
+        compare === "previous" ? previousComparableWindow(window) : window;
       if (tab === "geo.country") {
         currentComparisonFilters = withoutGeoFilter(currentComparisonFilters);
         referenceComparisonFilters = withoutGeoFilter(
@@ -114,9 +116,7 @@ export async function handleOverviewTabContract(
           filters: currentComparisonFilters,
         },
         reference: {
-          time: queryWindowToTime(
-            compare === "previous" ? previousComparableWindow(window) : window,
-          ),
+          time: queryWindowToTime(referenceWindow),
           filters: referenceComparisonFilters,
         },
         metric:

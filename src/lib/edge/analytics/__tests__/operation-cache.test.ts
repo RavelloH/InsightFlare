@@ -60,6 +60,37 @@ describe("OperationResultCache", () => {
     expect(first).toBe(second);
   });
 
+  it("includes the fixed clock when a filter contains @now", async () => {
+    const base = {
+      contractRevision: "1",
+      operation: "site.analytics.overview",
+      operationRevision: "1",
+      subjectFingerprint: "subject-hash",
+      policyRevision: "policy-1",
+    } as const;
+    const queryAt = (capturedAtMs: number) => ({
+      time: { capturedAtMs, range: { startMs: 0, endExclusiveMs: 10 } },
+      filters: {
+        version: 1,
+        root: {
+          kind: "condition",
+          target: { kind: "time-anchor", anchor: "now" },
+          operator: "gte",
+          value: 1,
+        },
+      },
+    });
+    const first = await createOperationCacheKey({
+      ...base,
+      query: queryAt(100),
+    });
+    const second = await createOperationCacheKey({
+      ...base,
+      query: queryAt(200),
+    });
+    expect(first).not.toBe(second);
+  });
+
   it("keeps identities isolated and expires entries", async () => {
     const cache = new OperationResultCache();
     const load = vi

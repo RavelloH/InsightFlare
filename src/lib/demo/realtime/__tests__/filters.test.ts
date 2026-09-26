@@ -201,6 +201,23 @@ describe("mock/filters", () => {
       });
       expect(filters.filterDocument?.root).toBeTruthy();
     });
+
+    it("accepts the canonical DSL and fixed evaluation context from the mock provider", () => {
+      const filters = parseDemoFilters({
+        __filterDsl: 'count(event { event.name eq "signup" }) gte 1',
+        evaluationFromMs: 1_000,
+        evaluationToMs: 2_000,
+        nowMs: 3_000,
+        timeZone: "America/Los_Angeles",
+      });
+      expect(filters.filterDocument?.root).toBeTruthy();
+      expect(filters.evaluationRange).toEqual({
+        startMs: 1_000,
+        endExclusiveMs: 2_000,
+      });
+      expect(filters.capturedAtMs).toBe(3_000);
+      expect(filters.reportingTimeZone).toBe("America/Los_Angeles");
+    });
   });
 
   describe("normalizeDemoSearch", () => {
