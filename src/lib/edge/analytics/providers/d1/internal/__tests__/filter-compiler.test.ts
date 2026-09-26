@@ -334,7 +334,7 @@ describe("filter SQL compiler", () => {
     expect(result.bindings).toHaveLength(3);
   });
 
-  it("lowers startsWith OR leaves with the same escaped JSON set", () => {
+  it("lowers startsWith OR leaves with literal JSON set matching", () => {
     const result = compileFilterDocument(
       document({
         kind: "or",
@@ -355,8 +355,9 @@ describe("filter SQL compiler", () => {
       }),
     );
 
-    expect(result.clause).toContain("LIKE");
-    expect(result.clause).toContain(" || '%'");
+    expect(result.clause).toContain("SUBSTR(");
+    expect(result.clause).toContain("LENGTH(TRIM(filter_or_like_0.value))");
+    expect(result.clause).not.toContain("LIKE");
     expect(result.bindings).toHaveLength(1);
   });
 
@@ -395,7 +396,7 @@ describe("filter SQL compiler", () => {
     expect(result.clause).not.toContain("json_each(?)");
   });
 
-  it("compiles nested visit predicates with bound values and escaped LIKE", () => {
+  it("compiles nested visit predicates with case-aware literal string matching", () => {
     const result = compileFilterDocument(
       document({
         kind: "and",
@@ -424,9 +425,55 @@ describe("filter SQL compiler", () => {
     expect(result.clause).toContain(
       "LOWER(TRIM(COALESCE(vs.country, ''))) = ?",
     );
-    expect(result.clause).toContain("LIKE ? ESCAPE '\\'");
+    expect(result.clause).toContain(
+      "INSTR(TRIM(COALESCE(vs.title, '')), ?) > 0",
+    );
+    expect(result.clause).not.toContain("LIKE");
     expect(result.clause).toContain("NOT (");
-    expect(result.bindings).toEqual(["%100\\%\\_ready\\\\go%", "us"]);
+    expect(result.bindings).toEqual(["100%_ready\\go", "us"]);
+  });
+
+  it("executes string operators with registry case rules and literal wildcards", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      database.exec("CREATE TABLE visits (id TEXT, pathname TEXT)");
+      const insert = database.prepare(
+        "INSERT INTO visits (id, pathname) VALUES (?, ?)",
+      );
+      insert.run("upper", "/Docs/100%_ready\\go");
+      insert.run("lower", "/docs/100%_ready\\go");
+      insert.run("wildcard-only", "/Docs/100Xready\\go");
+
+      const prefix = compileFilterDocument(
+        document({
+          kind: "condition",
+          target: { kind: "field", field: "page.path" },
+          operator: "startsWith",
+          value: "/Docs",
+        }),
+        { alias: "vs" },
+      );
+      const literalContains = compileFilterDocument(
+        document({
+          kind: "condition",
+          target: { kind: "field", field: "page.path" },
+          operator: "contains",
+          value: "%_ready",
+        }),
+        { alias: "vs" },
+      );
+      const prefixed = database
+        .prepare(`SELECT id FROM visits vs ${prefix.clause}`)
+        .all(...prefix.bindings) as Array<{ id: string }>;
+      const containing = database
+        .prepare(`SELECT id FROM visits vs ${literalContains.clause}`)
+        .all(...literalContains.bindings) as Array<{ id: string }>;
+
+      expect(prefixed.map((row) => row.id)).toEqual(["upper", "wildcard-only"]);
+      expect(containing.map((row) => row.id)).toEqual(["upper", "lower"]);
+    } finally {
+      database.close();
+    }
   });
 
   it("compresses large sets into one json_each binding", () => {

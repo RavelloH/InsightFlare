@@ -21,7 +21,7 @@ export function createDemoCustomEventFacts(
 ): DemoCustomEventFact[] {
   const eventCounters = new Map<string, number>();
   return visits
-    .filter((visit) => visit.eventType !== "pageview")
+    .filter((visit) => visit.eventType.trim().toLowerCase() !== "pageview")
     .map((visit) => {
       const sequence = (eventCounters.get(visit.visitId) ?? 0) + 1;
       eventCounters.set(visit.visitId, sequence);

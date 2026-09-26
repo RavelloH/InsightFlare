@@ -20,6 +20,7 @@ import type {
   FilterEvaluationEntity,
 } from "@/lib/filter-contract/filter-evaluator";
 import { evaluateFilterDocument } from "@/lib/filter-contract/filter-evaluator";
+import { buildCanonicalFilterScopeFacts } from "@/lib/filter-contract/filter-facts";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
 import type {
@@ -107,12 +108,6 @@ interface RawPayloadNode extends Record<string, unknown> {
   string_value: string | null;
   number_value: number | null;
   boolean_value: number | null;
-}
-
-interface MutableAggregate {
-  readonly id: string;
-  readonly visitorId?: string;
-  readonly items: FilterEvaluationEntity[];
 }
 
 function invalidInput(
@@ -516,71 +511,17 @@ function fieldsFor(row: RawEvaluationRow): Record<string, unknown> {
 function aggregateFacts(
   records: readonly FilterEvaluationEntity[],
 ): Map<string, Record<string, unknown>> {
-  const sessions = new Map<string, MutableAggregate>();
-  const visitors = new Map<string, MutableAggregate>();
-  for (const record of records) {
-    if (record.sessionId) {
-      const current = sessions.get(record.sessionId) ?? {
-        id: record.sessionId,
-        visitorId: record.visitorId,
-        items: [],
-      };
-      current.items.push(record);
-      sessions.set(record.sessionId, current);
-    }
-    if (record.visitorId) {
-      const current = visitors.get(record.visitorId) ?? {
-        id: record.visitorId,
-        items: [],
-      };
-      current.items.push(record);
-      visitors.set(record.visitorId, current);
-    }
-  }
-  const result = new Map<string, Record<string, unknown>>();
-  for (const session of sessions.values()) {
-    const orderedPages = session.items
-      .filter((item) => item.kind === "page")
-      .sort(compareEvaluationActivity);
-    const views = orderedPages.length;
-    const events = session.items.filter((item) => item.kind === "event").length;
-    const facts = {
-      "session.durationMs": session.items
-        .filter((item) => item.kind === "page")
-        .reduce(
-          (sum, item) => sum + Number(item.fields["page.durationMs"] ?? 0),
-          0,
-        ),
-      "session.views": views,
-      "session.events": events,
-      "session.bounce": views === 1,
-      "session.entryPath": orderedPages[0]?.fields["page.path"],
-      "session.exitPath": orderedPages.at(-1)?.fields["page.path"],
-    };
-    result.set(`session:${session.id}`, facts);
-  }
-  for (const visitor of visitors.values()) {
-    const facts = {
-      "visitor.sessions": new Set(
-        visitor.items.map((item) => item.sessionId).filter(Boolean),
-      ).size,
-      "visitor.views": visitor.items.filter((item) => item.kind === "page")
-        .length,
-      "visitor.events": visitor.items.filter((item) => item.kind === "event")
-        .length,
-    };
-    result.set(`visitor:${visitor.id}`, facts);
-  }
-  return result;
-}
-
-function compareEvaluationActivity(
-  left: FilterEvaluationEntity,
-  right: FilterEvaluationEntity,
-): number {
-  return (
-    (left.time ?? 0) - (right.time ?? 0) || left.id.localeCompare(right.id)
+  const activities = records.filter(
+    (item): item is FilterEvaluationEntity & { kind: "page" | "event" } =>
+      item.kind === "page" || item.kind === "event",
   );
+  const canonical = buildCanonicalFilterScopeFacts(activities);
+  const result = new Map<string, Record<string, unknown>>();
+  for (const [id, facts] of canonical.sessions)
+    result.set(`session:${id}`, { ...facts });
+  for (const [id, facts] of canonical.visitors)
+    result.set(`visitor:${id}`, { ...facts });
+  return result;
 }
 
 function entitiesForRows(
@@ -658,22 +599,36 @@ async function evaluateForSites(input: {
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
 }): Promise<ScopedAdvancedFilterMatches> {
-  const evaluationRange = input.time.evaluationRange ?? input.time.range;
-  if (evaluationRange.endExclusiveMs > input.time.capturedAtMs + 1) {
-    throw invalidInput(
-      "evaluationRange",
-      "filter_evaluation_range_unavailable",
-    );
-  }
+  const fullHistory = input.time.fullHistory === true;
+  const configuredRange = input.time.evaluationRange ?? input.time.range;
   const coverage = await siteCoverage(
     input.env,
     input.siteIds,
     input.diagnostics,
     input.signal,
   );
+  const evaluationRange = fullHistory
+    ? {
+        startMs: Math.min(
+          ...input.siteIds.map(
+            (siteId) => coverage.get(siteId) ?? Number.MAX_SAFE_INTEGER,
+          ),
+        ),
+        endExclusiveMs: input.time.capturedAtMs + 1,
+      }
+    : configuredRange;
+  if (evaluationRange.endExclusiveMs > input.time.capturedAtMs + 1) {
+    throw invalidInput(
+      "evaluationRange",
+      "filter_evaluation_range_unavailable",
+    );
+  }
   for (const siteId of input.siteIds) {
     const createdAt = coverage.get(siteId);
-    if (createdAt === undefined || evaluationRange.startMs < createdAt) {
+    if (
+      createdAt === undefined ||
+      (!fullHistory && evaluationRange.startMs < createdAt)
+    ) {
       throw invalidInput(
         "evaluationRange",
         "filter_evaluation_range_unavailable",
@@ -713,6 +668,12 @@ async function evaluateForSites(input: {
   for (const siteId of input.siteIds) {
     const createdAt = coverage.get(siteId)!;
     const siteRows = rowsBySite.get(siteId) ?? [];
+    const siteEvaluationRange = fullHistory
+      ? {
+          startMs: createdAt,
+          endExclusiveMs: input.time.capturedAtMs + 1,
+        }
+      : evaluationRange;
     const dataset = entitiesForRows(
       siteRows,
       payloads,
@@ -720,10 +681,7 @@ async function evaluateForSites(input: {
         startMs: input.time.range.startMs,
         endExclusiveMs: input.time.range.endExclusiveMs,
       },
-      {
-        startMs: evaluationRange.startMs,
-        endExclusiveMs: evaluationRange.endExclusiveMs,
-      },
+      siteEvaluationRange,
     );
     let result;
     try {
@@ -739,7 +697,8 @@ async function evaluateForSites(input: {
         {
           scope: input.plan.scope,
           candidateRange: input.time.range,
-          evaluationRange,
+          evaluationRange: siteEvaluationRange,
+          fullHistory,
           reportingTimeZone: input.time.reportingTimeZone,
           capturedAtMs: input.time.capturedAtMs,
           maxActivities: MAX_ADVANCED_ACTIVITIES,

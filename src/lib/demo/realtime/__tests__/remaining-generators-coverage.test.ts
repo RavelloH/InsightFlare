@@ -822,7 +822,9 @@ describe("mock remaining generator coverage", () => {
     expect(
       generateDemoUtmDimension(SITE_ID, "medium", {
         from: BASE_TIME,
-        to: BASE_TIME + 1,
+        // This deterministic window seeds both dimension and trend generators
+        // below the half-view rounding threshold.
+        to: BASE_TIME + 7,
       }),
     ).toMatchObject({
       ok: true,
@@ -832,7 +834,7 @@ describe("mock remaining generator coverage", () => {
       generateDemoUtmTrend(SITE_ID, {
         dimension: "medium",
         from: BASE_TIME,
-        to: BASE_TIME + 1,
+        to: BASE_TIME + 7,
       }),
     ).toEqual({ ok: true, interval: "day", series: [], data: [] });
   });

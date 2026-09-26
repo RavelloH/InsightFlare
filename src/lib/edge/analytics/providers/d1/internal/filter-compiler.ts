@@ -220,11 +220,34 @@ function fieldScalar(
   return scalar(value);
 }
 
-function escapedLike(value: string): string {
-  return value
-    .replaceAll("\\", "\\\\")
-    .replaceAll("%", "\\%")
-    .replaceAll("_", "\\_");
+function stringMatchExpression(
+  left: string,
+  right: string,
+  operator: "contains" | "startsWith" | "endsWith",
+): string {
+  if (operator === "contains") return `INSTR(${left}, ${right}) > 0`;
+  if (operator === "startsWith")
+    return `SUBSTR(${left}, 1, LENGTH(${right})) = ${right}`;
+  return `(LENGTH(${right}) = 0 OR SUBSTR(${left}, -LENGTH(${right})) = ${right})`;
+}
+
+function boundStringMatch(
+  compiler: Compiler,
+  left: string,
+  value: string,
+  operator: "contains" | "startsWith" | "endsWith",
+): string {
+  if (operator === "contains")
+    return `INSTR(${left}, ${push(compiler, value)}) > 0`;
+  if (operator === "startsWith") {
+    const lengthValue = push(compiler, value);
+    const compareValue = push(compiler, value);
+    return `SUBSTR(${left}, 1, LENGTH(${lengthValue})) = ${compareValue}`;
+  }
+  const emptyValue = push(compiler, value);
+  const lengthValue = push(compiler, value);
+  const compareValue = push(compiler, value);
+  return `(LENGTH(${emptyValue}) = 0 OR SUBSTR(${left}, -LENGTH(${lengthValue})) = ${compareValue})`;
 }
 
 type OrVectorOperator = "eq" | "contains" | "startsWith" | "endsWith";
@@ -239,8 +262,11 @@ type OrVectorCondition = {
 function storedComparisonValue(
   field: RegisteredFilterField,
   value: string | number,
+  operator: FilterOperator,
 ): string | number {
-  return field.profile === "direct-referrer" && value === "__direct__"
+  return field.profile === "direct-referrer" &&
+    value === "__direct__" &&
+    ["eq", "neq", "in", "notIn"].includes(operator)
     ? ""
     : value;
 }
@@ -272,7 +298,7 @@ function orVectorCondition(
     field,
     source: directColumn(compiler, compilerStrategyFor(field)),
     operator: item.operator,
-    value: storedComparisonValue(field, item.value),
+    value: storedComparisonValue(field, item.value, item.operator),
   };
 }
 
@@ -280,26 +306,24 @@ function vectorKey(item: OrVectorCondition): string {
   return `${item.field.id}\u0000${item.operator}`;
 }
 
-function jsonOrLikeComparison(
+function jsonOrStringComparison(
   compiler: Compiler,
   item: OrVectorCondition,
   values: readonly string[],
 ): string {
+  if (item.operator === "eq")
+    throw new TypeError("Equality uses the scalar JSON set comparison.");
   const normalized = normalizedColumn(item.field, item.source);
   const alias = `filter_or_like_${compiler.orLikeIndex}`;
   compiler.orLikeIndex += 1;
-  // This mirrors escapedLike() for values read from json_each at SQL runtime.
-  const escaped = `REPLACE(REPLACE(REPLACE(${alias}.value, '\\', '\\\\'), '%', '\\%'), '_', '\\_')`;
-  const pattern =
-    item.operator === "contains"
-      ? `'%' || ${escaped} || '%'`
-      : item.operator === "startsWith"
-        ? `${escaped} || '%'`
-        : `'%' || ${escaped}`;
+  const value =
+    item.field.comparison === "case-insensitive"
+      ? `LOWER(TRIM(${alias}.value))`
+      : `TRIM(${alias}.value)`;
   return `EXISTS (
     SELECT 1
     FROM json_each(${push(compiler, JSON.stringify(values))}) AS ${alias}
-    WHERE ${normalized} LIKE ${pattern} ESCAPE '\\'
+    WHERE ${stringMatchExpression(normalized, value, item.operator)}
   )`;
 }
 
@@ -312,7 +336,7 @@ function vectorOrComparison(
   if (item.operator === "eq") {
     return `${normalized} IN (SELECT value FROM json_each(${push(compiler, jsonSet(values))}))`;
   }
-  return jsonOrLikeComparison(compiler, item, values as readonly string[]);
+  return jsonOrStringComparison(compiler, item, values as readonly string[]);
 }
 
 function orExpression(
@@ -373,10 +397,9 @@ function comparison(
     return `${source} IS NOT NULL`;
   if (operator === "notExists" || operator === "isNull")
     return `${source} IS NULL`;
-  if (operator === "isEmpty")
-    return `${source} IS NOT NULL AND ${normalized} = ''`;
+  if (operator === "isEmpty") return `${source} IS NOT NULL AND ${source} = ''`;
   if (operator === "notEmpty")
-    return `${source} IS NOT NULL AND ${normalized} != ''`;
+    return `${source} IS NOT NULL AND ${source} != ''`;
   if (Array.isArray(value)) {
     if (operator === "between") {
       return `${normalized} BETWEEN ${push(compiler, fieldScalar(field, value[0]!))} AND ${push(compiler, fieldScalar(field, value[1]!))}`;
@@ -398,14 +421,7 @@ function comparison(
     operator === "startsWith" ||
     operator === "endsWith"
   ) {
-    const pattern = escapedLike(String(binding));
-    const like =
-      operator === "contains"
-        ? `%${pattern}%`
-        : operator === "startsWith"
-          ? `${pattern}%`
-          : `%${pattern}`;
-    return `${normalized} LIKE ${push(compiler, like)} ESCAPE '\\'`;
+    return boundStringMatch(compiler, normalized, String(binding), operator);
   }
   const sqlOperator: Record<string, string> = {
     eq: "=",
@@ -530,15 +546,8 @@ function payloadComparison(
   ) {
     if (typeof value !== "string")
       throw new TypeError("Payload string matching requires a string.");
-    const escaped = escapedLike(value);
-    const pattern =
-      condition.operator === "contains"
-        ? `%${escaped}%`
-        : condition.operator === "startsWith"
-          ? `${escaped}%`
-          : `%${escaped}`;
     return exists(
-      ` AND ${valueAlias}.value_type = 1 AND ${valueAlias}.string_value LIKE ${push(compiler, pattern)} ESCAPE '\\'`,
+      ` AND ${valueAlias}.value_type = 1 AND ${boundStringMatch(compiler, `${valueAlias}.string_value`, value, condition.operator)}`,
     );
   }
   const operator: Record<string, string> = {

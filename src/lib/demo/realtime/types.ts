@@ -8,6 +8,10 @@
 
 export interface DemoQueryFilters {
   filterDocument?: FilterDocument;
+  /** Site identity used to synthesize an expanded Mock evaluation source. */
+  siteId?: string;
+  /** Optional expanded source data used only by the canonical filter evaluator. */
+  historyDataset?: DemoFactDataset;
   /** Candidate entities remain bounded separately from historical evaluation. */
   candidateRange?: {
     readonly startMs: number;
@@ -18,6 +22,8 @@ export interface DemoQueryFilters {
     readonly startMs: number;
     readonly endExclusiveMs: number;
   };
+  /** Evaluate unbounded positional and relation expressions over source coverage. */
+  fullHistory?: boolean;
   reportingTimeZone?: string;
   capturedAtMs?: number;
   /** Resolved by the canonical operation registry before demo execution. */
@@ -104,6 +110,8 @@ export interface DemoVisitFact {
   longitude: number;
   eventType: string;
   durationMs: number;
+  /** Optional stored payload used when this visit has a custom event. */
+  customEventPayload?: Readonly<Record<string, unknown>>;
   screenWidth?: number | null;
   screenHeight?: number | null;
   isEU?: boolean;

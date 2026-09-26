@@ -1,3 +1,4 @@
+import type { AnalyzedFilterDocument } from "./filter-semantics";
 import type { FilterFieldRegistry } from "./filters";
 import {
   type FilterCondition,
@@ -8,7 +9,7 @@ import {
   isLegacyFilterTarget,
 } from "./filters";
 
-type ScalarType =
+export type FilterScalarType =
   | "string"
   | "number"
   | "boolean"
@@ -16,8 +17,10 @@ type ScalarType =
   | "date"
   | "duration"
   | "calendar-period"
+  | "json-scalar"
   | "unknown";
-type ValueType =
+type ScalarType = FilterScalarType;
+export type FilterSemanticValueType =
   | { readonly kind: "scalar"; readonly scalar: ScalarType }
   | {
       readonly kind: "collection";
@@ -33,6 +36,7 @@ type ValueType =
   | { readonly kind: "sequence" }
   | { readonly kind: "period"; readonly item: ValueType }
   | { readonly kind: "bucket" };
+type ValueType = FilterSemanticValueType;
 
 const scalar = (value: ScalarType): ValueType => ({
   kind: "scalar",
@@ -49,8 +53,12 @@ const fieldScalars: Readonly<Record<string, ScalarType>> = {
   boolean: "boolean",
   date: "date",
   datetime: "datetime",
-  "json-scalar": "unknown",
+  "json-scalar": "json-scalar",
 };
+
+function isDynamicScalar(type: ScalarType): boolean {
+  return type === "json-scalar" || type === "unknown";
+}
 
 function fail(code: string, path: string, message: string): never {
   throw new FilterValidationError(code, path, message);
@@ -73,7 +81,7 @@ function entityMemberType(
 ): ValueType {
   if (member === "time" && (entity === "event" || entity === "page"))
     return scalar("datetime");
-  if (member === "payload") return collection("payload", scalar("unknown"));
+  if (member === "payload") return collection("payload", scalar("json-scalar"));
   if (
     ["geo", "client", "referrer", "utm", "user", "performance"].includes(member)
   )
@@ -83,7 +91,7 @@ function entityMemberType(
   if (definition)
     return scalar(fieldScalars[definition.valueKind] ?? "unknown");
   if (entity === "event" && member === "payload")
-    return collection("payload", scalar("unknown"));
+    return collection("payload", scalar("json-scalar"));
   if (entity === "session" && member === "events") return collection("event");
   if (entity === "session" && member === "pages") return collection("page");
   if (entity === "visitor" && member === "events") return collection("event");
@@ -150,7 +158,7 @@ function inferTarget(
           "unknown",
       );
     case "event-payload":
-      return scalar("unknown");
+      return scalar("json-scalar");
     case "entity-root":
       return collection(target.entity);
     case "context-root":
@@ -289,7 +297,7 @@ function inferTarget(
           "Projection requires a collection.",
         );
       const member = entityMemberType(source.entity, target.member, registry);
-      const projected = target.path ? scalar("unknown") : member;
+      const projected = target.path ? scalar("json-scalar") : member;
       return { kind: "collection", entity: source.entity, item: projected };
     }
     case "reducer": {
@@ -317,7 +325,7 @@ function inferTarget(
         return scalar("number");
       }
       if (target.reducer === "sum" || target.reducer === "avg") {
-        if (itemScalar !== "number" && itemScalar !== "unknown")
+        if (itemScalar !== "number" && !isDynamicScalar(itemScalar))
           fail(
             "reducer_type_mismatch",
             path,
@@ -334,6 +342,7 @@ function inferTarget(
             "boolean",
             "datetime",
             "date",
+            "json-scalar",
             "unknown",
           ].includes(item.scalar)
         )
@@ -351,15 +360,31 @@ function inferTarget(
       const right = inferTarget(target.right, registry, `${path}.right`);
       const l = left.kind === "scalar" ? left.scalar : "unknown";
       const r = right.kind === "scalar" ? right.scalar : "unknown";
-      if (target.operator === "sub" && l === "datetime" && r === "datetime")
-        return scalar("duration");
-      if (l !== "number" && l !== "unknown")
+      if (target.operator === "sub") {
+        if (
+          (l === "datetime" || isDynamicScalar(l)) &&
+          (r === "datetime" || isDynamicScalar(r)) &&
+          (l === "datetime" || r === "datetime")
+        )
+          return scalar("duration");
+        if (
+          (l === "number" || isDynamicScalar(l)) &&
+          (r === "number" || isDynamicScalar(r))
+        )
+          return scalar("number");
+        fail(
+          "arithmetic_type_mismatch",
+          path,
+          "sub requires two numeric values or two time values.",
+        );
+      }
+      if (l !== "number" && !isDynamicScalar(l))
         fail(
           "arithmetic_type_mismatch",
           `${path}.left`,
           "Arithmetic requires numeric values.",
         );
-      if (r !== "number" && r !== "unknown")
+      if (r !== "number" && !isDynamicScalar(r))
         fail(
           "arithmetic_type_mismatch",
           `${path}.right`,
@@ -386,7 +411,9 @@ function inferTarget(
       const inputType = valueScalar(input);
       if (
         inputType.kind !== "scalar" ||
-        !["datetime", "date", "unknown"].includes(inputType.scalar)
+        !["datetime", "date", "json-scalar", "unknown"].includes(
+          inputType.scalar,
+        )
       )
         fail(
           "bucket_type_mismatch",
@@ -416,7 +443,7 @@ function inferTarget(
       const anchor = inferTarget(target.anchor, registry, `${path}.anchor`);
       if (
         anchor.kind !== "scalar" ||
-        !["datetime", "unknown"].includes(anchor.scalar)
+        !["datetime", "json-scalar", "unknown"].includes(anchor.scalar)
       )
         fail(
           "window_anchor_type_mismatch",
@@ -517,6 +544,14 @@ function inferTarget(
   }
 }
 
+/** Public type inference primitive used by the shared semantic analysis. */
+export function inferFilterTargetType(
+  target: FilterTargetExpression,
+  registry: FilterFieldRegistry,
+): FilterSemanticValueType {
+  return inferTarget(target, registry, "target");
+}
+
 function checkCompatible(
   left: ValueType,
   right: ValueType,
@@ -539,8 +574,8 @@ function checkCompatible(
     );
   }
   if (
-    left.scalar !== "unknown" &&
-    right.scalar !== "unknown" &&
+    !isDynamicScalar(left.scalar) &&
+    !isDynamicScalar(right.scalar) &&
     left.scalar !== right.scalar
   ) {
     fail(
@@ -566,6 +601,17 @@ function validateCondition(
   // field/payload contract, preserving its exact type and canonicalization.
   if (isLegacyFilterTarget(condition.target) && !computedValue) return;
   const left = inferTarget(condition.target, registry, `${path}.target`);
+  const leftType = valueScalar(left);
+  if (
+    (condition.operator === "isEmpty" || condition.operator === "notEmpty") &&
+    (leftType.kind !== "scalar" ||
+      (leftType.scalar !== "string" && !isDynamicScalar(leftType.scalar)))
+  )
+    fail(
+      "operator_type_mismatch",
+      path,
+      `${condition.operator} requires a string value.`,
+    );
   if (
     [
       "exists",
@@ -589,7 +635,7 @@ function validateCondition(
     const leftType = valueScalar(left);
     if (
       leftType.kind !== "scalar" ||
-      (leftType.scalar !== "string" && leftType.scalar !== "unknown")
+      (leftType.scalar !== "string" && !isDynamicScalar(leftType.scalar))
     )
       fail(
         "operator_type_mismatch",
@@ -606,7 +652,7 @@ function validateCondition(
       "datetime",
       "date",
       "duration",
-      "calendar-period",
+      "json-scalar",
       "unknown",
     ].includes(comparableLeft.scalar)
   )
@@ -662,6 +708,39 @@ function validateCondition(
     }
     checkCompatible(left, right, `${path}.value[${index}]`);
   }
+  if (operator === "between" && values.length === 2) {
+    const endpointTypes = values.map((value, index) => {
+      if (
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        "kind" in value
+      )
+        return inferTarget(
+          value as FilterTargetExpression,
+          registry,
+          `${path}.value[${index}]`,
+        );
+      if (
+        typeof value === "string" &&
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u.test(
+          value,
+        ) &&
+        Number.isFinite(Date.parse(value))
+      )
+        return scalar("datetime");
+      return scalar(
+        value === null
+          ? "unknown"
+          : typeof value === "number"
+            ? "number"
+            : typeof value === "boolean"
+              ? "boolean"
+              : "string",
+      );
+    });
+    checkCompatible(endpointTypes[0]!, endpointTypes[1]!, `${path}.value`);
+  }
 }
 
 function validateBooleanExpression(
@@ -690,105 +769,119 @@ export function validateFilterExpressionTypes(
 ): void {
   if (!document.root) return;
   validateBooleanExpression(document.root, registry, "root");
-  const rootEntity = (target: FilterTargetExpression): string | null => {
+}
+
+export type FilterRelationScope = "event" | "session" | "visitor";
+
+/** Validate relation anchoring only after the query's effective Scope is known. */
+export function validateFilterRelationDomains(
+  document: FilterDocument,
+  resolvedScope: FilterRelationScope,
+  analysis?: Pick<AnalyzedFilterDocument, "relationTargets">,
+): void {
+  if (!document.root) return;
+  const collectionEntity = (target: FilterTargetExpression): string | null => {
     if (target.kind === "entity-root") return target.entity;
-    if (target.kind === "selector") return rootEntity(target.collection);
-    if (target.kind === "member") return rootEntity(target.object);
-    if (target.kind === "projection") return rootEntity(target.collection);
-    if (target.kind === "reducer") return rootEntity(target.input);
-    if (target.kind === "window") return rootEntity(target.collection);
-    if (target.kind === "periods") return rootEntity(target.collection);
+    if (target.kind === "selector") return collectionEntity(target.collection);
+    if (target.kind === "member") return collectionEntity(target.object);
+    if (target.kind === "projection")
+      return collectionEntity(target.collection);
+    if (target.kind === "reducer") return collectionEntity(target.input);
+    if (target.kind === "window") return collectionEntity(target.collection);
+    if (target.kind === "periods") return collectionEntity(target.collection);
     return null;
   };
-  const anchorVisitTarget = (
+  const visitTarget = (
     target: FilterTargetExpression,
-    anchored: boolean,
+    domain: FilterRelationScope,
     path: string,
   ): void => {
     if (target.kind === "selector") {
-      const collectionEntity = rootEntity(target.collection);
-      const nextAnchor =
-        anchored ||
-        collectionEntity === "session" ||
-        collectionEntity === "visitor";
-      anchorVisitExpression(target.predicate, nextAnchor, `${path}.predicate`);
-      anchorVisitTarget(target.collection, anchored, `${path}.collection`);
+      const entity = collectionEntity(target.collection);
+      const predicateDomain =
+        entity === "session" || entity === "visitor" ? entity : domain;
+      visitExpression(target.predicate, predicateDomain, `${path}.predicate`);
+      visitTarget(target.collection, domain, `${path}.collection`);
       return;
     }
-    const relation =
-      target.kind === "sequence" ||
-      target.kind === "adjacent" ||
-      target.kind === "without";
-    if (relation && !anchored)
+    const requiresRelationDomain = analysis
+      ? analysis.relationTargets.has(target)
+      : target.kind === "sequence" ||
+        target.kind === "adjacent" ||
+        target.kind === "without";
+    if (requiresRelationDomain && domain === "event")
       fail(
-        "relation_requires_session_or_visitor_selector",
+        "relation_requires_session_or_visitor_scope",
         path,
-        "Relation expressions must be nested inside a session or visitor selector.",
+        "Relation expressions require visitor or session scope.",
       );
     switch (target.kind) {
       case "member":
-        anchorVisitTarget(target.object, anchored, `${path}.object`);
+        visitTarget(target.object, domain, `${path}.object`);
         break;
       case "projection":
-        anchorVisitTarget(target.collection, anchored, `${path}.collection`);
+        visitTarget(target.collection, domain, `${path}.collection`);
         break;
       case "reducer":
-        anchorVisitTarget(target.input, anchored, `${path}.input`);
+        visitTarget(target.input, domain, `${path}.input`);
         break;
       case "arithmetic":
-        anchorVisitTarget(target.left, anchored, `${path}.left`);
-        anchorVisitTarget(target.right, anchored, `${path}.right`);
+        visitTarget(target.left, domain, `${path}.left`);
+        visitTarget(target.right, domain, `${path}.right`);
         break;
       case "bucket":
-        anchorVisitTarget(target.input, anchored, `${path}.input`);
+        visitTarget(target.input, domain, `${path}.input`);
         break;
       case "window":
-        anchorVisitTarget(target.collection, anchored, `${path}.collection`);
-        anchorVisitTarget(target.anchor, anchored, `${path}.anchor`);
+        visitTarget(target.collection, domain, `${path}.collection`);
+        visitTarget(target.anchor, domain, `${path}.anchor`);
         break;
       case "periods":
-        anchorVisitTarget(target.collection, anchored, `${path}.collection`);
+        visitTarget(target.collection, domain, `${path}.collection`);
         break;
       case "sequence":
         target.steps.forEach((step, index) =>
-          anchorVisitTarget(step, anchored, `${path}.steps[${index}]`),
+          visitTarget(step, domain, `${path}.steps[${index}]`),
         );
         break;
       case "adjacent":
-        anchorVisitTarget(target.sequence, anchored, `${path}.sequence`);
+        visitTarget(target.sequence, domain, `${path}.sequence`);
         break;
       case "without":
-        anchorVisitTarget(target.sequence, anchored, `${path}.sequence`);
-        anchorVisitTarget(target.excluded, anchored, `${path}.excluded`);
+        visitTarget(target.sequence, domain, `${path}.sequence`);
+        visitTarget(target.excluded, domain, `${path}.excluded`);
         break;
     }
   };
-  const anchorVisitExpression = (
+  const visitExpression = (
     expression: FilterExpression,
-    anchored: boolean,
+    domain: FilterRelationScope,
     path: string,
   ): void => {
     if (expression.kind === "condition") {
-      anchorVisitTarget(expression.target, anchored, `${path}.target`);
+      visitTarget(expression.target, domain, `${path}.target`);
       if (
         expression.value &&
         typeof expression.value === "object" &&
         !Array.isArray(expression.value) &&
         "kind" in expression.value
       )
-        anchorVisitTarget(
+        visitTarget(
           expression.value as FilterTargetExpression,
-          anchored,
+          domain,
           `${path}.value`,
         );
-    } else if (expression.kind === "not")
-      anchorVisitExpression(expression.child, anchored, `${path}.child`);
-    else
-      expression.children.forEach((child, index) =>
-        anchorVisitExpression(child, anchored, `${path}.children[${index}]`),
-      );
+      return;
+    }
+    if (expression.kind === "not") {
+      visitExpression(expression.child, domain, `${path}.child`);
+      return;
+    }
+    expression.children.forEach((child, index) =>
+      visitExpression(child, domain, `${path}.children[${index}]`),
+    );
   };
-  anchorVisitExpression(document.root, false, "root");
+  visitExpression(document.root, resolvedScope, "root");
 }
 
 export function filterUsesRequestClock(document: FilterDocument): boolean {

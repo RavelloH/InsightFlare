@@ -50,7 +50,7 @@ describe("filter DSL v1", () => {
     expect(FILTER_DSL_VERSION).toBe(1);
     expect(document.version).toBe(1);
     expect(formatFilterDsl(document)).toBe(
-      'page.path eq "/pricing" AND (referrer.domain eq "google.com" OR NOT client.deviceType in ["Mobile","Tablet"])',
+      'page.path eq "/pricing" AND (referrer.domain eq "google.com" OR NOT client.deviceType in ["Mobile", "Tablet"])',
     );
     expect(
       parseFilterDsl(formatFilterDsl(document), analyticsFilterRegistry),
@@ -71,6 +71,22 @@ describe("filter DSL v1", () => {
     expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
       document,
     );
+  });
+
+  it("round-trips duration and request-clock between ranges", () => {
+    for (const source of [
+      "sub(first(event).time, first(page).time) between [0d, 30d]",
+      "time between [@now-30d, @now]",
+    ]) {
+      const document = parseFilterDsl(source, analyticsFilterRegistry);
+      const formatted = formatFilterDsl(document);
+      expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
+        document,
+      );
+    }
+    expect(() =>
+      parseFilterDsl("time in [@now, 7d]", analyticsFilterRegistry),
+    ).toThrow();
   });
 
   it("round-trips windows, periods, and ordered Relation steps", () => {
@@ -121,13 +137,13 @@ describe("filter DSL v1", () => {
     const expressions = [
       "metric.number eq 1",
       "metric.number neq 1",
-      "metric.number in [1,2]",
-      "metric.number notIn [1,2]",
+      "metric.number in [1, 2]",
+      "metric.number notIn [1, 2]",
       "metric.number gt 1",
       "metric.number gte 1",
       "metric.number lt 2",
       "metric.number lte 2",
-      "metric.number between [1,2]",
+      "metric.number between [1, 2]",
       "metric.number exists",
       "metric.number notExists",
       "metric.number isNull",

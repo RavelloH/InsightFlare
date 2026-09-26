@@ -181,6 +181,8 @@ export async function executeDemoQuery(
     params.nowMs = time.capturedAtMs;
     params.__filterDsl = formatFilterDsl(filters ?? { version: 1, root: null });
     params.scope = scopePreference ?? "auto";
+    if (time.fullHistory) params.__filterFullHistory = "true";
+    else delete params.__filterFullHistory;
     if (time.evaluationRange) {
       params.evaluationFromMs = time.evaluationRange.startMs;
       params.evaluationToMs = time.evaluationRange.endExclusiveMs;

@@ -187,5 +187,41 @@ describe("filter DSL time range", () => {
         100_000,
       ),
     ).toThrow("filter_time_range_invalid");
+    expect(() =>
+      prepareFilterTimeRange(
+        condition("between", [70_000, Number.MAX_SAFE_INTEGER]) as never,
+        candidateRange,
+        100_000,
+      ),
+    ).toThrow("filter_time_range_invalid");
+    expect(() =>
+      prepareFilterTimeRange(
+        condition("gt", Number.MAX_SAFE_INTEGER) as never,
+        candidateRange,
+        100_000,
+      ),
+    ).toThrow("filter_time_range_invalid");
+    expect(() =>
+      prepareFilterTimeRange(
+        condition("lte", Number.MAX_SAFE_INTEGER) as never,
+        candidateRange,
+        100_000,
+      ),
+    ).toThrow("filter_time_range_invalid");
+    expect(() =>
+      prepareFilterTimeRange(
+        condition("gte", {
+          kind: "time-anchor",
+          anchor: "now",
+          offset: {
+            kind: "duration",
+            amount: Number.MAX_SAFE_INTEGER,
+            unit: "ms",
+          },
+        }) as never,
+        candidateRange,
+        100_000,
+      ),
+    ).toThrow("filter_time_range_invalid");
   });
 });

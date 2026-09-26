@@ -1,9 +1,15 @@
+import { analyzeFilterHistory } from "@/lib/filter-contract/filter-history";
 import {
   analyticsFilterDefinition,
+  analyticsFilterRegistry,
   type FilterFieldSource,
 } from "@/lib/filter-contract/filter-registry";
+import { analyzeFilterDocument } from "@/lib/filter-contract/filter-semantics";
 import { prepareFilterTimeRange } from "@/lib/filter-contract/filter-time-range";
-import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
+import {
+  filterDocumentUsesAdvancedExpressions,
+  validateFilterRelationDomains,
+} from "@/lib/filter-contract/filter-types";
 import type {
   FilterCondition,
   FilterDocument,
@@ -378,6 +384,12 @@ export function createScopedFilterPlan(
   };
 }
 
+export function prepareScopedQuery<T extends QueryInput>(
+  operation: QueryOperation,
+  query: T,
+): [T] extends [never]
+  ? QueryInput
+  : T & { readonly scopePlan?: ScopedFilterPlan };
 export function prepareScopedQuery(
   operation: QueryOperation,
   query: QueryInput,
@@ -411,6 +423,14 @@ export function prepareScopedQuery(
     reconciledScope,
   );
   if (!plan) return { ...query, scopePreference: requestedScope };
+  validateFilterRelationDomains(
+    query.filters ?? { version: 1, root: null },
+    plan.scope,
+    analyzeFilterDocument(
+      query.filters ?? { version: 1, root: null },
+      analyticsFilterRegistry,
+    ),
+  );
   const time =
     "time" in query && query.time ? (query.time as QueryTime) : undefined;
   if (!time) {
@@ -444,7 +464,32 @@ function prepareFilterTimeWindow(query: QueryInput): QueryInput {
     time.range,
     time.capturedAtMs,
   );
-  if (!prepared.evaluationRange) return query;
+  const semanticAnalysis = analyzeFilterDocument(
+    prepared.filters,
+    analyticsFilterRegistry,
+  );
+  const history = analyzeFilterHistory(
+    semanticAnalysis,
+    time.range,
+    time.capturedAtMs,
+  );
+  const ranges = [
+    prepared.evaluationRange,
+    history.kind === "bounded"
+      ? { startMs: history.startMs, endExclusiveMs: history.endExclusiveMs }
+      : undefined,
+  ].filter((range): range is NonNullable<typeof range> => range !== undefined);
+  const evaluationRange = ranges.length
+    ? {
+        startMs: Math.min(...ranges.map((range) => range.startMs)),
+        endExclusiveMs: Math.max(
+          ...ranges.map((range) => range.endExclusiveMs),
+        ),
+      }
+    : undefined;
+  const fullHistory = history.kind === "full-history";
+  if (!evaluationRange && !fullHistory && !prepared.evaluationRange)
+    return query;
   if (!filterDocumentUsesAdvancedExpressions(prepared.filters))
     throw new TypeError("filter_time_range_requires_advanced_expression");
   return {
@@ -452,12 +497,16 @@ function prepareFilterTimeWindow(query: QueryInput): QueryInput {
     filters: prepared.filters,
     time: {
       ...time,
-      evaluationRange: {
-        startMs: prepared.evaluationRange
-          .startMs as QueryTime["range"]["startMs"],
-        endExclusiveMs: prepared.evaluationRange
-          .endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
-      },
+      ...(evaluationRange
+        ? {
+            evaluationRange: {
+              startMs: evaluationRange.startMs as QueryTime["range"]["startMs"],
+              endExclusiveMs:
+                evaluationRange.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
+            },
+          }
+        : {}),
+      ...(fullHistory ? { fullHistory: true } : {}),
     },
   } as QueryInput;
 }
@@ -472,7 +521,34 @@ function prepareComparisonFilterTimeRanges(
       side.time.range,
       side.time.capturedAtMs,
     );
-    if (!prepared.evaluationRange) return side;
+    const semanticAnalysis = analyzeFilterDocument(
+      prepared.filters,
+      analyticsFilterRegistry,
+    );
+    const history = analyzeFilterHistory(
+      semanticAnalysis,
+      side.time.range,
+      side.time.capturedAtMs,
+    );
+    const ranges = [
+      prepared.evaluationRange,
+      history.kind === "bounded"
+        ? { startMs: history.startMs, endExclusiveMs: history.endExclusiveMs }
+        : undefined,
+    ].filter(
+      (range): range is NonNullable<typeof range> => range !== undefined,
+    );
+    const evaluationRange = ranges.length
+      ? {
+          startMs: Math.min(...ranges.map((range) => range.startMs)),
+          endExclusiveMs: Math.max(
+            ...ranges.map((range) => range.endExclusiveMs),
+          ),
+        }
+      : undefined;
+    const fullHistory = history.kind === "full-history";
+    if (!evaluationRange && !fullHistory && !prepared.evaluationRange)
+      return side;
     if (!filterDocumentUsesAdvancedExpressions(prepared.filters))
       throw new TypeError("filter_time_range_requires_advanced_expression");
     return {
@@ -480,12 +556,17 @@ function prepareComparisonFilterTimeRanges(
       filters: prepared.filters,
       time: {
         ...side.time,
-        evaluationRange: {
-          startMs: prepared.evaluationRange
-            .startMs as QueryTime["range"]["startMs"],
-          endExclusiveMs: prepared.evaluationRange
-            .endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
-        },
+        ...(evaluationRange
+          ? {
+              evaluationRange: {
+                startMs:
+                  evaluationRange.startMs as QueryTime["range"]["startMs"],
+                endExclusiveMs:
+                  evaluationRange.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
+              },
+            }
+          : {}),
+        ...(fullHistory ? { fullHistory: true } : {}),
       },
     };
   };
@@ -553,6 +634,22 @@ function prepareScopedComparisonQuery(
   );
   if (!currentPlan || !referencePlan)
     throw new Error("unsupported_filter_scope");
+  validateFilterRelationDomains(
+    current.side.filters ?? { version: 1, root: null },
+    resolvedScope,
+    analyzeFilterDocument(
+      current.side.filters ?? { version: 1, root: null },
+      analyticsFilterRegistry,
+    ),
+  );
+  validateFilterRelationDomains(
+    reference.side.filters ?? { version: 1, root: null },
+    resolvedScope,
+    analyzeFilterDocument(
+      reference.side.filters ?? { version: 1, root: null },
+      analyticsFilterRegistry,
+    ),
+  );
   const scopedSide = (prepared: {
     side: ComparisonSideInput;
     plan: ScopedFilterPlan;

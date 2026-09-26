@@ -1,8 +1,10 @@
 import {
   type CanonicalJsonPath,
   FILTER_OPERATOR_IDS,
+  type FilterComparisonValue,
   type FilterCondition,
   type FilterDocument,
+  type FilterDurationTarget,
   type FilterDurationUnit,
   type FilterExpression,
   type FilterFieldId,
@@ -34,7 +36,7 @@ export const FILTER_DSL_SYNTAX = {
   grouping:
     "Use parentheses for precedence, or use AND(<expression>) and OR(<expression>) for an explicit single-child group.",
   value:
-    "A JSON scalar; time conditions may also use @now, @range.start, or @range.end with elapsed duration offsets.",
+    "A JSON scalar; temporal `between` ranges may use elapsed duration endpoints or @now/@range anchors with elapsed offsets.",
   list: "Use [<value>, ...] for in and notIn values.",
   selector: "Select a collection with <collection> { <filter-expression> }.",
   reducer:
@@ -42,7 +44,7 @@ export const FILTER_DSL_SYNTAX = {
   temporal:
     "Use bucket(collection.time, <calendar-period>), periods(collection, <calendar-period>), or window(collection, anchor, [<start-offset>, <end-offset>]).",
   relation:
-    "Use sequence([...]), adjacent(sequence), and without(sequence, collection) inside an explicit session or visitor selector.",
+    "Use sequence([...]), adjacent(sequence), and without(sequence, collection) with visitor or session query Scope, or inside an explicit session/visitor selector.",
   payloadTarget:
     'Use event.payload("<json-pointer>") for event payload fields.',
   caseSensitivity:
@@ -612,7 +614,7 @@ class Parser {
       return expression;
     }
 
-    const parsedValue = this.value();
+    const parsedValue = this.value(operator);
     const expression: FilterCondition = {
       kind: "condition",
       target: parsedTarget.target,
@@ -1072,9 +1074,7 @@ class Parser {
     );
   }
 
-  private requireDuration(): FilterTargetExpression & {
-    readonly kind: "duration";
-  } {
+  private requireDuration(): FilterDurationTarget {
     if (this.current.kind !== "duration") {
       throw tokenError(
         this.source,
@@ -1089,7 +1089,7 @@ class Parser {
     return { kind: "duration", ...token.value };
   }
 
-  private value(): ParsedValue {
+  private value(operator: FilterOperator): ParsedValue {
     if (this.current.kind === "time-anchor") {
       const token = this.current;
       this.index += 1;
@@ -1102,7 +1102,7 @@ class Parser {
     if (this.current.kind === "duration") {
       const token = this.current;
       this.index += 1;
-      const value: FilterTargetExpression = {
+      const value: FilterDurationTarget = {
         kind: "duration",
         ...token.value,
       };
@@ -1114,21 +1114,29 @@ class Parser {
     }
     const open = this.consume("list-open");
     if (open) {
-      const values: FilterValue[] = [];
+      const values: Array<
+        FilterValue | FilterTimeAnchorTarget | FilterDurationTarget
+      > = [];
       const elements: Span[] = [];
       const close = this.consume("list-close");
       if (close) {
         return {
-          value: values,
+          value: [] as FilterValue[],
           span: { start: open.start, end: close.end },
           elements,
         };
       }
 
       do {
-        const parsed = this.scalarValue();
-        values.push(parsed.value);
-        elements.push(parsed.span);
+        if (operator === "between") {
+          const parsed = this.comparisonRangeEndpoint();
+          values.push(parsed.value);
+          elements.push(parsed.span);
+        } else {
+          const parsed = this.scalarValue();
+          values.push(parsed.value);
+          elements.push(parsed.span);
+        }
       } while (this.consume("comma"));
 
       const closingBracket = this.consume("list-close");
@@ -1142,8 +1150,23 @@ class Parser {
           "`]`",
         );
       }
+      if (operator === "between" && values.length !== 2) {
+        throw sourceError(
+          this.source,
+          "invalid_range",
+          open.start,
+          "Between requires exactly two values.",
+          closingBracket.end - open.start,
+        );
+      }
       return {
-        value: values,
+        value:
+          operator === "between"
+            ? ([
+                values[0] as FilterComparisonValue,
+                values[1] as FilterComparisonValue,
+              ] as const)
+            : (values as FilterValue[]),
         span: { start: open.start, end: closingBracket.end },
         elements,
       };
@@ -1155,6 +1178,27 @@ class Parser {
       span: scalar.span,
       elements: [scalar.span],
     };
+  }
+
+  private comparisonRangeEndpoint(): {
+    readonly value: FilterComparisonValue;
+    readonly span: Span;
+  } {
+    if (this.current.kind === "time-anchor") {
+      const token = this.current;
+      this.index += 1;
+      return { value: token.value, span: spanFromToken(token) };
+    }
+    if (this.current.kind === "duration") {
+      const token = this.current;
+      this.index += 1;
+      return {
+        value: { kind: "duration", ...token.value },
+        span: spanFromToken(token),
+      };
+    }
+    const scalar = this.scalarValue();
+    return scalar;
   }
 
   private scalarValue(): { readonly value: FilterValue; readonly span: Span } {
@@ -1405,6 +1449,14 @@ function formatConditionValue(value: FilterCondition["value"]): string {
   ) {
     return formatFilterTargetExpression(value as FilterTargetExpression);
   }
+  if (Array.isArray(value))
+    return `[${value
+      .map((item) =>
+        item && typeof item === "object" && "kind" in item
+          ? formatFilterTargetExpression(item as FilterTargetExpression)
+          : JSON.stringify(item),
+      )
+      .join(", ")}]`;
   return JSON.stringify(value);
 }
 

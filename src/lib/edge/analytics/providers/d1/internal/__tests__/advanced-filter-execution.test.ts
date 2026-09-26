@@ -11,10 +11,13 @@ import {
   createQueryTime,
   createScopedFilterPlan,
   createTimeRange,
+  prepareScopedQuery,
+  type QueryTime,
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { compileFilterDocument } from "@/lib/edge/analytics/providers/d1/internal/filter-compiler";
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { expandCustomEventDataJson } from "@/lib/edge/ingest/custom-event-json";
 import type { Env } from "@/lib/edge/types";
@@ -31,6 +34,8 @@ interface SharedActivityBase {
   readonly visitorId: string;
   readonly pageTimeMs: number;
   readonly pathname: string;
+  readonly title?: string;
+  readonly hostname?: string;
 }
 type SharedActivity = SharedActivityBase &
   (
@@ -39,6 +44,7 @@ type SharedActivity = SharedActivityBase &
           readonly id: string;
           readonly name: string;
           readonly timeMs: number;
+          readonly payload?: Readonly<Record<string, unknown>>;
         };
       }
     | { readonly event?: never }
@@ -219,8 +225,8 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
     .prepare("INSERT INTO site_identities (site_pk, site_id) VALUES (?, ?)")
     .run(1, SITE_ID);
   const insertVisit = database.prepare(`
-    INSERT INTO visits (visit_id, site_id, site_pk, visitor_id, session_id, started_at, pathname, duration_ms)
-    VALUES (?, ?, 1, ?, ?, ?, ?, 5)
+    INSERT INTO visits (visit_id, site_id, site_pk, visitor_id, session_id, started_at, pathname, title, duration_ms, hostname)
+    VALUES (?, ?, 1, ?, ?, ?, ?, ?, 5, ?)
   `);
   for (const activity of activities) {
     insertVisit.run(
@@ -230,6 +236,8 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
       activity.sessionId,
       activity.pageTimeMs,
       activity.pathname,
+      activity.title ?? activity.pathname,
+      activity.hostname ?? "example.test",
     );
   }
   database
@@ -293,7 +301,7 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
       visit: demoVisit(activity),
     };
     const expanded = expandCustomEventDataJson(
-      JSON.stringify(demoEventRecordPayload(event)),
+      JSON.stringify(activity.event.payload ?? demoEventRecordPayload(event)),
     );
     if (!expanded.ok) throw new Error(expanded.error);
     for (const node of expanded.data.nodes) {
@@ -362,8 +370,8 @@ function demoVisit(activity: SharedActivity): DemoVisitFact {
     visitorId: activity.visitorId,
     startedAt: activity.pageTimeMs,
     pathname: activity.pathname,
-    title: activity.pathname,
-    hostname: "example.test",
+    title: activity.title ?? activity.pathname,
+    hostname: activity.hostname ?? "example.test",
     referrerHost: "",
     referrerUrl: "",
     browser: "Chrome",
@@ -385,6 +393,9 @@ function demoVisit(activity: SharedActivity): DemoVisitFact {
     longitude: 0,
     eventType: activity.event?.name ?? "pageview",
     durationMs: 5,
+    ...(activity.event?.payload !== undefined
+      ? { customEventPayload: activity.event.payload }
+      : {}),
   };
 }
 
@@ -442,50 +453,48 @@ async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
           ),
         }
       : baseTime;
-    const plan = createScopedFilterPlan("overview", document, request.scope);
-    if (!plan) throw new Error("expected_scoped_filter_plan");
-    const filters = attachScopedFilterMetadata(document, {
-      requestedScope: request.scope,
-      resolvedScope: request.scope,
-      plan,
-      time,
-      siteIds: [SITE_ID],
-    });
-    const input = {
+    const input = prepareScopedQuery("overview", {
       context: siteQueryContext(SITE_ID, "private-dashboard"),
-      filters,
+      filters: document,
       scopePreference: request.scope,
-      scopePlan: plan,
       time,
-    };
+    });
+    if (!input.scopePlan || !input.filters || !("time" in input))
+      throw new Error("expected_prepared_scoped_filter_query");
+    const preparedTime = (input as typeof input & { time: QueryTime }).time;
     const output = await d1AdvancedFilterMiddleware(env)(
       "overview",
       input,
       async (prepared) => prepared,
     );
     const prepared = output as typeof input;
-    const d1Ids = (prepared.scopePlan.advancedMatches?.entityIds ?? [])
+    const d1Ids = (prepared.scopePlan?.advancedMatches?.entityIds ?? [])
       .map((item) => item.id)
       .sort();
 
-    const coverageStart = Math.min(
-      request.candidateRange.startMs,
-      request.evaluationRange?.startMs ?? request.candidateRange.startMs,
-    );
+    const coverageStart = preparedTime.fullHistory
+      ? Math.min(0, request.candidateRange.startMs)
+      : Math.min(
+          request.candidateRange.startMs,
+          preparedTime.evaluationRange?.startMs ??
+            request.candidateRange.startMs,
+        );
     const coverageEnd = Math.max(
       request.candidateRange.endExclusiveMs,
-      request.evaluationRange?.endExclusiveMs ??
+      preparedTime.evaluationRange?.endExclusiveMs ??
         request.candidateRange.endExclusiveMs,
+      preparedTime.fullHistory ? request.capturedAtMs + 1 : 0,
     );
     const mockResult = applyDemoFilters(
       sharedDemoDataset(request.activities, coverageStart, coverageEnd),
       {
-        filterDocument: document,
+        filterDocument: prepared.filters ?? document,
         scope: request.scope,
         candidateRange: request.candidateRange,
-        ...(request.evaluationRange
-          ? { evaluationRange: request.evaluationRange }
+        ...(preparedTime.evaluationRange
+          ? { evaluationRange: preparedTime.evaluationRange }
           : {}),
+        ...(preparedTime.fullHistory ? { fullHistory: true } : {}),
         reportingTimeZone: request.reportingTimeZone,
         capturedAtMs: request.capturedAtMs,
       },
@@ -812,6 +821,338 @@ describe("D1 advanced filter execution", () => {
     });
     expect(withoutBetweenEndpoints.d1).toEqual(["session-a"]);
     expect(withoutBetweenEndpoints.mock).toEqual(withoutBetweenEndpoints.d1);
+  });
+
+  it("keeps Legacy string predicates and canonical scope facts consistent across providers", async () => {
+    const activities: readonly SharedActivity[] = [
+      {
+        visitId: "legacy-docs",
+        sessionId: "legacy-session-a",
+        visitorId: "legacy-visitor-a",
+        pageTimeMs: 10,
+        pathname: "/Docs/start",
+        hostname: "Example.Test",
+      },
+      {
+        visitId: "legacy-lower",
+        sessionId: "legacy-session-b",
+        visitorId: "legacy-visitor-b",
+        pageTimeMs: 20,
+        pathname: "/docs/start",
+        hostname: "example.test",
+      },
+      {
+        visitId: "legacy-wildcard",
+        sessionId: "legacy-session-c",
+        visitorId: "legacy-visitor-c",
+        pageTimeMs: 30,
+        pathname: "/Docs/100X_ready",
+        hostname: "api.example.test",
+      },
+      {
+        visitId: "legacy-empty-title",
+        sessionId: "legacy-session-empty",
+        visitorId: "legacy-visitor-empty",
+        pageTimeMs: 40,
+        pathname: "/empty-title",
+        title: "",
+        hostname: "empty.example.test",
+      },
+    ];
+    const { database } = sqliteEnv(activities);
+    const legacyIds = (filterDsl: string) => {
+      const document = parseFilterDsl(filterDsl, analyticsFilterRegistry);
+      const compiled = compileFilterDocument(document);
+      return (
+        database
+          .prepare(
+            `SELECT DISTINCT visitor_id FROM visits visit_source WHERE site_pk = 1 AND (${compiled.clause.replace(/^WHERE\s+/u, "")}) ORDER BY visitor_id`,
+          )
+          .all(...compiled.bindings) as Array<{ visitor_id: string }>
+      ).map((row) => row.visitor_id);
+    };
+    try {
+      const parityCases = [
+        ['page.path eq "/Docs/start"', ["legacy-visitor-a"]],
+        [
+          'page.path neq "/elsewhere"',
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        [
+          'page.path in ["/Docs/start", "/docs/start"]',
+          ["legacy-visitor-a", "legacy-visitor-b"],
+        ],
+        [
+          'page.path notIn ["/elsewhere"]',
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        ['page.path contains "Docs"', ["legacy-visitor-a", "legacy-visitor-c"]],
+        [
+          'page.path startsWith "/Docs"',
+          ["legacy-visitor-a", "legacy-visitor-c"],
+        ],
+        [
+          'page.path endsWith "start"',
+          ["legacy-visitor-a", "legacy-visitor-b"],
+        ],
+        [
+          "page.durationMs gt 4",
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        [
+          "page.durationMs gte 5",
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        [
+          "page.durationMs lt 6",
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        [
+          "page.durationMs lte 5",
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        [
+          "page.durationMs between [5, 5]",
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        [
+          "page.path exists",
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        ["page.path notExists", []],
+        ["page.path isNull", []],
+        [
+          "page.path notNull",
+          [
+            "legacy-visitor-a",
+            "legacy-visitor-b",
+            "legacy-visitor-c",
+            "legacy-visitor-empty",
+          ],
+        ],
+        ["page.title isEmpty", ["legacy-visitor-empty"]],
+        [
+          "page.title notEmpty",
+          ["legacy-visitor-a", "legacy-visitor-b", "legacy-visitor-c"],
+        ],
+        [
+          'page.hostname eq "EXAMPLE.TEST"',
+          ["legacy-visitor-a", "legacy-visitor-b"],
+        ],
+      ] as const;
+      for (const [legacyFilter, expected] of parityCases) {
+        const mixedFilter = `${legacyFilter} AND count(event) gte 0`;
+        const baseline = legacyIds(legacyFilter);
+        const result = await evaluateSharedFixture({
+          activities,
+          filterDsl: mixedFilter,
+          scope: "visitor",
+          candidateRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 100,
+        });
+        expect(baseline).toEqual(expected);
+        expect(result.d1).toEqual(baseline);
+        expect(result.mock).toEqual(baseline);
+      }
+    } finally {
+      database.close();
+    }
+
+    const factParity = await evaluateSharedFixture({
+      activities: [
+        {
+          visitId: "fact-entry",
+          sessionId: "fact-session-a",
+          visitorId: "fact-visitor",
+          pageTimeMs: 10,
+          pathname: "/entry",
+        },
+        {
+          visitId: "fact-event",
+          sessionId: "fact-session-a",
+          visitorId: "fact-visitor",
+          pageTimeMs: 15,
+          pathname: "/event",
+          event: { id: "fact-event:purchase", name: "purchase", timeMs: 16 },
+        },
+        {
+          visitId: "fact-exit",
+          sessionId: "fact-session-a",
+          visitorId: "fact-visitor",
+          pageTimeMs: 20,
+          pathname: "/exit",
+        },
+        {
+          visitId: "fact-bounce",
+          sessionId: "fact-session-b",
+          visitorId: "fact-visitor",
+          pageTimeMs: 30,
+          pathname: "/bounce",
+        },
+      ],
+      filterDsl:
+        'visitor { visitor.sessions eq 2 AND visitor.views eq 4 AND visitor.events eq 1 AND session { session.durationMs eq 15 AND session.views eq 3 AND session.events eq 1 AND session.bounce eq false AND session.entryPath eq "/entry" AND session.exitPath eq "/exit" } exists } exists',
+      scope: "visitor",
+      candidateRange: { startMs: 0, endExclusiveMs: 2_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 2_000,
+    });
+    expect(factParity.d1).toEqual(["fact-visitor"]);
+    expect(factParity.mock).toEqual(factParity.d1);
+  });
+
+  it("keeps numeric arithmetic, typed payloads, Duration ranges, auto history, and root Relations in provider parity", async () => {
+    const activities: readonly SharedActivity[] = [
+      {
+        visitId: "advanced-candidate-a",
+        sessionId: "candidate-session-a",
+        visitorId: "advanced-visitor",
+        pageTimeMs: 15_000,
+        pathname: "/candidate-a",
+      },
+      {
+        visitId: "advanced-candidate-b",
+        sessionId: "candidate-session-b",
+        visitorId: "advanced-visitor",
+        pageTimeMs: 16_000,
+        pathname: "/candidate-b",
+      },
+      {
+        visitId: "advanced-signup",
+        sessionId: "history-session-a",
+        visitorId: "advanced-visitor",
+        pageTimeMs: 10,
+        pathname: "/signup",
+        event: { id: "advanced-signup:signup", name: "signup", timeMs: 1_010 },
+      },
+      {
+        visitId: "advanced-purchase-text",
+        sessionId: "history-session-b",
+        visitorId: "advanced-visitor",
+        pageTimeMs: 20,
+        pathname: "/purchase-text",
+        event: {
+          id: "advanced-purchase-text:purchase",
+          name: "purchase",
+          timeMs: 1_020,
+          payload: { amount: "0", productId: "123" },
+        },
+      },
+      {
+        visitId: "advanced-purchase-number-a",
+        sessionId: "history-session-b",
+        visitorId: "advanced-visitor",
+        pageTimeMs: 30,
+        pathname: "/purchase-number-a",
+        event: {
+          id: "advanced-purchase-number-a:purchase",
+          name: "purchase",
+          timeMs: 1_030,
+          payload: { amount: 20, productId: 123 },
+        },
+      },
+      {
+        visitId: "advanced-purchase-number-b",
+        sessionId: "history-session-b",
+        visitorId: "advanced-visitor",
+        pageTimeMs: 40,
+        pathname: "/purchase-number-b",
+        event: {
+          id: "advanced-purchase-number-b:purchase",
+          name: "purchase",
+          timeMs: 1_040,
+          payload: { amount: 30, productId: "123" },
+        },
+      },
+    ];
+    const automaticHistory = await evaluateSharedFixture({
+      activities,
+      filterDsl:
+        'count(event { event.name eq "purchase" AND time gte @now-19s }) gte 3 AND min(event { event.name eq "purchase" AND time gte @now-19s }.payload("/amount")) gt 15 AND countDistinct(event { event.name eq "purchase" AND time gte @now-19s }.payload("/productId")) eq 2 AND sub(count(event { event.name eq "purchase" AND time gte @now-19s }), count(page)) eq 1 AND div(sub(count(event { event.name eq "purchase" AND time gte @now-19s }), count(page)), count(page)) gt 0',
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(automaticHistory.d1).toEqual(["advanced-visitor"]);
+    expect(automaticHistory.mock).toEqual(automaticHistory.d1);
+
+    const durationRange = await evaluateSharedFixture({
+      activities,
+      filterDsl:
+        'sub(first(event { event.name eq "purchase" }).time, first(event { event.name eq "signup" }).time) between [0ms, 20ms]',
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(durationRange.d1).toEqual(["advanced-visitor"]);
+    expect(durationRange.mock).toEqual(durationRange.d1);
+
+    const visitorSequence =
+      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists';
+    const visitorRelation = await evaluateSharedFixture({
+      activities,
+      filterDsl: visitorSequence,
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(visitorRelation.d1).toEqual(["advanced-visitor"]);
+    expect(visitorRelation.mock).toEqual(visitorRelation.d1);
+
+    const sessionRelation = await evaluateSharedFixture({
+      activities,
+      filterDsl: visitorSequence,
+      scope: "session",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(sessionRelation.d1).toEqual([]);
+    expect(sessionRelation.mock).toEqual(sessionRelation.d1);
   });
 
   it("keeps DST buckets, natural periods, and empty reducers consistent across providers", async () => {

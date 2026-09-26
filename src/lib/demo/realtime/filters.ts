@@ -36,7 +36,7 @@ export const DEMO_INTERVALS = new Set([
   "month",
 ]);
 export function normalizeDemoFilterValue(
-  value: string | number | undefined,
+  value: string | number | null | undefined,
 ): string | undefined {
   if (value === undefined || value === null) return undefined;
   const normalized = String(value).trim().slice(0, 120);
@@ -81,8 +81,29 @@ export function parseDemoFilters(
     Number.isSafeInteger(evaluationEndExclusiveMs) &&
     evaluationEndExclusiveMs > evaluationStartMs;
   const capturedAtMs = Number(params.nowMs);
+  const fullHistory = params.__filterFullHistory === "true";
+  const candidateStartMs = Number(params.from);
+  const candidateEndExclusiveMs = Number(params.to);
+  const hasCandidateRange =
+    params.from !== undefined &&
+    params.to !== undefined &&
+    Number.isSafeInteger(candidateStartMs) &&
+    Number.isSafeInteger(candidateEndExclusiveMs) &&
+    candidateEndExclusiveMs > candidateStartMs;
+  const candidateRange = hasCandidateRange
+    ? {
+        startMs: candidateStartMs,
+        endExclusiveMs: candidateEndExclusiveMs,
+      }
+    : undefined;
+  const siteId =
+    typeof params.siteId === "string" && params.siteId.length > 0
+      ? params.siteId
+      : undefined;
   return {
     filterDocument: document,
+    ...(siteId ? { siteId } : {}),
+    ...(candidateRange ? { candidateRange } : {}),
     ...(hasEvaluationRange
       ? {
           evaluationRange: {
@@ -91,6 +112,7 @@ export function parseDemoFilters(
           },
         }
       : {}),
+    ...(fullHistory ? { fullHistory: true } : {}),
     ...(typeof params.timeZone === "string"
       ? { reportingTimeZone: params.timeZone }
       : {}),

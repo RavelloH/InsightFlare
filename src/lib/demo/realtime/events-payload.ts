@@ -4,6 +4,7 @@ import { parseDemoScreenSize } from "@/lib/demo/realtime/shared";
 
 export function demoEventRecordPayload(event: DemoCustomEventFact) {
   const visit = event.visit;
+  if (visit.customEventPayload !== undefined) return visit.customEventPayload;
   const screen = parseDemoScreenSize(visit.screenSize);
   const eventScore = fnv1a(event.eventId);
   const rng = mulberry32(eventScore);

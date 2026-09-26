@@ -24,6 +24,7 @@ import {
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
 } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
+import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 
 const context = {
   subject: { kind: "site", siteId: "site-1" },
@@ -238,6 +239,126 @@ describe("scoped filter contract", () => {
 
     expect(prepared.scopePlan?.scope).toBe("event");
     expect(prepared.filters?.root).toBeNull();
+  });
+
+  it("plans selector history and full-history reducers into query time", () => {
+    const queryTime = {
+      range: { startMs: 80_000, endExclusiveMs: 90_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 100_000,
+    } as QueryTime;
+    const bounded = prepareScopedQuery("overview", {
+      context,
+      time: queryTime,
+      filters: parseFilterDsl(
+        'count(event { event.name eq "purchase" AND time gte @now-30s }) gte 1',
+        analyticsFilterRegistry,
+      ),
+      scopePreference: "visitor",
+    } as QueryInput & { time: QueryTime });
+    expect(bounded.time).toMatchObject({
+      evaluationRange: { startMs: 70_000, endExclusiveMs: 100_001 },
+    });
+
+    const upperBounded = prepareScopedQuery("overview", {
+      context,
+      time: queryTime,
+      filters: parseFilterDsl(
+        "count(event { time lt @now-30s }) gte 1",
+        analyticsFilterRegistry,
+      ),
+      scopePreference: "visitor",
+    } as QueryInput & { time: QueryTime });
+    expect(upperBounded.time).toMatchObject({ fullHistory: true });
+
+    const twoSided = prepareScopedQuery("overview", {
+      context,
+      time: queryTime,
+      filters: parseFilterDsl(
+        "count(event { time gte @now-30s AND time lte @now-5s }) gte 1",
+        analyticsFilterRegistry,
+      ),
+      scopePreference: "visitor",
+    } as QueryInput & { time: QueryTime });
+    expect(twoSided.time).toMatchObject({
+      evaluationRange: { startMs: 70_000, endExclusiveMs: 95_001 },
+    });
+    expect(twoSided.time).not.toHaveProperty("fullHistory");
+
+    const fullHistory = prepareScopedQuery("overview", {
+      context,
+      time: queryTime,
+      filters: parseFilterDsl(
+        "first(page).path exists",
+        analyticsFilterRegistry,
+      ),
+      scopePreference: "visitor",
+    } as QueryInput & { time: QueryTime });
+    expect(fullHistory.time).toMatchObject({ fullHistory: true });
+  });
+
+  it("plans selector history independently for each comparison side", () => {
+    const filters = parseFilterDsl(
+      "count(event { time gte @now-30s AND time lte @now-5s }) gte 1",
+      analyticsFilterRegistry,
+    );
+    const currentTime = {
+      ...time,
+      capturedAtMs: 100,
+    } as QueryTime;
+    const referenceTime = {
+      ...time,
+      range: { startMs: 200, endExclusiveMs: 300 },
+      capturedAtMs: 400,
+    } as QueryTime;
+    const prepared = prepareScopedQuery("comparison", {
+      context,
+      scopePreference: "visitor",
+      current: { time: currentTime, filters },
+      reference: { time: referenceTime, filters },
+      metrics: ["views"],
+    } as unknown as QueryInput) as QueryInput & {
+      current: { time: QueryTime };
+      reference: { time: QueryTime };
+    };
+
+    expect(prepared.current.time.evaluationRange).toEqual({
+      startMs: -29_900,
+      endExclusiveMs: -4_899,
+    });
+    expect(prepared.reference.time.evaluationRange).toEqual({
+      startMs: -29_600,
+      endExclusiveMs: -4_599,
+    });
+    expect(prepared.current.time).not.toHaveProperty("fullHistory");
+    expect(prepared.reference.time).not.toHaveProperty("fullHistory");
+  });
+
+  it("validates top-level Relation targets against the resolved query Scope", () => {
+    const filters = parseFilterDsl(
+      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+      analyticsFilterRegistry,
+    );
+    const prepared = prepareScopedQuery("overview", {
+      context,
+      time,
+      filters,
+      scopePreference: "visitor",
+    } as QueryInput & { time: QueryTime });
+    expect(prepared.scopePlan?.scope).toBe("visitor");
+
+    expect(() =>
+      prepareScopedQuery("overview", {
+        context,
+        time,
+        filters,
+        scopePreference: "event",
+      } as QueryInput & { time: QueryTime }),
+    ).toThrow(
+      expect.objectContaining({
+        code: "relation_requires_session_or_visitor_scope",
+      }),
+    );
   });
 
   it("does not claim an observation source for an unknown field", () => {

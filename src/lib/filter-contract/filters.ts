@@ -198,8 +198,21 @@ export type FilterTargetExpression =
 /** Legacy name retained for consumers that only accept field / payload paths. */
 export type FilterTarget = FieldFilterTarget | EventPayloadFilterTarget;
 
+/** Values which may appear at one endpoint of a computed temporal range. */
+export type FilterComparisonValue =
+  FilterValue | FilterTimeAnchorTarget | FilterDurationTarget;
+
+/**
+ * The Filter v1 language allows scalar lists, plus duration/time-anchor
+ * endpoints for `between`. Runtime normalization validates that computed
+ * endpoints are only used by `between` and that the pair has compatible types.
+ */
 export type FilterConditionValue =
-  FilterValue | readonly FilterValue[] | FilterTargetExpression;
+  | FilterValue
+  | readonly FilterValue[]
+  | readonly [FilterComparisonValue, FilterComparisonValue]
+  | FilterTimeAnchorTarget
+  | FilterDurationTarget;
 
 export interface FilterCondition {
   readonly kind: "condition";
@@ -1125,7 +1138,7 @@ function canonicalCondition(
     const canonicalDynamicValue = (
       value: unknown,
       valuePath: string,
-    ): FilterValue | FilterTargetExpression => {
+    ): FilterValue | FilterTimeAnchorTarget | FilterDurationTarget => {
       if (isRecord(value) && typeof value.kind === "string") {
         const expression = canonicalTargetExpression(
           value,
@@ -1205,37 +1218,109 @@ function canonicalCondition(
         );
       }
       const values = rawValue.map((value, index) =>
-        isRecord(value) && typeof value.kind === "string"
-          ? fail(
-              "invalid_range",
-              `${path}.value[${index}]`,
-              "Range endpoints must be scalar literals.",
-            )
-          : canonicalDynamicValue(value, `${path}.value[${index}]`),
+        canonicalDynamicValue(value, `${path}.value[${index}]`),
+      );
+      const computedKinds = values.map((value) =>
+        value && typeof value === "object" && "kind" in value
+          ? value.kind
+          : null,
       );
       if (
+        computedKinds.some((kind) => kind === "duration") &&
+        computedKinds.some((kind) => kind !== "duration")
+      ) {
+        fail(
+          "invalid_range",
+          `${path}.value`,
+          "Duration endpoints must both be elapsed durations.",
+        );
+      }
+      if (
+        values.some((value) => {
+          if (typeof value === "boolean" || value === null) return true;
+          if (value && typeof value === "object" && value.kind === "duration")
+            return value.unit === "mo" || value.unit === "y";
+          return false;
+        })
+      ) {
+        fail(
+          "invalid_range",
+          `${path}.value`,
+          "Range endpoints must be ordered temporal or numeric values.",
+        );
+      }
+      const durationMs = (value: FilterDurationTarget) => {
+        const factors: Readonly<Record<string, number>> = {
+          ms: 1,
+          s: 1_000,
+          m: 60_000,
+          h: 3_600_000,
+          d: 86_400_000,
+          w: 604_800_000,
+        };
+        return value.amount * factors[value.unit]!;
+      };
+      const staticLower = values[0];
+      const staticUpper = values[1];
+      const isDurationRange = computedKinds[0] === "duration";
+      const isAnchorRange = computedKinds.some(
+        (kind) => kind === "time-anchor",
+      );
+      if (
+        isAnchorRange &&
         values.some(
-          (value) => typeof value !== "string" && typeof value !== "number",
+          (value, index) =>
+            computedKinds[index] !== "time-anchor" &&
+            !(
+              typeof value === "string" &&
+              /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d{1,3})?)?(?:Z|[+-]\d\d:\d\d)$/u.test(
+                value,
+              ) &&
+              Number.isFinite(Date.parse(value))
+            ) &&
+            !(value && typeof value === "object" && "kind" in value),
         )
       ) {
         fail(
           "invalid_range",
           `${path}.value`,
-          "Range endpoints must be ordered scalar values.",
+          "Time-anchor ranges require datetime or computed temporal endpoints.",
         );
       }
-      if (values[0]! > values[1]!) {
+      if (
+        isDurationRange &&
+        durationMs(staticLower as FilterDurationTarget) >
+          durationMs(staticUpper as FilterDurationTarget)
+      ) {
         fail(
           "reversed_range",
           `${path}.value`,
           "Between endpoints must be ordered from lower to upper.",
         );
       }
+      const reversedNumericRange =
+        typeof staticLower === "number" &&
+        typeof staticUpper === "number" &&
+        staticLower > staticUpper;
+      const reversedStringRange =
+        typeof staticLower === "string" &&
+        typeof staticUpper === "string" &&
+        staticLower > staticUpper;
+      if (
+        !isDurationRange &&
+        !isAnchorRange &&
+        (reversedNumericRange || reversedStringRange)
+      )
+        fail(
+          "reversed_range",
+          `${path}.value`,
+          "Between endpoints must be ordered from lower to upper.",
+        );
       return {
         kind: "condition",
         target,
         operator,
-        value: values as readonly FilterValue[],
+        value: [values[0]!, values[1]!] as const,
       };
     }
     if (Array.isArray(rawValue)) {

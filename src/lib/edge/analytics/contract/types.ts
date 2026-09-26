@@ -27,6 +27,8 @@ export interface QueryTime {
   readonly range: TimeRange;
   /** Optional historical evaluation window for v1 Core and Relation nodes. */
   readonly evaluationRange?: TimeRange;
+  /** Internal planner signal to evaluate against verified site coverage. */
+  readonly fullHistory?: boolean;
   readonly reportingTimeZone: ReportingTimeZone;
   readonly capturedAtMs: EpochMs;
   /** API v1 raw-request identity used to keep preset cursors stable. */

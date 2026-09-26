@@ -128,6 +128,224 @@ describe("filter evaluator", () => {
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
 
+  it("uses contextual JSON payload narrowing and keeps JSON scalar types distinct", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [],
+      events: [
+        event("string", "api_request", 10, "s-a", "u-a", {
+          amount: "0",
+          productId: "123",
+        }),
+        event("number-1", "api_request", 20, "s-a", "u-a", {
+          amount: 150,
+          productId: 123,
+        }),
+        event("number-2", "api_request", 30, "s-a", "u-a", {
+          amount: 200,
+          productId: "123",
+        }),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const options = {
+      scope: "visitor" as const,
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    };
+    const minimum = evaluateFilterDocument(
+      parseFilterDsl(
+        'min(event.payload("/amount")) gt 100',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      options,
+    );
+    const distinct = evaluateFilterDocument(
+      parseFilterDsl(
+        'countDistinct(event.payload("/productId")) eq 2',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      options,
+    );
+    const numericArithmetic = evaluateFilterDocument(
+      parseFilterDsl(
+        'div(sub(sum(event.payload("/amount")), sum(event.payload("/refund"))), count(event)) gt 50',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      options,
+    );
+    const stringMinimum = evaluateFilterDocument(
+      parseFilterDsl(
+        'min(event.payload("/value")) gt "alpha"',
+        analyticsFilterRegistry,
+      ),
+      {
+        pages: [],
+        events: [
+          event("number-first", "api_request", 10, "s-text", "u-text", {
+            value: 500,
+          }),
+          event("text-min", "api_request", 20, "s-text", "u-text", {
+            value: "beta",
+          }),
+          event("text-max", "api_request", 30, "s-text", "u-text", {
+            value: "zeta",
+          }),
+        ],
+        coverageRange: { startMs: 0, endExclusiveMs: 100 },
+      },
+      options,
+    );
+
+    expect(minimum.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+    expect(distinct.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+    expect(numericArithmetic.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+    expect(stringMinimum.matchingScopeEntityIds).toEqual(new Set(["u-text"]));
+  });
+
+  it("evaluates duration and request-clock range endpoints as typed values", () => {
+    expect(
+      evaluate(
+        'sub(first(event { event.name eq "purchase" }).time, first(event { event.name eq "signup" }).time) eq 17ms',
+        "visitor",
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["u-a"]));
+    expect(
+      evaluate(
+        "sub(last(event).time, first(page).time) between [0d, 30d]",
+        "visitor",
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["u-a", "u-b"]));
+    expect(
+      evaluate("time between [@now-30d, @now]", "event").matchingEventIds,
+    ).toEqual(
+      new Set([
+        "a-cancel-before",
+        "a-signup",
+        "a-purchase-low",
+        "a-purchase-high",
+        "b-signup",
+        "b-purchase",
+      ]),
+    );
+  });
+
+  it("keeps legacy string operator behavior equal when Advanced forces the evaluator", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [page("page", 10, "s-a", "u-a", "/docs")],
+      events: [event("event", "purchase", 11, "s-a", "u-a")],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const options = {
+      scope: "visitor" as const,
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    };
+    const legacy = evaluateFilterDocument(
+      parseFilterDsl('page.path startsWith "/Docs"', analyticsFilterRegistry),
+      dataset,
+      options,
+    );
+    const advanced = evaluateFilterDocument(
+      parseFilterDsl(
+        'page.path startsWith "/Docs" AND count(event) gte 0',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      options,
+    );
+    expect(advanced.matchingScopeEntityIds).toEqual(
+      legacy.matchingScopeEntityIds,
+    );
+  });
+
+  it("keeps every Legacy operator stable when combined with an Advanced expression", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        page(
+          "matrix-page-a",
+          10,
+          "matrix-session",
+          "matrix-visitor",
+          "/Docs/start",
+        ),
+        page(
+          "matrix-page-b",
+          20,
+          "matrix-session",
+          "matrix-visitor",
+          "/pricing",
+        ),
+      ].map((record, index) => ({
+        ...record,
+        fields: {
+          ...record.fields,
+          "page.durationMs": 5 + index,
+          "page.title": index === 0 ? "" : "Pricing",
+        },
+      })),
+      events: [
+        event(
+          "matrix-event",
+          "purchase",
+          15,
+          "matrix-session",
+          "matrix-visitor",
+        ),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const conditions = [
+      'page.path eq "/Docs/start"',
+      'page.path neq "/elsewhere"',
+      'page.path in ["/Docs/start", "/pricing"]',
+      'page.path notIn ["/elsewhere"]',
+      'page.path contains "Docs"',
+      'page.path startsWith "/Docs"',
+      'page.path endsWith "start"',
+      "page.durationMs gt 5",
+      "page.durationMs gte 5",
+      "page.durationMs lt 7",
+      "page.durationMs lte 6",
+      "page.durationMs between [5, 6]",
+      "page.path exists",
+      "page.path notExists",
+      "page.path isNull",
+      "page.path notNull",
+      "page.title isEmpty",
+      "page.title notEmpty",
+    ];
+    const options = {
+      scope: "visitor" as const,
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    };
+
+    for (const condition of conditions) {
+      const legacy = evaluateFilterDocument(
+        parseFilterDsl(condition, analyticsFilterRegistry),
+        dataset,
+        options,
+      );
+      const advanced = evaluateFilterDocument(
+        parseFilterDsl(
+          `${condition} AND count(event) gte 0`,
+          analyticsFilterRegistry,
+        ),
+        dataset,
+        options,
+      );
+      expect(advanced.matchingScopeEntityIds, condition).toEqual(
+        legacy.matchingScopeEntityIds,
+      );
+    }
+  });
+
   it("allows a Visitor relation to cross sessions but keeps Session relations local", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [],
@@ -181,6 +399,234 @@ describe("filter evaluator", () => {
     );
     expect(sessionResult.matchingScopeEntityIds).toEqual(new Set());
     expect(nestedSessionResult.matchingScopeEntityIds).toEqual(new Set());
+  });
+
+  it("keeps the resolved relation anchor through nested Event selectors", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [],
+      events: [
+        event("signup", "signup", 10, "session-a", "visitor-a"),
+        event("purchase", "purchase", 20, "session-b", "visitor-a"),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const document = parseFilterDsl(
+      'event { event.name eq "signup" AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists } exists',
+      analyticsFilterRegistry,
+    );
+    const result = evaluateFilterDocument(document, dataset, {
+      scope: "visitor",
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    });
+
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["visitor-a"]));
+  });
+
+  it("rejects root Relations when evaluated in Event Scope", () => {
+    const document = parseFilterDsl(
+      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+      analyticsFilterRegistry,
+    );
+
+    expect(() =>
+      evaluateFilterDocument(document, fixture, {
+        scope: "event",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: "relation_requires_session_or_visitor_scope",
+      }),
+    );
+  });
+
+  it("evaluates the complete visitor Core and Relation DSL sample", () => {
+    const day = 86_400_000;
+    const visitorId = "visitor-sample";
+    const pageRows = [
+      page("first-page", 0, "session-1", visitorId, "/first"),
+      ...Array.from({ length: 20 }, (_, index) =>
+        page(
+          `bucket-page-${index}`,
+          (60 + index) * day,
+          `session-${(index % 4) + 1}`,
+          visitorId,
+          `/bucket-${index}`,
+        ),
+      ),
+      page("last-page", 90 * day, "session-4", visitorId, "/last"),
+    ].map((record) => ({
+      ...record,
+      fields: {
+        ...record.fields,
+        "referrer.domain": "google.com",
+        "geo.country": "US",
+        "client.deviceType": "desktop",
+      },
+    }));
+    const purchases = [
+      ["purchase-1", 33, "session-1", 600, "product-a"],
+      ["purchase-2", 40, "session-2", 600, "product-b"],
+      ["purchase-3", 45, "session-3", 500, "product-c"],
+      ["purchase-4", 50, "session-1", 100, "product-d"],
+      ["purchase-5", 55, "session-2", 100, "product-e"],
+    ] as const;
+    const eventRows: FilterEvaluationEntity[] = [
+      event("signup", "signup", 30 * day, "session-1", visitorId),
+      event(
+        "project-created",
+        "project_created",
+        31 * day,
+        "session-1",
+        visitorId,
+      ),
+      event(
+        "first-team-event",
+        "first_team_event",
+        32 * day,
+        "session-1",
+        visitorId,
+      ),
+      event("invite-sent", "invite_sent", 32 * day, "session-1", visitorId),
+      ...purchases.map(([id, atDay, sessionId, amount, productId]) =>
+        event(id, "purchase", atDay * day, sessionId, visitorId, {
+          currency: "USD",
+          amount,
+          productId,
+        }),
+      ),
+      ...[35, 36, 37].map((atDay, index) =>
+        event(
+          `insight-saved-${index + 1}`,
+          "insight_saved",
+          atDay * day,
+          "session-2",
+          visitorId,
+        ),
+      ),
+      ...[20, 21, 22, 27, 28, 29, 34, 35, 36].map((atDay, index) =>
+        event(
+          `shared-insight-${index + 1}`,
+          "shared_insight",
+          atDay * day,
+          `session-${(index % 3) + 1}`,
+          visitorId,
+        ),
+      ),
+      event("refund", "refund", 56 * day, "session-3", visitorId, {
+        amount: 100,
+      }),
+      event("api-request", "api_request", 77 * day, "session-3", visitorId, {
+        latency: 300,
+      }),
+      event(
+        "old-cancellation",
+        "cancellation",
+        29 * day,
+        "session-1",
+        visitorId,
+      ),
+      event("failed-1", "payment_failed", 70 * day, "session-4", visitorId),
+      event("failed-2", "payment_failed", 71 * day, "session-4", visitorId),
+    ].map((record) => ({
+      ...record,
+      fields: {
+        ...record.fields,
+        "geo.country": "US",
+        "client.deviceType": "desktop",
+      },
+    }));
+    const dataset: FilterEvaluationDataset = {
+      pages: pageRows,
+      events: eventRows,
+      coverageRange: { startMs: 0, endExclusiveMs: 101 * day },
+    };
+    const dsl = `
+      geo.country in ["US", "GB", "CA"]
+      AND client.deviceType neq "bot"
+      AND event {
+        event.name eq "purchase"
+        AND event.payload("/currency") eq "USD"
+        AND event.payload("/amount") gt 0
+      } exists
+      AND event { event.name eq "fraud_flag" } notExists
+      AND count(event {
+        event.name eq "purchase"
+        AND event.payload("/currency") eq "USD"
+        AND event.payload("/amount") gt 0
+        AND time gte @now-90d
+      }) gte 5
+      AND countDistinct(event {
+        event.name eq "purchase"
+        AND time gte @now-90d
+      }.payload("/productId")) gte 3
+      AND countDistinct(bucket(page { time gte @now-90d }.time, 1d)) gte 20
+      AND sub(
+        sum(event { event.name eq "purchase" AND time gte @now-90d }.payload("/amount")),
+        sum(event { event.name eq "refund" AND time gte @now-90d }.payload("/amount"))
+      ) gt 1000
+      AND div(
+        sum(event { event.name eq "refund" AND time gte @now-90d }.payload("/amount")),
+        sum(event { event.name eq "purchase" AND time gte @now-90d }.payload("/amount"))
+      ) lt 0.3
+      AND avg(event {
+        event.name eq "api_request"
+        AND event.payload("/latency") exists
+        AND time gte @now-30d
+      }.payload("/latency")) lt 500
+      AND first(page).referrer.domain eq "google.com"
+      AND last(page).time gte @now-14d
+      AND sub(
+        first(event { event.name eq "first_team_event" }).time,
+        first(event { event.name eq "signup" }).time
+      ) between [0d, 30d]
+      AND sub(
+        nth(event { event.name eq "insight_saved" }, 3).time,
+        first(event { event.name eq "signup" }).time
+      ) between [0d, 30d]
+      AND count(session) gte 4
+      AND div(
+        count(session { event { event.name eq "purchase" } exists }),
+        count(session)
+      ) gt 0.5
+      AND count(periods(
+        event { event.name eq "shared_insight" AND time gte @now-12w },
+        1w
+      ) { count(period.items) gte 3 }) gte 3
+      AND sequence([
+        event { event.name eq "signup" },
+        event { event.name eq "project_created" },
+        event { event.name eq "invite_sent" },
+        event { event.name eq "purchase" }
+      ]) { sequence.span lte 14d } exists
+      AND without(
+        sequence([
+          event { event.name eq "signup" },
+          event { event.name eq "purchase" }
+        ]),
+        event { event.name eq "cancellation" }
+      ) { sequence.span lte 7d } exists
+      AND count(session {
+        count(event { event.name eq "payment_failed" }) gte 2
+        AND event { event.name eq "purchase" } notExists
+      }) lte 1
+    `;
+    const result = evaluateFilterDocument(
+      parseFilterDsl(dsl, analyticsFilterRegistry),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 101 * day },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 100 * day,
+      },
+    );
+
+    expect([...result.matchingScopeEntityIds]).toEqual([visitorId]);
   });
 
   it("distinguishes explicit JSON null from a missing payload path", () => {
@@ -295,6 +741,12 @@ describe("filter evaluator", () => {
     expect(evaluatePayload('event.payload("/empty") notEmpty')).toEqual(
       new Set(["two"]),
     );
+    expect(evaluatePayload('event.payload("/explicitNull") exists')).toEqual(
+      new Set(["one"]),
+    );
+    expect(evaluatePayload('event.payload("/explicitNull") notExists')).toEqual(
+      new Set(["two", "missing"]),
+    );
     expect(evaluatePayload('event.payload("/score") notNull')).toEqual(
       new Set(["one", "two"]),
     );
@@ -303,8 +755,14 @@ describe("filter evaluator", () => {
   it("derives session and visitor facts from mixed page and event activity", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [
-        page("entry", 100, "s-a", "u-a", "/entry"),
-        page("exit", 200, "s-a", "u-a", "/exit"),
+        {
+          ...page("entry", 100, "s-a", "u-a", "/entry"),
+          fields: { "page.path": "/entry", "page.durationMs": 40 },
+        },
+        {
+          ...page("exit", 200, "s-a", "u-a", "/exit"),
+          fields: { "page.path": "/exit", "page.durationMs": 60 },
+        },
         page("bounce", 300, "s-b", "u-a", "/bounce"),
         page("orphan", 350, "", "", "/orphan"),
       ],
@@ -353,7 +811,7 @@ describe("filter evaluator", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [],
       events: [
-        event("matrix", "Purchase", 10, "session-a", "visitor-a", {
+        event("matrix", "purchase", 10, "session-a", "visitor-a", {
           number: 5,
           text: "Alpha Beta",
           nullish: null,
@@ -442,7 +900,7 @@ describe("filter evaluator", () => {
       ['event.payload("/value") in [1, 2]', ["number"]],
       ['event.payload("/value") notIn [1]', ["number", "string"]],
       ['event.payload("/value") contains "2"', ["string"]],
-      ['event.payload("/text") startsWith "al"', ["number"]],
+      ['event.payload("/text") startsWith "Al"', ["number"]],
       ['event.payload("/text") endsWith "ta"', ["string"]],
       ['event.payload("/value") gt 3', []],
       ['event.name eq "purchase"', ["number", "string"]],
@@ -513,7 +971,7 @@ describe("filter evaluator", () => {
     } as const;
     const sequence = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.start gte 10 AND sequence.end lte 40 AND sequence.span gte 20ms } exists } exists',
+        'visitor { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.start gte "1970-01-01T00:00:00.010Z" AND sequence.end lte "1970-01-01T00:00:00.040Z" AND sequence.span gte 20ms } exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -605,6 +1063,38 @@ describe("filter evaluator", () => {
     );
 
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a", "u-b"]));
+  });
+
+  it("orders activity collections chronologically before positional reducers", () => {
+    const dataset: FilterEvaluationDataset = {
+      // Deliberately use generator order rather than event time order.
+      pages: [
+        page("late-page", 30, "session-a", "visitor-a", "/late"),
+        page("early-page", 10, "session-a", "visitor-a", "/early"),
+        page("middle-page", 20, "session-a", "visitor-a", "/middle"),
+      ],
+      events: [
+        event("late-event", "third", 30, "session-a", "visitor-a"),
+        event("early-event", "first", 10, "session-a", "visitor-a"),
+        event("middle-event", "second", 20, "session-a", "visitor-a"),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        'first(page).path eq "/early" AND last(page).path eq "/late" AND nth(event, 3).name eq "third"',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["visitor-a"]));
   });
 
   it("orders page and event activity together for adjacent sequences", () => {

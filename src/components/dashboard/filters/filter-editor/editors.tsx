@@ -29,9 +29,10 @@ import {
   analyticsFilterRegistry,
   type FilterCondition,
   type FilterDocument,
+  type FilterDurationTarget,
   type FilterOperator,
   type FilterScope,
-  type FilterTargetExpression,
+  type FilterTimeAnchorTarget,
   type FilterValue,
   type FilterValueKind,
 } from "@/lib/filter-contract/index";
@@ -93,7 +94,7 @@ function advancedConditionForEditor(
 
 function isFilterTargetExpression(
   value: FilterCondition["value"],
-): value is FilterTargetExpression {
+): value is FilterDurationTarget | FilterTimeAnchorTarget {
   return Boolean(
     value &&
     typeof value === "object" &&

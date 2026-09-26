@@ -50,7 +50,7 @@ describe("filter DSL editor integration", () => {
     const document = parseFilterDsl(source, analyticsFilterRegistry);
 
     expect(formatFilterDsl(document)).toBe(
-      'page.path eq "/pricing" AND (referrer.domain in ["news,example.com",""] AND geo.region notNull)',
+      'page.path eq "/pricing" AND (referrer.domain in ["news,example.com", ""] AND geo.region notNull)',
     );
     expect(document.root).toMatchObject({
       kind: "and",

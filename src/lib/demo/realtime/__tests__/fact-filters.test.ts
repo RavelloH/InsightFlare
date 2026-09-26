@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { emptyDemoFactDataset } from "@/lib/demo/realtime/fact-dataset";
+import {
+  buildDemoFactDataset,
+  emptyDemoFactDataset,
+} from "@/lib/demo/realtime/fact-dataset";
 import {
   applyDemoFilters,
   buildCanonicalDemoFacts,
@@ -25,6 +28,71 @@ import {
   parseFilterDsl,
 } from "@/lib/filter-contract";
 describe("mock/fact-filters", () => {
+  it("evaluates full-history predicates on expanded data and returns candidate visits", () => {
+    const candidate = makeDataset([
+      makeVisit({
+        visitId: "candidate-page",
+        sessionId: "history-session",
+        visitorId: "history-visitor",
+        startedAt: 85,
+        pathname: "/candidate",
+      }),
+    ]);
+    candidate.from = 80;
+    candidate.to = 90;
+    const historyDataset = makeDataset([
+      makeVisit({
+        visitId: "history-page",
+        sessionId: "history-session",
+        visitorId: "history-visitor",
+        startedAt: 10,
+        pathname: "/history",
+      }),
+    ]);
+    historyDataset.from = 0;
+    historyDataset.to = 100;
+    const filterDocument = parseFilterDsl(
+      'first(page).path eq "/history"',
+      analyticsFilterRegistry,
+    );
+
+    expect(
+      applyDemoFilters(candidate, {
+        filterDocument,
+        scope: "visitor",
+        candidateRange: { startMs: 80, endExclusiveMs: 90 },
+        fullHistory: true,
+        historyDataset,
+      }).visits.map((visit) => visit.visitId),
+    ).toEqual(["candidate-page"]);
+  });
+
+  it("builds a full-history Mock source when the query requires it", () => {
+    const to = Date.now();
+    const from = to - 86_400_000;
+    const siteId = "demo-site-001";
+    const candidate = buildDemoFactDataset(siteId, from, to);
+    const filterDocument = parseFilterDsl(
+      "first(page).path exists",
+      analyticsFilterRegistry,
+    );
+
+    const filtered = applyDemoFilters(candidate, {
+      filterDocument,
+      scope: "event",
+      siteId,
+      candidateRange: { startMs: from, endExclusiveMs: to },
+      fullHistory: true,
+      capturedAtMs: to,
+    });
+
+    expect(filtered.visits.length).toBeGreaterThan(0);
+    expect(filtered.visits.every((visit) => visit.startedAt >= from)).toBe(
+      true,
+    );
+    expect(filtered.visits.every((visit) => visit.startedAt < to)).toBe(true);
+  });
+
   it("executes Core expressions over the demo fact dataset", () => {
     const result = applyDemoFilters(emptyDemoFactDataset(0, 1), {
       filterDocument: parseFilterDsl(
@@ -67,8 +135,8 @@ describe("mock/fact-filters", () => {
     expect(facts.sessions.get("s1")).toEqual({
       sessionId: "s1",
       visitorId: "u1",
-      entryPath: "/start",
-      exitPath: "/finish",
+      entryPath: "/finish",
+      exitPath: "/start",
       durationMs: 30,
       views: 2,
       events: 1,
@@ -211,7 +279,8 @@ describe("mock/fact-filters", () => {
       ['page.path neq "/other"', true],
       ['page.path in ["/other", " /Docs/Guide "]', true],
       ['page.path notIn ["/other"]', true],
-      ['page.path contains "guide"', true],
+      ['page.path contains "Guide"', true],
+      ['page.path contains "guide"', false],
       ['page.path startsWith " /Docs"', true],
       ['page.path endsWith "Guide "', true],
       ["page.durationMs gt 10", true],

@@ -5,6 +5,10 @@ import {
 import { createDemoCustomEventFacts } from "@/lib/demo/realtime/events-facts";
 import { demoEventRecordPayload } from "@/lib/demo/realtime/events-payload";
 import {
+  buildDemoFactDataset,
+  DEMO_FILTER_HISTORY_START_MS,
+} from "@/lib/demo/realtime/fact-dataset";
+import {
   DEMO_DIRECT_REFERRER_FILTER_VALUE,
   parseDemoGeoFilterValue,
 } from "@/lib/demo/realtime/filters";
@@ -15,17 +19,22 @@ import type {
 } from "@/lib/demo/realtime/types";
 import { demoQueryStringForVisit } from "@/lib/demo/realtime/visit-helpers";
 import {
-  analyticsFilterDefinition,
   analyticsFilterRegistry,
+  compareFilterValues,
   type FilterCondition,
   type FilterDocument,
   filterDocumentUsesAdvancedExpressions,
   type FilterExpression,
+  filterPresenceMatches,
   type FilterValue,
+  filterValueInSet,
+  filterValuesEqual,
   isLegacyFilterTarget,
+  matchFilterString,
   normalizeFilterDocument,
 } from "@/lib/filter-contract";
 import { evaluateFilterDocument } from "@/lib/filter-contract/filter-evaluator";
+import { buildCanonicalFilterScopeFacts } from "@/lib/filter-contract/filter-facts";
 interface DemoSessionFacts {
   readonly sessionId: string;
   readonly visitorId: string;
@@ -49,58 +58,52 @@ export interface CanonicalDemoFacts {
 export function buildCanonicalDemoFacts(
   dataset: DemoFactDataset,
 ): CanonicalDemoFacts {
+  const pages = dataset.visits.map((visit) => ({
+    kind: "page" as const,
+    id: visit.visitId,
+    time: visit.startedAt,
+    sessionId: visit.sessionId,
+    visitorId: visit.visitorId,
+    fields: {
+      "page.path": visit.pathname,
+      "page.durationMs": visit.durationMs,
+    },
+  }));
+  const events = createDemoCustomEventFacts(dataset.visits).map((event) => ({
+    kind: "event" as const,
+    id: event.eventId,
+    time: event.occurredAt,
+    sessionId: event.visit.sessionId,
+    visitorId: event.visit.visitorId,
+    fields: {},
+  }));
+  const canonical = buildCanonicalFilterScopeFacts([...pages, ...events]);
+  const visitorBySession = new Map(
+    dataset.visits.map((visit) => [visit.sessionId, visit.visitorId]),
+  );
   const sessions = new Map<string, DemoSessionFacts>();
-  const visitorIds = new Set<string>();
-  for (const visit of dataset.visits) {
-    visitorIds.add(visit.visitorId);
-    const current = sessions.get(visit.sessionId);
-    const isEvent = visit.eventType.trim().toLowerCase() !== "pageview";
-    if (!current) {
-      sessions.set(visit.sessionId, {
-        sessionId: visit.sessionId,
-        visitorId: visit.visitorId,
-        entryPath: visit.pathname,
-        exitPath: visit.pathname,
-        durationMs: visit.durationMs,
-        views: 1,
-        events: isEvent ? 1 : 0,
-        bounce: true,
-      });
-      continue;
-    }
-    sessions.set(visit.sessionId, {
-      ...current,
-      exitPath: visit.pathname,
-      durationMs: current.durationMs + visit.durationMs,
-      views: current.views + 1,
-      events: current.events + (isEvent ? 1 : 0),
-      bounce: false,
+  for (const [sessionId, facts] of canonical.sessions) {
+    sessions.set(sessionId, {
+      sessionId,
+      visitorId:
+        dataset.sessions.get(sessionId)?.visitorId ??
+        visitorBySession.get(sessionId) ??
+        "",
+      entryPath: String(facts?.["session.entryPath"] ?? ""),
+      exitPath: String(facts?.["session.exitPath"] ?? ""),
+      durationMs: Number(facts?.["session.durationMs"] ?? 0),
+      views: Number(facts?.["session.views"] ?? 0),
+      events: Number(facts?.["session.events"] ?? 0),
+      bounce: facts?.["session.bounce"] === true,
     });
   }
-
-  const visitorStats = new Map<
-    string,
-    { sessions: Set<string>; views: number; events: number }
-  >();
-  for (const [sessionId, session] of sessions) {
-    const current = visitorStats.get(session.visitorId) ?? {
-      sessions: new Set<string>(),
-      views: 0,
-      events: 0,
-    };
-    current.sessions.add(sessionId);
-    current.views += session.views;
-    current.events += session.events;
-    visitorStats.set(session.visitorId, current);
-  }
   const visitors = new Map<string, DemoVisitorFacts>();
-  for (const visitorId of visitorIds) {
-    const stats = visitorStats.get(visitorId);
+  for (const [visitorId, facts] of canonical.visitors) {
     visitors.set(visitorId, {
       visitorId,
-      sessions: stats?.sessions.size ?? 0,
-      views: stats?.views ?? 0,
-      events: stats?.events ?? 0,
+      sessions: Number(facts?.["visitor.sessions"] ?? 0),
+      views: Number(facts?.["visitor.views"] ?? 0),
+      events: Number(facts?.["visitor.events"] ?? 0),
     });
   }
   return { sessions, visitors };
@@ -218,29 +221,12 @@ export function canonicalFieldValue(
       return undefined;
   }
 }
-function demoComparisonValue(fieldId: string, value: FilterValue): FilterValue {
-  if (
-    (fieldId === "referrer.domain" || fieldId === "referrer.url") &&
-    value === DEMO_DIRECT_REFERRER_FILTER_VALUE
-  ) {
-    return "";
-  }
-  return value;
-}
 export function demoScalarEqual(
   fieldId: string,
   actual: FilterValue | undefined,
   expected: FilterValue,
 ): boolean {
-  if (actual === undefined || actual === null) return false;
-  const definition = analyticsFilterDefinition(fieldId);
-  const right = demoComparisonValue(fieldId, expected);
-  if (typeof actual === "string" && typeof right === "string") {
-    return definition?.comparison === "case-insensitive"
-      ? actual.trim().toLowerCase() === right.trim().toLowerCase()
-      : actual.trim() === right.trim();
-  }
-  return actual === right;
+  return filterValuesEqual(actual, expected, fieldId, "eq");
 }
 export function demoConditionMatches(
   visit: DemoFactDataset["visits"][number],
@@ -254,13 +240,17 @@ export function demoConditionMatches(
   const fieldId = condition.target.field;
   const actual = canonicalFieldValue(visit, fieldId, facts);
   const operator = condition.operator;
-  if (operator === "exists" || operator === "notNull")
-    return actual !== undefined && actual !== null;
-  if (operator === "notExists" || operator === "isNull")
-    return actual === undefined || actual === null;
-  if (operator === "isEmpty") return actual !== null && actual === "";
-  if (operator === "notEmpty")
-    return actual !== null && actual !== undefined && actual !== "";
+  const presence = filterPresenceMatches(
+    operator,
+    {
+      missing: actual === undefined,
+      value: actual,
+      emptyCollection: false,
+      legacyField: condition.target.kind === "field",
+    },
+    fieldId,
+  );
+  if (presence !== undefined) return presence;
 
   const rawValues = Array.isArray(condition.value)
     ? condition.value
@@ -269,9 +259,7 @@ export function demoConditionMatches(
   // evaluator aligned with D1 when the visit fact is missing.
   if (actual === undefined || actual === null) return false;
   if (operator === "in" || operator === "notIn") {
-    const found = rawValues.some((value) =>
-      demoScalarEqual(fieldId, actual, value),
-    );
+    const found = filterValueInSet(actual, rawValues, fieldId, operator);
     return operator === "in" ? found : !found;
   }
   if (operator === "between") {
@@ -291,29 +279,33 @@ export function demoConditionMatches(
   ) {
     if (typeof actual !== "string" || typeof rawValues[0] !== "string")
       return false;
-    const left = actual.trim().toLowerCase();
-    const right = rawValues[0].trim().toLowerCase();
-    return operator === "contains"
-      ? left.includes(right)
-      : operator === "startsWith"
-        ? left.startsWith(right)
-        : left.endsWith(right);
+    return matchFilterString(actual, rawValues[0], operator, fieldId);
   }
   if (operator === "eq" || operator === "neq") {
-    const equal = demoScalarEqual(fieldId, actual, rawValues[0]!);
+    const equal = filterValuesEqual(actual, rawValues[0], fieldId, operator);
     return operator === "eq" ? equal : !equal;
   }
-  if (typeof actual !== "number" || typeof rawValues[0] !== "number")
+  if (
+    !["gt", "gte", "lt", "lte"].includes(operator) ||
+    !["string", "number", "boolean"].includes(typeof actual) ||
+    !["string", "number", "boolean"].includes(typeof rawValues[0]) ||
+    typeof actual !== typeof rawValues[0]
+  )
     return false;
+  const order = compareFilterValues(
+    actual as string | number | boolean,
+    rawValues[0] as string | number | boolean,
+    fieldId,
+  );
   switch (operator) {
     case "gt":
-      return actual > rawValues[0];
+      return order > 0;
     case "gte":
-      return actual >= rawValues[0];
+      return order >= 0;
     case "lt":
-      return actual < rawValues[0];
+      return order < 0;
     case "lte":
-      return actual <= rawValues[0];
+      return order <= 0;
     default:
       return false;
   }
@@ -453,42 +445,83 @@ function applyCanonicalDemoFilters(
     : document;
   if (filterDocumentUsesAdvancedExpressions(normalized)) {
     if (dataset.to <= dataset.from) return finalizeDemoFilteredFacts([]);
-    const facts = buildCanonicalDemoFacts(dataset);
-    const fieldsFor = (visit: DemoFactDataset["visits"][number]) =>
+    const requestedHistoryStart = filters.evaluationRange?.startMs;
+    const requestedHistoryEnd = filters.evaluationRange?.endExclusiveMs;
+    const needsExpandedSource =
+      filters.fullHistory === true ||
+      (requestedHistoryStart !== undefined &&
+        requestedHistoryStart < dataset.from) ||
+      (requestedHistoryEnd !== undefined && requestedHistoryEnd > dataset.to);
+    const historyDataset =
+      filters.historyDataset ??
+      (needsExpandedSource && filters.siteId
+        ? buildDemoFactDataset(
+            filters.siteId,
+            filters.fullHistory
+              ? Math.min(dataset.from, DEMO_FILTER_HISTORY_START_MS)
+              : Math.min(dataset.from, requestedHistoryStart ?? dataset.from),
+            filters.fullHistory
+              ? Math.max(
+                  dataset.to,
+                  requestedHistoryEnd ?? dataset.to,
+                  (filters.capturedAtMs ?? dataset.to - 1) + 1,
+                )
+              : Math.max(dataset.to, requestedHistoryEnd ?? dataset.to),
+          )
+        : undefined);
+    const evaluationDataset = historyDataset
+      ? mergeFilterHistoryDataset(dataset, historyDataset)
+      : dataset;
+    const evaluationFacts = buildCanonicalDemoFacts(evaluationDataset);
+    const candidateFacts = buildCanonicalDemoFacts(dataset);
+    const fieldsFor = (
+      visit: DemoFactDataset["visits"][number],
+      facts: CanonicalDemoFacts,
+    ) =>
       Object.fromEntries(
         [...analyticsFilterRegistry.keys()].flatMap((fieldId) => {
           const value = canonicalFieldValue(visit, fieldId, facts);
           return value === undefined ? [] : [[fieldId, value]];
         }),
       );
-    const pages = dataset.visits.map((visit) => ({
+    const pages = evaluationDataset.visits.map((visit) => ({
       kind: "page" as const,
       id: visit.visitId,
       visitId: visit.visitId,
       sessionId: visit.sessionId,
       visitorId: visit.visitorId,
       time: visit.startedAt,
-      fields: fieldsFor(visit),
+      fields: fieldsFor(visit, evaluationFacts),
+      candidateFields: fieldsFor(visit, candidateFacts),
     }));
-    const events = createDemoCustomEventFacts(dataset.visits).map((event) => ({
-      kind: "event" as const,
-      id: event.eventId,
-      visitId: event.visit.visitId,
-      sessionId: event.visit.sessionId,
-      visitorId: event.visit.visitorId,
-      time: event.occurredAt,
-      fields: {
-        ...fieldsFor(event.visit),
-        "event.name": event.eventName,
-      },
-      payload: demoEventRecordPayload(event),
-    }));
+    const events = createDemoCustomEventFacts(evaluationDataset.visits).map(
+      (event) => ({
+        kind: "event" as const,
+        id: event.eventId,
+        visitId: event.visit.visitId,
+        sessionId: event.visit.sessionId,
+        visitorId: event.visit.visitorId,
+        time: event.occurredAt,
+        fields: {
+          ...fieldsFor(event.visit, evaluationFacts),
+          "event.name": event.eventName,
+        },
+        candidateFields: {
+          ...fieldsFor(event.visit, candidateFacts),
+          "event.name": event.eventName,
+        },
+        payload: demoEventRecordPayload(event),
+      }),
+    );
     const evaluation = evaluateFilterDocument(
       normalized,
       {
         pages,
         events,
-        coverageRange: { startMs: dataset.from, endExclusiveMs: dataset.to },
+        coverageRange: {
+          startMs: evaluationDataset.from,
+          endExclusiveMs: evaluationDataset.to,
+        },
       },
       {
         scope: scope ?? "event",
@@ -499,6 +532,7 @@ function applyCanonicalDemoFilters(
         ...(filters.evaluationRange
           ? { evaluationRange: filters.evaluationRange }
           : {}),
+        ...(filters.fullHistory ? { fullHistory: true } : {}),
         reportingTimeZone: filters.reportingTimeZone ?? "UTC",
         capturedAtMs: filters.capturedAtMs ?? dataset.to - 1,
       },
@@ -536,6 +570,38 @@ function applyCanonicalDemoFilters(
       entityIds.has(scope === "session" ? visit.sessionId : visit.visitorId),
     ),
   );
+}
+
+/**
+ * Keep query-result facts on the candidate dataset while giving Core/Relation
+ * evaluation the additional source rows it needs. The mock generator uses
+ * stable session and visit IDs across windows, so candidate facts can replace
+ * duplicate history rows without changing result identity.
+ */
+function mergeFilterHistoryDataset(
+  candidate: DemoFactDataset,
+  history: DemoFactDataset,
+): DemoFactDataset {
+  const visitorBySession = new Map<string, string>();
+  for (const visit of candidate.visits) {
+    if (!visitorBySession.has(visit.sessionId))
+      visitorBySession.set(visit.sessionId, visit.visitorId);
+  }
+  const visits = new Map<string, DemoFactDataset["visits"][number]>();
+  for (const visit of history.visits) {
+    const visitorId = visitorBySession.get(visit.sessionId) ?? visit.visitorId;
+    visits.set(
+      visit.visitId,
+      visitorId === visit.visitorId ? visit : { ...visit, visitorId },
+    );
+  }
+  for (const visit of candidate.visits) visits.set(visit.visitId, visit);
+  return {
+    ...history,
+    from: Math.min(candidate.from, history.from),
+    to: Math.max(candidate.to, history.to),
+    visits: [...visits.values()],
+  };
 }
 export function applyDemoFilters(
   dataset: DemoFactDataset,

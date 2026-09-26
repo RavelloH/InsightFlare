@@ -286,7 +286,7 @@ export function createAdvancedFilterCondition(
       kind: "condition",
       target,
       operator: "gte",
-      value: createDefaultFilterTarget("duration", audience),
+      value: { kind: "duration", amount: 1, unit: "d" },
     };
   if (kind === "reducer" || kind === "arithmetic")
     return { kind: "condition", target, operator: "gte", value: 1 };

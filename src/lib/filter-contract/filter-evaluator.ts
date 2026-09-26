@@ -4,12 +4,30 @@ import {
   zonedTimeToUtcMs,
 } from "@/lib/analytics/time-zone";
 
+import { buildCanonicalFilterScopeFacts } from "./filter-facts";
 import { analyticsFilterRegistry } from "./filter-registry";
+import {
+  type AnalyzedFilterDocument,
+  analyzeFilterDocument,
+} from "./filter-semantics";
+import {
+  type FilterScalarType,
+  validateFilterRelationDomains,
+} from "./filter-types";
+import {
+  compareFilterValues,
+  filterPresenceMatches,
+  filterValueInSet,
+  filterValuesEqual,
+  matchFilterString,
+} from "./filter-value-semantics";
 import {
   type FilterCondition,
   type FilterDocument,
+  type FilterDurationTarget,
   type FilterExpression,
   type FilterTargetExpression,
+  type FilterTimeAnchorTarget,
   isLegacyFilterTarget,
   normalizeFilterDocument,
 } from "./filters";
@@ -52,6 +70,7 @@ export interface FilterEvaluationOptions {
   readonly scope: FilterScope;
   readonly candidateRange: FilterEvaluationRange;
   readonly evaluationRange?: FilterEvaluationRange;
+  readonly fullHistory?: boolean;
   readonly reportingTimeZone: string;
   readonly capturedAtMs: number;
   readonly maxActivities?: number;
@@ -119,6 +138,7 @@ interface RuntimeFrame {
 
 interface RuntimeContext {
   readonly dataset: FilterEvaluationDataset;
+  readonly analysis: AnalyzedFilterDocument;
   readonly options: Required<FilterEvaluationOptions>;
   readonly pages: readonly FilterEvaluationEntity[];
   readonly events: readonly FilterEvaluationEntity[];
@@ -171,6 +191,13 @@ function buildAggregateEntities(
   records: readonly FilterEvaluationEntity[],
   entity: "session" | "visitor",
 ): FilterEvaluationEntity[] {
+  const activities = records.filter(
+    (item): item is FilterEvaluationEntity & { kind: "page" | "event" } =>
+      item.kind === "page" || item.kind === "event",
+  );
+  const canonicalFacts = buildCanonicalFilterScopeFacts(activities);
+  const factsById =
+    entity === "session" ? canonicalFacts.sessions : canonicalFacts.visitors;
   const idKey = entity === "session" ? "sessionId" : "visitorId";
   const groups = new Map<string, FilterEvaluationEntity[]>();
   for (const record of records) {
@@ -183,30 +210,9 @@ function buildAggregateEntities(
   return [...groups]
     .map(([id, items]) => {
       const ordered = [...items].sort(compareActivity);
-      const pageItems = ordered.filter((item) => item.kind === "page");
-      const eventItems = ordered.filter((item) => item.kind === "event");
       const first = ordered[0];
-      const last = ordered.at(-1);
-      const firstPage = pageItems[0];
-      const lastPage = pageItems.at(-1);
-      const sessionIds = new Set(
-        ordered
-          .map((item) => item.sessionId)
-          .filter((value): value is string => Boolean(value)),
-      );
       const fields: Record<string, unknown> = {
-        [`${entity}.views`]: pageItems.length,
-        [`${entity}.events`]: eventItems.length,
-        [`${entity}.sessions`]:
-          entity === "visitor" ? sessionIds.size : undefined,
-        [`${entity}.durationMs`]:
-          entity === "session" && first && last
-            ? Math.max(0, (last.time ?? 0) - (first.time ?? 0))
-            : undefined,
-        [`${entity}.entryPath`]: firstPage?.fields["page.path"],
-        [`${entity}.exitPath`]: lastPage?.fields["page.path"],
-        [`${entity}.bounce`]:
-          entity === "session" ? pageItems.length <= 1 : undefined,
+        ...(factsById.get(id) ?? {}),
       };
       // Entity facts inherit stable context from the first activity in the range.
       for (const [key, value] of Object.entries(first?.fields ?? {})) {
@@ -227,8 +233,17 @@ function buildAggregateEntities(
 function createRuntimeContext(
   dataset: FilterEvaluationDataset,
   options: FilterEvaluationOptions,
+  analysis: AnalyzedFilterDocument,
 ): RuntimeContext {
-  const evaluationRange = options.evaluationRange ?? options.candidateRange;
+  const evaluationRange = options.fullHistory
+    ? {
+        startMs: dataset.coverageRange.startMs,
+        endExclusiveMs: Math.min(
+          dataset.coverageRange.endExclusiveMs,
+          options.capturedAtMs + 1,
+        ),
+      }
+    : (options.evaluationRange ?? options.candidateRange);
   if (
     !Number.isSafeInteger(evaluationRange.startMs) ||
     !Number.isSafeInteger(evaluationRange.endExclusiveMs) ||
@@ -243,17 +258,18 @@ function createRuntimeContext(
   const normalizedOptions: Required<FilterEvaluationOptions> = {
     ...options,
     evaluationRange,
+    fullHistory: options.fullHistory ?? false,
     maxActivities: options.maxActivities ?? DEFAULT_MAX_ACTIVITIES,
     maxSequenceMatches:
       options.maxSequenceMatches ?? DEFAULT_MAX_SEQUENCE_MATCHES,
     maxSequenceWork: options.maxSequenceWork ?? DEFAULT_MAX_SEQUENCE_WORK,
   };
-  const pages = [...dataset.pages].filter((record) =>
-    inRange(record.time, evaluationRange),
-  );
-  const events = [...dataset.events].filter((record) =>
-    inRange(record.time, evaluationRange),
-  );
+  const pages = [...dataset.pages]
+    .filter((record) => inRange(record.time, evaluationRange))
+    .sort(compareActivity);
+  const events = [...dataset.events]
+    .filter((record) => inRange(record.time, evaluationRange))
+    .sort(compareActivity);
   if (pages.length + events.length > normalizedOptions.maxActivities)
     throw new TypeError("filter_activity_limit_exceeded");
   const candidatePages = dataset.pages.filter((record) =>
@@ -265,18 +281,19 @@ function createRuntimeContext(
   const evaluationRecords = [...pages, ...events].sort(compareActivity);
   return {
     dataset,
+    analysis,
     options: normalizedOptions,
     pages,
     events,
     sessions: dataset.sessions
-      ? dataset.sessions.filter((record) =>
-          inRange(record.time, evaluationRange),
-        )
+      ? dataset.sessions
+          .filter((record) => inRange(record.time, evaluationRange))
+          .sort(compareEntity)
       : buildAggregateEntities(evaluationRecords, "session"),
     visitors: dataset.visitors
-      ? dataset.visitors.filter((record) =>
-          inRange(record.time, evaluationRange),
-        )
+      ? dataset.visitors
+          .filter((record) => inRange(record.time, evaluationRange))
+          .sort(compareEntity)
       : buildAggregateEntities(evaluationRecords, "visitor"),
     candidatePages,
     candidateEvents,
@@ -425,7 +442,7 @@ function rootCollection(
   frame: RuntimeFrame,
   context: RuntimeContext,
 ): readonly FilterEvaluationEntity[] {
-  const anchor = currentEntity(frame);
+  const anchor = frame.anchor ?? currentEntity(frame);
   const source =
     entity === "page"
       ? context.pages
@@ -564,9 +581,14 @@ function targetValue(
       );
     case "event-payload": {
       const entity = currentEntity(frame);
-      return entity?.kind === "event"
-        ? payloadPath(entity.payload, target.path)
-        : MISSING;
+      const value =
+        entity?.kind === "event"
+          ? payloadPath(entity.payload, target.path)
+          : MISSING;
+      return narrowPayloadValue(
+        value,
+        context.analysis.expectedTargetTypes.get(target),
+      );
     }
     case "entity-root":
       return rootCollection(target.entity, frame, context);
@@ -586,8 +608,13 @@ function targetValue(
       const selected: unknown[] = [];
       for (const item of source) {
         const entity = item as FilterEvaluationEntity;
+        const anchor =
+          isRuntimeEntity(entity) &&
+          (entity.kind === "session" || entity.kind === "visitor")
+            ? entity
+            : (frame.anchor ?? currentEntity(frame));
         const childFrame: RuntimeFrame = isRuntimeEntity(entity)
-          ? { ...frame, current: entity, anchor: entity, topLevel: false }
+          ? { ...frame, current: entity, anchor, topLevel: false }
           : isSequenceMatch(item)
             ? { ...frame, current: undefined, sequence: item, topLevel: false }
             : isPeriodValue(item)
@@ -627,7 +654,12 @@ function targetValue(
         if (target.member === "time") return entity.time ?? MISSING;
         return fieldValue(entity, `${entity.kind}.${target.member}`);
       });
-      return values.filter((value) => !isMissing(value));
+      const expected = context.analysis.expectedTargetTypes.get(target);
+      return values.filter(
+        (value) =>
+          !isMissing(value) &&
+          (expected === undefined || payloadValueMatchesType(value, expected)),
+      );
     }
     case "reducer": {
       const input = targetValue(target.input, frame, context);
@@ -690,8 +722,11 @@ function targetValue(
       const right = targetValue(target.right, frame, context);
       if (isMissing(left) || isMissing(right)) return MISSING;
       if (left === null || right === null) return null;
+      const resultType = context.analysis.targetTypes.get(target);
       if (
         target.operator === "sub" &&
+        resultType?.kind === "scalar" &&
+        resultType.scalar === "duration" &&
         typeof left === "number" &&
         typeof right === "number"
       )
@@ -996,39 +1031,61 @@ function comparable(value: RuntimeValue): string | number | boolean | null {
     : null;
 }
 
-function equalValue(left: unknown, right: unknown, fieldId?: string): boolean {
-  if (left === null || right === null || isMissing(left) || isMissing(right))
-    return false;
-  if (typeof left === "string" && typeof right === "string") {
-    const insensitive = fieldId
-      ? analyticsFilterRegistry.get(fieldId)?.comparison === "case-insensitive"
-      : false;
-    return insensitive
-      ? left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase()
-      : left.trim() === right.trim();
+function payloadValueMatchesType(
+  value: unknown,
+  expected: FilterScalarType,
+): boolean {
+  switch (expected) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "date":
+      return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value);
+    case "datetime":
+      return (
+        (typeof value === "number" && Number.isFinite(value)) ||
+        (typeof value === "string" && Number.isFinite(Date.parse(value)))
+      );
+    case "json-scalar":
+      return (
+        value === null ||
+        typeof value === "string" ||
+        typeof value === "boolean" ||
+        (typeof value === "number" && Number.isFinite(value))
+      );
+    case "duration":
+    case "calendar-period":
+    case "unknown":
+      return true;
   }
-  if (
-    typeof left === "number" &&
-    typeof right === "string" &&
-    /^\d{4}-\d\d-\d\dT/u.test(right)
-  ) {
-    const timestamp = Date.parse(right);
-    return Number.isFinite(timestamp) && left === timestamp;
-  }
-  if (
-    typeof right === "number" &&
-    typeof left === "string" &&
-    /^\d{4}-\d\d-\d\dT/u.test(left)
-  ) {
-    const timestamp = Date.parse(left);
-    return Number.isFinite(timestamp) && right === timestamp;
-  }
+}
+
+function narrowPayloadValue(
+  value: unknown,
+  expected: FilterScalarType | undefined,
+): RuntimeValue {
+  if (expected === undefined || isMissing(value)) return value as RuntimeValue;
+  return payloadValueMatchesType(value, expected)
+    ? (value as RuntimeValue)
+    : MISSING;
+}
+
+function equalValue(
+  left: unknown,
+  right: unknown,
+  fieldId?: string,
+  operator: "eq" | "neq" | "in" | "notIn" = "eq",
+): boolean {
+  if (isMissing(left) || isMissing(right)) return false;
   if (left && typeof left === "object" && "kind" in left) {
     const normalizedLeft = comparable(left as RuntimeValue);
     const normalizedRight = comparable(right as RuntimeValue);
     return normalizedLeft !== null && normalizedLeft === normalizedRight;
   }
-  return typeof left === typeof right && left === right;
+  return filterValuesEqual(left, right, fieldId, operator);
 }
 
 function conditionMatches(
@@ -1090,42 +1147,41 @@ function conditionMatchesOnEntity(
     : condition.value === undefined
       ? []
       : [condition.value];
-  if (op === "exists")
-    return (
-      !isMissing(actual) &&
-      actual !== null &&
-      (Array.isArray(actual) ? actual.length > 0 : true)
-    );
   const legacyNullTarget = legacy && condition.target.kind === "field";
-  if (op === "notExists")
-    return (
-      isMissing(actual) ||
-      (Array.isArray(actual) && actual.length === 0) ||
-      (legacyNullTarget && actual === null)
-    );
-  if (op === "isNull")
-    return actual === null || (legacyNullTarget && isMissing(actual));
-  if (op === "notNull") return !isMissing(actual) && actual !== null;
-  if (op === "isEmpty") return actual === "";
-  if (op === "notEmpty") return typeof actual === "string" && actual !== "";
+  const fieldId = fieldIdFor(condition.target);
+  const presence = filterPresenceMatches(
+    op,
+    {
+      missing: isMissing(actual),
+      value: actual,
+      emptyCollection: Array.isArray(actual) && actual.length === 0,
+      legacyField: legacyNullTarget,
+    },
+    fieldId,
+  );
+  if (presence !== undefined) return presence;
   if (isMissing(actual) || actual === null) return false;
   if (op === "in" || op === "notIn") {
-    const found = valueItems.some((expected) =>
-      equalValue(actual, expected, fieldIdFor(condition.target)),
-    );
+    const found = filterValueInSet(actual, valueItems, fieldId, op);
     return op === "in" ? found : !found;
   }
   if (op === "between") {
     if (valueItems.length < 2) return false;
     const value = comparable(actual);
-    const lower = comparable(valueItems[0] as RuntimeValue);
-    const upper = comparable(valueItems[1] as RuntimeValue);
+    const lowerValue = isTargetExpression(valueItems[0])
+      ? targetValue(valueItems[0], scopedFrame, context)
+      : (valueItems[0] as RuntimeValue);
+    const upperValue = isTargetExpression(valueItems[1])
+      ? targetValue(valueItems[1], scopedFrame, context)
+      : (valueItems[1] as RuntimeValue);
+    const lower = comparable(lowerValue);
+    const upper = comparable(upperValue);
     return (
       value !== null &&
       lower !== null &&
       upper !== null &&
-      compareScalar(value, lower) >= 0 &&
-      compareScalar(value, upper) <= 0
+      compareComparable(value, lower, fieldId) >= 0 &&
+      compareComparable(value, upper, fieldId) <= 0
     );
   }
   const expectedTarget = isTargetExpression(condition.value)
@@ -1133,28 +1189,23 @@ function conditionMatchesOnEntity(
     : valueItems[0];
   if (isMissing(expectedTarget) || expectedTarget === null) return false;
   if (op === "eq" || op === "neq") {
-    const equal = equalValue(
-      actual,
-      expectedTarget,
-      fieldIdFor(condition.target),
-    );
+    const equal = equalValue(actual, expectedTarget, fieldId, op);
     return op === "eq" ? equal : !equal;
   }
   if (["contains", "startsWith", "endsWith"].includes(op)) {
     if (typeof actual !== "string" || typeof expectedTarget !== "string")
       return false;
-    const left = actual.toLocaleLowerCase();
-    const right = expectedTarget.toLocaleLowerCase();
-    return op === "contains"
-      ? left.includes(right)
-      : op === "startsWith"
-        ? left.startsWith(right)
-        : left.endsWith(right);
+    return matchFilterString(
+      actual,
+      expectedTarget,
+      op as "contains" | "startsWith" | "endsWith",
+      fieldId,
+    );
   }
   const left = comparable(actual);
   const right = comparable(expectedTarget as RuntimeValue);
   if (left === null || right === null) return false;
-  const order = compareScalar(left, right);
+  const order = compareComparable(left, right, fieldId);
   return op === "gt"
     ? order > 0
     : op === "gte"
@@ -1167,16 +1218,46 @@ function conditionMatchesOnEntity(
 }
 
 function fieldIdFor(target: FilterTargetExpression): string | undefined {
-  return target.kind === "field" ? target.field : undefined;
+  if (target.kind === "field") return target.field;
+  if (target.kind === "event-payload") return "event.payload";
+  if (target.kind === "projection" && target.member === "payload")
+    return "event.payload";
+
+  const members: string[] = [];
+  let current: FilterTargetExpression = target;
+  while (current.kind === "member") {
+    members.push(current.member);
+    current = current.object;
+  }
+  while (current.kind === "reducer") current = current.input;
+  if (current.kind !== "entity-root" || members.length === 0) return undefined;
+
+  const orderedMembers = members.reverse();
+  const paths = orderedMembers.map((_, index) =>
+    [...orderedMembers.slice(index)].join("."),
+  );
+  paths.unshift(`${current.entity}.${orderedMembers.join(".")}`);
+  return paths.find((fieldId) => analyticsFilterRegistry.has(fieldId));
 }
 
-function isTargetExpression(value: unknown): value is FilterTargetExpression {
+function compareComparable(
+  left: string | number | boolean,
+  right: string | number | boolean,
+  fieldId?: string,
+): number {
+  return compareFilterValues(left, right, fieldId);
+}
+
+function isTargetExpression(
+  value: unknown,
+): value is FilterDurationTarget | FilterTimeAnchorTarget {
   return Boolean(
     value &&
     typeof value === "object" &&
     !Array.isArray(value) &&
     "kind" in value &&
-    typeof (value as { kind?: unknown }).kind === "string",
+    ((value as { kind?: unknown }).kind === "duration" ||
+      (value as { kind?: unknown }).kind === "time-anchor"),
   );
 }
 
@@ -1224,7 +1305,9 @@ export function evaluateFilterDocument(
   options: FilterEvaluationOptions,
 ): FilterEvaluationResult {
   const normalized = normalizeFilterDocument(document, analyticsFilterRegistry);
-  const context = createRuntimeContext(dataset, options);
+  const analysis = analyzeFilterDocument(normalized, analyticsFilterRegistry);
+  validateFilterRelationDomains(normalized, options.scope, analysis);
+  const context = createRuntimeContext(dataset, options, analysis);
   const matchingScopeEntityIds = new Set<string>();
   const matchingVisitIds = new Set<string>();
   const matchingEventIds = new Set<string>();

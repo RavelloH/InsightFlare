@@ -37,6 +37,8 @@ import {
 } from "@/lib/demo/realtime/visitor-pool";
 export const DEMO_FACT_DATASET_CACHE = new Map<string, DemoFactDataset>();
 const DEMO_DAY_MS = 86_400_000;
+/** Earliest timestamp for which the synthetic Mock source claims coverage. */
+export const DEMO_FILTER_HISTORY_START_MS = Date.UTC(2020, 0, 1);
 const MIN_SAMPLED_VIEWS = 320;
 const MAX_SAMPLED_VIEWS = 12_000;
 const LONG_WINDOW_START_DAYS = 30;

@@ -204,10 +204,14 @@ describe("mock/filters", () => {
 
     it("accepts the canonical DSL and fixed evaluation context from the mock provider", () => {
       const filters = parseDemoFilters({
+        siteId: "demo-site-001",
+        from: 1_000,
+        to: 2_000,
         __filterDsl: 'count(event { event.name eq "signup" }) gte 1',
         evaluationFromMs: 1_000,
         evaluationToMs: 2_000,
         nowMs: 3_000,
+        __filterFullHistory: "true",
         timeZone: "America/Los_Angeles",
       });
       expect(filters.filterDocument?.root).toBeTruthy();
@@ -215,6 +219,12 @@ describe("mock/filters", () => {
         startMs: 1_000,
         endExclusiveMs: 2_000,
       });
+      expect(filters.candidateRange).toEqual({
+        startMs: 1_000,
+        endExclusiveMs: 2_000,
+      });
+      expect(filters.fullHistory).toBe(true);
+      expect(filters.siteId).toBe("demo-site-001");
       expect(filters.capturedAtMs).toBe(3_000);
       expect(filters.reportingTimeZone).toBe("America/Los_Angeles");
     });

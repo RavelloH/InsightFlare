@@ -13,6 +13,7 @@ import {
   type FilterFieldId,
   type FilterFieldRegistry,
   type FilterOperator,
+  type FilterTargetExpression,
   FilterValidationError,
   type FilterValue,
   isLegacyFilterTarget,
@@ -74,6 +75,15 @@ const VALUELESS = new Set<FilterOperator>([
   "notEmpty",
 ]);
 const LIST = new Set<FilterOperator>(["in", "notIn"]);
+type SelectorReferenceKind =
+  | "event"
+  | "page"
+  | "session"
+  | "visitor"
+  | "period"
+  | "bucket"
+  | "sequence"
+  | "value";
 
 export interface FilterCodecOptions {
   readonly limits?: Partial<typeof DEFAULT_FILTER_LIMITS>;
@@ -256,9 +266,11 @@ function parseComplexCondition(
   raw: string,
   registry: FilterFieldRegistry,
   key: string,
+  resolveSelector?: (reference: string) => FilterTargetExpression,
 ): FilterCondition {
   const parse = (source: string) => {
-    const document = parseFilterDsl(source, registry);
+    const prepared = prepareSelectorReferences(source, resolveSelector);
+    const document = parseFilterDsl(prepared.source, registry);
     if (!document.root || document.root.kind !== "condition") {
       fail(
         "invalid_complex_filter",
@@ -266,7 +278,14 @@ function parseComplexCondition(
         "Expected one condition for the complex filter target.",
       );
     }
-    return document.root;
+    return {
+      ...document.root,
+      target: replaceSelectorMarkers(
+        document.root.target,
+        prepared.markers,
+        resolveSelector,
+      ),
+    };
   };
   // Canonical DSL suffixes (emitted by this codec) keep computed literal
   // types intact. The operator:value spelling also remains accepted for the
@@ -296,9 +315,238 @@ function parseComplexCondition(
   return parse(`${target} ${raw}`);
 }
 
+const SELECTOR_REFERENCE =
+  /\b(event|page|session|visitor|period|bucket|sequence|value):(\d+)\b/giu;
+
+function selectorReferenceParts(reference: string): {
+  readonly entity: SelectorReferenceKind;
+  readonly index: number;
+} | null {
+  const match =
+    /^(event|page|session|visitor|period|bucket|sequence|value):(\d+)$/iu.exec(
+      reference,
+    );
+  if (!match || !Number.isSafeInteger(Number(match[2]))) return null;
+  return {
+    entity: match[1]!.toLowerCase() as SelectorReferenceKind,
+    index: Number(match[2]),
+  };
+}
+
+function replaceSelectorReferencesOutsideStrings(
+  source: string,
+  getMarker: (reference: string) => string,
+): string {
+  let result = "";
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < source.length;) {
+    const character = source[index]!;
+    if (quoted) {
+      result += character;
+      index += 1;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+      result += character;
+      index += 1;
+      continue;
+    }
+    const match =
+      /^(event|page|session|visitor|period|bucket|sequence|value):(\d+)\b/iu.exec(
+        source.slice(index),
+      );
+    if (match) {
+      const reference = `${match[1]!.toLowerCase()}:${Number(match[2])}`;
+      result += getMarker(reference);
+      index += match[0].length;
+    } else {
+      result += character;
+      index += 1;
+    }
+  }
+  return result;
+}
+
+function prepareSelectorReferences(
+  source: string,
+  resolveSelector?: (reference: string) => FilterTargetExpression,
+): { readonly source: string; readonly markers: ReadonlyMap<string, string> } {
+  const markers = new Map<string, string>();
+  SELECTOR_REFERENCE.lastIndex = 0;
+  const hasReferences = SELECTOR_REFERENCE.test(source);
+  SELECTOR_REFERENCE.lastIndex = 0;
+  if (!resolveSelector || !hasReferences) {
+    return { source, markers };
+  }
+  let index = 0;
+  const rewritten = replaceSelectorReferencesOutsideStrings(
+    source,
+    (reference) => {
+      let marker = `__insightflare_filter_url_ref_${index}__`;
+      while (source.includes(marker)) marker += "_";
+      markers.set(marker, reference);
+      index += 1;
+      return `event { event.name eq ${JSON.stringify(marker)} }`;
+    },
+  );
+  return { source: rewritten, markers };
+}
+
+function replaceSelectorMarkers(
+  target: FilterTargetExpression,
+  markers: ReadonlyMap<string, string>,
+  resolveSelector?: (reference: string) => FilterTargetExpression,
+): FilterTargetExpression {
+  if (target.kind === "selector" && target.predicate.kind === "condition") {
+    const condition = target.predicate;
+    const marker =
+      condition.target.kind === "field" &&
+      condition.target.field === "event.name" &&
+      condition.operator === "eq" &&
+      typeof condition.value === "string"
+        ? condition.value
+        : null;
+    const reference = marker ? markers.get(marker) : undefined;
+    if (reference && resolveSelector) return resolveSelector(reference);
+  }
+  switch (target.kind) {
+    case "member":
+      return {
+        ...target,
+        object: replaceSelectorMarkers(target.object, markers, resolveSelector),
+      };
+    case "selector":
+      return {
+        ...target,
+        collection: replaceSelectorMarkers(
+          target.collection,
+          markers,
+          resolveSelector,
+        ),
+        predicate: replaceSelectorMarkersExpression(
+          target.predicate,
+          markers,
+          resolveSelector,
+        ),
+      };
+    case "projection":
+      return {
+        ...target,
+        collection: replaceSelectorMarkers(
+          target.collection,
+          markers,
+          resolveSelector,
+        ),
+      };
+    case "reducer":
+      return {
+        ...target,
+        input: replaceSelectorMarkers(target.input, markers, resolveSelector),
+      };
+    case "arithmetic":
+      return {
+        ...target,
+        left: replaceSelectorMarkers(target.left, markers, resolveSelector),
+        right: replaceSelectorMarkers(target.right, markers, resolveSelector),
+      };
+    case "bucket":
+      return {
+        ...target,
+        input: replaceSelectorMarkers(target.input, markers, resolveSelector),
+      };
+    case "window":
+      return {
+        ...target,
+        collection: replaceSelectorMarkers(
+          target.collection,
+          markers,
+          resolveSelector,
+        ),
+        anchor: replaceSelectorMarkers(target.anchor, markers, resolveSelector),
+      };
+    case "periods":
+      return {
+        ...target,
+        collection: replaceSelectorMarkers(
+          target.collection,
+          markers,
+          resolveSelector,
+        ),
+      };
+    case "sequence":
+      return {
+        ...target,
+        steps: target.steps.map((step) =>
+          replaceSelectorMarkers(step, markers, resolveSelector),
+        ),
+      };
+    case "adjacent":
+      return {
+        ...target,
+        sequence: replaceSelectorMarkers(
+          target.sequence,
+          markers,
+          resolveSelector,
+        ),
+      };
+    case "without":
+      return {
+        ...target,
+        sequence: replaceSelectorMarkers(
+          target.sequence,
+          markers,
+          resolveSelector,
+        ),
+        excluded: replaceSelectorMarkers(
+          target.excluded,
+          markers,
+          resolveSelector,
+        ),
+      };
+    default:
+      return target;
+  }
+}
+
+function replaceSelectorMarkersExpression(
+  expression: FilterExpression,
+  markers: ReadonlyMap<string, string>,
+  resolveSelector?: (reference: string) => FilterTargetExpression,
+): FilterExpression {
+  if (expression.kind === "condition")
+    return {
+      ...expression,
+      target: replaceSelectorMarkers(
+        expression.target,
+        markers,
+        resolveSelector,
+      ),
+    };
+  if (expression.kind === "not")
+    return {
+      ...expression,
+      child: replaceSelectorMarkersExpression(
+        expression.child,
+        markers,
+        resolveSelector,
+      ),
+    };
+  return {
+    ...expression,
+    children: expression.children.map((child) =>
+      replaceSelectorMarkersExpression(child, markers, resolveSelector),
+    ),
+  };
+}
+
 function parseKey(
   key: string,
-): { field: string; payloadPath?: string; logic: string } | null {
+): { field: string; payloadPath?: string; parts: string[] } | null {
   if (!key.startsWith("filter[")) return null;
   const readBracket = (
     start: number,
@@ -337,14 +585,10 @@ function parseKey(
     cursor = part.end;
   }
   let payloadPath: string | undefined;
-  let logic = "";
   if (field === "event.payload" && parts[0]?.startsWith("/")) {
     payloadPath = parts.shift();
   }
-  if (parts.length > 1)
-    fail("invalid_filter_key", key, "A filter key may have one logic path.");
-  logic = parts[0] ?? "";
-  return { field, ...(payloadPath ? { payloadPath } : {}), logic };
+  return { field, ...(payloadPath ? { payloadPath } : {}), parts };
 }
 
 function parseLogic(
@@ -437,17 +681,226 @@ export function parseFilterParams(
   options: FilterCodecOptions = {},
 ): FilterDocument {
   const limits = { ...DEFAULT_FILTER_LIMITS, ...(options.limits ?? {}) };
-  const root = scope();
-  let conditions = 0;
+  const entries: Array<{
+    readonly key: string;
+    readonly value: string;
+    readonly parsed: NonNullable<ReturnType<typeof parseKey>>;
+  }> = [];
+  const references = new Map<string, SelectorReferenceKind>();
+  const addReference = (reference: string) => {
+    const parsed = selectorReferenceParts(reference);
+    if (!parsed) return;
+    const canonicalReference = `${parsed.entity}:${parsed.index}`;
+    const existing = references.get(canonicalReference);
+    if (existing && existing !== parsed.entity)
+      fail(
+        "invalid_selector_reference",
+        reference,
+        "Selector reference entity conflicts.",
+      );
+    references.set(canonicalReference, parsed.entity);
+  };
   for (const [key, value] of parseInput(input).entries()) {
     const parsed = parseKey(key);
     if (!parsed) {
-      if (key.startsWith("filter[") && options.strictFilterKeys !== false) {
+      if (key.startsWith("filter[") && options.strictFilterKeys !== false)
         fail("invalid_filter_key", key, "Malformed filter key.");
-      }
       continue;
     }
-    if (parsed.field === "event.payload" && !parsed.payloadPath) {
+    entries.push({ key, value, parsed });
+    addReference(parsed.field);
+    for (const part of parsed.parts) addReference(part);
+    for (const match of parsed.field.matchAll(
+      /\b(event|page|session|visitor|period|bucket|sequence|value):(\d+)\b/giu,
+    ))
+      addReference(`${match[1]!.toLowerCase()}:${Number(match[2])}`);
+    if (selectorReferenceParts(parsed.field) && parsed.parts[0] === "source")
+      replaceSelectorReferencesOutsideStrings(value, (reference) => {
+        addReference(reference);
+        return reference;
+      });
+  }
+
+  const selectorScopes = new Map<string, Scope>();
+  const selectorTargets = new Map<string, FilterTargetExpression>();
+  for (const [reference, entity] of references) {
+    selectorScopes.set(reference, scope());
+    selectorTargets.set(reference, {
+      kind: "selector",
+      collection: {
+        kind: "entity-root",
+        entity:
+          entity === "page" || entity === "session" || entity === "visitor"
+            ? entity
+            : "event",
+      },
+      predicate: {
+        kind: "condition",
+        target: { kind: "context-root", context: "current" },
+        operator: "exists",
+      },
+    });
+  }
+  const resolveSelector = (reference: string): FilterTargetExpression => {
+    const parsed = selectorReferenceParts(reference);
+    const canonicalReference = parsed
+      ? `${parsed.entity}:${parsed.index}`
+      : reference;
+    const target = selectorTargets.get(canonicalReference);
+    if (!target)
+      fail(
+        "unbound_selector_reference",
+        canonicalReference,
+        "Selector reference is not declared in this filter URL.",
+      );
+    return target;
+  };
+  const parseScopedCondition = (
+    target: string,
+    payloadPath: string | undefined,
+    raw: string,
+    key: string,
+  ): FilterCondition => {
+    if (registry.has(target) || target === "event.payload")
+      return parseCondition(target, payloadPath, raw, registry, limits);
+    try {
+      return parseComplexCondition(target, raw, registry, key, resolveSelector);
+    } catch (error) {
+      if (error instanceof FilterCodecError) throw error;
+      fail(
+        "invalid_complex_filter",
+        key,
+        "Invalid complex filter target or value.",
+      );
+    }
+  };
+  const insertInSelector = (
+    reference: string,
+    target: string,
+    payloadPath: string | undefined,
+    logic: string,
+    raw: string,
+    key: string,
+  ) => {
+    const selectorScope = selectorScopes.get(reference);
+    if (!selectorScope)
+      fail(
+        "unbound_selector_reference",
+        reference,
+        "Selector reference is not declared.",
+      );
+    if (raw.length > limits.maxValueLength)
+      fail("value_too_long", key, "Filter value is too long.");
+    const condition = parseScopedCondition(target, payloadPath, raw, key);
+    insert(selectorScope, parseLogic(logic, limits.maxDepth), condition);
+  };
+
+  for (const { key, value, parsed } of entries) {
+    const reference = selectorReferenceParts(parsed.field);
+    if (!reference || parsed.parts[0] !== "source") continue;
+    if (parsed.parts.length !== 1)
+      fail(
+        "invalid_filter_key",
+        key,
+        "A selector source declaration has an invalid path.",
+      );
+    const sourceCondition = parseComplexCondition(
+      value,
+      "exists",
+      registry,
+      key,
+      resolveSelector,
+    );
+    const target = selectorTargets.get(parsed.field);
+    if (!target || target.kind !== "selector")
+      fail(
+        "invalid_selector_reference",
+        parsed.field,
+        "Invalid selector source.",
+      );
+    (target as { collection: FilterTargetExpression }).collection =
+      sourceCondition.target;
+  }
+
+  // First pass declares all selector predicates. Nested selector paths are
+  // lexical: a child selector's predicate is stored under its own reference.
+  for (const { key, value, parsed } of entries) {
+    const parent = selectorReferenceParts(parsed.field);
+    if (!parent || parsed.parts.length === 0) continue;
+    const first = parsed.parts[0]!;
+    if (first === "source") continue;
+    const child = selectorReferenceParts(first);
+    if (child) {
+      if (parsed.parts.length === 1) {
+        insertInSelector(parsed.field, first, undefined, "", value, key);
+        continue;
+      }
+      const target = parsed.parts[1]!;
+      const payloadPath =
+        target === "event.payload" && parsed.parts[2]?.startsWith("/")
+          ? parsed.parts[2]
+          : undefined;
+      const logicIndex = payloadPath ? 3 : 2;
+      const logicParts = parsed.parts.slice(logicIndex);
+      if (logicParts.length > 1)
+        fail(
+          "invalid_filter_key",
+          key,
+          "A selector filter may have one logic path.",
+        );
+      insertInSelector(
+        first,
+        target,
+        payloadPath,
+        logicParts[0] ?? "",
+        value,
+        key,
+      );
+      continue;
+    }
+    const target = first;
+    const payloadPath =
+      target === "event.payload" && parsed.parts[1]?.startsWith("/")
+        ? parsed.parts[1]
+        : undefined;
+    const logicIndex = payloadPath ? 2 : 1;
+    const logicParts = parsed.parts.slice(logicIndex);
+    if (logicParts.length > 1)
+      fail(
+        "invalid_filter_key",
+        key,
+        "A selector filter may have one logic path.",
+      );
+    insertInSelector(
+      parsed.field,
+      target,
+      payloadPath,
+      logicParts[0] ?? "",
+      value,
+      key,
+    );
+  }
+  for (const [reference, selector] of selectorTargets) {
+    const predicate = scopeExpression(selectorScopes.get(reference)!);
+    if (!predicate)
+      fail(
+        "unbound_selector_reference",
+        reference,
+        "Selector reference has no predicate declaration.",
+      );
+    (selector as { predicate: FilterExpression }).predicate = predicate;
+  }
+
+  const root = scope();
+  let conditions = 0;
+  for (const { key, value, parsed } of entries) {
+    const topSelector = selectorReferenceParts(parsed.field);
+    if (topSelector && parsed.parts.length > 0) continue;
+    if (
+      parsed.field === "event.payload" &&
+      !parsed.payloadPath &&
+      !selectorReferenceParts(parsed.field)
+    ) {
       fail(
         "invalid_target",
         key,
@@ -456,27 +909,16 @@ export function parseFilterParams(
     }
     if (value.length > limits.maxValueLength)
       fail("value_too_long", key, "Filter value is too long.");
-    let condition: FilterCondition;
-    if (!registry.has(parsed.field) && parsed.field !== "event.payload") {
-      try {
-        condition = parseComplexCondition(parsed.field, value, registry, key);
-      } catch {
-        fail(
-          "invalid_complex_filter",
-          key,
-          "Invalid complex filter target or value.",
-        );
-      }
-    } else {
-      condition = parseCondition(
-        parsed.field,
-        parsed.payloadPath,
-        value,
-        registry,
-        limits,
-      );
-    }
-    insert(root, parseLogic(parsed.logic, limits.maxDepth), condition);
+    const logic = parsed.parts.length === 1 ? parsed.parts[0]! : "";
+    if (parsed.parts.length > 1)
+      fail("invalid_filter_key", key, "A filter key may have one logic path.");
+    const condition = parseScopedCondition(
+      parsed.field,
+      parsed.payloadPath,
+      value,
+      key,
+    );
+    insert(root, parseLogic(logic, limits.maxDepth), condition);
     conditions += 1;
     if (conditions > limits.maxConditions)
       fail("too_many_conditions", key, "Filter condition limit exceeded.");
@@ -547,38 +989,260 @@ function conditionValue(
   return `${alias}:${encoded.join(",")}`;
 }
 
+function selectorOutputKind(
+  target: FilterTargetExpression,
+): SelectorReferenceKind {
+  if (target.kind === "entity-root") return target.entity;
+  if (target.kind === "periods") return "period";
+  if (target.kind === "bucket") return "bucket";
+  if (
+    target.kind === "sequence" ||
+    target.kind === "adjacent" ||
+    target.kind === "without"
+  )
+    return "sequence";
+  if (target.kind === "selector") return selectorOutputKind(target.collection);
+  if (target.kind === "projection") return "value";
+  if (target.kind === "window") return selectorOutputKind(target.collection);
+  if (target.kind === "member") return selectorOutputKind(target.object);
+  if (target.kind === "reducer") return selectorOutputKind(target.input);
+  if (target.kind === "arithmetic") return "value";
+  return "value";
+}
+
+function collectSelectorReferences(
+  document: FilterDocument,
+): WeakMap<FilterTargetExpression, string> {
+  const references = new WeakMap<FilterTargetExpression, string>();
+  const counters = new Map<SelectorReferenceKind, number>();
+  const visitTarget = (target: FilterTargetExpression): void => {
+    if (target.kind === "selector") {
+      if (!references.has(target)) {
+        const kind = selectorOutputKind(target.collection);
+        const index = counters.get(kind) ?? 0;
+        counters.set(kind, index + 1);
+        references.set(target, `${kind}:${index}`);
+      }
+      visitTarget(target.collection);
+      visitExpression(target.predicate);
+      return;
+    }
+    switch (target.kind) {
+      case "member":
+        visitTarget(target.object);
+        break;
+      case "projection":
+        visitTarget(target.collection);
+        break;
+      case "reducer":
+        visitTarget(target.input);
+        break;
+      case "arithmetic":
+        visitTarget(target.left);
+        visitTarget(target.right);
+        break;
+      case "bucket":
+        visitTarget(target.input);
+        break;
+      case "window":
+        visitTarget(target.collection);
+        visitTarget(target.anchor);
+        break;
+      case "periods":
+        visitTarget(target.collection);
+        break;
+      case "sequence":
+        target.steps.forEach(visitTarget);
+        break;
+      case "adjacent":
+        visitTarget(target.sequence);
+        break;
+      case "without":
+        visitTarget(target.sequence);
+        visitTarget(target.excluded);
+        break;
+    }
+  };
+  const visitExpression = (expression: FilterExpression): void => {
+    if (expression.kind === "condition") {
+      visitTarget(expression.target);
+      return;
+    }
+    if (expression.kind === "not") {
+      visitExpression(expression.child);
+      return;
+    }
+    expression.children.forEach(visitExpression);
+  };
+  if (document.root) visitExpression(document.root);
+  return references;
+}
+
+function formatFilterUrlTarget(
+  target: FilterTargetExpression,
+  references: WeakMap<FilterTargetExpression, string>,
+): string {
+  switch (target.kind) {
+    case "field":
+      return target.field;
+    case "event-payload":
+      return `event.payload(${JSON.stringify(target.path)})`;
+    case "entity-root":
+      return target.entity;
+    case "context-root":
+      return target.context === "current" ? "" : target.context;
+    case "member": {
+      const object = formatFilterUrlTarget(target.object, references);
+      return object ? `${object}.${target.member}` : target.member;
+    }
+    case "selector": {
+      const reference = references.get(target);
+      if (!reference)
+        fail(
+          "invalid_selector_reference",
+          "target",
+          "Selector has no stable URL reference.",
+        );
+      return reference;
+    }
+    case "projection":
+      return `${formatFilterUrlTarget(target.collection, references)}.${target.member}${target.path === undefined ? "" : `(${JSON.stringify(target.path)})`}`;
+    case "reducer":
+      return target.reducer === "nth"
+        ? `nth(${formatFilterUrlTarget(target.input, references)},${target.index})`
+        : `${target.reducer}(${formatFilterUrlTarget(target.input, references)})`;
+    case "arithmetic":
+      return `${target.operator}(${formatFilterUrlTarget(target.left, references)},${formatFilterUrlTarget(target.right, references)})`;
+    case "duration":
+      return `${target.amount}${target.unit}`;
+    case "time-anchor":
+      return `@${target.anchor}${target.offset ? `${target.offset.amount >= 0 ? "+" : ""}${target.offset.amount}${target.offset.unit}` : ""}`;
+    case "bucket":
+      return `bucket(${formatFilterUrlTarget(target.input, references)},${target.interval.amount}${target.interval.unit})`;
+    case "window":
+      return `window(${formatFilterUrlTarget(target.collection, references)},${formatFilterUrlTarget(target.anchor, references)},[${target.startOffset.amount}${target.startOffset.unit},${target.endOffset.amount}${target.endOffset.unit}])`;
+    case "periods":
+      return `periods(${formatFilterUrlTarget(target.collection, references)},${target.interval.amount}${target.interval.unit})`;
+    case "sequence":
+      return `sequence([${target.steps.map((step) => formatFilterUrlTarget(step, references)).join(",")}])`;
+    case "adjacent":
+      return `adjacent(${formatFilterUrlTarget(target.sequence, references)})`;
+    case "without":
+      return `without(${formatFilterUrlTarget(target.sequence, references)},${formatFilterUrlTarget(target.excluded, references)})`;
+  }
+}
+
+function appendKey(parts: readonly string[]): string {
+  return `filter[${parts.join("][")}]`;
+}
+
 function serializeExpression(
   expression: FilterExpression,
-  path: string[],
+  selectorPath: string[],
+  logicPath: string[],
   pairs: Array<[string, string]>,
   registry: FilterFieldRegistry,
+  references: WeakMap<FilterTargetExpression, string>,
+  declared: Set<FilterTargetExpression>,
 ): void {
   const children =
     expression.kind === "and" ? expression.children : [expression];
   const orGroups = children.filter((child) => child.kind === "or");
   const notGroups = children.filter((child) => child.kind === "not");
+  const serializeDeclarations = (target: FilterTargetExpression): void => {
+    if (target.kind === "selector") {
+      if (declared.has(target)) return;
+      declared.add(target);
+      const reference = references.get(target);
+      if (!reference)
+        fail(
+          "invalid_selector_reference",
+          "target",
+          "Selector has no stable URL reference.",
+        );
+      if (target.collection.kind !== "entity-root") {
+        serializeDeclarations(target.collection);
+        pairs.push([
+          appendKey([...selectorPath, reference, "source"]),
+          formatFilterUrlTarget(target.collection, references),
+        ]);
+      }
+      serializeExpression(
+        target.predicate,
+        [...selectorPath, reference],
+        [],
+        pairs,
+        registry,
+        references,
+        declared,
+      );
+      return;
+    }
+    switch (target.kind) {
+      case "member":
+        serializeDeclarations(target.object);
+        break;
+      case "projection":
+        serializeDeclarations(target.collection);
+        break;
+      case "reducer":
+        serializeDeclarations(target.input);
+        break;
+      case "arithmetic":
+        serializeDeclarations(target.left);
+        serializeDeclarations(target.right);
+        break;
+      case "bucket":
+        serializeDeclarations(target.input);
+        break;
+      case "window":
+        serializeDeclarations(target.collection);
+        serializeDeclarations(target.anchor);
+        break;
+      case "periods":
+        serializeDeclarations(target.collection);
+        break;
+      case "sequence":
+        target.steps.forEach(serializeDeclarations);
+        break;
+      case "adjacent":
+        serializeDeclarations(target.sequence);
+        break;
+      case "without":
+        serializeDeclarations(target.sequence);
+        serializeDeclarations(target.excluded);
+        break;
+    }
+  };
   for (const child of children) {
     if (child.kind === "condition") {
+      serializeDeclarations(child.target);
       if (!isLegacyFilterTarget(child.target)) {
-        const target = formatFilterTargetExpression(child.target);
+        const urlTarget = formatFilterUrlTarget(child.target, references);
+        const humanTarget = formatFilterTargetExpression(child.target);
         const expressionText = formatFilterDsl({
           version: FILTER_DOCUMENT_VERSION,
           root: child,
         });
-        const rawValue = expressionText.slice(target.length).trimStart();
+        const rawValue = expressionText.slice(humanTarget.length).trimStart();
         pairs.push([
-          `filter[${target}]${path.length ? `[${path.join(".")}]` : ""}`,
+          appendKey([
+            ...selectorPath,
+            urlTarget,
+            ...(logicPath.length ? [logicPath.join(".")] : []),
+          ]),
           rawValue,
         ]);
         continue;
       }
       const field =
         child.target.kind === "field" ? child.target.field : "event.payload";
-      const targetPath =
-        child.target.kind === "event-payload" ? `[${child.target.path}]` : "";
+      const parts = [...selectorPath, field];
+      if (child.target.kind === "event-payload") parts.push(child.target.path);
+      if (logicPath.length) parts.push(logicPath.join("."));
       const isTypeless = registry.get(field)?.valueKind === "json-scalar";
       pairs.push([
-        `filter[${field}]${targetPath}${path.length ? `[${path.join(".")}]` : ""}`,
+        appendKey(parts),
         conditionValue(
           legacyConditionValue(child.value),
           child.operator,
@@ -588,16 +1252,27 @@ function serializeExpression(
     } else if (child.kind === "not") {
       const index = notGroups.indexOf(child);
       const token = notGroups.length === 1 ? "not" : `not:${index}`;
-      serializeExpression(child.child, [...path, token], pairs, registry);
+      serializeExpression(
+        child.child,
+        selectorPath,
+        [...logicPath, token],
+        pairs,
+        registry,
+        references,
+        declared,
+      );
     } else {
       const index = orGroups.indexOf(child);
       const token = orGroups.length === 1 ? "or" : `or:${index}`;
       child.children.forEach((branch, branchIndex) =>
         serializeExpression(
           branch,
-          [...path, token, String(branchIndex)],
+          selectorPath,
+          [...logicPath, token, String(branchIndex)],
           pairs,
           registry,
+          references,
+          declared,
         ),
       );
     }
@@ -611,7 +1286,15 @@ export function serializeFilterParams(
   const normalized = normalizeFilterDocument(document, registry);
   const pairs: Array<[string, string]> = [];
   if (normalized.root)
-    serializeExpression(normalized.root, [], pairs, registry);
+    serializeExpression(
+      normalized.root,
+      [],
+      [],
+      pairs,
+      registry,
+      collectSelectorReferences(normalized),
+      new Set(),
+    );
   pairs.sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv));
   const params = new URLSearchParams();
   for (const [key, value] of pairs) params.append(key, value);

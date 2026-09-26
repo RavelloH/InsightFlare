@@ -6,9 +6,10 @@ import {
   type FilterFieldDefinition,
   type FilterFieldRegistry,
   normalizeFilterDocument,
+  parseFilterDsl,
   parseFilterParams,
   serializeFilterParams,
-} from "@/lib/edge/analytics/contract";
+} from "@/lib/filter-contract";
 
 describe("filter URL codec", () => {
   it("parses canonical dot-namespaced filters with typed values", () => {
@@ -80,6 +81,82 @@ describe("filter URL codec", () => {
     expect(
       parseFilterParams(temporalSerialized, analyticsFilterRegistry),
     ).toEqual(temporal);
+  });
+
+  it("serializes selector predicates through stable references", () => {
+    const document = normalizeFilterDocument(
+      parseFilterDsl(
+        'count(event { event.name eq "purchase" AND event.payload("/amount") gt 0 }) gte 2',
+        analyticsFilterRegistry,
+      ),
+      analyticsFilterRegistry,
+    );
+    const params = serializeFilterParams(document, analyticsFilterRegistry);
+    expect([...params.keys()]).toEqual([
+      "filter[count(event:0)]",
+      "filter[event:0][event.name]",
+      "filter[event:0][event.payload][/amount]",
+    ]);
+    expect(params.toString()).not.toMatch(/event\s*\{/u);
+    expect(parseFilterParams(params, analyticsFilterRegistry)).toEqual(
+      document,
+    );
+  });
+
+  it("round-trips nested and computed-collection selectors independent of parameter order", () => {
+    const sources = [
+      'session { event { event.name eq "purchase" } exists } exists',
+      'count(periods(event { event.name eq "shared_insight" AND time gte @now-12w }, 1w) { count(period.items) gte 3 }) gte 3',
+    ];
+    for (const source of sources) {
+      const document = normalizeFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        analyticsFilterRegistry,
+      );
+      const params = serializeFilterParams(document, analyticsFilterRegistry);
+      const reversed = new URLSearchParams([...params.entries()].reverse());
+      expect(parseFilterParams(params, analyticsFilterRegistry)).toEqual(
+        document,
+      );
+      expect(parseFilterParams(reversed, analyticsFilterRegistry)).toEqual(
+        document,
+      );
+      expect(
+        serializeFilterParams(
+          parseFilterParams(params, analyticsFilterRegistry),
+          analyticsFilterRegistry,
+        ),
+      ).toEqual(params);
+    }
+  });
+
+  it("round-trips all Core and Relation target forms through selector references", () => {
+    const sources = [
+      'nth(event { event.name eq "purchase" }, 3).payload("/amount") gt 0',
+      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }).time, [0d, 7d]) notExists',
+      'adjacent(sequence([page { page.path eq "/pricing" }, event { event.name eq "purchase" }])) exists',
+      'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) exists',
+      'NOT (count(event { event.name eq "purchase" }) gte 2 OR page.path eq "/private")',
+      'sub(first(event { event.name eq "purchase" }).time, first(event { event.name eq "signup" }).time) between [0d, 30d] AND time between [@now-30d, @now]',
+    ];
+
+    for (const source of sources) {
+      const document = normalizeFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        analyticsFilterRegistry,
+      );
+      const params = serializeFilterParams(document, analyticsFilterRegistry);
+      const reversed = new URLSearchParams([...params.entries()].reverse());
+      const parsed = parseFilterParams(params, analyticsFilterRegistry);
+      expect(parsed).toEqual(document);
+      expect(parseFilterParams(reversed, analyticsFilterRegistry)).toEqual(
+        document,
+      );
+      expect(
+        serializeFilterParams(parsed, analyticsFilterRegistry).toString(),
+      ).toBe(params.toString());
+      expect(params.toString()).not.toMatch(/event\s*\{|page\s*\{/u);
+    }
   });
 
   it("preserves escaped set operands and reconstructs nested OR and NOT", () => {
