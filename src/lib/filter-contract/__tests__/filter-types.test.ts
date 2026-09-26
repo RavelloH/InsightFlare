@@ -34,6 +34,37 @@ describe("Filter v1 expression types", () => {
     expect(analysis.expectedTargetTypes.get(root.target)).toBe("number");
   });
 
+  it("propagates eq, neq, and homogeneous set types into positional payload reducers", () => {
+    for (const [source, expected] of [
+      ['first(event.payload("/value")) eq 100', "number"],
+      ['first(event.payload("/value")) neq "100"', "string"],
+      ['first(event.payload("/value")) in [true, false]', "boolean"],
+      [
+        'nth(event { event.name eq "value" }.payload("/value"), 2) notIn [1, 2]',
+        "number",
+      ],
+    ] as const) {
+      const document = parseFilterDsl(source, analyticsFilterRegistry);
+      const root = document.root;
+      if (root?.kind !== "condition") throw new Error("expected_condition");
+      expect(
+        analyzeFilterDocument(
+          document,
+          analyticsFilterRegistry,
+        ).expectedTargetTypes.get(root.target),
+      ).toBe(expected);
+    }
+  });
+
+  it("rejects heterogeneous advanced sets and null equality", () => {
+    expect(() =>
+      validate('first(event.payload("/value")) in [1, "1"]'),
+    ).toThrow(expect.objectContaining({ code: "heterogeneous_set_values" }));
+    expect(() => validate('first(event.payload("/value")) eq null')).toThrow(
+      expect.objectContaining({ code: "null_requires_unary_operator" }),
+    );
+  });
+
   it("accepts collection comparisons, datetime literals, and temporal arithmetic", () => {
     validate('first(event).name eq "purchase"');
     validate('time gte "2026-09-01T00:00:00Z"');

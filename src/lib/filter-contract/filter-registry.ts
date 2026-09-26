@@ -1,4 +1,5 @@
 import type {
+  FilterConditionEntity,
   FilterFieldDefinition,
   FilterOperator,
   FilterValueKind,
@@ -311,6 +312,7 @@ function groupFor(id: string): FilterFieldGroup {
 type FieldMetadataOverrides = Partial<
   Pick<
     RegisteredFilterField,
+    | "conditionEntity"
     | "source"
     | "observationKinds"
     | "presence"
@@ -353,6 +355,9 @@ function text<const Id extends string>(
     valueKind: "string",
     operators: operatorsFor("string"),
     audiences,
+    ...(options.conditionEntity
+      ? { conditionEntity: options.conditionEntity }
+      : {}),
     profile,
     singletonSetEquivalent: true,
     source,
@@ -415,6 +420,9 @@ function numeric<const Id extends string>(
     valueKind: "number",
     operators: operatorsFor("number"),
     audiences,
+    ...(options.conditionEntity
+      ? { conditionEntity: options.conditionEntity }
+      : {}),
     profile: "trimmed-text",
     source,
     observationKinds:
@@ -456,16 +464,25 @@ function booleanField<const Id extends string>(
 
 /** The only hand-maintained field list. All public IDs and registry entries derive from it. */
 const FIELDS = [
-  text("page.path", PUBLIC_AUDIENCES, "column.pathname"),
-  text("page.title", PUBLIC_AUDIENCES, "column.title"),
+  text("page.path", PUBLIC_AUDIENCES, "column.pathname", "trimmed-text", {
+    conditionEntity: "page",
+  }),
+  text("page.title", PUBLIC_AUDIENCES, "column.title", "trimmed-text", {
+    conditionEntity: "page",
+  }),
   text(
     "page.hostname",
     PUBLIC_AUDIENCES,
     "column.hostname",
     "case-folded-text",
+    { conditionEntity: "page" },
   ),
-  text("page.query", PRIVATE_AUDIENCES, "column.query_string"),
-  text("page.hash", PRIVATE_AUDIENCES, "column.hash_fragment"),
+  text("page.query", PRIVATE_AUDIENCES, "column.query_string", "trimmed-text", {
+    conditionEntity: "page",
+  }),
+  text("page.hash", PRIVATE_AUDIENCES, "column.hash_fragment", "trimmed-text", {
+    conditionEntity: "page",
+  }),
   {
     ...text(
       "session.entryPath",
@@ -623,6 +640,7 @@ const FIELDS = [
     compilerStrategy: "event.payload" as const,
   },
   numeric("page.durationMs", PUBLIC_AUDIENCES, "column.duration_ms", {
+    conditionEntity: "page",
     unit: "ms",
     number: { min: 0 },
   }),
@@ -798,7 +816,7 @@ export const analyticsFilterFieldDisplayOrder: ReadonlyMap<string, number> =
   );
 
 /** Bump when canonical IDs, value kinds, or operator semantics change. */
-export const ANALYTICS_FILTER_REGISTRY_REVISION = "analytics-filter-v4";
+export const ANALYTICS_FILTER_REGISTRY_REVISION = "analytics-filter-v5";
 
 const REGISTERED_FIELDS: readonly RegisteredFilterField[] = FIELDS.map(
   (field) => Object.freeze(field),
@@ -833,6 +851,28 @@ export function analyticsFilterDefinition(
   fieldId: string,
 ): RegisteredFilterField | undefined {
   return analyticsFilterRegistry.get(fieldId);
+}
+
+/** Resolve where a registered condition is anchored independently of the storage source. */
+export function filterConditionEntity(
+  definition: FilterFieldDefinition | undefined,
+): FilterConditionEntity | undefined {
+  if (!definition) return undefined;
+  const metadata = definition as FilterFieldDefinition & {
+    readonly nativeEntity?: FilterNativeEntity;
+    readonly observationKinds?: ReadonlySet<FilterObservationKind>;
+  };
+  if (definition.conditionEntity) return definition.conditionEntity;
+  if (metadata.nativeEntity === "session") return "session";
+  if (metadata.nativeEntity === "visitor") return "visitor";
+  if (metadata.nativeEntity === "event") return "event";
+  if (metadata.nativeEntity === "visit") {
+    const observations = metadata.observationKinds;
+    return observations?.size === 1 && observations.has("visit")
+      ? "page"
+      : "activity";
+  }
+  return undefined;
 }
 
 export function analyticsFilterOperators(

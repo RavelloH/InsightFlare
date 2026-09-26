@@ -5,10 +5,15 @@ import {
 } from "@/lib/analytics/time-zone";
 
 import { buildCanonicalFilterScopeFacts } from "./filter-facts";
-import { analyticsFilterRegistry } from "./filter-registry";
+import {
+  analyticsFilterDefinition,
+  analyticsFilterRegistry,
+  filterConditionEntity,
+} from "./filter-registry";
 import {
   type AnalyzedFilterDocument,
   analyzeFilterDocument,
+  validateFilterConditionDomains,
 } from "./filter-semantics";
 import {
   type FilterScalarType,
@@ -146,6 +151,62 @@ interface RuntimeContext {
   readonly visitors: readonly FilterEvaluationEntity[];
   readonly candidatePages: readonly FilterEvaluationEntity[];
   readonly candidateEvents: readonly FilterEvaluationEntity[];
+  readonly pagesById: ReadonlyMap<string, readonly FilterEvaluationEntity[]>;
+  readonly eventsById: ReadonlyMap<string, readonly FilterEvaluationEntity[]>;
+  readonly sessionsById: ReadonlyMap<string, readonly FilterEvaluationEntity[]>;
+  readonly visitorsById: ReadonlyMap<string, readonly FilterEvaluationEntity[]>;
+  readonly pagesBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly eventsBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly pagesByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly eventsByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly sessionsByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly activitiesBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly activitiesByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly candidatePagesBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly candidateEventsBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly candidatePagesByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly candidateEventsByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly candidateActivitiesBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly candidateActivitiesByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
   readonly sequenceMatchesLimit: number;
   readonly sequenceWorkLimit: number;
   readonly sequenceStats: { matches: number; work: number };
@@ -155,6 +216,45 @@ const DEFAULT_MAX_ACTIVITIES = 20_000;
 const DEFAULT_MAX_SEQUENCE_MATCHES = 50_000;
 const DEFAULT_MAX_SEQUENCE_WORK = 1_000_000;
 const DAY_MS = 86_400_000;
+
+function indexEntities(
+  records: readonly FilterEvaluationEntity[],
+  key: "id" | "sessionId" | "visitorId",
+): ReadonlyMap<string, readonly FilterEvaluationEntity[]> {
+  const index = new Map<string, FilterEvaluationEntity[]>();
+  for (const record of records) {
+    const value = record[key];
+    if (typeof value !== "string") continue;
+    const bucket = index.get(value) ?? [];
+    bucket.push(record);
+    index.set(value, bucket);
+  }
+  return index;
+}
+
+function indexActivities(
+  pages: readonly FilterEvaluationEntity[],
+  events: readonly FilterEvaluationEntity[],
+  key: "sessionId" | "visitorId",
+): ReadonlyMap<string, readonly FilterEvaluationEntity[]> {
+  const index = new Map<string, FilterEvaluationEntity[]>();
+  for (const record of [...pages, ...events]) {
+    const value = record[key];
+    if (typeof value !== "string") continue;
+    const bucket = index.get(value) ?? [];
+    bucket.push(record);
+    index.set(value, bucket);
+  }
+  for (const records of index.values()) records.sort(compareActivity);
+  return index;
+}
+
+function indexed(
+  index: ReadonlyMap<string, readonly FilterEvaluationEntity[]>,
+  id: string | undefined,
+): readonly FilterEvaluationEntity[] {
+  return id === undefined ? [] : (index.get(id) ?? []);
+}
 
 function inRange(
   time: number | undefined,
@@ -279,24 +379,51 @@ function createRuntimeContext(
     inRange(record.time, options.candidateRange),
   );
   const evaluationRecords = [...pages, ...events].sort(compareActivity);
+  const sessions = dataset.sessions
+    ? dataset.sessions
+        .filter((record) => inRange(record.time, evaluationRange))
+        .sort(compareEntity)
+    : buildAggregateEntities(evaluationRecords, "session");
+  const visitors = dataset.visitors
+    ? dataset.visitors
+        .filter((record) => inRange(record.time, evaluationRange))
+        .sort(compareEntity)
+    : buildAggregateEntities(evaluationRecords, "visitor");
   return {
     dataset,
     analysis,
     options: normalizedOptions,
     pages,
     events,
-    sessions: dataset.sessions
-      ? dataset.sessions
-          .filter((record) => inRange(record.time, evaluationRange))
-          .sort(compareEntity)
-      : buildAggregateEntities(evaluationRecords, "session"),
-    visitors: dataset.visitors
-      ? dataset.visitors
-          .filter((record) => inRange(record.time, evaluationRange))
-          .sort(compareEntity)
-      : buildAggregateEntities(evaluationRecords, "visitor"),
+    sessions,
+    visitors,
     candidatePages,
     candidateEvents,
+    pagesById: indexEntities(pages, "id"),
+    eventsById: indexEntities(events, "id"),
+    sessionsById: indexEntities(sessions, "id"),
+    visitorsById: indexEntities(visitors, "id"),
+    pagesBySession: indexEntities(pages, "sessionId"),
+    eventsBySession: indexEntities(events, "sessionId"),
+    pagesByVisitor: indexEntities(pages, "visitorId"),
+    eventsByVisitor: indexEntities(events, "visitorId"),
+    sessionsByVisitor: indexEntities(sessions, "visitorId"),
+    activitiesBySession: indexActivities(pages, events, "sessionId"),
+    activitiesByVisitor: indexActivities(pages, events, "visitorId"),
+    candidatePagesBySession: indexEntities(candidatePages, "sessionId"),
+    candidateEventsBySession: indexEntities(candidateEvents, "sessionId"),
+    candidatePagesByVisitor: indexEntities(candidatePages, "visitorId"),
+    candidateEventsByVisitor: indexEntities(candidateEvents, "visitorId"),
+    candidateActivitiesBySession: indexActivities(
+      candidatePages,
+      candidateEvents,
+      "sessionId",
+    ),
+    candidateActivitiesByVisitor: indexActivities(
+      candidatePages,
+      candidateEvents,
+      "visitorId",
+    ),
     sequenceMatchesLimit: normalizedOptions.maxSequenceMatches,
     sequenceWorkLimit: normalizedOptions.maxSequenceWork,
     sequenceStats: { matches: 0, work: 0 },
@@ -453,25 +580,33 @@ function rootCollection(
           : context.visitors;
   if (!anchor) return source;
   if (anchor.kind === "visitor") {
-    if (entity === "visitor")
-      return source.filter((item) => item.id === anchor.id);
-    return source.filter((item) => item.visitorId === anchor.id);
+    if (entity === "visitor") return indexed(context.visitorsById, anchor.id);
+    if (entity === "session")
+      return indexed(context.sessionsByVisitor, anchor.id);
+    return entity === "page"
+      ? indexed(context.pagesByVisitor, anchor.id)
+      : indexed(context.eventsByVisitor, anchor.id);
   }
   if (anchor.kind === "session") {
     if (entity === "visitor")
-      return source.filter((item) => item.id === anchor.visitorId);
-    if (entity === "session")
-      return source.filter((item) => item.id === anchor.id);
-    return source.filter((item) => item.sessionId === anchor.id);
+      return indexed(context.visitorsById, anchor.visitorId);
+    if (entity === "session") return indexed(context.sessionsById, anchor.id);
+    return entity === "page"
+      ? indexed(context.pagesBySession, anchor.id)
+      : indexed(context.eventsBySession, anchor.id);
   }
   // A top-level Event scope uses its Session as the natural local anchor.
   if (entity === "visitor")
-    return source.filter((item) => item.id === anchor.visitorId);
+    return indexed(context.visitorsById, anchor.visitorId);
   if (entity === "session")
-    return source.filter((item) => item.id === anchor.sessionId);
+    return indexed(context.sessionsById, anchor.sessionId);
   if (anchor.sessionId)
-    return source.filter((item) => item.sessionId === anchor.sessionId);
-  return source.filter((item) => item.id === anchor.id);
+    return entity === "page"
+      ? indexed(context.pagesBySession, anchor.sessionId)
+      : indexed(context.eventsBySession, anchor.sessionId);
+  return entity === "page"
+    ? indexed(context.pagesById, anchor.id)
+    : indexed(context.eventsById, anchor.id);
 }
 
 function elapsedMilliseconds(amount: number, unit: string): number {
@@ -598,6 +733,15 @@ function targetValue(
       if (target.context === "period") return frame.period ?? MISSING;
       return frame.bucket ?? MISSING;
     case "member":
+      if (
+        target.member === "time" &&
+        target.object.kind === "entity-root" &&
+        (target.object.entity === "page" || target.object.entity === "event")
+      ) {
+        const entity = currentEntity(frame);
+        if (entity?.kind === target.object.entity)
+          return entity.time ?? MISSING;
+      }
       return memberValue(
         targetValue(target.object, frame, context),
         target.member,
@@ -892,9 +1036,12 @@ function targetValue(
     case "adjacent": {
       const matches = targetValue(target.sequence, frame, context);
       if (!Array.isArray(matches)) throw new TypeError("expected_sequence");
-      const timeline = rootCollection("page", frame, context)
-        .concat(rootCollection("event", frame, context))
-        .sort(compareActivity);
+      const timeline = activitiesForAnchor(
+        frame.anchor ?? currentEntity(frame),
+        context,
+        new Set(["page", "event"]),
+        false,
+      );
       const positions = new Map(
         timeline.map((item, index) => [activityKey(item), index]),
       );
@@ -1080,7 +1227,10 @@ function equalValue(
   operator: "eq" | "neq" | "in" | "notIn" = "eq",
 ): boolean {
   if (isMissing(left) || isMissing(right)) return false;
-  if (left && typeof left === "object" && "kind" in left) {
+  if (
+    (left && typeof left === "object" && "kind" in left) ||
+    (right && typeof right === "object" && "kind" in right)
+  ) {
     const normalizedLeft = comparable(left as RuntimeValue);
     const normalizedRight = comparable(right as RuntimeValue);
     return normalizedLeft !== null && normalizedLeft === normalizedRight;
@@ -1093,41 +1243,213 @@ function conditionMatches(
   frame: RuntimeFrame,
   context: RuntimeContext,
 ): boolean {
-  if (frame.topLevel && isLegacyFilterTarget(condition.target)) {
-    const candidates =
-      context.options.scope === "event"
-        ? [frame.current].filter((value): value is FilterEvaluationEntity =>
-            Boolean(value),
-          )
-        : candidateActivitiesForAnchor(frame.current, context);
-    return candidates.some((candidate) =>
-      conditionMatchesOnEntity(condition, candidate, frame, context, true),
+  const resolution = resolveConditionSubjects(condition.target, frame, context);
+  const legacyCandidate =
+    frame.topLevel && isLegacyFilterTarget(condition.target);
+  const legacy = legacyCandidate;
+  if (resolution.mode === "existential")
+    return resolution.subjects.some((subject) =>
+      conditionMatchesOnEntity(condition, subject, frame, context, legacy),
     );
-  }
-  // Only standalone v1 predicates keep candidate-range membership semantics.
-  // A field target nested in a Core expression reads the evaluation collection.
-  return conditionMatchesOnEntity(
-    condition,
-    currentEntity(frame),
-    frame,
-    context,
-    false,
-  );
+  const subject = resolution.subjects[0];
+  return subject
+    ? conditionMatchesOnEntity(condition, subject, frame, context, legacy)
+    : false;
 }
 
-function candidateActivitiesForAnchor(
+interface ConditionSubjectResolution {
+  readonly mode: "direct" | "existential";
+  readonly subjects: readonly FilterEvaluationEntity[];
+}
+
+interface ConditionSubjectDomain {
+  readonly native:
+    "current" | "page" | "event" | "session" | "visitor" | "activity";
+  readonly activities: ReadonlySet<"page" | "event">;
+}
+
+function conditionSubjectDomain(
+  target: FilterTargetExpression,
+): ConditionSubjectDomain {
+  if (
+    target.kind === "member" &&
+    target.member === "time" &&
+    target.object.kind === "context-root" &&
+    target.object.context === "current"
+  )
+    return { native: "activity", activities: new Set(["page", "event"]) };
+  if (target.kind === "member" && target.member === "time") {
+    if (
+      target.object.kind === "entity-root" &&
+      (target.object.entity === "page" || target.object.entity === "event")
+    )
+      return {
+        native: target.object.entity,
+        activities: new Set([target.object.entity]),
+      };
+  }
+
+  // Only a bare field condition inherits its field's entity domain. A
+  // reducer, projection, arithmetic expression, or other wrapper is already
+  // a scalar expression in the current query context; inspecting its nested
+  // field would incorrectly evaluate the whole expression once per activity.
+  const directFieldId =
+    target.kind === "field"
+      ? target.field
+      : target.kind === "member" &&
+          target.object.kind === "context-root" &&
+          ["geo", "client", "referrer", "utm", "user", "performance"].includes(
+            target.object.context,
+          )
+        ? fieldIdFor(target)
+        : undefined;
+  const definition = directFieldId
+    ? analyticsFilterDefinition(directFieldId)
+    : undefined;
+  const conditionEntity = filterConditionEntity(definition);
+  if (conditionEntity === "page" || conditionEntity === "event")
+    return {
+      native: conditionEntity,
+      activities: new Set([conditionEntity]),
+    };
+  if (conditionEntity === "activity")
+    return { native: "activity", activities: new Set(["page", "event"]) };
+  if (conditionEntity === "session" || conditionEntity === "visitor")
+    return { native: conditionEntity, activities: new Set() };
+  if (target.kind === "event-payload")
+    return { native: "event", activities: new Set(["event"]) };
+  return { native: "current", activities: new Set() };
+}
+
+function activitiesForAnchor(
   anchor: FilterEvaluationEntity | undefined,
   context: RuntimeContext,
-): FilterEvaluationEntity[] {
+  activityKinds: ReadonlySet<"page" | "event">,
+  candidate: boolean,
+): readonly FilterEvaluationEntity[] {
   if (!anchor) return [];
-  const records = [...context.candidatePages, ...context.candidateEvents];
-  if (anchor.kind === "session")
-    return records.filter((item) => item.sessionId === anchor.id);
-  if (anchor.kind === "visitor")
-    return records.filter((item) => item.visitorId === anchor.id);
-  return records.filter(
-    (item) => item.id === anchor.id || item.visitId === anchor.visitId,
-  );
+  if (activityKinds.size === 0) return [];
+  const allActivities = activityKinds.has("page") && activityKinds.has("event");
+  if (allActivities) {
+    const visitorIndex = candidate
+      ? context.candidateActivitiesByVisitor
+      : context.activitiesByVisitor;
+    const sessionIndex = candidate
+      ? context.candidateActivitiesBySession
+      : context.activitiesBySession;
+    if (anchor.kind === "session") return indexed(sessionIndex, anchor.id);
+    if (anchor.kind === "visitor") return indexed(visitorIndex, anchor.id);
+    if (anchor.sessionId) return indexed(sessionIndex, anchor.sessionId);
+    return [anchor];
+  }
+  const pageIndex = candidate
+    ? context.candidatePagesBySession
+    : context.pagesBySession;
+  const eventIndex = candidate
+    ? context.candidateEventsBySession
+    : context.eventsBySession;
+  const pageVisitorIndex = candidate
+    ? context.candidatePagesByVisitor
+    : context.pagesByVisitor;
+  const eventVisitorIndex = candidate
+    ? context.candidateEventsByVisitor
+    : context.eventsByVisitor;
+  let pages: readonly FilterEvaluationEntity[] = [];
+  let events: readonly FilterEvaluationEntity[] = [];
+  if (anchor.kind === "session") {
+    pages = indexed(pageIndex, anchor.id);
+    events = indexed(eventIndex, anchor.id);
+  } else if (anchor.kind === "visitor") {
+    pages = indexed(pageVisitorIndex, anchor.id);
+    events = indexed(eventVisitorIndex, anchor.id);
+  } else if (anchor.sessionId) {
+    pages = indexed(pageIndex, anchor.sessionId);
+    events = indexed(eventIndex, anchor.sessionId);
+  } else {
+    const direct =
+      anchor.kind === "page" ? context.pagesById : context.eventsById;
+    const value = indexed(direct, anchor.id);
+    pages = value.filter((item) => item.kind === "page");
+    events = value.filter((item) => item.kind === "event");
+  }
+  const selected = activityKinds.has("page") ? pages : events;
+  return selected;
+}
+
+function resolveConditionSubjects(
+  target: FilterTargetExpression,
+  frame: RuntimeFrame,
+  context: RuntimeContext,
+): ConditionSubjectResolution {
+  const current = currentEntity(frame);
+  if (!current) return { mode: "direct", subjects: [] };
+  const domain = conditionSubjectDomain(target);
+  const legacyCandidate = frame.topLevel && isLegacyFilterTarget(target);
+  if (legacyCandidate) {
+    if (context.options.scope === "event")
+      return { mode: "direct", subjects: [current] };
+    return {
+      mode: "existential",
+      subjects: activitiesForAnchor(
+        current,
+        context,
+        new Set(["page", "event"]),
+        true,
+      ),
+    };
+  }
+
+  if (domain.native === "current")
+    return { mode: "direct", subjects: [current] };
+
+  if (current.kind === "session" || current.kind === "visitor") {
+    if (domain.native === current.kind)
+      return { mode: "direct", subjects: [current] };
+    if (domain.native === "visitor" && current.kind === "session") {
+      return {
+        mode: "direct",
+        subjects: indexed(context.visitorsById, current.visitorId),
+      };
+    }
+    if (domain.native === "session" && current.kind === "visitor")
+      return {
+        mode: "existential",
+        subjects: indexed(context.sessionsByVisitor, current.id),
+      };
+    if (
+      domain.native === "page" ||
+      domain.native === "event" ||
+      domain.native === "activity"
+    )
+      return {
+        mode: "existential",
+        subjects: activitiesForAnchor(
+          current,
+          context,
+          domain.activities,
+          false,
+        ),
+      };
+  }
+
+  if (current.kind === "page" || current.kind === "event") {
+    if (domain.native === current.kind || domain.activities.has(current.kind))
+      return { mode: "direct", subjects: [current] };
+    if (domain.native === "session")
+      return {
+        mode: "direct",
+        subjects: indexed(context.sessionsById, current.sessionId),
+      };
+    if (domain.native === "visitor")
+      return {
+        mode: "direct",
+        subjects: indexed(context.visitorsById, current.visitorId),
+      };
+    if (domain.native === "activity")
+      return { mode: "direct", subjects: [current] };
+  }
+
+  return { mode: "direct", subjects: [current] };
 }
 
 function conditionMatchesOnEntity(
@@ -1230,13 +1552,22 @@ function fieldIdFor(target: FilterTargetExpression): string | undefined {
     current = current.object;
   }
   while (current.kind === "reducer") current = current.input;
-  if (current.kind !== "entity-root" || members.length === 0) return undefined;
+  if (members.length === 0) return undefined;
 
   const orderedMembers = members.reverse();
   const paths = orderedMembers.map((_, index) =>
     [...orderedMembers.slice(index)].join("."),
   );
-  paths.unshift(`${current.entity}.${orderedMembers.join(".")}`);
+  if (current.kind === "entity-root")
+    paths.unshift(`${current.entity}.${orderedMembers.join(".")}`);
+  else if (
+    current.kind === "context-root" &&
+    ["geo", "client", "referrer", "utm", "user", "performance"].includes(
+      current.context,
+    )
+  )
+    paths.unshift(`${current.context}.${orderedMembers.join(".")}`);
+  else return undefined;
   return paths.find((fieldId) => analyticsFilterRegistry.has(fieldId));
 }
 
@@ -1306,6 +1637,11 @@ export function evaluateFilterDocument(
 ): FilterEvaluationResult {
   const normalized = normalizeFilterDocument(document, analyticsFilterRegistry);
   const analysis = analyzeFilterDocument(normalized, analyticsFilterRegistry);
+  validateFilterConditionDomains(
+    normalized,
+    options.scope,
+    analyticsFilterRegistry,
+  );
   validateFilterRelationDomains(normalized, options.scope, analysis);
   const context = createRuntimeContext(dataset, options, analysis);
   const matchingScopeEntityIds = new Set<string>();

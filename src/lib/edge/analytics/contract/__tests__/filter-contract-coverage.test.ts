@@ -78,7 +78,7 @@ describe("query contract boundary coverage", () => {
 
   it("exposes the v4 field inventory and typed metadata", () => {
     expect(analyticsFilterRegistry.size).toBe(49);
-    expect(ANALYTICS_FILTER_REGISTRY_REVISION).toBe("analytics-filter-v4");
+    expect(ANALYTICS_FILTER_REGISTRY_REVISION).toBe("analytics-filter-v5");
     expect([...ANALYTICS_FILTER_FIELD_IDS].slice(31)).toEqual([
       "page.durationMs",
       "session.durationMs",

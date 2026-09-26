@@ -821,6 +821,72 @@ describe("D1 advanced filter execution", () => {
     });
     expect(withoutBetweenEndpoints.d1).toEqual(["session-a"]);
     expect(withoutBetweenEndpoints.mock).toEqual(withoutBetweenEndpoints.d1);
+
+    const descendantActivities: readonly SharedActivity[] = [
+      {
+        visitId: "descendant-page-a",
+        sessionId: "descendant-session",
+        visitorId: "descendant-visitor",
+        pageTimeMs: 10,
+        pathname: "/home",
+        title: "Home",
+      },
+      {
+        visitId: "descendant-page-b",
+        sessionId: "descendant-session",
+        visitorId: "descendant-visitor",
+        pageTimeMs: 20,
+        pathname: "/pricing",
+        title: "Checkout",
+      },
+      {
+        visitId: "descendant-event-c",
+        sessionId: "descendant-session",
+        visitorId: "descendant-visitor",
+        pageTimeMs: 25,
+        pathname: "/other",
+        event: {
+          id: "descendant-event-c:purchase",
+          name: "purchase",
+          timeMs: 30,
+        },
+      },
+    ];
+    const lifted = await evaluateSharedFixture({
+      activities: descendantActivities,
+      filterDsl:
+        'session { page.path eq "/pricing" AND event.name eq "purchase" } exists',
+      scope: "session",
+      candidateRange: sharedRange,
+      reportingTimeZone: "UTC",
+      capturedAtMs: 25_000,
+    });
+    expect(lifted.d1).toEqual(["descendant-session"]);
+    expect(lifted.mock).toEqual(lifted.d1);
+
+    const independentlyLifted = await evaluateSharedFixture({
+      activities: descendantActivities,
+      filterDsl:
+        'session { page.path eq "/pricing" AND page.title eq "Home" } exists',
+      scope: "session",
+      candidateRange: sharedRange,
+      reportingTimeZone: "UTC",
+      capturedAtMs: 25_000,
+    });
+    expect(independentlyLifted.d1).toEqual(["descendant-session"]);
+    expect(independentlyLifted.mock).toEqual(independentlyLifted.d1);
+
+    const samePageOnly = await evaluateSharedFixture({
+      activities: descendantActivities,
+      filterDsl:
+        'session { page { page.path eq "/pricing" AND page.title eq "Home" } exists } exists',
+      scope: "session",
+      candidateRange: sharedRange,
+      reportingTimeZone: "UTC",
+      capturedAtMs: 25_000,
+    });
+    expect(samePageOnly.d1).toEqual([]);
+    expect(samePageOnly.mock).toEqual(samePageOnly.d1);
   });
 
   it("keeps Legacy string predicates and canonical scope facts consistent across providers", async () => {
@@ -1118,6 +1184,51 @@ describe("D1 advanced filter execution", () => {
     expect(automaticHistory.d1).toEqual(["advanced-visitor"]);
     expect(automaticHistory.mock).toEqual(automaticHistory.d1);
 
+    const narrowedNumber = await evaluateSharedFixture({
+      activities,
+      filterDsl: 'first(event.payload("/amount")) eq 20',
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(narrowedNumber.d1).toEqual(["advanced-visitor"]);
+    expect(narrowedNumber.mock).toEqual(narrowedNumber.d1);
+
+    const narrowedString = await evaluateSharedFixture({
+      activities,
+      filterDsl: 'first(event.payload("/amount")) eq "0"',
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(narrowedString.d1).toEqual(["advanced-visitor"]);
+    expect(narrowedString.mock).toEqual(narrowedString.d1);
+
+    const narrowedSet = await evaluateSharedFixture({
+      activities,
+      filterDsl: 'first(event.payload("/amount")) in [20, 30]',
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(narrowedSet.d1).toEqual(["advanced-visitor"]);
+    expect(narrowedSet.mock).toEqual(narrowedSet.d1);
+
+    const wrappedHistory = await evaluateSharedFixture({
+      activities,
+      filterDsl:
+        'first(periods(event { event.name eq "purchase" AND time gte @now-19s }, 1d)).items exists',
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(wrappedHistory.d1).toEqual(["advanced-visitor"]);
+    expect(wrappedHistory.mock).toEqual(wrappedHistory.d1);
+
     const durationRange = await evaluateSharedFixture({
       activities,
       filterDsl:
@@ -1153,6 +1264,42 @@ describe("D1 advanced filter execution", () => {
     });
     expect(sessionRelation.d1).toEqual([]);
     expect(sessionRelation.mock).toEqual(sessionRelation.d1);
+  });
+
+  it("applies top-level Activity time to aggregate Scopes without removing the predicate", async () => {
+    const activities: readonly SharedActivity[] = [
+      {
+        visitId: "old-history",
+        sessionId: "old-session",
+        visitorId: "visitor-with-old-activity",
+        pageTimeMs: 500,
+        pathname: "/old",
+      },
+      {
+        visitId: "old-candidate",
+        sessionId: "old-session",
+        visitorId: "visitor-with-old-activity",
+        pageTimeMs: 15_000,
+        pathname: "/candidate",
+      },
+      {
+        visitId: "new-candidate",
+        sessionId: "new-session",
+        visitorId: "visitor-without-old-activity",
+        pageTimeMs: 16_000,
+        pathname: "/candidate",
+      },
+    ];
+    const result = await evaluateSharedFixture({
+      activities,
+      filterDsl: 'time lt @now-19s AND page.path eq "/candidate"',
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(result.d1).toEqual(["visitor-with-old-activity"]);
+    expect(result.mock).toEqual(result.d1);
   });
 
   it("keeps DST buckets, natural periods, and empty reducers consistent across providers", async () => {

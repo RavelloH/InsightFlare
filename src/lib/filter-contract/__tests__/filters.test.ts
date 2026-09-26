@@ -7,6 +7,7 @@ import {
   assertFilterAudience,
   attachFilterScopePreference,
   filterConditionCount,
+  filterConditionEntity,
   type FilterFieldDefinition,
   type FilterFieldRegistry,
   filterFingerprint,
@@ -138,6 +139,22 @@ describe("typed filter contract", () => {
       empty: "raw-empty-string",
       comparison: "case-sensitive",
     });
+    expect(filterConditionEntity(analyticsFilterDefinition("page.path"))).toBe(
+      "page",
+    );
+    expect(filterConditionEntity(analyticsFilterDefinition("event.name"))).toBe(
+      "event",
+    );
+    expect(
+      filterConditionEntity(analyticsFilterDefinition("session.durationMs")),
+    ).toBe("session");
+    expect(
+      filterConditionEntity(analyticsFilterDefinition("visitor.sessions")),
+    ).toBe("visitor");
+    expect(
+      filterConditionEntity(analyticsFilterDefinition("geo.country")),
+    ).toBe("activity");
+    expect(filterConditionEntity(undefined)).toBeUndefined();
     expect(analyticsFilterRegistry.get("session.entryPath")).toMatchObject({
       source: "session",
       presence: "derived-session-value",

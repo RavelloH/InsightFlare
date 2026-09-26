@@ -316,6 +316,7 @@ describe("API v1 comparison v2 handler", () => {
     const response = await handleSiteComparison(
       request({
         ...baseBody,
+        scope: "visitor",
         select: { metrics: ["views"] },
         current: {
           ...baseBody.current,

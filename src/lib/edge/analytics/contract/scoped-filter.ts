@@ -1,11 +1,16 @@
-import { analyzeFilterHistory } from "@/lib/filter-contract/filter-history";
+import {
+  analyzeFilterHistory,
+  type FilterHistoryRequirement,
+} from "@/lib/filter-contract/filter-history";
 import {
   analyticsFilterDefinition,
   analyticsFilterRegistry,
   type FilterFieldSource,
 } from "@/lib/filter-contract/filter-registry";
-import { analyzeFilterDocument } from "@/lib/filter-contract/filter-semantics";
-import { prepareFilterTimeRange } from "@/lib/filter-contract/filter-time-range";
+import {
+  analyzeFilterDocument,
+  validateFilterConditionDomains,
+} from "@/lib/filter-contract/filter-semantics";
 import {
   filterDocumentUsesAdvancedExpressions,
   validateFilterRelationDomains,
@@ -401,12 +406,8 @@ export function prepareScopedQuery(
       operation === "channels") &&
     isComparisonQuery(query)
   ) {
-    return prepareScopedComparisonQuery(
-      operation,
-      prepareComparisonFilterTimeRanges(query),
-    );
+    return prepareScopedComparisonQuery(operation, query);
   }
-  query = prepareFilterTimeWindow(query);
   const requestedScope = normalizeFilterScopePreference(
     query.scopePreference ?? filterScopePreferenceFromDocument(query.filters),
   );
@@ -423,158 +424,41 @@ export function prepareScopedQuery(
     reconciledScope,
   );
   if (!plan) return { ...query, scopePreference: requestedScope };
-  validateFilterRelationDomains(
-    query.filters ?? { version: 1, root: null },
-    plan.scope,
-    analyzeFilterDocument(
-      query.filters ?? { version: 1, root: null },
-      analyticsFilterRegistry,
-    ),
+  const filters = query.filters ?? { version: 1, root: null };
+  const semanticAnalysis = analyzeFilterDocument(
+    filters,
+    analyticsFilterRegistry,
   );
+  validateFilterConditionDomains(filters, plan.scope, analyticsFilterRegistry);
+  validateFilterRelationDomains(filters, plan.scope, semanticAnalysis);
   const time =
     "time" in query && query.time ? (query.time as QueryTime) : undefined;
   if (!time) {
     throw new Error("scoped_query_requires_time");
   }
+  const history = analyzeFilterHistory(
+    semanticAnalysis,
+    time.range,
+    time.capturedAtMs,
+    plan.scope,
+  );
+  const plannedTime = timeWithFilterHistory(time, history);
   const subject = query.context.subject;
   const siteIds =
     subject.kind === "site" ? [subject.siteId] : [...subject.authorizedSiteIds];
   return {
     ...query,
+    time: plannedTime,
     scopePreference: requestedScope,
     scopePlan: plan,
-    filters: attachScopedFilterMetadata(
-      query.filters ?? { version: 1, root: null },
-      {
-        requestedScope,
-        resolvedScope: plan.scope,
-        plan,
-        time,
-        siteIds,
-      },
-    ),
-  };
-}
-
-function prepareFilterTimeWindow(query: QueryInput): QueryInput {
-  if (!("time" in query) || !query.time || !query.filters?.root) return query;
-  const time = query.time as QueryTime;
-  const prepared = prepareFilterTimeRange(
-    query.filters,
-    time.range,
-    time.capturedAtMs,
-  );
-  const semanticAnalysis = analyzeFilterDocument(
-    prepared.filters,
-    analyticsFilterRegistry,
-  );
-  const history = analyzeFilterHistory(
-    semanticAnalysis,
-    time.range,
-    time.capturedAtMs,
-  );
-  const ranges = [
-    prepared.evaluationRange,
-    history.kind === "bounded"
-      ? { startMs: history.startMs, endExclusiveMs: history.endExclusiveMs }
-      : undefined,
-  ].filter((range): range is NonNullable<typeof range> => range !== undefined);
-  const evaluationRange = ranges.length
-    ? {
-        startMs: Math.min(...ranges.map((range) => range.startMs)),
-        endExclusiveMs: Math.max(
-          ...ranges.map((range) => range.endExclusiveMs),
-        ),
-      }
-    : undefined;
-  const fullHistory = history.kind === "full-history";
-  if (!evaluationRange && !fullHistory && !prepared.evaluationRange)
-    return query;
-  if (!filterDocumentUsesAdvancedExpressions(prepared.filters))
-    throw new TypeError("filter_time_range_requires_advanced_expression");
-  return {
-    ...query,
-    filters: prepared.filters,
-    time: {
-      ...time,
-      ...(evaluationRange
-        ? {
-            evaluationRange: {
-              startMs: evaluationRange.startMs as QueryTime["range"]["startMs"],
-              endExclusiveMs:
-                evaluationRange.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
-            },
-          }
-        : {}),
-      ...(fullHistory ? { fullHistory: true } : {}),
-    },
+    filters: attachScopedFilterMetadata(filters, {
+      requestedScope,
+      resolvedScope: plan.scope,
+      plan,
+      time: plannedTime,
+      siteIds,
+    }),
   } as QueryInput;
-}
-
-function prepareComparisonFilterTimeRanges(
-  query: ComparisonQueryInput,
-): ComparisonQueryInput {
-  const prepareSide = (side: ComparisonSideInput): ComparisonSideInput => {
-    if (!side.filters?.root) return side;
-    const prepared = prepareFilterTimeRange(
-      side.filters,
-      side.time.range,
-      side.time.capturedAtMs,
-    );
-    const semanticAnalysis = analyzeFilterDocument(
-      prepared.filters,
-      analyticsFilterRegistry,
-    );
-    const history = analyzeFilterHistory(
-      semanticAnalysis,
-      side.time.range,
-      side.time.capturedAtMs,
-    );
-    const ranges = [
-      prepared.evaluationRange,
-      history.kind === "bounded"
-        ? { startMs: history.startMs, endExclusiveMs: history.endExclusiveMs }
-        : undefined,
-    ].filter(
-      (range): range is NonNullable<typeof range> => range !== undefined,
-    );
-    const evaluationRange = ranges.length
-      ? {
-          startMs: Math.min(...ranges.map((range) => range.startMs)),
-          endExclusiveMs: Math.max(
-            ...ranges.map((range) => range.endExclusiveMs),
-          ),
-        }
-      : undefined;
-    const fullHistory = history.kind === "full-history";
-    if (!evaluationRange && !fullHistory && !prepared.evaluationRange)
-      return side;
-    if (!filterDocumentUsesAdvancedExpressions(prepared.filters))
-      throw new TypeError("filter_time_range_requires_advanced_expression");
-    return {
-      ...side,
-      filters: prepared.filters,
-      time: {
-        ...side.time,
-        ...(evaluationRange
-          ? {
-              evaluationRange: {
-                startMs:
-                  evaluationRange.startMs as QueryTime["range"]["startMs"],
-                endExclusiveMs:
-                  evaluationRange.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
-              },
-            }
-          : {}),
-        ...(fullHistory ? { fullHistory: true } : {}),
-      },
-    };
-  };
-  return {
-    ...query,
-    current: prepareSide(query.current),
-    reference: prepareSide(query.reference),
-  };
 }
 
 interface ComparisonSideInput {
@@ -582,6 +466,31 @@ interface ComparisonSideInput {
   readonly filters?: FilterDocument;
   readonly scopePreference?: FilterScopePreference;
   readonly [key: string]: unknown;
+}
+
+function timeWithFilterHistory(
+  time: QueryTime,
+  history: FilterHistoryRequirement,
+): QueryTime {
+  const base: QueryTime = {
+    range: time.range,
+    reportingTimeZone: time.reportingTimeZone,
+    capturedAtMs: time.capturedAtMs,
+    ...(time.paginationBinding !== undefined
+      ? { paginationBinding: time.paginationBinding }
+      : {}),
+  };
+  if (history.kind === "full-history") return { ...base, fullHistory: true };
+  if (history.kind === "bounded")
+    return {
+      ...base,
+      evaluationRange: {
+        startMs: history.startMs as QueryTime["range"]["startMs"],
+        endExclusiveMs:
+          history.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
+      },
+    };
+  return base;
 }
 
 interface ComparisonQueryInput extends QueryInput {
@@ -634,40 +543,45 @@ function prepareScopedComparisonQuery(
   );
   if (!currentPlan || !referencePlan)
     throw new Error("unsupported_filter_scope");
-  validateFilterRelationDomains(
-    current.side.filters ?? { version: 1, root: null },
-    resolvedScope,
-    analyzeFilterDocument(
-      current.side.filters ?? { version: 1, root: null },
+  const prepareResolvedSide = (side: ComparisonSideInput) => {
+    const filters = side.filters ?? { version: 1, root: null };
+    const semanticAnalysis = analyzeFilterDocument(
+      filters,
       analyticsFilterRegistry,
-    ),
-  );
-  validateFilterRelationDomains(
-    reference.side.filters ?? { version: 1, root: null },
-    resolvedScope,
-    analyzeFilterDocument(
-      reference.side.filters ?? { version: 1, root: null },
+    );
+    validateFilterConditionDomains(
+      filters,
+      resolvedScope,
       analyticsFilterRegistry,
-    ),
-  );
+    );
+    validateFilterRelationDomains(filters, resolvedScope, semanticAnalysis);
+    const history = analyzeFilterHistory(
+      semanticAnalysis,
+      side.time.range,
+      side.time.capturedAtMs,
+      resolvedScope,
+    );
+    const time = timeWithFilterHistory(side.time, history);
+    return { ...side, filters, time };
+  };
   const scopedSide = (prepared: {
     side: ComparisonSideInput;
     plan: ScopedFilterPlan;
     callerScope: FilterScopePreference;
-  }): ComparisonSideInput => ({
-    ...prepared.side,
-    scopePreference: resolvedScope,
-    filters: attachScopedFilterMetadata(
-      prepared.side.filters ?? { version: 1, root: null },
-      {
+  }): ComparisonSideInput => {
+    const resolvedSide = prepareResolvedSide(prepared.side);
+    return {
+      ...resolvedSide,
+      scopePreference: resolvedScope,
+      filters: attachScopedFilterMetadata(resolvedSide.filters!, {
         requestedScope: prepared.callerScope,
         resolvedScope,
         plan: prepared.plan,
-        time: prepared.side.time,
+        time: resolvedSide.time,
         siteIds,
-      },
-    ),
-  });
+      }),
+    };
+  };
   return {
     ...query,
     scopePreference: requestedScope,

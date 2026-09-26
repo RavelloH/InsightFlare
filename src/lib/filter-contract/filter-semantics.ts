@@ -1,3 +1,5 @@
+import { filterConditionEntity } from "./filter-registry";
+import type { FilterRelationScope } from "./filter-types";
 import {
   type FilterScalarType,
   type FilterSemanticValueType,
@@ -8,9 +10,11 @@ import type {
   FilterCondition,
   FilterDocument,
   FilterExpression,
+  FilterFieldDefinition,
   FilterFieldRegistry,
   FilterTargetExpression,
 } from "./filters";
+import { FilterValidationError, isLegacyFilterTarget } from "./filters";
 
 export interface FilterConditionSemantics {
   readonly valueType: FilterSemanticValueType;
@@ -56,6 +60,10 @@ function knownLiteralType(value: unknown): FilterScalarType | null {
   if (typeof value === "number") return "number";
   if (typeof value === "boolean") return "boolean";
   return typeof value === "string" ? "string" : null;
+}
+
+function setValueType(value: unknown): FilterScalarType | null {
+  return knownLiteralType(value);
 }
 
 function isDynamicScalar(type: FilterScalarType): boolean {
@@ -137,9 +145,10 @@ function visitExpression(
     expression.target.object.context === "current";
   const valueType = state.targetTypes.get(expression.target)!;
   const leftType = scalarType(valueType);
-  const firstValue = Array.isArray(expression.value)
-    ? expression.value[0]
-    : expression.value;
+  const values = Array.isArray(expression.value)
+    ? expression.value
+    : [expression.value];
+  const firstValue = values[0];
   const expected =
     firstValue &&
     typeof firstValue === "object" &&
@@ -154,7 +163,22 @@ function visitExpression(
     !isDynamicScalar(expected)
       ? expected
       : leftType;
+  const setTypes = values.map(setValueType);
+  const homogeneousSetType =
+    setTypes.length > 0 &&
+    setTypes[0] !== null &&
+    setTypes.every((type) => type === setTypes[0])
+      ? setTypes[0]
+      : null;
+  const narrowingExpectation =
+    expression.operator === "in" || expression.operator === "notIn"
+      ? homogeneousSetType
+      : effectiveExpected;
   const narrowsPayloadType = [
+    "eq",
+    "neq",
+    "in",
+    "notIn",
     "gt",
     "gte",
     "lt",
@@ -165,13 +189,14 @@ function visitExpression(
     "endsWith",
   ].includes(expression.operator);
   if (
+    !isLegacyFilterTarget(expression.target) &&
     narrowsPayloadType &&
-    effectiveExpected &&
-    !isDynamicScalar(effectiveExpected)
+    narrowingExpectation &&
+    !isDynamicScalar(narrowingExpectation)
   )
     narrowTarget(
       expression.target,
-      effectiveExpected,
+      narrowingExpectation,
       state.expectedTargetTypes,
     );
 
@@ -181,6 +206,282 @@ function visitExpression(
     ...(narrowed ? { expectedType: narrowed } : {}),
     ...(temporalPredicate ? { temporalPredicate: true } : {}),
   });
+}
+
+type NativeEntity = "page" | "event" | "session" | "visitor" | "activity";
+function fieldIdForTarget(target: FilterTargetExpression): string | undefined {
+  if (target.kind === "field") return target.field;
+  if (target.kind === "event-payload") return "event.payload";
+  if (target.kind === "projection" && target.member === "payload")
+    return "event.payload";
+  if (target.kind !== "member") return undefined;
+  const members: string[] = [];
+  let current: FilterTargetExpression = target;
+  while (current.kind === "member") {
+    members.push(current.member);
+    current = current.object;
+  }
+  if (current.kind === "entity-root")
+    return `${current.entity}.${members.reverse().join(".")}`;
+  if (
+    current.kind === "context-root" &&
+    ["geo", "client", "referrer", "utm", "user", "performance"].includes(
+      current.context,
+    )
+  )
+    return `${current.context}.${members.reverse().join(".")}`;
+  return undefined;
+}
+
+function nativeEntityForTarget(
+  target: FilterTargetExpression,
+  registry: FilterFieldRegistry,
+): {
+  readonly entity: NativeEntity;
+  readonly definition?: FilterFieldDefinition;
+} {
+  if (
+    target.kind === "member" &&
+    target.member === "time" &&
+    target.object.kind === "context-root" &&
+    target.object.context === "current"
+  )
+    return { entity: "activity" };
+  if (target.kind === "member" && target.member === "time") {
+    const parent = target.object;
+    if (
+      parent.kind === "entity-root" &&
+      (parent.entity === "page" || parent.entity === "event")
+    )
+      return { entity: parent.entity };
+  }
+  const fieldId = fieldIdForTarget(target);
+  const definition = fieldId ? registry.get(fieldId) : undefined;
+  const entity = filterConditionEntity(definition);
+  if (entity) return { entity, definition };
+  if (target.kind === "event-payload") return { entity: "event", definition };
+  if (target.kind === "member" && target.object.kind === "entity-root")
+    return { entity: target.object.entity };
+  if (target.kind === "projection") {
+    const collection = target.collection;
+    if (collection.kind === "entity-root") return { entity: collection.entity };
+  }
+  return { entity: "activity", definition };
+}
+
+function collectionEntity(
+  target: FilterTargetExpression,
+): NativeEntity | undefined {
+  if (target.kind === "entity-root") return target.entity;
+  if (target.kind === "selector") return collectionEntity(target.collection);
+  if (target.kind === "member") return collectionEntity(target.object);
+  if (target.kind === "projection") return collectionEntity(target.collection);
+  if (target.kind === "reducer") return collectionEntity(target.input);
+  if (target.kind === "window") return collectionEntity(target.collection);
+  if (target.kind === "periods") return collectionEntity(target.collection);
+  return undefined;
+}
+
+/** Rejects Page/Event sibling reads from a single-activity selector. */
+export function validateFilterConditionDomains(
+  document: FilterDocument,
+  resolvedScope: FilterRelationScope,
+  registry: FilterFieldRegistry,
+): void {
+  if (!document.root) return;
+
+  const visitTarget = (
+    target: FilterTargetExpression,
+    domain: NativeEntity,
+    strictActivityAnchor: boolean,
+    path: string,
+  ): void => {
+    if (target.kind === "selector") {
+      const entity = collectionEntity(target.collection);
+      if (
+        strictActivityAnchor &&
+        (domain === "page" || domain === "event") &&
+        (entity === "page" || entity === "event") &&
+        entity !== domain
+      )
+        throw new FilterValidationError(
+          "invalid_condition_entity_domain",
+          `${path}.collection`,
+          "Page and Event sibling selectors require a Session or Visitor anchor.",
+        );
+      const predicateDomain = entity ?? domain;
+      visitExpression(
+        target.predicate,
+        predicateDomain,
+        predicateDomain === "page" || predicateDomain === "event",
+        `${path}.predicate`,
+      );
+      visitTarget(
+        target.collection,
+        domain,
+        strictActivityAnchor,
+        `${path}.collection`,
+      );
+      return;
+    }
+    switch (target.kind) {
+      case "member":
+        visitTarget(
+          target.object,
+          domain,
+          strictActivityAnchor,
+          `${path}.object`,
+        );
+        break;
+      case "projection":
+        visitTarget(
+          target.collection,
+          domain,
+          strictActivityAnchor,
+          `${path}.collection`,
+        );
+        break;
+      case "reducer":
+        visitTarget(
+          target.input,
+          domain,
+          strictActivityAnchor,
+          `${path}.input`,
+        );
+        break;
+      case "arithmetic":
+        visitTarget(target.left, domain, strictActivityAnchor, `${path}.left`);
+        visitTarget(
+          target.right,
+          domain,
+          strictActivityAnchor,
+          `${path}.right`,
+        );
+        break;
+      case "bucket":
+        visitTarget(
+          target.input,
+          domain,
+          strictActivityAnchor,
+          `${path}.input`,
+        );
+        break;
+      case "window":
+        visitTarget(
+          target.collection,
+          domain,
+          strictActivityAnchor,
+          `${path}.collection`,
+        );
+        visitTarget(
+          target.anchor,
+          domain,
+          strictActivityAnchor,
+          `${path}.anchor`,
+        );
+        break;
+      case "periods":
+        visitTarget(
+          target.collection,
+          domain,
+          strictActivityAnchor,
+          `${path}.collection`,
+        );
+        break;
+      case "sequence":
+        target.steps.forEach((step, index) =>
+          visitTarget(
+            step,
+            domain,
+            strictActivityAnchor,
+            `${path}.steps[${index}]`,
+          ),
+        );
+        break;
+      case "adjacent":
+        visitTarget(
+          target.sequence,
+          domain,
+          strictActivityAnchor,
+          `${path}.sequence`,
+        );
+        break;
+      case "without":
+        visitTarget(
+          target.sequence,
+          domain,
+          strictActivityAnchor,
+          `${path}.sequence`,
+        );
+        visitTarget(
+          target.excluded,
+          domain,
+          strictActivityAnchor,
+          `${path}.excluded`,
+        );
+        break;
+    }
+  };
+
+  const visitExpression = (
+    expression: FilterExpression,
+    domain: NativeEntity,
+    strictActivityAnchor: boolean,
+    path: string,
+  ): void => {
+    if (expression.kind === "condition") {
+      if (strictActivityAnchor && (domain === "page" || domain === "event")) {
+        const native = nativeEntityForTarget(expression.target, registry);
+        const isSiblingField =
+          (native.entity === "page" || native.entity === "event") &&
+          native.entity !== domain;
+        if (isSiblingField)
+          throw new FilterValidationError(
+            "invalid_condition_entity_domain",
+            `${path}.target`,
+            `${domain} selectors cannot read sibling ${native.entity} fields. Use a Session or Visitor selector.`,
+          );
+      }
+      visitTarget(
+        expression.target,
+        domain,
+        strictActivityAnchor,
+        `${path}.target`,
+      );
+      if (
+        expression.value &&
+        typeof expression.value === "object" &&
+        !Array.isArray(expression.value) &&
+        "kind" in expression.value
+      )
+        visitTarget(
+          expression.value as FilterTargetExpression,
+          domain,
+          strictActivityAnchor,
+          `${path}.value`,
+        );
+      return;
+    }
+    if (expression.kind === "not") {
+      visitExpression(
+        expression.child,
+        domain,
+        strictActivityAnchor,
+        `${path}.child`,
+      );
+      return;
+    }
+    expression.children.forEach((child, index) =>
+      visitExpression(
+        child,
+        domain,
+        strictActivityAnchor,
+        `${path}.children[${index}]`,
+      ),
+    );
+  };
+
+  visitExpression(document.root, resolvedScope, false, "root");
 }
 
 function narrowTarget(

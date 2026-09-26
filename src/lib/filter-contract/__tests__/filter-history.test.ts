@@ -14,7 +14,10 @@ import type {
 
 const candidate = { startMs: 80_000, endExclusiveMs: 90_000 };
 
-function history(source: string) {
+function history(
+  source: string,
+  scope: "event" | "session" | "visitor" = "visitor",
+) {
   return analyzeFilterHistory(
     analyzeFilterDocument(
       parseFilterDsl(source, analyticsFilterRegistry),
@@ -22,6 +25,7 @@ function history(source: string) {
     ),
     candidate,
     100_000,
+    scope,
   );
 }
 
@@ -64,7 +68,7 @@ function historyForUnvalidatedTimeCondition(
     document,
     conditions,
   } as unknown as AnalyzedFilterDocument;
-  return analyzeFilterHistory(analysis, candidate, 100_000);
+  return analyzeFilterHistory(analysis, candidate, 100_000, "visitor");
 }
 
 function historyForUnvalidatedWindow(startOffsetUnit: string) {
@@ -109,7 +113,7 @@ function historyForUnvalidatedWindow(startOffsetUnit: string) {
     document,
     conditions,
   } as unknown as AnalyzedFilterDocument;
-  return analyzeFilterHistory(analysis, candidate, 100_000);
+  return analyzeFilterHistory(analysis, candidate, 100_000, "visitor");
 }
 
 describe("Filter history requirements", () => {
@@ -123,6 +127,7 @@ describe("Filter history requirements", () => {
         analyzeFilterDocument(document, analyticsFilterRegistry),
         candidate,
         100_000,
+        "visitor",
       ),
     ).toEqual({
       kind: "bounded",
@@ -225,6 +230,27 @@ describe("Filter history requirements", () => {
     ).toEqual({ kind: "full-history" });
   });
 
+  it("uses the bounded sequence domain for without exclusions", () => {
+    const sequence =
+      'sequence([event { event.name eq "signup" AND time gte @now-30d }, event { event.name eq "purchase" AND time gte @now-30d }])';
+    expect(
+      history(`without(${sequence}, event { event.name eq "cancel" }) exists`),
+    ).toEqual({
+      kind: "bounded",
+      startMs: 100_000 - 30 * 86_400_000,
+      endExclusiveMs: 100_001,
+    });
+    expect(
+      history(
+        `without(${sequence}, event { event.name eq "cancel" AND time gte @now-90d }) exists`,
+      ),
+    ).toEqual({
+      kind: "bounded",
+      startMs: 100_000 - 90 * 86_400_000,
+      endExclusiveMs: 100_001,
+    });
+  });
+
   it("keeps non-temporal and empty documents candidate-bound", () => {
     expect(history("")).toEqual({ kind: "candidate-only" });
     expect(history("count(event) gte 1")).toEqual({ kind: "candidate-only" });
@@ -297,6 +323,28 @@ describe("Filter history requirements", () => {
     ).toEqual({ kind: "full-history" });
   });
 
+  it("preserves nested selector coverage and empty bounded domains", () => {
+    const ninetyDays = {
+      kind: "bounded",
+      startMs: 100_000 - 90 * 86_400_000,
+      endExclusiveMs: 100_001,
+    };
+    expect(
+      history("count(event { time gte @now-90d } { time gte @now-30d }) gte 1"),
+    ).toEqual(ninetyDays);
+    expect(
+      history("count(event { time gte @now-30d } { time lt @now-40d }) gte 1"),
+    ).toEqual({ kind: "candidate-only" });
+  });
+
+  it("uses full history when an exclusion has an upper-only time bound", () => {
+    const sequence =
+      "sequence([event { time gte @now-30d }, event { time gte @now-30d }])";
+    expect(
+      history(`without(${sequence}, event { time lt @now-10d }) exists`),
+    ).toEqual({ kind: "full-history" });
+  });
+
   it("falls back to full history when computed ranges overflow safe timestamps", () => {
     const document = parseFilterDsl(
       "count(event { time gte @now-1ms }) gte 1",
@@ -307,6 +355,7 @@ describe("Filter history requirements", () => {
         analyzeFilterDocument(document, analyticsFilterRegistry),
         { startMs: 0, endExclusiveMs: Number.MAX_SAFE_INTEGER },
         Number.MAX_SAFE_INTEGER,
+        "visitor",
       ),
     ).toEqual({ kind: "full-history" });
 
@@ -319,8 +368,49 @@ describe("Filter history requirements", () => {
         analyzeFilterDocument(windowDocument, analyticsFilterRegistry),
         { startMs: -Number.MAX_SAFE_INTEGER, endExclusiveMs: 0 },
         0,
+        "visitor",
       ),
     ).toEqual({ kind: "full-history" });
+  });
+
+  it("preserves bounded history through periods, buckets, projections, and windows", () => {
+    const bounded = {
+      kind: "bounded",
+      startMs: 100_000 - 30 * 86_400_000,
+      endExclusiveMs: 100_001,
+    };
+    expect(
+      history("first(periods(event { time gte @now-30d }, 1d)).start exists"),
+    ).toEqual(bounded);
+    expect(
+      history(
+        "first(bucket(page { time gte @now-30d }.time, 1d)).start exists",
+      ),
+    ).toEqual(bounded);
+    expect(
+      history('nth(event { time gte @now-30d }.payload("/amount"), 3) eq 3'),
+    ).toEqual(bounded);
+    expect(
+      history(
+        "first(window(event, first(event { time gte @now-30d }).time, [0d, 7d])) exists",
+      ),
+    ).toEqual(bounded);
+    expect(history("first(event) exists")).toEqual({
+      kind: "full-history",
+    });
+  });
+
+  it("plans top-level activity time according to the resolved Scope", () => {
+    const expected = {
+      kind: "bounded",
+      startMs: 100_000 - 30 * 86_400_000,
+      endExclusiveMs: 100_001,
+    };
+    expect(history("time gte @now-30d", "visitor")).toEqual(expected);
+    expect(history("time gte @now-30d", "session")).toEqual(expected);
+    expect(history("time gte @now-30d", "event")).toEqual({
+      kind: "candidate-only",
+    });
   });
 
   it("fails conservatively for endpoints the history planner cannot resolve", () => {

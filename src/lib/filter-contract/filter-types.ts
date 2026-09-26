@@ -1,5 +1,5 @@
 import type { AnalyzedFilterDocument } from "./filter-semantics";
-import type { FilterFieldRegistry } from "./filters";
+import type { FilterFieldDefinition, FilterFieldRegistry } from "./filters";
 import {
   type FilterCondition,
   type FilterDocument,
@@ -72,6 +72,14 @@ function targetPath(target: FilterTargetExpression): string | null {
     return parent ? `${parent}.${target.member}` : target.member;
   }
   return null;
+}
+
+function targetUnit(
+  target: FilterTargetExpression,
+  registry: FilterFieldRegistry,
+): FilterFieldDefinition["unit"] {
+  const path = targetPath(target);
+  return path ? registry.get(path)?.unit : undefined;
 }
 
 function entityMemberType(
@@ -591,6 +599,33 @@ function validateCondition(
   registry: FilterFieldRegistry,
   path: string,
 ): void {
+  if (
+    (condition.operator === "eq" || condition.operator === "neq") &&
+    condition.value === null &&
+    !isLegacyFilterTarget(condition.target)
+  )
+    fail(
+      "null_requires_unary_operator",
+      `${path}.value`,
+      "Use isNull or notNull instead of comparing to null.",
+    );
+  if (
+    (condition.operator === "in" || condition.operator === "notIn") &&
+    !isLegacyFilterTarget(condition.target)
+  ) {
+    const values = Array.isArray(condition.value)
+      ? condition.value
+      : [condition.value];
+    const valueTypes = values
+      .filter((value) => value !== undefined)
+      .map((value) => (value === null ? "null" : typeof value));
+    if (new Set(valueTypes).size > 1)
+      fail(
+        "heterogeneous_set_values",
+        `${path}.value`,
+        "Set values must all use the same JSON scalar type.",
+      );
+  }
   const computedValue = Boolean(
     condition.value &&
     typeof condition.value === "object" &&
@@ -706,7 +741,15 @@ function validateCondition(
           `Expected a valid ${comparableLeft.scalar} literal.`,
         );
     }
-    checkCompatible(left, right, `${path}.value[${index}]`);
+    const rightScalar = valueScalar(right);
+    const durationCompatibleWithMilliseconds =
+      comparableLeft.kind === "scalar" &&
+      comparableLeft.scalar === "number" &&
+      rightScalar.kind === "scalar" &&
+      rightScalar.scalar === "duration" &&
+      targetUnit(condition.target, registry) === "ms";
+    if (!durationCompatibleWithMilliseconds)
+      checkCompatible(left, right, `${path}.value[${index}]`);
   }
   if (operator === "between" && values.length === 2) {
     const endpointTypes = values.map((value, index) => {

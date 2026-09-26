@@ -25,9 +25,9 @@ export interface TimeRange {
 }
 export interface QueryTime {
   readonly range: TimeRange;
-  /** Optional historical evaluation window for v1 Core and Relation nodes. */
+  /** Derived by Filter History Analysis; never authored by the UI or DSL. */
   readonly evaluationRange?: TimeRange;
-  /** Internal planner signal to evaluate against verified site coverage. */
+  /** Derived by Filter History Analysis when complete retained history is needed. */
   readonly fullHistory?: boolean;
   readonly reportingTimeZone: ReportingTimeZone;
   readonly capturedAtMs: EpochMs;

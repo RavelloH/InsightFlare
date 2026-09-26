@@ -128,6 +128,264 @@ describe("filter evaluator", () => {
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
 
+  it("lifts Session descendant fields over every Page and Event in the Session", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        page("first-page", 10, "s-a", "u-a", "/home"),
+        page("later-page", 20, "s-a", "u-a", "/pricing"),
+      ],
+      events: [
+        event("first-event", "signup", 11, "s-a", "u-a"),
+        event("later-event", "purchase", 30, "s-a", "u-a"),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const evaluateSession = (source: string) =>
+      evaluateFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        dataset,
+        {
+          scope: "session",
+          candidateRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 80,
+        },
+      );
+
+    expect(
+      evaluateSession('session { page.path eq "/pricing" } exists')
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["s-a"]));
+    expect(
+      evaluateSession('session { event.name eq "purchase" } exists')
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["s-a"]));
+    expect(
+      evaluateSession(
+        'session { page.path eq "/pricing" AND event.name eq "purchase" } exists',
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["s-a"]));
+  });
+
+  it("keeps bare descendant conditions independent while nested selectors anchor one Page", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        {
+          ...page("page-a", 10, "s-a", "u-a", "/pricing"),
+          fields: { "page.path": "/pricing", "page.title": "Home" },
+        },
+        {
+          ...page("page-b", 20, "s-a", "u-a", "/home"),
+          fields: { "page.path": "/home", "page.title": "Checkout" },
+        },
+      ],
+      events: [],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const evaluateSession = (source: string) =>
+      evaluateFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        dataset,
+        {
+          scope: "session",
+          candidateRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 80,
+        },
+      );
+
+    expect(
+      evaluateSession(
+        'session { page.path eq "/pricing" AND page.title eq "Checkout" } exists',
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["s-a"]));
+    expect(
+      evaluateSession(
+        'session { page { page.path eq "/pricing" AND page.title eq "Checkout" } exists } exists',
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set());
+  });
+
+  it("distinguishes negated equality from existential inequality", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        page("page-home", 10, "s-a", "u-a", "/home"),
+        page("page-pricing", 20, "s-a", "u-a", "/pricing"),
+      ],
+      events: [],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const evaluateSession = (source: string) =>
+      evaluateFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        dataset,
+        {
+          scope: "session",
+          candidateRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 80,
+        },
+      );
+
+    expect(
+      evaluateSession('session { NOT page.path eq "/admin" } exists')
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["s-a"]));
+    expect(
+      evaluateSession('session { NOT page.path eq "/pricing" } exists')
+        .matchingScopeEntityIds,
+    ).toEqual(new Set());
+    expect(
+      evaluateSession('session { page.path neq "/pricing" } exists')
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["s-a"]));
+  });
+
+  it("lifts Visitor conditions to descendant Sessions and Events", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        page("session-a-page", 10, "s-a", "u-a", "/home"),
+        page("session-b-page", 30, "s-b", "u-a", "/pricing"),
+      ],
+      events: [event("purchase", "purchase", 40, "s-b", "u-a")],
+      sessions: [
+        {
+          kind: "session",
+          id: "s-a",
+          time: 10,
+          sessionId: "s-a",
+          visitorId: "u-a",
+          fields: { "session.durationMs": 1_000 },
+        },
+        {
+          kind: "session",
+          id: "s-b",
+          time: 30,
+          sessionId: "s-b",
+          visitorId: "u-a",
+          fields: { "session.durationMs": 400_000 },
+        },
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 1_000_000 },
+    };
+    const evaluateVisitor = (source: string) =>
+      evaluateFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        dataset,
+        {
+          scope: "visitor",
+          candidateRange: { startMs: 0, endExclusiveMs: 1_000_000 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 800_000,
+        },
+      );
+
+    expect(
+      evaluateVisitor('visitor { event.name eq "purchase" } exists')
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["u-a"]));
+    expect(
+      evaluateVisitor("visitor { session.durationMs gt 5m } exists")
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["u-a"]));
+  });
+
+  it("uses registry entity domains for aggregate and activity selectors", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        {
+          ...page(
+            "domain-page",
+            10,
+            "domain-session",
+            "domain-visitor",
+            "/pricing",
+          ),
+          fields: {
+            "page.path": "/pricing",
+            "page.time": 10,
+            "geo.country": "US",
+          },
+        },
+      ],
+      events: [
+        {
+          ...event(
+            "domain-event",
+            "purchase",
+            20,
+            "domain-session",
+            "domain-visitor",
+          ),
+          fields: { "event.name": "purchase", "geo.country": "US" },
+        },
+      ],
+      sessions: [
+        {
+          kind: "session",
+          id: "domain-session",
+          time: 10,
+          sessionId: "domain-session",
+          visitorId: "domain-visitor",
+          fields: { "session.durationMs": 1_200 },
+        },
+      ],
+      visitors: [
+        {
+          kind: "visitor",
+          id: "domain-visitor",
+          time: 10,
+          visitorId: "domain-visitor",
+          fields: { "visitor.sessions": 1, "visitor.views": 1 },
+        },
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const run = (source: string, scope: "event" | "session" | "visitor") =>
+      evaluateFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        dataset,
+        {
+          scope,
+          candidateRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 80,
+        },
+      );
+
+    expect(
+      run(
+        'visitor { session.durationMs gte 1s AND visitor.sessions eq 1 AND page.path eq "/pricing" AND event.name eq "purchase" AND geo.country eq "US" } exists',
+        "visitor",
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["domain-visitor"]));
+    expect(
+      run(
+        'session { visitor.views eq 1 AND page { page.time eq "1970-01-01T00:00:00.010Z" AND geo.country eq "US" } exists AND event { event.time eq "1970-01-01T00:00:00.020Z" AND geo.country eq "US" } exists } exists',
+        "session",
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["domain-session"]));
+    expect(
+      run(
+        'visitor { time eq "1970-01-01T00:00:00.010Z" AND time eq "1970-01-01T00:00:00.020Z" } exists',
+        "visitor",
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["domain-visitor"]));
+  });
+
+  it("rejects Page and Event sibling fields inside a single-activity selector", () => {
+    expect(() =>
+      evaluate(
+        'event { event.name eq "purchase" AND page.path eq "/pricing" } exists',
+      ),
+    ).toThrow(
+      expect.objectContaining({ code: "invalid_condition_entity_domain" }),
+    );
+    expect(() => evaluate('page { event.name eq "purchase" } exists')).toThrow(
+      expect.objectContaining({ code: "invalid_condition_entity_domain" }),
+    );
+  });
+
   it("uses contextual JSON payload narrowing and keeps JSON scalar types distinct", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [],
@@ -204,6 +462,283 @@ describe("filter evaluator", () => {
     expect(distinct.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
     expect(numericArithmetic.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
     expect(stringMinimum.matchingScopeEntityIds).toEqual(new Set(["u-text"]));
+  });
+
+  it("narrows payload collections from equality and homogeneous set comparisons", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [],
+      events: [
+        event("legacy", "value", 10, "s-a", "u-a", { value: "legacy" }),
+        event("number-1", "value", 20, "s-a", "u-a", { value: 100 }),
+        event("number-2", "value", 30, "s-a", "u-a", { value: 200 }),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const evaluatePayload = (source: string) =>
+      evaluateFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        dataset,
+        {
+          scope: "visitor",
+          candidateRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 80,
+        },
+      ).matchingScopeEntityIds;
+
+    expect(evaluatePayload('first(event.payload("/value")) eq 100')).toEqual(
+      new Set(["u-a"]),
+    );
+    expect(
+      evaluatePayload('first(event.payload("/value")) eq "legacy"'),
+    ).toEqual(new Set(["u-a"]));
+    expect(
+      evaluatePayload(
+        'nth(event { event.name eq "value" }.payload("/value"), 2) eq 200',
+      ),
+    ).toEqual(new Set(["u-a"]));
+    expect(evaluatePayload('min(event.payload("/value")) eq 100')).toEqual(
+      new Set(["u-a"]),
+    );
+    expect(
+      evaluatePayload('first(event.payload("/value")) in [100, 200]'),
+    ).toEqual(new Set(["u-a"]));
+    expect(evaluatePayload('last(event.payload("/value")) neq 99')).toEqual(
+      new Set(["u-a"]),
+    );
+    expect(
+      evaluatePayload('first(event.payload("/value")) notIn ["legacy"]'),
+    ).toEqual(new Set());
+    expect(
+      evaluatePayload('countDistinct(event.payload("/value")) eq 3'),
+    ).toEqual(new Set(["u-a"]));
+  });
+
+  it("keeps aggregate member comparisons anchored to the current query entity", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        {
+          ...page("first", 10, "s-a", "u-a", "/first"),
+          fields: {
+            "page.path": "/first",
+            "referrer.domain": "google.com",
+          },
+        },
+        {
+          ...page("last", 20, "s-a", "u-a", "/last"),
+          fields: {
+            "page.path": "/last",
+            "referrer.domain": "bing.com",
+          },
+        },
+      ],
+      events: [],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const options = {
+      scope: "visitor" as const,
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    };
+
+    for (const expression of [
+      'first(page).referrer.domain eq "google.com"',
+      'last(page).time eq "1970-01-01T00:00:00.020Z"',
+      'page.time eq "1970-01-01T00:00:00.010Z"',
+    ]) {
+      expect(
+        evaluateFilterDocument(
+          parseFilterDsl(expression, analyticsFilterRegistry),
+          dataset,
+          options,
+        ).matchingScopeEntityIds,
+      ).toEqual(new Set(["u-a"]));
+    }
+  });
+
+  it("returns no match for division by an empty aggregate", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [page("candidate", 10, "s-a", "u-a")],
+      events: [],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        "div(count(event), count(event)) eq 0",
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+    expect(result.matchingScopeEntityIds).toEqual(new Set());
+  });
+
+  it("resolves aggregate roots from their indexed anchors", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        {
+          kind: "page",
+          id: "orphan-page",
+          time: 10,
+          visitId: "orphan-page",
+          fields: { "page.path": "/orphan" },
+        },
+        page("session-page", 20, "session-a", "visitor-a"),
+      ],
+      events: [],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const run = (source: string, scope: "event" | "session" | "visitor") =>
+      evaluateFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        dataset,
+        {
+          scope,
+          candidateRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 80,
+        },
+      );
+
+    expect(run("count(page) eq 1", "event").matchingVisitIds).toEqual(
+      new Set(["orphan-page", "session-page"]),
+    );
+    expect(
+      run("count(page) eq 1 AND count(visitor) eq 1", "event").matchingVisitIds,
+    ).toEqual(new Set(["session-page"]));
+    expect(
+      run("count(visitor) eq 1 OR count(session) eq 1", "visitor")
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["visitor-a"]));
+    expect(
+      run("session { count(visitor) eq 1 } exists", "session")
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["session-a"]));
+  });
+
+  it("narrows boolean payloads without coercing other JSON scalar types", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [],
+      events: [
+        event("bool", "value", 10, "s-a", "u-a", { value: false }),
+        event("bool-true", "value", 15, "s-a", "u-a", { value: true }),
+        event("number", "value", 20, "s-a", "u-a", { value: 0 }),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        'first(event.payload("/value")) eq false',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+    expect(
+      evaluateFilterDocument(
+        parseFilterDsl(
+          'min(event.payload("/value")) eq false',
+          analyticsFilterRegistry,
+        ),
+        dataset,
+        {
+          scope: "visitor",
+          candidateRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 80,
+        },
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["u-a"]));
+  });
+
+  it("exposes sequence steps and preserves sequence identity in reducers", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [page("candidate", 10, "s-a", "u-a")],
+      events: [
+        event("signup", "signup", 20, "s-a", "u-a"),
+        event("purchase", "purchase", 30, "s-a", "u-a"),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const sequence =
+      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])';
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        `count(first(${sequence}).steps) eq 2`,
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+  });
+
+  it("buckets ISO datetime payloads without coercing their values", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [],
+      events: [
+        event("at-a", "timestamp", 10, "s-a", "u-a", {
+          at: "1970-01-01T00:00:00.010Z",
+        }),
+        event("at-b", "timestamp", 20, "s-a", "u-a", {
+          at: "1970-01-01T12:00:00.020Z",
+        }),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100_000_000 },
+    };
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        'count(bucket(event.payload("/at"), 1d)) eq 2',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100_000_000 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80_000_000,
+      },
+    );
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+  });
+
+  it("resolves bare Page and Event time members in their native domains", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [page("page-time", 10, "s-a", "u-a")],
+      events: [event("event-time", "purchase", 20, "s-a", "u-a")],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        'page.time eq "1970-01-01T00:00:00.010Z" AND event.time eq "1970-01-01T00:00:00.020Z"',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
 
   it("evaluates duration and request-clock range endpoints as typed values", () => {

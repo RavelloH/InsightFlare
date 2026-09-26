@@ -297,6 +297,65 @@ describe("scoped filter contract", () => {
     expect(fullHistory.time).toMatchObject({ fullHistory: true });
   });
 
+  it("keeps top-level time predicates in the FilterDocument and plans history by Scope", () => {
+    const queryTime = {
+      range: { startMs: 80_000, endExclusiveMs: 90_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 100_000,
+    } as QueryTime;
+    const filters = parseFilterDsl(
+      'time gte @now-30s AND client.deviceType eq "desktop"',
+      analyticsFilterRegistry,
+    );
+    const visitor = prepareScopedQuery("overview", {
+      context,
+      time: queryTime,
+      filters,
+      scopePreference: "visitor",
+    } as QueryInput & { time: QueryTime }) as QueryInput & {
+      filters: FilterDocument;
+      time: QueryTime;
+    };
+    expect(visitor.filters.root).toEqual(filters.root);
+    expect(visitor.time.evaluationRange).toEqual({
+      startMs: 70_000,
+      endExclusiveMs: 100_001,
+    });
+
+    const event = prepareScopedQuery("overview", {
+      context,
+      time: queryTime,
+      filters,
+      scopePreference: "event",
+    } as QueryInput & { time: QueryTime }) as QueryInput & {
+      filters: FilterDocument;
+      time: QueryTime;
+    };
+    expect(event.filters.root).toEqual(filters.root);
+    expect(event.time).not.toHaveProperty("evaluationRange");
+    expect(event.time).not.toHaveProperty("fullHistory");
+  });
+
+  it("keeps evaluation ranges planner-owned while preserving query bindings", () => {
+    const prepared = prepareScopedQuery("overview", {
+      context,
+      time: {
+        ...time,
+        paginationBinding: "cursor-binding",
+        evaluationRange: { startMs: -500, endExclusiveMs: 100 },
+        fullHistory: true,
+      },
+      filters: filter("page.path", "/docs"),
+      scopePreference: "visitor",
+    } as unknown as QueryInput & { time: QueryTime });
+
+    expect(prepared.time).toMatchObject({
+      paginationBinding: "cursor-binding",
+    });
+    expect(prepared.time).not.toHaveProperty("evaluationRange");
+    expect(prepared.time).not.toHaveProperty("fullHistory");
+  });
+
   it("plans selector history independently for each comparison side", () => {
     const filters = parseFilterDsl(
       "count(event { time gte @now-30s AND time lte @now-5s }) gte 1",

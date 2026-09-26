@@ -97,7 +97,7 @@ describe("edge dashboard cache wrapper", () => {
     );
 
     expect((match.mock.calls[0]![0] as Request).url).toBe(
-      "https://analytics-cache.insightflare.internal/analytics/v2-analytics-filter-v4/private/site-1/shared/overview?from=1&to=2",
+      "https://analytics-cache.insightflare.internal/analytics/v2-analytics-filter-v5/private/site-1/shared/overview?from=1&to=2",
     );
   });
 

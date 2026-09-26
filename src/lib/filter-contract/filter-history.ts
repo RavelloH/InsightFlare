@@ -17,6 +17,31 @@ export type FilterHistoryRequirement =
   | ({ readonly kind: "bounded" } & FilterHistoryRange)
   | { readonly kind: "full-history" };
 
+export type FilterHistoryScope = "event" | "session" | "visitor";
+
+export interface TargetHistoryAnalysis {
+  readonly requirement: FilterHistoryRequirement;
+  /** Proven time domain for this target when it yields ordered values. */
+  readonly temporalBounds?: FilterHistoryRange;
+  /** Whether an explicit finite history domain bounds a collection. */
+  readonly boundedCollection: boolean;
+}
+
+interface PredicateTimeBounds {
+  readonly hasTime: boolean;
+  readonly fullHistory: boolean;
+  readonly impossible?: boolean;
+  readonly start?: number;
+  readonly end?: number;
+}
+
+const CANDIDATE_ONLY: FilterHistoryRequirement = Object.freeze({
+  kind: "candidate-only",
+});
+const FULL_HISTORY: FilterHistoryRequirement = Object.freeze({
+  kind: "full-history",
+});
+
 const ELAPSED_MS: Readonly<Record<string, number>> = {
   ms: 1,
   s: 1_000,
@@ -27,7 +52,12 @@ const ELAPSED_MS: Readonly<Record<string, number>> = {
 };
 
 function isTimeTarget(target: FilterTargetExpression): boolean {
-  return target.kind === "member" && target.member === "time";
+  return (
+    target.kind === "member" &&
+    target.member === "time" &&
+    target.object.kind === "context-root" &&
+    target.object.context === "current"
+  );
 }
 
 function resolveEndpoint(
@@ -51,8 +81,7 @@ function resolveEndpoint(
         ? candidate.startMs
         : candidate.endExclusiveMs;
   if (timeAnchor.offset) {
-    const unit = timeAnchor.offset.unit;
-    const factor = ELAPSED_MS[unit];
+    const factor = ELAPSED_MS[timeAnchor.offset.unit];
     if (factor === undefined) return null;
     result += timeAnchor.offset.amount * factor;
   }
@@ -98,13 +127,6 @@ function boundsForCondition(
   }
 }
 
-interface PredicateTimeBounds {
-  readonly hasTime: boolean;
-  readonly fullHistory: boolean;
-  readonly start?: number;
-  readonly end?: number;
-}
-
 function predicateTimeBounds(
   expression: FilterExpression,
   candidate: FilterHistoryRange,
@@ -117,27 +139,26 @@ function predicateTimeBounds(
     const bounds = boundsForCondition(expression, candidate, capturedAtMs);
     return bounds
       ? { hasTime: true, fullHistory: false, ...bounds }
-      : {
-          hasTime: true,
-          fullHistory: true,
-        };
+      : { hasTime: true, fullHistory: true };
   }
   if (expression.kind === "not" || expression.kind === "or") {
-    const containsTime =
+    const childBounds =
       expression.kind === "not"
-        ? predicateTimeBounds(
-            expression.child,
-            candidate,
-            capturedAtMs,
-            analysis,
-          ).hasTime
-        : expression.children.some(
-            (child) =>
-              predicateTimeBounds(child, candidate, capturedAtMs, analysis)
-                .hasTime,
+        ? [
+            predicateTimeBounds(
+              expression.child,
+              candidate,
+              capturedAtMs,
+              analysis,
+            ),
+          ]
+        : expression.children.map((child) =>
+            predicateTimeBounds(child, candidate, capturedAtMs, analysis),
           );
-    return { hasTime: containsTime, fullHistory: containsTime };
+    const hasTime = childBounds.some((bounds) => bounds.hasTime);
+    return { hasTime, fullHistory: hasTime };
   }
+
   let hasTime = false;
   let fullHistory = false;
   let start: number | undefined;
@@ -157,70 +178,88 @@ function predicateTimeBounds(
       end = Math.min(end ?? Number.MAX_SAFE_INTEGER, bounds.end);
   }
   if (start !== undefined && end !== undefined && end <= start)
-    return { hasTime: true, fullHistory: false, start, end };
+    return { hasTime: true, fullHistory: false, impossible: true, start, end };
+  if (hasTime && start === undefined && end !== undefined) fullHistory = true;
   return {
     hasTime,
-    fullHistory:
-      fullHistory || (hasTime && start === undefined && end !== undefined),
+    fullHistory,
     ...(start !== undefined ? { start } : {}),
     ...(end !== undefined ? { end } : {}),
   };
 }
 
-function completePredicateTimeBounds(
+function requirementForRange(
+  range: FilterHistoryRange,
+  capturedAtMs: number,
+): FilterHistoryRequirement {
+  const endExclusiveMs = Math.min(range.endExclusiveMs, capturedAtMs + 1);
+  if (range.startMs >= endExclusiveMs) return CANDIDATE_ONLY;
+  if (
+    !Number.isSafeInteger(range.startMs) ||
+    !Number.isSafeInteger(endExclusiveMs)
+  )
+    return FULL_HISTORY;
+  return { kind: "bounded", startMs: range.startMs, endExclusiveMs };
+}
+
+function requirementForPredicateBounds(
   bounds: PredicateTimeBounds,
-): PredicateTimeBounds {
+  capturedAtMs: number,
+): FilterHistoryRequirement {
+  if (!bounds.hasTime || bounds.impossible) return CANDIDATE_ONLY;
+  if (bounds.fullHistory || bounds.start === undefined) return FULL_HISTORY;
+  return requirementForRange(
+    {
+      startMs: bounds.start,
+      endExclusiveMs: bounds.end ?? capturedAtMs + 1,
+    },
+    capturedAtMs,
+  );
+}
+
+function mergeRequirements(
+  left: FilterHistoryRequirement,
+  right: FilterHistoryRequirement,
+): FilterHistoryRequirement {
+  if (left.kind === "full-history" || right.kind === "full-history")
+    return FULL_HISTORY;
+  if (left.kind === "candidate-only") return right;
+  if (right.kind === "candidate-only") return left;
   return {
-    ...bounds,
-    fullHistory:
-      bounds.fullHistory ||
-      (bounds.hasTime &&
-        bounds.start === undefined &&
-        bounds.end !== undefined),
+    kind: "bounded",
+    startMs: Math.min(left.startMs, right.startMs),
+    endExclusiveMs: Math.max(left.endExclusiveMs, right.endExclusiveMs),
   };
 }
 
-function selectorHasBoundedTime(
-  target: FilterTargetExpression,
-  candidate: FilterHistoryRange,
-  capturedAtMs: number,
-  analysis: AnalyzedFilterDocument,
-): boolean {
-  if (target.kind !== "selector") return false;
-  const bounds = completePredicateTimeBounds(
-    predicateTimeBounds(target.predicate, candidate, capturedAtMs, analysis),
-  );
-  return bounds.hasTime && !bounds.fullHistory && bounds.start !== undefined;
+function unionBounds(
+  left: FilterHistoryRange | undefined,
+  right: FilterHistoryRange | undefined,
+): FilterHistoryRange | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    startMs: Math.min(left.startMs, right.startMs),
+    endExclusiveMs: Math.max(left.endExclusiveMs, right.endExclusiveMs),
+  };
 }
 
-function targetTimePredicateBounds(
-  target: FilterTargetExpression,
-  candidate: FilterHistoryRange,
+function intersectBounds(
+  source: FilterHistoryRange,
+  predicate: PredicateTimeBounds,
   capturedAtMs: number,
-  analysis: AnalyzedFilterDocument,
-): PredicateTimeBounds {
-  if (target.kind === "selector")
-    return completePredicateTimeBounds(
-      predicateTimeBounds(target.predicate, candidate, capturedAtMs, analysis),
-    );
-  if (target.kind === "member")
-    return targetTimePredicateBounds(
-      target.object,
-      candidate,
-      capturedAtMs,
-      analysis,
-    );
-  if (
-    target.kind === "reducer" &&
-    ["first", "last", "nth"].includes(target.reducer)
-  )
-    return targetTimePredicateBounds(
-      target.input,
-      candidate,
-      capturedAtMs,
-      analysis,
-    );
-  return { hasTime: false, fullHistory: false };
+): FilterHistoryRange | null {
+  if (predicate.impossible) return null;
+  const startMs = Math.max(
+    source.startMs,
+    predicate.start ?? Number.MIN_SAFE_INTEGER,
+  );
+  const endExclusiveMs = Math.min(
+    source.endExclusiveMs,
+    predicate.end ?? capturedAtMs + 1,
+  );
+  if (endExclusiveMs <= startMs) return null;
+  return { startMs, endExclusiveMs };
 }
 
 function elapsedOffsetMs(amount: number, unit: string): number | null {
@@ -230,236 +269,297 @@ function elapsedOffsetMs(amount: number, unit: string): number | null {
   return Number.isSafeInteger(offset) ? offset : null;
 }
 
-function targetNeedsFullHistory(
+function addOffset(value: number, offset: number): number | null {
+  const result = value + offset;
+  return Number.isSafeInteger(result) ? result : null;
+}
+
+function analyzeTarget(
   target: FilterTargetExpression,
   candidate: FilterHistoryRange,
   capturedAtMs: number,
   analysis: AnalyzedFilterDocument,
-): boolean {
+): TargetHistoryAnalysis {
+  const analyze = (child: FilterTargetExpression) =>
+    analyzeTarget(child, candidate, capturedAtMs, analysis);
   switch (target.kind) {
-    case "reducer":
-      if (
-        ["first", "last", "nth"].includes(target.reducer) &&
-        !selectorHasBoundedTime(target.input, candidate, capturedAtMs, analysis)
-      )
-        return true;
-      return targetNeedsFullHistory(
-        target.input,
+    case "entity-root":
+      return {
+        requirement: CANDIDATE_ONLY,
+        boundedCollection: false,
+      };
+    case "field":
+    case "event-payload":
+    case "context-root":
+    case "duration":
+      return { requirement: CANDIDATE_ONLY, boundedCollection: false };
+    case "time-anchor": {
+      const value = resolveEndpoint(target, candidate, capturedAtMs);
+      if (value === null || value === Number.MAX_SAFE_INTEGER)
+        return { requirement: CANDIDATE_ONLY, boundedCollection: false };
+      return {
+        requirement: CANDIDATE_ONLY,
+        temporalBounds: { startMs: value, endExclusiveMs: value + 1 },
+        boundedCollection: false,
+      };
+    }
+    case "selector": {
+      const source = analyze(target.collection);
+      const predicate = predicateTimeBounds(
+        target.predicate,
         candidate,
         capturedAtMs,
         analysis,
       );
-    case "sequence":
-      return target.steps.some(
-        (step) =>
-          !selectorHasBoundedTime(step, candidate, capturedAtMs, analysis),
-      );
-    case "adjacent":
-      return targetNeedsFullHistory(
-        target.sequence,
+      const predicateTargets = analyzeExpressionTargets(
+        target.predicate,
         candidate,
         capturedAtMs,
         analysis,
       );
-    case "without":
-      return (
-        targetNeedsFullHistory(
-          target.sequence,
-          candidate,
-          capturedAtMs,
-          analysis,
-        ) ||
-        targetNeedsFullHistory(
-          target.excluded,
-          candidate,
-          capturedAtMs,
-          analysis,
-        )
-      );
-    case "selector":
-      return false;
-    case "member":
-      return targetNeedsFullHistory(
-        target.object,
-        candidate,
-        capturedAtMs,
-        analysis,
-      );
-    case "projection":
-      return targetNeedsFullHistory(
-        target.collection,
-        candidate,
-        capturedAtMs,
-        analysis,
-      );
-    case "arithmetic":
-      return (
-        targetNeedsFullHistory(
-          target.left,
-          candidate,
-          capturedAtMs,
-          analysis,
-        ) ||
-        targetNeedsFullHistory(target.right, candidate, capturedAtMs, analysis)
-      );
+      let requirement = mergeRequirements(source.requirement, predicateTargets);
+      let temporalBounds = source.temporalBounds;
+      let boundedCollection = source.boundedCollection;
+      if (predicate.hasTime) {
+        if (predicate.impossible) {
+          return {
+            requirement: predicateTargets,
+            boundedCollection: true,
+          };
+        }
+        if (source.temporalBounds) {
+          const intersection = intersectBounds(
+            source.temporalBounds,
+            predicate,
+            capturedAtMs,
+          );
+          if (intersection) {
+            temporalBounds = intersection;
+            boundedCollection = true;
+            requirement = mergeRequirements(
+              requirement,
+              requirementForRange(intersection, capturedAtMs),
+            );
+          } else {
+            return { requirement: predicateTargets, boundedCollection: true };
+          }
+        } else if (predicate.fullHistory || predicate.start === undefined) {
+          requirement = mergeRequirements(requirement, FULL_HISTORY);
+        } else {
+          const range = {
+            startMs: predicate.start,
+            endExclusiveMs: predicate.end ?? capturedAtMs + 1,
+          };
+          temporalBounds = range;
+          boundedCollection = true;
+          requirement = mergeRequirements(
+            requirement,
+            requirementForRange(range, capturedAtMs),
+          );
+        }
+      }
+      return { requirement, temporalBounds, boundedCollection };
+    }
+    case "member": {
+      const object = analyze(target.object);
+      return object;
+    }
+    case "projection": {
+      const collection = analyze(target.collection);
+      return collection;
+    }
+    case "reducer": {
+      const input = analyze(target.input);
+      if (["first", "last", "nth"].includes(target.reducer))
+        return {
+          ...input,
+          requirement: input.boundedCollection
+            ? input.requirement
+            : mergeRequirements(input.requirement, FULL_HISTORY),
+        };
+      return input;
+    }
+    case "arithmetic": {
+      const left = analyze(target.left);
+      const right = analyze(target.right);
+      return {
+        requirement: mergeRequirements(left.requirement, right.requirement),
+        temporalBounds: unionBounds(left.temporalBounds, right.temporalBounds),
+        boundedCollection: left.boundedCollection && right.boundedCollection,
+      };
+    }
     case "bucket":
-      return targetNeedsFullHistory(
-        target.input,
-        candidate,
-        capturedAtMs,
-        analysis,
+      return analyze(target.input);
+    case "periods":
+      return analyze(target.collection);
+    case "window": {
+      const collection = analyze(target.collection);
+      const anchor = analyze(target.anchor);
+      let requirement = mergeRequirements(
+        collection.requirement,
+        anchor.requirement,
       );
-    case "window":
-      return (
-        targetNeedsFullHistory(
-          target.collection,
+      let temporalBounds = collection.temporalBounds;
+      let boundedCollection = collection.boundedCollection;
+      if (anchor.temporalBounds) {
+        const startOffset = elapsedOffsetMs(
+          target.startOffset.amount,
+          target.startOffset.unit,
+        );
+        const endOffset = elapsedOffsetMs(
+          target.endOffset.amount,
+          target.endOffset.unit,
+        );
+        if (startOffset === null || endOffset === null) {
+          requirement = FULL_HISTORY;
+        } else {
+          const startMs = addOffset(
+            anchor.temporalBounds.startMs,
+            Math.min(0, startOffset),
+          );
+          const rawEnd = addOffset(
+            anchor.temporalBounds.endExclusiveMs,
+            endOffset,
+          );
+          if (startMs === null || rawEnd === null) {
+            requirement = FULL_HISTORY;
+          } else {
+            const range = {
+              startMs,
+              endExclusiveMs: Math.min(rawEnd, capturedAtMs + 1),
+            };
+            temporalBounds = unionBounds(temporalBounds, range);
+            boundedCollection = true;
+            requirement = mergeRequirements(
+              requirement,
+              requirementForRange(range, capturedAtMs),
+            );
+          }
+        }
+      } else if (anchor.requirement.kind === "full-history") {
+        requirement = FULL_HISTORY;
+      }
+      return { requirement, temporalBounds, boundedCollection };
+    }
+    case "sequence": {
+      const steps = target.steps.map(analyze);
+      const requirement = steps.reduce(
+        (current, step) => mergeRequirements(current, step.requirement),
+        CANDIDATE_ONLY,
+      );
+      const bounded = steps.every((step) => step.boundedCollection);
+      const temporalBounds = steps.reduce<FilterHistoryRange | undefined>(
+        (current, step) => unionBounds(current, step.temporalBounds),
+        undefined,
+      );
+      return {
+        requirement: bounded ? requirement : FULL_HISTORY,
+        temporalBounds,
+        boundedCollection: bounded,
+      };
+    }
+    case "adjacent":
+      return analyze(target.sequence);
+    case "without": {
+      const sequence = analyze(target.sequence);
+      const excluded = analyze(target.excluded);
+      if (sequence.requirement.kind === "full-history") return sequence;
+      let temporalBounds = sequence.temporalBounds;
+      let requirement: FilterHistoryRequirement = sequence.requirement;
+      if (excluded.requirement.kind === "full-history") {
+        requirement = FULL_HISTORY;
+      } else if (excluded.temporalBounds) {
+        temporalBounds = unionBounds(temporalBounds, excluded.temporalBounds);
+        requirement = mergeRequirements(
+          requirement,
+          requirementForRange(excluded.temporalBounds, capturedAtMs),
+        );
+      }
+      return {
+        requirement,
+        temporalBounds,
+        boundedCollection: sequence.boundedCollection,
+      };
+    }
+  }
+}
+
+function analyzeExpressionTargets(
+  expression: FilterExpression,
+  candidate: FilterHistoryRange,
+  capturedAtMs: number,
+  analysis: AnalyzedFilterDocument,
+): FilterHistoryRequirement {
+  if (expression.kind === "condition") {
+    const target = analyzeTarget(
+      expression.target,
+      candidate,
+      capturedAtMs,
+      analysis,
+    );
+    let requirement = target.requirement;
+    if (
+      expression.value &&
+      typeof expression.value === "object" &&
+      !Array.isArray(expression.value) &&
+      "kind" in expression.value
+    )
+      requirement = mergeRequirements(
+        requirement,
+        analyzeTarget(
+          expression.value as FilterTargetExpression,
           candidate,
           capturedAtMs,
           analysis,
-        ) ||
-        targetNeedsFullHistory(target.anchor, candidate, capturedAtMs, analysis)
+        ).requirement,
       );
-    case "periods":
-      return targetNeedsFullHistory(
-        target.collection,
-        candidate,
-        capturedAtMs,
-        analysis,
-      );
-    default:
-      return false;
+    return requirement;
   }
+  if (expression.kind === "not")
+    return analyzeExpressionTargets(
+      expression.child,
+      candidate,
+      capturedAtMs,
+      analysis,
+    );
+  return expression.children.reduce(
+    (requirement, child) =>
+      mergeRequirements(
+        requirement,
+        analyzeExpressionTargets(child, candidate, capturedAtMs, analysis),
+      ),
+    CANDIDATE_ONLY,
+  );
 }
 
 export function analyzeFilterHistory(
   analysis: AnalyzedFilterDocument,
   candidate: FilterHistoryRange,
   capturedAtMs: number,
+  scope: FilterHistoryScope,
 ): FilterHistoryRequirement {
   const document: FilterDocument = analysis.document;
-  if (!document.root) return { kind: "candidate-only" };
-  let fullHistory = false;
-  let start: number | undefined;
-  let end: number | undefined;
-  const visitTarget = (target: FilterTargetExpression): void => {
-    if (target.kind === "selector") {
-      const bounds = completePredicateTimeBounds(
-        predicateTimeBounds(
-          target.predicate,
-          candidate,
-          capturedAtMs,
-          analysis,
-        ),
-      );
-      fullHistory ||= bounds.fullHistory;
-      if (bounds.start !== undefined)
-        start = Math.min(start ?? Number.MAX_SAFE_INTEGER, bounds.start);
-      if (bounds.end !== undefined)
-        end = Math.max(end ?? Number.MIN_SAFE_INTEGER, bounds.end);
-      visitExpression(target.predicate);
-      visitTarget(target.collection);
-      return;
-    }
-    fullHistory ||= targetNeedsFullHistory(
-      target,
+  if (!document.root) return CANDIDATE_ONLY;
+  let requirement = analyzeExpressionTargets(
+    document.root,
+    candidate,
+    capturedAtMs,
+    analysis,
+  );
+
+  // Top-level time means an activity predicate. Event Scope only tests
+  // candidate observations; Session and Visitor Scope must read its history.
+  if (scope !== "event") {
+    const topLevelBounds = predicateTimeBounds(
+      document.root,
       candidate,
       capturedAtMs,
       analysis,
     );
-    if (target.kind === "window") {
-      const anchorBounds = targetTimePredicateBounds(
-        target.anchor,
-        candidate,
-        capturedAtMs,
-        analysis,
-      );
-      const startOffset = elapsedOffsetMs(
-        target.startOffset.amount,
-        target.startOffset.unit,
-      );
-      const endOffset = elapsedOffsetMs(
-        target.endOffset.amount,
-        target.endOffset.unit,
-      );
-      if (anchorBounds.start !== undefined && !anchorBounds.fullHistory) {
-        if (startOffset === null) {
-          fullHistory = true;
-        } else {
-          const requiredStart = anchorBounds.start + Math.min(0, startOffset);
-          if (!Number.isSafeInteger(requiredStart)) fullHistory = true;
-          else
-            start = Math.min(start ?? Number.MAX_SAFE_INTEGER, requiredStart);
-        }
-      }
-      if (
-        anchorBounds.end !== undefined &&
-        !anchorBounds.fullHistory &&
-        endOffset !== null
-      ) {
-        const rawRequiredEnd = anchorBounds.end + endOffset;
-        if (!Number.isSafeInteger(rawRequiredEnd)) {
-          fullHistory = true;
-        } else {
-          const requiredEnd = Math.min(rawRequiredEnd, capturedAtMs + 1);
-          end = Math.max(end ?? Number.MIN_SAFE_INTEGER, requiredEnd);
-        }
-      }
-    }
-    switch (target.kind) {
-      case "member":
-        visitTarget(target.object);
-        break;
-      case "projection":
-        visitTarget(target.collection);
-        break;
-      case "reducer":
-        visitTarget(target.input);
-        break;
-      case "arithmetic":
-        visitTarget(target.left);
-        visitTarget(target.right);
-        break;
-      case "bucket":
-        visitTarget(target.input);
-        break;
-      case "window":
-        visitTarget(target.collection);
-        visitTarget(target.anchor);
-        break;
-      case "periods":
-        visitTarget(target.collection);
-        break;
-      case "sequence":
-        target.steps.forEach(visitTarget);
-        break;
-      case "adjacent":
-        visitTarget(target.sequence);
-        break;
-      case "without":
-        visitTarget(target.sequence);
-        visitTarget(target.excluded);
-        break;
-    }
-  };
-  const visitExpression = (expression: FilterExpression): void => {
-    if (expression.kind === "condition") {
-      visitTarget(expression.target);
-      return;
-    }
-    if (expression.kind === "not") {
-      visitExpression(expression.child);
-      return;
-    }
-    expression.children.forEach(visitExpression);
-  };
-  visitExpression(document.root);
-  if (fullHistory) return { kind: "full-history" };
-  if (start === undefined && end === undefined)
-    return { kind: "candidate-only" };
-  const startMs = start ?? candidate.startMs;
-  const endExclusiveMs = end ?? capturedAtMs + 1;
-  if (!Number.isSafeInteger(startMs) || !Number.isSafeInteger(endExclusiveMs))
-    return { kind: "full-history" };
-  if (endExclusiveMs <= startMs) return { kind: "candidate-only" };
-  return { kind: "bounded", startMs, endExclusiveMs };
+    requirement = mergeRequirements(
+      requirement,
+      requirementForPredicateBounds(topLevelBounds, capturedAtMs),
+    );
+  }
+  return requirement;
 }

@@ -238,6 +238,9 @@ export interface FilterDocument {
   readonly root: FilterExpression | null;
 }
 
+export type FilterConditionEntity =
+  "page" | "event" | "session" | "visitor" | "activity";
+
 export interface FilterLimits {
   readonly maxConditions: number;
   readonly maxDepth: number;
@@ -259,6 +262,8 @@ export interface FilterFieldDefinition {
   readonly valueKind: FilterValueKind;
   readonly operators: ReadonlySet<FilterOperator>;
   readonly audiences: ReadonlySet<FilterAudience>;
+  /** Entity domain used when a condition is evaluated inside an aggregate selector. */
+  readonly conditionEntity?: FilterConditionEntity;
   readonly number?: {
     readonly min?: number;
     readonly max?: number;
@@ -266,6 +271,7 @@ export interface FilterFieldDefinition {
   };
   /** Set-to-scalar reduction is only sound when the storage profile proves it. */
   readonly singletonSetEquivalent?: boolean;
+  readonly unit?: "ms" | "px" | "ratio";
   readonly canonicalize?: (value: FilterValue) => FilterValue;
 }
 
@@ -1411,6 +1417,30 @@ function canonicalCondition(
       `${path}.value`,
       "Use isNull or notNull instead of comparing to null.",
     );
+  }
+  if (isRecord(rawValue) && rawValue.kind === "duration") {
+    if (definition.unit !== "ms")
+      fail(
+        "invalid_value",
+        `${path}.value`,
+        "Duration values require a field stored in milliseconds.",
+      );
+    const duration = canonicalTargetExpression(
+      rawValue,
+      registry,
+      limits,
+      counters,
+      `${path}.value`,
+      1,
+    );
+    if (duration.kind !== "duration")
+      fail("invalid_value", `${path}.value`, "Expected a duration value.");
+    return {
+      kind: "condition",
+      target,
+      operator,
+      value: duration,
+    };
   }
   return {
     kind: "condition",
