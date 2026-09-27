@@ -64,7 +64,7 @@ describe("filter URL codec", () => {
     );
     const serialized = serializeFilterParams(document, analyticsFilterRegistry);
     expect(serialized.toString()).toBe(
-      "filter%5Bcount%28event%29%5D=gte+5&filter%5Bfirst%28page%29.path%5D=eq+%22%2Fpricing%22",
+      "filter%5Bcount%28event%29%5D=gte%3A5&filter%5Bfirst%28page%29.path%5D=eq%3A%22%2Fpricing%22",
     );
     expect(parseFilterParams(serialized, analyticsFilterRegistry)).toEqual(
       document,
@@ -83,6 +83,75 @@ describe("filter URL codec", () => {
     ).toEqual(temporal);
   });
 
+  it("canonicalizes legacy space-separated computed values to operator:value", () => {
+    const legacy = parseFilterParams(
+      "filter[count(event)]=gte+5",
+      analyticsFilterRegistry,
+    );
+    const canonical = serializeFilterParams(legacy, analyticsFilterRegistry);
+
+    expect(canonical.get("filter[count(event)]")).toBe("gte:5");
+    expect(canonical.toString()).toBe("filter%5Bcount%28event%29%5D=gte%3A5");
+    expect(parseFilterParams(canonical, analyticsFilterRegistry)).toEqual(
+      legacy,
+    );
+  });
+
+  it("serializes computed operators and temporal values with the URL value grammar", () => {
+    const cases = [
+      ["count(event) gte 5", "filter[count(event)]", "gte:5"],
+      [
+        'first(page).path eq "/pricing"',
+        "filter[first(page).path]",
+        'eq:"/pricing"',
+      ],
+      [
+        "first(page).durationMs lte 7d",
+        "filter[first(page).durationMs]",
+        "lte:7d",
+      ],
+      [
+        "time between [@now-30d, @now]",
+        "filter[time]",
+        "between:@now-30d,@now",
+      ],
+      ["first(page).path exists", "filter[first(page).path]", "ex"],
+      ["first(page).path notExists", "filter[first(page).path]", "nex"],
+      ["first(page).path isNull", "filter[first(page).path]", "null"],
+      ["first(page).path notNull", "filter[first(page).path]", "nnull"],
+      ["first(page).path isEmpty", "filter[first(page).path]", "empty"],
+      ["first(page).path notEmpty", "filter[first(page).path]", "nempty"],
+    ] as const;
+
+    for (const [source, key, expected] of cases) {
+      const document = parseFilterDsl(source, analyticsFilterRegistry);
+      const params = serializeFilterParams(document, analyticsFilterRegistry);
+      expect(params.get(key), source).toBe(expected);
+      expect(
+        parseFilterParams(params, analyticsFilterRegistry),
+        source,
+      ).toEqual(document);
+    }
+
+    const escaped = parseFilterDsl(
+      String.raw`first(page).path in ["a,b", "json:true", "quote\"and\\slash"]`,
+      analyticsFilterRegistry,
+    );
+    const escapedParams = serializeFilterParams(
+      escaped,
+      analyticsFilterRegistry,
+    );
+    expect(parseFilterParams(escapedParams, analyticsFilterRegistry)).toEqual(
+      escaped,
+    );
+    expect(
+      serializeFilterParams(
+        parseFilterParams(escapedParams, analyticsFilterRegistry),
+        analyticsFilterRegistry,
+      ),
+    ).toEqual(escapedParams);
+  });
+
   it("serializes selector predicates through stable references", () => {
     const document = normalizeFilterDocument(
       parseFilterDsl(
@@ -97,6 +166,7 @@ describe("filter URL codec", () => {
       "filter[event:0][event.name]",
       "filter[event:0][event.payload][/amount]",
     ]);
+    expect(params.get("filter[count(event:0)]")).toBe("gte:2");
     expect(params.toString()).not.toMatch(/event\s*\{/u);
     expect(parseFilterParams(params, analyticsFilterRegistry)).toEqual(
       document,
@@ -133,6 +203,7 @@ describe("filter URL codec", () => {
   it("round-trips all Core and Relation target forms through selector references", () => {
     const sources = [
       'nth(event { event.name eq "purchase" }, 3).payload("/amount") gt 0',
+      'sub(first(event { event.name eq "purchase" }), first(event { event.name eq "refund" })) gt 0',
       'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists',
       'adjacent(sequence([page { page.path eq "/pricing" }, event { event.name eq "purchase" }])) exists',
       'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) exists',

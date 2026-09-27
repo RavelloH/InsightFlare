@@ -1,12 +1,9 @@
-import {
-  formatFilterDsl,
-  formatFilterTargetExpression,
-  parseFilterDsl,
-} from "./filter-dsl";
+import { parseFilterDsl } from "./filter-dsl";
 import {
   type CanonicalJsonPath,
   DEFAULT_FILTER_LIMITS,
   FILTER_DOCUMENT_VERSION,
+  type FilterComparisonValue,
   type FilterCondition,
   type FilterDocument,
   type FilterExpression,
@@ -287,9 +284,10 @@ function parseComplexCondition(
       ),
     };
   };
-  // Canonical DSL suffixes (emitted by this codec) keep computed literal
-  // types intact. The operator:value spelling also remains accepted for the
-  // compact form documented by Filter v1.
+  const valuelessAlias = OPERATOR_ALIASES[raw];
+  if (valuelessAlias && VALUELESS.has(valuelessAlias))
+    return parse(`${target} ${valuelessAlias}`);
+  // Keep accepting the space-separated form emitted by earlier codec versions.
   if (
     /^(?:eq|neq|in|notIn|contains|startsWith|endsWith|gt|gte|lt|lte|between|exists|notExists|isNull|notNull|isEmpty|notEmpty)(?:\s|$)/i.test(
       raw,
@@ -304,10 +302,22 @@ function parseComplexCondition(
     const operator = OPERATOR_ALIASES[alias];
     if (operator) {
       if (VALUELESS.has(operator)) return parse(`${target} ${operator}`);
-      const untyped = `${target} ${operator} ${operand}`;
+      const listValue = LIST.has(operator) || operator === "between";
+      const formattedOperand = listValue
+        ? operand.startsWith("[") && operand.endsWith("]")
+          ? operand
+          : `[${operand}]`
+        : operand;
+      const untyped = `${target} ${operator} ${formattedOperand}`;
       try {
         return parse(untyped);
       } catch {
+        if (listValue) {
+          const quotedItems = splitEscapedList(operand)
+            .map((value) => JSON.stringify(value))
+            .join(", ");
+          return parse(`${target} ${operator} [${quotedItems}]`);
+        }
         return parse(`${target} ${operator} ${JSON.stringify(operand)}`);
       }
     }
@@ -1132,6 +1142,53 @@ function formatFilterUrlTarget(
   }
 }
 
+const ADVANCED_VALUELESS_OPERATORS: Partial<Record<FilterOperator, string>> = {
+  exists: "ex",
+  notExists: "nex",
+  isNull: "null",
+  notNull: "nnull",
+  isEmpty: "empty",
+  notEmpty: "nempty",
+};
+
+function formatAdvancedConditionValue(
+  condition: FilterCondition,
+  references: WeakMap<FilterTargetExpression, string>,
+): string {
+  const valueless = ADVANCED_VALUELESS_OPERATORS[condition.operator];
+  if (valueless) return valueless;
+  if (condition.value === undefined)
+    fail(
+      "invalid_complex_filter_value",
+      "value",
+      "A computed filter condition requires a value.",
+    );
+
+  const values: readonly FilterComparisonValue[] = Array.isArray(
+    condition.value,
+  )
+    ? (condition.value as readonly FilterComparisonValue[])
+    : [condition.value as FilterComparisonValue];
+  const encoded = values.map((value) => {
+    if (typeof value === "string") return JSON.stringify(value);
+    if (typeof value === "number" || typeof value === "boolean")
+      return String(value);
+    if (value === null) return "null";
+    if (
+      value &&
+      typeof value === "object" &&
+      (value.kind === "duration" || value.kind === "time-anchor")
+    )
+      return formatFilterUrlTarget(value, references);
+    return fail(
+      "invalid_complex_filter_value",
+      "value",
+      "Computed filter values must be scalar or temporal values.",
+    );
+  });
+  return `${condition.operator}:${encoded.join(",")}`;
+}
+
 function appendKey(parts: readonly string[]): string {
   return `filter[${parts.join("][")}]`;
 }
@@ -1219,19 +1276,13 @@ function serializeExpression(
       serializeDeclarations(child.target);
       if (!isLegacyFilterTarget(child.target)) {
         const urlTarget = formatFilterUrlTarget(child.target, references);
-        const humanTarget = formatFilterTargetExpression(child.target);
-        const expressionText = formatFilterDsl({
-          version: FILTER_DOCUMENT_VERSION,
-          root: child,
-        });
-        const rawValue = expressionText.slice(humanTarget.length).trimStart();
         pairs.push([
           appendKey([
             ...selectorPath,
             urlTarget,
             ...(logicPath.length ? [logicPath.join(".")] : []),
           ]),
-          rawValue,
+          formatAdvancedConditionValue(child, references),
         ]);
         continue;
       }
