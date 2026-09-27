@@ -209,33 +209,50 @@ function inferTarget(
         return { kind: "period", item: scalar("unknown") };
       if (target.context === "bucket") return { kind: "bucket" };
       return scalar("unknown");
+    case "context-intrinsic":
+      if (target.intrinsic === "span" || target.intrinsic === "gap")
+        return scalar("duration");
+      if (target.intrinsic === "items")
+        return collection("period.items", scalar("unknown"));
+      {
+        const input = inferTarget(target.input, registry, `${path}.input`);
+        if (input.kind !== "scalar")
+          fail(
+            "same_value_type_mismatch",
+            `${path}.input`,
+            "$same requires a scalar value for each sequence occurrence.",
+          );
+        return scalar("boolean");
+      }
+    case "occurrence-time": {
+      const input = inferTarget(target.input, registry, `${path}.input`);
+      if (
+        input.kind !== "entity" ||
+        (input.entity !== "event" && input.entity !== "page")
+      )
+        fail(
+          "occurrence_time_type_mismatch",
+          `${path}.input`,
+          "time() requires one Event or Page occurrence.",
+        );
+      return scalar("datetime");
+    }
     case "member": {
       if (target.object.kind === "context-root") {
         const context = target.object.context;
         if (context === "current" && target.member === "time")
           return scalar("datetime");
-        if (context === "sequence") {
-          if (target.member === "span") return scalar("duration");
-        }
-        if (context === "period") {
-          if (target.member === "items")
-            return collection("period.items", scalar("unknown"));
-        }
       }
       const object = inferTarget(target.object, registry, `${path}.object`);
       if (object.kind === "collection") {
         const item =
           object.item.kind === "entity"
             ? entityMemberType(object.entity, target.member, registry)
-            : object.item.kind === "period" && target.member === "items"
-              ? collection("period.items", object.item.item)
-              : object.item.kind === "sequence" && target.member === "span"
-                ? scalar("duration")
-                : fail(
-                    "invalid_member",
-                    `${path}.member`,
-                    `Unknown ${object.entity} member: ${target.member}.`,
-                  );
+            : fail(
+                "invalid_member",
+                `${path}.member`,
+                `Unknown ${object.entity} member: ${target.member}.`,
+              );
         if (item.kind === "namespace")
           return { ...item, collectionEntity: object.entity };
         if (item.kind === "collection") return item;
@@ -256,13 +273,6 @@ function inferTarget(
               item: member,
             }
           : member;
-      }
-      if (object.kind === "period") {
-        if (target.member === "items")
-          return collection("period.items", object.item);
-      }
-      if (object.kind === "sequence") {
-        if (target.member === "span") return scalar("duration");
       }
       const objectPath = targetPath(target.object);
       const memberDefinition = objectPath
@@ -389,12 +399,14 @@ function inferTarget(
       const l = left.kind === "scalar" ? left.scalar : "unknown";
       const r = right.kind === "scalar" ? right.scalar : "unknown";
       if (target.operator === "sub") {
-        if (
-          (l === "datetime" || isDynamicScalar(l)) &&
-          (r === "datetime" || isDynamicScalar(r)) &&
-          (l === "datetime" || r === "datetime")
-        )
-          return scalar("duration");
+        if (l === "datetime" || r === "datetime") {
+          if (l === "datetime" && r === "datetime") return scalar("duration");
+          fail(
+            "arithmetic_type_mismatch",
+            path,
+            "DateTime subtraction requires two DateTime values.",
+          );
+        }
         if (
           (l === "number" || isDynamicScalar(l)) &&
           (r === "number" || isDynamicScalar(r))

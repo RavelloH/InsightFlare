@@ -233,6 +233,12 @@ function requiredSources(
       case "member":
         visitTarget(target.object);
         break;
+      case "context-intrinsic":
+        if (target.intrinsic === "same") visitTarget(target.input);
+        break;
+      case "occurrence-time":
+        visitTarget(target.input);
+        break;
       case "selector":
         visitTarget(target.collection);
         visit(target.predicate);

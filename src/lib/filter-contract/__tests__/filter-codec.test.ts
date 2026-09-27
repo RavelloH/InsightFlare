@@ -176,7 +176,7 @@ describe("filter URL codec", () => {
   it("round-trips nested and computed-collection selectors independent of parameter order", () => {
     const sources = [
       'session { event { event.name eq "purchase" } exists } exists',
-      'time gte @now-12w AND count(periods(event { event.name eq "shared_insight" }, 1w) { count(period.items) gte 3 }) gte 3',
+      'time gte @now-12w AND count(periods(event { event.name eq "shared_insight" }, 1w) { count($items) gte 3 }) gte 3',
     ];
     for (const source of sources) {
       const document = normalizeFilterDocument(
@@ -202,11 +202,11 @@ describe("filter URL codec", () => {
 
   it("round-trips all Core and Relation target forms through selector references", () => {
     const sources = [
-      'nth(event { event.name eq "purchase" }, 3).payload("/amount") gt 0',
+      'nth(event { event.name eq "purchase" }.payload("/amount"), 3) gt 0',
       'sub(first(event { event.name eq "purchase" }), first(event { event.name eq "refund" })) gt 0',
       'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists',
       'adjacent(sequence([page { page.path eq "/pricing" }, event { event.name eq "purchase" }])) exists',
-      'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) exists',
+      'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) { $span lte 7d } exists',
       'NOT (count(event { event.name eq "purchase" }) gte 2 OR page.path eq "/private")',
       "time between [@now-30d, @now] AND countDistinct(bucket(page, 1d)) gte 20",
     ];
@@ -228,6 +228,64 @@ describe("filter URL codec", () => {
       ).toBe(params.toString());
       expect(params.toString()).not.toMatch(/event\s*\{|page\s*\{/u);
     }
+  });
+
+  it("serializes occurrence time and context intrinsics canonically", () => {
+    const sources = [
+      'sequence([event { event.name eq "view" }, event { event.name eq "purchase" }]) { $gap(1, 2) lte 7d AND $same(event.payload("/productId")) } exists',
+      'periods(event { event.name eq "shared_insight" }, 1w) { count($items) gte 3 } exists',
+      'time(first(event { event.name eq "signup" })) gte @now-30d',
+    ];
+
+    for (const source of sources) {
+      const document = parseFilterDsl(source, analyticsFilterRegistry);
+      const params = serializeFilterParams(document, analyticsFilterRegistry);
+      const query = params.toString();
+      expect(query.includes("%24")).toBe(source.includes("$"));
+      expect(query).not.toMatch(/sequence\.span|period\.items/u);
+      expect(
+        [...params.values()].every((value) => !value.includes("gte+")),
+      ).toBe(true);
+      expect(parseFilterParams(params, analyticsFilterRegistry)).toEqual(
+        normalizeFilterDocument(document, analyticsFilterRegistry),
+      );
+      expect(
+        serializeFilterParams(
+          parseFilterParams(params, analyticsFilterRegistry),
+          analyticsFilterRegistry,
+        ).toString(),
+      ).toBe(query);
+    }
+  });
+
+  it("migrates legacy structural URL targets to context intrinsics", () => {
+    const document = normalizeFilterDocument(
+      parseFilterDsl(
+        'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 7d } exists AND count(periods(event, 1w) { count($items) gte 3 }) gte 2',
+        analyticsFilterRegistry,
+      ),
+      analyticsFilterRegistry,
+    );
+    const canonical = serializeFilterParams(document, analyticsFilterRegistry);
+    const legacy = new URLSearchParams(canonical);
+    for (const [current, previous] of [
+      ["$span", "sequence.span"],
+      ["$items", "period.items"],
+    ] as const) {
+      const key = [...legacy.keys()].find((candidate) =>
+        candidate.includes(current),
+      );
+      expect(key).toBeDefined();
+      const value = legacy.get(key!);
+      legacy.delete(key!);
+      legacy.set(key!.replace(`[${current}]`, `[${previous}]`), value!);
+    }
+
+    const migrated = parseFilterParams(legacy, analyticsFilterRegistry);
+    expect(migrated).toEqual(document);
+    expect(
+      serializeFilterParams(migrated, analyticsFilterRegistry).toString(),
+    ).toBe(canonical.toString());
   });
 
   it("preserves escaped set operands and reconstructs nested OR and NOT", () => {

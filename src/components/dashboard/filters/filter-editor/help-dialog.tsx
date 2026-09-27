@@ -94,6 +94,18 @@ export function FilterExpressionHelpDialog({
 
               <section className="space-y-3">
                 <h3 className="text-sm font-medium">
+                  {messages.filterBuilder.expressionHelpContextTitle}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  {messages.filterBuilder.expressionHelpContextDescription}
+                </p>
+                <pre className="overflow-x-auto whitespace-pre-wrap border-y border-border py-3 font-mono text-xs">
+                  {messages.filterBuilder.expressionHelpContextExamples}
+                </pre>
+              </section>
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium">
                   {messages.filterBuilder.expressionHelpValues}
                 </h3>
                 <p className="text-xs text-muted-foreground">

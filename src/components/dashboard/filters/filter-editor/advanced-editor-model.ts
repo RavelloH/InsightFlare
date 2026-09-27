@@ -2,9 +2,12 @@ import {
   analyticsFilterRegistry,
   FILTER_OPERATOR_IDS,
   type FilterCondition,
+  type FilterContextIntrinsicTarget,
   type FilterDurationTarget,
   type FilterExpression,
+  type FilterOccurrenceTimeTarget,
   type FilterOperator,
+  type FilterSequenceTarget,
   type FilterTargetExpression,
   type FilterValueKind,
 } from "@/lib/filter-contract";
@@ -92,6 +95,48 @@ export function createDefaultFilterTarget(
       return { kind, entity: relationEntity };
     case "context-root":
       return { kind, context: "current" };
+    case "context-intrinsic":
+      return {
+        kind,
+        context: "sequence",
+        intrinsic: "span",
+      };
+    case "sequence-span":
+      return {
+        kind: "context-intrinsic",
+        context: "sequence",
+        intrinsic: "span",
+      };
+    case "sequence-gap":
+      return {
+        kind: "context-intrinsic",
+        context: "sequence",
+        intrinsic: "gap",
+        from: 1,
+        to: 2,
+      };
+    case "sequence-same":
+      return {
+        kind: "context-intrinsic",
+        context: "sequence",
+        intrinsic: "same",
+        input: { kind: "event-payload", path: "/productId" as never },
+      };
+    case "period-items":
+      return {
+        kind: "context-intrinsic",
+        context: "period",
+        intrinsic: "items",
+      };
+    case "occurrence-time":
+      return {
+        kind,
+        input: {
+          kind: "reducer",
+          reducer: "first",
+          input: { kind: "entity-root", entity: "event" },
+        },
+      };
     case "member":
       return {
         kind,
@@ -173,6 +218,328 @@ function rootEntity(target: FilterTargetExpression): string | undefined {
   return undefined;
 }
 
+export interface ContextIntrinsicLocation {
+  readonly target: FilterContextIntrinsicTarget;
+  readonly sequence?: FilterSequenceTarget;
+}
+
+function sequenceContextForTarget(
+  target: FilterTargetExpression,
+): FilterSequenceTarget | undefined {
+  if (target.kind === "sequence") return target;
+  if (target.kind === "adjacent")
+    return sequenceContextForTarget(target.sequence);
+  if (target.kind === "without")
+    return sequenceContextForTarget(target.sequence);
+  if (target.kind === "selector")
+    return sequenceContextForTarget(target.collection);
+  return undefined;
+}
+
+export function findContextIntrinsic(
+  target: FilterTargetExpression,
+): ContextIntrinsicLocation | undefined {
+  const visitExpression = (
+    expression: FilterExpression,
+    sequences: readonly FilterSequenceTarget[],
+  ): ContextIntrinsicLocation | undefined => {
+    if (expression.kind === "condition")
+      return (
+        visitTarget(expression.target, sequences) ??
+        (expression.value &&
+        typeof expression.value === "object" &&
+        !Array.isArray(expression.value) &&
+        "kind" in expression.value
+          ? visitTarget(expression.value as FilterTargetExpression, sequences)
+          : undefined)
+      );
+    if (expression.kind === "not")
+      return visitExpression(expression.child, sequences);
+    for (const child of expression.children) {
+      const found = visitExpression(child, sequences);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
+  const visitTarget = (
+    current: FilterTargetExpression,
+    sequences: readonly FilterSequenceTarget[],
+  ): ContextIntrinsicLocation | undefined => {
+    if (current.kind === "context-intrinsic")
+      return {
+        target: current,
+        ...(current.context === "sequence" && sequences.length
+          ? { sequence: sequences.at(-1) }
+          : {}),
+      };
+    if (current.kind === "selector") {
+      const sequence = sequenceContextForTarget(current.collection);
+      const nestedSequences = sequence ? [...sequences, sequence] : sequences;
+      return (
+        visitExpression(current.predicate, nestedSequences) ??
+        visitTarget(current.collection, sequences)
+      );
+    }
+    switch (current.kind) {
+      case "member":
+        return visitTarget(current.object, sequences);
+      case "occurrence-time":
+        return visitTarget(current.input, sequences);
+      case "projection":
+        return visitTarget(current.collection, sequences);
+      case "reducer":
+        return visitTarget(current.input, sequences);
+      case "arithmetic":
+        return (
+          visitTarget(current.left, sequences) ??
+          visitTarget(current.right, sequences)
+        );
+      case "bucket":
+        return visitTarget(current.input, sequences);
+      case "window":
+        return (
+          visitTarget(current.collection, sequences) ??
+          visitTarget(current.anchor, sequences)
+        );
+      case "periods":
+        return visitTarget(current.collection, sequences);
+      case "sequence":
+        for (const step of current.steps) {
+          const found = visitTarget(step, sequences);
+          if (found) return found;
+        }
+        return undefined;
+      case "adjacent":
+        return visitTarget(current.sequence, sequences);
+      case "without":
+        return (
+          visitTarget(current.sequence, sequences) ??
+          visitTarget(current.excluded, sequences)
+        );
+      default:
+        return undefined;
+    }
+  };
+
+  return visitTarget(target, []);
+}
+
+export function findOccurrenceTimeTarget(
+  target: FilterTargetExpression,
+): FilterOccurrenceTimeTarget | undefined {
+  if (target.kind === "occurrence-time") return target;
+  switch (target.kind) {
+    case "member":
+      return findOccurrenceTimeTarget(target.object);
+    case "context-intrinsic":
+      return target.intrinsic === "same"
+        ? findOccurrenceTimeTarget(target.input)
+        : undefined;
+    case "selector":
+      return (
+        findOccurrenceTimeInExpression(target.predicate) ??
+        findOccurrenceTimeTarget(target.collection)
+      );
+    case "projection":
+      return findOccurrenceTimeTarget(target.collection);
+    case "reducer":
+      return findOccurrenceTimeTarget(target.input);
+    case "arithmetic":
+      return (
+        findOccurrenceTimeTarget(target.left) ??
+        findOccurrenceTimeTarget(target.right)
+      );
+    case "bucket":
+      return findOccurrenceTimeTarget(target.input);
+    case "window":
+      return (
+        findOccurrenceTimeTarget(target.collection) ??
+        findOccurrenceTimeTarget(target.anchor)
+      );
+    case "periods":
+      return findOccurrenceTimeTarget(target.collection);
+    case "sequence":
+      for (const step of target.steps) {
+        const found = findOccurrenceTimeTarget(step);
+        if (found) return found;
+      }
+      return undefined;
+    case "adjacent":
+      return findOccurrenceTimeTarget(target.sequence);
+    case "without":
+      return (
+        findOccurrenceTimeTarget(target.sequence) ??
+        findOccurrenceTimeTarget(target.excluded)
+      );
+    default:
+      return undefined;
+  }
+}
+
+function findOccurrenceTimeInExpression(
+  expression: FilterExpression,
+): FilterOccurrenceTimeTarget | undefined {
+  if (expression.kind === "condition")
+    return (
+      findOccurrenceTimeTarget(expression.target) ??
+      (expression.value &&
+      typeof expression.value === "object" &&
+      !Array.isArray(expression.value) &&
+      "kind" in expression.value
+        ? findOccurrenceTimeTarget(expression.value as FilterTargetExpression)
+        : undefined)
+    );
+  if (expression.kind === "not")
+    return findOccurrenceTimeInExpression(expression.child);
+  for (const child of expression.children) {
+    const found = findOccurrenceTimeInExpression(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+export function replaceTargetReference(
+  expression: FilterExpression,
+  search: FilterTargetExpression,
+  replacement: FilterTargetExpression,
+): FilterExpression {
+  const visitTarget = (
+    target: FilterTargetExpression,
+  ): FilterTargetExpression => {
+    if (target === search) return replacement;
+    switch (target.kind) {
+      case "member":
+        return { ...target, object: visitTarget(target.object) };
+      case "context-intrinsic":
+        return target.intrinsic === "same"
+          ? { ...target, input: visitTarget(target.input) }
+          : target;
+      case "occurrence-time":
+        return { ...target, input: visitTarget(target.input) };
+      case "selector":
+        return {
+          ...target,
+          collection: visitTarget(target.collection),
+          predicate: visitExpression(target.predicate),
+        };
+      case "projection":
+        return { ...target, collection: visitTarget(target.collection) };
+      case "reducer":
+        return { ...target, input: visitTarget(target.input) };
+      case "arithmetic":
+        return {
+          ...target,
+          left: visitTarget(target.left),
+          right: visitTarget(target.right),
+        };
+      case "bucket":
+        return { ...target, input: visitTarget(target.input) };
+      case "window":
+        return {
+          ...target,
+          collection: visitTarget(target.collection),
+          anchor: visitTarget(target.anchor),
+        };
+      case "periods":
+        return { ...target, collection: visitTarget(target.collection) };
+      case "sequence":
+        return { ...target, steps: target.steps.map(visitTarget) };
+      case "adjacent":
+        return { ...target, sequence: visitTarget(target.sequence) };
+      case "without":
+        return {
+          ...target,
+          sequence: visitTarget(target.sequence),
+          excluded: visitTarget(target.excluded),
+        };
+      default:
+        return target;
+    }
+  };
+  const visitExpression = (node: FilterExpression): FilterExpression => {
+    if (node.kind === "condition")
+      return {
+        ...node,
+        target: visitTarget(node.target),
+      };
+    if (node.kind === "not")
+      return { ...node, child: visitExpression(node.child) };
+    return { ...node, children: node.children.map(visitExpression) };
+  };
+  return visitExpression(expression);
+}
+
+export function updateConditionWhere(
+  expression: FilterExpression,
+  predicate: (condition: FilterCondition) => boolean,
+  update: (condition: FilterCondition) => FilterCondition,
+): FilterExpression {
+  const visitTarget = (
+    target: FilterTargetExpression,
+  ): FilterTargetExpression => {
+    switch (target.kind) {
+      case "member":
+        return { ...target, object: visitTarget(target.object) };
+      case "context-intrinsic":
+        return target.intrinsic === "same"
+          ? { ...target, input: visitTarget(target.input) }
+          : target;
+      case "occurrence-time":
+        return { ...target, input: visitTarget(target.input) };
+      case "selector":
+        return {
+          ...target,
+          collection: visitTarget(target.collection),
+          predicate: visitExpression(target.predicate),
+        };
+      case "projection":
+        return { ...target, collection: visitTarget(target.collection) };
+      case "reducer":
+        return { ...target, input: visitTarget(target.input) };
+      case "arithmetic":
+        return {
+          ...target,
+          left: visitTarget(target.left),
+          right: visitTarget(target.right),
+        };
+      case "bucket":
+        return { ...target, input: visitTarget(target.input) };
+      case "window":
+        return {
+          ...target,
+          collection: visitTarget(target.collection),
+          anchor: visitTarget(target.anchor),
+        };
+      case "periods":
+        return { ...target, collection: visitTarget(target.collection) };
+      case "sequence":
+        return { ...target, steps: target.steps.map(visitTarget) };
+      case "adjacent":
+        return { ...target, sequence: visitTarget(target.sequence) };
+      case "without":
+        return {
+          ...target,
+          sequence: visitTarget(target.sequence),
+          excluded: visitTarget(target.excluded),
+        };
+      default:
+        return target;
+    }
+  };
+  const visitExpression = (node: FilterExpression): FilterExpression => {
+    if (node.kind === "condition") {
+      const nestedTarget = visitTarget(node.target);
+      const condition = { ...node, target: nestedTarget };
+      return predicate(condition) ? update(condition) : condition;
+    }
+    if (node.kind === "not")
+      return { ...node, child: visitExpression(node.child) };
+    return { ...node, children: node.children.map(visitExpression) };
+  };
+  return visitExpression(expression);
+}
+
 export function filterValueKindForTarget(
   target: FilterTargetExpression,
 ): FilterValueKind {
@@ -181,6 +548,12 @@ export function filterValueKindForTarget(
       analyticsFilterRegistry.get(target.field)?.valueKind ?? "json-scalar"
     );
   if (target.kind === "event-payload") return "json-scalar";
+  if (target.kind === "occurrence-time") return "datetime";
+  if (target.kind === "context-intrinsic") {
+    if (target.intrinsic === "same") return "boolean";
+    if (target.intrinsic === "span" || target.intrinsic === "gap")
+      return "number";
+  }
   if (
     target.kind === "reducer" &&
     ["count", "sum", "avg", "countDistinct"].includes(target.reducer)
@@ -225,8 +598,14 @@ export function filterValueKindForTarget(
 export function filterOperatorsForTarget(
   target: FilterTargetExpression,
 ): readonly FilterOperator[] {
-  if (target.kind === "time-anchor" || isCurrentTimeTarget(target))
+  if (
+    target.kind === "time-anchor" ||
+    target.kind === "occurrence-time" ||
+    isCurrentTimeTarget(target)
+  )
     return DATETIME_OPERATORS;
+  if (target.kind === "context-intrinsic" && target.intrinsic === "same")
+    return ["eq"];
   if (target.kind === "field")
     return [
       ...(analyticsFilterRegistry.get(target.field)?.operators ??
@@ -265,6 +644,76 @@ export function createAdvancedFilterCondition(
   audience: FilterPanelAudience,
 ): FilterCondition {
   const target = createDefaultFilterTarget(kind, audience);
+  if (
+    kind === "sequence-span" ||
+    kind === "sequence-gap" ||
+    kind === "sequence-same"
+  ) {
+    const sequence = createDefaultFilterTarget("sequence", audience);
+    if (sequence.kind !== "sequence")
+      throw new Error("invalid_sequence_default");
+    const operator = kind === "sequence-same" ? "eq" : "lte";
+    const value =
+      kind === "sequence-same"
+        ? true
+        : ({
+            kind: "duration",
+            amount: kind === "sequence-gap" ? 1 : 14,
+            unit: "d",
+          } as const);
+    const constrainedSequence: FilterTargetExpression = {
+      kind: "selector",
+      collection: sequence,
+      predicate: { kind: "condition", target, operator, value },
+    };
+    return {
+      kind: "condition",
+      target: {
+        kind: "selector",
+        collection: { kind: "entity-root", entity: "session" },
+        predicate: {
+          kind: "condition",
+          target: constrainedSequence,
+          operator: "exists",
+        },
+      },
+      operator: "exists",
+    };
+  }
+  if (kind === "period-items") {
+    const period: FilterTargetExpression = {
+      kind: "periods",
+      collection: { kind: "entity-root", entity: "event" },
+      interval: { kind: "duration", amount: 1, unit: "w" },
+    };
+    const countedItems: FilterTargetExpression = {
+      kind: "reducer",
+      reducer: "count",
+      input: target,
+    };
+    return {
+      kind: "condition",
+      target: {
+        kind: "selector",
+        collection: { kind: "entity-root", entity: "session" },
+        predicate: {
+          kind: "condition",
+          target: {
+            kind: "selector",
+            collection: period,
+            predicate: {
+              kind: "condition",
+              target: countedItems,
+              operator: "gte",
+              value: 1,
+            },
+          },
+          operator: "exists",
+        },
+      },
+      operator: "exists",
+    };
+  }
   if (kind === "sequence" || kind === "adjacent" || kind === "without")
     return {
       kind: "condition",
@@ -279,12 +728,19 @@ export function createAdvancedFilterCondition(
       },
       operator: "exists",
     };
-  if (kind === "time" || kind === "time-anchor")
+  if (kind === "time" || kind === "time-anchor" || kind === "occurrence-time")
     return {
       kind: "condition",
       target,
       operator: "gte",
-      value: "",
+      value:
+        kind === "occurrence-time"
+          ? {
+              kind: "time-anchor",
+              anchor: "now",
+              offset: { kind: "duration", amount: -14, unit: "d" },
+            }
+          : "",
     };
   if (kind === "bucket")
     return {

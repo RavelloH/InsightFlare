@@ -28,6 +28,12 @@ export const ADVANCED_FILTER_TARGET_KINDS = [
   "time",
   "entity-root",
   "context-root",
+  "context-intrinsic",
+  "occurrence-time",
+  "sequence-span",
+  "sequence-gap",
+  "sequence-same",
+  "period-items",
   "member",
   "selector",
   "projection",
@@ -50,6 +56,12 @@ export const FILTER_TARGET_EDITOR_KINDS = [
   "event-payload",
   "entity-root",
   "context-root",
+  "context-intrinsic",
+  "occurrence-time",
+  "sequence-span",
+  "sequence-gap",
+  "sequence-same",
+  "period-items",
   "member",
   "selector",
   "projection",
@@ -114,6 +126,66 @@ export function advancedFilterFieldValue(
   return `${ADVANCED_FILTER_FIELD_PREFIX}${kind}`;
 }
 
+function firstContextIntrinsic(
+  target: FilterTargetExpression,
+):
+  | Extract<FilterTargetExpression, { readonly kind: "context-intrinsic" }>
+  | undefined {
+  if (target.kind === "context-intrinsic") return target;
+  if (target.kind === "member") return firstContextIntrinsic(target.object);
+  if (target.kind === "occurrence-time")
+    return firstContextIntrinsic(target.input);
+  if (target.kind === "selector")
+    return (
+      firstContextIntrinsicInExpression(target.predicate) ??
+      firstContextIntrinsic(target.collection)
+    );
+  if (target.kind === "projection")
+    return firstContextIntrinsic(target.collection);
+  if (target.kind === "reducer") return firstContextIntrinsic(target.input);
+  if (target.kind === "arithmetic")
+    return (
+      firstContextIntrinsic(target.left) ?? firstContextIntrinsic(target.right)
+    );
+  if (target.kind === "bucket") return firstContextIntrinsic(target.input);
+  if (target.kind === "window")
+    return (
+      firstContextIntrinsic(target.collection) ??
+      firstContextIntrinsic(target.anchor)
+    );
+  if (target.kind === "periods")
+    return firstContextIntrinsic(target.collection);
+  if (target.kind === "sequence") {
+    for (const step of target.steps) {
+      const found = firstContextIntrinsic(step);
+      if (found) return found;
+    }
+  }
+  if (target.kind === "adjacent") return firstContextIntrinsic(target.sequence);
+  if (target.kind === "without")
+    return (
+      firstContextIntrinsic(target.sequence) ??
+      firstContextIntrinsic(target.excluded)
+    );
+  return undefined;
+}
+
+function firstContextIntrinsicInExpression(
+  expression: FilterExpression,
+):
+  | Extract<FilterTargetExpression, { readonly kind: "context-intrinsic" }>
+  | undefined {
+  if (expression.kind === "condition")
+    return firstContextIntrinsic(expression.target);
+  if (expression.kind === "not")
+    return firstContextIntrinsicInExpression(expression.child);
+  for (const child of expression.children) {
+    const found = firstContextIntrinsicInExpression(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 export function advancedFilterFieldValueForTarget(
   target: FilterTargetExpression,
 ): string {
@@ -124,6 +196,19 @@ export function advancedFilterFieldValueForTarget(
     target.member === "time"
   )
     return advancedFilterFieldValue("time");
+  if (target.kind === "occurrence-time")
+    return advancedFilterFieldValue("occurrence-time");
+  const intrinsic = firstContextIntrinsic(target);
+  if (intrinsic) {
+    if (intrinsic.context === "period")
+      return advancedFilterFieldValue("period-items");
+    if (intrinsic.intrinsic === "span")
+      return advancedFilterFieldValue("sequence-span");
+    if (intrinsic.intrinsic === "gap")
+      return advancedFilterFieldValue("sequence-gap");
+    if (intrinsic.intrinsic === "same")
+      return advancedFilterFieldValue("sequence-same");
+  }
   if (
     target.kind === "selector" &&
     target.collection.kind === "entity-root" &&

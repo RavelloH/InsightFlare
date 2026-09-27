@@ -81,6 +81,36 @@ export interface FilterContextRootTarget {
   readonly context: "current" | "sequence" | "period" | "bucket";
 }
 
+export type FilterContextIntrinsicTarget =
+  | {
+      readonly kind: "context-intrinsic";
+      readonly context: "sequence";
+      readonly intrinsic: "span";
+    }
+  | {
+      readonly kind: "context-intrinsic";
+      readonly context: "sequence";
+      readonly intrinsic: "gap";
+      readonly from: number;
+      readonly to: number;
+    }
+  | {
+      readonly kind: "context-intrinsic";
+      readonly context: "sequence";
+      readonly intrinsic: "same";
+      readonly input: FilterTargetExpression;
+    }
+  | {
+      readonly kind: "context-intrinsic";
+      readonly context: "period";
+      readonly intrinsic: "items";
+    };
+
+export interface FilterOccurrenceTimeTarget {
+  readonly kind: "occurrence-time";
+  readonly input: FilterTargetExpression;
+}
+
 export interface FilterMemberTarget {
   readonly kind: "member";
   readonly object: FilterTargetExpression;
@@ -181,6 +211,8 @@ export type FilterTargetExpression =
   | EventPayloadFilterTarget
   | FilterEntityRootTarget
   | FilterContextRootTarget
+  | FilterContextIntrinsicTarget
+  | FilterOccurrenceTimeTarget
   | FilterMemberTarget
   | FilterSelectorTarget
   | FilterProjectionTarget
@@ -539,11 +571,82 @@ function canonicalTargetExpression(
         kind: "context-root",
         context: input.context as FilterContextRootTarget["context"],
       };
-    case "member":
+    case "member": {
+      const object = target(input.object, "object");
+      const member = memberName(input.member, "member");
+      // One-way migration for persisted v1 structural members. Canonical ASTs
+      // and all new output use the dedicated intrinsic node below.
+      if (
+        object.kind === "context-root" &&
+        object.context === "sequence" &&
+        member === "span"
+      )
+        return {
+          kind: "context-intrinsic",
+          context: "sequence",
+          intrinsic: "span",
+        };
+      if (
+        object.kind === "context-root" &&
+        object.context === "period" &&
+        member === "items"
+      )
+        return {
+          kind: "context-intrinsic",
+          context: "period",
+          intrinsic: "items",
+        };
+      return { kind: "member", object, member };
+    }
+    case "context-intrinsic":
+      if (input.context === "sequence" && input.intrinsic === "span")
+        return {
+          kind: "context-intrinsic",
+          context: "sequence",
+          intrinsic: "span",
+        };
+      if (input.context === "sequence" && input.intrinsic === "gap") {
+        if (
+          !Number.isSafeInteger(input.from) ||
+          !Number.isSafeInteger(input.to) ||
+          (input.from as number) < 1 ||
+          (input.to as number) <= (input.from as number)
+        )
+          fail(
+            "invalid_sequence_gap",
+            path,
+            "$gap requires increasing positive safe-integer step indexes.",
+          );
+        return {
+          kind: "context-intrinsic",
+          context: "sequence",
+          intrinsic: "gap",
+          from: input.from as number,
+          to: input.to as number,
+        };
+      }
+      if (input.context === "sequence" && input.intrinsic === "same")
+        return {
+          kind: "context-intrinsic",
+          context: "sequence",
+          intrinsic: "same",
+          input: target(input.input, "input"),
+        };
+      if (input.context === "period" && input.intrinsic === "items")
+        return {
+          kind: "context-intrinsic",
+          context: "period",
+          intrinsic: "items",
+        };
+      return fail(
+        "invalid_context_intrinsic",
+        path,
+        "Unknown or incompatible context intrinsic.",
+      );
+    case "occurrence-time":
       return {
-        kind: "member",
-        object: target(input.object, "object"),
-        member: memberName(input.member, "member"),
+        kind: "occurrence-time",
+        input: target(input.input, "input"),
       };
     case "selector": {
       if (!Object.prototype.hasOwnProperty.call(input, "predicate")) {
@@ -1104,6 +1207,16 @@ function canonicalCondition(
       );
   const definition = resolved?.definition;
   const operator = requireOperator(input.operator, `${path}.operator`);
+  if (
+    target.kind === "context-intrinsic" &&
+    target.intrinsic === "same" &&
+    (operator !== "eq" || input.value !== true)
+  )
+    fail(
+      "invalid_context_intrinsic_condition",
+      path,
+      "$same(...) must be represented as the canonical condition `eq true`.",
+    );
   if (definition && !definition.operators.has(operator)) {
     fail(
       "operator_not_allowed",
@@ -1697,6 +1810,10 @@ export function filterConditionCount(document: FilterDocument): number {
         return countTarget(target.collection);
       case "context-root":
         return 0;
+      case "context-intrinsic":
+        return target.intrinsic === "same" ? countTarget(target.input) : 0;
+      case "occurrence-time":
+        return countTarget(target.input);
       case "member":
         return countTarget(target.object);
       case "reducer":
@@ -1823,6 +1940,12 @@ export function assertFilterAudience(
         visitTarget(target.collection);
         break;
       case "context-root":
+        break;
+      case "context-intrinsic":
+        if (target.intrinsic === "same") visitTarget(target.input);
+        break;
+      case "occurrence-time":
+        visitTarget(target.input);
         break;
       case "reducer":
         visitTarget(target.input);

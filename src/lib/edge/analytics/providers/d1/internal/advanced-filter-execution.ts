@@ -212,6 +212,10 @@ function payloadPaths(expression: FilterDocument["root"]): {
     else if (value.kind === "member") {
       target(value.object);
       if (value.member === "payload") wholePayload = true;
+    } else if (value.kind === "context-intrinsic") {
+      if (value.intrinsic === "same") target(value.input);
+    } else if (value.kind === "occurrence-time") {
+      target(value.input);
     } else if (value.kind === "selector") {
       target(value.collection);
       visit(value.predicate);

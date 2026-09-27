@@ -169,7 +169,7 @@ describe("Filter v1 expression types", () => {
 
   it("resolves relation anchors from query Scope or explicit selectors", () => {
     const source =
-      'session { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.span lte 7d } exists } exists';
+      'session { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 7d } exists } exists';
     expect(() => validate(source)).not.toThrow();
     const topLevel = parseFilterDsl(
       'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
@@ -230,6 +230,44 @@ describe("Filter v1 expression types", () => {
     );
   });
 
+  it("allows only DateTime minus DateTime as a duration operation", () => {
+    const document = parseFilterDsl(
+      "sub(time(first(event)), time(first(page))) between [0d, 30d]",
+      analyticsFilterRegistry,
+    );
+    const root = document.root;
+    if (root?.kind !== "condition") throw new Error("expected_condition");
+    expect(
+      analyzeFilterDocument(document, analyticsFilterRegistry).targetTypes.get(
+        root.target,
+      ),
+    ).toMatchObject({ kind: "scalar", scalar: "duration" });
+
+    for (const source of [
+      "sub(time(first(event)), count(event)) gt 1",
+      "sub(count(event), time(first(event))) gt 1",
+      "add(time(first(event)), time(first(page))) gt 1",
+    ])
+      expect(() => validate(source), source).toThrow(
+        expect.objectContaining({ code: "arithmetic_type_mismatch" }),
+      );
+  });
+
+  it("keeps $same in the canonical eq true condition form", () => {
+    for (const source of [
+      'sequence([event, event]) { $same(event.payload("/id")) neq true } exists',
+      'sequence([event, event]) { $same(event.payload("/id")) eq false } exists',
+    ])
+      expect(
+        () => parseFilterDsl(source, analyticsFilterRegistry),
+        source,
+      ).toThrow(
+        expect.objectContaining({
+          code: "invalid_context_intrinsic_condition",
+        }),
+      );
+  });
+
   it("accepts temporal ranges without allowing temporal set values", () => {
     validate("time between [@now-30d, @now]");
     expect(() => validate("time in [@now, 7d]")).toThrow();
@@ -249,7 +287,7 @@ describe("Filter v1 expression types", () => {
       "bucket(page, 1d).end exists",
       "session.pages exists",
       "visitor.pages exists",
-      "period.items.time exists",
+      "periods(event, 1w) { $items.time exists } exists",
       "first(event).payload exists",
       'page { page.path eq "/pricing" }.payload("/price") eq 1',
       'first(event).payload("/price") eq 1',

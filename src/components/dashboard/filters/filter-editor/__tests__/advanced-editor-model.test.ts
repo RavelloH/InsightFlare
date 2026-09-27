@@ -6,6 +6,10 @@ import {
   createFilterPickerTargetCondition,
   filterOperatorsForTarget,
   filterValueKindForTarget,
+  findContextIntrinsic,
+  findOccurrenceTimeTarget,
+  replaceTargetReference,
+  updateConditionWhere,
 } from "@/components/dashboard/filters/filter-editor/advanced-editor-model";
 import {
   ADVANCED_FILTER_TARGET_KINDS,
@@ -28,17 +32,92 @@ import {
 import { filterPickerTargetForValue } from "@/lib/filter-contract/filter-picker-registry";
 import { FILTER_PICKER_TARGET_REGISTRY } from "@/lib/filter-contract/filter-picker-registry";
 
+const eventRoot: FilterTargetExpression = {
+  kind: "entity-root",
+  entity: "event",
+};
+const pageRoot: FilterTargetExpression = {
+  kind: "entity-root",
+  entity: "page",
+};
+const eventName: FilterTargetExpression = {
+  kind: "field",
+  field: "event.name" as never,
+};
+const intrinsic: FilterTargetExpression = {
+  kind: "context-intrinsic",
+  context: "sequence",
+  intrinsic: "span",
+};
+const occurrenceTime: FilterTargetExpression = {
+  kind: "occurrence-time",
+  input: eventRoot,
+};
+
+function condition(target: FilterTargetExpression): FilterExpression {
+  return { kind: "condition", target, operator: "exists" };
+}
+
+function wrappersAround(
+  child: FilterTargetExpression,
+): FilterTargetExpression[] {
+  const sequence: FilterTargetExpression = {
+    kind: "sequence",
+    steps: [eventRoot, child],
+  };
+  return [
+    { kind: "member", object: child, member: "name" },
+    {
+      kind: "context-intrinsic",
+      context: "sequence",
+      intrinsic: "same",
+      input: child,
+    },
+    { kind: "occurrence-time", input: child },
+    {
+      kind: "selector",
+      collection: child,
+      predicate: condition(child),
+    },
+    { kind: "projection", collection: child, member: "name" },
+    { kind: "reducer", reducer: "first", input: child },
+    { kind: "arithmetic", operator: "add", left: eventRoot, right: child },
+    {
+      kind: "bucket",
+      input: child,
+      interval: { kind: "duration", amount: 1, unit: "d" },
+    },
+    {
+      kind: "window",
+      collection: eventRoot,
+      anchor: child,
+      startOffset: { kind: "duration", amount: 0, unit: "d" },
+      endOffset: { kind: "duration", amount: 1, unit: "d" },
+    },
+    {
+      kind: "periods",
+      collection: child,
+      interval: { kind: "duration", amount: 1, unit: "w" },
+    },
+    sequence,
+    { kind: "adjacent", sequence },
+    { kind: "without", sequence, excluded: child },
+  ];
+}
+
 describe("advanced filter editor model", () => {
   it("round-trips every advanced target and relation through the visual tree", () => {
     const sources = [
       'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2 AND last(page).path exists',
       'sub(sum(event { event.name eq "purchase" }.payload("/amount")), sum(event { event.name eq "refund" }.payload("/amount"))) gt 0',
       "countDistinct(bucket(page, 1d)) gte 2",
-      "count(periods(page, 1w) { count(period.items) gte 3 }) gte 2",
+      "count(periods(page, 1w) { count($items) gte 3 }) gte 2",
+      'time(nth(event { event.name eq "signup" }, 3)) gte @now-30d',
+      'sequence([event { event.name eq "view" }, event { event.name eq "purchase" }]) { $gap(1, 2) lte 7d AND $same(event.payload("/productId")) } exists',
       'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists',
       'time gte @range.start AND time lt @range.end AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
       'adjacent(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])) exists',
-      'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) { sequence.span lte 7d } exists',
+      'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) { $span lte 7d } exists',
       'NOT (page.path eq "/a" OR page.path eq "/b")',
     ];
 
@@ -130,6 +209,16 @@ describe("advanced filter editor model", () => {
     expect(filterValueKindForTarget(context)).toBe("json-scalar");
     expect(
       filterValueKindForTarget({
+        kind: "occurrence-time",
+        input: {
+          kind: "reducer",
+          reducer: "first",
+          input: { kind: "entity-root", entity: "event" },
+        },
+      }),
+    ).toBe("datetime");
+    expect(
+      filterValueKindForTarget({
         kind: "reducer",
         reducer: "min",
         input: {
@@ -214,5 +303,154 @@ describe("advanced filter editor model", () => {
         collection: { kind: "entity-root", entity: "page" },
       }),
     );
+  });
+
+  it("finds context intrinsics throughout target and selector structures", () => {
+    for (const target of wrappersAround(intrinsic)) {
+      expect(findContextIntrinsic(target)?.target).toBe(
+        target.kind === "context-intrinsic" ? target : intrinsic,
+      );
+    }
+    expect(findContextIntrinsic(eventRoot)).toBeUndefined();
+
+    const sequence: FilterTargetExpression = {
+      kind: "sequence",
+      steps: [eventRoot],
+    };
+    for (const collection of [
+      sequence,
+      { kind: "adjacent", sequence } satisfies FilterTargetExpression,
+      {
+        kind: "without",
+        sequence,
+        excluded: eventRoot,
+      } satisfies FilterTargetExpression,
+      {
+        kind: "selector",
+        collection: sequence,
+        predicate: condition(eventRoot),
+      } satisfies FilterTargetExpression,
+    ]) {
+      const selector: FilterTargetExpression = {
+        kind: "selector",
+        collection,
+        predicate: condition(intrinsic),
+      };
+      expect(findContextIntrinsic(selector)).toEqual({
+        target: intrinsic,
+        sequence,
+      });
+    }
+
+    const nestedIntrinsic: FilterTargetExpression = {
+      kind: "sequence",
+      steps: [intrinsic],
+    };
+    expect(
+      findContextIntrinsic({
+        kind: "selector",
+        collection: nestedIntrinsic,
+        predicate: condition(eventRoot),
+      })?.target,
+    ).toBe(intrinsic);
+
+    const intrinsicValue = {
+      kind: "condition",
+      target: eventRoot,
+      operator: "eq",
+      value: intrinsic,
+    } as unknown as FilterExpression;
+    expect(
+      findContextIntrinsic({
+        kind: "selector",
+        collection: eventRoot,
+        predicate: {
+          kind: "not",
+          child: {
+            kind: "and",
+            children: [condition(eventName), intrinsicValue],
+          },
+        },
+      })?.target,
+    ).toBe(intrinsic);
+  });
+
+  it("finds occurrence-time targets through nested targets and expressions", () => {
+    for (const target of wrappersAround(occurrenceTime)) {
+      expect(findOccurrenceTimeTarget(target)).toBe(
+        target.kind === "occurrence-time" ? target : occurrenceTime,
+      );
+    }
+    expect(findOccurrenceTimeTarget(eventRoot)).toBeUndefined();
+    expect(
+      findOccurrenceTimeTarget({
+        kind: "context-intrinsic",
+        context: "sequence",
+        intrinsic: "span",
+      }),
+    ).toBeUndefined();
+
+    const occurrenceValue = {
+      kind: "condition",
+      target: eventName,
+      operator: "eq",
+      value: occurrenceTime,
+    } as unknown as FilterExpression;
+    const nested: FilterTargetExpression = {
+      kind: "selector",
+      collection: eventRoot,
+      predicate: {
+        kind: "not",
+        child: {
+          kind: "or",
+          children: [condition(eventName), occurrenceValue],
+        },
+      },
+    };
+    expect(findOccurrenceTimeTarget(nested)).toBe(occurrenceTime);
+  });
+
+  it("replaces target references and updates matching nested conditions", () => {
+    const expression: FilterExpression = {
+      kind: "and",
+      children: [
+        ...wrappersAround(eventName).map(condition),
+        {
+          kind: "not",
+          child: {
+            kind: "and",
+            children: [
+              condition({
+                kind: "selector",
+                collection: eventRoot,
+                predicate: condition(eventName),
+              }),
+            ],
+          },
+        },
+      ],
+    };
+    const replaced = replaceTargetReference(expression, eventName, pageRoot);
+    expect(JSON.stringify(replaced)).not.toContain('"field":"event.name"');
+
+    let updatedCount = 0;
+    const updated = updateConditionWhere(
+      replaced,
+      (candidate) => candidate.target === pageRoot,
+      (candidate) => {
+        updatedCount += 1;
+        return { ...candidate, operator: "eq", value: "/replacement" };
+      },
+    );
+    expect(updatedCount).toBeGreaterThan(1);
+    expect(JSON.stringify(updated)).toContain("/replacement");
+
+    expect(
+      updateConditionWhere(
+        replaced,
+        () => false,
+        (candidate) => candidate,
+      ),
+    ).toEqual(replaced);
   });
 });

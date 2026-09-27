@@ -560,20 +560,6 @@ function memberValue(value: RuntimeValue, member: string): RuntimeValue {
     return value.map((item) => memberValue(item as RuntimeValue, member));
   if (isMissing(value) || value === null || typeof value !== "object")
     return MISSING;
-  if ("kind" in value) {
-    const tagged = value as Record<string, unknown>;
-    if (tagged.kind === "duration-value") return MISSING;
-    if (tagged.kind === "period-value") {
-      if (member === "items") return tagged.items as readonly unknown[];
-    }
-    if (tagged.kind === "sequence-match-value") {
-      if (member === "span")
-        return {
-          kind: "duration-value",
-          milliseconds: tagged.spanMs as number,
-        };
-    }
-  }
   const entity = value as FilterEvaluationEntity;
   if (entity.kind && entity.fields && typeof entity.fields === "object") {
     if (member === "payload")
@@ -807,6 +793,54 @@ function targetValue(
       if (target.context === "sequence") return frame.sequence ?? MISSING;
       if (target.context === "period") return frame.period ?? MISSING;
       return frame.bucket ?? MISSING;
+    case "context-intrinsic": {
+      if (target.intrinsic === "items") return frame.period?.items ?? MISSING;
+      const sequence = frame.sequence;
+      if (!sequence) return MISSING;
+      if (target.intrinsic === "span")
+        return {
+          kind: "duration-value",
+          milliseconds: sequence.spanMs,
+        } satisfies DurationValue;
+      if (target.intrinsic === "gap") {
+        const from = sequence.steps[target.from - 1]?.time;
+        const to = sequence.steps[target.to - 1]?.time;
+        if (typeof from !== "number" || typeof to !== "number") return MISSING;
+        return {
+          kind: "duration-value",
+          milliseconds: to - from,
+        } satisfies DurationValue;
+      }
+      const values = sequence.steps.map((occurrence) =>
+        targetValue(
+          target.input,
+          { ...frame, current: occurrence, topLevel: false },
+          context,
+        ),
+      );
+      if (
+        values.length === 0 ||
+        values.some(
+          (value) =>
+            isMissing(value) ||
+            value === null ||
+            !["string", "number", "boolean"].includes(typeof value) ||
+            (typeof value === "number" && !Number.isFinite(value)),
+        )
+      )
+        return false;
+      const fieldId = fieldIdFor(target.input);
+      return values
+        .slice(1)
+        .every((value) => equalValue(values[0], value, fieldId));
+    }
+    case "occurrence-time": {
+      const occurrence = targetValue(target.input, frame, context);
+      return isRuntimeEntity(occurrence) &&
+        (occurrence.kind === "page" || occurrence.kind === "event")
+        ? (occurrence.time ?? MISSING)
+        : MISSING;
+    }
     case "member":
       if (isScopeTimeTarget(target))
         return currentEntity(frame)?.time ?? MISSING;

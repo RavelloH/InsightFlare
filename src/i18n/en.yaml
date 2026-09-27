@@ -276,6 +276,11 @@ filterBuilder:
     client.screenHeight: Screen height
     geo.isEU: EU region
     time: Time
+    time(...): Occurrence time
+    $items: Items in period
+    $span: Sequence span
+    $gap(...): Gap between steps
+    $same(...): Same value across steps
     bucket(...): Time bucket
     window(...): Relative time window
     periods(...): Period groups
@@ -333,6 +338,7 @@ filterBuilder:
   rangeStartPlaceholder: Lower bound
   rangeEndPlaceholder: Upper bound
   unitAriaLabel: Display unit
+  durationUnit: Duration unit
   units:
     hours: Hours
     minutes: Minutes
@@ -364,6 +370,14 @@ filterBuilder:
   expressionHelpFieldType: Type
   expressionHelpFieldOperators: Operators
   expressionHelpOtherFields: Other
+  expressionHelpContextTitle: Occurrence time and context intrinsics
+  expressionHelpContextDescription: A dot reads a registered field. @ names a temporal anchor. $ names a value supplied by the nearest matching Sequence or Period predicate context.
+  expressionHelpContextExamples: |-
+    time(last(page)) gte @now-14d
+    sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {
+      $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))
+    } exists
+    periods(event, 1w) { count($items) gte 3 } exists
   advancedEditor:
     not: NOT
     removeNot: Remove NOT
@@ -385,6 +399,13 @@ filterBuilder:
     jsonPointerPlaceholder: /property/path
     entityMember: Entity member
     nthIndex: Nth item index
+    fromStep: From step
+    toStep: To step
+    occurrenceKind: Occurrence selector
+    occurrenceEntity: Occurrence type
+    occurrenceIndex: Occurrence index
+    correlationTarget: Value shared by each step
+    periodItemCount: Items per period
     nestedTooDeep: Expression is nested too deeply.
     applyOffset: Apply offset
     removeStep: Remove step
@@ -400,6 +421,8 @@ filterBuilder:
       event-payload: Event payload
       entity-root: Entity collection
       context-root: Context
+      context-intrinsic: Context intrinsic
+      occurrence-time: Occurrence time
       member: Member
       selector: Selector
       projection: Projection
@@ -407,6 +430,10 @@ filterBuilder:
       arithmetic: Arithmetic
       duration: Duration
       time-anchor: Relative time
+      sequence-span: Sequence span
+      sequence-gap: Sequence gap
+      sequence-same: Sequence shared value
+      period-items: Period items
       bucket: Time bucket
       window: Window
       periods: Periods

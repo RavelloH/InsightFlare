@@ -287,6 +287,11 @@ function analyzeTarget(
     case "context-root":
     case "duration":
       return { requirement: CANDIDATE_ONLY, boundedCollection: false };
+    case "context-intrinsic":
+      if (target.intrinsic === "same") analyze(target.input);
+      return { requirement: CANDIDATE_ONLY, boundedCollection: false };
+    case "occurrence-time":
+      return analyze(target.input);
     case "time-anchor": {
       const value = resolveEndpoint(target, candidate, capturedAtMs);
       if (value === null || value === Number.MAX_SAFE_INTEGER)
@@ -304,6 +309,7 @@ function analyzeTarget(
         candidate,
         capturedAtMs,
         analysis,
+        filterRange,
       );
       return {
         requirement: mergeRequirements(source.requirement, predicateTargets),

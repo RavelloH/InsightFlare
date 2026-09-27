@@ -242,7 +242,7 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
   }
   database
     .prepare(
-      "INSERT INTO custom_event_names (id, site_pk, name) VALUES (1, 1, 'signup'), (2, 1, 'purchase'), (3, 1, 'cancellation'), (4, 1, 'refund')",
+      "INSERT INTO custom_event_names (id, site_pk, name) VALUES (1, 1, 'signup'), (2, 1, 'purchase'), (3, 1, 'cancellation'), (4, 1, 'refund'), (5, 1, 'view')",
     )
     .run();
   const insertEvent = database.prepare(`
@@ -281,6 +281,7 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
     purchase: 2,
     cancellation: 3,
     refund: 4,
+    view: 5,
   };
   for (const activity of activities) {
     if (!activity.event) continue;
@@ -1207,7 +1208,7 @@ describe("D1 advanced filter execution", () => {
     const wrappedHistory = await evaluateSharedFixture({
       activities,
       filterDsl:
-        'first(periods(event { event.name eq "purchase" }, 1d)).items exists',
+        'first(periods(event { event.name eq "purchase" }, 1d) { count($items) gte 1 }) exists',
       scope: "visitor",
       candidateRange: { startMs: 0, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
@@ -1251,6 +1252,87 @@ describe("D1 advanced filter execution", () => {
     });
     expect(sessionRelation.d1).toEqual([]);
     expect(sessionRelation.mock).toEqual(sessionRelation.d1);
+
+    const contextualActivities: readonly SharedActivity[] = [
+      {
+        visitId: "same-view-a",
+        sessionId: "same-session-a",
+        visitorId: "same-visitor-a",
+        pageTimeMs: 10,
+        pathname: "/view-a",
+        event: {
+          id: "same-view-a:event",
+          name: "view",
+          timeMs: 10,
+          payload: { productId: "A" },
+        },
+      },
+      {
+        visitId: "same-purchase-a",
+        sessionId: "same-session-a",
+        visitorId: "same-visitor-a",
+        pageTimeMs: 20,
+        pathname: "/purchase-a",
+        event: {
+          id: "same-purchase-a:event",
+          name: "purchase",
+          timeMs: 20,
+          payload: { productId: "A" },
+        },
+      },
+      {
+        visitId: "same-view-b",
+        sessionId: "same-session-b",
+        visitorId: "same-visitor-b",
+        pageTimeMs: 10,
+        pathname: "/view-b",
+        event: {
+          id: "same-view-b:event",
+          name: "view",
+          timeMs: 10,
+          payload: { productId: "A" },
+        },
+      },
+      {
+        visitId: "same-purchase-b",
+        sessionId: "same-session-b",
+        visitorId: "same-visitor-b",
+        pageTimeMs: 20,
+        pathname: "/purchase-b",
+        event: {
+          id: "same-purchase-b:event",
+          name: "purchase",
+          timeMs: 20,
+          payload: { productId: "B" },
+        },
+      },
+    ];
+    const contextualParity = await evaluateSharedFixture({
+      activities: contextualActivities,
+      filterDsl:
+        'sequence([event { event.name eq "view" }, event { event.name eq "purchase" }]) { $span lte 20ms AND $gap(1, 2) eq 10ms AND $same(event.payload("/productId")) } exists',
+      scope: "visitor",
+      candidateRange: { startMs: 0, endExclusiveMs: 2_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 2_000,
+    });
+    expect(contextualParity.d1).toEqual(["same-visitor-a"]);
+    expect(contextualParity.mock).toEqual(contextualParity.d1);
+
+    const occurrenceTimeParity = await evaluateSharedFixture({
+      activities: contextualActivities,
+      filterDsl:
+        'sub(time(first(event { event.name eq "purchase" })), time(first(event { event.name eq "view" }))) eq 10ms',
+      scope: "visitor",
+      candidateRange: { startMs: 0, endExclusiveMs: 2_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 2_000,
+    });
+    expect(occurrenceTimeParity.d1).toEqual([
+      "same-visitor-a",
+      "same-visitor-b",
+    ]);
+    expect(occurrenceTimeParity.mock).toEqual(occurrenceTimeParity.d1);
   });
 
   it("evaluates complete Visitor filters in Filter time and projects only Query time", async () => {

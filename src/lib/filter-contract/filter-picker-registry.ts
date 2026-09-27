@@ -14,10 +14,15 @@ export type FilterPickerTargetSelection =
       readonly kind: "target";
       readonly targetKind:
         | "time"
+        | "occurrence-time"
         | "bucket"
         | "window"
         | "periods"
+        | "period-items"
         | "sequence"
+        | "sequence-span"
+        | "sequence-gap"
+        | "sequence-same"
         | "adjacent"
         | "without";
     }
@@ -105,6 +110,13 @@ export const FILTER_PICKER_TARGET_REGISTRY = [
     selection: { kind: "target", targetKind: "time" },
   },
   {
+    id: "time(...)",
+    group: "time",
+    labelKey: "time(...)",
+    value: targetValue("occurrence-time"),
+    selection: { kind: "target", targetKind: "occurrence-time" },
+  },
+  {
     id: "bucket(...)",
     group: "time",
     labelKey: "bucket(...)",
@@ -147,6 +159,13 @@ export const FILTER_PICKER_TARGET_REGISTRY = [
     value: targetValue("reducer", reducer),
     selection: { kind: "reducer" as const, reducer },
   })),
+  {
+    id: "$items",
+    group: "aggregation",
+    labelKey: "$items",
+    value: targetValue("period-items"),
+    selection: { kind: "target", targetKind: "period-items" },
+  },
   ...(
     [
       ["add", "add(...)"],
@@ -180,6 +199,27 @@ export const FILTER_PICKER_TARGET_REGISTRY = [
     value: targetValue(targetKind),
     selection: { kind: "target" as const, targetKind },
   })),
+  {
+    id: "$span",
+    group: "relation",
+    labelKey: "$span",
+    value: targetValue("sequence-span"),
+    selection: { kind: "target", targetKind: "sequence-span" },
+  },
+  {
+    id: "$gap(...)",
+    group: "relation",
+    labelKey: "$gap(...)",
+    value: targetValue("sequence-gap"),
+    selection: { kind: "target", targetKind: "sequence-gap" },
+  },
+  {
+    id: "$same(...)",
+    group: "relation",
+    labelKey: "$same(...)",
+    value: targetValue("sequence-same"),
+    selection: { kind: "target", targetKind: "sequence-same" },
+  },
 ] as const satisfies readonly FilterPickerTargetRegistration[];
 
 export function filterPickerTargetForValue(

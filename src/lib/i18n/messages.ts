@@ -244,6 +244,7 @@ export interface AppMessages {
     rangeStartPlaceholder: string;
     rangeEndPlaceholder: string;
     unitAriaLabel: string;
+    durationUnit: string;
     units: {
       hours: string;
       minutes: string;
@@ -272,6 +273,9 @@ export interface AppMessages {
     expressionHelpFieldType: string;
     expressionHelpFieldOperators: string;
     expressionHelpOtherFields: string;
+    expressionHelpContextTitle: string;
+    expressionHelpContextDescription: string;
+    expressionHelpContextExamples: string;
     advancedEditor: {
       not: string;
       removeNot: string;
@@ -293,6 +297,13 @@ export interface AppMessages {
       jsonPointerPlaceholder: string;
       entityMember: string;
       nthIndex: string;
+      fromStep: string;
+      toStep: string;
+      occurrenceKind: string;
+      occurrenceEntity: string;
+      occurrenceIndex: string;
+      correlationTarget: string;
+      periodItemCount: string;
       nestedTooDeep: string;
       applyOffset: string;
       removeStep: string;
@@ -308,6 +319,8 @@ export interface AppMessages {
         "event-payload": string;
         "entity-root": string;
         "context-root": string;
+        "context-intrinsic": string;
+        "occurrence-time": string;
         member: string;
         selector: string;
         projection: string;
@@ -315,6 +328,10 @@ export interface AppMessages {
         arithmetic: string;
         duration: string;
         "time-anchor": string;
+        "sequence-span": string;
+        "sequence-gap": string;
+        "sequence-same": string;
+        "period-items": string;
         bucket: string;
         window: string;
         periods: string;
@@ -3075,6 +3092,11 @@ const enMessages = {
       "client.screenHeight": "Screen height",
       "geo.isEU": "EU region",
       time: "Time",
+      "time(...)": "Occurrence time",
+      $items: "Items in period",
+      $span: "Sequence span",
+      "$gap(...)": "Gap between steps",
+      "$same(...)": "Same value across steps",
       "bucket(...)": "Time bucket",
       "window(...)": "Relative time window",
       "periods(...)": "Period groups",
@@ -3135,6 +3157,7 @@ const enMessages = {
     rangeStartPlaceholder: "Lower bound",
     rangeEndPlaceholder: "Upper bound",
     unitAriaLabel: "Display unit",
+    durationUnit: "Duration unit",
     units: {
       hours: "Hours",
       minutes: "Minutes",
@@ -3166,6 +3189,11 @@ const enMessages = {
     expressionHelpFieldType: "Type",
     expressionHelpFieldOperators: "Operators",
     expressionHelpOtherFields: "Other",
+    expressionHelpContextTitle: "Occurrence time and context intrinsics",
+    expressionHelpContextDescription:
+      "A dot reads a registered field. @ names a temporal anchor. $ names a value supplied by the nearest matching Sequence or Period predicate context.",
+    expressionHelpContextExamples:
+      'time(last(page)) gte @now-14d\nsequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))\n} exists\nperiods(event, 1w) { count($items) gte 3 } exists',
     advancedEditor: {
       not: "NOT",
       removeNot: "Remove NOT",
@@ -3187,6 +3215,13 @@ const enMessages = {
       jsonPointerPlaceholder: "/property/path",
       entityMember: "Entity member",
       nthIndex: "Nth item index",
+      fromStep: "From step",
+      toStep: "To step",
+      occurrenceKind: "Occurrence selector",
+      occurrenceEntity: "Occurrence type",
+      occurrenceIndex: "Occurrence index",
+      correlationTarget: "Value shared by each step",
+      periodItemCount: "Items per period",
       nestedTooDeep: "Expression is nested too deeply.",
       applyOffset: "Apply offset",
       removeStep: "Remove step",
@@ -3203,6 +3238,8 @@ const enMessages = {
         "event-payload": "Event payload",
         "entity-root": "Entity collection",
         "context-root": "Context",
+        "context-intrinsic": "Context intrinsic",
+        "occurrence-time": "Occurrence time",
         member: "Member",
         selector: "Selector",
         projection: "Projection",
@@ -3210,6 +3247,10 @@ const enMessages = {
         arithmetic: "Arithmetic",
         duration: "Duration",
         "time-anchor": "Relative time",
+        "sequence-span": "Sequence span",
+        "sequence-gap": "Sequence gap",
+        "sequence-same": "Sequence shared value",
+        "period-items": "Period items",
         bucket: "Time bucket",
         window: "Window",
         periods: "Periods",
@@ -6175,6 +6216,11 @@ const zhMessages = {
       "client.screenHeight": "屏幕高度",
       "geo.isEU": "是否欧盟地区",
       time: "时间",
+      "time(...)": "活动时间",
+      $items: "周期中的项目",
+      $span: "序列跨度",
+      "$gap(...)": "步骤间隔",
+      "$same(...)": "步骤共有值",
       "bucket(...)": "时间分桶",
       "window(...)": "相对时间窗口",
       "periods(...)": "周期分组",
@@ -6235,6 +6281,7 @@ const zhMessages = {
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
     unitAriaLabel: "显示单位",
+    durationUnit: "时间单位",
     units: {
       hours: "小时",
       minutes: "分钟",
@@ -6265,6 +6312,11 @@ const zhMessages = {
     expressionHelpFieldType: "类型",
     expressionHelpFieldOperators: "操作符",
     expressionHelpOtherFields: "其他",
+    expressionHelpContextTitle: "活动时间与上下文内建值",
+    expressionHelpContextDescription:
+      "点号用于已注册字段；@ 表示时间锚点；$ 表示最近一层匹配的序列或周期筛选上下文提供的内建值。",
+    expressionHelpContextExamples:
+      'time(last(page)) gte @now-14d\nsequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))\n} exists\nperiods(event, 1w) { count($items) gte 3 } exists',
     advancedEditor: {
       not: "非",
       removeNot: "移除“非”",
@@ -6286,6 +6338,13 @@ const zhMessages = {
       jsonPointerPlaceholder: "/属性/路径",
       entityMember: "实体成员",
       nthIndex: "第 N 项索引",
+      fromStep: "起始步骤",
+      toStep: "结束步骤",
+      occurrenceKind: "活动选择方式",
+      occurrenceEntity: "活动类型",
+      occurrenceIndex: "活动序号",
+      correlationTarget: "每个步骤共有的值",
+      periodItemCount: "每个周期的项目数",
       nestedTooDeep: "表达式嵌套过深。",
       applyOffset: "应用偏移量",
       removeStep: "移除步骤",
@@ -6301,6 +6360,8 @@ const zhMessages = {
         "event-payload": "事件载荷",
         "entity-root": "实体集合",
         "context-root": "上下文",
+        "context-intrinsic": "上下文内建值",
+        "occurrence-time": "活动时间",
         member: "成员",
         selector: "选择器",
         projection: "投影",
@@ -6308,6 +6369,10 @@ const zhMessages = {
         arithmetic: "算术表达式",
         duration: "时间长度",
         "time-anchor": "相对时间",
+        "sequence-span": "序列跨度",
+        "sequence-gap": "步骤间隔",
+        "sequence-same": "序列共有值",
+        "period-items": "周期项目",
         bucket: "时间桶",
         window: "时间窗口",
         periods: "周期集合",
@@ -9195,6 +9260,11 @@ const jaMessages = {
       "client.screenHeight": "画面の高さ",
       "geo.isEU": "EU 地域か",
       time: "時間",
+      "time(...)": "発生時刻",
+      $items: "期間内項目",
+      $span: "シーケンス幅",
+      "$gap(...)": "ステップ間隔",
+      "$same(...)": "ステップ共通値",
       "bucket(...)": "時間バケット",
       "window(...)": "相対時間ウィンドウ",
       "periods(...)": "期間グループ",
@@ -9255,6 +9325,7 @@ const jaMessages = {
     rangeStartPlaceholder: "下限",
     rangeEndPlaceholder: "上限",
     unitAriaLabel: "表示単位",
+    durationUnit: "期間の単位",
     units: {
       hours: "時間",
       minutes: "分",
@@ -9287,6 +9358,11 @@ const jaMessages = {
     expressionHelpFieldType: "型",
     expressionHelpFieldOperators: "演算子",
     expressionHelpOtherFields: "その他",
+    expressionHelpContextTitle: "発生時刻とコンテキスト組み込み値",
+    expressionHelpContextDescription:
+      "ドットは登録済みフィールドを示します。@ は時間アンカー、$ は最も近い Sequence または Period 条件コンテキストの組み込み値です。",
+    expressionHelpContextExamples:
+      'time(last(page)) gte @now-14d\nsequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))\n} exists',
     advancedEditor: {
       not: "NOT",
       removeNot: "NOT を削除",
@@ -9308,6 +9384,13 @@ const jaMessages = {
       jsonPointerPlaceholder: "/property/path",
       entityMember: "エンティティメンバー",
       nthIndex: "N 番目のインデックス",
+      fromStep: "開始ステップ",
+      toStep: "終了ステップ",
+      occurrenceKind: "発生の選択方法",
+      occurrenceEntity: "発生の種類",
+      occurrenceIndex: "発生番号",
+      correlationTarget: "各ステップで共通する値",
+      periodItemCount: "期間ごとの項目数",
       nestedTooDeep: "式のネストが深すぎます。",
       applyOffset: "オフセットを適用",
       removeStep: "ステップを削除",
@@ -9324,6 +9407,8 @@ const jaMessages = {
         "event-payload": "イベントペイロード",
         "entity-root": "エンティティコレクション",
         "context-root": "コンテキスト",
+        "context-intrinsic": "コンテキスト組み込み値",
+        "occurrence-time": "発生時刻",
         member: "メンバー",
         selector: "セレクター",
         projection: "射影",
@@ -9331,6 +9416,10 @@ const jaMessages = {
         arithmetic: "算術式",
         duration: "期間",
         "time-anchor": "相対時間",
+        "sequence-span": "シーケンス幅",
+        "sequence-gap": "ステップ間隔",
+        "sequence-same": "シーケンス共通値",
+        "period-items": "期間内項目",
         bucket: "時間バケット",
         window: "ウィンドウ",
         periods: "期間コレクション",

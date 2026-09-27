@@ -190,6 +190,11 @@ describe("Filter time domain and history planning", () => {
         'time between [@now-60d, @now-30d] AND count(event { event.name eq "purchase" }) gte 3',
       ),
     ).toEqual({ kind: "bounded", startMs, endExclusiveMs });
+    expect(
+      history(
+        'time between [@now-60d, @now-30d] AND session { first(event).name eq "signup" } exists',
+      ),
+    ).toEqual({ kind: "bounded", startMs, endExclusiveMs });
   });
 
   it("extends the required read range when a window reaches beyond Filter time", () => {
@@ -214,16 +219,8 @@ describe("Filter time domain and history planning", () => {
 
   it("rejects equality operators for scope-level time", () => {
     for (const operator of ["eq", "neq"] as const) {
-      const document = parseFilterDsl(
-        `time ${operator} @now`,
-        analyticsFilterRegistry,
-      );
       expect(() =>
-        validateFilterConditionDomains(
-          document,
-          "visitor",
-          analyticsFilterRegistry,
-        ),
+        parseFilterDsl(`time ${operator} @now`, analyticsFilterRegistry),
       ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
     }
   });

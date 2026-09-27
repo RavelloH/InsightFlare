@@ -25,13 +25,18 @@ import {
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
 import { filterPickerTargetForValue } from "@/lib/filter-contract/filter-picker-registry";
+import { filterConditionEntity } from "@/lib/filter-contract/filter-registry";
 import {
   analyticsFilterRegistry,
   type FilterCondition,
+  type FilterContextIntrinsicTarget,
   type FilterDocument,
   type FilterDurationTarget,
+  type FilterDurationUnit,
+  type FilterExpression,
   type FilterOperator,
   type FilterScope,
+  type FilterTargetExpression,
   type FilterTimeAnchorTarget,
   type FilterValue,
   type FilterValueKind,
@@ -45,6 +50,10 @@ import {
   createFilterPickerTargetCondition,
   filterOperatorsForTarget,
   filterValueKindForTarget,
+  findContextIntrinsic,
+  findOccurrenceTimeTarget,
+  replaceTargetReference,
+  updateConditionWhere,
 } from "./advanced-editor-model";
 import {
   dateTimeInputValueToLiteral,
@@ -101,6 +110,148 @@ function isFilterTargetExpression(
     !Array.isArray(value) &&
     "kind" in value,
   );
+}
+
+function occurrenceEntity(
+  target: FilterTargetExpression,
+): "event" | "page" | undefined {
+  if (target.kind === "entity-root")
+    return target.entity === "event" || target.entity === "page"
+      ? target.entity
+      : undefined;
+  if (target.kind === "selector") return occurrenceEntity(target.collection);
+  if (target.kind === "reducer") return occurrenceEntity(target.input);
+  return undefined;
+}
+
+function withOccurrenceEntity(
+  target: FilterTargetExpression,
+  entity: "event" | "page",
+): FilterTargetExpression {
+  if (target.kind === "entity-root") return { ...target, entity };
+  if (target.kind === "selector")
+    return {
+      ...target,
+      collection: withOccurrenceEntity(target.collection, entity),
+    };
+  if (target.kind === "reducer")
+    return { ...target, input: withOccurrenceEntity(target.input, entity) };
+  return { kind: "entity-root", entity };
+}
+
+function sequenceStepEntity(
+  target: FilterTargetExpression,
+): "event" | "page" | undefined {
+  return occurrenceEntity(target);
+}
+
+function conditionForIntrinsic(
+  expression: FilterExpression,
+  intrinsic: FilterContextIntrinsicTarget,
+): FilterCondition | undefined {
+  const matches = (condition: FilterCondition) =>
+    condition.target === intrinsic ||
+    (intrinsic.context === "period" &&
+      intrinsic.intrinsic === "items" &&
+      condition.target.kind === "reducer" &&
+      condition.target.reducer === "count" &&
+      condition.target.input === intrinsic);
+  const fromTarget = (
+    target: FilterTargetExpression,
+  ): FilterCondition | undefined => {
+    if (target.kind === "selector")
+      return fromExpression(target.predicate) ?? fromTarget(target.collection);
+    if (target.kind === "member") return fromTarget(target.object);
+    if (target.kind === "context-intrinsic" && target.intrinsic === "same")
+      return fromTarget(target.input);
+    if (target.kind === "occurrence-time") return fromTarget(target.input);
+    if (target.kind === "projection") return fromTarget(target.collection);
+    if (target.kind === "reducer") return fromTarget(target.input);
+    if (target.kind === "arithmetic")
+      return fromTarget(target.left) ?? fromTarget(target.right);
+    if (target.kind === "bucket") return fromTarget(target.input);
+    if (target.kind === "window")
+      return fromTarget(target.collection) ?? fromTarget(target.anchor);
+    if (target.kind === "periods") return fromTarget(target.collection);
+    if (target.kind === "sequence") {
+      for (const step of target.steps) {
+        const found = fromTarget(step);
+        if (found) return found;
+      }
+    }
+    if (target.kind === "adjacent") return fromTarget(target.sequence);
+    if (target.kind === "without")
+      return fromTarget(target.sequence) ?? fromTarget(target.excluded);
+    return undefined;
+  };
+  const fromExpression = (
+    node: FilterExpression,
+  ): FilterCondition | undefined => {
+    if (node.kind === "condition") {
+      if (matches(node)) return node;
+      return fromTarget(node.target);
+    }
+    if (node.kind === "not") return fromExpression(node.child);
+    for (const child of node.children) {
+      const found = fromExpression(child);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return fromExpression(expression);
+}
+
+const ELAPSED_DURATION_UNITS: readonly FilterDurationUnit[] = [
+  "ms",
+  "s",
+  "m",
+  "h",
+  "d",
+  "w",
+];
+
+const TIME_ANCHOR_UNITS = ELAPSED_DURATION_UNITS;
+
+function isDurationValue(value: unknown): value is FilterDurationTarget {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { kind?: unknown }).kind === "duration",
+  );
+}
+
+function isTimeAnchorValue(value: unknown): value is FilterTimeAnchorTarget {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { kind?: unknown }).kind === "time-anchor",
+  );
+}
+
+function durationAt(
+  value: FilterCondition["value"],
+  index: number,
+): FilterDurationTarget {
+  const item = Array.isArray(value) ? value[index] : value;
+  return isDurationValue(item)
+    ? item
+    : { kind: "duration", amount: 1, unit: "d" };
+}
+
+function timeAnchorAt(
+  value: FilterCondition["value"],
+  index: number,
+): FilterTimeAnchorTarget {
+  const item = Array.isArray(value) ? value[index] : value;
+  return isTimeAnchorValue(item)
+    ? item
+    : {
+        kind: "time-anchor",
+        anchor: "now",
+        offset: { kind: "duration", amount: -14, unit: "d" },
+      };
 }
 
 function editorTextFromFilterValue(
@@ -207,6 +358,39 @@ function ConditionEditor({
     [groupedFields, messages, normalizedFieldSearch],
   );
   const advancedFieldKind = advancedFilterTargetKindFromField(advancedField);
+  const intrinsicLocation = advancedTarget
+    ? findContextIntrinsic(advancedTarget)
+    : undefined;
+  const intrinsicTarget = intrinsicLocation?.target;
+  const intrinsicCondition =
+    advancedCondition && intrinsicTarget
+      ? conditionForIntrinsic(advancedCondition, intrinsicTarget)
+      : undefined;
+  const occurrenceTimeTarget = advancedTarget
+    ? findOccurrenceTimeTarget(advancedTarget)
+    : undefined;
+  const occurrenceReducer =
+    occurrenceTimeTarget?.input.kind === "reducer" &&
+    ["first", "last", "nth"].includes(occurrenceTimeTarget.input.reducer)
+      ? occurrenceTimeTarget.input
+      : undefined;
+  const sequenceStepEntities =
+    intrinsicLocation?.sequence?.steps.map(sequenceStepEntity) ?? [];
+  const sameFieldOptions = fields.filter((candidate) => {
+    if (sequenceStepEntities.length === 0) return false;
+    const entity = filterConditionEntity(candidate);
+    if (!entity) return false;
+    return sequenceStepEntities.every(
+      (stepEntity) =>
+        stepEntity !== undefined &&
+        ((entity === "activity" &&
+          (stepEntity === "event" || stepEntity === "page")) ||
+          entity === stepEntity),
+    );
+  });
+  const samePayloadAllowed =
+    sequenceStepEntities.length > 0 &&
+    sequenceStepEntities.every((entity) => entity === "event");
   const selectedPickerField = groupedFields
     .flatMap((group) => group.fields)
     .find((pickerField) => pickerField.value === advancedField);
@@ -286,6 +470,62 @@ function ConditionEditor({
       advancedText: undefined,
     }));
   };
+  const patchAdvancedExpression = (
+    update: (expression: FilterExpression) => FilterExpression,
+  ) => {
+    if (!advancedCondition) return;
+    onChange((current) => ({
+      ...current,
+      advancedExpression: update(advancedCondition),
+      advancedText: undefined,
+    }));
+  };
+  const replaceAdvancedTarget = (
+    target: FilterTargetExpression,
+    replacement: FilterTargetExpression,
+  ) =>
+    patchAdvancedExpression((expression) =>
+      replaceTargetReference(expression, target, replacement),
+    );
+  const updateIntrinsicCondition = (
+    update: (current: FilterCondition) => FilterCondition,
+  ) => {
+    if (!advancedCondition || !intrinsicTarget) return;
+    patchAdvancedExpression((expression) =>
+      updateConditionWhere(
+        expression,
+        (candidate) =>
+          candidate.target === intrinsicTarget ||
+          (intrinsicTarget.context === "period" &&
+            intrinsicTarget.intrinsic === "items" &&
+            candidate.target.kind === "reducer" &&
+            candidate.target.reducer === "count" &&
+            candidate.target.input === intrinsicTarget),
+        update,
+      ),
+    );
+  };
+  const setIntrinsicDuration = (
+    index: number,
+    update: Partial<FilterDurationTarget>,
+  ) => {
+    if (!intrinsicCondition) return;
+    updateIntrinsicCondition((current) => {
+      const currentValue = current.value;
+      const values = Array.isArray(currentValue)
+        ? [...currentValue]
+        : [currentValue];
+      const old = durationAt(currentValue, index);
+      values[index] = { ...old, ...update, kind: "duration" };
+      return {
+        ...current,
+        value:
+          current.operator === "between"
+            ? (values as FilterCondition["value"])
+            : values[0],
+      };
+    });
+  };
 
   const setField = (field: string) => {
     const registeredTarget = filterPickerTargetForValue(field);
@@ -356,6 +596,18 @@ function ConditionEditor({
     if (!operators.includes(operator as FilterOperator)) return;
     if (advancedCondition) {
       const nextOperator = operator as FilterOperator;
+      if (occurrenceTimeTarget && needsValue) {
+        const firstAnchor = timeAnchorAt(advancedCondition.value, 0);
+        patchAdvanced({
+          operator: nextOperator,
+          value: VALUELESS_OPERATORS.has(nextOperator)
+            ? undefined
+            : nextOperator === "between"
+              ? [firstAnchor, timeAnchorAt(advancedCondition.value, 1)]
+              : firstAnchor,
+        });
+        return;
+      }
       patchAdvanced({
         operator: nextOperator,
         ...(VALUELESS_OPERATORS.has(nextOperator) ? { value: undefined } : {}),
@@ -431,6 +683,55 @@ function ConditionEditor({
       valueText: nextValueText,
       valueDirty: true,
     }));
+  };
+
+  const replaceOccurrenceInput = (input: FilterTargetExpression) => {
+    if (!occurrenceTimeTarget) return;
+    replaceAdvancedTarget(occurrenceTimeTarget, {
+      ...occurrenceTimeTarget,
+      input,
+    });
+  };
+  const setOccurrenceReducer = (reducer: "first" | "last" | "nth") => {
+    if (!occurrenceReducer) return;
+    const { index, ...base } = occurrenceReducer;
+    const next: FilterTargetExpression = {
+      ...base,
+      reducer,
+      ...(reducer === "nth" ? { index: index ?? 1 } : {}),
+    };
+    replaceOccurrenceInput(next);
+  };
+  const setOccurrenceEntity = (entity: "event" | "page") => {
+    if (!occurrenceReducer) return;
+    replaceOccurrenceInput({
+      ...occurrenceReducer,
+      input: withOccurrenceEntity(occurrenceReducer.input, entity),
+    });
+  };
+  const setOccurrenceIndex = (raw: string) => {
+    if (!occurrenceReducer || !Number.isSafeInteger(Number(raw))) return;
+    const index = Math.max(1, Number(raw));
+    replaceOccurrenceInput({ ...occurrenceReducer, reducer: "nth", index });
+  };
+  const setOccurrenceAnchor = (
+    index: number,
+    update: (anchor: FilterTimeAnchorTarget) => FilterTimeAnchorTarget,
+  ) => {
+    if (!advancedCondition || !occurrenceTimeTarget) return;
+    const current = advancedCondition.value;
+    const first = timeAnchorAt(current, 0);
+    if (operator === "between") {
+      const second = timeAnchorAt(current, 1);
+      const anchors: [FilterTimeAnchorTarget, FilterTimeAnchorTarget] = [
+        first,
+        second,
+      ];
+      anchors[index] = update(anchors[index]!);
+      patchAdvanced({ value: anchors });
+    } else {
+      patchAdvanced({ value: update(first) });
+    }
   };
 
   return (
@@ -550,6 +851,509 @@ function ConditionEditor({
         </div>
       </div>
 
+      {occurrenceTimeTarget && occurrenceReducer ? (
+        <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label>
+              {messages.filterBuilder.advancedEditor.occurrenceKind}
+            </Label>
+            <Select
+              value={occurrenceReducer.reducer}
+              onValueChange={(value) => {
+                if (value === "first" || value === "last" || value === "nth")
+                  setOccurrenceReducer(value);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="first">first(...)</SelectItem>
+                <SelectItem value="last">last(...)</SelectItem>
+                <SelectItem value="nth">nth(...)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>
+              {messages.filterBuilder.advancedEditor.occurrenceEntity}
+            </Label>
+            <Select
+              value={occurrenceEntity(occurrenceReducer.input) ?? "event"}
+              onValueChange={(value) => {
+                if (value === "event" || value === "page")
+                  setOccurrenceEntity(value);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="event">
+                  {messages.filterBuilder.fieldLabels.event}
+                </SelectItem>
+                <SelectItem value="page">
+                  {messages.filterBuilder.fieldLabels.page}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {occurrenceReducer.reducer === "nth" ? (
+            <div className="space-y-1">
+              <Label>
+                {messages.filterBuilder.advancedEditor.occurrenceIndex}
+              </Label>
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                value={occurrenceReducer.index ?? 1}
+                onChange={(event) => setOccurrenceIndex(event.target.value)}
+              />
+            </div>
+          ) : null}
+          {needsValue
+            ? (operator === "between" ? [0, 1] : [0]).map((index) => {
+                const anchor = timeAnchorAt(advancedCondition?.value, index);
+                const hasOffset = anchor.offset !== undefined;
+                const offset = anchor.offset ?? {
+                  kind: "duration" as const,
+                  amount: anchor.anchor === "now" ? -14 : 0,
+                  unit: "d" as const,
+                };
+                return (
+                  <div
+                    key={index}
+                    className="grid gap-2 sm:col-span-2 sm:grid-cols-2"
+                  >
+                    <div className="space-y-1">
+                      <Label>
+                        {operator === "between"
+                          ? `${messages.filterBuilder.advancedEditor.literalValue} ${index + 1}`
+                          : messages.filterBuilder.advancedEditor.literalValue}
+                      </Label>
+                      <Select
+                        value={anchor.anchor}
+                        onValueChange={(value) => {
+                          if (
+                            value === "now" ||
+                            value === "range.start" ||
+                            value === "range.end"
+                          )
+                            setOccurrenceAnchor(index, (current) => ({
+                              ...current,
+                              anchor: value,
+                            }));
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="now">@now</SelectItem>
+                          <SelectItem value="range.start">
+                            @range.start
+                          </SelectItem>
+                          <SelectItem value="range.end">@range.end</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <label className="flex min-h-9 items-center gap-2 text-xs text-muted-foreground">
+                      <Checkbox
+                        checked={hasOffset}
+                        onCheckedChange={(checked) => {
+                          setOccurrenceAnchor(index, (current) => {
+                            if (checked === true)
+                              return {
+                                ...current,
+                                offset: current.offset ?? {
+                                  kind: "duration",
+                                  amount: current.anchor === "now" ? -14 : 0,
+                                  unit: "d",
+                                },
+                              };
+                            const { offset: _offset, ...withoutOffset } =
+                              current;
+                            return withoutOffset;
+                          });
+                        }}
+                      />
+                      {messages.filterBuilder.advancedEditor.applyOffset}
+                    </label>
+                    {hasOffset ? (
+                      <>
+                        <div className="space-y-1">
+                          <Label>
+                            {
+                              messages.filterBuilder.advancedEditor
+                                .durationAmount
+                            }
+                          </Label>
+                          <Input
+                            type="number"
+                            step="any"
+                            value={offset.amount}
+                            onChange={(event) => {
+                              const amount = Number(event.target.value);
+                              if (Number.isFinite(amount))
+                                setOccurrenceAnchor(index, (current) => ({
+                                  ...current,
+                                  offset: { ...offset, amount },
+                                }));
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>{messages.filterBuilder.durationUnit}</Label>
+                          <Select
+                            value={offset.unit}
+                            onValueChange={(value) => {
+                              if (
+                                (
+                                  TIME_ANCHOR_UNITS as readonly string[]
+                                ).includes(value)
+                              )
+                                setOccurrenceAnchor(index, (current) => ({
+                                  ...current,
+                                  offset: {
+                                    ...offset,
+                                    unit: value as FilterDurationUnit,
+                                  },
+                                }));
+                            }}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TIME_ANCHOR_UNITS.map((unit) => (
+                                <SelectItem key={unit} value={unit}>
+                                  {unit}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })
+            : null}
+        </div>
+      ) : null}
+
+      {intrinsicTarget?.context === "sequence" &&
+      intrinsicTarget.intrinsic === "gap" ? (
+        <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label>{messages.filterBuilder.advancedEditor.fromStep}</Label>
+            <Select
+              value={String(intrinsicTarget.from)}
+              onValueChange={(value) => {
+                const from = Number(value);
+                const length = intrinsicLocation?.sequence?.steps.length ?? 0;
+                if (!Number.isSafeInteger(from) || from < 1 || from >= length)
+                  return;
+                const to = Math.max(intrinsicTarget.to, from + 1);
+                replaceAdvancedTarget(intrinsicTarget, {
+                  ...intrinsicTarget,
+                  from,
+                  to: Math.min(to, length),
+                });
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(intrinsicLocation?.sequence?.steps ?? [])
+                  .slice(0, -1)
+                  .map((_, index) => (
+                    <SelectItem key={index + 1} value={String(index + 1)}>
+                      {index + 1}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>{messages.filterBuilder.advancedEditor.toStep}</Label>
+            <Select
+              value={String(intrinsicTarget.to)}
+              onValueChange={(value) => {
+                const to = Number(value);
+                if (!Number.isSafeInteger(to) || to <= intrinsicTarget.from)
+                  return;
+                replaceAdvancedTarget(intrinsicTarget, {
+                  ...intrinsicTarget,
+                  to,
+                });
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(intrinsicLocation?.sequence?.steps ?? [])
+                  .slice(intrinsicTarget.from)
+                  .map((_, index) => {
+                    const step = intrinsicTarget.from + index + 1;
+                    return (
+                      <SelectItem key={step} value={String(step)}>
+                        {step}
+                      </SelectItem>
+                    );
+                  })}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      ) : null}
+
+      {intrinsicTarget?.context === "sequence" &&
+      intrinsicTarget.intrinsic === "same" ? (
+        <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label>
+              {messages.filterBuilder.advancedEditor.correlationTarget}
+            </Label>
+            <Select
+              value={
+                intrinsicTarget.input.kind === "event-payload"
+                  ? "event.payload"
+                  : intrinsicTarget.input.kind === "field"
+                    ? intrinsicTarget.input.field
+                    : ""
+              }
+              onValueChange={(value) => {
+                if (value === "event.payload") {
+                  if (!samePayloadAllowed) return;
+                  replaceAdvancedTarget(intrinsicTarget, {
+                    ...intrinsicTarget,
+                    input: {
+                      kind: "event-payload",
+                      path:
+                        intrinsicTarget.input.kind === "event-payload"
+                          ? intrinsicTarget.input.path
+                          : ("/productId" as never),
+                    },
+                  });
+                  return;
+                }
+                if (sameFieldOptions.some((field) => field.id === value))
+                  replaceAdvancedTarget(intrinsicTarget, {
+                    ...intrinsicTarget,
+                    input: { kind: "field", field: value as never },
+                  });
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sameFieldOptions.map((field) => (
+                  <SelectItem key={field.id} value={field.id}>
+                    {messages.filterBuilder.fieldLabels[field.id] ?? field.id}
+                  </SelectItem>
+                ))}
+                {samePayloadAllowed ? (
+                  <SelectItem value="event.payload">
+                    {messages.filterBuilder.fieldLabels["event.payload"]}
+                  </SelectItem>
+                ) : null}
+              </SelectContent>
+            </Select>
+          </div>
+          {intrinsicTarget.input.kind === "event-payload" ? (
+            <div className="space-y-1">
+              <Label>{messages.filterBuilder.advancedEditor.jsonPointer}</Label>
+              <Input
+                value={intrinsicTarget.input.path}
+                placeholder={
+                  messages.filterBuilder.advancedEditor.jsonPointerPlaceholder
+                }
+                onChange={(event) => {
+                  const input = intrinsicTarget.input;
+                  if (input.kind !== "event-payload") return;
+                  replaceAdvancedTarget(intrinsicTarget, {
+                    ...intrinsicTarget,
+                    input: { ...input, path: event.target.value as never },
+                  });
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {intrinsicTarget &&
+      (intrinsicTarget.intrinsic === "span" ||
+        intrinsicTarget.intrinsic === "gap") &&
+      intrinsicCondition ? (
+        <div className="grid gap-2 sm:col-span-2 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)]">
+          <div className="space-y-1">
+            <Label>{messages.filterBuilder.match}</Label>
+            <Select
+              value={intrinsicCondition.operator}
+              onValueChange={(value) => {
+                if (!["gt", "gte", "lt", "lte", "between"].includes(value))
+                  return;
+                updateIntrinsicCondition((current) => ({
+                  ...current,
+                  operator: value as FilterOperator,
+                  value:
+                    value === "between"
+                      ? [
+                          durationAt(current.value, 0),
+                          durationAt(current.value, 1),
+                        ]
+                      : durationAt(current.value, 0),
+                }));
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["gt", "gte", "lt", "lte", "between"].map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {messages.filterBuilder.operatorLabels[value] ?? value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {(intrinsicCondition.operator === "between" ? [0, 1] : [0]).map(
+            (index) => {
+              const duration = durationAt(intrinsicCondition.value, index);
+              return (
+                <div
+                  key={index}
+                  className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,0.45fr)]"
+                >
+                  <div className="space-y-1">
+                    <Label>
+                      {messages.filterBuilder.advancedEditor.durationAmount}
+                    </Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      value={duration.amount}
+                      onChange={(event) => {
+                        const amount = Number(event.target.value);
+                        if (Number.isFinite(amount))
+                          setIntrinsicDuration(index, { amount });
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>{messages.filterBuilder.durationUnit}</Label>
+                    <Select
+                      value={duration.unit}
+                      onValueChange={(value) => {
+                        if (
+                          (
+                            ELAPSED_DURATION_UNITS as readonly string[]
+                          ).includes(value)
+                        )
+                          setIntrinsicDuration(index, {
+                            unit: value as FilterDurationUnit,
+                          });
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ELAPSED_DURATION_UNITS.map((unit) => (
+                          <SelectItem key={unit} value={unit}>
+                            {unit}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              );
+            },
+          )}
+        </div>
+      ) : null}
+
+      {intrinsicTarget?.context === "period" &&
+      intrinsicTarget.intrinsic === "items" &&
+      intrinsicCondition ? (
+        <div className="grid gap-2 sm:col-span-2 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)]">
+          <div className="space-y-1">
+            <Label>
+              {messages.filterBuilder.advancedEditor.periodItemCount}
+            </Label>
+            <Select
+              value={intrinsicCondition.operator}
+              onValueChange={(value) => {
+                if (
+                  !["eq", "gt", "gte", "lt", "lte", "between"].includes(value)
+                )
+                  return;
+                updateIntrinsicCondition((current) => ({
+                  ...current,
+                  operator: value as FilterOperator,
+                  value: value === "between" ? [1, 3] : 1,
+                }));
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["eq", "gt", "gte", "lt", "lte", "between"].map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {messages.filterBuilder.operatorLabels[value] ?? value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {(intrinsicCondition.operator === "between" ? [0, 1] : [0]).map(
+            (index) => {
+              const value = Array.isArray(intrinsicCondition.value)
+                ? intrinsicCondition.value[index]
+                : intrinsicCondition.value;
+              return (
+                <div key={index} className="space-y-1">
+                  <Label>
+                    {messages.filterBuilder.advancedEditor.periodItemCount}
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={typeof value === "number" ? value : 1}
+                    onChange={(event) => {
+                      const count = Number(event.target.value);
+                      if (!Number.isSafeInteger(count) || count < 0) return;
+                      updateIntrinsicCondition((current) => {
+                        if (current.operator !== "between")
+                          return { ...current, value: count };
+                        const values = Array.isArray(current.value)
+                          ? [...current.value]
+                          : [1, 3];
+                        values[index] = count;
+                        return {
+                          ...current,
+                          value: values as FilterCondition["value"],
+                        };
+                      });
+                    }}
+                  />
+                </div>
+              );
+            },
+          )}
+        </div>
+      ) : null}
+
       {isPayload ? (
         <div className="space-y-2 sm:col-span-2">
           <SearchablePayloadPathInput
@@ -652,7 +1456,12 @@ function ConditionEditor({
         </div>
       ) : null}
 
-      {needsValue && !(advancedCondition && valueIsExpression) ? (
+      {needsValue &&
+      !(advancedCondition && valueIsExpression) &&
+      !(
+        advancedTarget?.kind === "context-intrinsic" &&
+        advancedTarget.intrinsic === "same"
+      ) ? (
         <div className="space-y-2 sm:col-span-2">
           {valueIsBoolean ? (
             <Select

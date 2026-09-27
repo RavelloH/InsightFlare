@@ -276,6 +276,11 @@ filterBuilder:
     client.screenHeight: 屏幕高度
     geo.isEU: 是否欧盟地区
     time: 时间
+    time(...): 活动时间
+    $items: 周期中的项目
+    $span: 序列跨度
+    $gap(...): 步骤间隔
+    $same(...): 步骤共有值
     bucket(...): 时间分桶
     window(...): 相对时间窗口
     periods(...): 周期分组
@@ -333,6 +338,7 @@ filterBuilder:
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
   unitAriaLabel: 显示单位
+  durationUnit: 时间单位
   units:
     hours: 小时
     minutes: 分钟
@@ -360,6 +366,14 @@ filterBuilder:
   expressionHelpFieldType: 类型
   expressionHelpFieldOperators: 操作符
   expressionHelpOtherFields: 其他
+  expressionHelpContextTitle: 活动时间与上下文内建值
+  expressionHelpContextDescription: 点号用于已注册字段；@ 表示时间锚点；$ 表示最近一层匹配的序列或周期筛选上下文提供的内建值。
+  expressionHelpContextExamples: |-
+    time(last(page)) gte @now-14d
+    sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {
+      $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))
+    } exists
+    periods(event, 1w) { count($items) gte 3 } exists
   advancedEditor:
     not: 非
     removeNot: 移除“非”
@@ -381,6 +395,13 @@ filterBuilder:
     jsonPointerPlaceholder: /属性/路径
     entityMember: 实体成员
     nthIndex: 第 N 项索引
+    fromStep: 起始步骤
+    toStep: 结束步骤
+    occurrenceKind: 活动选择方式
+    occurrenceEntity: 活动类型
+    occurrenceIndex: 活动序号
+    correlationTarget: 每个步骤共有的值
+    periodItemCount: 每个周期的项目数
     nestedTooDeep: 表达式嵌套过深。
     applyOffset: 应用偏移量
     removeStep: 移除步骤
@@ -396,6 +417,8 @@ filterBuilder:
       event-payload: 事件载荷
       entity-root: 实体集合
       context-root: 上下文
+      context-intrinsic: 上下文内建值
+      occurrence-time: 活动时间
       member: 成员
       selector: 选择器
       projection: 投影
@@ -403,6 +426,10 @@ filterBuilder:
       arithmetic: 算术表达式
       duration: 时间长度
       time-anchor: 相对时间
+      sequence-span: 序列跨度
+      sequence-gap: 步骤间隔
+      sequence-same: 序列共有值
+      period-items: 周期项目
       bucket: 时间桶
       window: 时间窗口
       periods: 周期集合

@@ -94,7 +94,7 @@ describe("filter DSL v1", () => {
 
   it("round-trips windows, periods, and ordered Relation steps", () => {
     const source =
-      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.span lte 30d } exists AND periods(event, 1w) { count(period.items) gte 3 } exists';
+      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 30d } exists AND periods(event, 1w) { count($items) gte 3 } exists';
     const document = parseFilterDsl(source, analyticsFilterRegistry);
     analyzeFilterDocument(document, analyticsFilterRegistry);
     const formatted = formatFilterDsl(document);
@@ -103,9 +103,71 @@ describe("filter DSL v1", () => {
     expect(formatted).toContain(
       'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])',
     );
+    expect(formatted).toContain("$span lte 30d");
+    expect(formatted).toContain("count($items) gte 3");
     expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
       document,
     );
+  });
+
+  it("round-trips contextual intrinsics and occurrence timestamps", () => {
+    const sources = [
+      "time(first(event)) gte @now-14d",
+      "time(last(page)) between [@now-30d, @now]",
+      'time(nth(event { event.name eq "insight_saved" }, 3)) gte @now-30d',
+      'sequence([event { event.name eq "signup" }, event { event.name eq "project_created" }, event { event.name eq "purchase" }]) { $span lte 14d AND $gap(1, 2) lte 1d AND $gap(2, 3) lte 7d AND $same(event.payload("/productId")) } exists',
+      "periods(event, 1w) { count($items) gte 3 } exists",
+      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 30d AND count(periods(event, 1w) { count($items) gte 3 }) gte 1 } exists',
+    ];
+    for (const source of sources) {
+      const document = parseFilterDsl(source, analyticsFilterRegistry);
+      const formatted = formatFilterDsl(document);
+      expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
+        document,
+      );
+      expect(formatted).not.toMatch(/sequence\.span|period\.items/u);
+    }
+  });
+
+  it("rejects unknown or out-of-scope context intrinsics and invalid time targets", () => {
+    const invalid: readonly [string, string][] = [
+      ["$foo eq 1", "unknown_context_intrinsic"],
+      ["$x eq 1", "unknown_context_intrinsic"],
+      ["$span lte 7d", "context_intrinsic_outside_sequence"],
+      ["count($items) gte 1", "context_intrinsic_outside_period"],
+      ['$same(event.payload("/id"))', "context_intrinsic_outside_sequence"],
+      ["time(event) exists", "occurrence_time_type_mismatch"],
+      ["time(page) exists", "occurrence_time_type_mismatch"],
+      ["time(session) exists", "occurrence_time_type_mismatch"],
+      ["time(visitor) exists", "occurrence_time_type_mismatch"],
+      ["time(first(session)) exists", "occurrence_time_type_mismatch"],
+      ["time(first(visitor)) exists", "occurrence_time_type_mismatch"],
+      ["event { time gte @now-7d } exists", "invalid_time_scope"],
+      ["NOT time gte @now-7d", "invalid_time_scope"],
+      ["time gte @now-7d OR event.name exists", "invalid_time_scope"],
+      [
+        'sequence([event, page]) { $same(event.payload("/id")) } exists',
+        "same_value_entity_mismatch",
+      ],
+    ];
+    for (const [source, code] of invalid)
+      expect(
+        () => parseFilterDsl(source, analyticsFilterRegistry),
+        source,
+      ).toThrow(expect.objectContaining({ code }));
+
+    for (const source of [
+      "sequence([event, event, event]) { $gap(0, 1) lte 1d } exists",
+      "sequence([event, event, event]) { $gap(2, 2) lte 1d } exists",
+      "sequence([event, event, event]) { $gap(3, 1) lte 1d } exists",
+      "sequence([event, event, event]) { $gap(1, 4) lte 1d } exists",
+      "sequence([event, event, event]) { $gap(1, 1.5) lte 1d } exists",
+      "sequence([event, event, event]) { $gap(1, count(event)) lte 1d } exists",
+    ])
+      expect(
+        () => parseFilterDsl(source, analyticsFilterRegistry),
+        source,
+      ).toThrow(expect.objectContaining({ code: "invalid_sequence_gap" }));
   });
 
   it("supports every v1 operator spelling, typed values, precedence, and payload targets", () => {
@@ -715,13 +777,11 @@ describe("filter DSL v1", () => {
     });
 
     expect(
-      parseFilterDsl("count(utm.source) gt 0", analyticsFilterRegistry).root,
+      parseFilterDsl('utm.source eq "newsletter"', analyticsFilterRegistry)
+        .root,
     ).toMatchObject({
       kind: "condition",
-      target: {
-        kind: "reducer",
-        input: { kind: "field", field: "utm.source" },
-      },
+      target: { kind: "field", field: "utm.source" },
     });
   });
 

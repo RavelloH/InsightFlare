@@ -1,4 +1,5 @@
 import { parseFilterDsl } from "./filter-dsl";
+import { analyzeFilterDocument } from "./filter-semantics";
 import {
   type CanonicalJsonPath,
   DEFAULT_FILTER_LIMITS,
@@ -267,7 +268,9 @@ function parseComplexCondition(
 ): FilterCondition {
   const parse = (source: string) => {
     const prepared = prepareSelectorReferences(source, resolveSelector);
-    const document = parseFilterDsl(prepared.source, registry);
+    const document = parseFilterDsl(prepared.source, registry, {
+      validateSemantics: false,
+    });
     if (!document.root || document.root.kind !== "condition") {
       fail(
         "invalid_complex_filter",
@@ -425,6 +428,22 @@ function replaceSelectorMarkers(
     if (reference && resolveSelector) return resolveSelector(reference);
   }
   switch (target.kind) {
+    case "context-intrinsic":
+      return target.intrinsic === "same"
+        ? {
+            ...target,
+            input: replaceSelectorMarkers(
+              target.input,
+              markers,
+              resolveSelector,
+            ),
+          }
+        : target;
+    case "occurrence-time":
+      return {
+        ...target,
+        input: replaceSelectorMarkers(target.input, markers, resolveSelector),
+      };
     case "member":
       return {
         ...target,
@@ -934,11 +953,13 @@ export function parseFilterParams(
       fail("too_many_conditions", key, "Filter condition limit exceeded.");
   }
   try {
-    return normalizeFilterDocument(
+    const normalized = normalizeFilterDocument(
       { version: FILTER_DOCUMENT_VERSION, root: scopeExpression(root) },
       registry,
       limits,
     );
+    analyzeFilterDocument(normalized, registry);
+    return normalized;
   } catch (error) {
     if (error instanceof FilterValidationError)
       throw new FilterCodecError(error.code, error.path, error.message);
@@ -1038,6 +1059,12 @@ function collectSelectorReferences(
       return;
     }
     switch (target.kind) {
+      case "context-intrinsic":
+        if (target.intrinsic === "same") visitTarget(target.input);
+        break;
+      case "occurrence-time":
+        visitTarget(target.input);
+        break;
       case "member":
         visitTarget(target.object);
         break;
@@ -1076,6 +1103,13 @@ function collectSelectorReferences(
   const visitExpression = (expression: FilterExpression): void => {
     if (expression.kind === "condition") {
       visitTarget(expression.target);
+      if (
+        expression.value &&
+        typeof expression.value === "object" &&
+        !Array.isArray(expression.value) &&
+        "kind" in expression.value
+      )
+        visitTarget(expression.value as FilterTargetExpression);
       return;
     }
     if (expression.kind === "not") {
@@ -1101,6 +1135,14 @@ function formatFilterUrlTarget(
       return target.entity;
     case "context-root":
       return target.context === "current" ? "" : target.context;
+    case "context-intrinsic":
+      if (target.intrinsic === "span") return "$span";
+      if (target.intrinsic === "items") return "$items";
+      if (target.intrinsic === "gap")
+        return `$gap(${target.from},${target.to})`;
+      return `$same(${formatFilterUrlTarget(target.input, references)})`;
+    case "occurrence-time":
+      return `time(${formatFilterUrlTarget(target.input, references)})`;
     case "member": {
       const object = formatFilterUrlTarget(target.object, references);
       return object ? `${object}.${target.member}` : target.member;
@@ -1236,6 +1278,12 @@ function serializeExpression(
       return;
     }
     switch (target.kind) {
+      case "context-intrinsic":
+        if (target.intrinsic === "same") serializeDeclarations(target.input);
+        break;
+      case "occurrence-time":
+        serializeDeclarations(target.input);
+        break;
       case "member":
         serializeDeclarations(target.object);
         break;
@@ -1274,6 +1322,13 @@ function serializeExpression(
   for (const child of children) {
     if (child.kind === "condition") {
       serializeDeclarations(child.target);
+      if (
+        child.value &&
+        typeof child.value === "object" &&
+        !Array.isArray(child.value) &&
+        "kind" in child.value
+      )
+        serializeDeclarations(child.value as FilterTargetExpression);
       if (!isLegacyFilterTarget(child.target)) {
         const urlTarget = formatFilterUrlTarget(child.target, references);
         pairs.push([

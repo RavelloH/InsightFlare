@@ -80,6 +80,13 @@ function visitTarget(
     case "member":
       visitTarget(target.object, registry, state);
       break;
+    case "context-intrinsic":
+      if (target.intrinsic === "same")
+        visitTarget(target.input, registry, state);
+      break;
+    case "occurrence-time":
+      visitTarget(target.input, registry, state);
+      break;
     case "selector":
       visitTarget(target.collection, registry, state);
       visitExpression(target.predicate, registry, state);
@@ -253,26 +260,6 @@ function entityCollection(target: FilterTargetExpression): string | undefined {
   return undefined;
 }
 
-function structuralTargetKind(
-  target: FilterTargetExpression,
-): "sequence" | "period" | undefined {
-  if (target.kind === "context-root")
-    return target.context === "sequence" || target.context === "period"
-      ? target.context
-      : undefined;
-  if (["sequence", "adjacent", "without"].includes(target.kind))
-    return "sequence";
-  if (target.kind === "periods") return "period";
-  if (target.kind === "selector")
-    return structuralTargetKind(target.collection);
-  if (
-    target.kind === "reducer" &&
-    ["first", "last", "nth"].includes(target.reducer)
-  )
-    return structuralTargetKind(target.input);
-  return undefined;
-}
-
 function eventPayloadCollection(target: FilterTargetExpression): boolean {
   if (target.kind === "entity-root") return target.entity === "event";
   return (
@@ -320,19 +307,9 @@ function validateMemberWhitelist(
       if (base.kind === "context-root") {
         const allowed =
           parts.length === 1 &&
-          ((base.context === "current" && parts[0] === "time") ||
-            (base.context === "sequence" && parts[0] === "span") ||
-            (base.context === "period" && parts[0] === "items"));
+          base.context === "current" &&
+          parts[0] === "time";
         if (!allowed) invalid(path, parts.join("."));
-        return;
-      }
-      const structural = structuralTargetKind(base);
-      if (
-        parts.length === 1 &&
-        ((structural === "sequence" && parts[0] === "span") ||
-          (structural === "period" && parts[0] === "items"))
-      ) {
-        validateTarget(base, `${path}.object`);
         return;
       }
       const entity = entityCollection(base);
@@ -359,6 +336,13 @@ function validateMemberWhitelist(
       case "context-root":
       case "duration":
       case "time-anchor":
+        return;
+      case "context-intrinsic":
+        if (target.intrinsic === "same")
+          validateTarget(target.input, `${path}.input`);
+        return;
+      case "occurrence-time":
+        validateTarget(target.input, `${path}.input`);
         return;
       case "field":
         if (!registry.has(target.field)) invalid(path, target.field);
@@ -459,6 +443,10 @@ function validateScopeTimePlacement(
     switch (target.kind) {
       case "member":
         return targetHasScopeTime(target.object);
+      case "context-intrinsic":
+        return target.intrinsic === "same" && targetHasScopeTime(target.input);
+      case "occurrence-time":
+        return targetHasScopeTime(target.input);
       case "selector":
         return (
           targetHasScopeTime(target.collection) ||
@@ -551,6 +539,201 @@ function validateScopeTimePlacement(
   visit(document.root, "root", true);
 }
 
+interface ContextIntrinsicFrame {
+  readonly sequences: readonly Extract<
+    FilterTargetExpression,
+    { readonly kind: "sequence" }
+  >[];
+  readonly periods: number;
+}
+
+function sequenceContextFor(
+  target: FilterTargetExpression,
+): Extract<FilterTargetExpression, { readonly kind: "sequence" }> | undefined {
+  if (target.kind === "sequence") return target;
+  if (target.kind === "adjacent") return sequenceContextFor(target.sequence);
+  if (target.kind === "without") return sequenceContextFor(target.sequence);
+  if (target.kind === "selector") return sequenceContextFor(target.collection);
+  return undefined;
+}
+
+function hasPeriodContext(target: FilterTargetExpression): boolean {
+  if (target.kind === "periods") return true;
+  return target.kind === "selector" && hasPeriodContext(target.collection);
+}
+
+function validateContextIntrinsicScopes(
+  document: FilterDocument,
+  registry: FilterFieldRegistry,
+): void {
+  const failContext = (code: string, path: string, message: string): never => {
+    throw new FilterValidationError(code, path, message);
+  };
+  const validateSameInput = (
+    input: FilterTargetExpression,
+    sequence: Extract<FilterTargetExpression, { readonly kind: "sequence" }>,
+    path: string,
+  ): void => {
+    const inputType = inferFilterTargetType(input, registry);
+    if (inputType.kind !== "scalar")
+      failContext(
+        "same_value_type_mismatch",
+        path,
+        "$same requires a registered scalar field or event.payload(path).",
+      );
+
+    const applicableEntity =
+      input.kind === "event-payload"
+        ? "event"
+        : input.kind === "field"
+          ? filterConditionEntity(registry.get(input.field))
+          : undefined;
+    if (!applicableEntity)
+      failContext(
+        "same_target_not_per_occurrence",
+        path,
+        "$same input must be a registered field or event.payload(path) evaluated on each occurrence.",
+      );
+
+    for (const [index, step] of sequence.steps.entries()) {
+      const stepType = inferFilterTargetType(step, registry);
+      if (stepType.kind !== "collection") continue;
+      const stepEntity = stepType.entity;
+      if (
+        (applicableEntity === "activity" &&
+          (stepEntity === "event" || stepEntity === "page")) ||
+        applicableEntity === stepEntity
+      )
+        continue;
+      failContext(
+        "same_value_entity_mismatch",
+        `${path}.steps[${index}]`,
+        "$same input must be available on every sequence step occurrence.",
+      );
+    }
+  };
+
+  const visitTarget = (
+    target: FilterTargetExpression,
+    frame: ContextIntrinsicFrame,
+    path: string,
+  ): void => {
+    if (target.kind === "context-intrinsic") {
+      if (target.context === "sequence") {
+        const sequence = frame.sequences.at(-1);
+        if (!sequence)
+          return failContext(
+            "context_intrinsic_outside_sequence",
+            path,
+            `$${target.intrinsic} is only available inside a Sequence predicate.`,
+          );
+        if (target.intrinsic === "gap" && target.to > sequence.steps.length)
+          failContext(
+            "invalid_sequence_gap",
+            path,
+            "$gap indexes must refer to steps in the active Sequence.",
+          );
+        if (target.intrinsic === "same")
+          validateSameInput(target.input, sequence, `${path}.input`);
+        if (target.intrinsic === "same")
+          visitTarget(target.input, frame, `${path}.input`);
+        return;
+      }
+      if (frame.periods === 0)
+        failContext(
+          "context_intrinsic_outside_period",
+          path,
+          "$items is only available inside a Period predicate.",
+        );
+      return;
+    }
+
+    if (target.kind === "selector") {
+      const sequence = sequenceContextFor(target.collection);
+      const nestedFrame: ContextIntrinsicFrame = {
+        sequences: sequence ? [...frame.sequences, sequence] : frame.sequences,
+        periods: frame.periods + (hasPeriodContext(target.collection) ? 1 : 0),
+      };
+      visitExpression(target.predicate, nestedFrame, `${path}.predicate`);
+      visitTarget(target.collection, frame, `${path}.collection`);
+      return;
+    }
+
+    switch (target.kind) {
+      case "member":
+        visitTarget(target.object, frame, `${path}.object`);
+        break;
+      case "occurrence-time":
+        visitTarget(target.input, frame, `${path}.input`);
+        break;
+      case "projection":
+        visitTarget(target.collection, frame, `${path}.collection`);
+        break;
+      case "reducer":
+        visitTarget(target.input, frame, `${path}.input`);
+        break;
+      case "arithmetic":
+        visitTarget(target.left, frame, `${path}.left`);
+        visitTarget(target.right, frame, `${path}.right`);
+        break;
+      case "bucket":
+        visitTarget(target.input, frame, `${path}.input`);
+        break;
+      case "window":
+        visitTarget(target.collection, frame, `${path}.collection`);
+        visitTarget(target.anchor, frame, `${path}.anchor`);
+        break;
+      case "periods":
+        visitTarget(target.collection, frame, `${path}.collection`);
+        break;
+      case "sequence":
+        target.steps.forEach((step, index) =>
+          visitTarget(step, frame, `${path}.steps[${index}]`),
+        );
+        break;
+      case "adjacent":
+        visitTarget(target.sequence, frame, `${path}.sequence`);
+        break;
+      case "without":
+        visitTarget(target.sequence, frame, `${path}.sequence`);
+        visitTarget(target.excluded, frame, `${path}.excluded`);
+        break;
+    }
+  };
+
+  const visitExpression = (
+    expression: FilterExpression,
+    frame: ContextIntrinsicFrame,
+    path: string,
+  ): void => {
+    if (expression.kind === "condition") {
+      visitTarget(expression.target, frame, `${path}.target`);
+      if (
+        expression.value &&
+        typeof expression.value === "object" &&
+        !Array.isArray(expression.value) &&
+        "kind" in expression.value
+      )
+        visitTarget(
+          expression.value as FilterTargetExpression,
+          frame,
+          `${path}.value`,
+        );
+      return;
+    }
+    if (expression.kind === "not") {
+      visitExpression(expression.child, frame, `${path}.child`);
+      return;
+    }
+    expression.children.forEach((child, index) =>
+      visitExpression(child, frame, `${path}.children[${index}]`),
+    );
+  };
+
+  if (document.root)
+    visitExpression(document.root, { sequences: [], periods: 0 }, "root");
+}
+
 function nativeEntityForTarget(
   target: FilterTargetExpression,
   registry: FilterFieldRegistry,
@@ -565,6 +748,9 @@ function nativeEntityForTarget(
     target.object.context === "current"
   )
     return { entity: "activity" };
+  if (target.kind === "occurrence-time") return { entity: "activity" };
+  if (target.kind === "context-intrinsic" && target.intrinsic === "same")
+    return nativeEntityForTarget(target.input, registry);
   const fieldId = fieldIdForTarget(target);
   const definition = fieldId ? registry.get(fieldId) : undefined;
   const entity = filterConditionEntity(definition);
@@ -642,6 +828,23 @@ export function validateFilterConditionDomains(
           domain,
           strictActivityAnchor,
           `${path}.object`,
+        );
+        break;
+      case "context-intrinsic":
+        if (target.intrinsic === "same")
+          visitTarget(
+            target.input,
+            domain,
+            strictActivityAnchor,
+            `${path}.input`,
+          );
+        break;
+      case "occurrence-time":
+        visitTarget(
+          target.input,
+          domain,
+          strictActivityAnchor,
+          `${path}.input`,
         );
         break;
       case "projection":
@@ -844,6 +1047,7 @@ export function analyzeFilterDocument(
   validateMemberWhitelist(document, registry);
   validateScopeTimePlacement(document);
   validateFilterExpressionTypes(document, registry);
+  validateContextIntrinsicScopes(document, registry);
   const state: AnalysisState = {
     targetTypes: new WeakMap(),
     expectedTargetTypes: new WeakMap(),

@@ -276,6 +276,11 @@ filterBuilder:
     client.screenHeight: 画面の高さ
     geo.isEU: EU 地域か
     time: 時間
+    time(...): 発生時刻
+    $items: 期間内項目
+    $span: シーケンス幅
+    $gap(...): ステップ間隔
+    $same(...): ステップ共通値
     bucket(...): 時間バケット
     window(...): 相対時間ウィンドウ
     periods(...): 期間グループ
@@ -333,6 +338,7 @@ filterBuilder:
   rangeStartPlaceholder: 下限
   rangeEndPlaceholder: 上限
   unitAriaLabel: 表示単位
+  durationUnit: 期間の単位
   units:
     hours: 時間
     minutes: 分
@@ -362,6 +368,13 @@ filterBuilder:
   expressionHelpFieldType: 型
   expressionHelpFieldOperators: 演算子
   expressionHelpOtherFields: その他
+  expressionHelpContextTitle: 発生時刻とコンテキスト組み込み値
+  expressionHelpContextDescription: ドットは登録済みフィールドを示します。@ は時間アンカー、$ は最も近い Sequence または Period 条件コンテキストの組み込み値です。
+  expressionHelpContextExamples: |-
+    time(last(page)) gte @now-14d
+    sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {
+      $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))
+    } exists
   advancedEditor:
     not: NOT
     removeNot: NOT を削除
@@ -383,6 +396,13 @@ filterBuilder:
     jsonPointerPlaceholder: /property/path
     entityMember: エンティティメンバー
     nthIndex: N 番目のインデックス
+    fromStep: 開始ステップ
+    toStep: 終了ステップ
+    occurrenceKind: 発生の選択方法
+    occurrenceEntity: 発生の種類
+    occurrenceIndex: 発生番号
+    correlationTarget: 各ステップで共通する値
+    periodItemCount: 期間ごとの項目数
     nestedTooDeep: 式のネストが深すぎます。
     applyOffset: オフセットを適用
     removeStep: ステップを削除
@@ -398,6 +418,8 @@ filterBuilder:
       event-payload: イベントペイロード
       entity-root: エンティティコレクション
       context-root: コンテキスト
+      context-intrinsic: コンテキスト組み込み値
+      occurrence-time: 発生時刻
       member: メンバー
       selector: セレクター
       projection: 射影
@@ -405,6 +427,10 @@ filterBuilder:
       arithmetic: 算術式
       duration: 期間
       time-anchor: 相対時間
+      sequence-span: シーケンス幅
+      sequence-gap: ステップ間隔
+      sequence-same: シーケンス共通値
+      period-items: 期間内項目
       bucket: 時間バケット
       window: ウィンドウ
       periods: 期間コレクション

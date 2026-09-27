@@ -714,7 +714,7 @@ describe("filter evaluator", () => {
     ).toEqual(new Set(["u-a"]));
   });
 
-  it("exposes only sequence span and preserves sequence identity in reducers", () => {
+  it("exposes sequence span only within its lexical predicate", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [page("candidate", 10, "s-a", "u-a")],
       events: [
@@ -723,11 +723,9 @@ describe("filter evaluator", () => {
       ],
       coverageRange: { startMs: 0, endExclusiveMs: 100 },
     };
-    const sequence =
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])';
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        `first(${sequence}).span eq 10ms`,
+        'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span eq 10ms } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -739,6 +737,115 @@ describe("filter evaluator", () => {
       },
     );
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+  });
+
+  it("computes sequence gaps from the matched ordered occurrences", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [],
+      events: [
+        event("signup", "signup", 10, "s-a", "u-a"),
+        event("project", "project_created", 20, "s-a", "u-a"),
+        event("purchase", "purchase", 30, "s-a", "u-a"),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        'sequence([event { event.name eq "signup" }, event { event.name eq "project_created" }, event { event.name eq "purchase" }]) { $gap(1, 2) eq 10ms AND $gap(2, 3) eq 10ms AND $gap(1, 3) eq 20ms AND $span eq 20ms } exists',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+  });
+
+  it("requires every Sequence occurrence to have the same typed non-null payload", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [],
+      events: [
+        event("same-view", "view", 10, "s-a", "u-a", { productId: "A" }),
+        event("same-purchase", "purchase", 20, "s-a", "u-a", {
+          productId: "A",
+        }),
+        event("different-view", "view", 10, "s-b", "u-b", { productId: "A" }),
+        event("different-purchase", "purchase", 20, "s-b", "u-b", {
+          productId: "B",
+        }),
+        event("missing-view", "view", 10, "s-c", "u-c"),
+        event("missing-purchase", "purchase", 20, "s-c", "u-c"),
+        event("null-view", "view", 10, "s-d", "u-d", { productId: null }),
+        event("null-purchase", "purchase", 20, "s-d", "u-d", {
+          productId: null,
+        }),
+        event("typed-view", "view", 10, "s-e", "u-e", { productId: 1 }),
+        event("typed-purchase", "purchase", 20, "s-e", "u-e", {
+          productId: "1",
+        }),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        'sequence([event { event.name eq "view" }, event { event.name eq "purchase" }]) { $same(event.payload("/productId")) } exists',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+  });
+
+  it("uses exact first and nth occurrence timestamps for DateTime subtraction", () => {
+    const day = 86_400_000;
+    const dataset: FilterEvaluationDataset = {
+      pages: [],
+      events: [
+        event("team-first", "first_team_event", 0, "s-a", "u-a"),
+        event("signup", "signup", 10 * day, "s-a", "u-a"),
+        event("team-later", "first_team_event", 20 * day, "s-a", "u-a"),
+        event("insight-1", "insight_saved", 7 * day, "s-b", "u-b"),
+        event("insight-2", "insight_saved", 8 * day, "s-b", "u-b"),
+        event("insight-3", "insight_saved", 9 * day, "s-b", "u-b"),
+        event("signup-b", "signup", 10 * day, "s-b", "u-b"),
+        event("insight-later", "insight_saved", 20 * day, "s-b", "u-b"),
+      ],
+      coverageRange: { startMs: -day, endExclusiveMs: 30 * day },
+    };
+    const options = {
+      scope: "visitor" as const,
+      candidateRange: { startMs: -day, endExclusiveMs: 30 * day },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 25 * day,
+    };
+    const first = evaluateFilterDocument(
+      parseFilterDsl(
+        'sub(time(first(event { event.name eq "first_team_event" })), time(first(event { event.name eq "signup" }))) between [0d, 30d]',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      options,
+    );
+    const nth = evaluateFilterDocument(
+      parseFilterDsl(
+        'sub(time(nth(event { event.name eq "insight_saved" }, 3)), time(first(event { event.name eq "signup" }))) between [0d, 30d]',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      options,
+    );
+    expect(first.matchingScopeEntityIds).toEqual(new Set());
+    expect(nth.matchingScopeEntityIds).toEqual(new Set());
   });
 
   it("buckets activity timestamps without exposing bucket members", () => {
@@ -1269,20 +1376,20 @@ describe("filter evaluator", () => {
       AND count(periods(
         event { event.name eq "shared_insight" },
         1w
-      ) { count(period.items) gte 3 }) gte 3
+      ) { count($items) gte 3 }) gte 3
       AND sequence([
         event { event.name eq "signup" },
         event { event.name eq "project_created" },
         event { event.name eq "invite_sent" },
         event { event.name eq "purchase" }
-      ]) { sequence.span lte 14d } exists
+      ]) { $span lte 14d } exists
       AND without(
         sequence([
           event { event.name eq "signup" },
           event { event.name eq "purchase" }
         ]),
         event { event.name eq "cancellation" }
-      ) { sequence.span lte 7d } exists
+      ) { $span lte 7d } exists
       AND count(session {
         count(event { event.name eq "payment_failed" }) gte 2
         AND event { event.name eq "purchase" } notExists
@@ -1695,7 +1802,7 @@ describe("filter evaluator", () => {
     } as const;
     const sequence = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.span gte 20ms } exists } exists',
+        'visitor { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span gte 20ms } exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2264,7 +2371,7 @@ describe("filter evaluator", () => {
       ["countDistinct(bucket(page, 1h)) eq 2", new Set(["u-a"])],
       ["count(periods(page, 1mo)) eq 2", new Set(["u-a"])],
       [
-        "count(periods(page, 1mo) { count(period.items) gte 1 }) eq 2",
+        "count(periods(page, 1mo) { count($items) gte 1 }) eq 2",
         new Set(["u-a"]),
       ],
       ["count(periods(page, 1y)) eq 1", new Set(["u-a"])],

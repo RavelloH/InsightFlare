@@ -1,3 +1,4 @@
+import { analyzeFilterDocument } from "./filter-semantics";
 import {
   type CanonicalJsonPath,
   FILTER_OPERATOR_IDS,
@@ -30,7 +31,7 @@ export const FILTER_DSL_OPERATOR_IDS = FILTER_OPERATOR_IDS;
 export const FILTER_DSL_SYNTAX = {
   condition: "<target-expression> <operator> <condition-value>",
   targetExpression:
-    "A registered field, entity root, selector, projection, reducer, arithmetic or temporal expression. Members are limited to registered field paths, event.payload(path), top-level Scope time for Session/Visitor, sequence.span and period.items.",
+    "A registered field, entity root, selector, projection, reducer, arithmetic or temporal expression. Members are limited to Registry-backed paths. Use time(event-or-page-occurrence) for occurrence time, and `$span`, `$gap(...)`, `$same(...)`, or `$items` for structural context.",
   boolean:
     "Combine expressions with <expression> AND <expression> or <expression> OR <expression>; prefix an expression with NOT to negate it.",
   grouping:
@@ -57,6 +58,9 @@ export const FILTER_DSL_EXAMPLES = [
   'geo.country in ["US", "GB"]',
   'NOT client.deviceType eq "mobile"',
   'page.path startsWith "/docs" AND referrer.domain eq "google.com"',
+  "time(last(page)) gte @now-14d",
+  'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId")) } exists',
+  "periods(event, 1w) { count($items) gte 3 } exists",
 ] as const;
 
 const VALUELESS_OPERATORS = new Set<FilterOperator>([
@@ -150,6 +154,7 @@ type Token =
       readonly value: FilterTimeAnchorTarget;
     })
   | (TokenBase & { readonly kind: "boolean"; readonly value: boolean })
+  | (TokenBase & { readonly kind: "dollar" })
   | (TokenBase & {
       readonly kind:
         | "null"
@@ -161,6 +166,7 @@ type Token =
         | "dot"
         | "brace-open"
         | "brace-close"
+        | "dollar"
         | "end";
     });
 
@@ -390,6 +396,7 @@ function tokenize(source: string): readonly Token[] {
       | "dot"
       | "brace-open"
       | "brace-close"
+      | "dollar"
       | undefined
     > = {
       "(": "open",
@@ -400,6 +407,7 @@ function tokenize(source: string): readonly Token[] {
       ".": "dot",
       "{": "brace-open",
       "}": "brace-close",
+      $: "dollar",
     };
     const kind = punctuation[character];
     if (kind) {
@@ -586,6 +594,26 @@ class Parser {
   private condition(): FilterCondition {
     const fieldToken = this.current;
     const parsedTarget = this.targetExpression();
+    if (
+      parsedTarget.target.kind === "context-intrinsic" &&
+      parsedTarget.target.intrinsic === "same" &&
+      !(
+        this.current.kind === "identifier" &&
+        OPERATORS.has(this.current.value.toLowerCase())
+      )
+    ) {
+      const expression: FilterCondition = {
+        kind: "condition",
+        target: parsedTarget.target,
+        operator: "eq",
+        value: true,
+      };
+      this.locations.set(expression, {
+        span: parsedTarget.location.target,
+        target: parsedTarget.location.target,
+      });
+      return expression;
+    }
     const operatorToken = this.expectIdentifier();
     const operator = OPERATORS.get(operatorToken.value.toLowerCase());
     if (!operator) {
@@ -715,6 +743,7 @@ class Parser {
   }
 
   private primaryTarget(): FilterTargetExpression {
+    if (this.current.kind === "dollar") return this.contextIntrinsicTarget();
     if (this.current.kind === "time-anchor") {
       const target = this.current.value;
       this.index += 1;
@@ -827,11 +856,155 @@ class Parser {
     return { kind: "field", field: name as FilterFieldId };
   }
 
+  private contextIntrinsicTarget(): FilterTargetExpression {
+    const start = this.current.start;
+    this.index += 1;
+    const nameToken = this.current;
+    if (nameToken.kind !== "identifier")
+      throw tokenError(
+        this.source,
+        "unknown_context_intrinsic",
+        nameToken,
+        "Expected a supported context intrinsic after `$`.",
+        "$span, $items, $gap(...), or $same(...)",
+      );
+    this.index += 1;
+    const name = nameToken.value.toLowerCase();
+    if (/^(?:span|items)\./u.test(name))
+      throw tokenError(
+        this.source,
+        "invalid_member",
+        nameToken,
+        `Context intrinsic $${name} does not expose members.`,
+      );
+    if (name === "span" || name === "items") {
+      const target: FilterTargetExpression =
+        name === "span"
+          ? {
+              kind: "context-intrinsic",
+              context: "sequence",
+              intrinsic: "span",
+            }
+          : {
+              kind: "context-intrinsic",
+              context: "period",
+              intrinsic: "items",
+            };
+      this.locations.set(target, {
+        span: { start, end: nameToken.end },
+        target: { start, end: nameToken.end },
+      });
+      return target;
+    }
+    if (name !== "gap" && name !== "same")
+      throw tokenError(
+        this.source,
+        "unknown_context_intrinsic",
+        nameToken,
+        `Unknown context intrinsic $${nameToken.value}.`,
+        "$span, $items, $gap(...), or $same(...)",
+      );
+    if (!this.consume("open"))
+      throw tokenError(
+        this.source,
+        "invalid_context_intrinsic_arguments",
+        this.current,
+        `$${name} requires parenthesized arguments.`,
+        "`(`",
+      );
+    let target: FilterTargetExpression;
+    if (name === "gap") {
+      const from = this.current;
+      if (from.kind !== "number" || !Number.isSafeInteger(from.value))
+        throw tokenError(
+          this.source,
+          "invalid_sequence_gap",
+          from,
+          "$gap indexes must be positive integer literals.",
+          "a positive integer step index",
+        );
+      this.index += 1;
+      if (!this.consume("comma"))
+        throw tokenError(
+          this.source,
+          "invalid_sequence_gap",
+          this.current,
+          "$gap requires a from and to step index.",
+          "`,`",
+        );
+      const to = this.current;
+      if (to.kind !== "number" || !Number.isSafeInteger(to.value))
+        throw tokenError(
+          this.source,
+          "invalid_sequence_gap",
+          to,
+          "$gap indexes must be positive integer literals.",
+          "a positive integer step index",
+        );
+      this.index += 1;
+      if (!this.consume("close"))
+        throw tokenError(
+          this.source,
+          "invalid_sequence_gap",
+          this.current,
+          "Expected `)` after $gap indexes.",
+          "`)`",
+        );
+      if (from.value < 1 || to.value <= from.value)
+        throw tokenError(
+          this.source,
+          "invalid_sequence_gap",
+          from,
+          "$gap requires 1 <= from < to.",
+        );
+      target = {
+        kind: "context-intrinsic",
+        context: "sequence",
+        intrinsic: "gap",
+        from: from.value,
+        to: to.value,
+      };
+    } else {
+      const input = this.targetExpression().target;
+      if (!this.consume("close"))
+        throw tokenError(
+          this.source,
+          "invalid_context_intrinsic_arguments",
+          this.current,
+          "Expected `)` after $same target.",
+          "`)`",
+        );
+      target = {
+        kind: "context-intrinsic",
+        context: "sequence",
+        intrinsic: "same",
+        input,
+      };
+    }
+    this.locations.set(target, {
+      span: { start, end: this.tokens[this.index - 1]!.end },
+      target: { start, end: this.tokens[this.index - 1]!.end },
+    });
+    return target;
+  }
+
   private functionTarget(
     token: Token & { readonly kind: "identifier" },
   ): FilterTargetExpression {
     const name = token.value.toLowerCase();
     this.index += 1; // opening parenthesis
+    if (name === "time") {
+      const input = this.targetExpression().target;
+      if (!this.consume("close"))
+        throw tokenError(
+          this.source,
+          "invalid_occurrence_time_arguments",
+          this.current,
+          "time() accepts exactly one Page or Event occurrence.",
+          "`)`",
+        );
+      return { kind: "occurrence-time", input };
+    }
     if (name === "sequence") {
       if (!this.consume("list-open")) {
         throw tokenError(
@@ -1349,6 +1522,7 @@ function rethrowValidationError(
 export function parseFilterDsl(
   source: string,
   registry: FilterFieldRegistry,
+  options: { readonly validateSemantics?: boolean } = {},
 ): FilterDocument {
   if (!source.trim()) {
     return { version: FILTER_DSL_VERSION, root: null };
@@ -1361,21 +1535,119 @@ export function parseFilterDsl(
     locations,
     registry,
   ).parse();
+  const migratedRoot = migrateLegacyContextMembers(root);
   try {
-    normalizeFilterDocument(
+    const normalized = normalizeFilterDocument(
       {
         version: FILTER_DSL_VERSION,
-        root,
+        root: migratedRoot,
       },
       registry,
     );
+    if (options.validateSemantics !== false)
+      analyzeFilterDocument(normalized, registry);
   } catch (error) {
     if (error instanceof FilterValidationError) {
       rethrowValidationError(error, source, root, locations);
     }
     throw error;
   }
-  return { version: FILTER_DSL_VERSION, root };
+  return { version: FILTER_DSL_VERSION, root: migratedRoot };
+}
+
+/** One-way migration for persisted structural members accepted by old DSLs. */
+function migrateLegacyContextMembers(
+  expression: FilterExpression,
+): FilterExpression {
+  const migrateTarget = (
+    target: FilterTargetExpression,
+  ): FilterTargetExpression => {
+    switch (target.kind) {
+      case "member": {
+        const object = migrateTarget(target.object);
+        if (
+          object.kind === "context-root" &&
+          object.context === "sequence" &&
+          target.member === "span"
+        )
+          return {
+            kind: "context-intrinsic",
+            context: "sequence",
+            intrinsic: "span",
+          };
+        if (
+          object.kind === "context-root" &&
+          object.context === "period" &&
+          target.member === "items"
+        )
+          return {
+            kind: "context-intrinsic",
+            context: "period",
+            intrinsic: "items",
+          };
+        return { ...target, object };
+      }
+      case "context-intrinsic":
+        return target.intrinsic === "same"
+          ? { ...target, input: migrateTarget(target.input) }
+          : target;
+      case "occurrence-time":
+        return { ...target, input: migrateTarget(target.input) };
+      case "selector":
+        return {
+          ...target,
+          collection: migrateTarget(target.collection),
+          predicate: migrateLegacyContextMembers(target.predicate),
+        };
+      case "projection":
+        return { ...target, collection: migrateTarget(target.collection) };
+      case "reducer":
+        return { ...target, input: migrateTarget(target.input) };
+      case "arithmetic":
+        return {
+          ...target,
+          left: migrateTarget(target.left),
+          right: migrateTarget(target.right),
+        };
+      case "bucket":
+        return { ...target, input: migrateTarget(target.input) };
+      case "window":
+        return {
+          ...target,
+          collection: migrateTarget(target.collection),
+          anchor: migrateTarget(target.anchor),
+        };
+      case "periods":
+        return { ...target, collection: migrateTarget(target.collection) };
+      case "sequence":
+        return { ...target, steps: target.steps.map(migrateTarget) };
+      case "adjacent":
+        return { ...target, sequence: migrateTarget(target.sequence) };
+      case "without":
+        return {
+          ...target,
+          sequence: migrateTarget(target.sequence),
+          excluded: migrateTarget(target.excluded),
+        };
+      default:
+        return target;
+    }
+  };
+
+  if (expression.kind === "condition")
+    return {
+      ...expression,
+      target: migrateTarget(expression.target),
+    };
+  if (expression.kind === "not")
+    return {
+      ...expression,
+      child: migrateLegacyContextMembers(expression.child),
+    };
+  return {
+    ...expression,
+    children: expression.children.map(migrateLegacyContextMembers),
+  };
 }
 
 const PRECEDENCE: Readonly<Record<FilterExpression["kind"], number>> = {
@@ -1404,7 +1676,27 @@ export function formatFilterTargetExpression(
       return target.entity;
     case "context-root":
       return target.context === "current" ? "" : target.context;
+    case "context-intrinsic":
+      if (target.intrinsic === "span") return "$span";
+      if (target.intrinsic === "items") return "$items";
+      if (target.intrinsic === "gap")
+        return `$gap(${target.from}, ${target.to})`;
+      return `$same(${formatFilterTargetExpression(target.input)})`;
+    case "occurrence-time":
+      return `time(${formatFilterTargetExpression(target.input)})`;
     case "member": {
+      if (
+        target.object.kind === "context-root" &&
+        target.object.context === "sequence" &&
+        target.member === "span"
+      )
+        return "$span";
+      if (
+        target.object.kind === "context-root" &&
+        target.object.context === "period" &&
+        target.member === "items"
+      )
+        return "$items";
       const object = formatFilterTargetExpression(target.object);
       return object ? `${object}.${target.member}` : target.member;
     }
@@ -1462,6 +1754,11 @@ function formatConditionValue(value: FilterCondition["value"]): string {
 
 function formatCondition(condition: FilterCondition): string {
   const target = formatFilterTargetExpression(condition.target);
+  if (
+    condition.target.kind === "context-intrinsic" &&
+    condition.target.intrinsic === "same"
+  )
+    return target;
   if (VALUELESS_OPERATORS.has(condition.operator)) {
     return `${target} ${condition.operator}`;
   }

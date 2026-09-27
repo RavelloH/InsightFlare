@@ -211,6 +211,12 @@ function advancedFilterCostDimensions(
     result.depth = Math.max(result.depth, depth);
     result.nodes += 1;
     switch (target.kind) {
+      case "context-intrinsic":
+        if (target.intrinsic === "same") targetVisit(target.input, depth + 1);
+        break;
+      case "occurrence-time":
+        targetVisit(target.input, depth + 1);
+        break;
       case "member":
         targetVisit(target.object, depth + 1);
         break;
