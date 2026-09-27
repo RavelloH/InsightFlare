@@ -19,6 +19,12 @@ export type FilterHistoryRequirement =
 
 export type FilterHistoryScope = "event" | "session" | "visitor";
 
+export type FilterPopulationRequirement =
+  | { readonly kind: "none" }
+  | { readonly kind: "empty" }
+  | ({ readonly kind: "bounded" } & FilterHistoryRange)
+  | { readonly kind: "full-history"; readonly endExclusiveMs: number };
+
 export interface TargetHistoryAnalysis {
   readonly requirement: FilterHistoryRequirement;
   /** Proven time domain for this target when it yields ordered values. */
@@ -202,21 +208,6 @@ function requirementForRange(
   return { kind: "bounded", startMs: range.startMs, endExclusiveMs };
 }
 
-function requirementForPredicateBounds(
-  bounds: PredicateTimeBounds,
-  capturedAtMs: number,
-): FilterHistoryRequirement {
-  if (!bounds.hasTime || bounds.impossible) return CANDIDATE_ONLY;
-  if (bounds.fullHistory || bounds.start === undefined) return FULL_HISTORY;
-  return requirementForRange(
-    {
-      startMs: bounds.start,
-      endExclusiveMs: bounds.end ?? capturedAtMs + 1,
-    },
-    capturedAtMs,
-  );
-}
-
 function mergeRequirements(
   left: FilterHistoryRequirement,
   right: FilterHistoryRequirement,
@@ -242,24 +233,6 @@ function unionBounds(
     startMs: Math.min(left.startMs, right.startMs),
     endExclusiveMs: Math.max(left.endExclusiveMs, right.endExclusiveMs),
   };
-}
-
-function intersectBounds(
-  source: FilterHistoryRange,
-  predicate: PredicateTimeBounds,
-  capturedAtMs: number,
-): FilterHistoryRange | null {
-  if (predicate.impossible) return null;
-  const startMs = Math.max(
-    source.startMs,
-    predicate.start ?? Number.MIN_SAFE_INTEGER,
-  );
-  const endExclusiveMs = Math.min(
-    source.endExclusiveMs,
-    predicate.end ?? capturedAtMs + 1,
-  );
-  if (endExclusiveMs <= startMs) return null;
-  return { startMs, endExclusiveMs };
 }
 
 function elapsedOffsetMs(amount: number, unit: string): number | null {
@@ -305,60 +278,17 @@ function analyzeTarget(
     }
     case "selector": {
       const source = analyze(target.collection);
-      const predicate = predicateTimeBounds(
-        target.predicate,
-        candidate,
-        capturedAtMs,
-        analysis,
-      );
       const predicateTargets = analyzeExpressionTargets(
         target.predicate,
         candidate,
         capturedAtMs,
         analysis,
       );
-      let requirement = mergeRequirements(source.requirement, predicateTargets);
-      let temporalBounds = source.temporalBounds;
-      let boundedCollection = source.boundedCollection;
-      if (predicate.hasTime) {
-        if (predicate.impossible) {
-          return {
-            requirement: predicateTargets,
-            boundedCollection: true,
-          };
-        }
-        if (source.temporalBounds) {
-          const intersection = intersectBounds(
-            source.temporalBounds,
-            predicate,
-            capturedAtMs,
-          );
-          if (intersection) {
-            temporalBounds = intersection;
-            boundedCollection = true;
-            requirement = mergeRequirements(
-              requirement,
-              requirementForRange(intersection, capturedAtMs),
-            );
-          } else {
-            return { requirement: predicateTargets, boundedCollection: true };
-          }
-        } else if (predicate.fullHistory || predicate.start === undefined) {
-          requirement = mergeRequirements(requirement, FULL_HISTORY);
-        } else {
-          const range = {
-            startMs: predicate.start,
-            endExclusiveMs: predicate.end ?? capturedAtMs + 1,
-          };
-          temporalBounds = range;
-          boundedCollection = true;
-          requirement = mergeRequirements(
-            requirement,
-            requirementForRange(range, capturedAtMs),
-          );
-        }
-      }
-      return { requirement, temporalBounds, boundedCollection };
+      return {
+        requirement: mergeRequirements(source.requirement, predicateTargets),
+        temporalBounds: source.temporalBounds,
+        boundedCollection: source.boundedCollection,
+      };
     }
     case "member": {
       const object = analyze(target.object);
@@ -540,26 +470,47 @@ export function analyzeFilterHistory(
 ): FilterHistoryRequirement {
   const document: FilterDocument = analysis.document;
   if (!document.root) return CANDIDATE_ONLY;
-  let requirement = analyzeExpressionTargets(
+  void scope;
+  return analyzeExpressionTargets(
     document.root,
     candidate,
     capturedAtMs,
     analysis,
   );
+}
 
-  // Top-level time means an activity predicate. Event Scope only tests
-  // candidate observations; Session and Visitor Scope must read its history.
-  if (scope !== "event") {
-    const topLevelBounds = predicateTimeBounds(
-      document.root,
-      candidate,
-      capturedAtMs,
-      analysis,
-    );
-    requirement = mergeRequirements(
-      requirement,
-      requirementForPredicateBounds(topLevelBounds, capturedAtMs),
-    );
-  }
-  return requirement;
+/** Resolve the top-level DSL `time` population selector independently from
+ * evaluator history needed by reducers, windows, and relations. */
+export function analyzeFilterPopulation(
+  analysis: AnalyzedFilterDocument,
+  candidate: FilterHistoryRange,
+  capturedAtMs: number,
+): FilterPopulationRequirement {
+  const document = analysis.document;
+  if (!document.root) return { kind: "none" };
+  const bounds = predicateTimeBounds(
+    document.root,
+    candidate,
+    capturedAtMs,
+    analysis,
+  );
+  if (!bounds.hasTime) return { kind: "none" };
+  if (bounds.impossible) return { kind: "empty" };
+  const endExclusiveMs = Math.min(
+    bounds.end ?? capturedAtMs + 1,
+    capturedAtMs + 1,
+  );
+  if (bounds.fullHistory || bounds.start === undefined)
+    return { kind: "full-history", endExclusiveMs };
+  if (
+    !Number.isSafeInteger(bounds.start) ||
+    !Number.isSafeInteger(endExclusiveMs)
+  )
+    return { kind: "full-history", endExclusiveMs };
+  if (bounds.start >= endExclusiveMs) return { kind: "empty" };
+  return {
+    kind: "bounded",
+    startMs: bounds.start,
+    endExclusiveMs,
+  };
 }

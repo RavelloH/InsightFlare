@@ -18,6 +18,9 @@ import {
 } from "@/components/dashboard/filters/filter-editor/model";
 import {
   analyticsFilterRegistry,
+  analyzeFilterDocument,
+  type FilterExpression,
+  type FilterTargetExpression,
   normalizeFilterDocument,
   parseFilterDsl,
   validateFilterExpressionTypes,
@@ -28,11 +31,11 @@ import { FILTER_PICKER_TARGET_REGISTRY } from "@/lib/filter-contract/filter-pick
 describe("advanced filter editor model", () => {
   it("round-trips every advanced target and relation through the visual tree", () => {
     const sources = [
-      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2 AND last(page).time gte @now-14d',
+      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2 AND last(page).path exists',
       'sub(sum(event { event.name eq "purchase" }.payload("/amount")), sum(event { event.name eq "refund" }.payload("/amount"))) gt 0',
-      "countDistinct(bucket(page.time, 1d)) gte 2",
+      "countDistinct(bucket(page, 1d)) gte 2",
       "count(periods(page, 1w) { count(period.items) gte 3 }) gte 2",
-      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }).time, [0d, 7d]) notExists',
+      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists',
       'time gte @range.start AND time lt @range.end AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
       'adjacent(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])) exists',
       'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) { sequence.span lte 7d } exists',
@@ -41,6 +44,7 @@ describe("advanced filter editor model", () => {
 
     for (const source of sources) {
       const parsed = parseFilterDsl(source, analyticsFilterRegistry);
+      analyzeFilterDocument(parsed, analyticsFilterRegistry);
       const root = editorRootFromDocument(parsed, conditionIdFactory());
       expect(
         parseFilterDsl(expressionTextFromEditor(root), analyticsFilterRegistry),
@@ -135,6 +139,14 @@ describe("advanced filter editor model", () => {
         },
       }),
     ).toBe("number");
+
+    const nestedMember = parseFilterDsl(
+      'first(page).geo.country eq "US"',
+      analyticsFilterRegistry,
+    ).root;
+    if (nestedMember?.kind !== "condition")
+      throw new Error("expected_condition");
+    expect(filterValueKindForTarget(nestedMember.target)).toBe("enum");
   });
 
   it("selects temporal, field-specific, collection, and generic operators", () => {
@@ -161,6 +173,38 @@ describe("advanced filter editor model", () => {
       "notExists",
     ]);
     expect(filterOperatorsForTarget(arithmetic)).toContain("gte");
+  });
+
+  it("infers a registered member through a selected positional Entity", () => {
+    const target: FilterTargetExpression = {
+      kind: "member",
+      object: {
+        kind: "reducer",
+        reducer: "first",
+        input: {
+          kind: "selector",
+          collection: { kind: "entity-root", entity: "event" },
+          predicate: {
+            kind: "condition",
+            target: { kind: "field", field: "event.name" as never },
+            operator: "eq",
+            value: "purchase",
+          } satisfies FilterExpression,
+        },
+      },
+      member: "name",
+    };
+
+    expect(filterValueKindForTarget(target)).toBe("string");
+  });
+
+  it("offers presence operators for sequence and period contexts", () => {
+    for (const target of [
+      { kind: "context-root", context: "sequence" },
+      { kind: "context-root", context: "period" },
+    ] as const) {
+      expect(filterOperatorsForTarget(target)).toEqual(["exists", "notExists"]);
+    }
   });
 
   it("uses page defaults when the audience cannot select events", () => {

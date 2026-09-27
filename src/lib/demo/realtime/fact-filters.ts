@@ -20,6 +20,8 @@ import type {
 import { demoQueryStringForVisit } from "@/lib/demo/realtime/visit-helpers";
 import {
   analyticsFilterRegistry,
+  analyzeFilterDocument,
+  analyzeFilterPopulation,
   compareFilterValues,
   type FilterCondition,
   type FilterDocument,
@@ -445,13 +447,34 @@ function applyCanonicalDemoFilters(
     : document;
   if (filterDocumentUsesAdvancedExpressions(normalized)) {
     if (dataset.to <= dataset.from) return finalizeDemoFilteredFacts([]);
+    const candidateRange = filters.candidateRange ?? {
+      startMs: dataset.from,
+      endExclusiveMs: dataset.to,
+    };
+    const capturedAtMs = filters.capturedAtMs ?? dataset.to - 1;
+    const population = analyzeFilterPopulation(
+      analyzeFilterDocument(normalized, analyticsFilterRegistry),
+      candidateRange,
+      capturedAtMs,
+    );
     const requestedHistoryStart = filters.evaluationRange?.startMs;
     const requestedHistoryEnd = filters.evaluationRange?.endExclusiveMs;
+    const populationStart =
+      population.kind === "bounded" ? population.startMs : undefined;
+    const populationEnd =
+      population.kind === "bounded"
+        ? population.endExclusiveMs
+        : population.kind === "full-history"
+          ? population.endExclusiveMs
+          : undefined;
     const needsExpandedSource =
       filters.fullHistory === true ||
+      population.kind === "full-history" ||
       (requestedHistoryStart !== undefined &&
         requestedHistoryStart < dataset.from) ||
-      (requestedHistoryEnd !== undefined && requestedHistoryEnd > dataset.to);
+      (requestedHistoryEnd !== undefined && requestedHistoryEnd > dataset.to) ||
+      (populationStart !== undefined && populationStart < dataset.from) ||
+      (populationEnd !== undefined && populationEnd > dataset.to);
     const historyDataset =
       filters.historyDataset ??
       (needsExpandedSource && filters.siteId
@@ -459,14 +482,31 @@ function applyCanonicalDemoFilters(
             filters.siteId,
             filters.fullHistory
               ? Math.min(dataset.from, DEMO_FILTER_HISTORY_START_MS)
-              : Math.min(dataset.from, requestedHistoryStart ?? dataset.from),
+              : population.kind === "full-history"
+                ? Math.min(dataset.from, DEMO_FILTER_HISTORY_START_MS)
+                : Math.min(
+                    dataset.from,
+                    requestedHistoryStart ?? dataset.from,
+                    populationStart ?? dataset.from,
+                  ),
             filters.fullHistory
               ? Math.max(
                   dataset.to,
                   requestedHistoryEnd ?? dataset.to,
-                  (filters.capturedAtMs ?? dataset.to - 1) + 1,
+                  capturedAtMs + 1,
+                  populationEnd ?? dataset.to,
                 )
-              : Math.max(dataset.to, requestedHistoryEnd ?? dataset.to),
+              : population.kind === "full-history"
+                ? Math.max(
+                    dataset.to,
+                    requestedHistoryEnd ?? dataset.to,
+                    populationEnd ?? dataset.to,
+                  )
+                : Math.max(
+                    dataset.to,
+                    requestedHistoryEnd ?? dataset.to,
+                    populationEnd ?? dataset.to,
+                  ),
           )
         : undefined);
     const evaluationDataset = historyDataset
@@ -525,16 +565,31 @@ function applyCanonicalDemoFilters(
       },
       {
         scope: scope ?? "event",
-        candidateRange: filters.candidateRange ?? {
-          startMs: dataset.from,
-          endExclusiveMs: dataset.to,
-        },
+        candidateRange,
         ...(filters.evaluationRange
           ? { evaluationRange: filters.evaluationRange }
           : {}),
         ...(filters.fullHistory ? { fullHistory: true } : {}),
+        ...(population.kind === "bounded"
+          ? {
+              populationRange: {
+                startMs: population.startMs,
+                endExclusiveMs: population.endExclusiveMs,
+              },
+            }
+          : {}),
+        ...(population.kind === "full-history"
+          ? {
+              populationFullHistory: true,
+              populationRange: {
+                startMs: evaluationDataset.from,
+                endExclusiveMs: population.endExclusiveMs,
+              },
+            }
+          : {}),
+        ...(population.kind === "empty" ? { populationEmpty: true } : {}),
         reportingTimeZone: filters.reportingTimeZone ?? "UTC",
-        capturedAtMs: filters.capturedAtMs ?? dataset.to - 1,
+        capturedAtMs,
       },
     );
     return finalizeDemoFilteredFacts(

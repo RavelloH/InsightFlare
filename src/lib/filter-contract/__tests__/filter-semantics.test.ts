@@ -8,6 +8,7 @@ import {
   type FilterTargetExpression,
   validateFilterConditionDomains,
 } from "@/lib/filter-contract";
+import type { CanonicalJsonPath } from "@/lib/filter-contract/filters";
 
 function condition(target: FilterTargetExpression): FilterExpression {
   return {
@@ -101,5 +102,29 @@ describe("Filter condition entity domains", () => {
     ).toThrow(
       expect.objectContaining({ code: "invalid_condition_entity_domain" }),
     );
+  });
+
+  it("recognizes an event payload projection as an Event condition", () => {
+    const document: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "condition",
+        target: {
+          kind: "projection",
+          collection: { kind: "entity-root", entity: "event" },
+          member: "payload",
+          path: "/amount" as CanonicalJsonPath,
+        },
+        operator: "exists",
+      },
+    };
+
+    expect(() =>
+      validateFilterConditionDomains(
+        document,
+        "visitor",
+        analyticsFilterRegistry,
+      ),
+    ).not.toThrow();
   });
 });

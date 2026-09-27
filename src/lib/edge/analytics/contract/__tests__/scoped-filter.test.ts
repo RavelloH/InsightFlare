@@ -241,7 +241,7 @@ describe("scoped filter contract", () => {
     expect(prepared.filters?.root).toBeNull();
   });
 
-  it("plans selector history and full-history reducers into query time", () => {
+  it("keeps evaluator history separate from scope population selection", () => {
     const queryTime = {
       range: { startMs: 80_000, endExclusiveMs: 90_000 },
       reportingTimeZone: "UTC",
@@ -251,38 +251,39 @@ describe("scoped filter contract", () => {
       context,
       time: queryTime,
       filters: parseFilterDsl(
-        'count(event { event.name eq "purchase" AND time gte @now-30s }) gte 1',
+        "count(window(event, @range.start, [0s, 10s])) gte 1",
         analyticsFilterRegistry,
       ),
       scopePreference: "visitor",
     } as QueryInput & { time: QueryTime });
     expect(bounded.time).toMatchObject({
-      evaluationRange: { startMs: 70_000, endExclusiveMs: 100_001 },
+      evaluationRange: { startMs: 80_000, endExclusiveMs: 90_001 },
     });
 
     const upperBounded = prepareScopedQuery("overview", {
       context,
       time: queryTime,
-      filters: parseFilterDsl(
-        "count(event { time lt @now-30s }) gte 1",
-        analyticsFilterRegistry,
-      ),
+      filters: parseFilterDsl("time lt @now-30s", analyticsFilterRegistry),
       scopePreference: "visitor",
     } as QueryInput & { time: QueryTime });
-    expect(upperBounded.time).toMatchObject({ fullHistory: true });
+    expect(upperBounded.time).toMatchObject({
+      populationFullHistory: true,
+      populationEndExclusiveMs: 70_000,
+    });
 
     const twoSided = prepareScopedQuery("overview", {
       context,
       time: queryTime,
       filters: parseFilterDsl(
-        "count(event { time gte @now-30s AND time lte @now-5s }) gte 1",
+        "time gte @now-30s AND time lte @now-5s",
         analyticsFilterRegistry,
       ),
       scopePreference: "visitor",
     } as QueryInput & { time: QueryTime });
     expect(twoSided.time).toMatchObject({
-      evaluationRange: { startMs: 70_000, endExclusiveMs: 95_001 },
+      populationRange: { startMs: 70_000, endExclusiveMs: 95_001 },
     });
+    expect(twoSided.time).not.toHaveProperty("evaluationRange");
     expect(twoSided.time).not.toHaveProperty("fullHistory");
 
     const fullHistory = prepareScopedQuery("overview", {
@@ -297,7 +298,7 @@ describe("scoped filter contract", () => {
     expect(fullHistory.time).toMatchObject({ fullHistory: true });
   });
 
-  it("keeps top-level time predicates in the FilterDocument and plans history by Scope", () => {
+  it("keeps top-level time predicates in the FilterDocument and plans population by Scope", () => {
     const queryTime = {
       range: { startMs: 80_000, endExclusiveMs: 90_000 },
       reportingTimeZone: "UTC",
@@ -317,23 +318,19 @@ describe("scoped filter contract", () => {
       time: QueryTime;
     };
     expect(visitor.filters.root).toEqual(filters.root);
-    expect(visitor.time.evaluationRange).toEqual({
+    expect(visitor.time.populationRange).toEqual({
       startMs: 70_000,
       endExclusiveMs: 100_001,
     });
 
-    const event = prepareScopedQuery("overview", {
-      context,
-      time: queryTime,
-      filters,
-      scopePreference: "event",
-    } as QueryInput & { time: QueryTime }) as QueryInput & {
-      filters: FilterDocument;
-      time: QueryTime;
-    };
-    expect(event.filters.root).toEqual(filters.root);
-    expect(event.time).not.toHaveProperty("evaluationRange");
-    expect(event.time).not.toHaveProperty("fullHistory");
+    expect(() =>
+      prepareScopedQuery("overview", {
+        context,
+        time: queryTime,
+        filters,
+        scopePreference: "event",
+      } as QueryInput & { time: QueryTime }),
+    ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
   });
 
   it("keeps evaluation ranges planner-owned while preserving query bindings", () => {
@@ -356,9 +353,9 @@ describe("scoped filter contract", () => {
     expect(prepared.time).not.toHaveProperty("fullHistory");
   });
 
-  it("plans selector history independently for each comparison side", () => {
+  it("plans bounded window history independently for each comparison side", () => {
     const filters = parseFilterDsl(
-      "count(event { time gte @now-30s AND time lte @now-5s }) gte 1",
+      "count(window(event, @range.start, [0s, 10s])) gte 1",
       analyticsFilterRegistry,
     );
     const currentTime = {
@@ -382,12 +379,12 @@ describe("scoped filter contract", () => {
     };
 
     expect(prepared.current.time.evaluationRange).toEqual({
-      startMs: -29_900,
-      endExclusiveMs: -4_899,
+      startMs: time.range.startMs,
+      endExclusiveMs: 101,
     });
     expect(prepared.reference.time.evaluationRange).toEqual({
-      startMs: -29_600,
-      endExclusiveMs: -4_599,
+      startMs: 200,
+      endExclusiveMs: 401,
     });
     expect(prepared.current.time).not.toHaveProperty("fullHistory");
     expect(prepared.reference.time).not.toHaveProperty("fullHistory");
@@ -420,15 +417,15 @@ describe("scoped filter contract", () => {
     );
   });
 
-  it("does not claim an observation source for an unknown field", () => {
-    const prepared = prepareScopedQuery("overview", {
-      context,
-      time,
-      filters: filter("unknown.field", "value"),
-      scopePreference: "session",
-    } as QueryInput & { time: QueryTime });
-
-    expect(prepared.scopePlan?.requiredSources).toEqual(new Set());
+  it("rejects an unregistered field during semantic analysis", () => {
+    expect(() =>
+      prepareScopedQuery("overview", {
+        context,
+        time,
+        filters: filter("unknown.field", "value"),
+        scopePreference: "session",
+      } as QueryInput & { time: QueryTime }),
+    ).toThrow(expect.objectContaining({ code: "invalid_member" }));
   });
 
   it("requires a time window for scoped queries", () => {

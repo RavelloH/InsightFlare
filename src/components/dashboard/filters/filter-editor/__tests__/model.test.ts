@@ -297,9 +297,26 @@ describe("filter editor tree model", () => {
     expect(appended).toMatchObject({ children: expect.any(Array) });
     expect((appended as typeof original).children).toHaveLength(2);
     expect(appendEditorNode(original, "missing", nested)).toBe(original);
+    expect(removeEditorNode(appended, nested.children[0]!.id)).toMatchObject({
+      children: [expect.any(Object)],
+    });
     expect(removeEditorNode(appended, nested.id)).toMatchObject({
       children: [expect.any(Object)],
     });
+    const validCurrent = editorRootFromDocument(
+      parseFilterDsl('page.path eq "/a"', analyticsFilterRegistry),
+      createId,
+    );
+    const replacement = editorRootFromDocument(
+      parseFilterDsl('page.path eq "/b"', analyticsFilterRegistry),
+      createId,
+    );
+    expect(
+      reconcileEditorRoot(validCurrent, {
+        ...validCurrent,
+        children: [replacement],
+      }).children,
+    ).toEqual([replacement]);
     expect(removeEditorNode(original, "missing")).toBe(original);
     expect(removeEditorNode(original, original.id)).toBeNull();
     expect(

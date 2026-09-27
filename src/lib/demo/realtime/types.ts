@@ -22,6 +22,12 @@ export interface DemoQueryFilters {
     readonly startMs: number;
     readonly endExclusiveMs: number;
   };
+  /** Scope population selection derived from top-level DSL `time`. */
+  populationRange?: {
+    readonly startMs: number;
+    readonly endExclusiveMs: number;
+  };
+  populationFullHistory?: boolean;
   /** Evaluate unbounded positional and relation expressions over source coverage. */
   fullHistory?: boolean;
   reportingTimeZone?: string;

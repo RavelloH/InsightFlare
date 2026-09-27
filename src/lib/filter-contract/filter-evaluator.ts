@@ -76,6 +76,10 @@ export interface FilterEvaluationOptions {
   readonly candidateRange: FilterEvaluationRange;
   readonly evaluationRange?: FilterEvaluationRange;
   readonly fullHistory?: boolean;
+  /** Scope population selected by the top-level DSL `time` condition. */
+  readonly populationRange?: FilterEvaluationRange;
+  readonly populationFullHistory?: boolean;
+  readonly populationEmpty?: boolean;
   readonly reportingTimeZone: string;
   readonly capturedAtMs: number;
   readonly maxActivities?: number;
@@ -204,6 +208,14 @@ interface RuntimeContext {
     readonly FilterEvaluationEntity[]
   >;
   readonly candidateActivitiesByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly populationActivitiesBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly populationActivitiesByVisitor: ReadonlyMap<
     string,
     readonly FilterEvaluationEntity[]
   >;
@@ -344,6 +356,15 @@ function createRuntimeContext(
         ),
       }
     : (options.evaluationRange ?? options.candidateRange);
+  const populationRange = options.populationFullHistory
+    ? {
+        startMs: dataset.coverageRange.startMs,
+        endExclusiveMs: Math.min(
+          dataset.coverageRange.endExclusiveMs,
+          options.populationRange?.endExclusiveMs ?? options.capturedAtMs + 1,
+        ),
+      }
+    : (options.populationRange ?? options.candidateRange);
   if (
     !Number.isSafeInteger(evaluationRange.startMs) ||
     !Number.isSafeInteger(evaluationRange.endExclusiveMs) ||
@@ -355,9 +376,19 @@ function createRuntimeContext(
     evaluationRange.endExclusiveMs > dataset.coverageRange.endExclusiveMs
   )
     throw new TypeError("filter_evaluation_range_unavailable");
+  if (
+    populationRange.startMs < dataset.coverageRange.startMs ||
+    populationRange.endExclusiveMs > dataset.coverageRange.endExclusiveMs
+  ) {
+    if (!options.populationEmpty)
+      throw new TypeError("filter_evaluation_range_unavailable");
+  }
   const normalizedOptions: Required<FilterEvaluationOptions> = {
     ...options,
     evaluationRange,
+    populationRange,
+    populationFullHistory: options.populationFullHistory ?? false,
+    populationEmpty: options.populationEmpty ?? false,
     fullHistory: options.fullHistory ?? false,
     maxActivities: options.maxActivities ?? DEFAULT_MAX_ACTIVITIES,
     maxSequenceMatches:
@@ -378,6 +409,19 @@ function createRuntimeContext(
   const candidateEvents = dataset.events.filter((record) =>
     inRange(record.time, options.candidateRange),
   );
+  const populationPages = normalizedOptions.populationEmpty
+    ? []
+    : dataset.pages.filter((record) => inRange(record.time, populationRange));
+  const populationEvents = normalizedOptions.populationEmpty
+    ? []
+    : dataset.events.filter((record) => inRange(record.time, populationRange));
+  const workloadIds = new Set(
+    [...pages, ...events, ...populationPages, ...populationEvents].map(
+      (record) => `${record.kind}:${record.id}`,
+    ),
+  );
+  if (workloadIds.size > normalizedOptions.maxActivities)
+    throw new TypeError("filter_activity_limit_exceeded");
   const evaluationRecords = [...pages, ...events].sort(compareActivity);
   const sessions = dataset.sessions
     ? dataset.sessions
@@ -424,6 +468,16 @@ function createRuntimeContext(
       candidateEvents,
       "visitorId",
     ),
+    populationActivitiesBySession: indexActivities(
+      populationPages,
+      populationEvents,
+      "sessionId",
+    ),
+    populationActivitiesByVisitor: indexActivities(
+      populationPages,
+      populationEvents,
+      "visitorId",
+    ),
     sequenceMatchesLimit: normalizedOptions.maxSequenceMatches,
     sequenceWorkLimit: normalizedOptions.maxSequenceWork,
     sequenceStats: { matches: 0, work: 0 },
@@ -458,16 +512,10 @@ function fieldValue(
 ): RuntimeValue {
   if (!record) return MISSING;
   if (field === "event.name" && record.kind !== "event") return MISSING;
-  if (field === "page.time" && record.kind !== "page") return MISSING;
-  if (field === "event.time" && record.kind !== "event") return MISSING;
   if (field === "page.path" && record.kind === "page")
     return record.fields[field] === undefined ? MISSING : record.fields[field];
   if (field === "event.name" && record.kind === "event")
     return record.fields[field] === undefined ? MISSING : record.fields[field];
-  if (field === "event.time" && record.kind === "event")
-    return record.time === undefined ? MISSING : record.time;
-  if (field === "page.time" && record.kind === "page")
-    return record.time === undefined ? MISSING : record.time;
   const fields = candidate
     ? (record.candidateFields ?? record.fields)
     : record.fields;
@@ -484,6 +532,15 @@ function currentEntity(
   return frame.current ?? frame.anchor;
 }
 
+function isScopeTimeTarget(target: FilterTargetExpression): boolean {
+  return (
+    target.kind === "member" &&
+    target.member === "time" &&
+    target.object.kind === "context-root" &&
+    target.object.context === "current"
+  );
+}
+
 function memberValue(value: RuntimeValue, member: string): RuntimeValue {
   if (Array.isArray(value))
     return value.map((item) => memberValue(item as RuntimeValue, member));
@@ -492,33 +549,19 @@ function memberValue(value: RuntimeValue, member: string): RuntimeValue {
   if ("kind" in value) {
     const tagged = value as Record<string, unknown>;
     if (tagged.kind === "duration-value") return MISSING;
-    if (tagged.kind === "time-bucket-value") {
-      if (member === "start") return tagged.startMs as number;
-      if (member === "end") return tagged.endExclusiveMs as number;
-    }
     if (tagged.kind === "period-value") {
-      if (member === "start") return tagged.startMs as number;
-      if (member === "end") return tagged.endExclusiveMs as number;
       if (member === "items") return tagged.items as readonly unknown[];
     }
     if (tagged.kind === "sequence-match-value") {
-      if (member === "start") return tagged.startMs as number;
-      if (member === "end") return tagged.endMs as number;
       if (member === "span")
         return {
           kind: "duration-value",
           milliseconds: tagged.spanMs as number,
         };
-      if (member === "steps")
-        return tagged.steps as readonly FilterEvaluationEntity[];
     }
   }
   const entity = value as FilterEvaluationEntity;
   if (entity.kind && entity.fields && typeof entity.fields === "object") {
-    if (member === "time")
-      return entity.kind === "event" || entity.kind === "page"
-        ? (entity.time ?? MISSING)
-        : MISSING;
     if (member === "payload")
       return entity.kind === "event"
         ? entity.payload === undefined
@@ -540,13 +583,6 @@ function memberValue(value: RuntimeValue, member: string): RuntimeValue {
     ]) {
       if (namespace === member) return { __filterNamespace: namespace, entity };
     }
-    const nestedField = Object.keys(entity.fields).find((key) =>
-      key.endsWith(`.${member}`),
-    );
-    if (nestedField) {
-      const found = entity.fields[nestedField];
-      return found === undefined ? MISSING : found;
-    }
   }
   const namespaceValue = value as {
     __filterNamespace?: string;
@@ -555,10 +591,6 @@ function memberValue(value: RuntimeValue, member: string): RuntimeValue {
   if (namespaceValue.__filterNamespace && namespaceValue.entity) {
     const key = `${namespaceValue.__filterNamespace}.${member}`;
     const found = namespaceValue.entity.fields[key];
-    return found === undefined ? MISSING : found;
-  }
-  if (Object.prototype.hasOwnProperty.call(value, member)) {
-    const found = (value as Record<string, unknown>)[member];
     return found === undefined ? MISSING : found;
   }
   return MISSING;
@@ -733,15 +765,8 @@ function targetValue(
       if (target.context === "period") return frame.period ?? MISSING;
       return frame.bucket ?? MISSING;
     case "member":
-      if (
-        target.member === "time" &&
-        target.object.kind === "entity-root" &&
-        (target.object.entity === "page" || target.object.entity === "event")
-      ) {
-        const entity = currentEntity(frame);
-        if (entity?.kind === target.object.entity)
-          return entity.time ?? MISSING;
-      }
+      if (isScopeTimeTarget(target))
+        return currentEntity(frame)?.time ?? MISSING;
       return memberValue(
         targetValue(target.object, frame, context),
         target.member,
@@ -795,7 +820,6 @@ function targetValue(
             : entity.payload === undefined
               ? MISSING
               : entity.payload;
-        if (target.member === "time") return entity.time ?? MISSING;
         return fieldValue(entity, `${entity.kind}.${target.member}`);
       });
       const expected = context.analysis.expectedTargetTypes.get(target);
@@ -912,8 +936,12 @@ function targetValue(
       const source = targetValue(target.input, frame, context);
       if (!Array.isArray(source)) throw new TypeError("expected_collection");
       const buckets: TimeBucketValue[] = [];
-      for (const timeValue of source) {
-        const time = dateNumber(timeValue);
+      for (const activity of source) {
+        const time =
+          isRuntimeEntity(activity) &&
+          (activity.kind === "page" || activity.kind === "event")
+            ? (activity.time ?? null)
+            : null;
         if (time === null) continue;
         const startMs = periodStart(
           time,
@@ -937,7 +965,10 @@ function targetValue(
     case "window": {
       const source = targetValue(target.collection, frame, context);
       if (!Array.isArray(source)) throw new TypeError("expected_collection");
-      const anchor = dateNumber(targetValue(target.anchor, frame, context));
+      const anchorValue = targetValue(target.anchor, frame, context);
+      const anchor = isRuntimeEntity(anchorValue)
+        ? (anchorValue.time ?? null)
+        : dateNumber(anchorValue);
       if (anchor === null) return [];
       const start =
         anchor +
@@ -1278,17 +1309,6 @@ function conditionSubjectDomain(
     target.object.context === "current"
   )
     return { native: "activity", activities: new Set(["page", "event"]) };
-  if (target.kind === "member" && target.member === "time") {
-    if (
-      target.object.kind === "entity-root" &&
-      (target.object.entity === "page" || target.object.entity === "event")
-    )
-      return {
-        native: target.object.entity,
-        activities: new Set([target.object.entity]),
-      };
-  }
-
   // Only a bare field condition inherits its field's entity domain. A
   // reducer, projection, arithmetic expression, or other wrapper is already
   // a scalar expression in the current query context; inspecting its nested
@@ -1326,34 +1346,47 @@ function activitiesForAnchor(
   context: RuntimeContext,
   activityKinds: ReadonlySet<"page" | "event">,
   candidate: boolean,
+  population = false,
 ): readonly FilterEvaluationEntity[] {
   if (!anchor) return [];
   if (activityKinds.size === 0) return [];
   const allActivities = activityKinds.has("page") && activityKinds.has("event");
   if (allActivities) {
-    const visitorIndex = candidate
-      ? context.candidateActivitiesByVisitor
-      : context.activitiesByVisitor;
-    const sessionIndex = candidate
-      ? context.candidateActivitiesBySession
-      : context.activitiesBySession;
+    const visitorIndex = population
+      ? context.populationActivitiesByVisitor
+      : candidate
+        ? context.candidateActivitiesByVisitor
+        : context.activitiesByVisitor;
+    const sessionIndex = population
+      ? context.populationActivitiesBySession
+      : candidate
+        ? context.candidateActivitiesBySession
+        : context.activitiesBySession;
     if (anchor.kind === "session") return indexed(sessionIndex, anchor.id);
     if (anchor.kind === "visitor") return indexed(visitorIndex, anchor.id);
     if (anchor.sessionId) return indexed(sessionIndex, anchor.sessionId);
     return [anchor];
   }
-  const pageIndex = candidate
-    ? context.candidatePagesBySession
-    : context.pagesBySession;
-  const eventIndex = candidate
-    ? context.candidateEventsBySession
-    : context.eventsBySession;
-  const pageVisitorIndex = candidate
-    ? context.candidatePagesByVisitor
-    : context.pagesByVisitor;
-  const eventVisitorIndex = candidate
-    ? context.candidateEventsByVisitor
-    : context.eventsByVisitor;
+  const pageIndex = population
+    ? new Map<string, readonly FilterEvaluationEntity[]>()
+    : candidate
+      ? context.candidatePagesBySession
+      : context.pagesBySession;
+  const eventIndex = population
+    ? new Map<string, readonly FilterEvaluationEntity[]>()
+    : candidate
+      ? context.candidateEventsBySession
+      : context.eventsBySession;
+  const pageVisitorIndex = population
+    ? new Map<string, readonly FilterEvaluationEntity[]>()
+    : candidate
+      ? context.candidatePagesByVisitor
+      : context.pagesByVisitor;
+  const eventVisitorIndex = population
+    ? new Map<string, readonly FilterEvaluationEntity[]>()
+    : candidate
+      ? context.candidateEventsByVisitor
+      : context.eventsByVisitor;
   let pages: readonly FilterEvaluationEntity[] = [];
   let events: readonly FilterEvaluationEntity[] = [];
   if (anchor.kind === "session") {
@@ -1383,6 +1416,20 @@ function resolveConditionSubjects(
 ): ConditionSubjectResolution {
   const current = currentEntity(frame);
   if (!current) return { mode: "direct", subjects: [] };
+  if (frame.topLevel && isScopeTimeTarget(target)) {
+    if (context.options.scope === "event")
+      return { mode: "direct", subjects: [] };
+    return {
+      mode: "existential",
+      subjects: activitiesForAnchor(
+        current,
+        context,
+        new Set(["page", "event"]),
+        false,
+        true,
+      ),
+    };
+  }
   const domain = conditionSubjectDomain(target);
   const legacyCandidate = frame.topLevel && isLegacyFilterTarget(target);
   if (legacyCandidate) {

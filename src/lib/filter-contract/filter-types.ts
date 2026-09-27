@@ -74,12 +74,54 @@ function targetPath(target: FilterTargetExpression): string | null {
   return null;
 }
 
+function registryFieldId(
+  target: FilterTargetExpression,
+  registry: FilterFieldRegistry,
+): string | undefined {
+  if (target.kind === "field")
+    return registry.has(target.field) ? target.field : undefined;
+  if (target.kind === "event-payload") return "event.payload";
+  if (target.kind === "projection" && target.member === "payload")
+    return "event.payload";
+  if (target.kind !== "member") return undefined;
+
+  const members: string[] = [];
+  let base: FilterTargetExpression = target;
+  while (base.kind === "member") {
+    members.unshift(base.member);
+    base = base.object;
+  }
+  const entityOf = (value: FilterTargetExpression): string | undefined => {
+    if (value.kind === "entity-root") return value.entity;
+    if (value.kind === "selector") return entityOf(value.collection);
+    if (
+      value.kind === "reducer" &&
+      ["first", "last", "nth"].includes(value.reducer)
+    )
+      return entityOf(value.input);
+    return undefined;
+  };
+  const entity = entityOf(base);
+  if (!entity) return undefined;
+  const suffix = members.join(".");
+  const direct = `${entity}.${suffix}`;
+  if (registry.has(direct)) return direct;
+  if (
+    ["geo", "client", "referrer", "utm", "user", "performance"].includes(
+      members[0] ?? "",
+    ) &&
+    registry.has(suffix)
+  )
+    return suffix;
+  return undefined;
+}
+
 function targetUnit(
   target: FilterTargetExpression,
   registry: FilterFieldRegistry,
 ): FilterFieldDefinition["unit"] {
-  const path = targetPath(target);
-  return path ? registry.get(path)?.unit : undefined;
+  const fieldId = registryFieldId(target, registry);
+  return fieldId ? registry.get(fieldId)?.unit : undefined;
 }
 
 function entityMemberType(
@@ -87,27 +129,19 @@ function entityMemberType(
   member: string,
   registry: FilterFieldRegistry,
 ): ValueType {
-  if (member === "time" && (entity === "event" || entity === "page"))
-    return scalar("datetime");
-  if (member === "payload") return collection("payload", scalar("json-scalar"));
   if (
-    ["geo", "client", "referrer", "utm", "user", "performance"].includes(member)
+    ["geo", "client", "referrer", "utm", "user", "performance"].includes(
+      member,
+    ) &&
+    [...registry.keys()].some((id) => id.startsWith(`${member}.`))
   )
     return { kind: "namespace", namespace: member };
   const fieldId = `${entity}.${member}`;
   const definition = registry.get(fieldId);
   if (definition)
     return scalar(fieldScalars[definition.valueKind] ?? "unknown");
-  if (entity === "event" && member === "payload")
-    return collection("payload", scalar("json-scalar"));
-  if (entity === "session" && member === "events") return collection("event");
-  if (entity === "session" && member === "pages") return collection("page");
-  if (entity === "visitor" && member === "events") return collection("event");
-  if (entity === "visitor" && member === "sessions")
-    return collection("session");
-  if (entity === "visitor" && member === "pages") return collection("page");
   fail(
-    "unknown_member",
+    "invalid_member",
     `${entity}.${member}`,
     `Unknown ${entity} member: ${member}.`,
   );
@@ -122,7 +156,7 @@ function namespaceMemberType(
   const definition = registry.get(id);
   if (definition)
     return scalar(fieldScalars[definition.valueKind] ?? "unknown");
-  fail("unknown_member", id, `Unknown context member: ${id}.`);
+  fail("invalid_member", id, `Unknown context member: ${id}.`);
 }
 
 function valueScalar(value: ValueType): ValueType {
@@ -181,23 +215,12 @@ function inferTarget(
         if (context === "current" && target.member === "time")
           return scalar("datetime");
         if (context === "sequence") {
-          if (target.member === "start" || target.member === "end")
-            return scalar("datetime");
           if (target.member === "span") return scalar("duration");
-          if (target.member === "steps")
-            return collection("activity", scalar("unknown"));
         }
         if (context === "period") {
-          if (target.member === "start" || target.member === "end")
-            return scalar("datetime");
           if (target.member === "items")
             return collection("period.items", scalar("unknown"));
         }
-        if (
-          context === "bucket" &&
-          (target.member === "start" || target.member === "end")
-        )
-          return scalar("datetime");
       }
       const object = inferTarget(target.object, registry, `${path}.object`);
       if (object.kind === "collection") {
@@ -206,24 +229,13 @@ function inferTarget(
             ? entityMemberType(object.entity, target.member, registry)
             : object.item.kind === "period" && target.member === "items"
               ? collection("period.items", object.item.item)
-              : object.item.kind === "period" &&
-                  (target.member === "start" || target.member === "end")
-                ? scalar("datetime")
-                : object.item.kind === "sequence" && target.member === "start"
-                  ? scalar("datetime")
-                  : object.item.kind === "sequence" && target.member === "end"
-                    ? scalar("datetime")
-                    : object.item.kind === "sequence" &&
-                        target.member === "span"
-                      ? scalar("duration")
-                      : object.item.kind === "sequence" &&
-                          target.member === "steps"
-                        ? collection("activity")
-                        : fail(
-                            "unknown_member",
-                            `${path}.member`,
-                            `Unknown ${object.entity} member: ${target.member}.`,
-                          );
+              : object.item.kind === "sequence" && target.member === "span"
+                ? scalar("duration")
+                : fail(
+                    "invalid_member",
+                    `${path}.member`,
+                    `Unknown ${object.entity} member: ${target.member}.`,
+                  );
         if (item.kind === "namespace")
           return { ...item, collectionEntity: object.entity };
         if (item.kind === "collection") return item;
@@ -246,20 +258,11 @@ function inferTarget(
           : member;
       }
       if (object.kind === "period") {
-        if (target.member === "start" || target.member === "end")
-          return scalar("datetime");
         if (target.member === "items")
           return collection("period.items", object.item);
       }
       if (object.kind === "sequence") {
-        if (target.member === "start" || target.member === "end")
-          return scalar("datetime");
         if (target.member === "span") return scalar("duration");
-        if (target.member === "steps") return collection("activity");
-      }
-      if (object.kind === "bucket") {
-        if (target.member === "start" || target.member === "end")
-          return scalar("datetime");
       }
       const objectPath = targetPath(target.object);
       const memberDefinition = objectPath
@@ -268,7 +271,7 @@ function inferTarget(
       if (memberDefinition)
         return scalar(fieldScalars[memberDefinition.valueKind] ?? "unknown");
       return fail(
-        "unknown_member",
+        "invalid_member",
         `${path}.member`,
         `Unknown member: ${target.member}.`,
       );
@@ -304,8 +307,10 @@ function inferTarget(
           `${path}.collection`,
           "Projection requires a collection.",
         );
-      const member = entityMemberType(source.entity, target.member, registry);
-      const projected = target.path ? scalar("json-scalar") : member;
+      const projected =
+        target.member === "payload" && source.entity === "event" && target.path
+          ? scalar("json-scalar")
+          : entityMemberType(source.entity, target.member, registry);
       return { kind: "collection", entity: source.entity, item: projected };
     }
     case "reducer": {
@@ -332,6 +337,12 @@ function inferTarget(
           );
         return scalar("number");
       }
+      if (item.kind === "bucket")
+        fail(
+          "opaque_bucket_value",
+          `${path}.input`,
+          "Time buckets can only be consumed by count or countDistinct.",
+        );
       if (target.reducer === "sum" || target.reducer === "avg") {
         if (itemScalar !== "number" && !isDynamicScalar(itemScalar))
           fail(
@@ -366,6 +377,15 @@ function inferTarget(
     case "arithmetic": {
       const left = inferTarget(target.left, registry, `${path}.left`);
       const right = inferTarget(target.right, registry, `${path}.right`);
+      if (
+        valueScalar(left).kind === "bucket" ||
+        valueScalar(right).kind === "bucket"
+      )
+        fail(
+          "opaque_bucket_value",
+          path,
+          "Time buckets can only be consumed by count or countDistinct.",
+        );
       const l = left.kind === "scalar" ? left.scalar : "unknown";
       const r = right.kind === "scalar" ? right.scalar : "unknown";
       if (target.operator === "sub") {
@@ -416,23 +436,25 @@ function inferTarget(
       return scalar("datetime");
     case "bucket": {
       const input = inferTarget(target.input, registry, `${path}.input`);
-      const inputType = valueScalar(input);
       if (
-        inputType.kind !== "scalar" ||
-        !["datetime", "date", "json-scalar", "unknown"].includes(
-          inputType.scalar,
-        )
+        input.kind !== "collection" ||
+        !["event", "page"].includes(input.entity) ||
+        input.item.kind !== "entity"
       )
         fail(
           "bucket_type_mismatch",
           path,
-          "bucket requires a date or time value.",
+          "bucket requires a Page or Event collection.",
         );
-      if (!isCalendarPeriodUnit(target.interval.unit))
+      if (
+        !Number.isSafeInteger(target.interval.amount) ||
+        target.interval.amount <= 0 ||
+        !isCalendarPeriodUnit(target.interval.unit)
+      )
         fail(
           "bucket_period_mismatch",
           `${path}.interval`,
-          "bucket requires a calendar period.",
+          "bucket requires a positive safe-integer calendar period.",
         );
       return collection("bucket", { kind: "bucket" });
     }
@@ -449,10 +471,11 @@ function inferTarget(
           "window requires a collection.",
         );
       const anchor = inferTarget(target.anchor, registry, `${path}.anchor`);
-      if (
-        anchor.kind !== "scalar" ||
-        !["datetime", "json-scalar", "unknown"].includes(anchor.scalar)
-      )
+      if (!(
+        target.anchor.kind === "time-anchor" ||
+        (anchor.kind === "entity" &&
+          (anchor.entity === "page" || anchor.entity === "event"))
+      ))
         fail(
           "window_anchor_type_mismatch",
           `${path}.anchor`,
@@ -483,11 +506,15 @@ function inferTarget(
           `${path}.collection`,
           "periods requires a collection.",
         );
-      if (!isCalendarPeriodUnit(target.interval.unit))
+      if (
+        !Number.isSafeInteger(target.interval.amount) ||
+        target.interval.amount <= 0 ||
+        !isCalendarPeriodUnit(target.interval.unit)
+      )
         fail(
           "period_interval_mismatch",
           `${path}.interval`,
-          "periods requires a calendar period.",
+          "periods requires a positive safe-integer calendar period.",
         );
       return {
         kind: "collection",
@@ -637,6 +664,12 @@ function validateCondition(
   if (isLegacyFilterTarget(condition.target) && !computedValue) return;
   const left = inferTarget(condition.target, registry, `${path}.target`);
   const leftType = valueScalar(left);
+  if (leftType.kind === "bucket")
+    fail(
+      "opaque_bucket_value",
+      `${path}.target`,
+      "Time buckets can only be consumed by an aggregate.",
+    );
   if (
     (condition.operator === "isEmpty" || condition.operator === "notEmpty") &&
     (leftType.kind !== "scalar" ||
@@ -742,6 +775,12 @@ function validateCondition(
         );
     }
     const rightScalar = valueScalar(right);
+    if (rightScalar.kind === "bucket")
+      fail(
+        "opaque_bucket_value",
+        `${path}.value[${index}]`,
+        "Time buckets can only be consumed by an aggregate.",
+      );
     const durationCompatibleWithMilliseconds =
       comparableLeft.kind === "scalar" &&
       comparableLeft.scalar === "number" &&

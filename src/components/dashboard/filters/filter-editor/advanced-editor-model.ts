@@ -130,11 +130,7 @@ export function createDefaultFilterTarget(
     case "bucket":
       return {
         kind,
-        input: {
-          kind: "member",
-          object: { kind: "entity-root", entity: "event" },
-          member: "time",
-        },
+        input: { kind: "entity-root", entity: "event" },
         interval: { kind: "duration", amount: 1, unit: "h" },
       };
     case "window":
@@ -207,12 +203,21 @@ export function filterValueKindForTarget(
   if (target.kind === "time-anchor" || target.kind === "bucket")
     return "datetime";
   if (target.kind === "member") {
-    const member = target.member;
+    const members: string[] = [];
+    let object: FilterTargetExpression = target;
+    while (object.kind === "member") {
+      members.unshift(object.member);
+      object = object.object;
+    }
     const root = rootEntity(target.object);
-    const field = root
-      ? analyticsFilterRegistry.get(`${root}.${member}`)
-      : undefined;
-    return field?.valueKind ?? (member === "time" ? "datetime" : "json-scalar");
+    const memberPath = members.join(".");
+    const field =
+      (root
+        ? analyticsFilterRegistry.get(`${root}.${memberPath}`)
+        : undefined) ?? analyticsFilterRegistry.get(memberPath);
+    return (
+      field?.valueKind ?? (memberPath === "time" ? "datetime" : "json-scalar")
+    );
   }
   return "json-scalar";
 }
@@ -280,6 +285,13 @@ export function createAdvancedFilterCondition(
       target,
       operator: "gte",
       value: "",
+    };
+  if (kind === "bucket")
+    return {
+      kind: "condition",
+      target: { kind: "reducer", reducer: "countDistinct", input: target },
+      operator: "gte",
+      value: 1,
     };
   if (kind === "duration")
     return {

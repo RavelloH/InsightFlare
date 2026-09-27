@@ -135,6 +135,12 @@ export function advancedFilterFieldValueForTarget(
       target.predicate.target.kind === "without")
   )
     return advancedFilterFieldValue(target.predicate.target.kind);
+  if (
+    target.kind === "reducer" &&
+    target.reducer === "countDistinct" &&
+    target.input.kind === "bucket"
+  )
+    return advancedFilterFieldValue("bucket");
   if (target.kind === "field") return target.field;
   if (target.kind === "event-payload") return "event.payload";
   if (target.kind === "entity-root")

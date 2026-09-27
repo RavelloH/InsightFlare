@@ -472,18 +472,31 @@ async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
       .map((item) => item.id)
       .sort();
 
-    const coverageStart = preparedTime.fullHistory
-      ? Math.min(0, request.candidateRange.startMs)
-      : Math.min(
-          request.candidateRange.startMs,
-          preparedTime.evaluationRange?.startMs ??
-            request.candidateRange.startMs,
-        );
+    const fixtureStart = Math.min(
+      ...request.activities.flatMap((activity) => [
+        activity.pageTimeMs,
+        ...(activity.event ? [activity.event.timeMs] : []),
+      ]),
+    );
+    const coverageStart = Math.min(
+      request.candidateRange.startMs,
+      preparedTime.evaluationRange?.startMs ?? request.candidateRange.startMs,
+      preparedTime.populationRange?.startMs ?? request.candidateRange.startMs,
+      preparedTime.populationFullHistory
+        ? fixtureStart
+        : Number.MAX_SAFE_INTEGER,
+      preparedTime.fullHistory ? fixtureStart : Number.MAX_SAFE_INTEGER,
+    );
     const coverageEnd = Math.max(
       request.candidateRange.endExclusiveMs,
       preparedTime.evaluationRange?.endExclusiveMs ??
         request.candidateRange.endExclusiveMs,
-      preparedTime.fullHistory ? request.capturedAtMs + 1 : 0,
+      preparedTime.populationRange?.endExclusiveMs ??
+        request.candidateRange.endExclusiveMs,
+      preparedTime.populationEndExclusiveMs ?? 0,
+      preparedTime.fullHistory || preparedTime.populationFullHistory
+        ? request.capturedAtMs + 1
+        : 0,
     );
     const mockResult = applyDemoFilters(
       sharedDemoDataset(request.activities, coverageStart, coverageEnd),
@@ -632,78 +645,48 @@ describe("D1 advanced filter execution", () => {
     }
   });
 
-  it("loads whole event payloads when a member selector needs the object", async () => {
-    const { env, database, queries } = sqliteEnv();
-    try {
-      const eventRoot = { kind: "entity-root", entity: "event" } as const;
-      const payloadProjection = {
-        kind: "selector",
-        collection: eventRoot,
-        predicate: {
+  it("rejects whole-payload object members when a JSON path is required", () => {
+    const eventRoot = { kind: "entity-root", entity: "event" } as const;
+    const payloadProjection = {
+      kind: "selector",
+      collection: eventRoot,
+      predicate: {
+        kind: "condition",
+        target: {
+          kind: "projection",
+          collection: eventRoot,
+          member: "payload",
+        },
+        operator: "exists",
+      },
+    } as const;
+    const document = normalizeFilterDocument(
+      {
+        version: 1,
+        root: {
           kind: "condition",
           target: {
-            kind: "projection",
-            collection: eventRoot,
-            member: "payload",
+            kind: "selector",
+            collection: { kind: "entity-root", entity: "session" },
+            predicate: {
+              kind: "condition",
+              target: payloadProjection,
+              operator: "exists",
+            },
           },
           operator: "exists",
         },
-      } as const;
-      const document = normalizeFilterDocument(
-        {
-          version: 1,
-          root: {
-            kind: "condition",
-            target: {
-              kind: "selector",
-              collection: { kind: "entity-root", entity: "session" },
-              predicate: {
-                kind: "condition",
-                target: payloadProjection,
-                operator: "exists",
-              },
-            },
-            operator: "exists",
-          },
-        },
-        analyticsFilterRegistry,
-      );
-      const time = createQueryTime(0, 20_000, "UTC", 25_000);
-      const plan = createScopedFilterPlan("overview", document, "session");
-      if (!plan) throw new Error("expected_scoped_filter_plan");
-      const filters = attachScopedFilterMetadata(document, {
-        requestedScope: "session",
-        resolvedScope: "session",
-        plan,
-        time,
-        siteIds: [SITE_ID],
-      });
-      const prepared = (await d1AdvancedFilterMiddleware(env)(
-        "overview",
-        {
-          context: siteQueryContext(SITE_ID, "private-dashboard"),
-          filters,
-          scopePreference: "session",
-          scopePlan: plan,
-          time,
-        },
-        async (input) => input,
-      )) as { scopePlan: typeof plan };
-
-      expect(prepared.scopePlan.advancedMatches?.entityIds).toEqual([
-        { siteId: SITE_ID, id: "session-a" },
-      ]);
-      expect(
-        queries.some((sql) =>
-          sql.includes("WITH RECURSIVE selected_payload_nodes"),
-        ),
-      ).toBe(false);
-      expect(
-        queries.some((sql) => sql.includes("custom_event_json_nodes")),
-      ).toBe(true);
-    } finally {
-      database.close();
-    }
+      },
+      analyticsFilterRegistry,
+    );
+    expect(() =>
+      prepareScopedQuery("overview", {
+        context: siteQueryContext(SITE_ID, "private-dashboard"),
+        filters: document,
+        scopePreference: "session",
+        time: createQueryTime(0, 20_000, "UTC", 25_000),
+      } as never),
+    ).toThrow(expect.objectContaining({ code: "invalid_member" }));
   });
 
   it("prepares both comparison sides and rejects advanced filters without execution metadata", async () => {
@@ -1175,9 +1158,9 @@ describe("D1 advanced filter execution", () => {
     const automaticHistory = await evaluateSharedFixture({
       activities,
       filterDsl:
-        'count(event { event.name eq "purchase" AND time gte @now-19s }) gte 3 AND min(event { event.name eq "purchase" AND time gte @now-19s }.payload("/amount")) gt 15 AND countDistinct(event { event.name eq "purchase" AND time gte @now-19s }.payload("/productId")) eq 2 AND sub(count(event { event.name eq "purchase" AND time gte @now-19s }), count(page)) eq 1 AND div(sub(count(event { event.name eq "purchase" AND time gte @now-19s }), count(page)), count(page)) gt 0',
+        'count(event { event.name eq "purchase" }) gte 3 AND min(event { event.name eq "purchase" }.payload("/amount")) gt 15 AND countDistinct(event { event.name eq "purchase" }.payload("/productId")) eq 2 AND sub(count(event { event.name eq "purchase" }), count(page)) lt 0 AND div(sub(count(event { event.name eq "purchase" }), count(page)), count(page)) lt 0',
       scope: "visitor",
-      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      candidateRange: { startMs: 0, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
       capturedAtMs: 20_000,
     });
@@ -1220,26 +1203,26 @@ describe("D1 advanced filter execution", () => {
     const wrappedHistory = await evaluateSharedFixture({
       activities,
       filterDsl:
-        'first(periods(event { event.name eq "purchase" AND time gte @now-19s }, 1d)).items exists',
+        'first(periods(event { event.name eq "purchase" }, 1d)).items exists',
       scope: "visitor",
-      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      candidateRange: { startMs: 0, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
       capturedAtMs: 20_000,
     });
     expect(wrappedHistory.d1).toEqual(["advanced-visitor"]);
     expect(wrappedHistory.mock).toEqual(wrappedHistory.d1);
 
-    const durationRange = await evaluateSharedFixture({
+    const entityAnchoredWindow = await evaluateSharedFixture({
       activities,
       filterDsl:
-        'sub(first(event { event.name eq "purchase" }).time, first(event { event.name eq "signup" }).time) between [0ms, 20ms]',
+        'count(window(event { event.name eq "purchase" }, first(event { event.name eq "signup" }), [0ms, 20ms])) gte 1',
       scope: "visitor",
-      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      candidateRange: { startMs: 0, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
       capturedAtMs: 20_000,
     });
-    expect(durationRange.d1).toEqual(["advanced-visitor"]);
-    expect(durationRange.mock).toEqual(durationRange.d1);
+    expect(entityAnchoredWindow.d1).toEqual(["advanced-visitor"]);
+    expect(entityAnchoredWindow.mock).toEqual(entityAnchoredWindow.d1);
 
     const visitorSequence =
       'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists';
@@ -1300,24 +1283,36 @@ describe("D1 advanced filter execution", () => {
     });
     expect(result.d1).toEqual(["visitor-with-old-activity"]);
     expect(result.mock).toEqual(result.d1);
+
+    const beforeCoverage = await evaluateSharedFixture({
+      activities,
+      filterDsl:
+        'time lt "1969-12-31T23:59:59.999Z" AND page.path eq "/candidate"',
+      scope: "visitor",
+      candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(beforeCoverage.d1).toEqual([]);
+    expect(beforeCoverage.mock).toEqual(beforeCoverage.d1);
   });
 
-  it("keeps DST buckets, natural periods, and empty reducers consistent across providers", async () => {
-    for (const [timestamp, hours] of [
-      [Date.parse("2026-03-08T20:00:00Z"), 23],
-      [Date.parse("2026-11-01T20:00:00Z"), 25],
+  it("keeps DST calendar bucket counts, periods, and empty reducers consistent across providers", async () => {
+    for (const timestamp of [
+      Date.parse("2026-03-08T20:00:00Z"),
+      Date.parse("2026-11-01T20:00:00Z"),
     ] as const) {
       const range = { startMs: timestamp - 1, endExclusiveMs: timestamp + 1 };
       const activity: SharedActivity = {
-        visitId: `dst-${hours}`,
-        sessionId: `session-dst-${hours}`,
-        visitorId: `visitor-dst-${hours}`,
+        visitId: `dst-${timestamp}`,
+        sessionId: `session-dst-${timestamp}`,
+        visitorId: `visitor-dst-${timestamp}`,
         pageTimeMs: timestamp,
         pathname: "/dst",
       };
       const expressions = [
-        `sub(first(bucket(page.time, 1d)).end, first(bucket(page.time, 1d)).start) eq ${hours}h`,
-        `sub(first(periods(page, 1d)).end, first(periods(page, 1d)).start) eq ${hours}h`,
+        "countDistinct(bucket(page, 1d)) eq 1",
+        "count(periods(page, 1d)) eq 1",
       ];
       for (const filterDsl of expressions) {
         const result = await evaluateSharedFixture({

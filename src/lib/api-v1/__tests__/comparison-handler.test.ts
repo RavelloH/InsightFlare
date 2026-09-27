@@ -296,6 +296,10 @@ describe("API v1 comparison v2 handler", () => {
   it("derives independent historical ranges from each comparison-side DSL", async () => {
     const observed: Array<{
       side: string;
+      populationRange?: {
+        readonly startMs: number;
+        readonly endExclusiveMs: number;
+      };
       evaluationRange?: {
         readonly startMs: number;
         readonly endExclusiveMs: number;
@@ -303,7 +307,11 @@ describe("API v1 comparison v2 handler", () => {
     }> = [];
     mocks.createComparisonProviders.mockImplementationOnce(() => ({
       overview: vi.fn(async ({ side, query }) => {
-        observed.push({ side, evaluationRange: query.time.evaluationRange });
+        observed.push({
+          side,
+          populationRange: query.time.populationRange,
+          evaluationRange: query.time.evaluationRange,
+        });
         return {
           value: rawMetrics(side === "current" ? 120 : 100),
           source: "raw" as const,
@@ -344,17 +352,19 @@ describe("API v1 comparison v2 handler", () => {
     expect(observed).toEqual([
       {
         side: "current",
-        evaluationRange: {
+        populationRange: {
           startMs: Date.parse("2026-07-31T00:00:00.000Z"),
           endExclusiveMs: Date.parse("2026-08-01T00:00:00.000Z"),
         },
+        evaluationRange: undefined,
       },
       {
         side: "reference",
-        evaluationRange: {
+        populationRange: {
           startMs: Date.parse("2026-07-28T00:00:00.000Z"),
           endExclusiveMs: Date.parse("2026-07-30T00:00:00.000Z"),
         },
+        evaluationRange: undefined,
       },
     ]);
   });

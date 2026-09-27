@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   analyticsFilterRegistry,
+  analyzeFilterDocument,
   type CanonicalJsonPath,
   FILTER_DSL_EXAMPLES,
   FILTER_DSL_MAX_LENGTH,
@@ -59,15 +60,16 @@ describe("filter DSL v1", () => {
 
   it("round-trips Core selectors, reducers, projections, and relative time", () => {
     const source =
-      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2 AND last(page).time gte @now-14d';
+      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2 AND time gte @now-14d';
     const document = parseFilterDsl(source, analyticsFilterRegistry);
+    analyzeFilterDocument(document, analyticsFilterRegistry);
     const formatted = formatFilterDsl(document);
 
     expect(document.version).toBe(1);
     expect(formatted).toContain(
       'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2',
     );
-    expect(formatted).toContain("last(page).time gte @now-14d");
+    expect(formatted).toContain("time gte @now-14d");
     expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
       document,
     );
@@ -75,10 +77,11 @@ describe("filter DSL v1", () => {
 
   it("round-trips duration and request-clock between ranges", () => {
     for (const source of [
-      "sub(first(event).time, first(page).time) between [0d, 30d]",
       "time between [@now-30d, @now]",
+      "countDistinct(bucket(page, 1d)) gte 10",
     ]) {
       const document = parseFilterDsl(source, analyticsFilterRegistry);
+      analyzeFilterDocument(document, analyticsFilterRegistry);
       const formatted = formatFilterDsl(document);
       expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
         document,
@@ -91,8 +94,9 @@ describe("filter DSL v1", () => {
 
   it("round-trips windows, periods, and ordered Relation steps", () => {
     const source =
-      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }).time, [0d, 7d]) notExists AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.span lte 30d } exists';
+      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.span lte 30d } exists AND periods(event, 1w) { count(period.items) gte 3 } exists';
     const document = parseFilterDsl(source, analyticsFilterRegistry);
+    analyzeFilterDocument(document, analyticsFilterRegistry);
     const formatted = formatFilterDsl(document);
 
     expect(formatted).toContain("[0d, 7d]");
@@ -502,9 +506,9 @@ describe("filter DSL v1", () => {
       ["window(page, @now, [0d 1d]) exists", "expected_argument_separator"],
       ["window(page, @now, [0d, 1d] exists", "invalid_window"],
       ['window(page, @now, ["0d", 1d]) exists', "expected_duration"],
-      ["bucket(page.time 1d) exists", "expected_argument_separator"],
-      ['bucket(page.time, "1d") exists', "expected_duration"],
-      ["bucket(page.time, 1d exists", "missing_closing_parenthesis"],
+      ["bucket(page 1d) exists", "expected_argument_separator"],
+      ['bucket(page, "1d") exists', "expected_duration"],
+      ["bucket(page, 1d exists", "missing_closing_parenthesis"],
       ["first(page, event) exists", "unexpected_argument"],
       ["add(page) exists", "missing_argument"],
       [

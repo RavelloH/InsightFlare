@@ -4,465 +4,350 @@ import {
   analyticsFilterRegistry,
   analyzeFilterDocument,
   analyzeFilterHistory,
+  analyzeFilterPopulation,
   parseFilterDsl,
 } from "@/lib/filter-contract";
 import type { AnalyzedFilterDocument } from "@/lib/filter-contract/filter-semantics";
 import type {
   FilterCondition,
-  FilterDocument,
+  FilterExpression,
 } from "@/lib/filter-contract/filters";
 
 const candidate = { startMs: 80_000, endExclusiveMs: 90_000 };
+const capturedAtMs = 100_000;
 
-function history(
-  source: string,
-  scope: "event" | "session" | "visitor" = "visitor",
-) {
+function analyzed(source: string) {
+  const document = parseFilterDsl(source, analyticsFilterRegistry);
+  return analyzeFilterDocument(document, analyticsFilterRegistry);
+}
+
+function history(source: string) {
   return analyzeFilterHistory(
-    analyzeFilterDocument(
-      parseFilterDsl(source, analyticsFilterRegistry),
-      analyticsFilterRegistry,
-    ),
+    analyzed(source),
     candidate,
-    100_000,
-    scope,
+    capturedAtMs,
+    "visitor",
   );
 }
 
-function historyForUnvalidatedTimeCondition(
+function population(source: string) {
+  return analyzeFilterPopulation(analyzed(source), candidate, capturedAtMs);
+}
+
+function rawTimeCondition(
   operator: string,
-  value: unknown,
+  value?: unknown,
   targetMember = "time",
-) {
-  const condition = {
+): FilterCondition {
+  return {
     kind: "condition",
     target: {
       kind: "member",
       object: { kind: "context-root", context: "current" },
       member: targetMember,
     },
-    operator,
-    value,
-  } as unknown as FilterCondition;
-  const document = {
-    version: 1,
-    root: {
-      kind: "condition",
-      target: {
-        kind: "reducer",
-        reducer: "count",
-        input: {
-          kind: "selector",
-          collection: { kind: "entity-root", entity: "event" },
-          predicate: condition,
-        },
-      },
-      operator: "gte",
-      value: 1,
-    },
-  } as unknown as FilterDocument;
-  const conditions = new WeakMap<object, { temporalPredicate: boolean }>([
-    [condition, { temporalPredicate: true }],
-  ]);
-  const analysis = {
-    document,
-    conditions,
-  } as unknown as AnalyzedFilterDocument;
-  return analyzeFilterHistory(analysis, candidate, 100_000, "visitor");
-}
-
-function historyForUnvalidatedWindow(startOffsetUnit: string) {
-  const condition = {
-    kind: "condition",
-    target: {
-      kind: "member",
-      object: { kind: "context-root", context: "current" },
-      member: "time",
-    },
-    operator: "gte",
-    value: 80_000,
-  } as unknown as FilterCondition;
-  const anchor = {
-    kind: "selector",
-    collection: { kind: "entity-root", entity: "event" },
-    predicate: condition,
+    operator: operator as FilterCondition["operator"],
+    ...(value !== undefined
+      ? { value: value as FilterCondition["value"] }
+      : {}),
   };
-  const document = {
-    version: 1,
-    root: {
-      kind: "condition",
-      target: {
-        kind: "reducer",
-        reducer: "count",
-        input: {
-          kind: "window",
-          collection: { kind: "entity-root", entity: "event" },
-          anchor,
-          startOffset: { kind: "duration", amount: -1, unit: startOffsetUnit },
-          endOffset: { kind: "duration", amount: 0, unit: "ms" },
-        },
-      },
-      operator: "gte",
-      value: 1,
-    },
-  } as unknown as FilterDocument;
-  const conditions = new WeakMap<object, { temporalPredicate: boolean }>([
-    [condition, { temporalPredicate: true }],
-  ]);
-  const analysis = {
-    document,
-    conditions,
-  } as unknown as AnalyzedFilterDocument;
-  return analyzeFilterHistory(analysis, candidate, 100_000, "visitor");
 }
 
-describe("Filter history requirements", () => {
-  it("derives a historical window from selector time predicates without removing them", () => {
-    const document = parseFilterDsl(
-      'count(event { event.name eq "purchase" AND time gte @now-30s }) gte 1',
-      analyticsFilterRegistry,
-    );
-    expect(
-      analyzeFilterHistory(
-        analyzeFilterDocument(document, analyticsFilterRegistry),
-        candidate,
-        100_000,
-        "visitor",
-      ),
-    ).toEqual({
-      kind: "bounded",
-      startMs: 70_000,
-      endExclusiveMs: 100_001,
-    });
-    expect(document.root).not.toBeNull();
-  });
+function populationForRawRoot(
+  root: FilterExpression,
+  now = capturedAtMs,
+  markAllConditionsAsTemporal = false,
+): ReturnType<typeof analyzeFilterPopulation> {
+  const conditions = new WeakMap<object, { temporalPredicate: boolean }>();
+  const visit = (expression: FilterExpression): void => {
+    if (expression.kind === "condition") {
+      const isTime =
+        expression.target.kind === "member" &&
+        expression.target.object.kind === "context-root" &&
+        expression.target.object.context === "current" &&
+        expression.target.member === "time";
+      if (isTime || markAllConditionsAsTemporal)
+        conditions.set(expression, { temporalPredicate: true });
+    } else if (expression.kind === "not") {
+      visit(expression.child);
+    } else {
+      expression.children.forEach(visit);
+    }
+  };
+  visit(root);
+  const document = { version: 1, root };
+  return analyzeFilterPopulation(
+    { document, conditions } as unknown as AnalyzedFilterDocument,
+    candidate,
+    now,
+  );
+}
 
-  it("uses the conservative union of multiple selector windows", () => {
-    expect(
-      history(
-        'count(event { event.name eq "purchase" AND time gte @now-90d }) gte 5 AND count(event { event.name eq "refund" AND time gte @now-30d }) gte 1',
-      ),
-    ).toMatchObject({ kind: "bounded" });
-  });
-
-  it("requires complete history for unbounded positional reducers and relations", () => {
-    expect(history("first(page).time exists")).toEqual({
-      kind: "full-history",
+describe("Filter history and population planning", () => {
+  it("keeps candidate-only reducers inside the report window", () => {
+    expect(history("count(event) gte 1")).toEqual({
+      kind: "candidate-only",
     });
-    expect(
-      history(
-        'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
-      ),
-    ).toEqual({ kind: "full-history" });
-  });
-
-  it("requires history for an upper-bounded selector even when the candidate is newer", () => {
-    expect(history("count(event { time lt @now-30s }) gte 1")).toEqual({
-      kind: "full-history",
+    expect(history("countDistinct(bucket(page, 1d)) gte 1")).toEqual({
+      kind: "candidate-only",
     });
-  });
-
-  it("extends window history backward by a negative start offset from a bounded anchor", () => {
-    expect(
-      history(
-        "count(window(event, first(event { time gte @now-30d }).time, [-10d, 0d])) gte 1",
-      ),
-    ).toEqual({
-      kind: "bounded",
-      startMs: 100_000 - 40 * 86_400_000,
-      endExclusiveMs: 100_001,
-    });
-  });
-
-  it("extends window history through its end offset from a bounded anchor", () => {
-    expect(
-      history(
-        "count(window(event, first(event { time between [@now-10s, @now-5s] }).time, [0s, 10s])) gte 1",
-      ),
-    ).toEqual({
-      kind: "bounded",
-      startMs: 90_000,
-      endExclusiveMs: 100_001,
-    });
-  });
-
-  it("bounds positional reducers and sequences when their source selectors are bounded", () => {
-    expect(
-      history(
-        'first(page { time gte @now-30d }).time exists AND sequence([event { event.name eq "signup" AND time gte @now-30d }, event { event.name eq "purchase" AND time gte @now-30d }]) exists',
-      ),
-    ).toMatchObject({ kind: "bounded", startMs: 100_000 - 30 * 86_400_000 });
-  });
-
-  it("propagates source history through buckets, periods, relations, and arithmetic", () => {
-    const bucketed = history(
-      "countDistinct(bucket(page { time gte @now-30s }.time, 1d)) gte 1",
-    );
-    expect(bucketed).toEqual({
-      kind: "bounded",
-      startMs: 70_000,
-      endExclusiveMs: 100_001,
-    });
-
-    expect(
-      history(
-        'count(periods(event { event.name eq "shared_insight" AND time gte @now-30s }, 1w) { count(period.items) gte 1 }) gte 1',
-      ),
-    ).toEqual({
-      kind: "bounded",
-      startMs: 70_000,
-      endExclusiveMs: 100_001,
-    });
-    expect(
-      history(
-        'without(sequence([event { event.name eq "signup" AND time gte @now-30s }, event { event.name eq "purchase" AND time gte @now-30s }]), event { event.name eq "cancel" AND time gte @now-30s }) exists',
-      ),
-    ).toEqual({
-      kind: "bounded",
-      startMs: 70_000,
-      endExclusiveMs: 100_001,
-    });
-    expect(history("sub(first(page).time, first(event).time) exists")).toEqual({
-      kind: "full-history",
-    });
-    expect(
-      history("count(window(event, first(event).time, [0s, 10s])) gte 1"),
-    ).toEqual({ kind: "full-history" });
-  });
-
-  it("uses the bounded sequence domain for without exclusions", () => {
-    const sequence =
-      'sequence([event { event.name eq "signup" AND time gte @now-30d }, event { event.name eq "purchase" AND time gte @now-30d }])';
-    expect(
-      history(`without(${sequence}, event { event.name eq "cancel" }) exists`),
-    ).toEqual({
-      kind: "bounded",
-      startMs: 100_000 - 30 * 86_400_000,
-      endExclusiveMs: 100_001,
-    });
-    expect(
-      history(
-        `without(${sequence}, event { event.name eq "cancel" AND time gte @now-90d }) exists`,
-      ),
-    ).toEqual({
-      kind: "bounded",
-      startMs: 100_000 - 90 * 86_400_000,
-      endExclusiveMs: 100_001,
-    });
-  });
-
-  it("keeps non-temporal and empty documents candidate-bound", () => {
-    expect(history("")).toEqual({ kind: "candidate-only" });
-    expect(history("count(event) gte 1")).toEqual({ kind: "candidate-only" });
-  });
-
-  it("resolves range anchors and single-point temporal selectors", () => {
-    expect(
-      history("count(event { time between [@range.start, @range.end] }) gte 1"),
-    ).toEqual({ kind: "bounded", startMs: 80_000, endExclusiveMs: 90_001 });
-    expect(history("count(event { time eq @now-10s }) gte 1")).toEqual({
-      kind: "bounded",
-      startMs: 90_000,
-      endExclusiveMs: 90_001,
-    });
-  });
-
-  it("handles datetime literals, ordered bounds, and selector existence", () => {
-    expect(
-      history('count(event { time eq "1970-01-01T00:00:01Z" }) gte 1'),
-    ).toEqual({ kind: "bounded", startMs: 1_000, endExclusiveMs: 1_001 });
-    expect(history("count(event { time gt @range.start }) gte 1")).toEqual({
-      kind: "bounded",
-      startMs: 80_001,
-      endExclusiveMs: 100_001,
-    });
-    expect(history("count(event { time lt @now-5s }) gte 1")).toEqual({
-      kind: "full-history",
-    });
-    expect(history("count(event { time lte @now-5s }) gte 1")).toEqual({
-      kind: "full-history",
-    });
-    expect(
-      history(
-        'count(event { time between ["1970-01-01T00:00:01Z", @now] }) gte 1',
-      ),
-    ).toEqual({ kind: "bounded", startMs: 1_000, endExclusiveMs: 100_001 });
-    expect(
-      history("count(event { time gte @now-30s AND time lte @now-5s }) gte 1"),
-    ).toEqual({ kind: "bounded", startMs: 70_000, endExclusiveMs: 95_001 });
-    expect(history("count(event { time exists }) gte 1")).toEqual({
-      kind: "full-history",
-    });
-    expect(history("count(event { time isNull }) gte 1")).toEqual({
-      kind: "full-history",
-    });
-  });
-
-  it("conservatively requires full history for upper-only and disjunctive time predicates", () => {
-    expect(history("count(event { time lte @range.end }) gte 1")).toEqual({
-      kind: "full-history",
-    });
-    expect(
-      history(
-        'count(event { time gte @now-30s OR event.name eq "signup" }) gte 1',
-      ),
-    ).toEqual({ kind: "full-history" });
-    expect(history("count(event { NOT time gte @now-30s }) gte 1")).toEqual({
-      kind: "full-history",
-    });
-  });
-
-  it("does not expand history for empty intersections and detects unrepresentable windows", () => {
-    expect(
-      history("count(event { time gte @now-10s AND time lt @now-20s }) gte 1"),
-    ).toEqual({ kind: "candidate-only" });
-    expect(
-      history(
-        "count(window(event, first(event { time between [@now-10s, @now-5s] }).time, [0s, 9007199254740991ms])) gte 1",
-      ),
-    ).toEqual({ kind: "full-history" });
-  });
-
-  it("preserves nested selector coverage and empty bounded domains", () => {
-    const ninetyDays = {
-      kind: "bounded",
-      startMs: 100_000 - 90 * 86_400_000,
-      endExclusiveMs: 100_001,
-    };
-    expect(
-      history("count(event { time gte @now-90d } { time gte @now-30d }) gte 1"),
-    ).toEqual(ninetyDays);
-    expect(
-      history("count(event { time gte @now-30d } { time lt @now-40d }) gte 1"),
-    ).toEqual({ kind: "candidate-only" });
-  });
-
-  it("uses full history when an exclusion has an upper-only time bound", () => {
-    const sequence =
-      "sequence([event { time gte @now-30d }, event { time gte @now-30d }])";
-    expect(
-      history(`without(${sequence}, event { time lt @now-10d }) exists`),
-    ).toEqual({ kind: "full-history" });
-  });
-
-  it("falls back to full history when computed ranges overflow safe timestamps", () => {
-    const document = parseFilterDsl(
-      "count(event { time gte @now-1ms }) gte 1",
-      analyticsFilterRegistry,
-    );
-    expect(
-      analyzeFilterHistory(
-        analyzeFilterDocument(document, analyticsFilterRegistry),
-        { startMs: 0, endExclusiveMs: Number.MAX_SAFE_INTEGER },
-        Number.MAX_SAFE_INTEGER,
-        "visitor",
-      ),
-    ).toEqual({ kind: "full-history" });
-
-    const windowDocument = parseFilterDsl(
-      "count(window(event, first(event { time gte @range.start }).time, [-1ms, 0ms])) gte 1",
-      analyticsFilterRegistry,
-    );
-    expect(
-      analyzeFilterHistory(
-        analyzeFilterDocument(windowDocument, analyticsFilterRegistry),
-        { startMs: -Number.MAX_SAFE_INTEGER, endExclusiveMs: 0 },
-        0,
-        "visitor",
-      ),
-    ).toEqual({ kind: "full-history" });
-  });
-
-  it("preserves bounded history through periods, buckets, projections, and windows", () => {
-    const bounded = {
-      kind: "bounded",
-      startMs: 100_000 - 30 * 86_400_000,
-      endExclusiveMs: 100_001,
-    };
-    expect(
-      history("first(periods(event { time gte @now-30d }, 1d)).start exists"),
-    ).toEqual(bounded);
-    expect(
-      history(
-        "first(bucket(page { time gte @now-30d }.time, 1d)).start exists",
-      ),
-    ).toEqual(bounded);
-    expect(
-      history('nth(event { time gte @now-30d }.payload("/amount"), 3) eq 3'),
-    ).toEqual(bounded);
-    expect(
-      history(
-        "first(window(event, first(event { time gte @now-30d }).time, [0d, 7d])) exists",
-      ),
-    ).toEqual(bounded);
-    expect(history("first(event) exists")).toEqual({
-      kind: "full-history",
-    });
-  });
-
-  it("plans top-level activity time according to the resolved Scope", () => {
-    const expected = {
-      kind: "bounded",
-      startMs: 100_000 - 30 * 86_400_000,
-      endExclusiveMs: 100_001,
-    };
-    expect(history("time gte @now-30d", "visitor")).toEqual(expected);
-    expect(history("time gte @now-30d", "session")).toEqual(expected);
-    expect(history("time gte @now-30d", "event")).toEqual({
+    expect(history("count(periods(event, 1w)) gte 1")).toEqual({
       kind: "candidate-only",
     });
   });
 
-  it("fails conservatively for endpoints the history planner cannot resolve", () => {
-    expect(historyForUnvalidatedTimeCondition("gte", 80_000)).toEqual({
+  it("merges a bounded history target with candidate-only conditions", () => {
+    expect(
+      history(
+        "count(window(event, @range.start, [0ms, 10ms])) gte 1 AND count(event) gte 1",
+      ),
+    ).toEqual({ kind: "bounded", startMs: 80_000, endExclusiveMs: 80_011 });
+  });
+
+  it("requires full history for positional reducers and entity anchors", () => {
+    expect(history("first(event) exists")).toEqual({
+      kind: "full-history",
+    });
+    expect(history("last(page) exists")).toEqual({
+      kind: "full-history",
+    });
+    expect(
+      history("count(window(event, first(event), [0d, 7d])) gte 1"),
+    ).toEqual({
+      kind: "full-history",
+    });
+  });
+
+  it("propagates positional history through payload projection and wrappers", () => {
+    expect(
+      history(
+        'nth(event { event.name eq "purchase" }.payload("/amount"), 3) eq 3',
+      ),
+    ).toEqual({
+      kind: "full-history",
+    });
+    expect(history("first(periods(event, 1w)) exists")).toEqual({
+      kind: "full-history",
+    });
+  });
+
+  it("does not turn scope-level time into evaluator history", () => {
+    expect(history("time gte @now-30d AND visitor.sessions gte 3")).toEqual({
+      kind: "candidate-only",
+    });
+  });
+
+  it("derives a bounded historical population range from time predicates", () => {
+    expect(population("time gte @now-30d")).toEqual({
       kind: "bounded",
-      startMs: 80_000,
+      startMs: 100_000 - 30 * 86_400_000,
       endExclusiveMs: 100_001,
     });
-    expect(
-      historyForUnvalidatedTimeCondition("between", [
-        80_000,
-        Number.MAX_SAFE_INTEGER,
-      ]),
-    ).toEqual({ kind: "full-history" });
-    expect(historyForUnvalidatedTimeCondition("gte", "not a date")).toEqual({
-      kind: "full-history",
+    expect(population("time between [@now-90d, @now-30d]")).toEqual({
+      kind: "bounded",
+      startMs: 100_000 - 90 * 86_400_000,
+      endExclusiveMs: 100_000 - 30 * 86_400_000 + 1,
     });
-    expect(historyForUnvalidatedTimeCondition("gte", null)).toEqual({
+    expect(population("time eq @range.start")).toEqual({
+      kind: "bounded",
+      startMs: 80_000,
+      endExclusiveMs: 80_001,
+    });
+  });
+
+  it("requires retained full history for upper-only population bounds", () => {
+    expect(population("time lt @now-30d")).toEqual({
       kind: "full-history",
+      endExclusiveMs: 100_000 - 30 * 86_400_000,
+    });
+    expect(population("time lte @range.end")).toEqual({
+      kind: "full-history",
+      endExclusiveMs: 90_001,
+    });
+  });
+
+  it("returns an empty population for disjoint top-level time bounds", () => {
+    expect(population("time gte @now-10d AND time lt @now-20d")).toEqual({
+      kind: "empty",
+    });
+    expect(population("time gte @now+1ms")).toEqual({ kind: "empty" });
+    expect(population("time between [@now+1ms, @now+2ms]")).toEqual({
+      kind: "empty",
+    });
+  });
+
+  it("keeps population selection absent when the filter has no time", () => {
+    expect(population('event.name eq "purchase"')).toEqual({ kind: "none" });
+    expect(history("")).toEqual({ kind: "candidate-only" });
+    expect(population("")).toEqual({ kind: "none" });
+  });
+
+  it("resolves date literals, elapsed anchors and every range endpoint", () => {
+    expect(population('time eq "1970-01-01T00:01:30Z"')).toEqual({
+      kind: "bounded",
+      startMs: 90_000,
+      endExclusiveMs: 90_001,
+    });
+    expect(population("time gt @range.start")).toEqual({
+      kind: "bounded",
+      startMs: 80_001,
+      endExclusiveMs: capturedAtMs + 1,
+    });
+    expect(population("time lte @range.start")).toEqual({
+      kind: "full-history",
+      endExclusiveMs: 80_001,
+    });
+    expect(population("time between [@range.start, @range.end]")).toEqual({
+      kind: "bounded",
+      startMs: 80_000,
+      endExclusiveMs: 90_001,
     });
     expect(
-      historyForUnvalidatedTimeCondition("gte", {
-        kind: "duration",
-        amount: 1,
-        unit: "d",
-      }),
-    ).toEqual({ kind: "full-history" });
-    expect(historyForUnvalidatedTimeCondition("gte", 80_000, "path")).toEqual({
-      kind: "full-history",
+      populationForRawRoot(
+        rawTimeCondition("gte", {
+          kind: "time-anchor",
+          anchor: "now",
+          offset: { kind: "duration", amount: -2, unit: "d" },
+        }),
+      ),
+    ).toEqual({
+      kind: "bounded",
+      startMs: capturedAtMs - 2 * 86_400_000,
+      endExclusiveMs: capturedAtMs + 1,
     });
-    expect(
-      historyForUnvalidatedTimeCondition("gte", {
-        kind: "time-anchor",
-        anchor: "now",
-        offset: { kind: "duration", amount: 1, unit: "mo" },
-      }),
-    ).toEqual({ kind: "full-history" });
-    expect(
-      historyForUnvalidatedTimeCondition("gte", {
-        kind: "time-anchor",
-        anchor: "now",
-        offset: {
-          kind: "duration",
-          amount: Number.MAX_SAFE_INTEGER,
-          unit: "ms",
+  });
+
+  it("conservatively handles malformed and unsupported temporal endpoints", () => {
+    for (const [operator, value] of [
+      ["gte", undefined],
+      ["gte", null],
+      ["gte", "not a date"],
+      ["gte", { kind: "duration", amount: 1, unit: "d" }],
+      [
+        "gte",
+        {
+          kind: "time-anchor",
+          anchor: "now",
+          offset: { kind: "duration", amount: 1, unit: "mo" },
         },
-      }),
+      ],
+      [
+        "gte",
+        {
+          kind: "time-anchor",
+          anchor: "now",
+          offset: {
+            kind: "duration",
+            amount: Number.MAX_SAFE_INTEGER,
+            unit: "ms",
+          },
+        },
+      ],
+      ["between", [80_000]],
+      ["between", [80_000, Number.MAX_SAFE_INTEGER]],
+      ["eq", Number.MAX_SAFE_INTEGER],
+      ["gt", Number.MAX_SAFE_INTEGER],
+      ["lte", Number.MAX_SAFE_INTEGER],
+      ["contains", 80_000],
+      ["neq", 80_000],
+    ] as const) {
+      expect(populationForRawRoot(rawTimeCondition(operator, value))).toEqual({
+        kind: "full-history",
+        endExclusiveMs: capturedAtMs + 1,
+      });
+    }
+    expect(
+      populationForRawRoot(
+        rawTimeCondition("gte", 80_000),
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).toEqual({
+      kind: "full-history",
+      endExclusiveMs: Number.MAX_SAFE_INTEGER + 1,
+    });
+    expect(
+      populationForRawRoot(
+        rawTimeCondition("gte", 80_000, "not-time"),
+        capturedAtMs,
+        true,
+      ),
+    ).toEqual({ kind: "full-history", endExclusiveMs: capturedAtMs + 1 });
+  });
+
+  it("treats time inside OR and NOT as requiring a conservative full scan", () => {
+    const bounded = rawTimeCondition("gte", 80_000);
+    const or = {
+      kind: "or",
+      children: [
+        bounded,
+        {
+          kind: "condition",
+          target: { kind: "field", field: "page.path" },
+          operator: "exists",
+        },
+      ],
+    } as FilterExpression;
+    const not = { kind: "not", child: bounded } as FilterExpression;
+    expect(populationForRawRoot(or)).toEqual({
+      kind: "full-history",
+      endExclusiveMs: capturedAtMs + 1,
+    });
+    expect(populationForRawRoot(not)).toEqual({
+      kind: "full-history",
+      endExclusiveMs: capturedAtMs + 1,
+    });
+  });
+
+  it("keeps bucket values opaque while carrying window and relation history", () => {
+    expect(history("countDistinct(bucket(page, 1d)) gte 1")).toEqual({
+      kind: "candidate-only",
+    });
+    expect(
+      history("first(window(event, @range.start, [-10d, 7d])) exists"),
+    ).toEqual({
+      kind: "bounded",
+      startMs: 80_000 - 10 * 86_400_000,
+      endExclusiveMs: capturedAtMs + 1,
+    });
+    expect(history("first(window(event, @now, [0d, -7d])) exists")).toEqual({
+      kind: "candidate-only",
+    });
+    expect(
+      history(
+        "count(window(event, @range.start, [0d, 9007199254740991ms])) gte 1",
+      ),
     ).toEqual({ kind: "full-history" });
-    expect(historyForUnvalidatedTimeCondition("contains", 80_000)).toEqual({
+    expect(
+      history("count(window(event, @now+9007199254740991ms, [0d, 1d])) gte 1"),
+    ).toEqual({ kind: "candidate-only" });
+    expect(
+      history(
+        "sequence([window(event, @range.start, [0d, 1d]), window(page, @range.end, [-1d, 0d])]) exists",
+      ),
+    ).toMatchObject({ kind: "bounded", startMs: 90_000 - 86_400_000 });
+    expect(history("adjacent(sequence([event, page])) exists")).toEqual({
       kind: "full-history",
     });
-    expect(historyForUnvalidatedWindow("mo")).toEqual({
+  });
+
+  it("limits without exclusions to a bounded sequence domain", () => {
+    const boundedSequence =
+      "sequence([window(event, @range.start, [0d, 1d]), window(event, @range.end, [-1d, 0d])])";
+    expect(history(`without(${boundedSequence}, event) exists`)).toMatchObject({
+      kind: "bounded",
+      startMs: 90_000 - 86_400_000,
+    });
+    expect(
+      history(
+        `without(${boundedSequence}, window(event, first(event), [0d, 7d])) exists`,
+      ),
+    ).toEqual({ kind: "full-history" });
+    expect(
+      history(
+        `without(${boundedSequence}, window(event, @now, [-30d, 0d])) exists`,
+      ),
+    ).toMatchObject({ kind: "bounded" });
+    expect(history(`without(sequence([event, page]), event) exists`)).toEqual({
       kind: "full-history",
     });
   });

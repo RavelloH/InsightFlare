@@ -131,10 +131,11 @@ function siteChunks(siteIds: readonly string[]): string[][] {
 function evaluationReadRanges(
   candidate: { readonly startMs: number; readonly endExclusiveMs: number },
   evaluation: { readonly startMs: number; readonly endExclusiveMs: number },
+  population?: { readonly startMs: number; readonly endExclusiveMs: number },
 ): Array<{ readonly startMs: number; readonly endExclusiveMs: number }> {
-  const ranges = [candidate, evaluation].sort(
-    (left, right) => left.startMs - right.startMs,
-  );
+  const ranges = [candidate, evaluation, ...(population ? [population] : [])]
+    .filter((range) => range.startMs < range.endExclusiveMs)
+    .sort((left, right) => left.startMs - right.startMs);
   const merged: Array<{ startMs: number; endExclusiveMs: number }> = [];
   for (const range of ranges) {
     const previous = merged.at(-1);
@@ -502,8 +503,6 @@ function fieldsFor(row: RawEvaluationRow): Record<string, unknown> {
           : value;
     }
   }
-  if (typeof row.started_at === "number" && row.kind === "page")
-    fields["page.time"] = row.started_at;
   if (row.kind === "event") fields["event.name"] = row.event_name;
   return fields;
 }
@@ -617,9 +616,30 @@ async function evaluateForSites(input: {
         endExclusiveMs: input.time.capturedAtMs + 1,
       }
     : configuredRange;
+  const populationEndExclusiveMs =
+    input.time.populationEndExclusiveMs ?? input.time.capturedAtMs + 1;
+  const populationFullHistory = input.time.populationFullHistory === true;
+  const configuredPopulationRange =
+    input.time.populationRange ?? input.time.range;
+  const populationRange = populationFullHistory
+    ? {
+        startMs: Math.min(
+          ...input.siteIds.map(
+            (siteId) => coverage.get(siteId) ?? Number.MAX_SAFE_INTEGER,
+          ),
+        ),
+        endExclusiveMs: populationEndExclusiveMs,
+      }
+    : configuredPopulationRange;
   if (evaluationRange.endExclusiveMs > input.time.capturedAtMs + 1) {
     throw invalidInput(
       "evaluationRange",
+      "filter_evaluation_range_unavailable",
+    );
+  }
+  if (populationRange.endExclusiveMs > input.time.capturedAtMs + 1) {
+    throw invalidInput(
+      "populationRange",
       "filter_evaluation_range_unavailable",
     );
   }
@@ -634,9 +654,23 @@ async function evaluateForSites(input: {
         "filter_evaluation_range_unavailable",
       );
     }
+    if (
+      createdAt === undefined ||
+      (!input.time.populationEmpty &&
+        !populationFullHistory &&
+        populationRange.startMs < createdAt)
+    )
+      throw invalidInput(
+        "populationRange",
+        "filter_evaluation_range_unavailable",
+      );
   }
   const paths = payloadPaths(input.filters.root);
-  const readRanges = evaluationReadRanges(input.time.range, evaluationRange);
+  const readRanges = evaluationReadRanges(
+    input.time.range,
+    evaluationRange,
+    input.time.populationEmpty ? undefined : populationRange,
+  );
   const [rows, payloads] = await Promise.all([
     loadActivities(
       input.env,
@@ -674,6 +708,12 @@ async function evaluateForSites(input: {
           endExclusiveMs: input.time.capturedAtMs + 1,
         }
       : evaluationRange;
+    const sitePopulationRange = populationFullHistory
+      ? { startMs: createdAt, endExclusiveMs: populationEndExclusiveMs }
+      : populationRange;
+    const sitePopulationEmpty =
+      input.time.populationEmpty === true ||
+      sitePopulationRange.startMs >= sitePopulationRange.endExclusiveMs;
     const dataset = entitiesForRows(
       siteRows,
       payloads,
@@ -699,6 +739,9 @@ async function evaluateForSites(input: {
           candidateRange: input.time.range,
           evaluationRange: siteEvaluationRange,
           fullHistory,
+          populationRange: sitePopulationRange,
+          populationFullHistory: false,
+          populationEmpty: sitePopulationEmpty,
           reportingTimeZone: input.time.reportingTimeZone,
           capturedAtMs: input.time.capturedAtMs,
           maxActivities: MAX_ADVANCED_ACTIVITIES,

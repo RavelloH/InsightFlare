@@ -30,7 +30,7 @@ export const FILTER_DSL_OPERATOR_IDS = FILTER_OPERATOR_IDS;
 export const FILTER_DSL_SYNTAX = {
   condition: "<target-expression> <operator> <condition-value>",
   targetExpression:
-    "A registered field, entity root, selector, projection, reducer, arithmetic or temporal expression.",
+    "A registered field, entity root, selector, projection, reducer, arithmetic or temporal expression. Members are limited to registered field paths, event.payload(path), top-level Scope time for Session/Visitor, sequence.span and period.items.",
   boolean:
     "Combine expressions with <expression> AND <expression> or <expression> OR <expression>; prefix an expression with NOT to negate it.",
   grouping:
@@ -42,7 +42,7 @@ export const FILTER_DSL_SYNTAX = {
   reducer:
     "Use count, first, last, nth, sum, avg, min, max, or countDistinct with a collection.",
   temporal:
-    "Use bucket(collection.time, <calendar-period>), periods(collection, <calendar-period>), or window(collection, anchor, [<start-offset>, <end-offset>]).",
+    "Use bucket(Page-or-Event-collection, <positive-calendar-period>), periods(collection, <positive-calendar-period>), or window(collection, event-or-page-anchor-or-@now-or-@range-anchor, [<start-offset>, <end-offset>]). Calendar periods must be positive safe integers such as 1h, 1d, 2w, 3mo or 1y.",
   relation:
     "Use sequence([...]), adjacent(sequence), and without(sequence, collection) with visitor or session query Scope, or inside an explicit session/visitor selector.",
   payloadTarget:

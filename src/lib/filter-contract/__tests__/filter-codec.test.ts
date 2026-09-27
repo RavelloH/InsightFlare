@@ -106,7 +106,7 @@ describe("filter URL codec", () => {
   it("round-trips nested and computed-collection selectors independent of parameter order", () => {
     const sources = [
       'session { event { event.name eq "purchase" } exists } exists',
-      'count(periods(event { event.name eq "shared_insight" AND time gte @now-12w }, 1w) { count(period.items) gte 3 }) gte 3',
+      'time gte @now-12w AND count(periods(event { event.name eq "shared_insight" }, 1w) { count(period.items) gte 3 }) gte 3',
     ];
     for (const source of sources) {
       const document = normalizeFilterDocument(
@@ -133,11 +133,11 @@ describe("filter URL codec", () => {
   it("round-trips all Core and Relation target forms through selector references", () => {
     const sources = [
       'nth(event { event.name eq "purchase" }, 3).payload("/amount") gt 0',
-      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }).time, [0d, 7d]) notExists',
+      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists',
       'adjacent(sequence([page { page.path eq "/pricing" }, event { event.name eq "purchase" }])) exists',
       'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) exists',
       'NOT (count(event { event.name eq "purchase" }) gte 2 OR page.path eq "/private")',
-      'sub(first(event { event.name eq "purchase" }).time, first(event { event.name eq "signup" }).time) between [0d, 30d] AND time between [@now-30d, @now]',
+      "time between [@now-30d, @now] AND countDistinct(bucket(page, 1d)) gte 20",
     ];
 
     for (const source of sources) {

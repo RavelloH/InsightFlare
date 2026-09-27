@@ -121,6 +121,43 @@ describe("filter evaluator", () => {
     );
   });
 
+  it("resolves nested Page and Event collections for unlinked activities", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [page("orphan-page", 10, "", "", "/orphan")],
+      events: [event("orphan-event", "orphan", 20, "", "")],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const options = {
+      scope: "event" as const,
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    };
+
+    expect(
+      evaluateFilterDocument(
+        parseFilterDsl(
+          'page { page.path eq "/orphan" } exists',
+          analyticsFilterRegistry,
+        ),
+        dataset,
+        options,
+      ).matchingVisitIds,
+    ).toEqual(new Set(["orphan-page"]));
+    const eventResult = evaluateFilterDocument(
+      parseFilterDsl(
+        'event { event.name eq "orphan" } exists',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      options,
+    );
+    expect(eventResult.matchingVisitIds).toEqual(
+      new Set(["visit-orphan-event"]),
+    );
+    expect(eventResult.matchingEventIds).toEqual(new Set(["orphan-event"]));
+  });
+
   it("evaluates all conditions in a Selector against the same event", () => {
     const result = evaluate(
       'count(event { event.name eq "purchase" AND event.payload("/amount") gt 20 }) eq 1',
@@ -303,7 +340,6 @@ describe("filter evaluator", () => {
           ),
           fields: {
             "page.path": "/pricing",
-            "page.time": 10,
             "geo.country": "US",
           },
         },
@@ -361,13 +397,13 @@ describe("filter evaluator", () => {
     ).toEqual(new Set(["domain-visitor"]));
     expect(
       run(
-        'session { visitor.views eq 1 AND page { page.time eq "1970-01-01T00:00:00.010Z" AND geo.country eq "US" } exists AND event { event.time eq "1970-01-01T00:00:00.020Z" AND geo.country eq "US" } exists } exists',
+        'session { visitor.views eq 1 AND page { page.path eq "/pricing" AND geo.country eq "US" } exists AND event { event.name eq "purchase" AND geo.country eq "US" } exists } exists',
         "session",
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["domain-session"]));
     expect(
       run(
-        'visitor { time eq "1970-01-01T00:00:00.010Z" AND time eq "1970-01-01T00:00:00.020Z" } exists',
+        "visitor { visitor.sessions eq 1 } exists AND time between [@range.start, @range.end]",
         "visitor",
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["domain-visitor"]));
@@ -497,6 +533,21 @@ describe("filter evaluator", () => {
         'nth(event { event.name eq "value" }.payload("/value"), 2) eq 200',
       ),
     ).toEqual(new Set(["u-a"]));
+    expect(
+      evaluatePayload(
+        'first(event { event.name eq "value" }.payload("/value")) eq 100',
+      ),
+    ).toEqual(new Set(["u-a"]));
+    expect(
+      evaluatePayload(
+        'first(event { event.name eq "value" }.payload("/value")) in [100, 200]',
+      ),
+    ).toEqual(new Set(["u-a"]));
+    expect(
+      evaluatePayload(
+        'event { event.name eq "value" }.payload("/value") exists',
+      ),
+    ).toEqual(new Set(["u-a"]));
     expect(evaluatePayload('min(event.payload("/value")) eq 100')).toEqual(
       new Set(["u-a"]),
     );
@@ -544,8 +595,8 @@ describe("filter evaluator", () => {
 
     for (const expression of [
       'first(page).referrer.domain eq "google.com"',
-      'last(page).time eq "1970-01-01T00:00:00.020Z"',
-      'page.time eq "1970-01-01T00:00:00.010Z"',
+      'last(page).referrer.domain eq "bing.com"',
+      'first(page).path eq "/first"',
     ]) {
       expect(
         evaluateFilterDocument(
@@ -663,7 +714,7 @@ describe("filter evaluator", () => {
     ).toEqual(new Set(["u-a"]));
   });
 
-  it("exposes sequence steps and preserves sequence identity in reducers", () => {
+  it("exposes only sequence span and preserves sequence identity in reducers", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [page("candidate", 10, "s-a", "u-a")],
       events: [
@@ -676,7 +727,7 @@ describe("filter evaluator", () => {
       'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])';
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        `count(first(${sequence}).steps) eq 2`,
+        `first(${sequence}).span eq 10ms`,
         analyticsFilterRegistry,
       ),
       dataset,
@@ -690,22 +741,18 @@ describe("filter evaluator", () => {
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
 
-  it("buckets ISO datetime payloads without coercing their values", () => {
+  it("buckets activity timestamps without exposing bucket members", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [],
       events: [
-        event("at-a", "timestamp", 10, "s-a", "u-a", {
-          at: "1970-01-01T00:00:00.010Z",
-        }),
-        event("at-b", "timestamp", 20, "s-a", "u-a", {
-          at: "1970-01-01T12:00:00.020Z",
-        }),
+        event("at-a", "timestamp", 10, "s-a", "u-a"),
+        event("at-b", "timestamp", 86_400_020, "s-a", "u-a"),
       ],
       coverageRange: { startMs: 0, endExclusiveMs: 100_000_000 },
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'count(bucket(event.payload("/at"), 1d)) eq 2',
+        "countDistinct(bucket(event, 1d)) eq 2",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -719,7 +766,7 @@ describe("filter evaluator", () => {
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
 
-  it("resolves bare Page and Event time members in their native domains", () => {
+  it("uses top-level time to select a historical population", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [page("page-time", 10, "s-a", "u-a")],
       events: [event("event-time", "purchase", 20, "s-a", "u-a")],
@@ -727,13 +774,14 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'page.time eq "1970-01-01T00:00:00.010Z" AND event.time eq "1970-01-01T00:00:00.020Z"',
+        'time gte "1970-01-01T00:00:00.015Z"',
         analyticsFilterRegistry,
       ),
       dataset,
       {
         scope: "visitor",
         candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        populationRange: { startMs: 15, endExclusiveMs: 100 },
         reportingTimeZone: "UTC",
         capturedAtMs: 80,
       },
@@ -741,31 +789,14 @@ describe("filter evaluator", () => {
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
 
-  it("evaluates duration and request-clock range endpoints as typed values", () => {
-    expect(
-      evaluate(
-        'sub(first(event { event.name eq "purchase" }).time, first(event { event.name eq "signup" }).time) eq 17ms',
-        "visitor",
-      ).matchingScopeEntityIds,
-    ).toEqual(new Set(["u-a"]));
-    expect(
-      evaluate(
-        "sub(last(event).time, first(page).time) between [0d, 30d]",
-        "visitor",
-      ).matchingScopeEntityIds,
-    ).toEqual(new Set(["u-a", "u-b"]));
-    expect(
-      evaluate("time between [@now-30d, @now]", "event").matchingEventIds,
-    ).toEqual(
-      new Set([
-        "a-cancel-before",
-        "a-signup",
-        "a-purchase-low",
-        "a-purchase-high",
-        "b-signup",
-        "b-purchase",
-      ]),
+  it("rejects Event-scope time and keeps fixed request-clock anchors available", () => {
+    expect(() => evaluate("time between [@now-30d, @now]", "event")).toThrow(
+      expect.objectContaining({ code: "invalid_time_scope" }),
     );
+    expect(
+      evaluate('@now eq "1970-01-01T00:00:00.080Z"', "visitor")
+        .matchingScopeEntityIds,
+    ).toEqual(new Set(["u-a", "u-b"]));
   });
 
   it("keeps legacy string operator behavior equal when Advanced forces the evaluator", () => {
@@ -959,6 +990,64 @@ describe("filter evaluator", () => {
     expect(result.matchingScopeEntityIds).toEqual(new Set(["visitor-a"]));
   });
 
+  it("lifts bare descendant fields independently while selectors keep same-entity anchors", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        {
+          ...page("home", 10, "session-a", "visitor-a", "/home"),
+          fields: { "page.path": "/home", "page.title": "Checkout" },
+        },
+        {
+          ...page("pricing", 20, "session-a", "visitor-a", "/pricing"),
+          fields: { "page.path": "/pricing", "page.title": "Plans" },
+        },
+        page("other", 30, "session-b", "visitor-b", "/other"),
+      ],
+      events: [
+        event("signup", "signup", 10, "session-a", "visitor-a"),
+        event("purchase", "purchase", 30, "session-a", "visitor-a", {
+          plan: "pro",
+        }),
+        event("cancel", "cancellation", 30, "session-b", "visitor-b"),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const options = {
+      scope: "session" as const,
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    };
+    const evaluateForSessions = (dsl: string) =>
+      evaluateFilterDocument(
+        parseFilterDsl(dsl, analyticsFilterRegistry),
+        dataset,
+        options,
+      ).matchingScopeEntityIds;
+
+    expect(
+      evaluateForSessions(
+        'session { page.path eq "/pricing" AND event.name eq "purchase" AND event.payload("/plan") eq "pro" } exists',
+      ),
+    ).toEqual(new Set(["session-a"]));
+    expect(
+      evaluateForSessions(
+        'session { page.path eq "/pricing" AND page.title eq "Checkout" } exists',
+      ),
+    ).toEqual(new Set(["session-a"]));
+    expect(
+      evaluateForSessions(
+        'session { page { page.path eq "/pricing" AND page.title eq "Checkout" } exists } exists',
+      ),
+    ).toEqual(new Set());
+    expect(
+      evaluateForSessions('session { NOT page.path eq "/pricing" } exists'),
+    ).toEqual(new Set(["session-b"]));
+    expect(
+      evaluateForSessions('session { page.path neq "/pricing" } exists'),
+    ).toEqual(new Set(["session-a", "session-b"]));
+  });
+
   it("rejects root Relations when evaluated in Event Scope", () => {
     const document = parseFilterDsl(
       'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
@@ -977,6 +1066,17 @@ describe("filter evaluator", () => {
         code: "relation_requires_session_or_visitor_scope",
       }),
     );
+  });
+
+  it("rejects implicit Page/Event sibling reads inside activity selectors", () => {
+    for (const source of [
+      'event { event.name eq "purchase" AND page.path eq "/pricing" } exists',
+      'page { page.path eq "/pricing" AND event.name eq "purchase" } exists',
+    ]) {
+      expect(() => evaluate(source, "visitor")).toThrow(
+        expect.objectContaining({ code: "invalid_condition_entity_domain" }),
+      );
+    }
   });
 
   it("evaluates the complete visitor Core and Relation DSL sample", () => {
@@ -1081,7 +1181,8 @@ describe("filter evaluator", () => {
       coverageRange: { startMs: 0, endExclusiveMs: 101 * day },
     };
     const dsl = `
-      geo.country in ["US", "GB", "CA"]
+      time gte @now-90d
+      AND geo.country in ["US", "GB", "CA"]
       AND client.deviceType neq "bot"
       AND event {
         event.name eq "purchase"
@@ -1093,43 +1194,34 @@ describe("filter evaluator", () => {
         event.name eq "purchase"
         AND event.payload("/currency") eq "USD"
         AND event.payload("/amount") gt 0
-        AND time gte @now-90d
       }) gte 5
       AND countDistinct(event {
         event.name eq "purchase"
-        AND time gte @now-90d
       }.payload("/productId")) gte 3
-      AND countDistinct(bucket(page { time gte @now-90d }.time, 1d)) gte 20
+      AND countDistinct(bucket(page, 1d)) gte 20
       AND sub(
-        sum(event { event.name eq "purchase" AND time gte @now-90d }.payload("/amount")),
-        sum(event { event.name eq "refund" AND time gte @now-90d }.payload("/amount"))
+        sum(event { event.name eq "purchase" }.payload("/amount")),
+        sum(event { event.name eq "refund" }.payload("/amount"))
       ) gt 1000
       AND div(
-        sum(event { event.name eq "refund" AND time gte @now-90d }.payload("/amount")),
-        sum(event { event.name eq "purchase" AND time gte @now-90d }.payload("/amount"))
+        sum(event { event.name eq "refund" }.payload("/amount")),
+        sum(event { event.name eq "purchase" }.payload("/amount"))
       ) lt 0.3
       AND avg(event {
         event.name eq "api_request"
         AND event.payload("/latency") exists
-        AND time gte @now-30d
       }.payload("/latency")) lt 500
       AND first(page).referrer.domain eq "google.com"
-      AND last(page).time gte @now-14d
-      AND sub(
-        first(event { event.name eq "first_team_event" }).time,
-        first(event { event.name eq "signup" }).time
-      ) between [0d, 30d]
-      AND sub(
-        nth(event { event.name eq "insight_saved" }, 3).time,
-        first(event { event.name eq "signup" }).time
-      ) between [0d, 30d]
+      AND last(page).path eq "/last"
+      AND first(event { event.name eq "first_team_event" }).name eq "first_team_event"
+      AND nth(event { event.name eq "insight_saved" }, 3).name eq "insight_saved"
       AND count(session) gte 4
       AND div(
         count(session { event { event.name eq "purchase" } exists }),
         count(session)
       ) gt 0.5
       AND count(periods(
-        event { event.name eq "shared_insight" AND time gte @now-12w },
+        event { event.name eq "shared_insight" },
         1w
       ) { count(period.items) gte 3 }) gte 3
       AND sequence([
@@ -1342,6 +1434,57 @@ describe("filter evaluator", () => {
     expect(bounces.matchingScopeEntityIds).toEqual(new Set(["s-b"]));
   });
 
+  it("uses provider-supplied Session and Visitor fact records when available", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [page("page", 20, "session-a", "visitor-a")],
+      events: [event("purchase", "purchase", 30, "session-a", "visitor-a")],
+      sessions: [
+        {
+          kind: "session",
+          id: "session-a",
+          visitorId: "visitor-a",
+          time: 20,
+          fields: { "session.durationMs": 9_000 },
+        },
+      ],
+      visitors: [
+        {
+          kind: "visitor",
+          id: "visitor-a",
+          time: 20,
+          fields: { "visitor.sessions": 4 },
+        },
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const common = {
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    } as const;
+
+    expect(
+      evaluateFilterDocument(
+        parseFilterDsl(
+          "visitor { visitor.sessions eq 4 AND session { session.durationMs eq 9000 } exists } exists",
+          analyticsFilterRegistry,
+        ),
+        dataset,
+        { ...common, scope: "visitor" },
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["visitor-a"]));
+    expect(
+      evaluateFilterDocument(
+        parseFilterDsl(
+          "session { visitor.sessions eq 4 } exists",
+          analyticsFilterRegistry,
+        ),
+        dataset,
+        { ...common, scope: "session" },
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["session-a"]));
+  });
+
   it("evaluates the complete operator matrix over typed payload and event values", () => {
     const dataset: FilterEvaluationDataset = {
       pages: [],
@@ -1506,7 +1649,7 @@ describe("filter evaluator", () => {
     } as const;
     const sequence = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.start gte "1970-01-01T00:00:00.010Z" AND sequence.end lte "1970-01-01T00:00:00.040Z" AND sequence.span gte 20ms } exists } exists',
+        'visitor { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { sequence.span gte 20ms } exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1514,7 +1657,7 @@ describe("filter evaluator", () => {
     );
     const bucket = evaluateFilterDocument(
       parseFilterDsl(
-        'countDistinct(bucket(page.time, 1d) { bucket.start eq "1970-01-01T00:00:00.000Z" AND bucket.end eq "1970-01-02T00:00:00.000Z" }) eq 1',
+        "countDistinct(bucket(page, 1d)) eq 1",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1618,6 +1761,32 @@ describe("filter evaluator", () => {
     const result = evaluateFilterDocument(
       parseFilterDsl(
         'first(page).path eq "/early" AND last(page).path eq "/late" AND nth(event, 3).name eq "third"',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["visitor-a"]));
+  });
+
+  it("uses entity IDs to break ties between same-kind activities at one timestamp", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        page("z-page", 10, "session-a", "visitor-a", "/z"),
+        page("a-page", 10, "session-a", "visitor-a", "/a"),
+      ],
+      events: [],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        'first(page).path eq "/a" AND last(page).path eq "/z"',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1797,40 +1966,45 @@ describe("filter evaluator", () => {
   });
 
   it("uses reporting-timezone DST boundaries for calendar day buckets", () => {
-    const assertBucketLength = (timestamp: number, expected: string) => {
+    const assertBucketCount = (
+      timestamps: readonly number[],
+      expected: number,
+    ) => {
+      const start = Math.min(...timestamps) - 1;
+      const end = Math.max(...timestamps) + 1;
       const dataset: FilterEvaluationDataset = {
-        pages: [page("candidate", timestamp, "session-a", "visitor-a")],
+        pages: timestamps.map((timestamp, index) =>
+          page(`candidate-${index}`, timestamp, "session-a", "visitor-a"),
+        ),
         events: [],
-        coverageRange: {
-          startMs: timestamp - 1,
-          endExclusiveMs: timestamp + 1,
-        },
+        coverageRange: { startMs: start, endExclusiveMs: end },
       };
-      const expressions = [
-        `sub(first(bucket(page.time, 1d)).end, first(bucket(page.time, 1d)).start) eq ${expected}`,
-        `sub(first(periods(page, 1d)).end, first(periods(page, 1d)).start) eq ${expected}`,
-      ];
-      for (const expression of expressions) {
-        const result = evaluateFilterDocument(
-          parseFilterDsl(expression, analyticsFilterRegistry),
-          dataset,
-          {
-            scope: "visitor",
-            candidateRange: {
-              startMs: timestamp - 1,
-              endExclusiveMs: timestamp + 1,
-            },
-            reportingTimeZone: "America/Los_Angeles",
-            capturedAtMs: timestamp,
-          },
-        );
-        expect(result.matchingScopeEntityIds).toEqual(new Set(["visitor-a"]));
-      }
+      const result = evaluateFilterDocument(
+        parseFilterDsl(
+          `countDistinct(bucket(page, 1d)) eq ${expected}`,
+          analyticsFilterRegistry,
+        ),
+        dataset,
+        {
+          scope: "visitor",
+          candidateRange: { startMs: start, endExclusiveMs: end },
+          reportingTimeZone: "America/Los_Angeles",
+          capturedAtMs: end - 1,
+        },
+      );
+      expect(result.matchingScopeEntityIds).toEqual(new Set(["visitor-a"]));
     };
 
-    // March 8, 2026 is a 23-hour day in Los Angeles; November 1 is 25 hours.
-    assertBucketLength(Date.parse("2026-03-08T20:00:00Z"), "23h");
-    assertBucketLength(Date.parse("2026-11-01T20:00:00Z"), "25h");
+    // Activities either side of local midnight occupy two buckets, including
+    // the shortened spring-forward and extended fall-back calendar days.
+    assertBucketCount(
+      [Date.parse("2026-03-08T07:59:00Z"), Date.parse("2026-03-08T08:01:00Z")],
+      2,
+    );
+    assertBucketCount(
+      [Date.parse("2026-11-01T05:59:00Z"), Date.parse("2026-11-01T06:01:00Z")],
+      1,
+    );
   });
 
   it("groups hourly, monthly, and yearly periods and exposes period items", () => {
@@ -1852,17 +2026,14 @@ describe("filter evaluator", () => {
       capturedAtMs: february + 1,
     };
     const assertions = [
-      ["countDistinct(bucket(page.time, 1h)) eq 2", new Set(["u-a"])],
+      ["countDistinct(bucket(page, 1h)) eq 2", new Set(["u-a"])],
       ["count(periods(page, 1mo)) eq 2", new Set(["u-a"])],
       [
         "count(periods(page, 1mo) { count(period.items) gte 1 }) eq 2",
         new Set(["u-a"]),
       ],
       ["count(periods(page, 1y)) eq 1", new Set(["u-a"])],
-      [
-        "sub(first(bucket(page.time, 1y)).end, first(bucket(page.time, 1y)).start) eq 366d",
-        new Set(["u-a"]),
-      ],
+      ["countDistinct(bucket(page, 1y)) eq 1", new Set(["u-a"])],
     ] as const;
 
     for (const [source, expected] of assertions) {
@@ -1912,7 +2083,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'session { count(window(event { event.name eq "purchase" }, first(page).time, [-10ms, 10ms])) eq 2 } exists',
+        'session { count(window(event { event.name eq "purchase" }, first(page), [-10ms, 10ms])) eq 2 } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1924,6 +2095,36 @@ describe("filter evaluator", () => {
       },
     );
     expect(result.matchingScopeEntityIds).toEqual(new Set(["session-a"]));
+
+    const literalAnchor = evaluateFilterDocument(
+      parseFilterDsl(
+        'count(window(event { event.name eq "purchase" }, @range.start, [0ms, 100ms])) eq 3',
+        analyticsFilterRegistry,
+      ),
+      dataset,
+      {
+        scope: "session",
+        candidateRange: { startMs: 0, endExclusiveMs: 100 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+    expect(literalAnchor.matchingScopeEntityIds).toEqual(
+      new Set(["session-a"]),
+    );
+
+    expect(
+      evaluate(
+        'count(window(event, first(event { event.name eq "missing" }), [0ms, 10ms])) eq 0',
+        "visitor",
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["u-a", "u-b"]));
+    expect(
+      evaluate(
+        'sub(avg(event.payload("/missing")), count(event)) isNull',
+        "visitor",
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["u-a", "u-b"]));
   });
 
   it("checks without only between sequence endpoints", () => {
@@ -1994,6 +2195,48 @@ describe("filter evaluator", () => {
         },
       ),
     ).toThrow("filter_evaluation_range_unavailable");
+  });
+
+  it("rejects population ranges outside retained history unless the range is empty", () => {
+    const document = parseFilterDsl(
+      "time gte @now-30d",
+      analyticsFilterRegistry,
+    );
+    const base = {
+      scope: "visitor" as const,
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      populationRange: { startMs: -20, endExclusiveMs: -10 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    };
+
+    expect(() => evaluateFilterDocument(document, fixture, base)).toThrow(
+      "filter_evaluation_range_unavailable",
+    );
+    expect(
+      evaluateFilterDocument(document, fixture, {
+        ...base,
+        populationEmpty: true,
+      }).matchingScopeEntityIds,
+    ).toEqual(new Set());
+  });
+
+  it("counts population history against the activity work limit", () => {
+    expect(() =>
+      evaluateFilterDocument(
+        parseFilterDsl("count(event) gte 1", analyticsFilterRegistry),
+        fixture,
+        {
+          scope: "visitor",
+          candidateRange: { startMs: 0, endExclusiveMs: 15 },
+          evaluationRange: { startMs: 0, endExclusiveMs: 15 },
+          populationRange: { startMs: 0, endExclusiveMs: 100 },
+          reportingTimeZone: "UTC",
+          capturedAtMs: 80,
+          maxActivities: 3,
+        },
+      ),
+    ).toThrow("filter_activity_limit_exceeded");
   });
 
   it("rejects invalid ranges and activity volumes before evaluating", () => {

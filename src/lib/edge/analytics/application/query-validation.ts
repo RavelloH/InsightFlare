@@ -6,9 +6,9 @@ import type {
   QueryOperation,
 } from "@/lib/edge/analytics/contract/types";
 import {
+  analyzeFilterDocument,
   filterDocumentUsesAdvancedExpressions,
   FilterValidationError,
-  validateFilterExpressionTypes,
 } from "@/lib/filter-contract";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import { assertFilterAudience } from "@/lib/filter-contract/filters";
@@ -33,7 +33,7 @@ function invalidFilterError(
     };
   }
   try {
-    validateFilterExpressionTypes(filters, analyticsFilterRegistry);
+    analyzeFilterDocument(filters, analyticsFilterRegistry);
     const unsupported = unsupportedFilterForOperation(operation, filters);
     if (unsupported) return unsupported;
     return null;

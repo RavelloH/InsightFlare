@@ -233,6 +233,326 @@ function fieldIdForTarget(target: FilterTargetExpression): string | undefined {
   return undefined;
 }
 
+const ENTITY_NAMESPACES = new Set([
+  "geo",
+  "client",
+  "referrer",
+  "utm",
+  "user",
+  "performance",
+]);
+
+function entityCollection(target: FilterTargetExpression): string | undefined {
+  if (target.kind === "entity-root") return target.entity;
+  if (target.kind === "selector") return entityCollection(target.collection);
+  if (
+    target.kind === "reducer" &&
+    ["first", "last", "nth"].includes(target.reducer)
+  )
+    return entityCollection(target.input);
+  return undefined;
+}
+
+function structuralTargetKind(
+  target: FilterTargetExpression,
+): "sequence" | "period" | undefined {
+  if (target.kind === "context-root")
+    return target.context === "sequence" || target.context === "period"
+      ? target.context
+      : undefined;
+  if (["sequence", "adjacent", "without"].includes(target.kind))
+    return "sequence";
+  if (target.kind === "periods") return "period";
+  if (target.kind === "selector")
+    return structuralTargetKind(target.collection);
+  if (
+    target.kind === "reducer" &&
+    ["first", "last", "nth"].includes(target.reducer)
+  )
+    return structuralTargetKind(target.input);
+  return undefined;
+}
+
+function eventPayloadCollection(target: FilterTargetExpression): boolean {
+  if (target.kind === "entity-root") return target.entity === "event";
+  return (
+    target.kind === "selector" && eventPayloadCollection(target.collection)
+  );
+}
+
+function isScopeTimeTarget(target: FilterTargetExpression): boolean {
+  return (
+    target.kind === "member" &&
+    target.member === "time" &&
+    target.object.kind === "context-root" &&
+    target.object.context === "current"
+  );
+}
+
+/**
+ * The public member language is intentionally closed. This is the single
+ * Semantic Analysis allow-list; the type checker and evaluators may implement
+ * values for allowed members but cannot add new syntax implicitly.
+ */
+function validateMemberWhitelist(
+  document: FilterDocument,
+  registry: FilterFieldRegistry,
+): void {
+  const invalid = (path: string, member: string): never => {
+    throw new FilterValidationError(
+      "invalid_member",
+      path,
+      `Member '${member}' is not registered or structurally supported.`,
+    );
+  };
+
+  const validateTarget = (
+    target: FilterTargetExpression,
+    path: string,
+  ): void => {
+    if (target.kind === "member") {
+      const parts: string[] = [];
+      let base: FilterTargetExpression = target;
+      while (base.kind === "member") {
+        parts.unshift(base.member);
+        base = base.object;
+      }
+      if (base.kind === "context-root") {
+        const allowed =
+          parts.length === 1 &&
+          ((base.context === "current" && parts[0] === "time") ||
+            (base.context === "sequence" && parts[0] === "span") ||
+            (base.context === "period" && parts[0] === "items"));
+        if (!allowed) invalid(path, parts.join("."));
+        return;
+      }
+      const structural = structuralTargetKind(base);
+      if (
+        parts.length === 1 &&
+        ((structural === "sequence" && parts[0] === "span") ||
+          (structural === "period" && parts[0] === "items"))
+      ) {
+        validateTarget(base, `${path}.object`);
+        return;
+      }
+      const entity = entityCollection(base);
+      if (entity) {
+        const memberPath = parts.join(".");
+        // `event.payload` is a registered execution strategy, but its JSON
+        // object is deliberately not a public member. Callers must project a
+        // concrete path with event.payload(path).
+        if (entity === "event" && memberPath === "payload")
+          invalid(path, memberPath);
+        const exact = registry.has(`${entity}.${memberPath}`);
+        const namespaced =
+          ENTITY_NAMESPACES.has(parts[0] ?? "") && registry.has(memberPath);
+        if (!exact && !namespaced) invalid(path, memberPath);
+      } else {
+        invalid(path, parts.join("."));
+      }
+      validateTarget(base, `${path}.object`);
+      return;
+    }
+    switch (target.kind) {
+      case "event-payload":
+      case "entity-root":
+      case "context-root":
+      case "duration":
+      case "time-anchor":
+        return;
+      case "field":
+        if (!registry.has(target.field)) invalid(path, target.field);
+        return;
+      case "selector":
+        validateTarget(target.collection, `${path}.collection`);
+        validateExpression(target.predicate, `${path}.predicate`);
+        return;
+      case "projection": {
+        const source = entityCollection(target.collection);
+        if (
+          target.member !== "payload" ||
+          !target.path ||
+          source !== "event" ||
+          !eventPayloadCollection(target.collection)
+        )
+          invalid(path, target.member);
+        validateTarget(target.collection, `${path}.collection`);
+        return;
+      }
+      case "reducer":
+        validateTarget(target.input, `${path}.input`);
+        return;
+      case "arithmetic":
+        validateTarget(target.left, `${path}.left`);
+        validateTarget(target.right, `${path}.right`);
+        return;
+      case "bucket":
+        validateTarget(target.input, `${path}.input`);
+        return;
+      case "window":
+        validateTarget(target.collection, `${path}.collection`);
+        validateTarget(target.anchor, `${path}.anchor`);
+        return;
+      case "periods":
+        validateTarget(target.collection, `${path}.collection`);
+        return;
+      case "sequence":
+        target.steps.forEach((step, index) =>
+          validateTarget(step, `${path}.steps[${index}]`),
+        );
+        return;
+      case "adjacent":
+        validateTarget(target.sequence, `${path}.sequence`);
+        return;
+      case "without":
+        validateTarget(target.sequence, `${path}.sequence`);
+        validateTarget(target.excluded, `${path}.excluded`);
+        return;
+    }
+  };
+
+  const validateExpression = (
+    expression: FilterExpression,
+    path: string,
+  ): void => {
+    if (expression.kind === "condition") {
+      validateTarget(expression.target, `${path}.target`);
+      if (
+        expression.value &&
+        typeof expression.value === "object" &&
+        !Array.isArray(expression.value) &&
+        "kind" in expression.value
+      )
+        validateTarget(
+          expression.value as FilterTargetExpression,
+          `${path}.value`,
+        );
+      return;
+    }
+    if (expression.kind === "not") {
+      validateExpression(expression.child, `${path}.child`);
+      return;
+    }
+    expression.children.forEach((child, index) =>
+      validateExpression(child, `${path}.children[${index}]`),
+    );
+  };
+
+  if (document.root) validateExpression(document.root, "root");
+}
+
+function validateScopeTimePlacement(
+  document: FilterDocument,
+  scope?: FilterRelationScope,
+): void {
+  if (!document.root) return;
+  const invalid = (path: string): never => {
+    throw new FilterValidationError(
+      "invalid_time_scope",
+      path,
+      "time is only allowed in the top-level AND domain for Session or Visitor scope.",
+    );
+  };
+
+  const targetHasScopeTime = (target: FilterTargetExpression): boolean => {
+    if (isScopeTimeTarget(target)) return true;
+    switch (target.kind) {
+      case "member":
+        return targetHasScopeTime(target.object);
+      case "selector":
+        return (
+          targetHasScopeTime(target.collection) ||
+          expressionHasScopeTime(target.predicate)
+        );
+      case "projection":
+        return targetHasScopeTime(target.collection);
+      case "reducer":
+        return targetHasScopeTime(target.input);
+      case "arithmetic":
+        return (
+          targetHasScopeTime(target.left) || targetHasScopeTime(target.right)
+        );
+      case "bucket":
+        return targetHasScopeTime(target.input);
+      case "window":
+        return (
+          targetHasScopeTime(target.collection) ||
+          targetHasScopeTime(target.anchor)
+        );
+      case "periods":
+        return targetHasScopeTime(target.collection);
+      case "sequence":
+        return target.steps.some(targetHasScopeTime);
+      case "adjacent":
+        return targetHasScopeTime(target.sequence);
+      case "without":
+        return (
+          targetHasScopeTime(target.sequence) ||
+          targetHasScopeTime(target.excluded)
+        );
+      default:
+        return false;
+    }
+  };
+  const expressionHasScopeTime = (expression: FilterExpression): boolean => {
+    if (expression.kind === "condition")
+      return (
+        targetHasScopeTime(expression.target) ||
+        Boolean(
+          expression.value &&
+          typeof expression.value === "object" &&
+          !Array.isArray(expression.value) &&
+          "kind" in expression.value &&
+          targetHasScopeTime(expression.value as FilterTargetExpression),
+        )
+      );
+    if (expression.kind === "not")
+      return expressionHasScopeTime(expression.child);
+    return expression.children.some(expressionHasScopeTime);
+  };
+  const visit = (
+    expression: FilterExpression,
+    path: string,
+    topAnd: boolean,
+  ): void => {
+    if (expression.kind === "condition") {
+      if (isScopeTimeTarget(expression.target)) {
+        if (
+          !topAnd ||
+          (scope !== undefined && scope !== "session" && scope !== "visitor")
+        )
+          invalid(`${path}.target`);
+        if (
+          !["eq", "neq", "gt", "gte", "lt", "lte", "between"].includes(
+            expression.operator,
+          )
+        )
+          invalid(`${path}.operator`);
+        return;
+      }
+      if (
+        targetHasScopeTime(expression.target) ||
+        (expression.value &&
+          typeof expression.value === "object" &&
+          !Array.isArray(expression.value) &&
+          "kind" in expression.value &&
+          targetHasScopeTime(expression.value as FilterTargetExpression))
+      )
+        invalid(`${path}.target`);
+      return;
+    }
+    if (expression.kind === "not") {
+      visit(expression.child, `${path}.child`, false);
+      return;
+    }
+    const allowChildren = topAnd && expression.kind === "and";
+    expression.children.forEach((child, index) =>
+      visit(child, `${path}.children[${index}]`, allowChildren),
+    );
+  };
+  visit(document.root, "root", true);
+}
+
 function nativeEntityForTarget(
   target: FilterTargetExpression,
   registry: FilterFieldRegistry,
@@ -247,14 +567,6 @@ function nativeEntityForTarget(
     target.object.context === "current"
   )
     return { entity: "activity" };
-  if (target.kind === "member" && target.member === "time") {
-    const parent = target.object;
-    if (
-      parent.kind === "entity-root" &&
-      (parent.entity === "page" || parent.entity === "event")
-    )
-      return { entity: parent.entity };
-  }
   const fieldId = fieldIdForTarget(target);
   const definition = fieldId ? registry.get(fieldId) : undefined;
   const entity = filterConditionEntity(definition);
@@ -289,6 +601,7 @@ export function validateFilterConditionDomains(
   registry: FilterFieldRegistry,
 ): void {
   if (!document.root) return;
+  validateScopeTimePlacement(document, resolvedScope);
 
   const visitTarget = (
     target: FilterTargetExpression,
@@ -530,6 +843,8 @@ export function analyzeFilterDocument(
   document: FilterDocument,
   registry: FilterFieldRegistry,
 ): AnalyzedFilterDocument {
+  validateMemberWhitelist(document, registry);
+  validateScopeTimePlacement(document);
   validateFilterExpressionTypes(document, registry);
   const state: AnalysisState = {
     targetTypes: new WeakMap(),

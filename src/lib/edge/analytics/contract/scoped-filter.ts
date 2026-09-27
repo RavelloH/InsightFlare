@@ -1,6 +1,8 @@
 import {
   analyzeFilterHistory,
+  analyzeFilterPopulation,
   type FilterHistoryRequirement,
+  type FilterPopulationRequirement,
 } from "@/lib/filter-contract/filter-history";
 import {
   analyticsFilterDefinition,
@@ -442,7 +444,12 @@ export function prepareScopedQuery(
     time.capturedAtMs,
     plan.scope,
   );
-  const plannedTime = timeWithFilterHistory(time, history);
+  const population = analyzeFilterPopulation(
+    semanticAnalysis,
+    time.range,
+    time.capturedAtMs,
+  );
+  const plannedTime = timeWithFilterHistory(time, history, population);
   const subject = query.context.subject;
   const siteIds =
     subject.kind === "site" ? [subject.siteId] : [...subject.authorizedSiteIds];
@@ -471,6 +478,7 @@ interface ComparisonSideInput {
 function timeWithFilterHistory(
   time: QueryTime,
   history: FilterHistoryRequirement,
+  population: FilterPopulationRequirement = { kind: "none" },
 ): QueryTime {
   const base: QueryTime = {
     range: time.range,
@@ -480,17 +488,37 @@ function timeWithFilterHistory(
       ? { paginationBinding: time.paginationBinding }
       : {}),
   };
-  if (history.kind === "full-history") return { ...base, fullHistory: true };
-  if (history.kind === "bounded")
+  const withHistory =
+    history.kind === "full-history"
+      ? { ...base, fullHistory: true }
+      : history.kind === "bounded"
+        ? {
+            ...base,
+            evaluationRange: {
+              startMs: history.startMs as QueryTime["range"]["startMs"],
+              endExclusiveMs:
+                history.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
+            },
+          }
+        : base;
+  if (population.kind === "none") return withHistory;
+  if (population.kind === "empty")
+    return { ...withHistory, populationEmpty: true };
+  if (population.kind === "full-history")
     return {
-      ...base,
-      evaluationRange: {
-        startMs: history.startMs as QueryTime["range"]["startMs"],
-        endExclusiveMs:
-          history.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
-      },
+      ...withHistory,
+      populationFullHistory: true,
+      populationEndExclusiveMs:
+        population.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
     };
-  return base;
+  return {
+    ...withHistory,
+    populationRange: {
+      startMs: population.startMs as QueryTime["range"]["startMs"],
+      endExclusiveMs:
+        population.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
+    },
+  };
 }
 
 interface ComparisonQueryInput extends QueryInput {
@@ -561,7 +589,12 @@ function prepareScopedComparisonQuery(
       side.time.capturedAtMs,
       resolvedScope,
     );
-    const time = timeWithFilterHistory(side.time, history);
+    const population = analyzeFilterPopulation(
+      semanticAnalysis,
+      side.time.range,
+      side.time.capturedAtMs,
+    );
+    const time = timeWithFilterHistory(side.time, history, population);
     return { ...side, filters, time };
   };
   const scopedSide = (prepared: {

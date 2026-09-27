@@ -6,15 +6,20 @@ import {
   legacyConditionValue,
   normalizeFilterDocument,
   parseFilterDsl,
+  validateFilterConditionDomains,
   validateFilterExpressionTypes,
   validateFilterRelationDomains,
 } from "@/lib/filter-contract";
+import type {
+  CanonicalJsonPath,
+  FilterDocument,
+  FilterTargetExpression,
+} from "@/lib/filter-contract/filters";
 
 function validate(source: string): void {
-  validateFilterExpressionTypes(
-    parseFilterDsl(source, analyticsFilterRegistry),
-    analyticsFilterRegistry,
-  );
+  const document = parseFilterDsl(source, analyticsFilterRegistry);
+  analyzeFilterDocument(document, analyticsFilterRegistry);
+  validateFilterExpressionTypes(document, analyticsFilterRegistry);
 }
 
 describe("Filter v1 expression types", () => {
@@ -56,6 +61,56 @@ describe("Filter v1 expression types", () => {
     }
   });
 
+  it("narrows payload projections after an entity selector", () => {
+    for (const [source, expected] of [
+      [
+        'first(event { event.name eq "value" }.payload("/value")) eq 100',
+        "number",
+      ],
+      [
+        'first(event { event.name eq "value" }.payload("/value")) in ["a", "b"]',
+        "string",
+      ],
+    ] as const) {
+      const document = parseFilterDsl(source, analyticsFilterRegistry);
+      const root = document.root;
+      if (root?.kind !== "condition") throw new Error("expected_condition");
+      const analysis = analyzeFilterDocument(document, analyticsFilterRegistry);
+      const reducer = root.target;
+      if (reducer.kind !== "reducer") throw new Error("expected_reducer");
+
+      expect(analysis.expectedTargetTypes.get(reducer.input)).toBe(expected);
+    }
+
+    const projection: FilterTargetExpression = {
+      kind: "projection",
+      collection: { kind: "entity-root", entity: "event" },
+      member: "payload",
+      path: "/value" as CanonicalJsonPath,
+    };
+    const target: FilterTargetExpression = {
+      kind: "reducer",
+      reducer: "first",
+      input: projection,
+    };
+    const projectedDocument: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "condition",
+        target,
+        operator: "eq",
+        value: 100,
+      },
+    };
+    const projectedAnalysis = analyzeFilterDocument(
+      projectedDocument,
+      analyticsFilterRegistry,
+    );
+    expect(projectedAnalysis.expectedTargetTypes.get(projection)).toBe(
+      "number",
+    );
+  });
+
   it("rejects heterogeneous advanced sets and null equality", () => {
     expect(() =>
       validate('first(event.payload("/value")) in [1, "1"]'),
@@ -65,10 +120,13 @@ describe("Filter v1 expression types", () => {
     );
   });
 
-  it("accepts collection comparisons, datetime literals, and temporal arithmetic", () => {
+  it("accepts registered entity members and the scope-level time field", () => {
     validate('first(event).name eq "purchase"');
     validate('time gte "2026-09-01T00:00:00Z"');
-    validate("sub(first(event).time, first(page).time) lte 7d");
+    validate("first(page).path exists");
+    validate("first(session).durationMs gt 5m");
+    validate("first(visitor).sessions gte 3");
+    validate('first(page).geo.country eq "US"');
     validate("countDistinct(page.path) gte 10");
     validate('sum(event.payload("/amount")) gt 1000');
   });
@@ -80,12 +138,33 @@ describe("Filter v1 expression types", () => {
   });
 
   it("keeps elapsed windows separate from calendar period buckets", () => {
-    validate("count(bucket(page.time, 1mo)) gte 1");
+    validate("count(bucket(page, 1mo)) gte 1");
+    validate("countDistinct(bucket(page, 1d)) gte 1");
+    validate('countDistinct(bucket(page { page.path eq "/docs" }, 1d)) gte 1');
+    validate("count(window(event, @range.start, [0d, 7d])) gte 1");
     expect(() =>
-      validate("count(window(event, first(event).time, [0mo, 7d])) gte 1"),
+      validate("count(window(event, first(event), [0mo, 7d])) gte 1"),
     ).toThrow(
       expect.objectContaining({ code: "calendar_offset_not_supported" }),
     );
+    expect(() =>
+      validate(
+        'count(window(event, first(event.payload("/timestamp")), [0d, 7d])) gte 1',
+      ),
+    ).toThrow(expect.objectContaining({ code: "window_anchor_type_mismatch" }));
+  });
+
+  it("keeps bucket values opaque outside count aggregates", () => {
+    for (const source of [
+      "sum(bucket(page, 1d)) gt 1",
+      "avg(bucket(event, 1d)) gt 1",
+      "min(bucket(page, 1d)) exists",
+      "max(bucket(event, 1d)) exists",
+      "bucket(page, 1d) exists",
+    ])
+      expect(() => validate(source), source).toThrow(
+        expect.objectContaining({ code: "opaque_bucket_value" }),
+      );
   });
 
   it("resolves relation anchors from query Scope or explicit selectors", () => {
@@ -126,56 +205,154 @@ describe("Filter v1 expression types", () => {
     ).not.toThrow();
   });
 
-  it("distinguishes numeric subtraction from elapsed-time subtraction", () => {
+  it("allows numeric arithmetic but does not expose entity timestamps", () => {
     validate(
       'sub(sum(event.payload("/purchase")), sum(event.payload("/refund"))) gt 1000',
     );
     validate(
       'div(sub(sum(event.payload("/purchase")), sum(event.payload("/refund"))), count(event)) gt 100',
     );
-    validate("sub(first(event).time, first(page).time) lte 7d");
     const numeric = parseFilterDsl(
       'sub(sum(event.payload("/purchase")), sum(event.payload("/refund"))) gt 1000',
       analyticsFilterRegistry,
     );
-    const temporal = parseFilterDsl(
-      "sub(first(event).time, first(page).time) lte 7d",
-      analyticsFilterRegistry,
-    );
     const numericTarget =
       numeric.root?.kind === "condition" ? numeric.root.target : null;
-    const temporalTarget =
-      temporal.root?.kind === "condition" ? temporal.root.target : null;
     expect(numericTarget).not.toBeNull();
-    expect(temporalTarget).not.toBeNull();
     expect(
       numericTarget &&
         analyzeFilterDocument(numeric, analyticsFilterRegistry).targetTypes.get(
           numericTarget,
         ),
     ).toMatchObject({ kind: "scalar", scalar: "number" });
-    expect(
-      temporalTarget &&
-        analyzeFilterDocument(
-          temporal,
-          analyticsFilterRegistry,
-        ).targetTypes.get(temporalTarget),
-    ).toMatchObject({ kind: "scalar", scalar: "duration" });
-    expect(() =>
-      validate('sub(first(event).time, sum(event.payload("/amount"))) gt 0'),
-    ).toThrow(expect.objectContaining({ code: "arithmetic_type_mismatch" }));
-    expect(() =>
-      validate('sub(sum(event.payload("/amount")), first(event).time) gt 0'),
-    ).toThrow(expect.objectContaining({ code: "arithmetic_type_mismatch" }));
+    expect(() => validate("first(event).time exists")).toThrow(
+      expect.objectContaining({ code: "invalid_member" }),
+    );
   });
 
   it("accepts temporal ranges without allowing temporal set values", () => {
-    validate("sub(first(event).time, first(page).time) between [0d, 30d]");
     validate("time between [@now-30d, @now]");
-    expect(() =>
-      validate("sub(first(event).time, first(page).time) between [30d, 0d]"),
-    ).toThrow(expect.objectContaining({ code: "reversed_range" }));
     expect(() => validate("time in [@now, 7d]")).toThrow();
+  });
+
+  it("rejects unregistered and removed structural members", () => {
+    for (const source of [
+      "event.time exists",
+      "page.time exists",
+      "first(event).time exists",
+      "sequence([event, page]).start exists",
+      "sequence([event, page]).end exists",
+      "sequence([event, page]).steps exists",
+      "periods(event, 1w).start exists",
+      "periods(event, 1w).end exists",
+      "bucket(page, 1d).start exists",
+      "bucket(page, 1d).end exists",
+      "session.pages exists",
+      "visitor.pages exists",
+      "period.items.time exists",
+      "first(event).payload exists",
+      'page { page.path eq "/pricing" }.payload("/price") eq 1',
+      'first(event).payload("/price") eq 1',
+      "event.unknownField eq 1",
+    ]) {
+      expect(() => validate(source), source).toThrow(
+        expect.objectContaining({ code: "invalid_member" }),
+      );
+    }
+    for (const source of [
+      "event.payload exists",
+      'page.payload("/price") eq 1',
+      'session.payload("/price") eq 1',
+      'visitor.payload("/price") eq 1',
+    ])
+      expect(() => validate(source), source).toThrow();
+
+    const rawUnknownField = {
+      version: 1,
+      root: {
+        kind: "condition",
+        target: { kind: "field", field: "event.unregistered" },
+        operator: "eq",
+        value: "value",
+      },
+    } as unknown as FilterDocument;
+    expect(() =>
+      analyzeFilterDocument(rawUnknownField, analyticsFilterRegistry),
+    ).toThrow(expect.objectContaining({ code: "invalid_member" }));
+  });
+
+  it("keeps registered aggregate fact members scalar", () => {
+    for (const source of [
+      "session.events gte 1",
+      "visitor.events gte 1",
+      "visitor.sessions gte 1",
+    ])
+      expect(() => validate(source), source).not.toThrow();
+
+    for (const source of [
+      "session.events gte 1",
+      "visitor.events gte 1",
+      "visitor.sessions gte 1",
+    ]) {
+      const document = parseFilterDsl(source, analyticsFilterRegistry);
+      const target =
+        document.root?.kind === "condition" ? document.root.target : null;
+      expect(
+        target &&
+          analyzeFilterDocument(
+            document,
+            analyticsFilterRegistry,
+          ).targetTypes.get(target),
+      ).toMatchObject({ kind: "scalar", scalar: "number" });
+    }
+  });
+
+  it("requires positive safe-integer bucket and period intervals", () => {
+    for (const source of [
+      "count(bucket(page, 0d)) gte 1",
+      "count(bucket(page, -1d)) gte 1",
+      "count(bucket(page, 0.5d)) gte 1",
+      "count(periods(event, 0w)) gte 1",
+      "count(periods(event, 1.5w)) gte 1",
+    ])
+      expect(() => validate(source), source).toThrow();
+  });
+
+  it("restricts scope-level time to top-level AND in Session or Visitor Scope", () => {
+    const checkScope = (
+      source: string,
+      scope: "event" | "session" | "visitor",
+    ) => {
+      const document = parseFilterDsl(source, analyticsFilterRegistry);
+      validateFilterConditionDomains(document, scope, analyticsFilterRegistry);
+    };
+    expect(() =>
+      checkScope("time gte @now-30d AND visitor.sessions gte 3", "visitor"),
+    ).not.toThrow();
+    expect(() => checkScope("time gte @now-30d", "event")).toThrow(
+      expect.objectContaining({ code: "invalid_time_scope" }),
+    );
+    expect(() =>
+      checkScope("event { time gte @now-30d } exists", "visitor"),
+    ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
+    expect(() =>
+      checkScope("page { time gte @now-30d } exists", "session"),
+    ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
+    expect(() =>
+      checkScope("session { time gte @now-30d } exists", "visitor"),
+    ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
+    expect(() => checkScope("NOT time gte @now-30d", "session")).toThrow(
+      expect.objectContaining({ code: "invalid_time_scope" }),
+    );
+    expect(() => checkScope("time exists", "visitor")).toThrow(
+      expect.objectContaining({ code: "invalid_time_scope" }),
+    );
+    expect(() => checkScope("time isNull", "session")).toThrow(
+      expect.objectContaining({ code: "invalid_time_scope" }),
+    );
+    expect(() =>
+      checkScope('time gte @now-30d OR event.name eq "purchase"', "visitor"),
+    ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
   });
 
   it("rejects computed values inside set filters", () => {
