@@ -130,10 +130,9 @@ function siteChunks(siteIds: readonly string[]): string[][] {
 
 function evaluationReadRanges(
   candidate: { readonly startMs: number; readonly endExclusiveMs: number },
-  evaluation: { readonly startMs: number; readonly endExclusiveMs: number },
-  population?: { readonly startMs: number; readonly endExclusiveMs: number },
+  read: { readonly startMs: number; readonly endExclusiveMs: number },
 ): Array<{ readonly startMs: number; readonly endExclusiveMs: number }> {
-  const ranges = [candidate, evaluation, ...(population ? [population] : [])]
+  const ranges = [candidate, read]
     .filter((range) => range.startMs < range.endExclusiveMs)
     .sort((left, right) => left.startMs - right.startMs);
   const merged: Array<{ startMs: number; endExclusiveMs: number }> = [];
@@ -527,10 +526,15 @@ function entitiesForRows(
   rows: readonly RawEvaluationRow[],
   payloads: ReadonlyMap<string, unknown>,
   candidateRange: { readonly startMs: number; readonly endExclusiveMs: number },
-  evaluationRange: {
+  filterRange: {
     readonly startMs: number;
     readonly endExclusiveMs: number;
   },
+  readRange: {
+    readonly startMs: number;
+    readonly endExclusiveMs: number;
+  },
+  explicitFilterRange: boolean,
 ): FilterEvaluationDataset {
   const initial = rows.map((row): FilterEvaluationEntity => ({
     kind: row.kind,
@@ -550,13 +554,19 @@ function entitiesForRows(
       item.time >= candidateRange.startMs &&
       item.time < candidateRange.endExclusiveMs,
   );
-  const evaluation = initial.filter(
+  const read = initial.filter(
     (item) =>
       item.time !== undefined &&
-      item.time >= evaluationRange.startMs &&
-      item.time < evaluationRange.endExclusiveMs,
+      item.time >= readRange.startMs &&
+      item.time < readRange.endExclusiveMs,
   );
-  const evaluationFacts = aggregateFacts(evaluation);
+  const filter = initial.filter(
+    (item) =>
+      item.time !== undefined &&
+      item.time >= filterRange.startMs &&
+      item.time < filterRange.endExclusiveMs,
+  );
+  const evaluationFacts = aggregateFacts(explicitFilterRange ? filter : read);
   const candidateFacts = aggregateFacts(candidate);
   const withFacts = initial.map((item) => {
     const fields = { ...item.fields };
@@ -598,15 +608,18 @@ async function evaluateForSites(input: {
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
 }): Promise<ScopedAdvancedFilterMatches> {
+  if (input.time.filterRangeEmpty)
+    return input.plan.scope === "event"
+      ? { visitIds: [], eventIds: [] }
+      : { entityIds: [] };
   const fullHistory = input.time.fullHistory === true;
-  const configuredRange = input.time.evaluationRange ?? input.time.range;
   const coverage = await siteCoverage(
     input.env,
     input.siteIds,
     input.diagnostics,
     input.signal,
   );
-  const evaluationRange = fullHistory
+  const readRange = fullHistory
     ? {
         startMs: Math.min(
           ...input.siteIds.map(
@@ -615,62 +628,21 @@ async function evaluateForSites(input: {
         ),
         endExclusiveMs: input.time.capturedAtMs + 1,
       }
-    : configuredRange;
-  const populationEndExclusiveMs =
-    input.time.populationEndExclusiveMs ?? input.time.capturedAtMs + 1;
-  const populationFullHistory = input.time.populationFullHistory === true;
-  const configuredPopulationRange =
-    input.time.populationRange ?? input.time.range;
-  const populationRange = populationFullHistory
-    ? {
-        startMs: Math.min(
-          ...input.siteIds.map(
-            (siteId) => coverage.get(siteId) ?? Number.MAX_SAFE_INTEGER,
-          ),
-        ),
-        endExclusiveMs: populationEndExclusiveMs,
-      }
-    : configuredPopulationRange;
-  if (evaluationRange.endExclusiveMs > input.time.capturedAtMs + 1) {
-    throw invalidInput(
-      "evaluationRange",
-      "filter_evaluation_range_unavailable",
-    );
-  }
-  if (populationRange.endExclusiveMs > input.time.capturedAtMs + 1) {
-    throw invalidInput(
-      "populationRange",
-      "filter_evaluation_range_unavailable",
-    );
+    : (input.time.readRange ?? input.time.range);
+  if (readRange.endExclusiveMs > input.time.capturedAtMs + 1) {
+    throw invalidInput("readRange", "filter_evaluation_range_unavailable");
   }
   for (const siteId of input.siteIds) {
     const createdAt = coverage.get(siteId);
     if (
       createdAt === undefined ||
-      (!fullHistory && evaluationRange.startMs < createdAt)
+      (!fullHistory && readRange.startMs < createdAt)
     ) {
-      throw invalidInput(
-        "evaluationRange",
-        "filter_evaluation_range_unavailable",
-      );
+      throw invalidInput("readRange", "filter_evaluation_range_unavailable");
     }
-    if (
-      createdAt === undefined ||
-      (!input.time.populationEmpty &&
-        !populationFullHistory &&
-        populationRange.startMs < createdAt)
-    )
-      throw invalidInput(
-        "populationRange",
-        "filter_evaluation_range_unavailable",
-      );
   }
   const paths = payloadPaths(input.filters.root);
-  const readRanges = evaluationReadRanges(
-    input.time.range,
-    evaluationRange,
-    input.time.populationEmpty ? undefined : populationRange,
-  );
+  const readRanges = evaluationReadRanges(input.time.range, readRange);
   const [rows, payloads] = await Promise.all([
     loadActivities(
       input.env,
@@ -702,18 +674,21 @@ async function evaluateForSites(input: {
   for (const siteId of input.siteIds) {
     const createdAt = coverage.get(siteId)!;
     const siteRows = rowsBySite.get(siteId) ?? [];
-    const siteEvaluationRange = fullHistory
+    const siteReadRange = fullHistory
       ? {
           startMs: createdAt,
           endExclusiveMs: input.time.capturedAtMs + 1,
         }
-      : evaluationRange;
-    const sitePopulationRange = populationFullHistory
-      ? { startMs: createdAt, endExclusiveMs: populationEndExclusiveMs }
-      : populationRange;
-    const sitePopulationEmpty =
-      input.time.populationEmpty === true ||
-      sitePopulationRange.startMs >= sitePopulationRange.endExclusiveMs;
+      : readRange;
+    const siteFilterRange = input.time.filterRange
+      ? {
+          startMs: input.time.filterRange.startMs ?? createdAt,
+          endExclusiveMs:
+            input.time.filterRange.endExclusiveMs ??
+            input.time.capturedAtMs + 1,
+        }
+      : input.time.range;
+    if (siteFilterRange.startMs >= siteFilterRange.endExclusiveMs) continue;
     const dataset = entitiesForRows(
       siteRows,
       payloads,
@@ -721,7 +696,9 @@ async function evaluateForSites(input: {
         startMs: input.time.range.startMs,
         endExclusiveMs: input.time.range.endExclusiveMs,
       },
-      siteEvaluationRange,
+      siteFilterRange,
+      siteReadRange,
+      input.time.filterRange !== undefined,
     );
     let result;
     try {
@@ -737,11 +714,9 @@ async function evaluateForSites(input: {
         {
           scope: input.plan.scope,
           candidateRange: input.time.range,
-          evaluationRange: siteEvaluationRange,
-          fullHistory,
-          populationRange: sitePopulationRange,
-          populationFullHistory: false,
-          populationEmpty: sitePopulationEmpty,
+          ...(input.time.filterRange ? { filterRange: siteFilterRange } : {}),
+          readRange: siteReadRange,
+          filterRangeEmpty: input.time.filterRangeEmpty ?? false,
           reportingTimeZone: input.time.reportingTimeZone,
           capturedAtMs: input.time.capturedAtMs,
           maxActivities: MAX_ADVANCED_ACTIVITIES,
@@ -751,7 +726,7 @@ async function evaluateForSites(input: {
     } catch (error) {
       const code = error instanceof Error ? error.message : "";
       if (code === "filter_evaluation_range_unavailable")
-        throw invalidInput("evaluationRange", code);
+        throw invalidInput("readRange", code);
       if (
         code === "filter_activity_limit_exceeded" ||
         code === "filter_sequence_match_limit_exceeded" ||

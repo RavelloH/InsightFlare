@@ -19,11 +19,18 @@ export type FilterHistoryRequirement =
 
 export type FilterHistoryScope = "event" | "session" | "visitor";
 
-export type FilterPopulationRequirement =
-  | { readonly kind: "none" }
-  | { readonly kind: "empty" }
-  | ({ readonly kind: "bounded" } & FilterHistoryRange)
-  | { readonly kind: "full-history"; readonly endExclusiveMs: number };
+export interface FilterEvaluationDomain {
+  /** Omitted start means the earliest confirmed retained data. */
+  readonly startMs?: number;
+  /** Omitted end means the captured query clock. */
+  readonly endExclusiveMs?: number;
+}
+
+export interface FilterTimeAnalysis {
+  readonly explicit: boolean;
+  readonly empty: boolean;
+  readonly range?: FilterEvaluationDomain;
+}
 
 export interface TargetHistoryAnalysis {
   readonly requirement: FilterHistoryRequirement;
@@ -116,10 +123,6 @@ function boundsForCondition(
   const value = resolveEndpoint(values[0], candidate, capturedAtMs);
   if (value === null) return null;
   switch (condition.operator) {
-    case "eq":
-      return value === Number.MAX_SAFE_INTEGER
-        ? null
-        : { start: value, end: value + 1 };
     case "gt":
       return value === Number.MAX_SAFE_INTEGER ? null : { start: value + 1 };
     case "gte":
@@ -252,15 +255,33 @@ function analyzeTarget(
   candidate: FilterHistoryRange,
   capturedAtMs: number,
   analysis: AnalyzedFilterDocument,
+  filterRange?: FilterEvaluationDomain,
 ): TargetHistoryAnalysis {
   const analyze = (child: FilterTargetExpression) =>
-    analyzeTarget(child, candidate, capturedAtMs, analysis);
+    analyzeTarget(child, candidate, capturedAtMs, analysis, filterRange);
   switch (target.kind) {
-    case "entity-root":
+    case "entity-root": {
+      if (filterRange) {
+        const startMs = filterRange.startMs;
+        const endExclusiveMs = filterRange.endExclusiveMs ?? capturedAtMs + 1;
+        if (startMs === undefined) {
+          return {
+            requirement: FULL_HISTORY,
+            boundedCollection: true,
+          };
+        }
+        const range = { startMs, endExclusiveMs };
+        return {
+          requirement: requirementForRange(range, capturedAtMs),
+          temporalBounds: range,
+          boundedCollection: true,
+        };
+      }
       return {
         requirement: CANDIDATE_ONLY,
         boundedCollection: false,
       };
+    }
     case "field":
     case "event-payload":
     case "context-root":
@@ -419,6 +440,7 @@ function analyzeExpressionTargets(
   candidate: FilterHistoryRange,
   capturedAtMs: number,
   analysis: AnalyzedFilterDocument,
+  filterRange?: FilterEvaluationDomain,
 ): FilterHistoryRequirement {
   if (expression.kind === "condition") {
     const target = analyzeTarget(
@@ -426,6 +448,7 @@ function analyzeExpressionTargets(
       candidate,
       capturedAtMs,
       analysis,
+      filterRange,
     );
     let requirement = target.requirement;
     if (
@@ -441,6 +464,7 @@ function analyzeExpressionTargets(
           candidate,
           capturedAtMs,
           analysis,
+          filterRange,
         ).requirement,
       );
     return requirement;
@@ -451,12 +475,19 @@ function analyzeExpressionTargets(
       candidate,
       capturedAtMs,
       analysis,
+      filterRange,
     );
   return expression.children.reduce(
     (requirement, child) =>
       mergeRequirements(
         requirement,
-        analyzeExpressionTargets(child, candidate, capturedAtMs, analysis),
+        analyzeExpressionTargets(
+          child,
+          candidate,
+          capturedAtMs,
+          analysis,
+          filterRange,
+        ),
       ),
     CANDIDATE_ONLY,
   );
@@ -467,50 +498,65 @@ export function analyzeFilterHistory(
   candidate: FilterHistoryRange,
   capturedAtMs: number,
   scope: FilterHistoryScope,
+  filterRange?: FilterEvaluationDomain,
 ): FilterHistoryRequirement {
   const document: FilterDocument = analysis.document;
   if (!document.root) return CANDIDATE_ONLY;
   void scope;
-  return analyzeExpressionTargets(
+  const expressionRequirement = analyzeExpressionTargets(
     document.root,
     candidate,
     capturedAtMs,
     analysis,
+    filterRange,
+  );
+  if (!filterRange) return expressionRequirement;
+  if (filterRange.startMs === undefined) return FULL_HISTORY;
+  const endExclusiveMs = filterRange.endExclusiveMs ?? capturedAtMs + 1;
+  if (filterRange.startMs >= endExclusiveMs) return CANDIDATE_ONLY;
+  return mergeRequirements(
+    requirementForRange(
+      { startMs: filterRange.startMs, endExclusiveMs },
+      capturedAtMs,
+    ),
+    expressionRequirement,
   );
 }
 
-/** Resolve the top-level DSL `time` population selector independently from
- * evaluator history needed by reducers, windows, and relations. */
-export function analyzeFilterPopulation(
+/** Derive the top-level DSL `time` domain used to evaluate the whole document. */
+export function analyzeFilterTimeRange(
   analysis: AnalyzedFilterDocument,
   candidate: FilterHistoryRange,
   capturedAtMs: number,
-): FilterPopulationRequirement {
+): FilterTimeAnalysis {
   const document = analysis.document;
-  if (!document.root) return { kind: "none" };
+  if (!document.root) return { explicit: false, empty: false };
   const bounds = predicateTimeBounds(
     document.root,
     candidate,
     capturedAtMs,
     analysis,
   );
-  if (!bounds.hasTime) return { kind: "none" };
-  if (bounds.impossible) return { kind: "empty" };
+  if (!bounds.hasTime) return { explicit: false, empty: false };
+  if (bounds.impossible) return { explicit: true, empty: true };
+  const startMs = bounds.start;
   const endExclusiveMs = Math.min(
     bounds.end ?? capturedAtMs + 1,
     capturedAtMs + 1,
   );
-  if (bounds.fullHistory || bounds.start === undefined)
-    return { kind: "full-history", endExclusiveMs };
   if (
-    !Number.isSafeInteger(bounds.start) ||
+    (startMs !== undefined && !Number.isSafeInteger(startMs)) ||
     !Number.isSafeInteger(endExclusiveMs)
   )
-    return { kind: "full-history", endExclusiveMs };
-  if (bounds.start >= endExclusiveMs) return { kind: "empty" };
+    return { explicit: true, empty: false, range: {} };
+  if (startMs !== undefined && startMs >= endExclusiveMs)
+    return { explicit: true, empty: true };
   return {
-    kind: "bounded",
-    startMs: bounds.start,
-    endExclusiveMs,
+    explicit: true,
+    empty: false,
+    range: {
+      ...(startMs !== undefined ? { startMs } : {}),
+      endExclusiveMs,
+    },
   };
 }

@@ -1,8 +1,8 @@
 import {
   analyzeFilterHistory,
-  analyzeFilterPopulation,
+  analyzeFilterTimeRange,
   type FilterHistoryRequirement,
-  type FilterPopulationRequirement,
+  type FilterTimeAnalysis,
 } from "@/lib/filter-contract/filter-history";
 import {
   analyticsFilterDefinition,
@@ -438,18 +438,21 @@ export function prepareScopedQuery(
   if (!time) {
     throw new Error("scoped_query_requires_time");
   }
-  const history = analyzeFilterHistory(
-    semanticAnalysis,
-    time.range,
-    time.capturedAtMs,
-    plan.scope,
-  );
-  const population = analyzeFilterPopulation(
+  const filterTime = analyzeFilterTimeRange(
     semanticAnalysis,
     time.range,
     time.capturedAtMs,
   );
-  const plannedTime = timeWithFilterHistory(time, history, population);
+  const history = filterTime.empty
+    ? { kind: "candidate-only" as const }
+    : analyzeFilterHistory(
+        semanticAnalysis,
+        time.range,
+        time.capturedAtMs,
+        plan.scope,
+        filterTime.explicit ? filterTime.range : undefined,
+      );
+  const plannedTime = timeWithFilterHistory(time, history, filterTime);
   const subject = query.context.subject;
   const siteIds =
     subject.kind === "site" ? [subject.siteId] : [...subject.authorizedSiteIds];
@@ -478,12 +481,16 @@ interface ComparisonSideInput {
 function timeWithFilterHistory(
   time: QueryTime,
   history: FilterHistoryRequirement,
-  population: FilterPopulationRequirement = { kind: "none" },
+  filterTime: FilterTimeAnalysis,
 ): QueryTime {
   const base: QueryTime = {
     range: time.range,
     reportingTimeZone: time.reportingTimeZone,
     capturedAtMs: time.capturedAtMs,
+    ...(filterTime.explicit && filterTime.range
+      ? { filterRange: filterTime.range }
+      : {}),
+    ...(filterTime.empty ? { filterRangeEmpty: true } : {}),
     ...(time.paginationBinding !== undefined
       ? { paginationBinding: time.paginationBinding }
       : {}),
@@ -494,31 +501,14 @@ function timeWithFilterHistory(
       : history.kind === "bounded"
         ? {
             ...base,
-            evaluationRange: {
+            readRange: {
               startMs: history.startMs as QueryTime["range"]["startMs"],
               endExclusiveMs:
                 history.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
             },
           }
         : base;
-  if (population.kind === "none") return withHistory;
-  if (population.kind === "empty")
-    return { ...withHistory, populationEmpty: true };
-  if (population.kind === "full-history")
-    return {
-      ...withHistory,
-      populationFullHistory: true,
-      populationEndExclusiveMs:
-        population.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
-    };
-  return {
-    ...withHistory,
-    populationRange: {
-      startMs: population.startMs as QueryTime["range"]["startMs"],
-      endExclusiveMs:
-        population.endExclusiveMs as QueryTime["range"]["endExclusiveMs"],
-    },
-  };
+  return withHistory;
 }
 
 interface ComparisonQueryInput extends QueryInput {
@@ -583,18 +573,21 @@ function prepareScopedComparisonQuery(
       analyticsFilterRegistry,
     );
     validateFilterRelationDomains(filters, resolvedScope, semanticAnalysis);
-    const history = analyzeFilterHistory(
-      semanticAnalysis,
-      side.time.range,
-      side.time.capturedAtMs,
-      resolvedScope,
-    );
-    const population = analyzeFilterPopulation(
+    const filterTime = analyzeFilterTimeRange(
       semanticAnalysis,
       side.time.range,
       side.time.capturedAtMs,
     );
-    const time = timeWithFilterHistory(side.time, history, population);
+    const history = filterTime.empty
+      ? { kind: "candidate-only" as const }
+      : analyzeFilterHistory(
+          semanticAnalysis,
+          side.time.range,
+          side.time.capturedAtMs,
+          resolvedScope,
+          filterTime.explicit ? filterTime.range : undefined,
+        );
+    const time = timeWithFilterHistory(side.time, history, filterTime);
     return { ...side, filters, time };
   };
   const scopedSide = (prepared: {

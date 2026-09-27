@@ -2,7 +2,7 @@ import type { FilterScope } from "@/lib/edge/analytics/contract";
 
 export interface QueryCostInput {
   readonly rangeMs: number;
-  readonly evaluationRangeMs?: number;
+  readonly readRangeMs?: number;
   readonly sideCount?: number;
   readonly siteCount?: number;
   readonly metricCount?: number;
@@ -58,7 +58,7 @@ export function calculateQueryCost(
 ): number {
   const values = [
     input.rangeMs,
-    input.evaluationRangeMs ?? 0,
+    input.readRangeMs ?? 0,
     input.sideCount ?? 1,
     input.siteCount ?? 1,
     input.metricCount ?? 1,
@@ -87,7 +87,7 @@ export function calculateQueryCost(
   const rangeFactor = Math.max(1, input.rangeMs / policy.rangeUnitMs);
   const evaluationFactor = Math.max(
     1,
-    (input.evaluationRangeMs ?? input.rangeMs) / Math.max(1, input.rangeMs),
+    (input.readRangeMs ?? input.rangeMs) / Math.max(1, input.rangeMs),
   );
   const providerFactor = input.provider
     ? policy.providerWeights[input.provider]

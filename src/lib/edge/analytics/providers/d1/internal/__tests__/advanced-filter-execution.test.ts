@@ -242,7 +242,7 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
   }
   database
     .prepare(
-      "INSERT INTO custom_event_names (id, site_pk, name) VALUES (1, 1, 'signup'), (2, 1, 'purchase'), (3, 1, 'cancellation')",
+      "INSERT INTO custom_event_names (id, site_pk, name) VALUES (1, 1, 'signup'), (2, 1, 'purchase'), (3, 1, 'cancellation'), (4, 1, 'refund')",
     )
     .run();
   const insertEvent = database.prepare(`
@@ -280,6 +280,7 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
     signup: 1,
     purchase: 2,
     cancellation: 3,
+    refund: 4,
   };
   for (const activity of activities) {
     if (!activity.event) continue;
@@ -423,7 +424,7 @@ interface SharedFilterRequest {
     readonly startMs: number;
     readonly endExclusiveMs: number;
   };
-  readonly evaluationRange?: {
+  readonly filterRange?: {
     readonly startMs: number;
     readonly endExclusiveMs: number;
   };
@@ -434,6 +435,7 @@ interface SharedFilterRequest {
 async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
   readonly d1: readonly string[];
   readonly mock: readonly string[];
+  readonly mockVisitIds: readonly string[];
 }> {
   const document = parseFilterDsl(request.filterDsl, analyticsFilterRegistry);
   const { env, database } = sqliteEnv(request.activities);
@@ -444,12 +446,12 @@ async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
       request.reportingTimeZone,
       request.capturedAtMs,
     );
-    const time = request.evaluationRange
+    const time = request.filterRange
       ? {
           ...baseTime,
-          evaluationRange: createTimeRange(
-            request.evaluationRange.startMs,
-            request.evaluationRange.endExclusiveMs,
+          filterRange: createTimeRange(
+            request.filterRange.startMs,
+            request.filterRange.endExclusiveMs,
           ),
         }
       : baseTime;
@@ -480,23 +482,17 @@ async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
     );
     const coverageStart = Math.min(
       request.candidateRange.startMs,
-      preparedTime.evaluationRange?.startMs ?? request.candidateRange.startMs,
-      preparedTime.populationRange?.startMs ?? request.candidateRange.startMs,
-      preparedTime.populationFullHistory
-        ? fixtureStart
-        : Number.MAX_SAFE_INTEGER,
+      preparedTime.readRange?.startMs ?? request.candidateRange.startMs,
+      preparedTime.filterRange?.startMs ?? request.candidateRange.startMs,
       preparedTime.fullHistory ? fixtureStart : Number.MAX_SAFE_INTEGER,
     );
     const coverageEnd = Math.max(
       request.candidateRange.endExclusiveMs,
-      preparedTime.evaluationRange?.endExclusiveMs ??
+      preparedTime.readRange?.endExclusiveMs ??
         request.candidateRange.endExclusiveMs,
-      preparedTime.populationRange?.endExclusiveMs ??
+      preparedTime.filterRange?.endExclusiveMs ??
         request.candidateRange.endExclusiveMs,
-      preparedTime.populationEndExclusiveMs ?? 0,
-      preparedTime.fullHistory || preparedTime.populationFullHistory
-        ? request.capturedAtMs + 1
-        : 0,
+      preparedTime.fullHistory ? request.capturedAtMs + 1 : 0,
     );
     const mockResult = applyDemoFilters(
       sharedDemoDataset(request.activities, coverageStart, coverageEnd),
@@ -504,8 +500,12 @@ async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
         filterDocument: prepared.filters ?? document,
         scope: request.scope,
         candidateRange: request.candidateRange,
-        ...(preparedTime.evaluationRange
-          ? { evaluationRange: preparedTime.evaluationRange }
+        ...(preparedTime.filterRange
+          ? { filterRange: preparedTime.filterRange }
+          : {}),
+        ...(preparedTime.filterRangeEmpty ? { filterRangeEmpty: true } : {}),
+        ...(preparedTime.readRange
+          ? { readRange: preparedTime.readRange }
           : {}),
         ...(preparedTime.fullHistory ? { fullHistory: true } : {}),
         reportingTimeZone: request.reportingTimeZone,
@@ -517,7 +517,11 @@ async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
         ? mockResult.sessions
         : mockResult.visitors),
     ].sort();
-    return { d1: d1Ids, mock: mockIds };
+    return {
+      d1: d1Ids,
+      mock: mockIds,
+      mockVisitIds: mockResult.visits.map((visit) => visit.visitId).sort(),
+    };
   } finally {
     database.close();
   }
@@ -533,7 +537,7 @@ describe("D1 advanced filter execution", () => {
       );
       const time = {
         ...createQueryTime(10_000, 20_000, "UTC", 25_000),
-        evaluationRange: createTimeRange(0, 10_000),
+        readRange: createTimeRange(0, 10_000),
       };
       const plan = createScopedFilterPlan("overview", document, "session");
       expect(plan).not.toBeNull();
@@ -586,7 +590,7 @@ describe("D1 advanced filter execution", () => {
         filterDocument: document,
         scope: "session",
         candidateRange: { startMs: 10_000, endExclusiveMs: 20_000 },
-        evaluationRange: { startMs: 0, endExclusiveMs: 10_000 },
+        readRange: { startMs: 0, endExclusiveMs: 10_000 },
         reportingTimeZone: "UTC",
         capturedAtMs: 25_000,
       });
@@ -1249,6 +1253,190 @@ describe("D1 advanced filter execution", () => {
     expect(sessionRelation.mock).toEqual(sessionRelation.d1);
   });
 
+  it("evaluates complete Visitor filters in Filter time and projects only Query time", async () => {
+    const activities: readonly SharedActivity[] = [
+      {
+        visitId: "aug-signup-match",
+        sessionId: "aug-session-match",
+        visitorId: "visitor-history-match",
+        pageTimeMs: 105,
+        pathname: "/signup",
+        event: {
+          id: "aug-signup-event",
+          name: "signup",
+          timeMs: 115,
+        },
+      },
+      {
+        visitId: "aug-page-match",
+        sessionId: "aug-session-match",
+        visitorId: "visitor-history-match",
+        pageTimeMs: 110,
+        pathname: "/august",
+        event: {
+          id: "aug-purchase-match",
+          name: "purchase",
+          timeMs: 120,
+        },
+      },
+      {
+        visitId: "sep-page-match",
+        sessionId: "sep-session-match",
+        visitorId: "visitor-history-match",
+        pageTimeMs: 3_220,
+        pathname: "/september",
+      },
+      {
+        visitId: "aug-page-no-purchase",
+        sessionId: "aug-session-no-purchase",
+        visitorId: "visitor-current-only-purchase",
+        pageTimeMs: 130,
+        pathname: "/august",
+      },
+      {
+        visitId: "sep-page-current-purchase",
+        sessionId: "sep-session-current-purchase",
+        visitorId: "visitor-current-only-purchase",
+        pageTimeMs: 3_230,
+        pathname: "/september",
+        event: {
+          id: "sep-purchase-current-only",
+          name: "purchase",
+          timeMs: 3_240,
+        },
+      },
+    ];
+    const filters = [
+      'event.name eq "purchase"',
+      'count(event { event.name eq "purchase" }) eq 1',
+      'first(event).name eq "signup"',
+      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+    ];
+    for (const expression of filters) {
+      const result = await evaluateSharedFixture({
+        activities,
+        filterDsl: `time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:01.999Z"] AND ${expression}`,
+        scope: "visitor",
+        candidateRange: { startMs: 3_000, endExclusiveMs: 4_000 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 3_999,
+      });
+
+      expect(result.d1).toEqual(["visitor-history-match"]);
+      expect(result.mock).toEqual(result.d1);
+      expect(result.mockVisitIds).toEqual(["sep-page-match"]);
+    }
+
+    const sessionActivities: readonly SharedActivity[] = [
+      {
+        visitId: "session-history-purchase",
+        sessionId: "session-history",
+        visitorId: "visitor-session-history",
+        pageTimeMs: 110,
+        pathname: "/august",
+        event: {
+          id: "session-history-purchase-event",
+          name: "purchase",
+          timeMs: 120,
+        },
+      },
+      {
+        visitId: "session-current-page",
+        sessionId: "session-history",
+        visitorId: "visitor-session-history",
+        pageTimeMs: 3_220,
+        pathname: "/september",
+      },
+      {
+        visitId: "session-current-only-purchase",
+        sessionId: "session-current-only",
+        visitorId: "visitor-current-only",
+        pageTimeMs: 3_230,
+        pathname: "/september",
+        event: {
+          id: "session-current-only-purchase-event",
+          name: "purchase",
+          timeMs: 3_240,
+        },
+      },
+    ];
+    const sessionResult = await evaluateSharedFixture({
+      activities: sessionActivities,
+      filterDsl:
+        'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:01.999Z"] AND event.name eq "purchase"',
+      scope: "session",
+      candidateRange: { startMs: 3_000, endExclusiveMs: 4_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 3_999,
+    });
+    expect(sessionResult.d1).toEqual(["session-history"]);
+    expect(sessionResult.mock).toEqual(sessionResult.d1);
+    expect(sessionResult.mockVisitIds).toEqual(["session-current-page"]);
+  });
+
+  it("short-circuits future-only Filter ranges in D1 and Mock", async () => {
+    const result = await evaluateSharedFixture({
+      activities: SHARED_ACTIVITIES,
+      filterDsl: "time gte @now+1ms AND count(event) gte 1",
+      scope: "visitor",
+      candidateRange: { startMs: 10_000, endExclusiveMs: 20_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 25_000,
+    });
+    expect(result.d1).toEqual([]);
+    expect(result.mock).toEqual([]);
+    expect(result.mockVisitIds).toEqual([]);
+  });
+
+  it("extends Window reads beyond Filter time without widening candidate projection", async () => {
+    const activities: readonly SharedActivity[] = [
+      {
+        visitId: "window-purchase",
+        sessionId: "window-session",
+        visitorId: "visitor-window",
+        pageTimeMs: 1_100,
+        pathname: "/history/purchase",
+        event: {
+          id: "window-purchase-event",
+          name: "purchase",
+          timeMs: 1_200,
+        },
+      },
+      {
+        visitId: "window-refund",
+        sessionId: "window-session",
+        visitorId: "visitor-window",
+        pageTimeMs: 8_000_000,
+        pathname: "/history/refund",
+        event: {
+          id: "window-refund-event",
+          name: "refund",
+          timeMs: 8_000_100,
+        },
+      },
+      {
+        visitId: "window-query-projection",
+        sessionId: "query-session",
+        visitorId: "visitor-window",
+        pageTimeMs: 9_000_000,
+        pathname: "/current-window",
+      },
+    ];
+    const result = await evaluateSharedFixture({
+      activities,
+      filterDsl:
+        'time between ["1970-01-01T00:00:01.000Z", "1970-01-01T00:00:03.000Z"] AND count(window(event, first(event { event.name eq "purchase" }), [0d, 7d])) gte 2',
+      scope: "visitor",
+      candidateRange: { startMs: 9_000_000, endExclusiveMs: 10_000_000 },
+      filterRange: { startMs: 1_000, endExclusiveMs: 3_001 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 10_000_000,
+    });
+    expect(result.d1).toEqual(["visitor-window"]);
+    expect(result.mock).toEqual(result.d1);
+    expect(result.mockVisitIds).toEqual(["window-query-projection"]);
+  });
+
   it("applies top-level Activity time to aggregate Scopes without removing the predicate", async () => {
     const activities: readonly SharedActivity[] = [
       {
@@ -1256,7 +1444,7 @@ describe("D1 advanced filter execution", () => {
         sessionId: "old-session",
         visitorId: "visitor-with-old-activity",
         pageTimeMs: 500,
-        pathname: "/old",
+        pathname: "/candidate",
       },
       {
         visitId: "old-candidate",
@@ -1388,7 +1576,7 @@ describe("D1 advanced filter execution", () => {
       );
       const time = {
         ...createQueryTime(100, 200, "UTC", 250),
-        evaluationRange: createTimeRange(-1, 100),
+        readRange: createTimeRange(-1, 100),
       };
       const plan = createScopedFilterPlan("overview", document, "session");
       const filters = attachScopedFilterMetadata(document, {
@@ -1416,7 +1604,7 @@ describe("D1 advanced filter execution", () => {
           kind: "invalid-input",
           issues: [
             {
-              path: "evaluationRange",
+              path: "readRange",
               code: "filter_evaluation_range_unavailable",
             },
           ],

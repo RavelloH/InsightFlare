@@ -766,27 +766,73 @@ describe("filter evaluator", () => {
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
 
-  it("uses top-level time to select a historical population", () => {
+  it("evaluates the whole FilterDocument inside top-level time and projects to query time", () => {
     const dataset: FilterEvaluationDataset = {
-      pages: [page("page-time", 10, "s-a", "u-a")],
-      events: [event("event-time", "purchase", 20, "s-a", "u-a")],
-      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+      pages: [
+        page("aug-page-a", 110, "s-a", "u-a"),
+        page("sep-page-a", 220, "s-a", "u-a"),
+        page("aug-page-b", 130, "s-b", "u-b"),
+        page("sep-page-b", 230, "s-b", "u-b"),
+      ],
+      events: [
+        event("aug-purchase-a", "purchase", 120, "s-a", "u-a"),
+        event("sep-purchase-b", "purchase", 240, "s-b", "u-b"),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 300 },
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'time gte "1970-01-01T00:00:00.015Z"',
+        'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND event.name eq "purchase"',
         analyticsFilterRegistry,
       ),
       dataset,
       {
         scope: "visitor",
-        candidateRange: { startMs: 0, endExclusiveMs: 100 },
-        populationRange: { startMs: 15, endExclusiveMs: 100 },
+        candidateRange: { startMs: 200, endExclusiveMs: 300 },
+        filterRange: { startMs: 100, endExclusiveMs: 200 },
+        readRange: { startMs: 100, endExclusiveMs: 300 },
         reportingTimeZone: "UTC",
-        capturedAtMs: 80,
+        capturedAtMs: 299,
       },
     );
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
+    expect(result.matchingVisitIds).toEqual(new Set(["sep-page-a"]));
+    expect(result.matchingEventIds).toEqual(new Set());
+  });
+
+  it("bounds counts, positional reducers, and sequences by Filter time", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [page("aug", 110, "s-a", "u-a"), page("sep", 220, "s-a", "u-a")],
+      events: [
+        event("aug-signup", "signup", 120, "s-a", "u-a"),
+        event("aug-purchase-1", "purchase", 130, "s-a", "u-a"),
+        event("aug-purchase-2", "purchase", 140, "s-a", "u-a"),
+        event("aug-purchase-3", "purchase", 150, "s-a", "u-a"),
+        event("sep-purchase", "purchase", 230, "s-a", "u-a"),
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 300 },
+    };
+    const options = {
+      scope: "visitor" as const,
+      candidateRange: { startMs: 200, endExclusiveMs: 300 },
+      filterRange: { startMs: 100, endExclusiveMs: 200 },
+      readRange: { startMs: 100, endExclusiveMs: 300 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 299,
+    };
+    for (const source of [
+      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND count(event { event.name eq "purchase" }) gte 3',
+      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND first(event).name eq "signup"',
+      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+    ]) {
+      expect(
+        evaluateFilterDocument(
+          parseFilterDsl(source, analyticsFilterRegistry),
+          dataset,
+          options,
+        ).matchingScopeEntityIds,
+      ).toEqual(new Set(["u-a"]));
+    }
   });
 
   it("rejects Event-scope time and keeps fixed request-clock anchors available", () => {
@@ -1719,7 +1765,7 @@ describe("filter evaluator", () => {
     const options = {
       scope: "session" as const,
       candidateRange: { startMs: 50, endExclusiveMs: 70 },
-      evaluationRange: { startMs: 0, endExclusiveMs: 40 },
+      readRange: { startMs: 0, endExclusiveMs: 40 },
       reportingTimeZone: "UTC",
       capturedAtMs: 80,
     };
@@ -2181,7 +2227,7 @@ describe("filter evaluator", () => {
     ).toThrow("filter_sequence_work_limit_exceeded");
   });
 
-  it("rejects an evaluation range outside the declared source coverage", () => {
+  it("rejects a read range outside the declared source coverage", () => {
     expect(() =>
       evaluateFilterDocument(
         parseFilterDsl("count(event) gte 1", analyticsFilterRegistry),
@@ -2189,7 +2235,7 @@ describe("filter evaluator", () => {
         {
           scope: "visitor",
           candidateRange: { startMs: 10, endExclusiveMs: 20 },
-          evaluationRange: { startMs: -1, endExclusiveMs: 20 },
+          readRange: { startMs: -1, endExclusiveMs: 20 },
           reportingTimeZone: "UTC",
           capturedAtMs: 80,
         },
@@ -2197,7 +2243,7 @@ describe("filter evaluator", () => {
     ).toThrow("filter_evaluation_range_unavailable");
   });
 
-  it("rejects population ranges outside retained history unless the range is empty", () => {
+  it("rejects Filter time reads outside retained history and short-circuits an empty domain", () => {
     const document = parseFilterDsl(
       "time gte @now-30d",
       analyticsFilterRegistry,
@@ -2205,7 +2251,8 @@ describe("filter evaluator", () => {
     const base = {
       scope: "visitor" as const,
       candidateRange: { startMs: 0, endExclusiveMs: 100 },
-      populationRange: { startMs: -20, endExclusiveMs: -10 },
+      filterRange: { startMs: -20, endExclusiveMs: -10 },
+      readRange: { startMs: -20, endExclusiveMs: -10 },
       reportingTimeZone: "UTC",
       capturedAtMs: 80,
     };
@@ -2216,12 +2263,12 @@ describe("filter evaluator", () => {
     expect(
       evaluateFilterDocument(document, fixture, {
         ...base,
-        populationEmpty: true,
+        filterRangeEmpty: true,
       }).matchingScopeEntityIds,
     ).toEqual(new Set());
   });
 
-  it("counts population history against the activity work limit", () => {
+  it("counts read and candidate activities against the activity work limit", () => {
     expect(() =>
       evaluateFilterDocument(
         parseFilterDsl("count(event) gte 1", analyticsFilterRegistry),
@@ -2229,8 +2276,8 @@ describe("filter evaluator", () => {
         {
           scope: "visitor",
           candidateRange: { startMs: 0, endExclusiveMs: 15 },
-          evaluationRange: { startMs: 0, endExclusiveMs: 15 },
-          populationRange: { startMs: 0, endExclusiveMs: 100 },
+          filterRange: { startMs: 0, endExclusiveMs: 100 },
+          readRange: { startMs: 0, endExclusiveMs: 100 },
           reportingTimeZone: "UTC",
           capturedAtMs: 80,
           maxActivities: 3,
@@ -2251,7 +2298,7 @@ describe("filter evaluator", () => {
         reportingTimeZone: "UTC",
         capturedAtMs: 80,
       }),
-    ).toThrow("invalid_evaluation_range");
+    ).toThrow("invalid_read_range");
     expect(() =>
       evaluateFilterDocument(document, fixture, {
         scope: "visitor",

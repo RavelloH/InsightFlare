@@ -166,17 +166,17 @@ function scopeAwareCostInput(
     1,
     ...times.map((time) => time.range.endExclusiveMs - time.range.startMs),
   );
-  const evaluationRangeMs = Math.max(
+  const readRangeMs = Math.max(
     1,
     ...times.map((time) => {
-      const range = time.evaluationRange ?? time.range;
+      const range = time.readRange ?? time.range;
       return range.endExclusiveMs - range.startMs;
     }),
   );
   const base: QueryCostInput = {
     ...(input ?? { rangeMs: candidateRangeMs }),
     rangeMs: input?.rangeMs ?? candidateRangeMs,
-    evaluationRangeMs,
+    readRangeMs,
     expressionDepth: Math.max(input?.expressionDepth ?? 1, dimensions.depth),
     relationStepCount: Math.max(
       input?.relationStepCount ?? 1,

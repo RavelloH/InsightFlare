@@ -296,11 +296,11 @@ describe("API v1 comparison v2 handler", () => {
   it("derives independent historical ranges from each comparison-side DSL", async () => {
     const observed: Array<{
       side: string;
-      populationRange?: {
-        readonly startMs: number;
-        readonly endExclusiveMs: number;
+      filterRange?: {
+        readonly startMs?: number;
+        readonly endExclusiveMs?: number;
       };
-      evaluationRange?: {
+      readRange?: {
         readonly startMs: number;
         readonly endExclusiveMs: number;
       };
@@ -309,8 +309,8 @@ describe("API v1 comparison v2 handler", () => {
       overview: vi.fn(async ({ side, query }) => {
         observed.push({
           side,
-          populationRange: query.time.populationRange,
-          evaluationRange: query.time.evaluationRange,
+          filterRange: query.time.filterRange,
+          readRange: query.time.readRange,
         });
         return {
           value: rawMetrics(side === "current" ? 120 : 100),
@@ -352,19 +352,25 @@ describe("API v1 comparison v2 handler", () => {
     expect(observed).toEqual([
       {
         side: "current",
-        populationRange: {
+        filterRange: {
           startMs: Date.parse("2026-07-31T00:00:00.000Z"),
           endExclusiveMs: Date.parse("2026-08-01T00:00:00.000Z"),
         },
-        evaluationRange: undefined,
+        readRange: {
+          startMs: Date.parse("2026-07-31T00:00:00.000Z"),
+          endExclusiveMs: Date.parse("2026-08-01T00:00:00.000Z"),
+        },
       },
       {
         side: "reference",
-        populationRange: {
+        filterRange: {
           startMs: Date.parse("2026-07-28T00:00:00.000Z"),
           endExclusiveMs: Date.parse("2026-07-30T00:00:00.000Z"),
         },
-        evaluationRange: undefined,
+        readRange: {
+          startMs: Date.parse("2026-07-28T00:00:00.000Z"),
+          endExclusiveMs: Date.parse("2026-07-30T00:00:00.000Z"),
+        },
       },
     ]);
   });

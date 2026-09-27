@@ -183,12 +183,27 @@ export async function executeDemoQuery(
     params.scope = scopePreference ?? "auto";
     if (time.fullHistory) params.__filterFullHistory = "true";
     else delete params.__filterFullHistory;
-    if (time.evaluationRange) {
-      params.evaluationFromMs = time.evaluationRange.startMs;
-      params.evaluationToMs = time.evaluationRange.endExclusiveMs;
+    if (time.filterRange) {
+      params.__filterRangeExplicit = "true";
+      if (time.filterRange.startMs !== undefined)
+        params.filterFromMs = time.filterRange.startMs;
+      else delete params.filterFromMs;
+      if (time.filterRange.endExclusiveMs !== undefined)
+        params.filterToMs = time.filterRange.endExclusiveMs;
+      else delete params.filterToMs;
     } else {
-      delete params.evaluationFromMs;
-      delete params.evaluationToMs;
+      delete params.__filterRangeExplicit;
+      delete params.filterFromMs;
+      delete params.filterToMs;
+    }
+    if (time.filterRangeEmpty) params.__filterRangeEmpty = "true";
+    else delete params.__filterRangeEmpty;
+    if (time.readRange) {
+      params.readFromMs = time.readRange.startMs;
+      params.readToMs = time.readRange.endExclusiveMs;
+    } else {
+      delete params.readFromMs;
+      delete params.readToMs;
     }
   }
 

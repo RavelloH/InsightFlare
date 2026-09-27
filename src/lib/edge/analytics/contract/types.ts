@@ -1,4 +1,5 @@
 import type { ZonedInterval } from "@/lib/analytics/time-zone";
+import type { FilterEvaluationDomain } from "@/lib/filter-contract/filter-history";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 import type {
   FilterScope,
@@ -25,18 +26,14 @@ export interface TimeRange {
 }
 export interface QueryTime {
   readonly range: TimeRange;
-  /** Derived by Filter History Analysis; never authored by the UI or DSL. */
-  readonly evaluationRange?: TimeRange;
+  /** Top-level DSL `time` domain; absent means the query range. */
+  readonly filterRange?: FilterEvaluationDomain;
+  /** The top-level time intersection is empty. */
+  readonly filterRangeEmpty?: boolean;
+  /** Data read by the evaluator; may extend beyond filterRange for windows. */
+  readonly readRange?: TimeRange;
   /** Derived by Filter History Analysis when complete retained history is needed. */
   readonly fullHistory?: boolean;
-  /** Derived by the scope planner from top-level DSL `time`; selects entities. */
-  readonly populationRange?: TimeRange;
-  /** Population selection must begin at each site's complete retained boundary. */
-  readonly populationFullHistory?: boolean;
-  /** Exclusive population end used with populationFullHistory. */
-  readonly populationEndExclusiveMs?: EpochMs;
-  /** The top-level time predicates have an empty intersection. */
-  readonly populationEmpty?: boolean;
   readonly reportingTimeZone: ReportingTimeZone;
   readonly capturedAtMs: EpochMs;
   /** API v1 raw-request identity used to keep preset cursors stable. */

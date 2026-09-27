@@ -523,9 +523,7 @@ function validateScopeTimePlacement(
         )
           invalid(`${path}.target`);
         if (
-          !["eq", "neq", "gt", "gte", "lt", "lte", "between"].includes(
-            expression.operator,
-          )
+          !["gt", "gte", "lt", "lte", "between"].includes(expression.operator)
         )
           invalid(`${path}.operator`);
         return;

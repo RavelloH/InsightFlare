@@ -104,6 +104,23 @@ describe("mock/fact-filters", () => {
     expect(result.visits).toEqual([]);
   });
 
+  it("handles an empty Query range and an empty FilterDocument", () => {
+    const emptyQueryRange = applyDemoFilters(emptyDemoFactDataset(10, 10), {
+      filterDocument: parseFilterDsl(
+        "count(event) gte 1",
+        analyticsFilterRegistry,
+      ),
+      scope: "visitor",
+    });
+    expect(emptyQueryRange.visits).toEqual([]);
+
+    expect(
+      applyDemoFilters(emptyDemoFactDataset(0, 1), {
+        filterDocument: { version: 1, root: null },
+      }).visits,
+    ).toEqual([]);
+  });
+
   it("builds canonical session and visitor aggregates", () => {
     const dataset = makeDataset([
       makeVisit({

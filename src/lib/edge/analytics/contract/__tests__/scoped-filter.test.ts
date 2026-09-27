@@ -241,7 +241,7 @@ describe("scoped filter contract", () => {
     expect(prepared.filters?.root).toBeNull();
   });
 
-  it("keeps evaluator history separate from scope population selection", () => {
+  it("plans Filter time separately from query and read ranges", () => {
     const queryTime = {
       range: { startMs: 80_000, endExclusiveMs: 90_000 },
       reportingTimeZone: "UTC",
@@ -257,7 +257,7 @@ describe("scoped filter contract", () => {
       scopePreference: "visitor",
     } as QueryInput & { time: QueryTime });
     expect(bounded.time).toMatchObject({
-      evaluationRange: { startMs: 80_000, endExclusiveMs: 90_001 },
+      readRange: { startMs: 80_000, endExclusiveMs: 90_001 },
     });
 
     const upperBounded = prepareScopedQuery("overview", {
@@ -267,8 +267,8 @@ describe("scoped filter contract", () => {
       scopePreference: "visitor",
     } as QueryInput & { time: QueryTime });
     expect(upperBounded.time).toMatchObject({
-      populationFullHistory: true,
-      populationEndExclusiveMs: 70_000,
+      filterRange: { endExclusiveMs: 70_000 },
+      fullHistory: true,
     });
 
     const twoSided = prepareScopedQuery("overview", {
@@ -281,9 +281,9 @@ describe("scoped filter contract", () => {
       scopePreference: "visitor",
     } as QueryInput & { time: QueryTime });
     expect(twoSided.time).toMatchObject({
-      populationRange: { startMs: 70_000, endExclusiveMs: 95_001 },
+      filterRange: { startMs: 70_000, endExclusiveMs: 95_001 },
+      readRange: { startMs: 70_000, endExclusiveMs: 95_001 },
     });
-    expect(twoSided.time).not.toHaveProperty("evaluationRange");
     expect(twoSided.time).not.toHaveProperty("fullHistory");
 
     const fullHistory = prepareScopedQuery("overview", {
@@ -298,7 +298,7 @@ describe("scoped filter contract", () => {
     expect(fullHistory.time).toMatchObject({ fullHistory: true });
   });
 
-  it("keeps top-level time predicates in the FilterDocument and plans population by Scope", () => {
+  it("keeps top-level time predicates in the FilterDocument and uses them as the Filter domain", () => {
     const queryTime = {
       range: { startMs: 80_000, endExclusiveMs: 90_000 },
       reportingTimeZone: "UTC",
@@ -318,10 +318,11 @@ describe("scoped filter contract", () => {
       time: QueryTime;
     };
     expect(visitor.filters.root).toEqual(filters.root);
-    expect(visitor.time.populationRange).toEqual({
+    expect(visitor.time.filterRange).toEqual({
       startMs: 70_000,
       endExclusiveMs: 100_001,
     });
+    expect(visitor.time.readRange).toEqual(visitor.time.filterRange);
 
     expect(() =>
       prepareScopedQuery("overview", {
@@ -333,13 +334,13 @@ describe("scoped filter contract", () => {
     ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
   });
 
-  it("keeps evaluation ranges planner-owned while preserving query bindings", () => {
+  it("keeps Filter and read ranges planner-owned while preserving query bindings", () => {
     const prepared = prepareScopedQuery("overview", {
       context,
       time: {
         ...time,
         paginationBinding: "cursor-binding",
-        evaluationRange: { startMs: -500, endExclusiveMs: 100 },
+        readRange: { startMs: -500, endExclusiveMs: 100 },
         fullHistory: true,
       },
       filters: filter("page.path", "/docs"),
@@ -349,7 +350,7 @@ describe("scoped filter contract", () => {
     expect(prepared.time).toMatchObject({
       paginationBinding: "cursor-binding",
     });
-    expect(prepared.time).not.toHaveProperty("evaluationRange");
+    expect(prepared.time).not.toHaveProperty("readRange");
     expect(prepared.time).not.toHaveProperty("fullHistory");
   });
 
@@ -378,11 +379,11 @@ describe("scoped filter contract", () => {
       reference: { time: QueryTime };
     };
 
-    expect(prepared.current.time.evaluationRange).toEqual({
+    expect(prepared.current.time.readRange).toEqual({
       startMs: time.range.startMs,
       endExclusiveMs: 101,
     });
-    expect(prepared.reference.time.evaluationRange).toEqual({
+    expect(prepared.reference.time.readRange).toEqual({
       startMs: 200,
       endExclusiveMs: 401,
     });

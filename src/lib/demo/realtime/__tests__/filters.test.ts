@@ -208,14 +208,21 @@ describe("mock/filters", () => {
         from: 1_000,
         to: 2_000,
         __filterDsl: 'count(event { event.name eq "signup" }) gte 1',
-        evaluationFromMs: 1_000,
-        evaluationToMs: 2_000,
+        __filterRangeExplicit: "true",
+        filterFromMs: 1_000,
+        filterToMs: 2_000,
+        readFromMs: 1_000,
+        readToMs: 2_000,
         nowMs: 3_000,
         __filterFullHistory: "true",
         timeZone: "America/Los_Angeles",
       });
       expect(filters.filterDocument?.root).toBeTruthy();
-      expect(filters.evaluationRange).toEqual({
+      expect(filters.filterRange).toEqual({
+        startMs: 1_000,
+        endExclusiveMs: 2_000,
+      });
+      expect(filters.readRange).toEqual({
         startMs: 1_000,
         endExclusiveMs: 2_000,
       });

@@ -69,7 +69,7 @@ describe("server demo query runtime", () => {
     expect(response.headers.get("x-insightflare-data-source")).toBe("mock");
   });
 
-  it("uses canonical side time, filter DSL, scope, and evaluation range", async () => {
+  it("uses canonical side time, filter DSL, scope, and Filter/read ranges", async () => {
     handleDemoRequestMock.mockReturnValue({
       ok: true,
       requestId: "demo-request",
@@ -83,9 +83,13 @@ describe("server demo query runtime", () => {
         "UTC",
         Date.parse("2026-08-09T00:00:00Z"),
       ),
-      evaluationRange: {
-        startMs: Date.parse("2026-07-01T00:00:00Z"),
-        endExclusiveMs: Date.parse("2026-08-01T00:00:00Z"),
+      filterRange: {
+        startMs: Date.parse("2026-08-01T00:00:00Z"),
+        endExclusiveMs: Date.parse("2026-08-08T00:00:00Z"),
+      },
+      readRange: {
+        startMs: Date.parse("2026-08-01T00:00:00Z"),
+        endExclusiveMs: Date.parse("2026-08-08T00:00:00Z"),
       },
     };
     const filters = parseFilterDsl(
@@ -95,7 +99,7 @@ describe("server demo query runtime", () => {
     await executeDemoQuery({
       request: request("/api/private/comparison"),
       url: new URL(
-        "https://app.test/api/private/comparison?evaluationFromMs=1&evaluationToMs=2",
+        "https://app.test/api/private/comparison?readFromMs=1&readToMs=2",
       ),
       siteId: "demo-site-001",
       operation: "comparison",
@@ -117,8 +121,11 @@ describe("server demo query runtime", () => {
           nowMs: time.capturedAtMs,
           __filterDsl: expect.stringContaining("@range.start"),
           scope: "visitor",
-          evaluationFromMs: time.evaluationRange.startMs,
-          evaluationToMs: time.evaluationRange.endExclusiveMs,
+          __filterRangeExplicit: "true",
+          filterFromMs: time.filterRange.startMs,
+          filterToMs: time.filterRange.endExclusiveMs,
+          readFromMs: time.readRange.startMs,
+          readToMs: time.readRange.endExclusiveMs,
         }),
       }),
     );

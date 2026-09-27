@@ -46,7 +46,7 @@ export interface FilterEvaluationRange {
   readonly endExclusiveMs: number;
 }
 
-/** A browser-safe, storage-independent record used by Filter v1 execution. */
+/** A browser-safe, storage-independent record used by Filter execution. */
 export interface FilterEvaluationEntity {
   readonly kind: FilterEvaluationEntityKind;
   readonly id: string;
@@ -56,7 +56,7 @@ export interface FilterEvaluationEntity {
   readonly visitorId?: string;
   /** Canonical registry ids (for example `page.path`) map to typed values. */
   readonly fields: Readonly<Record<string, unknown>>;
-  /** Legacy conditions continue to read values computed on candidate data. */
+  /** Legacy conditions without Filter time keep candidate-range values. */
   readonly candidateFields?: Readonly<Record<string, unknown>>;
   /** Present only on Event records; JSON null is distinct from an absent path. */
   readonly payload?: unknown;
@@ -74,12 +74,12 @@ export interface FilterEvaluationDataset {
 export interface FilterEvaluationOptions {
   readonly scope: FilterScope;
   readonly candidateRange: FilterEvaluationRange;
-  readonly evaluationRange?: FilterEvaluationRange;
+  /** Explicit top-level DSL `time` domain; absent means the query range. */
+  readonly filterRange?: FilterEvaluationRange;
+  readonly filterRangeEmpty?: boolean;
+  /** Data required for evaluation; may extend beyond the filter domain. */
+  readonly readRange?: FilterEvaluationRange;
   readonly fullHistory?: boolean;
-  /** Scope population selected by the top-level DSL `time` condition. */
-  readonly populationRange?: FilterEvaluationRange;
-  readonly populationFullHistory?: boolean;
-  readonly populationEmpty?: boolean;
   readonly reportingTimeZone: string;
   readonly capturedAtMs: number;
   readonly maxActivities?: number;
@@ -140,7 +140,9 @@ interface RuntimeFrame {
   readonly sequence?: SequenceMatchValue;
   readonly period?: PeriodValue;
   readonly bucket?: TimeBucketValue;
-  /** Top-level v1 conditions keep candidate-range membership semantics. */
+  /** Overrides the activity range for a Window source collection only. */
+  readonly windowRange?: FilterEvaluationRange;
+  /** Marks the document root; only root-level Filter time uses it. */
   readonly topLevel: boolean;
   readonly legacyFieldEvaluation?: boolean;
 }
@@ -151,6 +153,8 @@ interface RuntimeContext {
   readonly options: Required<FilterEvaluationOptions>;
   readonly pages: readonly FilterEvaluationEntity[];
   readonly events: readonly FilterEvaluationEntity[];
+  readonly readPages: readonly FilterEvaluationEntity[];
+  readonly readEvents: readonly FilterEvaluationEntity[];
   readonly sessions: readonly FilterEvaluationEntity[];
   readonly visitors: readonly FilterEvaluationEntity[];
   readonly candidatePages: readonly FilterEvaluationEntity[];
@@ -211,14 +215,32 @@ interface RuntimeContext {
     string,
     readonly FilterEvaluationEntity[]
   >;
-  readonly populationActivitiesBySession: ReadonlyMap<
+  readonly readPagesById: ReadonlyMap<
     string,
     readonly FilterEvaluationEntity[]
   >;
-  readonly populationActivitiesByVisitor: ReadonlyMap<
+  readonly readEventsById: ReadonlyMap<
     string,
     readonly FilterEvaluationEntity[]
   >;
+  readonly readPagesBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly readEventsBySession: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly readPagesByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly readEventsByVisitor: ReadonlyMap<
+    string,
+    readonly FilterEvaluationEntity[]
+  >;
+  readonly filterRangeExplicit: boolean;
+  readonly filterRangeEmpty: boolean;
   readonly sequenceMatchesLimit: number;
   readonly sequenceWorkLimit: number;
   readonly sequenceStats: { matches: number; work: number };
@@ -347,7 +369,7 @@ function createRuntimeContext(
   options: FilterEvaluationOptions,
   analysis: AnalyzedFilterDocument,
 ): RuntimeContext {
-  const evaluationRange = options.fullHistory
+  const readRange = options.fullHistory
     ? {
         startMs: dataset.coverageRange.startMs,
         endExclusiveMs: Math.min(
@@ -355,68 +377,60 @@ function createRuntimeContext(
           options.capturedAtMs + 1,
         ),
       }
-    : (options.evaluationRange ?? options.candidateRange);
-  const populationRange = options.populationFullHistory
-    ? {
-        startMs: dataset.coverageRange.startMs,
-        endExclusiveMs: Math.min(
-          dataset.coverageRange.endExclusiveMs,
-          options.populationRange?.endExclusiveMs ?? options.capturedAtMs + 1,
-        ),
-      }
-    : (options.populationRange ?? options.candidateRange);
+    : (options.readRange ?? options.candidateRange);
+  const filterRange = options.filterRange ?? readRange;
   if (
-    !Number.isSafeInteger(evaluationRange.startMs) ||
-    !Number.isSafeInteger(evaluationRange.endExclusiveMs) ||
-    evaluationRange.endExclusiveMs <= evaluationRange.startMs
+    !Number.isSafeInteger(readRange.startMs) ||
+    !Number.isSafeInteger(readRange.endExclusiveMs) ||
+    readRange.endExclusiveMs <= readRange.startMs
   )
-    throw new TypeError("invalid_evaluation_range");
+    throw new TypeError("invalid_read_range");
   if (
-    evaluationRange.startMs < dataset.coverageRange.startMs ||
-    evaluationRange.endExclusiveMs > dataset.coverageRange.endExclusiveMs
+    readRange.startMs < dataset.coverageRange.startMs ||
+    readRange.endExclusiveMs > dataset.coverageRange.endExclusiveMs
   )
     throw new TypeError("filter_evaluation_range_unavailable");
   if (
-    populationRange.startMs < dataset.coverageRange.startMs ||
-    populationRange.endExclusiveMs > dataset.coverageRange.endExclusiveMs
-  ) {
-    if (!options.populationEmpty)
-      throw new TypeError("filter_evaluation_range_unavailable");
-  }
+    !options.filterRangeEmpty &&
+    (!Number.isSafeInteger(filterRange.startMs) ||
+      !Number.isSafeInteger(filterRange.endExclusiveMs) ||
+      filterRange.endExclusiveMs < filterRange.startMs)
+  )
+    throw new TypeError("invalid_filter_range");
   const normalizedOptions: Required<FilterEvaluationOptions> = {
     ...options,
-    evaluationRange,
-    populationRange,
-    populationFullHistory: options.populationFullHistory ?? false,
-    populationEmpty: options.populationEmpty ?? false,
+    filterRange,
+    filterRangeEmpty: options.filterRangeEmpty ?? false,
+    readRange,
     fullHistory: options.fullHistory ?? false,
     maxActivities: options.maxActivities ?? DEFAULT_MAX_ACTIVITIES,
     maxSequenceMatches:
       options.maxSequenceMatches ?? DEFAULT_MAX_SEQUENCE_MATCHES,
     maxSequenceWork: options.maxSequenceWork ?? DEFAULT_MAX_SEQUENCE_WORK,
   };
-  const pages = [...dataset.pages]
-    .filter((record) => inRange(record.time, evaluationRange))
+  const readPages = [...dataset.pages]
+    .filter((record) => inRange(record.time, readRange))
     .sort(compareActivity);
-  const events = [...dataset.events]
-    .filter((record) => inRange(record.time, evaluationRange))
+  const readEvents = [...dataset.events]
+    .filter((record) => inRange(record.time, readRange))
     .sort(compareActivity);
-  if (pages.length + events.length > normalizedOptions.maxActivities)
+  if (readPages.length + readEvents.length > normalizedOptions.maxActivities)
     throw new TypeError("filter_activity_limit_exceeded");
+  const expressionRange = options.filterRange ? filterRange : readRange;
+  const pages = options.filterRangeEmpty
+    ? []
+    : readPages.filter((record) => inRange(record.time, expressionRange));
+  const events = options.filterRangeEmpty
+    ? []
+    : readEvents.filter((record) => inRange(record.time, expressionRange));
   const candidatePages = dataset.pages.filter((record) =>
     inRange(record.time, options.candidateRange),
   );
   const candidateEvents = dataset.events.filter((record) =>
     inRange(record.time, options.candidateRange),
   );
-  const populationPages = normalizedOptions.populationEmpty
-    ? []
-    : dataset.pages.filter((record) => inRange(record.time, populationRange));
-  const populationEvents = normalizedOptions.populationEmpty
-    ? []
-    : dataset.events.filter((record) => inRange(record.time, populationRange));
   const workloadIds = new Set(
-    [...pages, ...events, ...populationPages, ...populationEvents].map(
+    [...readPages, ...readEvents, ...candidatePages, ...candidateEvents].map(
       (record) => `${record.kind}:${record.id}`,
     ),
   );
@@ -425,12 +439,12 @@ function createRuntimeContext(
   const evaluationRecords = [...pages, ...events].sort(compareActivity);
   const sessions = dataset.sessions
     ? dataset.sessions
-        .filter((record) => inRange(record.time, evaluationRange))
+        .filter((record) => inRange(record.time, expressionRange))
         .sort(compareEntity)
     : buildAggregateEntities(evaluationRecords, "session");
   const visitors = dataset.visitors
     ? dataset.visitors
-        .filter((record) => inRange(record.time, evaluationRange))
+        .filter((record) => inRange(record.time, expressionRange))
         .sort(compareEntity)
     : buildAggregateEntities(evaluationRecords, "visitor");
   return {
@@ -439,6 +453,8 @@ function createRuntimeContext(
     options: normalizedOptions,
     pages,
     events,
+    readPages,
+    readEvents,
     sessions,
     visitors,
     candidatePages,
@@ -468,16 +484,14 @@ function createRuntimeContext(
       candidateEvents,
       "visitorId",
     ),
-    populationActivitiesBySession: indexActivities(
-      populationPages,
-      populationEvents,
-      "sessionId",
-    ),
-    populationActivitiesByVisitor: indexActivities(
-      populationPages,
-      populationEvents,
-      "visitorId",
-    ),
+    readPagesById: indexEntities(readPages, "id"),
+    readEventsById: indexEntities(readEvents, "id"),
+    readPagesBySession: indexEntities(readPages, "sessionId"),
+    readEventsBySession: indexEntities(readEvents, "sessionId"),
+    readPagesByVisitor: indexEntities(readPages, "visitorId"),
+    readEventsByVisitor: indexEntities(readEvents, "visitorId"),
+    filterRangeExplicit: options.filterRange !== undefined,
+    filterRangeEmpty: options.filterRangeEmpty ?? false,
     sequenceMatchesLimit: normalizedOptions.maxSequenceMatches,
     sequenceWorkLimit: normalizedOptions.maxSequenceWork,
     sequenceStats: { matches: 0, work: 0 },
@@ -602,43 +616,72 @@ function rootCollection(
   context: RuntimeContext,
 ): readonly FilterEvaluationEntity[] {
   const anchor = frame.anchor ?? currentEntity(frame);
+  const readWindow = frame.windowRange !== undefined;
+  const pages = readWindow ? context.readPages : context.pages;
+  const events = readWindow ? context.readEvents : context.events;
+  const pagesById = readWindow ? context.readPagesById : context.pagesById;
+  const eventsById = readWindow ? context.readEventsById : context.eventsById;
+  const pagesBySession = readWindow
+    ? context.readPagesBySession
+    : context.pagesBySession;
+  const eventsBySession = readWindow
+    ? context.readEventsBySession
+    : context.eventsBySession;
+  const pagesByVisitor = readWindow
+    ? context.readPagesByVisitor
+    : context.pagesByVisitor;
+  const eventsByVisitor = readWindow
+    ? context.readEventsByVisitor
+    : context.eventsByVisitor;
   const source =
     entity === "page"
-      ? context.pages
+      ? pages
       : entity === "event"
-        ? context.events
+        ? events
         : entity === "session"
           ? context.sessions
           : context.visitors;
-  if (!anchor) return source;
+  if (!anchor)
+    return frame.windowRange
+      ? source.filter((item) => inRange(item.time, frame.windowRange!))
+      : source;
+  let result: readonly FilterEvaluationEntity[];
   if (anchor.kind === "visitor") {
     if (entity === "visitor") return indexed(context.visitorsById, anchor.id);
     if (entity === "session")
       return indexed(context.sessionsByVisitor, anchor.id);
-    return entity === "page"
-      ? indexed(context.pagesByVisitor, anchor.id)
-      : indexed(context.eventsByVisitor, anchor.id);
-  }
-  if (anchor.kind === "session") {
+    result =
+      entity === "page"
+        ? indexed(pagesByVisitor, anchor.id)
+        : indexed(eventsByVisitor, anchor.id);
+  } else if (anchor.kind === "session") {
     if (entity === "visitor")
       return indexed(context.visitorsById, anchor.visitorId);
     if (entity === "session") return indexed(context.sessionsById, anchor.id);
-    return entity === "page"
-      ? indexed(context.pagesBySession, anchor.id)
-      : indexed(context.eventsBySession, anchor.id);
+    result =
+      entity === "page"
+        ? indexed(pagesBySession, anchor.id)
+        : indexed(eventsBySession, anchor.id);
+  } else {
+    // A top-level Event scope uses its Session as the natural local anchor.
+    if (entity === "visitor")
+      return indexed(context.visitorsById, anchor.visitorId);
+    if (entity === "session")
+      return indexed(context.sessionsById, anchor.sessionId);
+    if (anchor.sessionId)
+      result =
+        entity === "page"
+          ? indexed(pagesBySession, anchor.sessionId)
+          : indexed(eventsBySession, anchor.sessionId);
+    else
+      result =
+        entity === "page"
+          ? indexed(pagesById, anchor.id)
+          : indexed(eventsById, anchor.id);
   }
-  // A top-level Event scope uses its Session as the natural local anchor.
-  if (entity === "visitor")
-    return indexed(context.visitorsById, anchor.visitorId);
-  if (entity === "session")
-    return indexed(context.sessionsById, anchor.sessionId);
-  if (anchor.sessionId)
-    return entity === "page"
-      ? indexed(context.pagesBySession, anchor.sessionId)
-      : indexed(context.eventsBySession, anchor.sessionId);
-  return entity === "page"
-    ? indexed(context.pagesById, anchor.id)
-    : indexed(context.eventsById, anchor.id);
+  return frame.windowRange
+    ? result.filter((item) => inRange(item.time, frame.windowRange!))
+    : result;
 }
 
 function elapsedMilliseconds(amount: number, unit: string): number {
@@ -963,8 +1006,6 @@ function targetValue(
       return buckets;
     }
     case "window": {
-      const source = targetValue(target.collection, frame, context);
-      if (!Array.isArray(source)) throw new TypeError("expected_collection");
       const anchorValue = targetValue(target.anchor, frame, context);
       const anchor = isRuntimeEntity(anchorValue)
         ? (anchorValue.time ?? null)
@@ -977,6 +1018,12 @@ function targetValue(
         anchor +
         elapsedMilliseconds(target.endOffset.amount, target.endOffset.unit);
       if (start >= end) throw new TypeError("invalid_window_range");
+      const source = targetValue(
+        target.collection,
+        { ...frame, windowRange: { startMs: start, endExclusiveMs: end } },
+        context,
+      );
+      if (!Array.isArray(source)) throw new TypeError("expected_collection");
       return source.filter((item) => {
         const time =
           item && typeof item === "object" && "time" in item
@@ -1276,7 +1323,9 @@ function conditionMatches(
 ): boolean {
   const resolution = resolveConditionSubjects(condition.target, frame, context);
   const legacyCandidate =
-    frame.topLevel && isLegacyFilterTarget(condition.target);
+    frame.topLevel &&
+    !context.filterRangeExplicit &&
+    isLegacyFilterTarget(condition.target);
   const legacy = legacyCandidate;
   if (resolution.mode === "existential")
     return resolution.subjects.some((subject) =>
@@ -1346,47 +1395,34 @@ function activitiesForAnchor(
   context: RuntimeContext,
   activityKinds: ReadonlySet<"page" | "event">,
   candidate: boolean,
-  population = false,
 ): readonly FilterEvaluationEntity[] {
   if (!anchor) return [];
   if (activityKinds.size === 0) return [];
   const allActivities = activityKinds.has("page") && activityKinds.has("event");
   if (allActivities) {
-    const visitorIndex = population
-      ? context.populationActivitiesByVisitor
-      : candidate
-        ? context.candidateActivitiesByVisitor
-        : context.activitiesByVisitor;
-    const sessionIndex = population
-      ? context.populationActivitiesBySession
-      : candidate
-        ? context.candidateActivitiesBySession
-        : context.activitiesBySession;
+    const visitorIndex = candidate
+      ? context.candidateActivitiesByVisitor
+      : context.activitiesByVisitor;
+    const sessionIndex = candidate
+      ? context.candidateActivitiesBySession
+      : context.activitiesBySession;
     if (anchor.kind === "session") return indexed(sessionIndex, anchor.id);
     if (anchor.kind === "visitor") return indexed(visitorIndex, anchor.id);
     if (anchor.sessionId) return indexed(sessionIndex, anchor.sessionId);
     return [anchor];
   }
-  const pageIndex = population
-    ? new Map<string, readonly FilterEvaluationEntity[]>()
-    : candidate
-      ? context.candidatePagesBySession
-      : context.pagesBySession;
-  const eventIndex = population
-    ? new Map<string, readonly FilterEvaluationEntity[]>()
-    : candidate
-      ? context.candidateEventsBySession
-      : context.eventsBySession;
-  const pageVisitorIndex = population
-    ? new Map<string, readonly FilterEvaluationEntity[]>()
-    : candidate
-      ? context.candidatePagesByVisitor
-      : context.pagesByVisitor;
-  const eventVisitorIndex = population
-    ? new Map<string, readonly FilterEvaluationEntity[]>()
-    : candidate
-      ? context.candidateEventsByVisitor
-      : context.eventsByVisitor;
+  const pageIndex = candidate
+    ? context.candidatePagesBySession
+    : context.pagesBySession;
+  const eventIndex = candidate
+    ? context.candidateEventsBySession
+    : context.eventsBySession;
+  const pageVisitorIndex = candidate
+    ? context.candidatePagesByVisitor
+    : context.pagesByVisitor;
+  const eventVisitorIndex = candidate
+    ? context.candidateEventsByVisitor
+    : context.eventsByVisitor;
   let pages: readonly FilterEvaluationEntity[] = [];
   let events: readonly FilterEvaluationEntity[] = [];
   if (anchor.kind === "session") {
@@ -1426,7 +1462,6 @@ function resolveConditionSubjects(
         context,
         new Set(["page", "event"]),
         false,
-        true,
       ),
     };
   }
@@ -1441,7 +1476,7 @@ function resolveConditionSubjects(
         current,
         context,
         new Set(["page", "event"]),
-        true,
+        !context.filterRangeExplicit,
       ),
     };
   }
@@ -1664,7 +1699,9 @@ function scopeCandidates(context: RuntimeContext): FilterEvaluationEntity[] {
       compareActivity,
     );
   }
-  const records = [...context.candidatePages, ...context.candidateEvents];
+  const records = context.filterRangeExplicit
+    ? [...context.pages, ...context.events]
+    : [...context.candidatePages, ...context.candidateEvents];
   const candidates = buildAggregateEntities(records, context.options.scope);
   const evaluationEntities =
     context.options.scope === "session" ? context.sessions : context.visitors;
@@ -1690,6 +1727,12 @@ export function evaluateFilterDocument(
     analyticsFilterRegistry,
   );
   validateFilterRelationDomains(normalized, options.scope, analysis);
+  if (options.filterRangeEmpty)
+    return {
+      matchingScopeEntityIds: new Set(),
+      matchingVisitIds: new Set(),
+      matchingEventIds: new Set(),
+    };
   const context = createRuntimeContext(dataset, options, analysis);
   const matchingScopeEntityIds = new Set<string>();
   const matchingVisitIds = new Set<string>();

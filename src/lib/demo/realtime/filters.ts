@@ -72,14 +72,27 @@ export function parseDemoFilters(
       : requestedScope === "auto"
         ? undefined
         : requestedScope);
-  const evaluationStartMs = Number(params.evaluationFromMs);
-  const evaluationEndExclusiveMs = Number(params.evaluationToMs);
-  const hasEvaluationRange =
-    params.evaluationFromMs !== undefined &&
-    params.evaluationToMs !== undefined &&
-    Number.isSafeInteger(evaluationStartMs) &&
-    Number.isSafeInteger(evaluationEndExclusiveMs) &&
-    evaluationEndExclusiveMs > evaluationStartMs;
+  const readStartMs = Number(params.readFromMs);
+  const readEndExclusiveMs = Number(params.readToMs);
+  const hasReadRange =
+    params.readFromMs !== undefined &&
+    params.readToMs !== undefined &&
+    Number.isSafeInteger(readStartMs) &&
+    Number.isSafeInteger(readEndExclusiveMs) &&
+    readEndExclusiveMs > readStartMs;
+  const hasFilterRange = params.__filterRangeExplicit === "true";
+  const filterStartMs = Number(params.filterFromMs);
+  const filterEndExclusiveMs = Number(params.filterToMs);
+  const filterRange = hasFilterRange
+    ? {
+        ...(Number.isSafeInteger(filterStartMs)
+          ? { startMs: filterStartMs }
+          : {}),
+        ...(Number.isSafeInteger(filterEndExclusiveMs)
+          ? { endExclusiveMs: filterEndExclusiveMs }
+          : {}),
+      }
+    : undefined;
   const capturedAtMs = Number(params.nowMs);
   const fullHistory = params.__filterFullHistory === "true";
   const candidateStartMs = Number(params.from);
@@ -104,11 +117,13 @@ export function parseDemoFilters(
     filterDocument: document,
     ...(siteId ? { siteId } : {}),
     ...(candidateRange ? { candidateRange } : {}),
-    ...(hasEvaluationRange
+    ...(filterRange ? { filterRange } : {}),
+    ...(params.__filterRangeEmpty === "true" ? { filterRangeEmpty: true } : {}),
+    ...(hasReadRange
       ? {
-          evaluationRange: {
-            startMs: evaluationStartMs,
-            endExclusiveMs: evaluationEndExclusiveMs,
+          readRange: {
+            startMs: readStartMs,
+            endExclusiveMs: readEndExclusiveMs,
           },
         }
       : {}),

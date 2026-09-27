@@ -17,18 +17,18 @@ export interface DemoQueryFilters {
     readonly startMs: number;
     readonly endExclusiveMs: number;
   };
-  /** Optional historical window for Core/Relation evaluation. */
-  evaluationRange?: {
+  /** Explicit evaluation domain derived from top-level DSL `time`. */
+  filterRange?: {
+    readonly startMs?: number;
+    readonly endExclusiveMs?: number;
+  };
+  filterRangeEmpty?: boolean;
+  /** Source range required by reducers, windows, and relations. */
+  readRange?: {
     readonly startMs: number;
     readonly endExclusiveMs: number;
   };
-  /** Scope population selection derived from top-level DSL `time`. */
-  populationRange?: {
-    readonly startMs: number;
-    readonly endExclusiveMs: number;
-  };
-  populationFullHistory?: boolean;
-  /** Evaluate unbounded positional and relation expressions over source coverage. */
+  /** Read complete retained history for unbounded targets. */
   fullHistory?: boolean;
   reportingTimeZone?: string;
   capturedAtMs?: number;
