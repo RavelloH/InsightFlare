@@ -1322,18 +1322,32 @@ function conditionMatches(
   context: RuntimeContext,
 ): boolean {
   const resolution = resolveConditionSubjects(condition.target, frame, context);
-  const legacyCandidate =
+  // Top-level legacy fields retain Query Range facts only when the Filter has
+  // no explicit time domain. With explicit Filter time, their subjects carry
+  // facts computed from that domain and must use `fields`.
+  const useCandidateFields =
     frame.topLevel &&
     !context.filterRangeExplicit &&
     isLegacyFilterTarget(condition.target);
-  const legacy = legacyCandidate;
   if (resolution.mode === "existential")
     return resolution.subjects.some((subject) =>
-      conditionMatchesOnEntity(condition, subject, frame, context, legacy),
+      conditionMatchesOnEntity(
+        condition,
+        subject,
+        frame,
+        context,
+        useCandidateFields,
+      ),
     );
   const subject = resolution.subjects[0];
   return subject
-    ? conditionMatchesOnEntity(condition, subject, frame, context, legacy)
+    ? conditionMatchesOnEntity(
+        condition,
+        subject,
+        frame,
+        context,
+        useCandidateFields,
+      )
     : false;
 }
 
@@ -1466,8 +1480,8 @@ function resolveConditionSubjects(
     };
   }
   const domain = conditionSubjectDomain(target);
-  const legacyCandidate = frame.topLevel && isLegacyFilterTarget(target);
-  if (legacyCandidate) {
+  const topLevelLegacyTarget = frame.topLevel && isLegacyFilterTarget(target);
+  if (topLevelLegacyTarget) {
     if (context.options.scope === "event")
       return { mode: "direct", subjects: [current] };
     return {

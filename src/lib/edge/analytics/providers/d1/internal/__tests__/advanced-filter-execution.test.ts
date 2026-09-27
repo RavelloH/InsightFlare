@@ -1485,6 +1485,118 @@ describe("D1 advanced filter execution", () => {
     expect(beforeCoverage.mock).toEqual(beforeCoverage.d1);
   });
 
+  it("uses Filter Range Visitor facts for the full Filter and keeps D1/Mock aligned", async () => {
+    const filterDsl =
+      'time between ["1970-01-01T00:00:01.000Z", "1970-01-01T00:00:03.000Z"] AND visitor.sessions gte 2';
+    const candidateRange = { startMs: 10_000, endExclusiveMs: 20_000 };
+
+    const filterRangeOneSession = await evaluateSharedFixture({
+      activities: [
+        {
+          visitId: "visitor-filter-one",
+          sessionId: "filter-session-a",
+          visitorId: "visitor-range-a",
+          pageTimeMs: 1_100,
+          pathname: "/filter",
+        },
+        {
+          visitId: "visitor-query-one",
+          sessionId: "query-session-a",
+          visitorId: "visitor-range-a",
+          pageTimeMs: 15_000,
+          pathname: "/query",
+        },
+        {
+          visitId: "visitor-query-two",
+          sessionId: "query-session-b",
+          visitorId: "visitor-range-a",
+          pageTimeMs: 16_000,
+          pathname: "/query",
+        },
+      ],
+      filterDsl,
+      scope: "visitor",
+      candidateRange,
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(filterRangeOneSession.d1).toEqual([]);
+    expect(filterRangeOneSession.mock).toEqual(filterRangeOneSession.d1);
+    expect(filterRangeOneSession.mockVisitIds).toEqual([]);
+
+    const filterRangeTwoSessions = await evaluateSharedFixture({
+      activities: [
+        {
+          visitId: "visitor-filter-one",
+          sessionId: "filter-session-a",
+          visitorId: "visitor-range-b",
+          pageTimeMs: 1_100,
+          pathname: "/filter",
+        },
+        {
+          visitId: "visitor-filter-two",
+          sessionId: "filter-session-b",
+          visitorId: "visitor-range-b",
+          pageTimeMs: 1_200,
+          pathname: "/filter",
+        },
+        {
+          visitId: "visitor-query-one",
+          sessionId: "query-session-a",
+          visitorId: "visitor-range-b",
+          pageTimeMs: 15_000,
+          pathname: "/query",
+        },
+      ],
+      filterDsl,
+      scope: "visitor",
+      candidateRange,
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+    expect(filterRangeTwoSessions.d1).toEqual(["visitor-range-b"]);
+    expect(filterRangeTwoSessions.mock).toEqual(filterRangeTwoSessions.d1);
+    expect(filterRangeTwoSessions.mockVisitIds).toEqual(["visitor-query-one"]);
+  });
+
+  it("uses Filter Range Session facts instead of Query Range candidates", async () => {
+    const result = await evaluateSharedFixture({
+      activities: [
+        {
+          visitId: "session-filter-one",
+          sessionId: "session-range-a",
+          visitorId: "visitor-range-a",
+          pageTimeMs: 1_100,
+          pathname: "/filter-one",
+        },
+        {
+          visitId: "session-filter-two",
+          sessionId: "session-range-a",
+          visitorId: "visitor-range-a",
+          pageTimeMs: 1_200,
+          pathname: "/filter-two",
+        },
+        {
+          visitId: "session-query-one",
+          sessionId: "session-range-a",
+          visitorId: "visitor-range-a",
+          pageTimeMs: 15_000,
+          pathname: "/query",
+        },
+      ],
+      filterDsl:
+        'time between ["1970-01-01T00:00:01.000Z", "1970-01-01T00:00:03.000Z"] AND session.views eq 2 AND session.durationMs eq 10',
+      scope: "session",
+      candidateRange: { startMs: 10_000, endExclusiveMs: 20_000 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 20_000,
+    });
+
+    expect(result.d1).toEqual(["session-range-a"]);
+    expect(result.mock).toEqual(result.d1);
+    expect(result.mockVisitIds).toEqual(["session-query-one"]);
+  });
+
   it("keeps DST calendar bucket counts, periods, and empty reducers consistent across providers", async () => {
     for (const timestamp of [
       Date.parse("2026-03-08T20:00:00Z"),

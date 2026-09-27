@@ -1781,6 +1781,195 @@ describe("filter evaluator", () => {
     ).toEqual(new Set(["session-a"]));
   });
 
+  it("uses Filter Range aggregate fields when an explicit Filter time is present", () => {
+    const range = {
+      startMs: 0,
+      endExclusiveMs: 40,
+    };
+    const candidateRange = {
+      startMs: 50,
+      endExclusiveMs: 80,
+    };
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        {
+          ...page("visitor-filter-one", 10, "filter-session-a", "visitor-a"),
+          fields: { "page.path": "/history", "visitor.sessions": 1 },
+          candidateFields: {
+            "page.path": "/candidate",
+            "visitor.sessions": 2,
+          },
+        },
+        {
+          ...page("visitor-query-one", 60, "query-session-a", "visitor-a"),
+          fields: { "page.path": "/candidate", "visitor.sessions": 1 },
+          candidateFields: {
+            "page.path": "/candidate",
+            "visitor.sessions": 2,
+          },
+        },
+        {
+          ...page("visitor-query-two", 70, "query-session-b", "visitor-a"),
+          fields: { "page.path": "/candidate", "visitor.sessions": 1 },
+          candidateFields: {
+            "page.path": "/candidate",
+            "visitor.sessions": 2,
+          },
+        },
+      ],
+      events: [],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const document = parseFilterDsl(
+      'time between ["1970-01-01T00:00:00.000Z", "1970-01-01T00:00:00.040Z"] AND visitor.sessions gte 2',
+      analyticsFilterRegistry,
+    );
+
+    expect(
+      evaluateFilterDocument(document, dataset, {
+        scope: "visitor",
+        candidateRange,
+        filterRange: range,
+        readRange: { startMs: 0, endExclusiveMs: 80 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      }).matchingScopeEntityIds,
+    ).toEqual(new Set());
+
+    const twoFilterSessions: FilterEvaluationDataset = {
+      ...dataset,
+      pages: [
+        {
+          ...page("visitor-filter-one", 10, "filter-session-a", "visitor-a"),
+          fields: { "page.path": "/history", "visitor.sessions": 2 },
+          candidateFields: {
+            "page.path": "/candidate",
+            "visitor.sessions": 1,
+          },
+        },
+        {
+          ...page("visitor-filter-two", 20, "filter-session-b", "visitor-a"),
+          fields: { "page.path": "/history", "visitor.sessions": 2 },
+          candidateFields: {
+            "page.path": "/candidate",
+            "visitor.sessions": 1,
+          },
+        },
+        {
+          ...page("visitor-query-one", 60, "query-session-a", "visitor-a"),
+          fields: { "page.path": "/candidate", "visitor.sessions": 2 },
+          candidateFields: {
+            "page.path": "/candidate",
+            "visitor.sessions": 1,
+          },
+        },
+      ],
+    };
+
+    expect(
+      evaluateFilterDocument(document, twoFilterSessions, {
+        scope: "visitor",
+        candidateRange,
+        filterRange: range,
+        readRange: { startMs: 0, endExclusiveMs: 80 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      }).matchingScopeEntityIds,
+    ).toEqual(new Set(["visitor-a"]));
+  });
+
+  it("keeps Query Range aggregate facts for legacy fields without explicit Filter time", () => {
+    const result = evaluateFilterDocument(
+      parseFilterDsl("visitor.sessions eq 2", analyticsFilterRegistry),
+      {
+        pages: [
+          {
+            ...page("query-one", 60, "session-a", "visitor-a"),
+            fields: { "page.path": "/candidate", "visitor.sessions": 1 },
+            candidateFields: {
+              "page.path": "/candidate",
+              "visitor.sessions": 2,
+            },
+          },
+        ],
+        events: [],
+        coverageRange: { startMs: 0, endExclusiveMs: 100 },
+      },
+      {
+        scope: "visitor",
+        candidateRange: { startMs: 50, endExclusiveMs: 80 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["visitor-a"]));
+  });
+
+  it("uses Filter Range facts for Session views and duration together", () => {
+    const result = evaluateFilterDocument(
+      parseFilterDsl(
+        'time between ["1970-01-01T00:00:00.000Z", "1970-01-01T00:00:00.040Z"] AND session.views eq 2 AND session.durationMs eq 10',
+        analyticsFilterRegistry,
+      ),
+      {
+        pages: [
+          {
+            ...page("session-filter-one", 10, "session-a", "visitor-a"),
+            fields: {
+              "page.path": "/history",
+              "session.views": 2,
+              "session.durationMs": 10,
+            },
+            candidateFields: {
+              "page.path": "/candidate",
+              "session.views": 1,
+              "session.durationMs": 5,
+            },
+          },
+          {
+            ...page("session-filter-two", 20, "session-a", "visitor-a"),
+            fields: {
+              "page.path": "/history",
+              "session.views": 2,
+              "session.durationMs": 10,
+            },
+            candidateFields: {
+              "page.path": "/candidate",
+              "session.views": 1,
+              "session.durationMs": 5,
+            },
+          },
+          {
+            ...page("session-query-one", 60, "session-a", "visitor-a"),
+            fields: {
+              "page.path": "/candidate",
+              "session.views": 2,
+              "session.durationMs": 10,
+            },
+            candidateFields: {
+              "page.path": "/candidate",
+              "session.views": 1,
+              "session.durationMs": 5,
+            },
+          },
+        ],
+        events: [],
+        coverageRange: { startMs: 0, endExclusiveMs: 100 },
+      },
+      {
+        scope: "session",
+        candidateRange: { startMs: 50, endExclusiveMs: 80 },
+        filterRange: { startMs: 0, endExclusiveMs: 40 },
+        readRange: { startMs: 0, endExclusiveMs: 80 },
+        reportingTimeZone: "UTC",
+        capturedAtMs: 80,
+      },
+    );
+
+    expect(result.matchingScopeEntityIds).toEqual(new Set(["session-a"]));
+  });
+
   it("evaluates relative anchors from the fixed request clock and candidate range", () => {
     const result = evaluate(
       '(@now eq "1970-01-01T00:00:00.080Z" AND @now-10ms eq "1970-01-01T00:00:00.070Z") AND @range.start eq "1970-01-01T00:00:00.000Z" AND @range.end eq "1970-01-01T00:00:00.100Z"',

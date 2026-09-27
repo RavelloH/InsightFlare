@@ -540,7 +540,15 @@ function applyCanonicalDemoFilters(
       ...evaluationDataset,
       visits: factVisits,
     });
-    const candidateFacts = buildCanonicalDemoFacts(dataset);
+    const candidateVisits = dataset.visits.filter(
+      (visit) =>
+        visit.startedAt >= candidateRange.startMs &&
+        visit.startedAt < candidateRange.endExclusiveMs,
+    );
+    const candidateFacts = buildCanonicalDemoFacts({
+      ...dataset,
+      visits: candidateVisits,
+    });
     const fieldsFor = (
       visit: DemoFactDataset["visits"][number],
       facts: CanonicalDemoFacts,
