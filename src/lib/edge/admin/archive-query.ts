@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   canAccessMemberSite,
   parseMemberSiteIdsJson,
@@ -47,8 +48,13 @@ async function assertSiteAccess(
   siteId: string,
   userId: string,
 ): Promise<boolean> {
-  const row = await env.DB.prepare(
-    `
+  const row = await createDatabaseRuntime(env.DB).first<{
+    id: string;
+    ownerUserId: string;
+    role: string | null;
+    siteIdsJson: string | null;
+  }>({
+    sql: `
       SELECT
         s.id,
         t.owner_user_id AS ownerUserId,
@@ -60,14 +66,9 @@ async function assertSiteAccess(
       WHERE s.id = ?
       LIMIT 1
     `,
-  )
-    .bind(userId, siteId)
-    .first<{
-      id: string;
-      ownerUserId: string;
-      role: string | null;
-      siteIdsJson: string | null;
-    }>();
+    bindings: [userId, siteId],
+    tag: "admin.sites.first",
+  });
   if (!row?.id) return false;
   if (row.ownerUserId === userId) return true;
   if (row.role === "owner" || row.role === "admin") return true;
@@ -130,8 +131,18 @@ export async function handlePrivateArchiveManifest(
     return badRequest("Invalid time window");
   }
 
-  const result = await env.DB.prepare(
-    `
+  const result = await createDatabaseRuntime(env.DB).all<{
+    archiveKey: string;
+    siteId: string;
+    startHour: number;
+    endHour: number;
+    granularity: string;
+    format: string;
+    rowCount: number;
+    sizeBytes: number;
+    createdAt: number;
+  }>({
+    sql: `
       SELECT
         archive_key AS archiveKey,
         site_id AS siteId,
@@ -148,19 +159,9 @@ export async function handlePrivateArchiveManifest(
         AND start_hour <= ?
       ORDER BY start_hour ASC
     `,
-  )
-    .bind(siteId, window.fromHour, window.toHour)
-    .all<{
-      archiveKey: string;
-      siteId: string;
-      startHour: number;
-      endHour: number;
-      granularity: string;
-      format: string;
-      rowCount: number;
-      sizeBytes: number;
-      createdAt: number;
-    }>();
+    bindings: [siteId, window.fromHour, window.toHour],
+    tag: "admin.archive_objects.all",
+  });
 
   const files = result.results.map((row) => ({
     ...row,
@@ -197,16 +198,20 @@ export async function handlePrivateArchiveFile(
     return badRequest("Missing key");
   }
 
-  const row = await env.DB.prepare(
-    `
+  const row = await createDatabaseRuntime(env.DB).first<{
+    archiveKey: string;
+    format: string;
+    siteId: string;
+  }>({
+    sql: `
       SELECT archive_key AS archiveKey, format, site_id AS siteId
       FROM archive_objects
       WHERE archive_key = ?
       LIMIT 1
     `,
-  )
-    .bind(key)
-    .first<{ archiveKey: string; format: string; siteId: string }>();
+    bindings: [key],
+    tag: "admin.archive_objects.first",
+  });
   if (!row?.archiveKey) {
     return notFound("Archive object not found");
   }

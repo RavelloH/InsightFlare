@@ -1,4 +1,5 @@
 import { BlockingRulesValidationError } from "@/lib/blocking";
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   canManageSite,
   canManageTeam,
@@ -35,16 +36,16 @@ export async function ensurePublicSlugAvailable(
   excludeSiteId?: string,
 ): Promise<boolean> {
   const row = excludeSiteId
-    ? await env.DB.prepare(
-        "SELECT 1 AS ok FROM sites WHERE public_slug=? AND id<>? LIMIT 1",
-      )
-        .bind(slug, excludeSiteId)
-        .first<{ ok: number }>()
-    : await env.DB.prepare(
-        "SELECT 1 AS ok FROM sites WHERE public_slug=? LIMIT 1",
-      )
-        .bind(slug)
-        .first<{ ok: number }>();
+    ? await createDatabaseRuntime(env.DB).first<{ ok: number }>({
+        sql: "SELECT 1 AS ok FROM sites WHERE public_slug=? AND id<>? LIMIT 1",
+        bindings: [slug, excludeSiteId],
+        tag: "admin.sites.first",
+      })
+    : await createDatabaseRuntime(env.DB).first<{ ok: number }>({
+        sql: "SELECT 1 AS ok FROM sites WHERE public_slug=? LIMIT 1",
+        bindings: [slug],
+        tag: "admin.sites.first",
+      });
   return !row?.ok;
 }
 export async function createSiteWithDefaultSettings(
@@ -165,20 +166,20 @@ export async function handleSitesAdmin(
     if (!teamId) return bad("Missing teamId", undefined, req);
     if (!(await canReadTeam(env, a, teamId)))
       return forb("Team access denied", undefined, req);
-    const rows = await env.DB.prepare(
-      "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug,created_at AS createdAt,updated_at AS updatedAt FROM sites WHERE team_id=? ORDER BY created_at DESC",
-    )
-      .bind(teamId)
-      .all<{
-        id: string;
-        teamId: string;
-        name: string;
-        domain: string;
-        publicEnabled: number;
-        publicSlug: string | null;
-        createdAt: number;
-        updatedAt: number;
-      }>();
+    const rows = await createDatabaseRuntime(env.DB).all<{
+      id: string;
+      teamId: string;
+      name: string;
+      domain: string;
+      publicEnabled: number;
+      publicSlug: string | null;
+      createdAt: number;
+      updatedAt: number;
+    }>({
+      sql: "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug,created_at AS createdAt,updated_at AS updatedAt FROM sites WHERE team_id=? ORDER BY created_at DESC",
+      bindings: [teamId],
+      tag: "admin.sites.all",
+    });
     return jsonResponseFor(req, {
       ok: true,
       data: await filterReadableSitesForActor(env, a, teamId, rows.results),
@@ -225,18 +226,18 @@ export async function handleSitesAdmin(
     const siteId = clampString(String(body.siteId || ""), 120);
     const intent = clampString(String(body.intent || ""), 20);
     if (!siteId) return bad("siteId is required", undefined, req);
-    const e = await env.DB.prepare(
-      "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug FROM sites WHERE id=? LIMIT 1",
-    )
-      .bind(siteId)
-      .first<{
-        id: string;
-        teamId: string;
-        name: string;
-        domain: string;
-        publicEnabled: number;
-        publicSlug: string | null;
-      }>();
+    const e = await createDatabaseRuntime(env.DB).first<{
+      id: string;
+      teamId: string;
+      name: string;
+      domain: string;
+      publicEnabled: number;
+      publicSlug: string | null;
+    }>({
+      sql: "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug FROM sites WHERE id=? LIMIT 1",
+      bindings: [siteId],
+      tag: "admin.sites.first",
+    });
     if (!e) return nf("Site not found", undefined, req);
     if (!(await canManageTeam(env, a, e.teamId)))
       return forb("Only team owner can update sites", undefined, req);
@@ -324,11 +325,13 @@ export async function handleSiteConfigAdmin(
       body.config && typeof body.config === "object" ? body.config : {}
     ) as JsonRecord;
     try {
-      const site = await env.DB.prepare(
-        "SELECT domain FROM sites WHERE id=? LIMIT 1",
-      )
-        .bind(siteId)
-        .first<{ domain: string }>();
+      const site = await createDatabaseRuntime(env.DB).first<{
+        domain: string;
+      }>({
+        sql: "SELECT domain FROM sites WHERE id=? LIMIT 1",
+        bindings: [siteId],
+        tag: "admin.sites.first",
+      });
       if (!site?.domain) return nf("Site not found", undefined, req);
       const next = await upsertSiteTrackingConfig(env, siteId, {
         siteDomain: site.domain,

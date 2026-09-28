@@ -13,6 +13,7 @@ import {
   type SavedFilterDefinition,
   type SavedFilterPage,
 } from "@/lib/api-v1/contract/resources";
+import { createDatabaseRuntime } from "@/lib/db";
 import type { Env } from "@/lib/edge/types";
 import {
   decodePageCursor,
@@ -105,8 +106,8 @@ export function createSavedFilterApplicationService(
       return { ok: false, error: { code: "not_found" } };
     }
     try {
-      const row = await env.DB.prepare(
-        `SELECT sf.id, sf.name, sf.description,
+      const row = await createDatabaseRuntime(env.DB).first<SavedFilterRow>({
+        sql: `SELECT sf.id, sf.name, sf.description,
                 sf.scope_preference AS scopePreference,
                 sf.filter_dsl AS filterDsl, sf.filter_dsl_version AS filterDslVersion,
                 sf.created_at AS createdAt, sf.updated_at AS updatedAt
@@ -115,9 +116,9 @@ export function createSavedFilterApplicationService(
          WHERE sf.site_id = ? AND sf.id = ?
            AND sf.visibility = 'team' AND s.team_id = ?
          LIMIT 1`,
-      )
-        .bind(input.siteId, input.id, context.teamId)
-        .first<SavedFilterRow>();
+        bindings: [input.siteId, input.id, context.teamId],
+        tag: "api-v1.saved_filters.first",
+      });
       if (!row) return { ok: false, error: { code: "not_found" } };
       return { ok: true, value: toDefinition(row) };
     } catch (error) {
@@ -184,8 +185,8 @@ export function createSavedFilterApplicationService(
             input.page.limit + 1,
           ]
         : [input.siteId, context.teamId, input.page.limit + 1];
-      const rows = await env.DB.prepare(
-        `SELECT sf.id, sf.name, sf.description,
+      const rows = await createDatabaseRuntime(env.DB).all<SavedFilterRow>({
+        sql: `SELECT sf.id, sf.name, sf.description,
                 sf.scope_preference AS scopePreference,
                 sf.filter_dsl AS filterDsl, sf.filter_dsl_version AS filterDslVersion,
                 sf.created_at AS createdAt, sf.updated_at AS updatedAt
@@ -195,9 +196,9 @@ export function createSavedFilterApplicationService(
            ${cursorClause}
          ORDER BY sf.updated_at DESC, sf.id DESC
          LIMIT ?`,
-      )
-        .bind(...bindings)
-        .all<SavedFilterRow>();
+        bindings: [...bindings],
+        tag: "api-v1.saved_filters.all",
+      });
       const hasMore = rows.results.length > input.page.limit;
       const visibleRows = hasMore
         ? rows.results.slice(0, input.page.limit)

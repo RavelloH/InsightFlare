@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { canManageSite, canManageTeam } from "@/lib/edge/admin/access";
 import type { Actor } from "@/lib/edge/admin/auth";
 import { appNow } from "@/lib/edge/runtime/e2e-clock";
@@ -168,11 +169,11 @@ export async function getNotificationRule(
   env: Env,
   ruleId: string,
 ): Promise<NotificationRule | null> {
-  const row = await env.DB.prepare(
-    `SELECT ${RULE_SELECT} FROM notification_rules WHERE id=? LIMIT 1`,
-  )
-    .bind(ruleId)
-    .first<RuleRow>();
+  const row = await createDatabaseRuntime(env.DB).first<RuleRow>({
+    sql: `SELECT ${RULE_SELECT} FROM notification_rules WHERE id=? LIMIT 1`,
+    bindings: [ruleId],
+    tag: "notifications.notification_rules.first",
+  });
   return row ? mapNotificationRule(row) : null;
 }
 async function requireCanManageRuleScope(
@@ -262,17 +263,17 @@ export async function listNotificationRules(
     where.push("site_id = ?");
     bindings.push(filters.siteId);
   }
-  const rows = await env.DB.prepare(
-    `
+  const rows = await createDatabaseRuntime(env.DB).all<RuleRow>({
+    sql: `
       SELECT ${RULE_SELECT}
       FROM notification_rules
       ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
       ORDER BY updated_at DESC
       LIMIT 200
     `,
-  )
-    .bind(...bindings)
-    .all<RuleRow>();
+    bindings: [...bindings],
+    tag: "notifications.notification_rules.all",
+  });
   return rows.results.map(mapNotificationRule);
 }
 export async function updateNotificationRule(
@@ -379,8 +380,8 @@ export async function listDueNotificationRules(
   env: Env,
   now: number,
 ): Promise<NotificationRule[]> {
-  const rows = await env.DB.prepare(
-    `
+  const rows = await createDatabaseRuntime(env.DB).all<RuleRow>({
+    sql: `
       SELECT ${RULE_SELECT}
       FROM notification_rules
       WHERE enabled = 1
@@ -391,9 +392,9 @@ export async function listDueNotificationRules(
       ORDER BY next_run_at ASC
       LIMIT 100
     `,
-  )
-    .bind(now, now)
-    .all<RuleRow>();
+    bindings: [now, now],
+    tag: "notifications.notification_rules.all",
+  });
   return rows.results.map(mapNotificationRule);
 }
 export async function advanceNotificationRuleSchedule(
@@ -518,8 +519,14 @@ export async function resolveNotificationRecipients(
 > {
   if (rule.recipient.mode === "creator") {
     if (!rule.createdByUserId) return [];
-    const row = await env.DB.prepare(
-      `
+    const row = await createDatabaseRuntime(env.DB).first<{
+      id: string;
+      email: string;
+      preferencesJson: string;
+      preferredLocale?: string | null;
+      timeZone?: string | null;
+    }>({
+      sql: `
         SELECT
           id,
           email,
@@ -530,22 +537,22 @@ export async function resolveNotificationRecipients(
         WHERE id = ?
         LIMIT 1
       `,
-    )
-      .bind(rule.createdByUserId)
-      .first<{
-        id: string;
-        email: string;
-        preferencesJson: string;
-        preferredLocale?: string | null;
-        timeZone?: string | null;
-      }>();
+      bindings: [rule.createdByUserId],
+      tag: "notifications.users.first",
+    });
     return row ? [row] : [];
   }
   if (rule.recipient.mode === "users") {
     if (rule.recipient.userIds.length === 0) return [];
     const placeholders = rule.recipient.userIds.map(() => "?").join(", ");
-    const rows = await env.DB.prepare(
-      `
+    const rows = await createDatabaseRuntime(env.DB).all<{
+      id: string;
+      email: string;
+      preferencesJson: string;
+      preferredLocale?: string | null;
+      timeZone?: string | null;
+    }>({
+      sql: `
         SELECT
           id,
           email,
@@ -555,23 +562,23 @@ export async function resolveNotificationRecipients(
         FROM users
         WHERE id IN (${placeholders})
       `,
-    )
-      .bind(...rule.recipient.userIds)
-      .all<{
-        id: string;
-        email: string;
-        preferencesJson: string;
-        preferredLocale?: string | null;
-        timeZone?: string | null;
-      }>();
+      bindings: [...rule.recipient.userIds],
+      tag: "notifications.users.all",
+    });
     return rows.results;
   }
   const roleFilter =
     rule.recipient.mode === "team_admins"
       ? "AND (tm.role IN ('owner', 'admin') OR t.owner_user_id = u.id)"
       : "";
-  const rows = await env.DB.prepare(
-    `
+  const rows = await createDatabaseRuntime(env.DB).all<{
+    id: string;
+    email: string;
+    preferencesJson: string;
+    preferredLocale?: string | null;
+    timeZone?: string | null;
+  }>({
+    sql: `
       SELECT DISTINCT
         u.id,
         u.email,
@@ -585,14 +592,8 @@ export async function resolveNotificationRecipients(
       ${roleFilter}
       ORDER BY u.created_at ASC
     `,
-  )
-    .bind(rule.teamId)
-    .all<{
-      id: string;
-      email: string;
-      preferencesJson: string;
-      preferredLocale?: string | null;
-      timeZone?: string | null;
-    }>();
+    bindings: [rule.teamId],
+    tag: "notifications.users.all",
+  });
   return rows.results;
 }

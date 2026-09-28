@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { TeamDashboardData } from "@/lib/edge/analytics/contract";
 import {
   type FilterDocument,
@@ -405,8 +406,8 @@ export async function listTeamSites(
   teamId: string,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<TeamSiteRow[]> {
-  const result = await env.DB.prepare(
-    `
+  const result = await createDatabaseRuntime(env.DB).all<TeamSiteRow>({
+    sql: `
       SELECT
         id,
         team_id AS teamId,
@@ -420,9 +421,9 @@ export async function listTeamSites(
       WHERE team_id = ?
       ORDER BY created_at DESC
     `,
-  )
-    .bind(teamId)
-    .all<TeamSiteRow>();
+    bindings: [teamId],
+    tag: "analytics.sites.all",
+  });
   recordD1RowsRead(diagnostics, result);
   return result.results;
 }
@@ -450,8 +451,8 @@ export async function queryTeamSitesPageFromD1(
   const cursorClause = cursor
     ? "AND (created_at < ? OR (created_at = ? AND id > ?))"
     : "";
-  const result = await env.DB.prepare(
-    `
+  const result = await createDatabaseRuntime(env.DB).all<TeamSiteRow>({
+    sql: `
       SELECT
         id,
         team_id AS teamId,
@@ -468,14 +469,14 @@ export async function queryTeamSitesPageFromD1(
       ORDER BY created_at DESC, id ASC
       LIMIT ?
     `,
-  )
-    .bind(
+    bindings: [
       teamId,
       ...(allowedSiteIds ?? []),
       ...(cursor ? [cursor.createdAt, cursor.createdAt, cursor.id] : []),
       limit + 1,
-    )
-    .all<TeamSiteRow>();
+    ],
+    tag: "analytics.sites.all",
+  });
   recordD1RowsRead(diagnostics, result);
   const hasMore = result.results.length > limit;
   const rows = hasMore ? result.results.slice(0, limit) : result.results;

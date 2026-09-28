@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { InvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 import { runNotificationTick } from "@/lib/notifications/edge/notification-task";
@@ -43,8 +44,8 @@ async function loadDueStates(
   env: Env,
   now: number,
 ): Promise<ScheduleStateRow[]> {
-  const result = await env.DB.prepare(
-    `
+  const result = await createDatabaseRuntime(env.DB).all<ScheduleStateRow>({
+    sql: `
       SELECT
         task_key AS taskKey,
         enabled,
@@ -52,9 +53,9 @@ async function loadDueStates(
       FROM scheduled_task_schedule_state
       WHERE enabled = 1 AND next_run_at <= ?
     `,
-  )
-    .bind(now)
-    .all<ScheduleStateRow>();
+    bindings: [now],
+    tag: "scheduled-tasks.scheduled_task_schedule_state.all",
+  });
   const due = new Map(result.results.map((row) => [String(row.taskKey), row]));
   return TASK_ORDER.flatMap((key) => {
     const row = due.get(key);

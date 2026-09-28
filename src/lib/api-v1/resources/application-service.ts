@@ -16,6 +16,7 @@ import {
   type TrackingScriptSchema,
   type TrackingSettingsSchema,
 } from "@/lib/api-v1/contract/resources";
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   createSiteWithDefaultSettings,
   deleteSiteData,
@@ -246,14 +247,14 @@ async function siteById(
 ): Promise<SiteRow | null> {
   if (!isAllowed(context, siteId)) return null;
   return (
-    (await env.DB.prepare(
-      `SELECT id, team_id AS teamId, name, domain,
+    (await createDatabaseRuntime(env.DB).first<SiteRow>({
+      sql: `SELECT id, team_id AS teamId, name, domain,
               public_enabled AS publicEnabled, public_slug AS publicSlug,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sites WHERE id=? AND team_id=? LIMIT 1`,
-    )
-      .bind(siteId, context.teamId)
-      .first<SiteRow>()) ?? null
+      bindings: [siteId, context.teamId],
+      tag: "api-v1.sites.first",
+    })) ?? null
   );
 }
 async function funnelById(
@@ -262,14 +263,14 @@ async function funnelById(
   funnelId: string,
 ): Promise<FunnelRow | null> {
   return (
-    (await env.DB.prepare(
-      `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
+    (await createDatabaseRuntime(env.DB).first<FunnelRow>({
+      sql: `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
        FROM analysis_definitions
        WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL
        LIMIT 1`,
-    )
-      .bind(funnelId, siteId)
-      .first<FunnelRow>()) ?? null
+      bindings: [funnelId, siteId],
+      tag: "api-v1.analysis_definitions.first",
+    })) ?? null
   );
 }
 async function goalById(
@@ -278,14 +279,14 @@ async function goalById(
   goalId: string,
 ): Promise<GoalRow | null> {
   return (
-    (await env.DB.prepare(
-      `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
+    (await createDatabaseRuntime(env.DB).first<GoalRow>({
+      sql: `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
        FROM analysis_definitions
        WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL
        LIMIT 1`,
-    )
-      .bind(goalId, siteId)
-      .first<GoalRow>()) ?? null
+      bindings: [goalId, siteId],
+      tag: "api-v1.analysis_definitions.first",
+    })) ?? null
   );
 }
 function ok<T>(value: T): ApiV1ApplicationOutcome<T, never> {
@@ -357,15 +358,15 @@ export function createResourceApplicationService(
           parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
         }
         parameters.push(value.page.limit + 1);
-        const rows = await env.DB.prepare(
-          `SELECT id, team_id AS teamId, name, domain,
+        const rows = await createDatabaseRuntime(env.DB).all<SiteRow>({
+          sql: `SELECT id, team_id AS teamId, name, domain,
                   public_enabled AS publicEnabled, public_slug AS publicSlug,
                   created_at AS createdAt, updated_at AS updatedAt
            FROM sites WHERE ${where.join(" AND ")}
            ORDER BY created_at DESC, id ASC LIMIT ?`,
-        )
-          .bind(...parameters)
-          .all<SiteRow>();
+          bindings: [...parameters],
+          tag: "api-v1.sites.all",
+        });
         const page = pageResult(rows.results, value.page.limit);
         const nextCursor =
           page.hasMore && page.last
@@ -562,13 +563,13 @@ export function createResourceApplicationService(
           parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
         }
         parameters.push(value.page.limit + 1);
-        const rows = await env.DB.prepare(
-          `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
+        const rows = await createDatabaseRuntime(env.DB).all<FunnelRow>({
+          sql: `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
            FROM analysis_definitions WHERE ${where.join(" AND ")}
            ORDER BY created_at DESC, id ASC LIMIT ?`,
-        )
-          .bind(...parameters)
-          .all<FunnelRow>();
+          bindings: [...parameters],
+          tag: "api-v1.analysis_definitions.all",
+        });
         const page = pageResult(rows.results, value.page.limit);
         const nextCursor =
           page.hasMore && page.last
@@ -663,13 +664,13 @@ export function createResourceApplicationService(
           parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
         }
         parameters.push(value.page.limit + 1);
-        const rows = await env.DB.prepare(
-          `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
+        const rows = await createDatabaseRuntime(env.DB).all<GoalRow>({
+          sql: `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
            FROM analysis_definitions WHERE ${where.join(" AND ")}
            ORDER BY created_at DESC, id DESC LIMIT ?`,
-        )
-          .bind(...parameters)
-          .all<GoalRow>();
+          bindings: [...parameters],
+          tag: "api-v1.analysis_definitions.all",
+        });
         const page = pageResult(rows.results, value.page.limit);
         const nextCursor =
           page.hasMore && page.last

@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { Env } from "@/lib/edge/types";
 import { safeJsonStringify } from "@/lib/notifications/json";
 import type {
@@ -107,11 +108,13 @@ export async function getUserNotificationPreferences(
   env: Env,
   userId: string,
 ): Promise<NotificationPreferences> {
-  const row = await env.DB.prepare(
-    "SELECT notification_preferences_json AS preferencesJson FROM users WHERE id = ? LIMIT 1",
-  )
-    .bind(userId)
-    .first<{ preferencesJson: string | null }>();
+  const row = await createDatabaseRuntime(env.DB).first<{
+    preferencesJson: string | null;
+  }>({
+    sql: "SELECT notification_preferences_json AS preferencesJson FROM users WHERE id = ? LIMIT 1",
+    bindings: [userId],
+    tag: "notifications.users.first",
+  });
   return normalizeNotificationPreferences(row?.preferencesJson);
 }
 

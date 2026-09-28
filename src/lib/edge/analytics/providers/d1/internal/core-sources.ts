@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import {
   currentD1Operation,
@@ -344,9 +345,11 @@ export async function queryD1All<T extends object>(
   const logger = currentInvocationLogger();
   const operation = currentD1Operation();
   const startedAt = globalThis.performance?.now() ?? Date.now();
-  const result = await env.DB.prepare(sql)
-    .bind(...bindings)
-    .all<T>();
+  const result = await createDatabaseRuntime(env.DB).all<T>({
+    sql,
+    bindings,
+    tag: operation ?? "analytics.query.all",
+  });
   const finishedAt = globalThis.performance?.now() ?? Date.now();
   recordD1RowsRead(diagnostics, result);
   if (logger && operation) {

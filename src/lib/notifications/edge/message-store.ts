@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { appNow } from "@/lib/edge/runtime/e2e-clock";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
@@ -178,14 +179,18 @@ export async function getNotificationMessage(
   const expiryFilter = options.includeExpired
     ? ""
     : " AND (expires_at IS NULL OR expires_at > ?)";
-  const statement = env.DB.prepare(
-    `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=?${expiryFilter} LIMIT 1`,
-  );
+  const sql = `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=?${expiryFilter} LIMIT 1`;
   const row = options.includeExpired
-    ? await statement.bind(messageId).first<MessageRow>()
-    : await statement
-        .bind(messageId, Math.trunc(appNow() / 1000))
-        .first<MessageRow>();
+    ? await createDatabaseRuntime(env.DB).first<MessageRow>({
+        sql,
+        bindings: [messageId],
+        tag: "notifications.notification_messages.first",
+      })
+    : await createDatabaseRuntime(env.DB).first<MessageRow>({
+        sql,
+        bindings: [messageId, Math.trunc(appNow() / 1000)],
+        tag: "notifications.notification_messages.first",
+      });
   return row ? mapNotificationMessage(row) : null;
 }
 export async function createNotificationMessage(
@@ -292,17 +297,17 @@ export async function listNotificationMessagesForUser(
     filters.push("created_at < ?");
     bindings.push(Math.trunc(input.before));
   }
-  const rows = await env.DB.prepare(
-    `
+  const rows = await createDatabaseRuntime(env.DB).all<MessageRow>({
+    sql: `
       SELECT ${MESSAGE_SELECT}
       FROM notification_messages
       WHERE ${filters.join(" AND ")}
       ORDER BY created_at DESC
       LIMIT ?
     `,
-  )
-    .bind(...bindings, limit)
-    .all<MessageRow>();
+    bindings: [...bindings, limit],
+    tag: "notifications.notification_messages.all",
+  });
   return rows.results.map(mapNotificationMessage);
 }
 export async function listNotificationMessagesForTeam(
@@ -344,25 +349,25 @@ export async function listNotificationMessagesForTeam(
     filters.push("created_at < ?");
     bindings.push(Math.trunc(input.before));
   }
-  const rows = await env.DB.prepare(
-    `
+  const rows = await createDatabaseRuntime(env.DB).all<MessageRow>({
+    sql: `
       SELECT ${MESSAGE_SELECT}
       FROM notification_messages
       WHERE ${filters.join(" AND ")}
       ORDER BY created_at DESC
       LIMIT ?
     `,
-  )
-    .bind(...bindings, limit)
-    .all<MessageRow>();
+    bindings: [...bindings, limit],
+    tag: "notifications.notification_messages.all",
+  });
   return rows.results.map(mapNotificationMessage);
 }
 export async function countUnreadAttentionMessages(
   env: Env,
   userId: string,
 ): Promise<number> {
-  const row = await env.DB.prepare(
-    `
+  const row = await createDatabaseRuntime(env.DB).first<{ count: number }>({
+    sql: `
       SELECT COUNT(*) AS count
       FROM notification_messages
       WHERE user_id=?
@@ -371,9 +376,9 @@ export async function countUnreadAttentionMessages(
         AND archived_at IS NULL
         AND (expires_at IS NULL OR expires_at > ?)
     `,
-  )
-    .bind(userId, Math.trunc(appNow() / 1000))
-    .first<{ count: number }>();
+    bindings: [userId, Math.trunc(appNow() / 1000)],
+    tag: "notifications.notification_messages.first",
+  });
   return Number(row?.count ?? 0);
 }
 export async function markNotificationMessageRead(
@@ -391,11 +396,11 @@ export async function markNotificationMessageRead(
   )
     .bind(now, now, input.messageId, input.userId, now)
     .run();
-  const row = await env.DB.prepare(
-    `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=? AND user_id=? AND (expires_at IS NULL OR expires_at > ?) LIMIT 1`,
-  )
-    .bind(input.messageId, input.userId, now)
-    .first<MessageRow>();
+  const row = await createDatabaseRuntime(env.DB).first<MessageRow>({
+    sql: `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=? AND user_id=? AND (expires_at IS NULL OR expires_at > ?) LIMIT 1`,
+    bindings: [input.messageId, input.userId, now],
+    tag: "notifications.notification_messages.first",
+  });
   return row ? mapNotificationMessage(row) : null;
 }
 export async function markAllNotificationMessagesRead(

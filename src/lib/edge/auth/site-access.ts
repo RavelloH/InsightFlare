@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   canAccessMemberSite,
   parseMemberSiteIdsJson,
@@ -78,18 +79,24 @@ export async function resolvePrivateSiteForSession(
   }
 
   if (session.systemRole === "admin") {
-    const site = await env.DB.prepare(
-      "SELECT id,name,domain FROM sites WHERE id=? LIMIT 1",
-    )
-      .bind(siteId)
-      .first<SiteRow>();
+    const site = await createDatabaseRuntime(env.DB).first<SiteRow>({
+      sql: "SELECT id,name,domain FROM sites WHERE id=? LIMIT 1",
+      bindings: [siteId],
+      tag: "auth.sites.first",
+    });
     return site
       ? { ...site, canManage: true }
       : notFound("Site not found", undefined, request);
   }
 
-  const site = await env.DB.prepare(
-    `
+  const site = await createDatabaseRuntime(env.DB).first<
+    SiteRow & {
+      ownerUserId: string;
+      role: string | null;
+      siteIdsJson: string | null;
+    }
+  >({
+    sql: `
       SELECT
         s.id,
         s.name,
@@ -103,15 +110,9 @@ export async function resolvePrivateSiteForSession(
       WHERE s.id = ?
       LIMIT 1
     `,
-  )
-    .bind(session.userId, siteId)
-    .first<
-      SiteRow & {
-        ownerUserId: string;
-        role: string | null;
-        siteIdsJson: string | null;
-      }
-    >();
+    bindings: [session.userId, siteId],
+    tag: "auth.sites.first",
+  });
   if (!site) return notFound("Site not found", undefined, request);
   if (site.ownerUserId === session.userId) return { ...site, canManage: true };
   if (site.role === "owner" || site.role === "admin") {
@@ -145,14 +146,21 @@ export async function resolvePrivateTeamForSession(
   if (!teamId) return badRequest("teamId is required", undefined, request);
 
   if (session.systemRole === "admin") {
-    const team = await env.DB.prepare("SELECT id FROM teams WHERE id=? LIMIT 1")
-      .bind(teamId)
-      .first<{ id: string }>();
+    const team = await createDatabaseRuntime(env.DB).first<{ id: string }>({
+      sql: "SELECT id FROM teams WHERE id=? LIMIT 1",
+      bindings: [teamId],
+      tag: "auth.teams.first",
+    });
     return team ?? notFound("Team not found", undefined, request);
   }
 
-  const team = await env.DB.prepare(
-    `
+  const team = await createDatabaseRuntime(env.DB).first<{
+    id: string;
+    ownerUserId: string;
+    role: string | null;
+    siteIdsJson: string | null;
+  }>({
+    sql: `
       SELECT
         t.id,
         t.owner_user_id AS ownerUserId,
@@ -163,14 +171,9 @@ export async function resolvePrivateTeamForSession(
       WHERE t.id = ?
       LIMIT 1
     `,
-  )
-    .bind(session.userId, teamId)
-    .first<{
-      id: string;
-      ownerUserId: string;
-      role: string | null;
-      siteIdsJson: string | null;
-    }>();
+    bindings: [session.userId, teamId],
+    tag: "auth.teams.first",
+  });
   if (!team) return notFound("Team not found", undefined, request);
   if (team.ownerUserId === session.userId) return { id: team.id };
   if (team.role === "owner" || team.role === "admin") return { id: team.id };
@@ -201,10 +204,10 @@ export async function fetchPublicSite(
     return site ?? notFound("Public site not found");
   }
 
-  const site = await env.DB.prepare(
-    "SELECT id,name,domain FROM sites WHERE public_enabled=1 AND public_slug=? LIMIT 1",
-  )
-    .bind(slug)
-    .first<SiteRow>();
+  const site = await createDatabaseRuntime(env.DB).first<SiteRow>({
+    sql: "SELECT id,name,domain FROM sites WHERE public_enabled=1 AND public_slug=? LIMIT 1",
+    bindings: [slug],
+    tag: "auth.sites.first",
+  });
   return site ?? notFound("Public site not found");
 }

@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   bad as badRequest,
   bool,
@@ -127,17 +128,17 @@ interface ScheduleStateRow {
 }
 async function loadScheduleStates(env: Env): Promise<ScheduleStateRow[]> {
   try {
-    const result = await env.DB.prepare(
-      `
+    const result = await createDatabaseRuntime(env.DB).all<ScheduleStateRow>({
+      sql: `
         SELECT
           task_key AS taskKey,
           enabled,
           next_run_at AS nextRunAt
         FROM scheduled_task_schedule_state
       `,
-    )
-      .bind()
-      .all<ScheduleStateRow>();
+      bindings: [],
+      tag: "admin.scheduled_task_schedule_state.all",
+    });
     return result.results;
   } catch {
     return [];
@@ -372,15 +373,15 @@ async function countRunLogs(env: Env, runIds: string[]): Promise<number> {
     offset += MAX_LOG_RUN_IDS_PER_QUERY
   ) {
     const chunk = runIds.slice(offset, offset + MAX_LOG_RUN_IDS_PER_QUERY);
-    const row = await env.DB.prepare(
-      `
+    const row = await createDatabaseRuntime(env.DB).first<{ count: number }>({
+      sql: `
         SELECT COUNT(*) AS count
         FROM scheduled_task_run_logs
         WHERE run_id IN (${chunk.map(() => "?").join(", ")})
       `,
-    )
-      .bind(...chunk)
-      .first<{ count: number }>();
+      bindings: [...chunk],
+      tag: "admin.scheduled_task_run_logs.first",
+    });
     total += Number(row?.count ?? 0);
   }
   return total;
@@ -423,8 +424,8 @@ async function loadRunLogsPage(
     const cursorClause = cursor
       ? "AND (runs.started_at_ms > ? OR (runs.started_at_ms = ? AND (logs.run_id > ? OR (logs.run_id = ? AND (logs.sequence > ? OR (logs.sequence = ? AND logs.id > ?))))))"
       : "";
-    const result = await env.DB.prepare(
-      `
+    const result = await createDatabaseRuntime(env.DB).all<LogRow>({
+      sql: `
         SELECT
           logs.id,
           logs.run_id AS runId,
@@ -443,8 +444,7 @@ async function loadRunLogsPage(
         ORDER BY runs.started_at_ms ASC, logs.run_id ASC, logs.sequence ASC, logs.id ASC
         LIMIT ?
       `,
-    )
-      .bind(
+      bindings: [
         ...chunk,
         ...(cursor
           ? [
@@ -458,8 +458,9 @@ async function loadRunLogsPage(
             ]
           : []),
         limit + 1,
-      )
-      .all<LogRow>();
+      ],
+      tag: "admin.scheduled_task_run_logs.all",
+    });
     rows.push(...result.results);
   }
   rows.sort(
@@ -691,8 +692,8 @@ export async function handleScheduledTasksAdmin(
     throw error;
   }
   const [healthRow, statsRows, latestRows, runRows] = await Promise.all([
-    env.DB.prepare(
-      `
+    createDatabaseRuntime(env.DB).first<HealthRow>({
+      sql: `
         WITH grouped AS (
           SELECT
             ${RUN_GROUP_KEY_SQL} AS id,
@@ -729,11 +730,11 @@ export async function handleScheduledTasksAdmin(
           MAX(startedAt) AS lastRunAt
         FROM normalized
       `,
-    )
-      .bind(staleBefore, since24h)
-      .first<HealthRow>(),
-    env.DB.prepare(
-      `
+      bindings: [staleBefore, since24h],
+      tag: "admin.scheduled_task_runs.first",
+    }),
+    createDatabaseRuntime(env.DB).all<TaskStatsRow>({
+      sql: `
         SELECT
           task_key AS taskKey,
           COUNT(*) AS runs30d,
@@ -747,11 +748,11 @@ export async function handleScheduledTasksAdmin(
         WHERE started_at_ms >= ?
         GROUP BY task_key
       `,
-    )
-      .bind(since30d)
-      .all<TaskStatsRow>(),
-    env.DB.prepare(
-      `
+      bindings: [since30d],
+      tag: "admin.scheduled_task_runs.all",
+    }),
+    createDatabaseRuntime(env.DB).all<RunRow>({
+      sql: `
         WITH ranked AS (
           SELECT
             ${RUN_SELECT_COLUMNS},
@@ -763,20 +764,20 @@ export async function handleScheduledTasksAdmin(
         FROM ranked
         WHERE rn = 1
       `,
-    )
-      .bind(since30d)
-      .all<RunRow>(),
-    env.DB.prepare(
-      runGroupPageSelectSql(`WHERE ${runFilters.join(" AND ")}`, cursor),
-    )
-      .bind(
+      bindings: [since30d],
+      tag: "admin.scheduled_task_runs.all",
+    }),
+    createDatabaseRuntime(env.DB).all<RunGroupRow>({
+      sql: runGroupPageSelectSql(`WHERE ${runFilters.join(" AND ")}`, cursor),
+      bindings: [
         ...runBindings,
         statusFilter,
         statusFilter,
         ...(cursor ? [cursor.startedAt, cursor.startedAt, cursor.groupId] : []),
         limit + 1,
-      )
-      .all<RunGroupRow>(),
+      ],
+      tag: "admin.handler.all",
+    }),
   ]);
 
   const hasMoreRuns = runRows.results.length > limit;
@@ -786,14 +787,14 @@ export async function handleScheduledTasksAdmin(
   const groupIds = requestedGroupRows.map((row) => String(row.id ?? ""));
   const pageTaskRows =
     groupIds.length > 0
-      ? await env.DB.prepare(
-          `${runSelectSql(
+      ? await createDatabaseRuntime(env.DB).all<RunRow>({
+          sql: `${runSelectSql(
             `WHERE ${RUN_GROUP_KEY_SQL} IN (${groupIds.map(() => "?").join(", ")})`,
           )}
            ORDER BY started_at_ms ASC, task_key ASC`,
-        )
-          .bind(...groupIds)
-          .all<RunRow>()
+          bindings: [...groupIds],
+          tag: "admin.handler.all",
+        })
       : { results: [] as RunRow[] };
   const taskRunsByGroup = new Map<string, ScheduledTaskRun[]>();
   for (const run of pageTaskRows.results.map(mapRun)) {
@@ -811,36 +812,38 @@ export async function handleScheduledTasksAdmin(
     selectedTaskRuns = selectedRun.runs;
   } else if (runId) {
     const selectedGroupId = runId;
-    let selectedRow = await env.DB.prepare(
-      `${runGroupSelectSql(`WHERE ${RUN_GROUP_KEY_SQL} = ?`)}
+    let selectedRow = await createDatabaseRuntime(env.DB).first<RunGroupRow>({
+      sql: `${runGroupSelectSql(`WHERE ${RUN_GROUP_KEY_SQL} = ?`)}
        LIMIT 1`,
-    )
-      .bind(selectedGroupId)
-      .first<RunGroupRow>();
+      bindings: [selectedGroupId],
+      tag: "admin.handler.first",
+    });
     if (!selectedRow) {
-      const directRun = await env.DB.prepare(
-        `SELECT ${RUN_GROUP_KEY_SQL} AS id FROM scheduled_task_runs WHERE id = ? LIMIT 1`,
-      )
-        .bind(runId)
-        .first<{ id: string }>();
+      const directRun = await createDatabaseRuntime(env.DB).first<{
+        id: string;
+      }>({
+        sql: `SELECT ${RUN_GROUP_KEY_SQL} AS id FROM scheduled_task_runs WHERE id = ? LIMIT 1`,
+        bindings: [runId],
+        tag: "admin.scheduled_task_runs.first",
+      });
       if (directRun?.id) {
-        selectedRow = await env.DB.prepare(
-          `${runGroupSelectSql(`WHERE ${RUN_GROUP_KEY_SQL} = ?`)}
+        selectedRow = await createDatabaseRuntime(env.DB).first<RunGroupRow>({
+          sql: `${runGroupSelectSql(`WHERE ${RUN_GROUP_KEY_SQL} = ?`)}
            LIMIT 1`,
-        )
-          .bind(String(directRun.id))
-          .first<RunGroupRow>();
+          bindings: [String(directRun.id)],
+          tag: "admin.handler.first",
+        });
       }
     }
     const detailGroupId = String(selectedRow?.id ?? selectedGroupId);
     selectedTaskRuns = selectedRow
       ? (
-          await env.DB.prepare(
-            `${runSelectSql(`WHERE ${RUN_GROUP_KEY_SQL} = ?`)}
+          await createDatabaseRuntime(env.DB).all<RunRow>({
+            sql: `${runSelectSql(`WHERE ${RUN_GROUP_KEY_SQL} = ?`)}
              ORDER BY started_at_ms ASC, task_key ASC`,
-          )
-            .bind(detailGroupId)
-            .all<RunRow>()
+            bindings: [detailGroupId],
+            tag: "admin.handler.all",
+          })
         ).results.map(mapRun)
       : [];
     if (selectedRow) {

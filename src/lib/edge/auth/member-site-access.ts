@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 
@@ -81,11 +82,11 @@ export async function assertSitesBelongToTeam(
   ) {
     const chunk = siteIds.slice(index, index + MAX_SITE_IDS_WITH_TEAM_BINDING);
     const placeholders = chunk.map(() => "?").join(",");
-    const rows = await env.DB.prepare(
-      `SELECT id FROM sites WHERE team_id=? AND id IN (${placeholders})`,
-    )
-      .bind(teamId, ...chunk)
-      .all<{ id: string }>();
+    const rows = await createDatabaseRuntime(env.DB).all<{ id: string }>({
+      sql: `SELECT id FROM sites WHERE team_id=? AND id IN (${placeholders})`,
+      bindings: [teamId, ...chunk],
+      tag: "auth.sites.all",
+    });
     matchingSiteIds += rows.results.length;
   }
   return matchingSiteIds === siteIds.length;

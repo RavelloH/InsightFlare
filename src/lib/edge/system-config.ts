@@ -1,14 +1,18 @@
+import { createDatabaseRuntime } from "@/lib/db";
+
 import type { Env } from "./types";
 
 export async function readConfig(
   env: Pick<Env, "DB">,
   key: string,
 ): Promise<Record<string, unknown> | null> {
-  const row = await env.DB.prepare(
-    "SELECT value_json FROM configs WHERE config_key = ? LIMIT 1",
-  )
-    .bind(key)
-    .first<{ value_json: string | null }>();
+  const row = await createDatabaseRuntime(env.DB).first<{
+    value_json: string | null;
+  }>({
+    sql: "SELECT value_json FROM configs WHERE config_key = ? LIMIT 1",
+    bindings: [key],
+    tag: "system-config.ts.configs.first",
+  });
   if (!row?.value_json) return null;
   try {
     const parsed = JSON.parse(row.value_json) as unknown;

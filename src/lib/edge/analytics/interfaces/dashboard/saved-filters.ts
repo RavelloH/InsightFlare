@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { parseJson } from "@/lib/edge/admin/response";
 import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
 import type { Env } from "@/lib/edge/types";
@@ -157,15 +158,15 @@ async function savedFilterById(
   siteId: string,
   id: string,
 ): Promise<SavedFilterRow | null> {
-  return env.DB.prepare(
-    `SELECT ${savedFilterColumns}
+  return createDatabaseRuntime(env.DB).first<SavedFilterRow>({
+    sql: `SELECT ${savedFilterColumns}
      FROM saved_filters sf
      INNER JOIN users u ON u.id = sf.owner_user_id
      WHERE sf.site_id = ? AND sf.id = ?
      LIMIT 1`,
-  )
-    .bind(siteId, id)
-    .first<SavedFilterRow>();
+    bindings: [siteId, id],
+    tag: "analytics.saved_filters.first",
+  });
 }
 export async function handleSavedFilters(
   request: Request,
@@ -207,8 +208,8 @@ export async function handleSavedFilters(
     const cursorClause = cursor
       ? "AND (sf.updated_at < ? OR (sf.updated_at = ? AND sf.id < ?))"
       : "";
-    const rows = await env.DB.prepare(
-      `SELECT ${savedFilterColumns}
+    const rows = await createDatabaseRuntime(env.DB).all<SavedFilterRow>({
+      sql: `SELECT ${savedFilterColumns}
        FROM saved_filters sf
        INNER JOIN users u ON u.id = sf.owner_user_id
        WHERE sf.site_id = ?
@@ -216,14 +217,14 @@ export async function handleSavedFilters(
          ${cursorClause}
        ORDER BY sf.updated_at DESC, sf.id DESC
        LIMIT ?`,
-    )
-      .bind(
+      bindings: [
         siteId,
         session.userId,
         ...(cursor ? [cursor.updatedAt, cursor.updatedAt, cursor.id] : []),
         limit + 1,
-      )
-      .all<SavedFilterRow>();
+      ],
+      tag: "analytics.saved_filters.all",
+    });
     const hasMore = rows.results.length > limit;
     const items = (hasMore ? rows.results.slice(0, limit) : rows.results).map(
       (row) => asSavedFilter(row, session.userId),
@@ -249,14 +250,21 @@ export async function handleSavedFilters(
   if (request.method === "POST" && !input.filterId) {
     const parsed = savedFilterInput(await parseJson(request));
     if (parsed instanceof Response) return parsed;
-    const duplicate = await env.DB.prepare(
-      `SELECT id FROM saved_filters
+    const duplicate = await createDatabaseRuntime(env.DB).first<{ id: string }>(
+      {
+        sql: `SELECT id FROM saved_filters
        WHERE site_id = ? AND owner_user_id = ? AND filter_dsl = ?
          AND scope_preference = ?
        LIMIT 1`,
-    )
-      .bind(siteId, session.userId, parsed.filterDsl, parsed.scopePreference)
-      .first<{ id: string }>();
+        bindings: [
+          siteId,
+          session.userId,
+          parsed.filterDsl,
+          parsed.scopePreference,
+        ],
+        tag: "analytics.saved_filters.first",
+      },
+    );
     if (duplicate) {
       return bad(
         "An identical saved filter already exists",
@@ -317,20 +325,22 @@ export async function handleSavedFilters(
   if (request.method === "PUT") {
     const parsed = savedFilterInput(await parseJson(request));
     if (parsed instanceof Response) return parsed;
-    const duplicate = await env.DB.prepare(
-      `SELECT id FROM saved_filters
+    const duplicate = await createDatabaseRuntime(env.DB).first<{ id: string }>(
+      {
+        sql: `SELECT id FROM saved_filters
        WHERE site_id = ? AND owner_user_id = ? AND filter_dsl = ?
          AND scope_preference = ? AND id <> ?
        LIMIT 1`,
-    )
-      .bind(
-        siteId,
-        session.userId,
-        parsed.filterDsl,
-        parsed.scopePreference,
-        id,
-      )
-      .first<{ id: string }>();
+        bindings: [
+          siteId,
+          session.userId,
+          parsed.filterDsl,
+          parsed.scopePreference,
+          id,
+        ],
+        tag: "analytics.saved_filters.first",
+      },
+    );
     if (duplicate) {
       return bad(
         "An identical saved filter already exists",

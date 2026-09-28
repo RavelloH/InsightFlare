@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { appNow } from "@/lib/edge/runtime/e2e-clock";
 import type {
   ScheduledTaskContext,
@@ -439,8 +440,14 @@ export async function createManualTestNotification(input: {
   const cache = createNotificationInvocationCache();
   const retention = context.retention ?? DEFAULT_RETENTION_CONFIG;
   const now = Math.floor(appNow() / 1000);
-  const user = await env.DB.prepare(
-    `
+  const user = await createDatabaseRuntime(env.DB).first<{
+    id: string;
+    email: string;
+    preferencesJson: string;
+    preferredLocale?: string | null;
+    timeZone?: string | null;
+  }>({
+    sql: `
       SELECT
         id,
         email,
@@ -451,15 +458,9 @@ export async function createManualTestNotification(input: {
       WHERE id = ?
       LIMIT 1
     `,
-  )
-    .bind(userId)
-    .first<{
-      id: string;
-      email: string;
-      preferencesJson: string;
-      preferredLocale?: string | null;
-      timeZone?: string | null;
-    }>();
+    bindings: [userId],
+    tag: "notifications.users.first",
+  });
   if (!user) {
     await context.logger.warn(
       "notification_delivery_skipped",

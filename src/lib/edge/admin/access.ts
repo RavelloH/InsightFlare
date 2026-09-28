@@ -1,4 +1,5 @@
 import { toTeamRole } from "@/lib/dashboard/permissions";
+import { createDatabaseRuntime } from "@/lib/db";
 import type { Actor } from "@/lib/edge/admin/auth";
 import {
   canAccessMemberSite,
@@ -21,11 +22,14 @@ export async function teamMembershipAccess(
   teamId: string,
   userId: string,
 ): Promise<TeamMembershipAccess | null> {
-  const row = await env.DB.prepare(
-    "SELECT role,site_ids_json AS siteIdsJson FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
-  )
-    .bind(teamId, userId)
-    .first<{ role: string; siteIdsJson?: string | null }>();
+  const row = await createDatabaseRuntime(env.DB).first<{
+    role: string;
+    siteIdsJson?: string | null;
+  }>({
+    sql: "SELECT role,site_ids_json AS siteIdsJson FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
+    bindings: [teamId, userId],
+    tag: "admin.team_members.first",
+  });
   if (!row) return null;
   return {
     role: row.role,
@@ -36,19 +40,22 @@ export async function teamById(
   env: Env,
   teamId: string,
 ): Promise<{ id: string; ownerUserId: string } | null> {
-  const row = await env.DB.prepare(
-    "SELECT id,owner_user_id AS ownerUserId FROM teams WHERE id=? LIMIT 1",
-  )
-    .bind(teamId)
-    .first<{ id: string; ownerUserId: string }>();
+  const row = await createDatabaseRuntime(env.DB).first<{
+    id: string;
+    ownerUserId: string;
+  }>({
+    sql: "SELECT id,owner_user_id AS ownerUserId FROM teams WHERE id=? LIMIT 1",
+    bindings: [teamId],
+    tag: "admin.teams.first",
+  });
   return row ?? null;
 }
 async function siteTeam(env: Env, siteId: string): Promise<string | null> {
-  const row = await env.DB.prepare(
-    "SELECT team_id FROM sites WHERE id=? LIMIT 1",
-  )
-    .bind(siteId)
-    .first<{ team_id: string }>();
+  const row = await createDatabaseRuntime(env.DB).first<{ team_id: string }>({
+    sql: "SELECT team_id FROM sites WHERE id=? LIMIT 1",
+    bindings: [siteId],
+    tag: "admin.sites.first",
+  });
   return row?.team_id ?? null;
 }
 export async function canReadTeam(
@@ -121,14 +128,16 @@ export async function uniqueTeamSlug(
   let i = 2;
   while (true) {
     const e = excludeTeamId
-      ? await env.DB.prepare(
-          "SELECT 1 AS ok FROM teams WHERE slug=? AND id<>? LIMIT 1",
-        )
-          .bind(slug, excludeTeamId)
-          .first<{ ok: number }>()
-      : await env.DB.prepare("SELECT 1 AS ok FROM teams WHERE slug=? LIMIT 1")
-          .bind(slug)
-          .first<{ ok: number }>();
+      ? await createDatabaseRuntime(env.DB).first<{ ok: number }>({
+          sql: "SELECT 1 AS ok FROM teams WHERE slug=? AND id<>? LIMIT 1",
+          bindings: [slug, excludeTeamId],
+          tag: "admin.teams.first",
+        })
+      : await createDatabaseRuntime(env.DB).first<{ ok: number }>({
+          sql: "SELECT 1 AS ok FROM teams WHERE slug=? LIMIT 1",
+          bindings: [slug],
+          tag: "admin.teams.first",
+        });
     if (!e?.ok) return slug;
     slug = `${base}-${i}`;
     i += 1;

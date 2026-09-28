@@ -1,6 +1,7 @@
 import { argon2id } from "@noble/hashes/argon2.js";
 
 import { toTeamRole } from "@/lib/dashboard/permissions";
+import { createDatabaseRuntime } from "@/lib/db";
 import { uniqueTeamSlug } from "@/lib/edge/admin/access";
 import { requireSession } from "@/lib/edge/auth/session-auth";
 import type { Env } from "@/lib/edge/types";
@@ -193,11 +194,11 @@ export const toPublicUser = (u: UserRow) => ({
 
 export async function byId(env: Env, id: string): Promise<UserRow | null> {
   return (
-    (await env.DB.prepare(
-      "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE id=? LIMIT 1",
-    )
-      .bind(id)
-      .first<UserRow>()) ?? null
+    (await createDatabaseRuntime(env.DB).first<UserRow>({
+      sql: "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE id=? LIMIT 1",
+      bindings: [id],
+      tag: "admin.users.first",
+    })) ?? null
   );
 }
 
@@ -207,11 +208,11 @@ export async function byIdentifier(
 ): Promise<UserRow | null> {
   const lowered = normU(identifier);
   return (
-    (await env.DB.prepare(
-      "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE lower(username)=? OR lower(email)=? LIMIT 1",
-    )
-      .bind(lowered, lowered)
-      .first<UserRow>()) ?? null
+    (await createDatabaseRuntime(env.DB).first<UserRow>({
+      sql: "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE lower(username)=? OR lower(email)=? LIMIT 1",
+      bindings: [lowered, lowered],
+      tag: "admin.users.first",
+    })) ?? null
   );
 }
 
@@ -219,11 +220,11 @@ export async function ensureDefaultTeam(
   env: Env,
   user: UserRow,
 ): Promise<void> {
-  const owned = await env.DB.prepare(
-    "SELECT id FROM teams WHERE owner_user_id=? LIMIT 1",
-  )
-    .bind(user.id)
-    .first<{ id: string }>();
+  const owned = await createDatabaseRuntime(env.DB).first<{ id: string }>({
+    sql: "SELECT id FROM teams WHERE owner_user_id=? LIMIT 1",
+    bindings: [user.id],
+    tag: "admin.teams.first",
+  });
   if (owned?.id) {
     await env.DB.prepare(
       "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='owner'",
@@ -251,9 +252,10 @@ export async function ensureDefaultTeam(
 }
 
 export async function ensureBootstrapAdmin(env: Env): Promise<UserRow> {
-  const admin = await env.DB.prepare(
-    "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE system_role='admin' ORDER BY created_at ASC LIMIT 1",
-  ).first<UserRow>();
+  const admin = await createDatabaseRuntime(env.DB).first<UserRow>({
+    sql: "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE system_role='admin' ORDER BY created_at ASC LIMIT 1",
+    tag: "admin.users.first",
+  });
   if (admin) {
     await ensureDefaultTeam(env, admin);
     return admin;
@@ -305,11 +307,13 @@ export async function teamsFor(
   env: Env,
   userId: string,
 ): Promise<Array<Record<string, unknown>>> {
-  const rows = await env.DB.prepare(
-    "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? ORDER BY t.created_at DESC",
-  )
-    .bind(userId)
-    .all<Record<string, unknown>>();
+  const rows = await createDatabaseRuntime(env.DB).all<Record<string, unknown>>(
+    {
+      sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? ORDER BY t.created_at DESC",
+      bindings: [userId],
+      tag: "admin.sites.all",
+    },
+  );
   return rows.results.map((row) => ({
     ...row,
     membershipRole: toTeamRole(row.membershipRole),
@@ -369,27 +373,33 @@ export async function teamGroupsForSession(
   teamGroups: SessionTeamGroups;
 }> {
   const userId = actor.user.id;
-  const createdRows = await env.DB.prepare(
-    "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,COALESCE(tm.role,'owner') AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.id AND tm.user_id=? WHERE t.owner_user_id=? ORDER BY t.created_at DESC",
-  )
-    .bind(userId, userId)
-    .all<Record<string, unknown>>();
-  const managedRows = await env.DB.prepare(
-    "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? AND tm.role IN ('owner','admin') AND t.owner_user_id<>? ORDER BY t.created_at DESC",
-  )
-    .bind(userId, userId)
-    .all<Record<string, unknown>>();
-  const memberRows = await env.DB.prepare(
-    "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? AND tm.role NOT IN ('owner','admin') AND t.owner_user_id<>? ORDER BY t.created_at DESC",
-  )
-    .bind(userId, userId)
-    .all<Record<string, unknown>>();
+  const createdRows = await createDatabaseRuntime(env.DB).all<
+    Record<string, unknown>
+  >({
+    sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,COALESCE(tm.role,'owner') AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.id AND tm.user_id=? WHERE t.owner_user_id=? ORDER BY t.created_at DESC",
+    bindings: [userId, userId],
+    tag: "admin.sites.all",
+  });
+  const managedRows = await createDatabaseRuntime(env.DB).all<
+    Record<string, unknown>
+  >({
+    sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? AND tm.role IN ('owner','admin') AND t.owner_user_id<>? ORDER BY t.created_at DESC",
+    bindings: [userId, userId],
+    tag: "admin.sites.all",
+  });
+  const memberRows = await createDatabaseRuntime(env.DB).all<
+    Record<string, unknown>
+  >({
+    sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? AND tm.role NOT IN ('owner','admin') AND t.owner_user_id<>? ORDER BY t.created_at DESC",
+    bindings: [userId, userId],
+    tag: "admin.sites.all",
+  });
   const systemRows = actor.isAdmin
-    ? await env.DB.prepare(
-        "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.id AND tm.user_id=? ORDER BY t.created_at DESC",
-      )
-        .bind(userId)
-        .all<Record<string, unknown>>()
+    ? await createDatabaseRuntime(env.DB).all<Record<string, unknown>>({
+        sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.id AND tm.user_id=? ORDER BY t.created_at DESC",
+        bindings: [userId],
+        tag: "admin.sites.all",
+      })
     : { results: [] };
 
   const teamGroups: SessionTeamGroups = {

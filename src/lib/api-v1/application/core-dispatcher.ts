@@ -12,6 +12,7 @@ import {
   jsonSuccess,
   methodNotAllowed,
 } from "@/lib/api-v1/contract/wire-helpers";
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   type ApiKeyPrincipal,
   canAccessSiteId,
@@ -33,16 +34,16 @@ async function teamByPrincipal(
   env: Env,
   principal: ApiKeyPrincipal,
 ): Promise<TeamRow> {
-  const row = await env.DB.prepare(
-    `
+  const row = await createDatabaseRuntime(env.DB).first<TeamRow>({
+    sql: `
       SELECT id, name, created_at AS createdAt
       FROM teams
       WHERE id=?
       LIMIT 1
     `,
-  )
-    .bind(principal.teamId)
-    .first<TeamRow>();
+    bindings: [principal.teamId],
+    tag: "api-v1.teams.first",
+  });
   return (
     row ?? {
       id: principal.teamId,
@@ -55,9 +56,11 @@ async function visibleSiteCount(
   env: Env,
   principal: ApiKeyPrincipal,
 ): Promise<number> {
-  const rows = await env.DB.prepare("SELECT id FROM sites WHERE team_id=?")
-    .bind(principal.teamId)
-    .all<{ id: string }>();
+  const rows = await createDatabaseRuntime(env.DB).all<{ id: string }>({
+    sql: "SELECT id FROM sites WHERE team_id=?",
+    bindings: [principal.teamId],
+    tag: "api-v1.sites.all",
+  });
   if (hasFullSiteAccess(principal)) return rows.results.length;
   return rows.results.filter((site) => canAccessSiteId(principal, site.id))
     .length;

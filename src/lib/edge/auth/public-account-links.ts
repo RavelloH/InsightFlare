@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   byId,
   byIdentifier,
@@ -71,9 +72,11 @@ async function teamInfo(
   teamId: string,
 ): Promise<TeamLinkInfo | null> {
   return (
-    (await env.DB.prepare("SELECT id,name,slug FROM teams WHERE id=? LIMIT 1")
-      .bind(teamId)
-      .first<TeamLinkInfo>()) ?? null
+    (await createDatabaseRuntime(env.DB).first<TeamLinkInfo>({
+      sql: "SELECT id,name,slug FROM teams WHERE id=? LIMIT 1",
+      bindings: [teamId],
+      tag: "auth.teams.first",
+    })) ?? null
   );
 }
 async function completeTeamInviteForUser(input: {

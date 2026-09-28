@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { FilterScopePreference } from "@/lib/edge/analytics/contract";
 import {
   attachSavedFilterScopePreference,
@@ -88,8 +89,10 @@ export function createAnalysisDefinitionReader(
   return {
     async resolveTeamVisibleSavedFilter({ siteId, id, signal }) {
       assertNotAborted(signal);
-      const row = await env.DB.prepare(
-        `SELECT sf.filter_dsl AS filterDsl,
+      const row = await createDatabaseRuntime(
+        env.DB,
+      ).first<SavedFilterDefinitionRow>({
+        sql: `SELECT sf.filter_dsl AS filterDsl,
                 sf.filter_dsl_version AS filterDslVersion,
                 COALESCE(sf.scope_preference, 'auto') AS scopePreference
          FROM saved_filters sf
@@ -99,9 +102,9 @@ export function createAnalysisDefinitionReader(
            AND sf.visibility = 'team'
            AND s.team_id = ?
          LIMIT 1`,
-      )
-        .bind(siteId, id, principal.teamId)
-        .first<SavedFilterDefinitionRow>();
+        bindings: [siteId, id, principal.teamId],
+        tag: "api-v1.saved_filters.first",
+      });
       assertNotAborted(signal);
       if (!row) return null;
 

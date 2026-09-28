@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { Env } from "@/lib/edge/types";
 import { clampString, nowEpochSeconds } from "@/lib/edge/utils";
 import { accountActionTokenHashSecret as resolveTokenHashSecret } from "@/lib/secrets";
@@ -256,8 +257,8 @@ export async function getAccountActionTokenById(
   tokenId: string,
 ): Promise<AccountActionTokenRow | null> {
   return (
-    (await env.DB.prepare(
-      `
+    (await createDatabaseRuntime(env.DB).first<AccountActionTokenRow>({
+      sql: `
         SELECT
           id, type, token_hash, team_id, user_id, email, payload_json,
           created_by_user_id, created_at, expires_at, used_at,
@@ -266,9 +267,9 @@ export async function getAccountActionTokenById(
         WHERE id = ?
         LIMIT 1
       `,
-    )
-      .bind(tokenId)
-      .first<AccountActionTokenRow>()) ?? null
+      bindings: [tokenId],
+      tag: "auth.account_action_tokens.first",
+    })) ?? null
   );
 }
 
@@ -278,8 +279,8 @@ export async function getAccountActionTokenByToken(
 ): Promise<AccountActionTokenRow | null> {
   const tokenHash = await hashAccountActionToken(env, token.trim());
   return (
-    (await env.DB.prepare(
-      `
+    (await createDatabaseRuntime(env.DB).first<AccountActionTokenRow>({
+      sql: `
         SELECT
           id, type, token_hash, team_id, user_id, email, payload_json,
           created_by_user_id, created_at, expires_at, used_at,
@@ -288,9 +289,9 @@ export async function getAccountActionTokenByToken(
         WHERE token_hash = ?
         LIMIT 1
       `,
-    )
-      .bind(tokenHash)
-      .first<AccountActionTokenRow>()) ?? null
+      bindings: [tokenHash],
+      tag: "auth.account_action_tokens.first",
+    })) ?? null
   );
 }
 
@@ -349,8 +350,8 @@ export async function listTeamInviteTokens(
   env: Env,
   teamId: string,
 ): Promise<PublicAccountActionToken[]> {
-  const rows = await env.DB.prepare(
-    `
+  const rows = await createDatabaseRuntime(env.DB).all<AccountActionTokenRow>({
+    sql: `
       SELECT
         id, type, token_hash, team_id, user_id, email, payload_json,
         created_by_user_id, created_at, expires_at, used_at,
@@ -359,8 +360,8 @@ export async function listTeamInviteTokens(
       WHERE team_id = ? AND type = 'team_invite'
       ORDER BY created_at DESC
     `,
-  )
-    .bind(teamId)
-    .all<AccountActionTokenRow>();
+    bindings: [teamId],
+    tag: "auth.account_action_tokens.all",
+  });
   return rows.results.map(toPublicAccountActionToken);
 }

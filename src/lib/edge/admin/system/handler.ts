@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { parseJson } from "@/lib/edge/admin/response";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
@@ -116,8 +117,8 @@ export async function handleSystemPerformanceAdmin(
     slowEventRows,
     openVisitRow,
   ] = await Promise.all([
-    env.DB.prepare(
-      `
+    createDatabaseRuntime(env.DB).first<Record<string, unknown>>({
+      sql: `
         ${SYSTEM_EVENTS_CTE}
         SELECT
           COUNT(*) AS totalEvents,
@@ -131,17 +132,17 @@ export async function handleSystemPerformanceAdmin(
           MAX(createdAtSec) AS latestCreatedAtSec
         FROM events
       `,
-    )
-      .bind(
+      bindings: [
         ...eventBindings,
         SYSTEM_TRUSTED_LATENCY_MAX_MS,
         SYSTEM_TRUSTED_LATENCY_MAX_MS,
         SYSTEM_DELAYED_EVENT_MS,
         SYSTEM_FUTURE_SKEW_MS,
-      )
-      .first<Record<string, unknown>>(),
-    env.DB.prepare(
-      `
+      ],
+      tag: "admin.events.first",
+    }),
+    createDatabaseRuntime(env.DB).first<Record<string, unknown>>({
+      sql: `
         ${SYSTEM_EVENTS_CTE},
         valid_latency AS (
           SELECT latencyMs
@@ -161,11 +162,11 @@ export async function handleSystemPerformanceAdmin(
           MIN(CASE WHEN rn >= total * 0.95 THEN latencyMs END) AS p95LatencyMs
         FROM ranked_latency
       `,
-    )
-      .bind(...eventBindings, SYSTEM_TRUSTED_LATENCY_MAX_MS)
-      .first<Record<string, unknown>>(),
-    env.DB.prepare(
-      `
+      bindings: [...eventBindings, SYSTEM_TRUSTED_LATENCY_MAX_MS],
+      tag: "admin.events.first",
+    }),
+    createDatabaseRuntime(env.DB).all<Record<string, unknown>>({
+      sql: `
         ${SYSTEM_EVENTS_MATERIALIZED_CTE},
         trend_aggregate AS (
           SELECT
@@ -218,8 +219,7 @@ export async function handleSystemPerformanceAdmin(
         LEFT JOIN bucket_percentiles p ON p.bucketSec = a.bucketSec
         ORDER BY a.bucketSec ASC
       `,
-    )
-      .bind(
+      bindings: [
         ...eventBindings,
         bucketSizeSec,
         bucketSizeSec,
@@ -229,10 +229,11 @@ export async function handleSystemPerformanceAdmin(
         bucketSizeSec,
         bucketSizeSec,
         SYSTEM_TRUSTED_LATENCY_MAX_MS,
-      )
-      .all<Record<string, unknown>>(),
-    env.DB.prepare(
-      `
+      ],
+      tag: "admin.events.all",
+    }),
+    createDatabaseRuntime(env.DB).all<Record<string, unknown>>({
+      sql: `
         ${SYSTEM_EVENTS_CTE}
         SELECT
           e.siteId,
@@ -250,16 +251,16 @@ export async function handleSystemPerformanceAdmin(
         ORDER BY totalEvents DESC, delayedEvents DESC
         LIMIT 8
       `,
-    )
-      .bind(
+      bindings: [
         ...eventBindings,
         SYSTEM_TRUSTED_LATENCY_MAX_MS,
         SYSTEM_DELAYED_EVENT_MS,
         SYSTEM_FUTURE_SKEW_MS,
-      )
-      .all<Record<string, unknown>>(),
-    env.DB.prepare(
-      `
+      ],
+      tag: "admin.events.all",
+    }),
+    createDatabaseRuntime(env.DB).all<Record<string, unknown>>({
+      sql: `
         ${SYSTEM_EVENTS_CTE}
         SELECT
           e.kind,
@@ -275,11 +276,11 @@ export async function handleSystemPerformanceAdmin(
         ORDER BY e.latencyMs DESC
         LIMIT 10
       `,
-    )
-      .bind(...eventBindings)
-      .all<Record<string, unknown>>(),
-    env.DB.prepare(
-      `
+      bindings: [...eventBindings],
+      tag: "admin.events.all",
+    }),
+    createDatabaseRuntime(env.DB).first<Record<string, unknown>>({
+      sql: `
         SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN ? - last_activity_at > ? THEN 1 ELSE 0 END) AS stale,
@@ -289,14 +290,14 @@ export async function handleSystemPerformanceAdmin(
         FROM visits
         WHERE status = 'open'
       `,
-    )
-      .bind(
+      bindings: [
         generatedAt,
         SYSTEM_STALE_OPEN_VISIT_MS,
         generatedAt,
         SYSTEM_TIMED_OUT_OPEN_VISIT_MS,
-      )
-      .first<Record<string, unknown>>(),
+      ],
+      tag: "admin.visits.first",
+    }),
   ]);
 
   const totalEvents = toFiniteNumber(summaryRow?.totalEvents);
@@ -514,9 +515,14 @@ export async function handleDoDiagnosticAdmin(
   if (req.method !== "GET") return na(req);
 
   const generatedAt = Date.now();
-  const sitesResult = await env.DB.prepare(
-    "SELECT id, name, domain FROM sites ORDER BY created_at ASC",
-  ).all<{ id: string; name: string; domain: string }>();
+  const sitesResult = await createDatabaseRuntime(env.DB).all<{
+    id: string;
+    name: string;
+    domain: string;
+  }>({
+    sql: "SELECT id, name, domain FROM sites ORDER BY created_at ASC",
+    tag: "admin.sites.all",
+  });
   const sites = sitesResult.results.map((row) => ({
     id: String(row.id || ""),
     name: String(row.name || ""),
@@ -628,9 +634,11 @@ export async function handleE2eFlushAdmin(
   const body = await parseJson(req);
   const siteId = clampString(String(body.siteId || ""), 120);
   if (!siteId) return bad("siteId is required", undefined, req);
-  const site = await env.DB.prepare("SELECT id FROM sites WHERE id=? LIMIT 1")
-    .bind(siteId)
-    .first<{ id: string }>();
+  const site = await createDatabaseRuntime(env.DB).first<{ id: string }>({
+    sql: "SELECT id FROM sites WHERE id=? LIMIT 1",
+    bindings: [siteId],
+    tag: "admin.sites.first",
+  });
   if (!site) return nf("Site not found", undefined, req);
   const stub = env.INGEST_DO.get(env.INGEST_DO.idFromName(siteId));
   const response = await stub.fetch("https://ingest.internal/flush?force=1", {

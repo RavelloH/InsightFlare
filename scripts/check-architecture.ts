@@ -34,6 +34,10 @@ interface DemoDynamicImportEntry {
   readonly reason: string;
 }
 
+type DirectD1AccessBaseline = Record<string, number>;
+
+const DIRECT_D1_BASELINE_PATH = "scripts/direct-d1-access-baseline.json";
+
 // Keep this list exact: each exception identifies one existing import and has
 // a removal task. New imports cannot inherit an exception from the same file.
 const LEGACY_ALLOWLIST: readonly LegacyAllowlistEntry[] = [
@@ -654,6 +658,199 @@ export function collectArchitectureViolations(
   );
 }
 
+function sourceFilesForDirectD1Scan(root: string): string[] {
+  return walk(path.join(root, "src")).filter((absolute) => {
+    const relative = slash(path.relative(root, absolute));
+    return (
+      !isWithin(relative, "src/lib/db") &&
+      !relative
+        .split("/")
+        .some((part) => part === "__tests__" || part === "tests") &&
+      !/\.(?:test|spec)\.[^.]+$/u.test(relative) &&
+      !isGeneratedFile(relative, readFileSync(absolute, "utf8"))
+    );
+  });
+}
+
+function d1DatabaseAliases(source: ts.SourceFile): Set<string> {
+  const aliases = new Set<string>();
+  const isDatabaseExpression = (expression: ts.Expression): boolean => {
+    if (ts.isParenthesizedExpression(expression))
+      return isDatabaseExpression(expression.expression);
+    if (ts.isAsExpression(expression) || ts.isNonNullExpression(expression))
+      return isDatabaseExpression(expression.expression);
+    if (ts.isIdentifier(expression)) return aliases.has(expression.text);
+    if (
+      ts.isPropertyAccessExpression(expression) &&
+      expression.name.text === "DB"
+    )
+      return true;
+    if (
+      ts.isElementAccessExpression(expression) &&
+      expression.argumentExpression &&
+      ts.isStringLiteralLike(expression.argumentExpression) &&
+      expression.argumentExpression.text === "DB"
+    )
+      return true;
+    return false;
+  };
+
+  const collect = () => {
+    let changed = false;
+    const visit = (node: ts.Node) => {
+      if (ts.isParameter(node) && node.type) {
+        const typeText = node.type.getText(source);
+        if (/\bD1Database(?:Session)?\b/u.test(typeText)) {
+          if (ts.isIdentifier(node.name) && !aliases.has(node.name.text)) {
+            aliases.add(node.name.text);
+            changed = true;
+          }
+        }
+      }
+      if (ts.isVariableDeclaration(node) && node.initializer) {
+        if (
+          ts.isIdentifier(node.name) &&
+          isDatabaseExpression(node.initializer) &&
+          !aliases.has(node.name.text)
+        ) {
+          aliases.add(node.name.text);
+          changed = true;
+        } else if (ts.isObjectBindingPattern(node.name)) {
+          for (const element of node.name.elements) {
+            const propertyName = element.propertyName ?? element.name;
+            if (
+              ts.isIdentifier(propertyName) &&
+              propertyName.text === "DB" &&
+              ts.isIdentifier(element.name) &&
+              !aliases.has(element.name.text)
+            ) {
+              aliases.add(element.name.text);
+              changed = true;
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return changed;
+  };
+  while (collect()) {
+    // Resolve short local alias chains such as `const database = db`.
+  }
+  return aliases;
+}
+
+function directD1Accesses(root: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const absolute of sourceFilesForDirectD1Scan(root)) {
+    const relative = slash(path.relative(root, absolute));
+    const sourceText = readFileSync(absolute, "utf8");
+    const source = ts.createSourceFile(
+      absolute,
+      sourceText,
+      ts.ScriptTarget.Latest,
+      true,
+      absolute.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const aliases = d1DatabaseAliases(source);
+    const isDatabaseExpression = (expression: ts.Expression): boolean => {
+      if (ts.isParenthesizedExpression(expression))
+        return isDatabaseExpression(expression.expression);
+      if (ts.isAsExpression(expression) || ts.isNonNullExpression(expression))
+        return isDatabaseExpression(expression.expression);
+      if (ts.isIdentifier(expression)) return aliases.has(expression.text);
+      if (
+        ts.isPropertyAccessExpression(expression) &&
+        expression.name.text === "DB"
+      )
+        return true;
+      if (
+        ts.isElementAccessExpression(expression) &&
+        expression.argumentExpression &&
+        ts.isStringLiteralLike(expression.argumentExpression) &&
+        expression.argumentExpression.text === "DB"
+      )
+        return true;
+      return false;
+    };
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        const expression = node.expression;
+        const name = ts.isPropertyAccessExpression(expression)
+          ? expression.name.text
+          : ts.isElementAccessExpression(expression) &&
+              expression.argumentExpression &&
+              ts.isStringLiteralLike(expression.argumentExpression)
+            ? expression.argumentExpression.text
+            : null;
+        const receiver =
+          ts.isPropertyAccessExpression(expression) ||
+          ts.isElementAccessExpression(expression)
+            ? expression.expression
+            : null;
+        if (
+          receiver &&
+          (name === "prepare" || name === "batch" || name === "exec") &&
+          isDatabaseExpression(receiver)
+        ) {
+          counts.set(relative, (counts.get(relative) ?? 0) + 1);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return counts;
+}
+
+function directD1BaselineViolations(root: string): ArchitectureViolation[] {
+  const baselineAbsolute = path.join(root, DIRECT_D1_BASELINE_PATH);
+  const baseline = JSON.parse(
+    readFileSync(baselineAbsolute, "utf8"),
+  ) as DirectD1AccessBaseline;
+  const actual = directD1Accesses(root);
+  const violations: ArchitectureViolation[] = [];
+
+  for (const [source, count] of actual) {
+    const expectedMaximum = baseline[source];
+    if (expectedMaximum === undefined) {
+      violations.push({
+        rule: "direct-d1-access-not-baselined",
+        source,
+        specifier: "D1Database",
+        target: source,
+        line: 1,
+        message: `${count} direct D1 access(es) are not in the remaining-access baseline; route read queries through DatabaseRuntime or update the baseline only for existing deferred writes/operational access.`,
+      });
+    } else if (count > expectedMaximum) {
+      violations.push({
+        rule: "direct-d1-access-baseline-increased",
+        source,
+        specifier: "D1Database",
+        target: source,
+        line: 1,
+        message: `Direct D1 access count increased from the allowed maximum ${expectedMaximum} to ${count}.`,
+      });
+    }
+  }
+
+  for (const source of Object.keys(baseline)) {
+    if (!actual.has(source)) {
+      violations.push({
+        rule: "direct-d1-access-stale-baseline",
+        source,
+        specifier: "D1Database",
+        target: source,
+        line: 1,
+        message:
+          "This source no longer has direct D1 access; remove it from the remaining-access baseline.",
+      });
+    }
+  }
+  return violations;
+}
+
 function printFileSizeWarnings(root: string): void {
   for (const absolute of walk(path.join(root, "src"))) {
     const relative = slash(path.relative(root, absolute));
@@ -681,7 +878,10 @@ function printFileSizeWarnings(root: string): void {
 
 export function runArchitectureCheck(rootDirectory = process.cwd()): number {
   const root = path.resolve(rootDirectory);
-  const violations = collectArchitectureViolations(root);
+  const violations = [
+    ...collectArchitectureViolations(root),
+    ...directD1BaselineViolations(root),
+  ];
   const errors = violations.filter((violation) => !isAllowlisted(violation));
   const legacy = violations.filter(isAllowlisted);
   const prefixFiles = detectForbiddenPrefixFiles(

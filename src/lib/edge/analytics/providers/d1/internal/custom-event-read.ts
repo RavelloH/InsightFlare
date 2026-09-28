@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { CUSTOM_EVENT_JSON_TYPE } from "@/lib/edge/ingest/custom-event-json";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
@@ -50,8 +51,9 @@ export async function readCustomEventsForVisit(
   limit = 100,
 ): Promise<CustomEventListItem[]> {
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 500);
-  const rows = await env.DB.prepare(
-    `
+  const rows = await createDatabaseRuntime(env.DB).all<Record<string, unknown>>(
+    {
+      sql: `
       SELECT
         ce.event_id AS eventId,
         ce.visit_id AS visitId,
@@ -68,9 +70,10 @@ export async function readCustomEventsForVisit(
       ORDER BY ce.occurred_at ASC, ce.sequence ASC, ce.event_pk ASC
       LIMIT ?
     `,
-  )
-    .bind(siteId, visitId, safeLimit)
-    .all<Record<string, unknown>>();
+      bindings: [siteId, visitId, safeLimit],
+      tag: "analytics.custom_events.all",
+    },
+  );
 
   return rows.results.map((row) => ({
     eventId: String(row.eventId ?? ""),
@@ -89,16 +92,16 @@ export async function readCustomEventVisitId(
   siteId: string,
   eventId: string,
 ): Promise<string | null> {
-  const row = await env.DB.prepare(
-    `
+  const row = await createDatabaseRuntime(env.DB).first<{ visitId: string }>({
+    sql: `
       SELECT visit_id AS visitId
       FROM custom_events
       WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND event_id = ?
       LIMIT 1
     `,
-  )
-    .bind(siteId, eventId)
-    .first<{ visitId: string }>();
+    bindings: [siteId, eventId],
+    tag: "analytics.custom_events.first",
+  });
   return row?.visitId ?? null;
 }
 
@@ -107,8 +110,8 @@ export async function readCustomEventDetail(
   siteId: string,
   eventId: string,
 ): Promise<CustomEventDetail | null> {
-  const event = await env.DB.prepare(
-    `
+  const event = await createDatabaseRuntime(env.DB).first<CustomEventRow>({
+    sql: `
       SELECT
         ce.event_pk AS eventPk,
         ce.event_id AS eventId,
@@ -126,13 +129,13 @@ export async function readCustomEventDetail(
       WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND ce.event_id = ?
       LIMIT 1
     `,
-  )
-    .bind(siteId, eventId)
-    .first<CustomEventRow>();
+    bindings: [siteId, eventId],
+    tag: "analytics.custom_events.first",
+  });
   if (!event) return null;
 
-  const nodes = await env.DB.prepare(
-    `
+  const nodes = await createDatabaseRuntime(env.DB).all<CustomEventNodeRow>({
+    sql: `
       SELECT
         n.node_id AS nodeId,
         n.parent_node_id AS parentNodeId,
@@ -152,9 +155,9 @@ export async function readCustomEventDetail(
       WHERE n.event_pk = ?
       ORDER BY n.depth ASC, n.parent_node_id ASC, n.member_order ASC, n.array_index ASC
     `,
-  )
-    .bind(event.eventPk)
-    .all<CustomEventNodeRow>();
+    bindings: [event.eventPk],
+    tag: "analytics.custom_event_json_nodes.all",
+  });
 
   return {
     eventId: event.eventId,

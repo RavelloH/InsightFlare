@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { Env } from "@/lib/edge/types";
 import { clampString, nowEpochSeconds } from "@/lib/edge/utils";
 import { apiKeyHashSecret as resolveApiKeyHashSecret } from "@/lib/secrets";
@@ -263,8 +264,8 @@ export async function listApiKeys(
   env: Env,
   teamId: string,
 ): Promise<PublicApiKey[]> {
-  const rows = await env.DB.prepare(
-    `
+  const rows = await createDatabaseRuntime(env.DB).all<ApiKeyRow>({
+    sql: `
       SELECT
         id, team_id, name, key_prefix, key_hash, scopes_json, site_ids_json,
         created_by_user_id, expires_at, revoked_at, revoked_by_user_id,
@@ -273,9 +274,9 @@ export async function listApiKeys(
       WHERE team_id = ?
       ORDER BY created_at DESC
     `,
-  )
-    .bind(teamId)
-    .all<ApiKeyRow>();
+    bindings: [teamId],
+    tag: "auth.api_keys.all",
+  });
   return rows.results.map(toPublicApiKey);
 }
 
@@ -284,8 +285,8 @@ export async function getApiKeyById(
   keyId: string,
 ): Promise<ApiKeyRow | null> {
   return (
-    (await env.DB.prepare(
-      `
+    (await createDatabaseRuntime(env.DB).first<ApiKeyRow>({
+      sql: `
         SELECT
           id, team_id, name, key_prefix, key_hash, scopes_json, site_ids_json,
           created_by_user_id, expires_at, revoked_at, revoked_by_user_id,
@@ -294,9 +295,9 @@ export async function getApiKeyById(
         WHERE id = ?
         LIMIT 1
       `,
-    )
-      .bind(keyId)
-      .first<ApiKeyRow>()) ?? null
+      bindings: [keyId],
+      tag: "auth.api_keys.first",
+    })) ?? null
   );
 }
 
@@ -305,8 +306,8 @@ export async function getApiKeyByPrefix(
   prefix: string,
 ): Promise<ApiKeyRow | null> {
   return (
-    (await env.DB.prepare(
-      `
+    (await createDatabaseRuntime(env.DB).first<ApiKeyRow>({
+      sql: `
         SELECT
           id, team_id, name, key_prefix, key_hash, scopes_json, site_ids_json,
           created_by_user_id, expires_at, revoked_at, revoked_by_user_id,
@@ -315,9 +316,9 @@ export async function getApiKeyByPrefix(
         WHERE key_prefix = ?
         LIMIT 1
       `,
-    )
-      .bind(prefix)
-      .first<ApiKeyRow>()) ?? null
+      bindings: [prefix],
+      tag: "auth.api_keys.first",
+    })) ?? null
   );
 }
 

@@ -1,4 +1,5 @@
 import { normalizeTimeZone } from "@/lib/analytics/time-zone";
+import { createDatabaseRuntime } from "@/lib/db";
 import { uniqueTeamSlug } from "@/lib/edge/admin/access";
 import {
   byId,
@@ -87,9 +88,12 @@ export async function handleUsersAdmin(
   if (!a.isAdmin)
     return forb("Only system admin can manage accounts", undefined, req);
   if (req.method === "GET") {
-    const rows = await env.DB.prepare(
-      "SELECT u.id,u.username,u.email,u.name,u.system_role AS systemRole,u.timezone AS timeZone,u.preferred_locale AS preferredLocale,u.created_at AS createdAt,u.updated_at AS updatedAt,(SELECT COUNT(*) FROM team_members tm WHERE tm.user_id=u.id) AS teamCount,(SELECT COUNT(*) FROM teams t WHERE t.owner_user_id=u.id) AS ownedTeamCount FROM users u ORDER BY u.created_at ASC",
-    ).all<Record<string, unknown>>();
+    const rows = await createDatabaseRuntime(env.DB).all<
+      Record<string, unknown>
+    >({
+      sql: "SELECT u.id,u.username,u.email,u.name,u.system_role AS systemRole,u.timezone AS timeZone,u.preferred_locale AS preferredLocale,u.created_at AS createdAt,u.updated_at AS updatedAt,(SELECT COUNT(*) FROM team_members tm WHERE tm.user_id=u.id) AS teamCount,(SELECT COUNT(*) FROM teams t WHERE t.owner_user_id=u.id) AS ownedTeamCount FROM users u ORDER BY u.created_at ASC",
+      tag: "admin.team_members.all",
+    });
     return jsonResponseFor(req, { ok: true, data: rows.results });
   }
   if (req.method === "POST") {
@@ -114,19 +118,19 @@ export async function handleUsersAdmin(
     if (teamName.length < 2)
       return bad("Team name is required", undefined, req);
     if (
-      await env.DB.prepare(
-        "SELECT 1 AS ok FROM users WHERE lower(username)=? LIMIT 1",
-      )
-        .bind(username)
-        .first()
+      await createDatabaseRuntime(env.DB).first({
+        sql: "SELECT 1 AS ok FROM users WHERE lower(username)=? LIMIT 1",
+        bindings: [username],
+        tag: "admin.users.first",
+      })
     )
       return bad("Username already exists", undefined, req);
     if (
-      await env.DB.prepare(
-        "SELECT 1 AS ok FROM users WHERE lower(email)=? LIMIT 1",
-      )
-        .bind(email)
-        .first()
+      await createDatabaseRuntime(env.DB).first({
+        sql: "SELECT 1 AS ok FROM users WHERE lower(email)=? LIMIT 1",
+        bindings: [email],
+        tag: "admin.users.first",
+      })
     )
       return bad("Email already exists", undefined, req);
     const id = crypto.randomUUID();
@@ -177,11 +181,13 @@ export async function handleUsersAdmin(
       const target = await byId(env, id);
       if (!target) return nf("User not found", undefined, req);
 
-      const ownedTeams = await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM teams WHERE owner_user_id=?",
-      )
-        .bind(id)
-        .first<{ count: number | null }>();
+      const ownedTeams = await createDatabaseRuntime(env.DB).first<{
+        count: number | null;
+      }>({
+        sql: "SELECT COUNT(*) AS count FROM teams WHERE owner_user_id=?",
+        bindings: [id],
+        tag: "admin.teams.first",
+      });
       if (Number(ownedTeams?.count ?? 0) > 0) {
         return bad("Cannot delete user that owns teams", undefined, req);
       }
@@ -207,19 +213,19 @@ export async function handleUsersAdmin(
     if (password.length > 0 && password.length < 8)
       return bad("Password must be at least 8 characters", undefined, req);
     if (
-      await env.DB.prepare(
-        "SELECT 1 AS ok FROM users WHERE lower(username)=? AND id<>? LIMIT 1",
-      )
-        .bind(username, id)
-        .first()
+      await createDatabaseRuntime(env.DB).first({
+        sql: "SELECT 1 AS ok FROM users WHERE lower(username)=? AND id<>? LIMIT 1",
+        bindings: [username, id],
+        tag: "admin.users.first",
+      })
     )
       return bad("Username already exists", undefined, req);
     if (
-      await env.DB.prepare(
-        "SELECT 1 AS ok FROM users WHERE lower(email)=? AND id<>? LIMIT 1",
-      )
-        .bind(email, id)
-        .first()
+      await createDatabaseRuntime(env.DB).first({
+        sql: "SELECT 1 AS ok FROM users WHERE lower(email)=? AND id<>? LIMIT 1",
+        bindings: [email, id],
+        tag: "admin.users.first",
+      })
     )
       return bad("Email already exists", undefined, req);
     const pass =
@@ -285,19 +291,19 @@ export async function handleProfileAdmin(
         return bad("Current password is incorrect", undefined, req);
     }
     if (
-      await env.DB.prepare(
-        "SELECT 1 AS ok FROM users WHERE lower(username)=? AND id<>? LIMIT 1",
-      )
-        .bind(username, a.user.id)
-        .first()
+      await createDatabaseRuntime(env.DB).first({
+        sql: "SELECT 1 AS ok FROM users WHERE lower(username)=? AND id<>? LIMIT 1",
+        bindings: [username, a.user.id],
+        tag: "admin.users.first",
+      })
     )
       return bad("Username already exists", undefined, req);
     if (
-      await env.DB.prepare(
-        "SELECT 1 AS ok FROM users WHERE lower(email)=? AND id<>? LIMIT 1",
-      )
-        .bind(email, a.user.id)
-        .first()
+      await createDatabaseRuntime(env.DB).first({
+        sql: "SELECT 1 AS ok FROM users WHERE lower(email)=? AND id<>? LIMIT 1",
+        bindings: [email, a.user.id],
+        tag: "admin.users.first",
+      })
     )
       return bad("Email already exists", undefined, req);
     const pass =

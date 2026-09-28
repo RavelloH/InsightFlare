@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type {
   FilterDocument,
@@ -326,11 +327,11 @@ async function loadSiteInfoUncached(
   env: Env,
   siteId: string,
 ): Promise<NotificationSiteInfo | null> {
-  const row = await env.DB.prepare(
-    "SELECT name, domain FROM sites WHERE id = ? LIMIT 1",
-  )
-    .bind(siteId)
-    .first<NotificationSiteInfo>();
+  const row = await createDatabaseRuntime(env.DB).first<NotificationSiteInfo>({
+    sql: "SELECT name, domain FROM sites WHERE id = ? LIMIT 1",
+    bindings: [siteId],
+    tag: "notifications.sites.first",
+  });
   return row ?? null;
 }
 export async function loadDailyReportData(
@@ -625,13 +626,15 @@ async function loadSiteLastSeenAtUncached(
   env: Env,
   siteId: string,
 ): Promise<number | null> {
-  const row = await env.DB.prepare(
-    `SELECT MAX(last_activity_at) AS lastSeenAt
+  const row = await createDatabaseRuntime(env.DB).first<{
+    lastSeenAt: number | null;
+  }>({
+    sql: `SELECT MAX(last_activity_at) AS lastSeenAt
      FROM visits
      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .first<{ lastSeenAt: number | null }>();
+    bindings: [siteId],
+    tag: "notifications.visits.first",
+  });
   const value = Number(row?.lastSeenAt ?? 0);
   return Number.isFinite(value) && value > 0 ? Math.floor(value / 1000) : null;
 }

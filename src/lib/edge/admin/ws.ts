@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   canAccessMemberSite,
   parseMemberSiteIdsJson,
@@ -119,14 +120,21 @@ async function canSessionReadSite(
   siteId: string,
 ): Promise<boolean> {
   if (session.systemRole === "admin") {
-    const site = await env.DB.prepare("SELECT id FROM sites WHERE id=? LIMIT 1")
-      .bind(siteId)
-      .first<{ id: string }>();
+    const site = await createDatabaseRuntime(env.DB).first<{ id: string }>({
+      sql: "SELECT id FROM sites WHERE id=? LIMIT 1",
+      bindings: [siteId],
+      tag: "admin.sites.first",
+    });
     return Boolean(site?.id);
   }
 
-  const site = await env.DB.prepare(
-    `SELECT
+  const site = await createDatabaseRuntime(env.DB).first<{
+    id: string;
+    ownerUserId: string;
+    role: string | null;
+    siteIdsJson: string | null;
+  }>({
+    sql: `SELECT
        s.id,
        t.owner_user_id AS ownerUserId,
        tm.role,
@@ -136,14 +144,9 @@ async function canSessionReadSite(
      LEFT JOIN team_members tm ON tm.team_id = s.team_id AND tm.user_id = ?
      WHERE s.id = ?
      LIMIT 1`,
-  )
-    .bind(session.userId, siteId)
-    .first<{
-      id: string;
-      ownerUserId: string;
-      role: string | null;
-      siteIdsJson: string | null;
-    }>();
+    bindings: [session.userId, siteId],
+    tag: "admin.sites.first",
+  });
 
   if (!site?.id) return false;
   if (site.ownerUserId === session.userId) return true;

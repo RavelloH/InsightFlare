@@ -1,4 +1,5 @@
 import { type TeamRole, toTeamRole } from "@/lib/dashboard/permissions";
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   canAdministerTeam,
   canManageTeam,
@@ -56,9 +57,12 @@ export async function handleTeamsAdmin(
   if (a instanceof Response) return a;
   if (req.method === "GET") {
     if (a.isAdmin) {
-      const rows = await env.DB.prepare(
-        "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,'owner' AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t ORDER BY t.created_at DESC",
-      ).all<Record<string, unknown>>();
+      const rows = await createDatabaseRuntime(env.DB).all<
+        Record<string, unknown>
+      >({
+        sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,'owner' AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t ORDER BY t.created_at DESC",
+        tag: "admin.sites.all",
+      });
       return jsonResponseFor(req, {
         ok: true,
         data: rows.results.map((row) => ({
@@ -110,18 +114,18 @@ export async function handleTeamsAdmin(
     if (!(await canManageTeam(env, a, teamId)))
       return forb("Only team owner can update team", undefined, req);
 
-    const existing = await env.DB.prepare(
-      "SELECT id,name,slug,owner_user_id AS ownerUserId,created_at AS createdAt,updated_at AS updatedAt FROM teams WHERE id=? LIMIT 1",
-    )
-      .bind(teamId)
-      .first<{
-        id: string;
-        name: string;
-        slug: string;
-        ownerUserId: string;
-        createdAt: number;
-        updatedAt: number;
-      }>();
+    const existing = await createDatabaseRuntime(env.DB).first<{
+      id: string;
+      name: string;
+      slug: string;
+      ownerUserId: string;
+      createdAt: number;
+      updatedAt: number;
+    }>({
+      sql: "SELECT id,name,slug,owner_user_id AS ownerUserId,created_at AS createdAt,updated_at AS updatedAt FROM teams WHERE id=? LIMIT 1",
+      bindings: [teamId],
+      tag: "admin.teams.first",
+    });
     if (!existing) return nf("Team not found", undefined, req);
 
     if (intent === "transfer_owner") {
@@ -141,11 +145,13 @@ export async function handleTeamsAdmin(
       if (newOwnerUserId === existing.ownerUserId) {
         return bad("Already the team owner", undefined, req);
       }
-      const targetMembership = await env.DB.prepare(
-        "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
-      )
-        .bind(teamId, newOwnerUserId)
-        .first<{ role: string }>();
+      const targetMembership = await createDatabaseRuntime(env.DB).first<{
+        role: string;
+      }>({
+        sql: "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
+        bindings: [teamId, newOwnerUserId],
+        tag: "admin.team_members.first",
+      });
       if (!targetMembership)
         return bad("Target user is not a team member", undefined, req);
 
@@ -178,11 +184,11 @@ export async function handleTeamsAdmin(
     if (intent === "remove" || intent === "delete") {
       if (!(await canAdministerTeam(env, a, teamId)))
         return forb("Only team owner can delete team", undefined, req);
-      const siteRows = await env.DB.prepare(
-        "SELECT id FROM sites WHERE team_id=?",
-      )
-        .bind(teamId)
-        .all<{ id: string }>();
+      const siteRows = await createDatabaseRuntime(env.DB).all<{ id: string }>({
+        sql: "SELECT id FROM sites WHERE team_id=?",
+        bindings: [teamId],
+        tag: "admin.sites.all",
+      });
       const siteIds = siteRows.results.map((row) => row.id);
 
       if (siteIds.length > 0) {
@@ -301,11 +307,13 @@ export async function handleMembersAdmin(
     if (!teamId) return bad("Missing teamId", undefined, req);
     if (!(await canReadTeam(env, a, teamId)))
       return forb("Team access denied", undefined, req);
-    const rows = await env.DB.prepare(
-      "SELECT tm.team_id AS teamId,tm.user_id AS userId,tm.role,tm.site_ids_json AS siteIdsJson,tm.joined_at AS joinedAt,u.username,u.email,u.name FROM team_members tm INNER JOIN users u ON u.id=tm.user_id WHERE tm.team_id=? ORDER BY tm.joined_at ASC",
-    )
-      .bind(teamId)
-      .all<Record<string, unknown>>();
+    const rows = await createDatabaseRuntime(env.DB).all<
+      Record<string, unknown>
+    >({
+      sql: "SELECT tm.team_id AS teamId,tm.user_id AS userId,tm.role,tm.site_ids_json AS siteIdsJson,tm.joined_at AS joinedAt,u.username,u.email,u.name FROM team_members tm INNER JOIN users u ON u.id=tm.user_id WHERE tm.team_id=? ORDER BY tm.joined_at ASC",
+      bindings: [teamId],
+      tag: "admin.team_members.all",
+    });
     return jsonResponseFor(req, {
       ok: true,
       data: rows.results.map((row) => {
@@ -372,11 +380,13 @@ export async function handleMembersAdmin(
     if (!(await assertSitesBelongToTeam(env, teamId, siteIds))) {
       return bad("siteIds must belong to the team", undefined, req);
     }
-    const existingRole = await env.DB.prepare(
-      "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
-    )
-      .bind(teamId, m.id)
-      .first<{ role: string }>();
+    const existingRole = await createDatabaseRuntime(env.DB).first<{
+      role: string;
+    }>({
+      sql: "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
+      bindings: [teamId, m.id],
+      tag: "admin.team_members.first",
+    });
     if (existingRole && toTeamRole(existingRole.role) === "owner")
       return forb("Cannot change team owner membership", undefined, req);
     await env.DB.prepare(
@@ -411,11 +421,13 @@ export async function handleMembersAdmin(
     if (!team) return nf("Team not found", undefined, req);
     if (!(await canManageTeam(env, a, teamId)))
       return forb("Only team owner can manage members", undefined, req);
-    const existing = await env.DB.prepare(
-      "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
-    )
-      .bind(teamId, userId)
-      .first<{ role: string }>();
+    const existing = await createDatabaseRuntime(env.DB).first<{
+      role: string;
+    }>({
+      sql: "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
+      bindings: [teamId, userId],
+      tag: "admin.team_members.first",
+    });
     if (!existing) return nf("Member not found", undefined, req);
     const existingRole = toTeamRole(existing.role);
 

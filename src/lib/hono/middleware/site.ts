@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 
 import { jsonError } from "@/lib/api-v1";
+import { createDatabaseRuntime } from "@/lib/db";
 import { canAccessSiteId } from "@/lib/edge/auth/api-key-auth";
 import {
   fetchPublicSite,
@@ -59,8 +60,8 @@ export function resolveApiSiteMiddleware(): MiddlewareHandler<AppEnv> {
       return response;
     }
 
-    const row = await c.env.DB.prepare(
-      `
+    const row = await createDatabaseRuntime(c.env.DB).first<HonoApiSite>({
+      sql: `
         SELECT
           id,
           team_id AS teamId,
@@ -74,9 +75,9 @@ export function resolveApiSiteMiddleware(): MiddlewareHandler<AppEnv> {
         WHERE id=? AND team_id=?
         LIMIT 1
       `,
-    )
-      .bind(siteId, principal.teamId)
-      .first<HonoApiSite>();
+      bindings: [siteId, principal.teamId],
+      tag: "hono.sites.first",
+    });
 
     if (!row) {
       const response = jsonError(

@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   type AggregateSiteHourMetricRow,
   ROLLUP_LAG_HOURS,
@@ -39,8 +40,10 @@ async function listAggregationCandidates(
   endHour: number,
 ): Promise<AggregationCandidateRow[]> {
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
-  const result = await env.DB.prepare(
-    `
+  const result = await createDatabaseRuntime(
+    env.DB,
+  ).all<AggregationCandidateRow>({
+    sql: `
       SELECT
         s.id AS siteId,
         si.site_pk AS sitePk,
@@ -61,9 +64,9 @@ async function listAggregationCandidates(
          )
       ORDER BY COALESCE(st.last_success_at, 0) ASC, s.id ASC
     `,
-  )
-    .bind(endExclusiveMs)
-    .all<AggregationCandidateRow>();
+    bindings: [endExclusiveMs],
+    tag: "scheduled-tasks.sites.all",
+  });
   return result.results.map((row) => ({
     siteId: String(row.siteId ?? ""),
     sitePk: Number(row.sitePk),
@@ -83,8 +86,8 @@ async function readFirstClosedHour(
   endHour: number,
 ): Promise<number | null> {
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
-  const row = await env.DB.prepare(
-    `
+  const row = await createDatabaseRuntime(env.DB).first<HourBucketRow>({
+    sql: `
       SELECT CAST(started_at / ? AS INTEGER) AS hourBucket
       FROM visits
       WHERE site_pk = ?
@@ -93,9 +96,9 @@ async function readFirstClosedHour(
       ORDER BY started_at ASC
       LIMIT 1
     `,
-  )
-    .bind(ONE_HOUR_MS, sitePk, endExclusiveMs)
-    .first<HourBucketRow>();
+    bindings: [ONE_HOUR_MS, sitePk, endExclusiveMs],
+    tag: "scheduled-tasks.visits.first",
+  });
   if (!row || row.hourBucket === null || row.hourBucket === undefined) {
     return null;
   }
@@ -108,8 +111,8 @@ async function readFirstOpenHour(
   endHour: number,
 ): Promise<number | null> {
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
-  const row = await env.DB.prepare(
-    `
+  const row = await createDatabaseRuntime(env.DB).first<HourBucketRow>({
+    sql: `
       SELECT CAST(started_at / ? AS INTEGER) AS hourBucket
       FROM visits
       WHERE site_pk = ?
@@ -118,9 +121,9 @@ async function readFirstOpenHour(
       ORDER BY started_at ASC
       LIMIT 1
     `,
-  )
-    .bind(ONE_HOUR_MS, sitePk, endExclusiveMs)
-    .first<HourBucketRow>();
+    bindings: [ONE_HOUR_MS, sitePk, endExclusiveMs],
+    tag: "scheduled-tasks.visits.first",
+  });
   if (!row || row.hourBucket === null || row.hourBucket === undefined) {
     return null;
   }
@@ -160,8 +163,10 @@ async function aggregateSiteHours(
   if (endHour < startHour) return 0;
   const startMs = startHour * ONE_HOUR_MS;
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
-  const metrics = await env.DB.prepare(
-    `
+  const metrics = await createDatabaseRuntime(
+    env.DB,
+  ).all<AggregateSiteHourMetricRow>({
+    sql: `
       WITH base_visits AS MATERIALIZED (
         SELECT
           site_id AS siteId,
@@ -256,9 +261,9 @@ async function aggregateSiteHours(
       GROUP BY siteId, hourBucket, session_id
       ORDER BY metric ASC, hourBucket ASC, visitorId ASC, sessionId ASC
     `,
-  )
-    .bind(ONE_HOUR_MS, sitePk, startMs, endExclusiveMs)
-    .all<AggregateSiteHourMetricRow>();
+    bindings: [ONE_HOUR_MS, sitePk, startMs, endExclusiveMs],
+    tag: "scheduled-tasks.visits.all",
+  });
   const byHour = new Map<number, StoredRollupRow>();
   for (const row of metrics.results.filter((item) => item.metric === "basic")) {
     byHour.set(Number(row.hourBucket), {

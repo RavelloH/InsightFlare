@@ -6,6 +6,7 @@ import {
   type AnalyticsEngineConfig,
   redactAnalyticsEngineConfig,
 } from "@/lib/analytics-engine-config";
+import { createDatabaseRuntime } from "@/lib/db";
 import { forb } from "@/lib/edge/admin/response";
 import { analyticsEngineAvailability } from "@/lib/edge/analytics-engine/config";
 import {
@@ -307,11 +308,15 @@ export async function siteLookupByIds(env: Env, ids: string[]) {
   for (let index = 0; index < ids.length; index += MAX_SITE_IDS_PER_D1_QUERY) {
     const chunk = ids.slice(index, index + MAX_SITE_IDS_PER_D1_QUERY);
     const placeholders = chunk.map(() => "?").join(",");
-    const rows = await env.DB.prepare(
-      `SELECT id, name, domain FROM sites WHERE id IN (${placeholders})`,
-    )
-      .bind(...chunk)
-      .all<{ id: string; name: string; domain: string }>();
+    const rows = await createDatabaseRuntime(env.DB).all<{
+      id: string;
+      name: string;
+      domain: string;
+    }>({
+      sql: `SELECT id, name, domain FROM sites WHERE id IN (${placeholders})`,
+      bindings: [...chunk],
+      tag: "admin.sites.all",
+    });
     for (const row of rows.results) {
       sites.set(String(row.id || ""), {
         name: String(row.name || ""),
