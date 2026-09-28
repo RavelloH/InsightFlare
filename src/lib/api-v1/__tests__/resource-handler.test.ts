@@ -104,7 +104,7 @@ function resourceEnv(
             ? listRows.funnels
             : listRows.sites;
           const cursorId = parameters.length >= 4 ? parameters.at(-2) : null;
-          const scoped = sql.includes("id IN")
+          const scoped = /\sIN\s*\(/i.test(sql)
             ? source.filter((row) => parameters.includes(row.id))
             : source;
           return typeof cursorId === "string"

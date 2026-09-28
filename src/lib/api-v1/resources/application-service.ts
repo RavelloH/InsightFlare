@@ -16,7 +16,28 @@ import {
   type TrackingScriptSchema,
   type TrackingSettingsSchema,
 } from "@/lib/api-v1/contract/resources";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Mutation,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  gt,
+  inList,
+  insert,
+  isNull,
+  limit,
+  lt,
+  or,
+  param,
+  project,
+  scan,
+  schema,
+  sort,
+  unixepoch,
+  update,
+} from "@/lib/db";
 import {
   createSiteWithDefaultSettings,
   deleteSiteData,
@@ -240,54 +261,121 @@ function stopped(execution: {
     (execution.deadlineMs !== undefined && Date.now() >= execution.deadlineMs),
   );
 }
+function database(env: Pick<Env, "DB">) {
+  return createD1DatabaseClient(env.DB);
+}
+function requireResourceId<Row extends { readonly id: string | null }>(
+  row: Row,
+  resource: string,
+): asserts row is Row & { readonly id: string } {
+  if (typeof row.id !== "string") {
+    throw new Error(`${resource}_row_missing_id`);
+  }
+}
 async function siteById(
   env: Pick<Env, "DB">,
   context: ApiV1ApplicationContext,
   siteId: string,
 ): Promise<SiteRow | null> {
   if (!isAllowed(context, siteId)) return null;
-  return (
-    (await createDatabaseRuntime(env.DB).first<SiteRow>({
-      sql: `SELECT id, team_id AS teamId, name, domain,
-              public_enabled AS publicEnabled, public_slug AS publicSlug,
-              created_at AS createdAt, updated_at AS updatedAt
-       FROM sites WHERE id=? AND team_id=? LIMIT 1`,
-      bindings: [siteId, context.teamId],
-      tag: "api-v1.sites.first",
-    })) ?? null
+  const sites = scan(schema.sites);
+  const matching = filter(
+    sites,
+    and(
+      eq(sites.columns.id, param(siteId)),
+      eq(sites.columns.team_id, param(context.teamId)),
+    ),
   );
+  const query = compileD1Query(
+    limit(
+      project(matching, {
+        id: matching.columns.id,
+        teamId: matching.columns.team_id,
+        name: matching.columns.name,
+        domain: matching.columns.domain,
+        publicEnabled: matching.columns.public_enabled,
+        publicSlug: matching.columns.public_slug,
+        createdAt: matching.columns.created_at,
+        updatedAt: matching.columns.updated_at,
+      }),
+      1,
+    ),
+    { tag: "api-v1.sites.first" },
+  );
+  const row = await database(env).first(query);
+  if (!row) return null;
+  requireResourceId(row, "site");
+  return row;
 }
 async function funnelById(
   env: Pick<Env, "DB">,
   siteId: string,
   funnelId: string,
 ): Promise<FunnelRow | null> {
-  return (
-    (await createDatabaseRuntime(env.DB).first<FunnelRow>({
-      sql: `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
-       FROM analysis_definitions
-       WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL
-       LIMIT 1`,
-      bindings: [funnelId, siteId],
-      tag: "api-v1.analysis_definitions.first",
-    })) ?? null
+  const definitions = scan(schema.analysis_definitions);
+  const matching = filter(
+    definitions,
+    and(
+      eq(definitions.columns.id, param(funnelId)),
+      eq(definitions.columns.site_id, param(siteId)),
+      eq(definitions.columns.kind, param("funnel")),
+      isNull(definitions.columns.archived_at),
+    ),
   );
+  const query = compileD1Query(
+    limit(
+      project(matching, {
+        id: matching.columns.id,
+        site_id: matching.columns.site_id,
+        name: matching.columns.name,
+        config_json: matching.columns.config_json,
+        config_version: matching.columns.config_version,
+        created_at: matching.columns.created_at,
+        updated_at: matching.columns.updated_at,
+      }),
+      1,
+    ),
+    { tag: "api-v1.analysis_definitions.first" },
+  );
+  const row = await database(env).first(query);
+  if (!row) return null;
+  requireResourceId(row, "funnel");
+  return row;
 }
 async function goalById(
   env: Pick<Env, "DB">,
   siteId: string,
   goalId: string,
 ): Promise<GoalRow | null> {
-  return (
-    (await createDatabaseRuntime(env.DB).first<GoalRow>({
-      sql: `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
-       FROM analysis_definitions
-       WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL
-       LIMIT 1`,
-      bindings: [goalId, siteId],
-      tag: "api-v1.analysis_definitions.first",
-    })) ?? null
+  const definitions = scan(schema.analysis_definitions);
+  const matching = filter(
+    definitions,
+    and(
+      eq(definitions.columns.id, param(goalId)),
+      eq(definitions.columns.site_id, param(siteId)),
+      eq(definitions.columns.kind, param("goal")),
+      isNull(definitions.columns.archived_at),
+    ),
   );
+  const query = compileD1Query(
+    limit(
+      project(matching, {
+        id: matching.columns.id,
+        site_id: matching.columns.site_id,
+        name: matching.columns.name,
+        config_json: matching.columns.config_json,
+        config_version: matching.columns.config_version,
+        created_at: matching.columns.created_at,
+        updated_at: matching.columns.updated_at,
+      }),
+      1,
+    ),
+    { tag: "api-v1.analysis_definitions.first" },
+  );
+  const row = await database(env).first(query);
+  if (!row) return null;
+  requireResourceId(row, "goal");
+  return row;
 }
 function ok<T>(value: T): ApiV1ApplicationOutcome<T, never> {
   return { ok: true, value };
@@ -347,27 +435,55 @@ export function createResourceApplicationService(
           throw error;
         }
         const allowedSiteIds = [...new Set(context.siteIds)];
-        const where = ["team_id=?"];
-        const parameters: unknown[] = [context.teamId];
+        const sites = scan(schema.sites);
+        let matching = filter(
+          sites,
+          eq(sites.columns.team_id, param(context.teamId)),
+        );
         if (allowedSiteIds.length > 0) {
-          where.push(`id IN (${allowedSiteIds.map(() => "?").join(",")})`);
-          parameters.push(...allowedSiteIds);
+          matching = filter(
+            matching,
+            inList(matching.columns.id, allowedSiteIds),
+          );
         }
         if (cursor) {
-          where.push("(created_at < ? OR (created_at = ? AND id > ?))");
-          parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
+          matching = filter(
+            matching,
+            or(
+              lt(matching.columns.created_at, param(cursor.createdAt)),
+              and(
+                eq(matching.columns.created_at, param(cursor.createdAt)),
+                gt(matching.columns.id, param(cursor.id)),
+              ),
+            ),
+          );
         }
-        parameters.push(value.page.limit + 1);
-        const rows = await createDatabaseRuntime(env.DB).all<SiteRow>({
-          sql: `SELECT id, team_id AS teamId, name, domain,
-                  public_enabled AS publicEnabled, public_slug AS publicSlug,
-                  created_at AS createdAt, updated_at AS updatedAt
-           FROM sites WHERE ${where.join(" AND ")}
-           ORDER BY created_at DESC, id ASC LIMIT ?`,
-          bindings: [...parameters],
-          tag: "api-v1.sites.all",
+        const projected = project(matching, {
+          id: matching.columns.id,
+          teamId: matching.columns.team_id,
+          name: matching.columns.name,
+          domain: matching.columns.domain,
+          publicEnabled: matching.columns.public_enabled,
+          publicSlug: matching.columns.public_slug,
+          createdAt: matching.columns.created_at,
+          updatedAt: matching.columns.updated_at,
         });
-        const page = pageResult(rows.results, value.page.limit);
+        const query = compileD1Query(
+          limit(
+            sort(projected, [
+              { expression: projected.columns.createdAt, direction: "DESC" },
+              { expression: projected.columns.id, direction: "ASC" },
+            ]),
+            value.page.limit + 1,
+          ),
+          { tag: "api-v1.sites.all" },
+        );
+        const rows = await database(env).all(query);
+        const siteRows = rows.results.map((row) => {
+          requireResourceId(row, "site");
+          return row;
+        });
+        const page = pageResult(siteRows, value.page.limit);
         const nextCursor =
           page.hasMore && page.last
             ? await encodePageCursor(env, binding, {
@@ -429,18 +545,24 @@ export function createResourceApplicationService(
           return failed("conflict") as never;
         }
         const domain = value.domain ?? site.domain;
-        await createDatabaseRuntime(env.DB).run({
-          sql: "UPDATE sites SET name=?, domain=?, public_enabled=?, public_slug=?, updated_at=unixepoch() WHERE id=? AND team_id=?",
-          bindings: [
-            value.name ?? site.name,
-            domain,
-            publicEnabled ? 1 : 0,
-            publicSlug,
-            site.id,
-            context.teamId,
-          ],
-          tag: "api_v1.sites.update",
-        });
+        await database(env).run(
+          compileD1Mutation(
+            update(schema.sites, (columns) => ({
+              set: {
+                name: param(value.name ?? site.name),
+                domain: param(domain),
+                public_enabled: param(publicEnabled ? 1 : 0),
+                public_slug: param(publicSlug),
+                updated_at: unixepoch(),
+              },
+              where: and(
+                eq(columns.id, param(site.id)),
+                eq(columns.team_id, param(context.teamId)),
+              ),
+            })),
+            { tag: "api_v1.sites.update" },
+          ),
+        );
         await upsertSiteScriptSettings(env, site.id, { siteDomain: domain });
         const updated = await siteById(env, context, site.id);
         return updated
@@ -522,16 +644,22 @@ export function createResourceApplicationService(
           publicEnabled,
           publicSlug,
         };
-        await createDatabaseRuntime(env.DB).run({
-          sql: "UPDATE sites SET public_enabled=?, public_slug=?, updated_at=unixepoch() WHERE id=? AND team_id=?",
-          bindings: [
-            sharing.publicEnabled ? 1 : 0,
-            sharing.publicSlug,
-            site.id,
-            context.teamId,
-          ],
-          tag: "api_v1.sites.update_sharing",
-        });
+        await database(env).run(
+          compileD1Mutation(
+            update(schema.sites, (columns) => ({
+              set: {
+                public_enabled: param(sharing.publicEnabled ? 1 : 0),
+                public_slug: param(sharing.publicSlug),
+                updated_at: unixepoch(),
+              },
+              where: and(
+                eq(columns.id, param(site.id)),
+                eq(columns.team_id, param(context.teamId)),
+              ),
+            })),
+            { tag: "api_v1.sites.update_sharing" },
+          ),
+        );
         return ok(sharing) as never;
       }
       if (operation === "funnels.list") {
@@ -556,21 +684,52 @@ export function createResourceApplicationService(
             return failed("invalid_cursor") as never;
           throw error;
         }
-        const where = ["site_id=?", "kind='funnel'", "archived_at IS NULL"];
-        const parameters: unknown[] = [site.id];
+        const definitions = scan(schema.analysis_definitions);
+        let matching = filter(
+          definitions,
+          and(
+            eq(definitions.columns.site_id, param(site.id)),
+            eq(definitions.columns.kind, param("funnel")),
+            isNull(definitions.columns.archived_at),
+          ),
+        );
         if (cursor) {
-          where.push("(created_at < ? OR (created_at = ? AND id > ?))");
-          parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
+          matching = filter(
+            matching,
+            or(
+              lt(matching.columns.created_at, param(cursor.createdAt)),
+              and(
+                eq(matching.columns.created_at, param(cursor.createdAt)),
+                gt(matching.columns.id, param(cursor.id)),
+              ),
+            ),
+          );
         }
-        parameters.push(value.page.limit + 1);
-        const rows = await createDatabaseRuntime(env.DB).all<FunnelRow>({
-          sql: `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
-           FROM analysis_definitions WHERE ${where.join(" AND ")}
-           ORDER BY created_at DESC, id ASC LIMIT ?`,
-          bindings: [...parameters],
-          tag: "api-v1.analysis_definitions.all",
+        const projected = project(matching, {
+          id: matching.columns.id,
+          site_id: matching.columns.site_id,
+          name: matching.columns.name,
+          config_json: matching.columns.config_json,
+          config_version: matching.columns.config_version,
+          created_at: matching.columns.created_at,
+          updated_at: matching.columns.updated_at,
         });
-        const page = pageResult(rows.results, value.page.limit);
+        const query = compileD1Query(
+          limit(
+            sort(projected, [
+              { expression: projected.columns.created_at, direction: "DESC" },
+              { expression: projected.columns.id, direction: "ASC" },
+            ]),
+            value.page.limit + 1,
+          ),
+          { tag: "api-v1.analysis_definitions.all" },
+        );
+        const rows = await database(env).all(query);
+        const funnelRows = rows.results.map((row) => {
+          requireResourceId(row, "funnel");
+          return row;
+        });
+        const page = pageResult(funnelRows, value.page.limit);
         const nextCursor =
           page.hasMore && page.last
             ? await encodePageCursor(env, binding, {
@@ -607,20 +766,21 @@ export function createResourceApplicationService(
         }
         const id = crypto.randomUUID();
         const now = Math.floor(Date.now() / 1_000);
-        await createDatabaseRuntime(env.DB).run({
-          sql: `INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at)
-           VALUES (?, ?, 'funnel', ?, ?, ?, ?, ?)`,
-          bindings: [
-            id,
-            site.id,
-            value.name,
-            encoded.configJson,
-            encoded.configVersion,
-            now,
-            now,
-          ],
-          tag: "api_v1.funnels.insert",
-        });
+        await database(env).run(
+          compileD1Mutation(
+            insert(schema.analysis_definitions, {
+              id: param(id),
+              site_id: param(site.id),
+              kind: param("funnel"),
+              name: param(value.name),
+              config_json: param(encoded.configJson),
+              config_version: param(encoded.configVersion),
+              created_at: param(now),
+              updated_at: param(now),
+            }),
+            { tag: "api_v1.funnels.insert" },
+          ),
+        );
         return ok(
           await funnelResource({
             id,
@@ -657,21 +817,52 @@ export function createResourceApplicationService(
             return failed("invalid_cursor") as never;
           throw error;
         }
-        const where = ["site_id=?", "kind='goal'", "archived_at IS NULL"];
-        const parameters: unknown[] = [site.id];
+        const definitions = scan(schema.analysis_definitions);
+        let matching = filter(
+          definitions,
+          and(
+            eq(definitions.columns.site_id, param(site.id)),
+            eq(definitions.columns.kind, param("goal")),
+            isNull(definitions.columns.archived_at),
+          ),
+        );
         if (cursor) {
-          where.push("(created_at < ? OR (created_at = ? AND id < ?))");
-          parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
+          matching = filter(
+            matching,
+            or(
+              lt(matching.columns.created_at, param(cursor.createdAt)),
+              and(
+                eq(matching.columns.created_at, param(cursor.createdAt)),
+                lt(matching.columns.id, param(cursor.id)),
+              ),
+            ),
+          );
         }
-        parameters.push(value.page.limit + 1);
-        const rows = await createDatabaseRuntime(env.DB).all<GoalRow>({
-          sql: `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
-           FROM analysis_definitions WHERE ${where.join(" AND ")}
-           ORDER BY created_at DESC, id DESC LIMIT ?`,
-          bindings: [...parameters],
-          tag: "api-v1.analysis_definitions.all",
+        const projected = project(matching, {
+          id: matching.columns.id,
+          site_id: matching.columns.site_id,
+          name: matching.columns.name,
+          config_json: matching.columns.config_json,
+          config_version: matching.columns.config_version,
+          created_at: matching.columns.created_at,
+          updated_at: matching.columns.updated_at,
         });
-        const page = pageResult(rows.results, value.page.limit);
+        const query = compileD1Query(
+          limit(
+            sort(projected, [
+              { expression: projected.columns.created_at, direction: "DESC" },
+              { expression: projected.columns.id, direction: "DESC" },
+            ]),
+            value.page.limit + 1,
+          ),
+          { tag: "api-v1.analysis_definitions.all" },
+        );
+        const rows = await database(env).all(query);
+        const goalRows = rows.results.map((row) => {
+          requireResourceId(row, "goal");
+          return row;
+        });
+        const page = pageResult(goalRows, value.page.limit);
         const nextCursor =
           page.hasMore && page.last
             ? await encodePageCursor(env, binding, {
@@ -705,20 +896,21 @@ export function createResourceApplicationService(
         }
         const id = crypto.randomUUID();
         const now = Math.floor(Date.now() / 1_000);
-        await createDatabaseRuntime(env.DB).run({
-          sql: `INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at)
-           VALUES (?, ?, 'goal', ?, ?, ?, ?, ?)`,
-          bindings: [
-            id,
-            site.id,
-            value.name.trim(),
-            encoded.configJson,
-            encoded.configVersion,
-            now,
-            now,
-          ],
-          tag: "api_v1.goals.insert",
-        });
+        await database(env).run(
+          compileD1Mutation(
+            insert(schema.analysis_definitions, {
+              id: param(id),
+              site_id: param(site.id),
+              kind: param("goal"),
+              name: param(value.name.trim()),
+              config_json: param(encoded.configJson),
+              config_version: param(encoded.configVersion),
+              created_at: param(now),
+              updated_at: param(now),
+            }),
+            { tag: "api_v1.goals.insert" },
+          ),
+        );
         return ok(
           await goalResource({
             id,
@@ -744,11 +936,23 @@ export function createResourceApplicationService(
         }
         if (operation === "goals.delete") {
           const now = Math.floor(Date.now() / 1_000);
-          await createDatabaseRuntime(env.DB).run({
-            sql: "UPDATE analysis_definitions SET archived_at=?, updated_at=? WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL",
-            bindings: [now, now, goal.id, site.id],
-            tag: "api_v1.goals.archive",
-          });
+          await database(env).run(
+            compileD1Mutation(
+              update(schema.analysis_definitions, (columns) => ({
+                set: {
+                  archived_at: param(now),
+                  updated_at: param(now),
+                },
+                where: and(
+                  eq(columns.id, param(goal.id)),
+                  eq(columns.site_id, param(site.id)),
+                  eq(columns.kind, param("goal")),
+                  isNull(columns.archived_at),
+                ),
+              })),
+              { tag: "api_v1.goals.archive" },
+            ),
+          );
           return ok(undefined) as never;
         }
         const value =
@@ -768,18 +972,25 @@ export function createResourceApplicationService(
         }
         const now = Math.floor(Date.now() / 1_000);
         const name = value.name?.trim() || goal.name;
-        await createDatabaseRuntime(env.DB).run({
-          sql: "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL",
-          bindings: [
-            name,
-            encoded.configJson,
-            encoded.configVersion,
-            now,
-            goal.id,
-            site.id,
-          ],
-          tag: "api_v1.goals.update",
-        });
+        await database(env).run(
+          compileD1Mutation(
+            update(schema.analysis_definitions, (columns) => ({
+              set: {
+                name: param(name),
+                config_json: param(encoded.configJson),
+                config_version: param(encoded.configVersion),
+                updated_at: param(now),
+              },
+              where: and(
+                eq(columns.id, param(goal.id)),
+                eq(columns.site_id, param(site.id)),
+                eq(columns.kind, param("goal")),
+                isNull(columns.archived_at),
+              ),
+            })),
+            { tag: "api_v1.goals.update" },
+          ),
+        );
         return ok(
           await goalResource({
             ...goal,
@@ -797,11 +1008,23 @@ export function createResourceApplicationService(
         return ok(await funnelResource(funnel)) as never;
       if (operation === "funnels.delete") {
         const now = Math.floor(Date.now() / 1_000);
-        await createDatabaseRuntime(env.DB).run({
-          sql: "UPDATE analysis_definitions SET archived_at=?, updated_at=? WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL",
-          bindings: [now, now, funnel.id, site.id],
-          tag: "api_v1.funnels.archive",
-        });
+        await database(env).run(
+          compileD1Mutation(
+            update(schema.analysis_definitions, (columns) => ({
+              set: {
+                archived_at: param(now),
+                updated_at: param(now),
+              },
+              where: and(
+                eq(columns.id, param(funnel.id)),
+                eq(columns.site_id, param(site.id)),
+                eq(columns.kind, param("funnel")),
+                isNull(columns.archived_at),
+              ),
+            })),
+            { tag: "api_v1.funnels.archive" },
+          ),
+        );
         return ok(undefined) as never;
       }
       const value =
@@ -835,18 +1058,25 @@ export function createResourceApplicationService(
       }
       const now = Math.floor(Date.now() / 1_000);
       const name = value.name ?? funnel.name;
-      await createDatabaseRuntime(env.DB).run({
-        sql: "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL",
-        bindings: [
-          name,
-          encoded.configJson,
-          encoded.configVersion,
-          now,
-          funnel.id,
-          site.id,
-        ],
-        tag: "api_v1.funnels.update",
-      });
+      await database(env).run(
+        compileD1Mutation(
+          update(schema.analysis_definitions, (columns) => ({
+            set: {
+              name: param(name),
+              config_json: param(encoded.configJson),
+              config_version: param(encoded.configVersion),
+              updated_at: param(now),
+            },
+            where: and(
+              eq(columns.id, param(funnel.id)),
+              eq(columns.site_id, param(site.id)),
+              eq(columns.kind, param("funnel")),
+              isNull(columns.archived_at),
+            ),
+          })),
+          { tag: "api_v1.funnels.update" },
+        ),
+      );
       return ok(
         await funnelResource({
           ...funnel,
