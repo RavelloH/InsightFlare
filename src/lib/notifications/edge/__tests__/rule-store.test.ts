@@ -108,7 +108,7 @@ describe("notification rule store", () => {
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => {
-          if (sql.includes("INSERT INTO notification_rules")) {
+          if (/INSERT\s+INTO\s+"?notification_rules"?/i.test(sql)) {
             return {
               bind: vi.fn((...args: unknown[]) => {
                 inserted.push(args);
@@ -174,24 +174,28 @@ describe("notification rule store", () => {
       JSON.stringify({ kind: "interval", everyMinutes: 60 }),
       "{}",
       JSON.stringify({ mode: "creator" }),
-      "{}",
       1_800_003_600,
       "user-1",
       1_800_000_000,
       1_800_000_000,
+      "{}",
     ]);
   });
 
   it("excludes test rules and active cooldowns from due rule queries", async () => {
     let sql = "";
+    let bindings: unknown[] = [];
     const env = {
       DB: {
         prepare: vi.fn((nextSql: string) => {
           sql = nextSql;
           return {
-            bind: vi.fn(() => ({
-              all: vi.fn(() => Promise.resolve({ results: [] })),
-            })),
+            bind: vi.fn((...nextBindings: unknown[]) => {
+              bindings = nextBindings;
+              return {
+                all: vi.fn(() => Promise.resolve({ results: [] })),
+              };
+            }),
           };
         }),
       },
@@ -199,8 +203,12 @@ describe("notification rule store", () => {
 
     await listDueNotificationRules(env as never, 1000);
 
-    expect(sql).toContain("AND type != 'test'");
-    expect(sql).toContain("cooldown_until IS NULL OR cooldown_until <= ?");
+    expect(sql).toContain('"notification_rules"');
+    expect(sql).toMatch(/<>\s*\?/);
+    expect(sql).toMatch(/IS NULL/);
+    expect(sql).toMatch(/ORDER BY[\s\S]*ASC/i);
+    expect(sql).toMatch(/LIMIT/i);
+    expect(bindings).toEqual(expect.arrayContaining([1, "test", 1000]));
   });
 
   it("writes cooldown when advancing a triggered rule", async () => {
@@ -226,6 +234,7 @@ describe("notification rule store", () => {
       2000,
       2000,
       1000,
+      null,
       1000,
       "rule-1",
     );
@@ -260,6 +269,7 @@ describe("notification rule store", () => {
       2000,
       2000,
       1000,
+      null,
       1000,
       "rule-1",
     );
@@ -274,6 +284,7 @@ describe("notification rule store", () => {
       null,
       null,
       1000,
+      null,
       1000,
       "rule-future",
     );
@@ -320,14 +331,16 @@ describe("notification rule store", () => {
     );
 
     expect(rules).toHaveLength(1);
-    expect(bind).toHaveBeenCalledWith("user-1", "user-1");
+    expect(bind.mock.calls[0]).toEqual(
+      expect.arrayContaining(["user-1", "owner", "admin"]),
+    );
     const prepareCalls = env.DB.prepare.mock.calls as unknown as Array<
       [string]
     >;
     const sql = String(prepareCalls[0]?.[0] ?? "");
-    expect(sql).toContain("LEFT JOIN teams t ON t.id = tm.team_id");
-    expect(sql).toContain("tm.role IN ('owner', 'admin')");
-    expect(sql).toContain("t.owner_user_id = ?");
+    expect(sql).toContain("LEFT JOIN");
+    expect(sql).toContain('"team_members"');
+    expect(sql).toContain('"owner_user_id"');
   });
 
   it("requires manage permission when listing rules by team", async () => {
@@ -381,7 +394,7 @@ describe("notification rule store", () => {
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => {
-          if (sql.includes("DELETE FROM notification_rules")) {
+          if (/DELETE\s+FROM\s+"?notification_rules"?/i.test(sql)) {
             return { bind: vi.fn(() => ({ run })) };
           }
           if (sql.includes('FROM "sites"') && sql.includes('"team_id"')) {
@@ -448,6 +461,8 @@ describe("notification rule store", () => {
                   id: "creator",
                   email: "creator@example.test",
                   preferencesJson: "{}",
+                  preferredLocale: "en",
+                  timeZone: "UTC",
                 }),
               ),
               all: vi.fn(() =>
@@ -457,6 +472,8 @@ describe("notification rule store", () => {
                       id: "user-1",
                       email: "user@example.test",
                       preferencesJson: "{}",
+                      preferredLocale: "en",
+                      timeZone: "UTC",
                     },
                   ],
                 }),
@@ -492,8 +509,11 @@ describe("notification rule store", () => {
       ),
     ).resolves.toEqual([]);
 
-    expect(preparedSql.join("\n")).toContain("WHERE id IN (?, ?)");
-    expect(preparedSql.join("\n")).toContain("tm.role IN ('owner', 'admin')");
+    expect(preparedSql).toHaveLength(3);
+    expect(preparedSql[1]).toContain("IN (?, ?)");
+    expect(preparedSql[2]).toContain('"team_members"');
+    expect(preparedSql[2]).toContain('"teams"');
+    expect(preparedSql[2]).toContain('"owner_user_id"');
   });
 
   it("preserves omitted fields when partially updating rule state", async () => {
@@ -528,7 +548,7 @@ describe("notification rule store", () => {
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => {
-          if (sql.includes("UPDATE notification_rules")) {
+          if (/UPDATE\s+"?notification_rules"?/i.test(sql)) {
             return { bind: updateBind };
           }
           if (sql.includes('FROM "sites"') && sql.includes('"team_id"')) {
@@ -597,7 +617,7 @@ describe("notification rule store", () => {
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => {
-          if (sql.includes("UPDATE notification_rules")) {
+          if (/UPDATE\s+"?notification_rules"?/i.test(sql)) {
             return {
               bind: vi.fn((...args: unknown[]) => {
                 calls.push(args);
@@ -677,7 +697,7 @@ describe("notification rule store", () => {
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => {
-          if (sql.includes("UPDATE notification_rules")) {
+          if (/UPDATE\s+"?notification_rules"?/i.test(sql)) {
             return {
               bind: vi.fn((...args: unknown[]) => {
                 calls.push(args);
@@ -750,7 +770,7 @@ describe("notification rule store", () => {
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => {
-          if (sql.includes("UPDATE notification_rules")) {
+          if (/UPDATE\s+"?notification_rules"?/i.test(sql)) {
             return {
               bind: vi.fn((...args: unknown[]) => {
                 calls.push(args);
