@@ -1,3 +1,4 @@
+import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
 import { measureExternalFetch } from "@/lib/edge/observability/bindings";
 import {
   currentInvocationLogger,
@@ -154,15 +155,14 @@ function createLogger(
     },
     async flush() {
       if (entries.length === 0) return;
-      const statements = entries.map((entry) =>
-        env.DB.prepare(
-          `
+      const statements: DatabaseStatement[] = entries.map((entry) => ({
+        sql: `
               INSERT INTO scheduled_task_run_logs (
                 id, run_id, task_key, sequence, level, event, message,
                 data_json, created_at_ms, expires_at
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
-        ).bind(
+        bindings: [
           entry.id,
           runId,
           taskKey,
@@ -173,8 +173,9 @@ function createLogger(
           entry.dataJson,
           entry.createdAtMs,
           expiresAtSec,
-        ),
-      );
+        ],
+        tag: "scheduled_tasks.run_logs.insert",
+      }));
       await bestEffortRun(
         "logs-flush",
         async () => {
@@ -183,7 +184,7 @@ function createLogger(
             offset < statements.length;
             offset += LOG_BATCH_SIZE
           ) {
-            await env.DB.batch(
+            await createDatabaseRuntime(env.DB).batch(
               statements.slice(offset, offset + LOG_BATCH_SIZE),
             );
           }
@@ -219,16 +220,15 @@ export async function runScheduledTask(
   await bestEffortRun(
     "run-start",
     async () => {
-      await env.DB.prepare(
-        `
+      await createDatabaseRuntime(env.DB).run({
+        sql: `
         INSERT INTO scheduled_task_runs (
           id, invocation_id, task_key, task_name, trigger_type, status,
           scheduled_at_ms, started_at_ms, scope_type, scope_id, summary_json,
           worker_version, expires_at
         ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, '{}', ?, ?)
       `,
-      )
-        .bind(
+        bindings: [
           runId,
           invocationId,
           definition.key,
@@ -240,8 +240,9 @@ export async function runScheduledTask(
           definition.scopeId ?? null,
           null,
           expiresAtSec,
-        )
-        .run();
+        ],
+        tag: "scheduled_tasks.runs.insert",
+      });
     },
     activeObservability,
   );
@@ -286,8 +287,8 @@ export async function runScheduledTask(
     await bestEffortRun(
       "run-finish",
       async () => {
-        await env.DB.prepare(
-          `
+        await createDatabaseRuntime(env.DB).run({
+          sql: `
           UPDATE scheduled_task_runs
           SET
             status = ?,
@@ -299,15 +300,15 @@ export async function runScheduledTask(
             error_stack = NULL
           WHERE id = ?
         `,
-        )
-          .bind(
+          bindings: [
             status,
             finishedAt,
             finishedAt - startedAt,
             safeJsonStringify(summary),
             runId,
-          )
-          .run();
+          ],
+          tag: "scheduled_tasks.runs.finish",
+        });
       },
       activeObservability,
     );
@@ -321,8 +322,8 @@ export async function runScheduledTask(
     await bestEffortRun(
       "run-error",
       async () => {
-        await env.DB.prepare(
-          `
+        await createDatabaseRuntime(env.DB).run({
+          sql: `
           UPDATE scheduled_task_runs
           SET
             status = 'failed',
@@ -334,8 +335,7 @@ export async function runScheduledTask(
             error_stack = ?
           WHERE id = ?
         `,
-        )
-          .bind(
+          bindings: [
             finishedAt,
             finishedAt - startedAt,
             "{}",
@@ -343,8 +343,9 @@ export async function runScheduledTask(
             normalized.message.slice(0, 1000),
             normalized.stack?.slice(0, 4000) ?? null,
             runId,
-          )
-          .run();
+          ],
+          tag: "scheduled_tasks.runs.fail",
+        });
       },
       activeObservability,
     );

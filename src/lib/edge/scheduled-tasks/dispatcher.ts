@@ -70,8 +70,8 @@ async function claimTask(
   claimToken: string,
 ): Promise<boolean> {
   try {
-    const result = await env.DB.prepare(
-      `
+    const result = await createDatabaseRuntime(env.DB).run({
+      sql: `
         UPDATE scheduled_task_schedule_state
         SET claim_token = ?,
             claim_expires_at = ?,
@@ -83,15 +83,15 @@ async function claimTask(
             claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at < ?
           )
       `,
-    )
-      .bind(
+      bindings: [
         claimToken,
         now + Math.trunc(STALE_RUNNING_MS / 1000),
         taskKey,
         now,
         now,
-      )
-      .run();
+      ],
+      tag: "scheduled_tasks.dispatcher.claim",
+    });
     return Number(result.meta?.changes ?? 0) === 1;
   } catch {
     // Claiming is fail-closed: a database error must not turn into duplicate
@@ -110,8 +110,8 @@ async function releaseTask(
   const now = nowSeconds(scheduledTime);
   const next = nextRunAt(taskKey, now);
   const lastError = error ? String(error).slice(0, 1000) : null;
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE scheduled_task_schedule_state
       SET last_run_at = ?,
           next_run_at = ?,
@@ -121,9 +121,9 @@ async function releaseTask(
           updated_at = unixepoch()
       WHERE task_key = ? AND claim_token = ?
     `,
-  )
-    .bind(now, next, lastError, taskKey, claimToken)
-    .run();
+    bindings: [now, next, lastError, taskKey, claimToken],
+    tag: "scheduled_tasks.dispatcher.complete",
+  });
 }
 
 async function executeTask(

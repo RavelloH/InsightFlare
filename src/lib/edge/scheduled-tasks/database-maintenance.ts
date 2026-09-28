@@ -1,3 +1,5 @@
+import { createDatabaseRuntime } from "@/lib/db";
+
 import type { ScheduledTaskContext, ScheduledTaskOutcome } from "./runner";
 
 const DELETE_BATCH_SIZE = 100;
@@ -11,8 +13,8 @@ async function deleteExpiredInBatches(
 ): Promise<number> {
   let deleted = 0;
   for (let batch = 0; batch < MAX_DELETE_BATCHES_PER_TABLE; batch += 1) {
-    const result = await context.env.DB.prepare(
-      `
+    const result = await createDatabaseRuntime(context.env.DB).run({
+      sql: `
         DELETE FROM ${table}
         WHERE id IN (
           SELECT id
@@ -22,9 +24,9 @@ async function deleteExpiredInBatches(
           LIMIT ?
         )
       `,
-    )
-      .bind(DELETE_BATCH_SIZE)
-      .run();
+      bindings: [DELETE_BATCH_SIZE],
+      tag: "scheduled_tasks.maintenance.delete_expired_batch",
+    });
     const changes = Number(result.meta?.changes ?? 0);
     deleted += changes;
     if (changes < DELETE_BATCH_SIZE) break;
@@ -55,8 +57,8 @@ export async function runDatabaseMaintenance(
   );
 
   const now = Date.now();
-  const staleResult = await env.DB.prepare(
-    `
+  const staleResult = await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE scheduled_task_runs
       SET
         status = 'failed',
@@ -70,14 +72,17 @@ export async function runDatabaseMaintenance(
       WHERE status = 'running'
         AND started_at_ms < ?
     `,
-  )
-    .bind(now, now, now - STALE_RUNNING_MS)
-    .run();
+    bindings: [now, now, now - STALE_RUNNING_MS],
+    tag: "scheduled_tasks.maintenance.fail_stale_runs",
+  });
   const staleRunsMarkedFailed = Number(staleResult.meta?.changes ?? 0);
 
   // D1 supports PRAGMA optimize and uses it to refresh query-planner
   // statistics after the maintenance deletes.
-  await env.DB.prepare("PRAGMA optimize").run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "PRAGMA optimize",
+    tag: "scheduled_tasks.maintenance.optimize",
+  });
   const summary = {
     logsDeleted,
     runsDeleted,

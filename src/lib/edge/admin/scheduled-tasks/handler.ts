@@ -626,15 +626,15 @@ export async function handleScheduledTasksAdmin(
     if (body.enabled !== undefined) {
       const task = SCHEDULED_TASKS.find((item) => item.key === taskKey);
       if (!task) return badRequest("Unknown scheduled task", undefined, req);
-      await env.DB.prepare(
-        `
+      await createDatabaseRuntime(env.DB).run({
+        sql: `
           UPDATE scheduled_task_schedule_state
           SET enabled = ?, updated_at = unixepoch()
           WHERE task_key = ?
         `,
-      )
-        .bind(bool(body.enabled) ? 1 : 0, task.key)
-        .run();
+        bindings: [bool(body.enabled) ? 1 : 0, task.key],
+        tag: "admin.scheduled_tasks.update_enabled",
+      });
     }
 
     const retentionPatch =

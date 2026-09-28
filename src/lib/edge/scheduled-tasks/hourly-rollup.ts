@@ -1,4 +1,4 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
 import {
   type AggregateSiteHourMetricRow,
   ROLLUP_LAG_HOURS,
@@ -135,8 +135,8 @@ async function finalizeStaleOpenVisits(
   cutoffMs: number,
   finalizedAt: number,
 ): Promise<number> {
-  const result = await env.DB.prepare(
-    `
+  const result = await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE visits
       SET status = 'timeout',
           last_activity_at = ?,
@@ -147,9 +147,9 @@ async function finalizeStaleOpenVisits(
       WHERE status = 'open'
         AND last_activity_at < ?
     `,
-  )
-    .bind(finalizedAt, finalizedAt, finalizedAt, cutoffMs)
-    .run();
+    bindings: [finalizedAt, finalizedAt, finalizedAt, cutoffMs],
+    tag: "scheduled_tasks.hourly_rollup.finalize_stale_visits",
+  });
   return Number(result.meta.changes ?? 0);
 }
 async function aggregateSiteHours(
@@ -310,7 +310,7 @@ async function aggregateSiteHours(
     sessionsByHour.set(hour, list);
   }
 
-  const statements: D1PreparedStatement[] = [];
+  const statements: DatabaseStatement[] = [];
   for (const [hour, rollup] of byHour.entries()) {
     const visitorIds = Array.from(new Set(visitorsByHour.get(hour) ?? []))
       .map((value) => value.trim())
@@ -324,9 +324,8 @@ async function aggregateSiteHours(
       .filter(([sessionId, count]) => sessionId.length > 0 && count > 0)
       .sort(([left], [right]) => left.localeCompare(right));
     const bounces = sessionCounts.filter(([, count]) => count === 1).length;
-    statements.push(
-      env.DB.prepare(
-        `
+    statements.push({
+      sql: `
           INSERT INTO visit_hourly_rollups (
             site_id, site_pk, hour_bucket, views, sessions, visitors, bounces,
             duration_ms_sum, duration_ms_count, visitor_set_json,
@@ -359,7 +358,7 @@ async function aggregateSiteHours(
             aggregated_at = excluded.aggregated_at,
             schema_version = excluded.schema_version
         `,
-      ).bind(
+      bindings: [
         siteId,
         sitePk,
         hour,
@@ -383,13 +382,13 @@ async function aggregateSiteHours(
         rollup.perfInpCount,
         inputCutoffMs,
         ROLLUP_SCHEMA_VERSION,
-      ),
-    );
+      ],
+      tag: "scheduled_tasks.hourly_rollup.upsert_hour",
+    });
   }
 
-  statements.push(
-    env.DB.prepare(
-      `
+  statements.push({
+    sql: `
         INSERT INTO visit_hourly_aggregation_state (
           site_id, site_pk, aggregated_until_hour, lag_hours, last_run_at,
           last_success_at, last_error
@@ -402,10 +401,11 @@ async function aggregateSiteHours(
           last_success_at = excluded.last_success_at,
           last_error = NULL
       `,
-    ).bind(siteId, sitePk, endHour, ROLLUP_LAG_HOURS),
-  );
+    bindings: [siteId, sitePk, endHour, ROLLUP_LAG_HOURS],
+    tag: "scheduled_tasks.hourly_rollup.update_state",
+  });
 
-  await env.DB.batch(statements);
+  await createDatabaseRuntime(env.DB).batch(statements);
   return byHour.size;
 }
 async function markAggregationFailed(
@@ -418,8 +418,8 @@ async function markAggregationFailed(
     0,
     400,
   );
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       INSERT INTO visit_hourly_aggregation_state (
         site_id, site_pk, aggregated_until_hour, lag_hours, last_run_at, last_error
       ) VALUES (?, ?, 0, ?, unixepoch(), ?)
@@ -428,9 +428,9 @@ async function markAggregationFailed(
         last_run_at = excluded.last_run_at,
         last_error = excluded.last_error
     `,
-  )
-    .bind(siteId, sitePk, ROLLUP_LAG_HOURS, message)
-    .run();
+    bindings: [siteId, sitePk, ROLLUP_LAG_HOURS, message],
+    tag: "scheduled_tasks.hourly_rollup.mark_failed",
+  });
 }
 export async function runHourlyAggregation(
   env: Env,

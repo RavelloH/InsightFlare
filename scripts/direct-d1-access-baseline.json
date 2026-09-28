@@ -1,14 +1,9 @@
 {
-  "src/lib/edge/admin/scheduled-tasks/handler.ts": 1,
   "src/lib/edge/ingest/alarm-sweep.ts": 1,
   "src/lib/edge/ingest/buffer-store.ts": 2,
   "src/lib/edge/ingest/custom-event-flush.ts": 8,
   "src/lib/edge/ingest/durable-object.ts": 2,
   "src/lib/edge/ingest/flush-types.ts": 3,
   "src/lib/edge/ingest/flush.ts": 4,
-  "src/lib/edge/scheduled-tasks/database-maintenance.ts": 3,
-  "src/lib/edge/scheduled-tasks/dispatcher.ts": 2,
-  "src/lib/edge/scheduled-tasks/hourly-rollup.ts": 5,
-  "src/lib/edge/scheduled-tasks/runner.ts": 5,
   "src/lib/hono/routes/e2e.ts": 1
 }
