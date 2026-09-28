@@ -337,16 +337,15 @@ export async function createApiKeyRecord(
   const generated = generateApiKeySecret();
   const hash = await hashApiKeySecret(env, generated.apiKey);
   const keyId = crypto.randomUUID();
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       INSERT INTO api_keys (
         id, team_id, name, key_prefix, key_hash, scopes_json, site_ids_json,
         created_by_user_id, expires_at, rotated_from_key_id, created_at, updated_at
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())
     `,
-  )
-    .bind(
+    bindings: [
       keyId,
       input.teamId,
       clampString(input.name.trim(), 120),
@@ -357,8 +356,9 @@ export async function createApiKeyRecord(
       input.createdByUserId || null,
       input.expiresAt ?? null,
       input.rotatedFromKeyId || null,
-    )
-    .run();
+    ],
+    tag: "auth.api_keys.insert",
+  });
   const row = await getApiKeyById(env, keyId);
   if (!row) throw new Error("api_key_create_failed");
   return {
@@ -375,25 +375,25 @@ export async function revokeApiKeyRecord(
     revokedByUserId?: string | null;
   },
 ): Promise<PublicApiKey | null> {
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE api_keys
       SET revoked_at = COALESCE(revoked_at, unixepoch()),
           revoked_by_user_id = COALESCE(revoked_by_user_id, ?),
           updated_at = unixepoch()
       WHERE id = ? AND team_id = ?
     `,
-  )
-    .bind(input.revokedByUserId || null, input.keyId, input.teamId)
-    .run();
+    bindings: [input.revokedByUserId || null, input.keyId, input.teamId],
+    tag: "auth.api_keys.revoke",
+  });
   const row = await getApiKeyById(env, input.keyId);
   return row ? toPublicApiKey(row) : null;
 }
 
 export async function markApiKeyUsed(env: Env, keyId: string): Promise<void> {
-  await env.DB.prepare(
-    "UPDATE api_keys SET last_used_at=unixepoch() WHERE id=?",
-  )
-    .bind(keyId)
-    .run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "UPDATE api_keys SET last_used_at=unixepoch() WHERE id=?",
+    bindings: [keyId],
+    tag: "auth.api_keys.mark_used",
+  });
 }

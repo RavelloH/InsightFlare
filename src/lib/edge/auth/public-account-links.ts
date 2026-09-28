@@ -88,16 +88,16 @@ async function completeTeamInviteForUser(input: {
   siteIds: string[];
   userId: string;
 }) {
-  await input.env.DB.prepare(
-    "INSERT INTO team_members (team_id,user_id,role,site_ids_json,joined_at) VALUES (?,?,?,?,unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role=excluded.role, site_ids_json=excluded.site_ids_json",
-  )
-    .bind(
+  await createDatabaseRuntime(input.env.DB).run({
+    sql: "INSERT INTO team_members (team_id,user_id,role,site_ids_json,joined_at) VALUES (?,?,?,?,unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role=excluded.role, site_ids_json=excluded.site_ids_json",
+    bindings: [
       input.teamId,
       input.userId,
       input.role,
       serializeMemberSiteIds(input.role === "member" ? input.siteIds : []),
-    )
-    .run();
+    ],
+    tag: "auth.team_members.accept_invite",
+  });
   await markAccountActionTokenUsed(input.env, {
     tokenId: input.tokenId,
     usedByUserId: input.userId,
@@ -170,11 +170,11 @@ export async function handlePublicAccountLinks(
     }
     if (!publicToken.userId) return fail(req, "User not found", 404);
     const passwordHash = await hashPassword(password);
-    await env.DB.prepare(
-      "UPDATE users SET password_hash=?,updated_at=unixepoch() WHERE id=?",
-    )
-      .bind(passwordHash, publicToken.userId)
-      .run();
+    await createDatabaseRuntime(env.DB).run({
+      sql: "UPDATE users SET password_hash=?,updated_at=unixepoch() WHERE id=?",
+      bindings: [passwordHash, publicToken.userId],
+      tag: "auth.users.reset_password",
+    });
     await markAccountActionTokenUsed(env, {
       tokenId: publicToken.id,
       usedByUserId: publicToken.userId,
@@ -235,21 +235,27 @@ export async function handlePublicAccountLinks(
 
   const userId = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,'user',unixepoch(),unixepoch())",
-    ).bind(userId, username, email, name, passwordHash),
-    env.DB.prepare(
-      "INSERT INTO team_members (team_id,user_id,role,site_ids_json,joined_at) VALUES (?,?,?,?,unixepoch())",
-    ).bind(
-      publicToken.teamId,
-      userId,
-      role,
-      serializeMemberSiteIds(role === "member" ? siteIds : []),
-    ),
-    env.DB.prepare(
-      "UPDATE account_action_tokens SET used_at = COALESCE(used_at, unixepoch()), used_by_user_id = COALESCE(used_by_user_id, ?) WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL",
-    ).bind(userId, publicToken.id),
+  await createDatabaseRuntime(env.DB).batch([
+    {
+      sql: "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,'user',unixepoch(),unixepoch())",
+      bindings: [userId, username, email, name, passwordHash],
+      tag: "auth.users.register_from_invite",
+    },
+    {
+      sql: "INSERT INTO team_members (team_id,user_id,role,site_ids_json,joined_at) VALUES (?,?,?,?,unixepoch())",
+      bindings: [
+        publicToken.teamId,
+        userId,
+        role,
+        serializeMemberSiteIds(role === "member" ? siteIds : []),
+      ],
+      tag: "auth.team_members.register_from_invite",
+    },
+    {
+      sql: "UPDATE account_action_tokens SET used_at = COALESCE(used_at, unixepoch()), used_by_user_id = COALESCE(used_by_user_id, ?) WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL",
+      bindings: [userId, publicToken.id],
+      tag: "auth.account_action_tokens.use_invite",
+    },
   ]);
 
   const createdUser = await byId(env, userId);

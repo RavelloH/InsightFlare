@@ -222,16 +222,15 @@ export async function createAccountActionToken(
   const payload = input.tokenPayload
     ? await input.tokenPayload(token)
     : input.payload;
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       INSERT INTO account_action_tokens (
         id, type, token_hash, team_id, user_id, email, payload_json,
         created_by_user_id, created_at, expires_at
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)
     `,
-  )
-    .bind(
+    bindings: [
       id,
       input.type,
       tokenHash,
@@ -241,8 +240,9 @@ export async function createAccountActionToken(
       JSON.stringify(safePayload(payload)),
       normalizeNullableString(input.createdByUserId),
       Math.max(0, Math.floor(input.expiresAt)),
-    )
-    .run();
+    ],
+    tag: "auth.account_action_tokens.insert",
+  });
 
   const row = await getAccountActionTokenById(env, id);
   if (!row) throw new Error("account_action_token_create_failed");
@@ -315,16 +315,16 @@ export async function markAccountActionTokenUsed(
     usedByUserId?: string | null;
   },
 ): Promise<AccountActionTokenRow | null> {
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE account_action_tokens
       SET used_at = COALESCE(used_at, unixepoch()),
           used_by_user_id = COALESCE(used_by_user_id, ?)
       WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL
     `,
-  )
-    .bind(normalizeNullableString(input.usedByUserId), input.tokenId)
-    .run();
+    bindings: [normalizeNullableString(input.usedByUserId), input.tokenId],
+    tag: "auth.account_action_tokens.mark_used",
+  });
   return getAccountActionTokenById(env, input.tokenId);
 }
 
@@ -334,15 +334,15 @@ export async function revokeAccountActionToken(
     tokenId: string;
   },
 ): Promise<AccountActionTokenRow | null> {
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE account_action_tokens
       SET revoked_at = COALESCE(revoked_at, unixepoch())
       WHERE id = ? AND used_at IS NULL
     `,
-  )
-    .bind(input.tokenId)
-    .run();
+    bindings: [input.tokenId],
+    tag: "auth.account_action_tokens.revoke",
+  });
   return getAccountActionTokenById(env, input.tokenId);
 }
 

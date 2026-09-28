@@ -29,24 +29,26 @@ export async function upsertConfig(
   key: string,
   value: Record<string, unknown>,
 ): Promise<void> {
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       INSERT INTO configs (config_key, value_json, created_at, updated_at)
       VALUES (?, ?, unixepoch(), unixepoch())
       ON CONFLICT(config_key) DO UPDATE SET
         value_json = excluded.value_json,
         updated_at = unixepoch()
     `,
-  )
-    .bind(key, JSON.stringify(value))
-    .run();
+    bindings: [key, JSON.stringify(value)],
+    tag: "system.configs.upsert",
+  });
 }
 
 export async function deleteConfig(
   env: Pick<Env, "DB">,
   key: string,
 ): Promise<void> {
-  await env.DB.prepare("DELETE FROM configs WHERE config_key = ?")
-    .bind(key)
-    .run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "DELETE FROM configs WHERE config_key = ?",
+    bindings: [key],
+    tag: "system.configs.delete",
+  });
 }
