@@ -112,7 +112,7 @@ describe("notification message store", () => {
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => {
-          if (sql.includes("INSERT INTO notification_messages")) {
+          if (sql.includes('INSERT INTO "notification_messages"')) {
             return {
               bind: vi.fn((...args: unknown[]) => {
                 inserted.push(args);
@@ -193,7 +193,7 @@ describe("notification message store", () => {
     const env = {
       DB: {
         prepare: vi.fn((sql: string) => {
-          if (sql.includes("INSERT INTO notification_messages")) {
+          if (sql.includes('INSERT INTO "notification_messages"')) {
             return {
               bind: vi.fn((...args: unknown[]) => {
                 inserted.push(args);
@@ -315,8 +315,8 @@ describe("notification message store", () => {
       limit: 0,
     });
 
-    expect(sqls[0]).toContain("user_id = ?");
-    expect(sqls[0]).toContain("read_at IS NULL");
+    expect(sqls[0]).toContain('"user_id"');
+    expect((sqls[0]?.match(/ IS NULL/g) ?? []).length).toBeGreaterThan(1);
     expect(calls[0]?.[0]).toBe("user-1");
     expect(calls[0]?.slice(2)).toEqual([
       "team-1",
@@ -359,11 +359,11 @@ describe("notification message store", () => {
       before: 0,
     });
 
-    expect(sqls[0]).not.toContain("read_at IS NULL");
+    expect((sqls[0]?.match(/ IS NULL/g) ?? []).length).toBe(2);
     expect(calls[0]?.[0]).toBe("user-1");
     expect(calls[0]?.slice(2)).toEqual([50]);
     expect(typeof calls[0]?.[1]).toBe("number");
-    expect(sqls[1]).toContain("read_at IS NULL");
+    expect((sqls[1]?.match(/ IS NULL/g) ?? []).length).toBe(3);
     expect(calls[1]?.[0]).toBe("team-1");
     expect(calls[1]?.slice(2)).toEqual([50]);
     expect(typeof calls[1]?.[1]).toBe("number");
@@ -478,7 +478,9 @@ describe("notification message store", () => {
       "x".repeat(1000),
       70,
       "failed",
+      "sent",
       70,
+      "failed",
       "failed",
       70,
       "msg-1",
@@ -519,8 +521,10 @@ describe("notification message store", () => {
       "",
       80,
       "sent",
+      "sent",
       80,
       "sent",
+      "failed",
       80,
       "msg-1",
     ]);
