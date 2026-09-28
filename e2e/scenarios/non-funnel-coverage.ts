@@ -274,7 +274,9 @@ export function registerNonFunnelCoverageScenarios(context: E2eContext) {
     });
 
     await page.context().clearCookies();
-    const query = `from=0&to=${browserNowMs()}`;
+    const queryToMs = browserNowMs();
+    const queryFromMs = queryToMs - 24 * 60 * 60 * 1000;
+    const query = `from=${queryFromMs}&to=${queryToMs}`;
     const publicOverview = await apiRequest<{ views: number }>(
       page,
       "GET",

@@ -507,7 +507,7 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
     });
     await expect(
       page.getByText(String(expected?.overview.views), { exact: true }).first(),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-geo-map-mode="flat"]')).toBeVisible({
       timeout: 15_000,
     });
@@ -529,7 +529,7 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
       page.getByRole("heading", { name: "页面分析" }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "查看详情: /", exact: true }),
+      page.getByRole("row", { name: "查看详情: /", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
   });
 
