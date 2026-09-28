@@ -88,22 +88,22 @@ function messageHasNotExpired(expiresAt: ExpiryColumn, now: number) {
 
 function messageByIdQuery(
   messageId: string,
-  options: { includeExpired?: boolean; now?: number } = {},
+  options: { includeExpired?: boolean; now?: number; userId?: string } = {},
 ) {
   const messages = notificationMessageRows();
-  const predicates = [eq(messages.columns.id, param(messageId))];
-  if (!options.includeExpired) {
-    predicates.push(
-      messageHasNotExpired(
-        messages.columns.expiresAt,
-        Math.trunc(options.now ?? appNow() / 1000),
-      ),
-    );
-  }
-  const predicate =
-    predicates.length === 1
-      ? predicates[0]!
-      : and(predicates[0]!, ...predicates.slice(1));
+  const idPredicate = eq(messages.columns.id, param(messageId));
+  const identityPredicate = options.userId
+    ? and(idPredicate, eq(messages.columns.userId, param(options.userId)))
+    : idPredicate;
+  const predicate = options.includeExpired
+    ? identityPredicate
+    : and(
+        identityPredicate,
+        messageHasNotExpired(
+          messages.columns.expiresAt,
+          Math.trunc(options.now ?? appNow() / 1000),
+        ),
+      );
   const matching = filter(messages, predicate);
   return limit(matching, 1);
 }
@@ -402,9 +402,10 @@ export async function markNotificationMessageRead(
     ),
   );
   const row = await client.first<MessageRow>(
-    compileD1Query(messageByIdQuery(input.messageId, { now }), {
-      tag: "notifications.notification_messages.first",
-    }),
+    compileD1Query(
+      messageByIdQuery(input.messageId, { now, userId: input.userId }),
+      { tag: "notifications.notification_messages.first" },
+    ),
   );
   return row
     ? mapNotificationMessage(requireNotificationMessageRow(row))

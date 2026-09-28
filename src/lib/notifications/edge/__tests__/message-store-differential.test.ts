@@ -621,6 +621,89 @@ describe("notification message store Typed DAL differential", () => {
     );
   });
 
+  it("keeps the mark-read reload scoped to the requested message owner", async () => {
+    const legacy = createFixture();
+    const typed = createFixture();
+    const messageId = "msg-other-user";
+    const wrongUserId = "user-1";
+    const ownerUserId = "user-2";
+    const wrongUserNow = NOW - 1_000;
+    const ownerNow = NOW - 999;
+    const stateSql =
+      "SELECT read_at, updated_at FROM notification_messages WHERE id=?";
+    const initialState = legacy.database.prepare(stateSql).get(messageId) as {
+      read_at: number | null;
+      updated_at: number;
+    };
+
+    legacy.database
+      .prepare(
+        `UPDATE notification_messages SET read_at=COALESCE(read_at, ?), updated_at=? WHERE id=? AND user_id=? AND (expires_at IS NULL OR expires_at > ?)`,
+      )
+      .run(wrongUserNow, wrongUserNow, messageId, wrongUserId, wrongUserNow);
+    const legacyWrongUserRow = legacyRead(
+      legacy.database,
+      messageId,
+      wrongUserId,
+      wrongUserNow,
+    );
+    const legacyWrongUserResult = legacyWrongUserRow
+      ? mapNotificationMessage(legacyWrongUserRow as never)
+      : null;
+    const typedWrongUserResult = await markNotificationMessageRead(typed.env, {
+      messageId,
+      userId: wrongUserId,
+      now: wrongUserNow,
+    });
+
+    expect(legacyWrongUserResult).toBeNull();
+    expect(typedWrongUserResult).toEqual(legacyWrongUserResult);
+    expect(typed.trace.preparedSql).toHaveLength(2);
+    const wrongUserReload = tracedStatement(typed.trace);
+    expect(wrongUserReload.bindings).toEqual(
+      expect.arrayContaining([messageId, wrongUserId, wrongUserNow]),
+    );
+    expect(typed.database.prepare(stateSql).get(messageId)).toEqual(
+      initialState,
+    );
+    expect(typed.database.prepare(stateSql).get(messageId)).toEqual(
+      legacy.database.prepare(stateSql).get(messageId),
+    );
+
+    legacy.database
+      .prepare(
+        `UPDATE notification_messages SET read_at=COALESCE(read_at, ?), updated_at=? WHERE id=? AND user_id=? AND (expires_at IS NULL OR expires_at > ?)`,
+      )
+      .run(ownerNow, ownerNow, messageId, ownerUserId, ownerNow);
+    const legacyOwnerRow = legacyRead(
+      legacy.database,
+      messageId,
+      ownerUserId,
+      ownerNow,
+    );
+    const legacyOwnerResult = legacyOwnerRow
+      ? mapNotificationMessage(legacyOwnerRow as never)
+      : null;
+    resetTrace(typed.trace);
+    const typedOwnerResult = await markNotificationMessageRead(typed.env, {
+      messageId,
+      userId: ownerUserId,
+      now: ownerNow,
+    });
+
+    expect(typedOwnerResult).toEqual(legacyOwnerResult);
+    expect(typedOwnerResult).toMatchObject({
+      id: messageId,
+      userId: ownerUserId,
+      readAt: ownerNow,
+      updatedAt: ownerNow,
+    });
+    expect(typed.trace.preparedSql).toHaveLength(2);
+    expect(typed.database.prepare(stateSql).get(messageId)).toEqual(
+      legacy.database.prepare(stateSql).get(messageId),
+    );
+  });
+
   it("preserves delivery updates and two-query create/get behavior", async () => {
     const legacy = createFixture();
     const typed = createFixture();
