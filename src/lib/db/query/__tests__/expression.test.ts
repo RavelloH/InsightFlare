@@ -15,6 +15,7 @@ import {
   gt,
   gte,
   inList,
+  inSubquery,
   isNotNull,
   isNull,
   limit,
@@ -83,6 +84,19 @@ describe("typed SQL expressions", () => {
       affinity: "integer",
       nullable: false,
     });
+    const siteIds = project(sites, { id: sites.columns.id });
+    expect(inSubquery(sites.columns.id, siteIds).resultType).toEqual({
+      affinity: "integer",
+      nullable: true,
+    });
+    const nullableSlugs = project(sites, { slug: sites.columns.public_slug });
+    expect(inSubquery(sites.columns.name, nullableSlugs).resultType).toEqual({
+      affinity: "integer",
+      nullable: true,
+    });
+    expect(() => inSubquery(sites.columns.id, sites)).toThrowError(
+      /exactly one output field/,
+    );
     expect(add(sites.columns.created_at, param(1)).resultType).toEqual({
       affinity: "numeric",
       nullable: false,

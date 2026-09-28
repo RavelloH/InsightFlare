@@ -163,6 +163,18 @@ export interface ScalarSubqueryExpression<
   readonly query: QuerySource;
 }
 
+export interface InSubqueryExpression<
+  T = boolean | null,
+  Result extends ExpressionResultType = ExpressionResultType<
+    "integer",
+    boolean
+  >,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "in-subquery";
+  readonly expression: SqlExpression;
+  readonly query: QuerySource;
+}
+
 export type SqlExpression<
   T = unknown,
   Result extends ExpressionResultType = ExpressionResultType,
@@ -179,7 +191,8 @@ export type SqlExpression<
   | AggregateExpression<T, Result>
   | CoalesceExpression<T, Result>
   | UnixepochExpression<T, Result>
-  | ScalarSubqueryExpression<T, Result>;
+  | ScalarSubqueryExpression<T, Result>
+  | InSubqueryExpression<T, Result>;
 
 export type AnyExpression = SqlExpression<unknown, ExpressionResultType>;
 export type Predicate<Nullable extends boolean = boolean> = SqlExpression<
@@ -505,6 +518,54 @@ export function inList<
       Values extends readonly [] ? false : NullableOf<E>
     >,
   } as Predicate<Values extends readonly [] ? false : NullableOf<E>>;
+}
+
+type MembershipNullable<
+  Left extends AnyExpression,
+  Right extends AnyExpression,
+> = OrNullable<NullableOf<Left>, NullableOf<Right>>;
+type MembershipValue<Nullable extends boolean> = Nullable extends true
+  ? boolean | null
+  : boolean;
+
+export function inSubquery<
+  Left extends AnyExpression,
+  Row extends object,
+  Columns extends Readonly<Record<string, AnyExpression>>,
+>(
+  expression: Left,
+  relation: Relation<Row, Columns> &
+    RequireComparable<Left, Columns[keyof Columns]>,
+): InSubqueryExpression<
+  MembershipValue<MembershipNullable<Left, Columns[keyof Columns]>>,
+  ExpressionResultType<
+    "integer",
+    MembershipNullable<Left, Columns[keyof Columns]>
+  >
+> {
+  if (relation.fields.length !== 1) {
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "inSubquery() requires a query with exactly one output field",
+    );
+  }
+  const field = relation.fields[0]!;
+  return {
+    kind: "in-subquery",
+    expression,
+    query: {
+      node: relation.node,
+      scope: relation.scope,
+      fields: relation.fields,
+    },
+    resultType: {
+      affinity: "integer",
+      nullable: expression.resultType.nullable || field.nullable,
+    } as ExpressionResultType<
+      "integer",
+      MembershipNullable<Left, Columns[keyof Columns]>
+    >,
+  };
 }
 
 type ArithmeticValue<

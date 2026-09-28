@@ -6,7 +6,6 @@ import {
   compileD1Query,
   count,
   createD1DatabaseClient,
-  createDatabaseRuntime,
   deleteFrom,
   eq,
   excluded,
@@ -47,6 +46,7 @@ import {
   nf,
   parseJson,
 } from "@/lib/edge/admin/response";
+import { teamDeletionMutations } from "@/lib/edge/admin/teams/deletion";
 import {
   assertSitesBelongToTeam,
   normalizeMemberSiteIds,
@@ -109,26 +109,6 @@ function membershipByTeamAndUser(teamId: string, userId: string) {
     ),
   );
   return limit(project(matching, { role: matching.columns.role }), 1);
-}
-const MAX_SITE_IDS_PER_D1_QUERY = 100;
-async function deleteForSiteIds(
-  env: Env,
-  siteIds: string[],
-  sql: (placeholders: string) => string,
-): Promise<void> {
-  for (
-    let index = 0;
-    index < siteIds.length;
-    index += MAX_SITE_IDS_PER_D1_QUERY
-  ) {
-    const chunk = siteIds.slice(index, index + MAX_SITE_IDS_PER_D1_QUERY);
-    const placeholders = chunk.map(() => "?").join(",");
-    await createDatabaseRuntime(env.DB).run({
-      sql: sql(placeholders),
-      bindings: chunk,
-      tag: "admin.teams.delete_site_settings",
-    });
-  }
 }
 export async function handleTeamsAdmin(
   req: Request,
@@ -316,86 +296,33 @@ export async function handleTeamsAdmin(
     if (intent === "remove" || intent === "delete") {
       if (!(await canAdministerTeam(env, a, teamId)))
         return forb("Only team owner can delete team", undefined, req);
-      const siteRows = await createDatabaseRuntime(env.DB).all<{ id: string }>({
-        sql: "SELECT id FROM sites WHERE team_id=?",
-        bindings: [teamId],
-        tag: "admin.sites.all",
+      const sites = scan(schema.sites);
+      const teamSites = filter(sites, eq(sites.columns.team_id, param(teamId)));
+      const siteIdRows = project(teamSites, { id: teamSites.columns.id });
+      const siteRows = await database(env).all(
+        compileD1Query(siteIdRows, { tag: "admin.sites.all" }),
+      );
+      const siteIds = siteRows.results.map(({ id }) => {
+        if (id === null) throw new Error("team_site_missing_id");
+        return id;
       });
-      const siteIds = siteRows.results.map((row) => row.id);
 
       if (siteIds.length > 0) {
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM custom_event_json_values WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
-        );
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders})))`,
-        );
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM custom_events WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
-        );
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM custom_event_names WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
-        );
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM custom_event_json_keys WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
-        );
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM custom_event_json_paths WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
-        );
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM visits WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
-        );
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM visit_hourly_rollups WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
-        );
-        await deleteForSiteIds(
-          env,
-          siteIds,
-          (placeholders) =>
-            `DELETE FROM visit_hourly_aggregation_state WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
-        );
-        const configKeys = siteIds.map((id) => `site:${id}`);
-        await deleteForSiteIds(
-          env,
-          configKeys,
-          (placeholders) =>
-            `DELETE FROM configs WHERE config_key IN (${placeholders})`,
-        );
+        const client = database(env);
+        for (const mutation of teamDeletionMutations(siteIds))
+          await client.run(mutation);
 
         await Promise.allSettled(
           siteIds.map((id) => deleteSiteScriptSettings(env, id)),
         );
       }
 
-      await createDatabaseRuntime(env.DB).run({
-        sql: "DELETE FROM teams WHERE id=?",
-        bindings: [teamId],
-        tag: "admin.teams.delete",
-      });
+      await database(env).run(
+        compileD1Mutation(
+          deleteFrom(schema.teams, (columns) => eq(columns.id, param(teamId))),
+          { tag: "admin.teams.delete" },
+        ),
+      );
       return jsonResponseFor(req, {
         ok: true,
         data: { teamId, removed: true },

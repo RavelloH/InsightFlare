@@ -7,6 +7,7 @@ import {
   eq,
   excluded,
   filter,
+  inSubquery,
   join,
   limit,
   param,
@@ -31,6 +32,43 @@ function expectInvalid(callback: () => unknown): void {
 }
 
 describe("logical query plan validation", () => {
+  it("rejects invalid IN subquery shapes, affinity, and result metadata", () => {
+    const sites = scan(schema.site_identities);
+    const oneColumn = project(sites, { site_pk: sites.columns.site_pk });
+    const valid = inSubquery(sites.columns.site_pk, oneColumn);
+    expect(() => validatePredicate(valid, [sites.scope])).not.toThrow();
+
+    const wrongAffinity = {
+      ...valid,
+      expression: param("text"),
+    } as SqlExpression;
+    expectInvalid(() =>
+      validatePredicate(wrongAffinity as never, [sites.scope]),
+    );
+
+    const wrongNullability = {
+      ...valid,
+      resultType: { affinity: "integer", nullable: false },
+    } as SqlExpression;
+    expectInvalid(() =>
+      validatePredicate(wrongNullability as never, [sites.scope]),
+    );
+
+    const twoColumns = project(sites, {
+      site_pk: sites.columns.site_pk,
+      site_id: sites.columns.site_id,
+    });
+    const wrongShape = {
+      ...valid,
+      query: {
+        node: twoColumns.node,
+        scope: twoColumns.scope,
+        fields: twoColumns.fields,
+      },
+    } as SqlExpression;
+    expectInvalid(() => validatePredicate(wrongShape as never, [sites.scope]));
+  });
+
   it("rejects columns from outside the visible relation scope", () => {
     const users = scan(schema.users);
     const visits = scan(schema.visits);

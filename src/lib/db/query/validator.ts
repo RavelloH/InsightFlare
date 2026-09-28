@@ -203,6 +203,31 @@ function validateExpression(
             expression.values.includes(null)),
       );
       return;
+    case "in-subquery": {
+      validateExpression(
+        expression.expression,
+        scopes,
+        activeSources,
+        allowExcluded,
+      );
+      if (expression.query.fields.length !== 1)
+        invalid("inSubquery() requires a query with exactly one output field");
+      validateSource(expression.query, activeSources, scopes);
+      const field = expression.query.fields[0]!;
+      if (
+        !comparableAffinities(
+          expression.expression.resultType.affinity,
+          field.affinity,
+        )
+      )
+        invalid("IN operands have incompatible SQL affinities");
+      validateResultType(
+        expression,
+        "integer",
+        expression.expression.resultType.nullable || field.nullable,
+      );
+      return;
+    }
     case "function":
       if (
         !["lower", "upper", "length", "abs", "round"].includes(expression.name)

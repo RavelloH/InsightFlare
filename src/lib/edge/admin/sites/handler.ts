@@ -4,7 +4,6 @@ import {
   compileD1Mutation,
   compileD1Query,
   createD1DatabaseClient,
-  createDatabaseRuntime,
   deleteFrom,
   eq,
   filter,
@@ -39,13 +38,13 @@ import {
   nf,
   parseJson,
 } from "@/lib/edge/admin/response";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import {
   deleteSiteScriptSettings,
   readSiteTrackingConfig,
   upsertSiteScriptSettings,
   upsertSiteTrackingConfig,
 } from "@/lib/edge/sites/settings-store";
+import { siteDeletionMutations } from "@/lib/edge/sites/site-deletion";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
@@ -147,61 +146,9 @@ async function filterReadableSitesForActor<T extends { id: string }>(
   return sites.filter((site) => allowed.has(site.id));
 }
 export async function deleteSiteData(env: Env, siteId: string): Promise<void> {
-  await createDatabaseRuntime(env.DB).run({
-    sql: "DELETE FROM configs WHERE config_key=?",
-    bindings: [`site:${siteId}`],
-    tag: "admin.sites.delete_config",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM custom_event_json_values WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_custom_event_json_values",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL})`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_custom_event_json_nodes",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM custom_events WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_custom_events",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM custom_event_names WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_custom_event_names",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM custom_event_json_keys WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_custom_event_json_keys",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM custom_event_json_paths WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_custom_event_json_paths",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM visits WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_visits",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM visit_hourly_rollups WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_hourly_rollups",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: `DELETE FROM visit_hourly_aggregation_state WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "admin.sites.delete_hourly_aggregation_state",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: "DELETE FROM sites WHERE id=?",
-    bindings: [siteId],
-    tag: "admin.sites.delete",
-  });
+  const client = database(env);
+  for (const mutation of siteDeletionMutations(siteId))
+    await client.run(mutation);
   try {
     await deleteSiteScriptSettings(env, siteId);
   } catch {

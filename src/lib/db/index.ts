@@ -29,6 +29,7 @@ export {
   gt,
   gte,
   inList,
+  inSubquery,
   isNotNull,
   isNull,
   lt,

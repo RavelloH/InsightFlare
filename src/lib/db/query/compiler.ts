@@ -133,6 +133,13 @@ export function compileD1Expression(
         join(expression.values.map((value) => parameter(value))),
         text(")"),
       );
+    case "in-subquery":
+      return concat(
+        compileD1Expression(expression.expression, scopes, context),
+        text(" IN ("),
+        compileQuerySource(expression.query, context, scopes),
+        text(")"),
+      );
     case "function":
       return concat(
         text(expression.name.toUpperCase()),

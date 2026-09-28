@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,10 +12,12 @@ import {
   handleSiteConfigAdmin,
   handleSitesAdmin,
 } from "@/lib/edge/admin/sites/handler";
+import { teamDeletionMutations } from "@/lib/edge/admin/teams/deletion";
 import {
   handleMembersAdmin,
   handleTeamsAdmin,
 } from "@/lib/edge/admin/teams/handlers";
+import { siteDeletionMutations } from "@/lib/edge/sites/site-deletion";
 import type { Env } from "@/lib/edge/types";
 
 const mocks = vi.hoisted(() => ({
@@ -62,6 +64,18 @@ vi.mock("@/lib/edge/sites/settings-store", () => ({
 }));
 
 const FIXED_TIME = 1_800_000_000;
+const teamDeletionTableOrder = [
+  "custom_event_json_values",
+  "custom_event_json_nodes",
+  "custom_events",
+  "custom_event_names",
+  "custom_event_json_keys",
+  "custom_event_json_paths",
+  "visits",
+  "visit_hourly_rollups",
+  "visit_hourly_aggregation_state",
+  "configs",
+] as const;
 const databases = new Set<DatabaseSync>();
 const actor = {
   user: {
@@ -204,6 +218,225 @@ async function responseData(response: Response): Promise<unknown> {
   return json.data;
 }
 
+function seedSiteDeletionRows(database: DatabaseSync): void {
+  database.exec("PRAGMA foreign_keys = ON");
+  const insertIdentity = database.prepare(
+    "INSERT INTO site_identities (site_id) VALUES (?)",
+  );
+  insertIdentity.run("site-1");
+  insertIdentity.run("site-2");
+  const sitePk = (siteId: string) =>
+    (
+      database
+        .prepare("SELECT site_pk FROM site_identities WHERE site_id=?")
+        .get(siteId) as { site_pk: number }
+    ).site_pk;
+  const targetPk = sitePk("site-1");
+  const controlPk = sitePk("site-2");
+
+  const insertConfig = database.prepare(
+    "INSERT INTO configs (config_key,value_json) VALUES (?,?)",
+  );
+  insertConfig.run("site:site-1", "{}");
+  insertConfig.run("site:site-2", "{}");
+  const insertVisit = database.prepare(
+    "INSERT INTO visits (visit_id,site_id,visitor_id,session_id,status,started_at,last_activity_at,pathname,hostname,site_pk) VALUES (?,?,?,?,?,?,?,?,?,?)",
+  );
+  insertVisit.run(
+    "visit-site-1",
+    "site-1",
+    "visitor-1",
+    "session-1",
+    "open",
+    100,
+    100,
+    "/",
+    "one.example.test",
+    targetPk,
+  );
+  insertVisit.run(
+    "visit-site-2",
+    "site-2",
+    "visitor-2",
+    "session-2",
+    "open",
+    200,
+    200,
+    "/",
+    "two.example.test",
+    controlPk,
+  );
+
+  const insertEventName = database.prepare(
+    "INSERT INTO custom_event_names (id,site_id,name,last_seen_at,site_pk) VALUES (?,?,?,?,?)",
+  );
+  insertEventName.run(301, "site-1", "target", 100, targetPk);
+  insertEventName.run(302, "site-2", "control", 200, controlPk);
+  const insertEvent = database.prepare(
+    "INSERT INTO custom_events (event_pk,event_id,site_id,visit_id,event_name_id,occurred_at,received_at,node_count,value_count,site_pk) VALUES (?,?,?,?,?,?,?,?,?,?)",
+  );
+  insertEvent.run(
+    401,
+    "event-site-1",
+    "site-1",
+    "visit-site-1",
+    301,
+    100,
+    100,
+    1,
+    1,
+    targetPk,
+  );
+  insertEvent.run(
+    402,
+    "event-site-2",
+    "site-2",
+    "visit-site-2",
+    302,
+    200,
+    200,
+    1,
+    1,
+    controlPk,
+  );
+  const insertKey = database.prepare(
+    "INSERT INTO custom_event_json_keys (id,site_id,key,last_seen_at,site_pk) VALUES (?,?,?,?,?)",
+  );
+  insertKey.run(501, "site-1", "target-key", 100, targetPk);
+  insertKey.run(502, "site-2", "control-key", 200, controlPk);
+  const insertPath = database.prepare(
+    "INSERT INTO custom_event_json_paths (id,site_id,path,last_seen_at,site_pk) VALUES (?,?,?,?,?)",
+  );
+  insertPath.run(601, "site-1", "$.target", 100, targetPk);
+  insertPath.run(602, "site-2", "$.control", 200, controlPk);
+  const insertNode = database.prepare(
+    "INSERT INTO custom_event_json_nodes (event_pk,node_id,key_id,path_id,value_type,depth) VALUES (?,?,?,?,?,?)",
+  );
+  insertNode.run(401, 1, 501, 601, 1, 1);
+  insertNode.run(402, 1, 502, 602, 1, 1);
+  const insertValue = database.prepare(
+    "INSERT INTO custom_event_json_values (event_pk,node_id,site_id,event_name_id,path_id,occurred_at,value_type,string_value,site_pk) VALUES (?,?,?,?,?,?,?,?,?)",
+  );
+  insertValue.run(401, 1, "site-1", 301, 601, 100, 1, "target", targetPk);
+  insertValue.run(402, 1, "site-2", 302, 602, 200, 1, "control", controlPk);
+  const insertRollup = database.prepare(
+    "INSERT INTO visit_hourly_rollups (site_id,hour_bucket,input_cutoff_ms,site_pk) VALUES (?,?,?,?)",
+  );
+  insertRollup.run("site-1", 1, 1000, targetPk);
+  insertRollup.run("site-2", 2, 1000, controlPk);
+  const insertAggregationState = database.prepare(
+    "INSERT INTO visit_hourly_aggregation_state (site_id,site_pk) VALUES (?,?)",
+  );
+  insertAggregationState.run("site-1", targetPk);
+  insertAggregationState.run("site-2", controlPk);
+}
+
+const siteDeletionSnapshotTables = [
+  "configs",
+  "custom_event_json_values",
+  "custom_event_json_nodes",
+  "custom_events",
+  "custom_event_names",
+  "custom_event_json_keys",
+  "custom_event_json_paths",
+  "visits",
+  "visit_hourly_rollups",
+  "visit_hourly_aggregation_state",
+  "sites",
+  "site_identities",
+  "teams",
+  "team_members",
+] as const;
+
+function siteDeletionSnapshot(database: DatabaseSync): Record<string, unknown> {
+  return Object.fromEntries(
+    siteDeletionSnapshotTables.map((table) => [
+      table,
+      database.prepare(`SELECT * FROM "${table}" ORDER BY rowid`).all(),
+    ]),
+  );
+}
+
+function applyLegacySiteDeletion(database: DatabaseSync, siteId: string): void {
+  const sitePk = "(SELECT site_pk FROM site_identities WHERE site_id=?)";
+  database
+    .prepare("DELETE FROM configs WHERE config_key=?")
+    .run(`site:${siteId}`);
+  database
+    .prepare(`DELETE FROM custom_event_json_values WHERE site_pk=${sitePk}`)
+    .run(siteId);
+  database
+    .prepare(
+      `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk=${sitePk})`,
+    )
+    .run(siteId);
+  database
+    .prepare(`DELETE FROM custom_events WHERE site_pk=${sitePk}`)
+    .run(siteId);
+  database
+    .prepare(`DELETE FROM custom_event_names WHERE site_pk=${sitePk}`)
+    .run(siteId);
+  database
+    .prepare(`DELETE FROM custom_event_json_keys WHERE site_pk=${sitePk}`)
+    .run(siteId);
+  database
+    .prepare(`DELETE FROM custom_event_json_paths WHERE site_pk=${sitePk}`)
+    .run(siteId);
+  database.prepare(`DELETE FROM visits WHERE site_pk=${sitePk}`).run(siteId);
+  database
+    .prepare(`DELETE FROM visit_hourly_rollups WHERE site_pk=${sitePk}`)
+    .run(siteId);
+  database
+    .prepare(
+      `DELETE FROM visit_hourly_aggregation_state WHERE site_pk=${sitePk}`,
+    )
+    .run(siteId);
+  database.prepare("DELETE FROM sites WHERE id=?").run(siteId);
+}
+
+function applyLegacyTeamDeletion(database: DatabaseSync, teamId: string): void {
+  const siteIds = (
+    database
+      .prepare("SELECT id FROM sites WHERE team_id=?")
+      .all(teamId) as Array<{ id: string }>
+  ).map(({ id }) => id);
+  const siteStatements = [
+    (placeholders: string) =>
+      `DELETE FROM custom_event_json_values WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
+    (placeholders: string) =>
+      `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders})))`,
+    (placeholders: string) =>
+      `DELETE FROM custom_events WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
+    (placeholders: string) =>
+      `DELETE FROM custom_event_names WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
+    (placeholders: string) =>
+      `DELETE FROM custom_event_json_keys WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
+    (placeholders: string) =>
+      `DELETE FROM custom_event_json_paths WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
+    (placeholders: string) =>
+      `DELETE FROM visits WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
+    (placeholders: string) =>
+      `DELETE FROM visit_hourly_rollups WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
+    (placeholders: string) =>
+      `DELETE FROM visit_hourly_aggregation_state WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${placeholders}))`,
+    (placeholders: string) =>
+      `DELETE FROM configs WHERE config_key IN (${placeholders})`,
+  ];
+  for (const statement of siteStatements) {
+    for (let offset = 0; offset < siteIds.length; offset += 100) {
+      const chunk = siteIds.slice(offset, offset + 100);
+      const bindings =
+        statement === siteStatements[9]
+          ? chunk.map((siteId) => `site:${siteId}`)
+          : chunk;
+      database
+        .prepare(statement(chunk.map(() => "?").join(",")))
+        .run(...bindings);
+    }
+  }
+  database.prepare("DELETE FROM teams WHERE id=?").run(teamId);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   for (const database of databases) database.close();
@@ -245,6 +478,281 @@ beforeEach(() => {
 });
 
 describe("Teams and Sites admin Typed DAL differential checks", () => {
+  it("matches legacy site cleanup and preserves sequential statement order", async () => {
+    const actual = createFixture();
+    const legacy = createFixture();
+    seedSiteDeletionRows(actual.database);
+    seedSiteDeletionRows(legacy.database);
+
+    const typedVisitDelete = siteDeletionMutations("site-1")[7]!;
+    const legacyVisitSql =
+      "DELETE FROM visits WHERE site_pk=(SELECT site_pk FROM site_identities WHERE site_id=?)";
+    const typedVisitPlan = actual.database
+      .prepare(`EXPLAIN QUERY PLAN ${typedVisitDelete.sql}`)
+      .all(...(typedVisitDelete.bindings as SQLInputValue[])) as Array<{
+      detail: string;
+    }>;
+    const legacyVisitPlan = actual.database
+      .prepare(`EXPLAIN QUERY PLAN ${legacyVisitSql}`)
+      .all("site-1") as Array<{ detail: string }>;
+    expect(typedVisitPlan.map(({ detail }) => detail).join(" ")).toContain(
+      "idx_visits_site_pk_started_at",
+    );
+    expect(legacyVisitPlan.map(({ detail }) => detail).join(" ")).toContain(
+      "idx_visits_site_pk_started_at",
+    );
+
+    const typedNodeDelete = siteDeletionMutations("site-1")[2]!;
+    const legacyNodeSql =
+      "DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk=(SELECT site_pk FROM site_identities WHERE site_id=?))";
+    const typedNodePlan = actual.database
+      .prepare(`EXPLAIN QUERY PLAN ${typedNodeDelete.sql}`)
+      .all(...(typedNodeDelete.bindings as SQLInputValue[])) as Array<{
+      detail: string;
+    }>;
+    const legacyNodePlan = actual.database
+      .prepare(`EXPLAIN QUERY PLAN ${legacyNodeSql}`)
+      .all("site-1") as Array<{ detail: string }>;
+    expect(typedNodePlan.map(({ detail }) => detail).join(" ")).toContain(
+      "sqlite_autoindex_custom_event_json_nodes_1",
+    );
+    expect(legacyNodePlan.map(({ detail }) => detail).join(" ")).toContain(
+      "sqlite_autoindex_custom_event_json_nodes_1",
+    );
+
+    applyLegacySiteDeletion(legacy.database, "site-1");
+    actual.trace.preparedSql.length = 0;
+    mocks.deleteSiteScriptSettings.mockImplementation(async (_env, siteId) => {
+      expect(siteId).toBe("site-1");
+      expect(actual.trace.preparedSql).toHaveLength(12);
+      expect(
+        actual.database.prepare("SELECT id FROM sites WHERE id=?").get(siteId),
+      ).toBeUndefined();
+    });
+    const response = await handleSitesAdmin(
+      request("/admin/sites", "PATCH", {
+        siteId: "site-1",
+        intent: "remove",
+      }),
+      actual.env,
+      new URL("https://app.test/admin/sites"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(actual.trace.batchStatements).toEqual([]);
+    const deletionSql = actual.trace.preparedSql.slice(-11);
+    expect(
+      deletionSql.map((sql) => sql.match(/DELETE FROM "([^"]+)"/)?.[1]),
+    ).toEqual([
+      "configs",
+      "custom_event_json_values",
+      "custom_event_json_nodes",
+      "custom_events",
+      "custom_event_names",
+      "custom_event_json_keys",
+      "custom_event_json_paths",
+      "visits",
+      "visit_hourly_rollups",
+      "visit_hourly_aggregation_state",
+      "sites",
+    ]);
+    expect(siteDeletionSnapshot(actual.database)).toEqual(
+      siteDeletionSnapshot(legacy.database),
+    );
+    expect(
+      actual.database.prepare("SELECT 1 FROM sites WHERE id=?").get("site-2"),
+    ).toBeDefined();
+    expect(
+      actual.database.prepare("SELECT 1 FROM sites WHERE id=?").get("site-1"),
+    ).toBeUndefined();
+    expect(mocks.deleteSiteScriptSettings).toHaveBeenCalledWith(
+      actual.env,
+      "site-1",
+    );
+    legacy.database.close();
+    databases.delete(legacy.database);
+  });
+
+  it("matches legacy team cleanup, chunk grouping, KV timing, and D1 plans", async () => {
+    const actual = createFixture();
+    const legacy = createFixture();
+    seedSiteDeletionRows(actual.database);
+    seedSiteDeletionRows(legacy.database);
+
+    const typedMutations = teamDeletionMutations(["site-1", "site-2"]);
+    const typedVisitDelete = typedMutations.find((mutation) =>
+      mutation.sql.startsWith('DELETE FROM "visits"'),
+    )!;
+    const legacyVisitSql =
+      "DELETE FROM visits WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (?,?))";
+    const typedVisitPlan = actual.database
+      .prepare(`EXPLAIN QUERY PLAN ${typedVisitDelete.sql}`)
+      .all(...(typedVisitDelete.bindings as SQLInputValue[])) as Array<{
+      detail: string;
+    }>;
+    const legacyVisitPlan = actual.database
+      .prepare(`EXPLAIN QUERY PLAN ${legacyVisitSql}`)
+      .all("site-1", "site-2") as Array<{ detail: string }>;
+    expect(typedVisitPlan.map(({ detail }) => detail).join(" ")).toContain(
+      "idx_visits_site_pk_started_at",
+    );
+    expect(legacyVisitPlan.map(({ detail }) => detail).join(" ")).toContain(
+      "idx_visits_site_pk_started_at",
+    );
+
+    const typedNodeDelete = typedMutations.find((mutation) =>
+      mutation.sql.startsWith('DELETE FROM "custom_event_json_nodes"'),
+    )!;
+    const legacyNodeSql =
+      "DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (?,?)))";
+    const typedNodePlan = actual.database
+      .prepare(`EXPLAIN QUERY PLAN ${typedNodeDelete.sql}`)
+      .all(...(typedNodeDelete.bindings as SQLInputValue[])) as Array<{
+      detail: string;
+    }>;
+    const legacyNodePlan = actual.database
+      .prepare(`EXPLAIN QUERY PLAN ${legacyNodeSql}`)
+      .all("site-1", "site-2") as Array<{ detail: string }>;
+    expect(typedNodePlan.map(({ detail }) => detail).join(" ")).toContain(
+      "sqlite_autoindex_custom_event_json_nodes_1",
+    );
+    expect(legacyNodePlan.map(({ detail }) => detail).join(" ")).toContain(
+      "sqlite_autoindex_custom_event_json_nodes_1",
+    );
+
+    applyLegacyTeamDeletion(legacy.database, "team-1");
+    actual.trace.preparedSql.length = 0;
+    const dependentTables = siteDeletionSnapshotTables.filter(
+      (table) =>
+        !["site_identities", "sites", "teams", "team_members"].includes(table),
+    );
+    mocks.deleteSiteScriptSettings.mockImplementation(async () => {
+      expect(
+        actual.database
+          .prepare("SELECT id FROM teams WHERE id=?")
+          .get("team-1"),
+      ).toBeDefined();
+      for (const table of dependentTables) {
+        expect(
+          actual.database
+            .prepare(`SELECT COUNT(*) AS count FROM "${table}"`)
+            .get(),
+        ).toEqual({ count: 0 });
+      }
+    });
+    const response = await handleTeamsAdmin(
+      request("/admin/teams", "PATCH", {
+        teamId: "team-1",
+        intent: "delete",
+      }),
+      actual.env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(actual.trace.batchStatements).toEqual([]);
+    const deletionSql = actual.trace.preparedSql.filter((sql) =>
+      sql.startsWith("DELETE FROM "),
+    );
+    expect(
+      deletionSql.map((sql) => sql.match(/DELETE FROM "([^"]+)"/)?.[1]),
+    ).toEqual([...teamDeletionTableOrder, "teams"]);
+    expect(siteDeletionSnapshot(actual.database)).toEqual(
+      siteDeletionSnapshot(legacy.database),
+    );
+    expect(mocks.deleteSiteScriptSettings).toHaveBeenNthCalledWith(
+      1,
+      actual.env,
+      "site-1",
+    );
+    expect(mocks.deleteSiteScriptSettings).toHaveBeenNthCalledWith(
+      2,
+      actual.env,
+      "site-2",
+    );
+    expect(
+      actual.database.prepare("SELECT 1 FROM teams WHERE id=?").get("team-1"),
+    ).toBeUndefined();
+    legacy.database.close();
+    databases.delete(legacy.database);
+  });
+
+  it("stops at the first failed team cleanup statement without rolling back prior runs", async () => {
+    const actual = createFixture();
+    seedSiteDeletionRows(actual.database);
+    actual.trace.preparedSql.length = 0;
+    const delegate = actual.env.DB;
+    const failingDatabase = {
+      prepare(sql: string) {
+        const prepared = delegate.prepare(sql);
+        if (!sql.startsWith('DELETE FROM "custom_event_json_nodes"'))
+          return prepared;
+        return new Proxy(prepared, {
+          get(target, property, receiver) {
+            const value = Reflect.get(target, property, receiver);
+            if (property !== "bind") return value;
+            return (...bindings: SQLInputValue[]) => {
+              const bound = Reflect.apply(
+                value,
+                target,
+                bindings,
+              ) as D1PreparedStatement;
+              return new Proxy(bound, {
+                get(boundTarget, boundProperty, boundReceiver) {
+                  if (boundProperty === "run")
+                    return async () => {
+                      throw new Error("simulated_team_cleanup_failure");
+                    };
+                  return Reflect.get(boundTarget, boundProperty, boundReceiver);
+                },
+              });
+            };
+          },
+        }) as D1PreparedStatement;
+      },
+      batch(statements: D1PreparedStatement[]) {
+        return delegate.batch(statements);
+      },
+    } as D1Database;
+    const failingEnv = { ...actual.env, DB: failingDatabase } as Env;
+
+    await expect(
+      handleTeamsAdmin(
+        request("/admin/teams", "PATCH", {
+          teamId: "team-1",
+          intent: "delete",
+        }),
+        failingEnv,
+      ),
+    ).rejects.toThrow("simulated_team_cleanup_failure");
+
+    const attemptedDeletes = actual.trace.preparedSql.filter((sql) =>
+      sql.startsWith("DELETE FROM "),
+    );
+    expect(
+      attemptedDeletes.map((sql) => sql.match(/DELETE FROM "([^"]+)"/)?.[1]),
+    ).toEqual(["custom_event_json_values", "custom_event_json_nodes"]);
+    expect(actual.trace.batchStatements).toEqual([]);
+    expect(
+      actual.database
+        .prepare("SELECT 1 FROM custom_event_json_values WHERE event_pk=401")
+        .get(),
+    ).toBeUndefined();
+    expect(
+      actual.database
+        .prepare("SELECT 1 FROM custom_event_json_nodes WHERE event_pk=401")
+        .get(),
+    ).toBeDefined();
+    expect(
+      actual.database
+        .prepare("SELECT 1 FROM custom_events WHERE event_pk=401")
+        .get(),
+    ).toBeDefined();
+    expect(
+      actual.database.prepare("SELECT 1 FROM teams WHERE id=?").get("team-1"),
+    ).toBeDefined();
+    expect(mocks.deleteSiteScriptSettings).not.toHaveBeenCalled();
+  });
+
   it("matches legacy admin team counts, projections, and ordering", async () => {
     const { database, env } = createFixture();
     const expected = database

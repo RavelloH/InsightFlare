@@ -4,6 +4,7 @@ import {
   compileD1Query,
   eq,
   insert,
+  inSubquery,
   join,
   param,
   project,
@@ -78,6 +79,51 @@ export function compileTimeDatabaseTypeAssertions(): void {
   void leftJoinChecks;
 
   const sites = scan(schema.sites);
+  const identities = scan(schema.site_identities);
+  const selectedIdentity = project(identities, {
+    site_id: identities.columns.site_id,
+  });
+  const membership = inSubquery(identities.columns.site_id, selectedIdentity);
+  type MembershipResultIsNonNullableInteger = Assert<
+    Equal<
+      ExpressionResultOf<typeof membership>,
+      ExpressionResultType<"integer", false>
+    >
+  >;
+  type MembershipValueIsBoolean = Assert<
+    Equal<ExpressionValue<typeof membership>, boolean>
+  >;
+  const membershipChecks: [
+    MembershipResultIsNonNullableInteger,
+    MembershipValueIsBoolean,
+  ] = [true, true];
+  void membershipChecks;
+  const nullableSlugRelation = project(sites, {
+    slug: sites.columns.public_slug,
+  });
+  const nullableMembership = inSubquery(
+    sites.columns.public_slug,
+    nullableSlugRelation,
+  );
+  type MembershipNullabilityIncludesEitherOperand = Assert<
+    Equal<
+      ExpressionResultOf<typeof nullableMembership>,
+      ExpressionResultType<"integer", true>
+    >
+  >;
+  type NullableMembershipValueIncludesNull = Assert<
+    Equal<ExpressionValue<typeof nullableMembership>, boolean | null>
+  >;
+  const nullableMembershipChecks: [
+    MembershipNullabilityIncludesEitherOperand,
+    NullableMembershipValueIncludesNull,
+  ] = [true, true];
+  void nullableMembershipChecks;
+  const selectedSiteId = project(identities, {
+    site_id: identities.columns.site_id,
+  });
+  // @ts-expect-error Integer site_pk cannot be compared with a TEXT site_id.
+  inSubquery(identities.columns.site_pk, selectedSiteId);
   const mixedFallback = coalesce(param("text"), param(1), param("again"));
   type MixedFallbackAffinityStaysUnknown = Assert<
     Equal<

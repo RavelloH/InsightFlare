@@ -24,6 +24,7 @@ import {
   insert,
   insertFromQuery,
   insertOrIgnore,
+  inSubquery,
   join,
   limit,
   lowerLogicalPlan,
@@ -183,6 +184,45 @@ describe("typed D1 query compiler", () => {
         ),
       );
 
+      const selectedSiteRows = filter(
+        sites,
+        eq(sites.columns.site_id, param("site-a")),
+      );
+      const selectedSite = project(selectedSiteRows, {
+        site_pk: selectedSiteRows.columns.site_pk,
+      });
+      const membershipProjection = () =>
+        project(sites, {
+          site_id: sites.columns.site_id,
+          is_selected: inSubquery(sites.columns.site_pk, selectedSite),
+        });
+      const memberships = compileD1Query(membershipProjection());
+      expect(memberships.sql).toContain(" IN (SELECT ");
+      expect(memberships.bindings).toEqual(["site-a"]);
+      expect(executeAll(db, memberships)).toEqual([
+        { site_id: "site-a", is_selected: 1 },
+        { site_id: "site-b", is_selected: 0 },
+      ]);
+      expect(memberships).toEqual(compileD1Query(membershipProjection()));
+
+      const missingSiteRows = filter(
+        sites,
+        eq(sites.columns.site_id, param("missing")),
+      );
+      const emptySites = project(missingSiteRows, {
+        site_pk: missingSiteRows.columns.site_pk,
+      });
+      const nullableMemberships = compileD1Query(
+        project(sites, {
+          site_id: sites.columns.site_id,
+          null_lhs_in_empty: inSubquery(param(null), emptySites),
+        }),
+      );
+      expect(executeAll(db, nullableMemberships)).toEqual([
+        { site_id: "site-a", null_lhs_in_empty: 0 },
+        { site_id: "site-b", null_lhs_in_empty: 0 },
+      ]);
+
       const innerSites = scan(schema.site_identities);
       const matchingSites = filter(
         innerSites,
@@ -202,6 +242,28 @@ describe("typed D1 query compiler", () => {
       expect(executeAll(db, correlatedQuery)).toEqual([
         { site_id: "site-a", matched_pk: 1 },
         { site_id: "site-b", matched_pk: 2 },
+      ]);
+
+      const innerIdentities = scan(schema.site_identities);
+      const correlatedIdentities = filter(
+        innerIdentities,
+        eq(innerIdentities.columns.site_id, sites.columns.site_id),
+      );
+      const correlatedMembership = compileD1Query(
+        project(sites, {
+          site_id: sites.columns.site_id,
+          contains_matching_id: inSubquery(
+            sites.columns.site_id,
+            project(correlatedIdentities, {
+              site_id: correlatedIdentities.columns.site_id,
+            }),
+          ),
+        }),
+      );
+      expect(correlatedMembership.sql).toContain('"q0"."_c1"');
+      expect(executeAll(db, correlatedMembership)).toEqual([
+        { site_id: "site-a", contains_matching_id: 1 },
+        { site_id: "site-b", contains_matching_id: 1 },
       ]);
 
       const updateSubquerySource = scan(schema.site_identities);
