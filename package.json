@@ -35,7 +35,7 @@
     "check:openapi": "npm run generate:openapi && npm run generate:skills && npm run verify:skills && tsx scripts/check-openapi-contract.ts && git diff --exit-code docs/openapi.json docs/openapi.yaml docs/skills.json",
     "check:openapi:fix": "npm run generate:openapi && npm run generate:skills && npm run verify:skills && tsx scripts/check-openapi-contract.ts",
     "check:skills": "npm run verify:skills && tsx scripts/check-openapi-contract.ts",
-    "check:schema": "npm run generate:schema && git diff --exit-code docs/schema.sql",
+    "check:schema": "npm run generate:schema && git diff --exit-code docs/schema.sql src/lib/db/schema/generated.ts",
     "check:schema:fix": "npm run generate:schema",
     "check": "tsx scripts/check.ts",
     "check:architecture": "tsx scripts/check-architecture.ts",

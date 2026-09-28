@@ -1,4 +1,71 @@
 export { createDatabaseRuntime } from "./d1-runtime";
+export { compileD1Mutation } from "./mutation/compiler";
+export type {
+  CompiledMutation,
+  MutationNode,
+  MutationResultContract,
+} from "./mutation/plan";
+export {
+  deleteFrom,
+  insert,
+  insertFromQuery,
+  insertOrIgnore,
+  mutationResultContract,
+  onConflictDoNothing,
+  onConflictDoUpdate,
+  unsafeRawMutation,
+  update,
+} from "./mutation/plan";
+export type { DatabaseClient } from "./query/client";
+export { createDatabaseClient } from "./query/client";
+export type { CompiledQuery } from "./query/compiled";
+export { compileD1Query } from "./query/compiler";
+export { DatabaseCompilerError } from "./query/errors";
+export {
+  add,
+  and,
+  avg,
+  callFunction,
+  coalesce,
+  count,
+  countDistinct,
+  div,
+  eq,
+  excluded,
+  gt,
+  gte,
+  inList,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  max,
+  min,
+  mul,
+  neq,
+  not,
+  or,
+  param,
+  sub,
+  sum,
+} from "./query/expression";
+export { lowerLogicalPlan } from "./query/physical-plan";
+export {
+  aggregate,
+  antiJoin,
+  distinct,
+  filter,
+  join,
+  limit,
+  project,
+  scan,
+  semiJoin,
+  sort,
+  union,
+} from "./query/plan";
+export type { GeneratedSchemaObject, GeneratedSchemaTable } from "./schema";
+export { schema } from "./schema";
+export { unsafeRawSql } from "./sql/fragment";
 export type {
   DatabaseBinding,
   DatabaseRuntime,

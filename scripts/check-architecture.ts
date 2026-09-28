@@ -253,6 +253,29 @@ function ruleViolations(
     target === "__package__:@tanstack/react-router" ||
     target === "__package__:@tanstack/router-core";
   const honoRuntime = target === "__package__:hono";
+  const databaseFoundation = [
+    "src/lib/db/schema",
+    "src/lib/db/query",
+    "src/lib/db/mutation",
+    "src/lib/db/sql",
+  ].some((directory) => isWithin(source, directory));
+
+  if (
+    databaseFoundation &&
+    (isWithin(target, "src/lib/edge") ||
+      isWithin(target, "src/lib/analytics") ||
+      isWithin(target, "src/lib/dashboard") ||
+      isWithin(target, "src/lib/hono") ||
+      isWithin(target, "src/components") ||
+      honoRuntime ||
+      reactRuntime ||
+      routerRuntime)
+  )
+    findings.push({
+      rule: "database-foundation-isolation",
+      message:
+        "Database schema, query, mutation, and SQL compiler modules must remain independent of Edge, Analytics, Dashboard, Hono, and React runtime modules.",
+    });
 
   if (isWithin(source, `${analytics}/contract`)) {
     if (
