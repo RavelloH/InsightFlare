@@ -155,6 +155,46 @@ export function isGeneratedFile(
   );
 }
 
+function typedDalConvergenceViolations(
+  relativePath: string,
+  sourceText: string,
+): ArchitectureViolation[] {
+  if (
+    !isWithin(relativePath, "src/lib/notifications/edge") &&
+    relativePath !==
+      "src/lib/edge/analytics/interfaces/dashboard/saved-filters.ts"
+  )
+    return [];
+
+  const source = ts.createSourceFile(
+    relativePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    relativePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const violations: ArchitectureViolation[] = [];
+  const forbidden = new Set(["createDatabaseRuntime", "DatabaseStatement"]);
+  const visit = (node: ts.Node) => {
+    if (ts.isIdentifier(node) && forbidden.has(node.text)) {
+      const line =
+        source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+      violations.push({
+        rule: "typed-dal-runtime-forbidden",
+        source: relativePath,
+        specifier: node.text,
+        target: relativePath,
+        line,
+        message:
+          "This module must use the typed D1 client and must not reference createDatabaseRuntime or DatabaseStatement.",
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return violations;
+}
+
 function importsIn(sourceText: string, fileName: string): ImportReference[] {
   const source = ts.createSourceFile(
     fileName,
@@ -552,6 +592,8 @@ export function collectArchitectureViolations(
       continue;
     const sourceText = readFileSync(absolute, "utf8");
     if (isGeneratedFile(relative, sourceText)) continue;
+
+    violations.push(...typedDalConvergenceViolations(relative, sourceText));
 
     const addSourceRuleViolation = (
       rule: string,

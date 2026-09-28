@@ -75,6 +75,44 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("forbids legacy database runtime references in converged DAL modules", () => {
+    const root = fixture();
+    const files: Record<string, string> = {
+      "src/lib/notifications/edge/rule-store.ts": [
+        'import { createDatabaseRuntime as runtime } from "@/lib/db/runtime";',
+        "type Statement = DatabaseStatement;",
+        "export { runtime, Statement };",
+        "",
+      ].join("\n"),
+      "src/lib/edge/analytics/interfaces/dashboard/saved-filters.ts":
+        "export const runtime = createDatabaseRuntime;\n",
+    };
+    for (const [relativePath, content] of Object.entries(files)) {
+      const absolutePath = path.join(root, relativePath);
+      mkdirSync(path.dirname(absolutePath), { recursive: true });
+      writeFileSync(absolutePath, content);
+    }
+
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ rule }) => rule === "typed-dal-runtime-forbidden")
+        .map(({ source, specifier }) => ({ source, specifier })),
+    ).toEqual([
+      {
+        source: "src/lib/edge/analytics/interfaces/dashboard/saved-filters.ts",
+        specifier: "createDatabaseRuntime",
+      },
+      {
+        source: "src/lib/notifications/edge/rule-store.ts",
+        specifier: "createDatabaseRuntime",
+      },
+      {
+        source: "src/lib/notifications/edge/rule-store.ts",
+        specifier: "DatabaseStatement",
+      },
+    ]);
+  });
+
   it("keeps Analytics contracts and shared domains out of runtime modules", () => {
     const root = fixture();
     const files: Record<string, string> = {
