@@ -21,9 +21,11 @@ function createDatabase() {
     bind: vi.fn(() => prepared),
     all: vi.fn(async () => result),
     first: vi.fn(async () => row),
+    run: vi.fn(async () => result),
   };
   const database = {
     prepare: vi.fn(() => prepared),
+    batch: vi.fn(async () => [result]),
   } as unknown as D1Database;
 
   return { database, prepared, result, row };
@@ -77,6 +79,89 @@ describe("D1 database runtime", () => {
     expect(prepared.all).not.toHaveBeenCalled();
   });
 
+  it("uses native run with exact SQL and bindings", async () => {
+    const { database, prepared, result } = createDatabase();
+    const sql = " UPDATE records SET value=? WHERE id=? ";
+    const bindings = [false, "record-1", null];
+
+    await expect(
+      createDatabaseRuntime(database).run({ sql, bindings }),
+    ).resolves.toBe(result);
+
+    expect(database.prepare).toHaveBeenCalledExactlyOnceWith(sql);
+    expect(prepared.bind).toHaveBeenCalledExactlyOnceWith(...bindings);
+    expect(prepared.run).toHaveBeenCalledExactlyOnceWith();
+    expect(prepared.all).not.toHaveBeenCalled();
+    expect(prepared.first).not.toHaveBeenCalled();
+  });
+
+  it("preserves omitted and empty bindings for run", async () => {
+    const omitted = createDatabase();
+    const empty = createDatabase();
+
+    await createDatabaseRuntime(omitted.database).run({
+      sql: "DELETE FROM records",
+    });
+    await createDatabaseRuntime(empty.database).run({
+      sql: "DELETE FROM records",
+      bindings: [],
+    });
+
+    expect(omitted.prepared.bind).not.toHaveBeenCalled();
+    expect(empty.prepared.bind).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it("prepares batch statements in order and returns native results unchanged", async () => {
+    const result = {
+      success: true,
+      results: [],
+      meta: {
+        duration: 0,
+        size_after: 0,
+        rows_read: 0,
+        rows_written: 0,
+        last_row_id: 0,
+        changed_db: false,
+        changes: 0,
+      },
+    } satisfies D1Result;
+    const results = [result, result, result];
+    const preparedStatements = ["A", "B", "C"].map(() => {
+      const prepared = {
+        bind: vi.fn(() => prepared),
+      };
+      return prepared;
+    });
+    const database = {
+      prepare: vi
+        .fn()
+        .mockReturnValueOnce(preparedStatements[0])
+        .mockReturnValueOnce(preparedStatements[1])
+        .mockReturnValueOnce(preparedStatements[2]),
+      batch: vi.fn(async () => results),
+    } as unknown as D1Database;
+    const statements = [
+      { sql: " INSERT A ", bindings: [] },
+      { sql: "INSERT B", bindings: [1] },
+      { sql: "INSERT C", bindings: ["x", null] },
+    ];
+
+    await expect(
+      createDatabaseRuntime(database).batch(statements),
+    ).resolves.toBe(results);
+
+    expect(database.prepare).toHaveBeenNthCalledWith(1, " INSERT A ");
+    expect(database.prepare).toHaveBeenNthCalledWith(2, "INSERT B");
+    expect(database.prepare).toHaveBeenNthCalledWith(3, "INSERT C");
+    expect(preparedStatements[0].bind).toHaveBeenCalledExactlyOnceWith();
+    expect(preparedStatements[1].bind).toHaveBeenCalledExactlyOnceWith(1);
+    expect(preparedStatements[2].bind).toHaveBeenCalledExactlyOnceWith(
+      "x",
+      null,
+    );
+    expect(database.batch).toHaveBeenCalledExactlyOnceWith(preparedStatements);
+  });
+
   it("keeps tags out of SQL and bindings", async () => {
     const { database, prepared } = createDatabase();
 
@@ -99,6 +184,28 @@ describe("D1 database runtime", () => {
 
     await expect(
       createDatabaseRuntime(database).all({ sql: "SELECT 1" }),
+    ).rejects.toBe(error);
+  });
+
+  it("propagates the original run error", async () => {
+    const error = new Error("D1 run failed");
+    const { database, prepared } = createDatabase();
+    prepared.run.mockRejectedValue(error);
+
+    await expect(
+      createDatabaseRuntime(database).run({
+        sql: "UPDATE records SET value=1",
+      }),
+    ).rejects.toBe(error);
+  });
+
+  it("propagates the original batch error", async () => {
+    const error = new Error("D1 batch failed");
+    const { database } = createDatabase();
+    vi.mocked(database.batch).mockRejectedValue(error);
+
+    await expect(
+      createDatabaseRuntime(database).batch([{ sql: "DELETE FROM records" }]),
     ).rejects.toBe(error);
   });
 });

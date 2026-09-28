@@ -823,14 +823,19 @@ function directD1BaselineViolations(root: string): ArchitectureViolation[] {
         line: 1,
         message: `${count} direct D1 access(es) are not in the remaining-access baseline; route read queries through DatabaseRuntime or update the baseline only for existing deferred writes/operational access.`,
       });
-    } else if (count > expectedMaximum) {
+    } else if (count !== expectedMaximum) {
+      const increased = count > expectedMaximum;
       violations.push({
-        rule: "direct-d1-access-baseline-increased",
+        rule: increased
+          ? "direct-d1-access-baseline-increased"
+          : "direct-d1-access-baseline-not-ratcheted",
         source,
         specifier: "D1Database",
         target: source,
         line: 1,
-        message: `Direct D1 access count increased from the allowed maximum ${expectedMaximum} to ${count}.`,
+        message: increased
+          ? `Direct D1 access count increased from ${expectedMaximum} to ${count}.`
+          : `Direct D1 access count decreased from ${expectedMaximum} to ${count}; update the baseline in this commit.`,
       });
     }
   }

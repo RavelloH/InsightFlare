@@ -14,4 +14,6 @@ export interface DatabaseRuntime {
     statement: DatabaseStatement,
     columnName?: string,
   ): Promise<T | null>;
+  run(statement: DatabaseStatement): Promise<D1Result>;
+  batch(statements: readonly DatabaseStatement[]): Promise<readonly D1Result[]>;
 }

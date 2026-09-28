@@ -21,5 +21,15 @@ export function createDatabaseRuntime(database: D1Database): DatabaseRuntime {
         ? prepared.first<T>()
         : prepared.first<T>(columnName);
     },
+    run(statement: DatabaseStatement): Promise<D1Result> {
+      return prepare(database, statement).run();
+    },
+    batch(
+      statements: readonly DatabaseStatement[],
+    ): Promise<readonly D1Result[]> {
+      return database.batch(
+        statements.map((statement) => prepare(database, statement)),
+      );
+    },
   };
 }
