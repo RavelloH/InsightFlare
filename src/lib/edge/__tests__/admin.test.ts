@@ -595,7 +595,7 @@ describe("private admin edge handler", () => {
       );
       await expect(
         uniqueTeamSlug(
-          createEnv([statement({ first: { ok: 0 } })]).env,
+          createEnv([statement({ first: null })]).env,
           "Open Team",
         ),
       ).resolves.toBe("open-team");

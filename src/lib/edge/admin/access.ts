@@ -1,11 +1,28 @@
 import { toTeamRole } from "@/lib/dashboard/permissions";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  limit,
+  neq,
+  param,
+  project,
+  scan,
+  schema,
+} from "@/lib/db";
 import type { Actor } from "@/lib/edge/admin/auth";
 import {
   canAccessMemberSite,
   parseMemberSiteIdsJson,
 } from "@/lib/edge/auth/member-site-access";
 import type { Env } from "@/lib/edge/types";
+
+function database(env: Pick<Env, "DB">) {
+  return createD1DatabaseClient(env.DB);
+}
+
 export const toSlug = (v: string) =>
   v
     .trim()
@@ -22,14 +39,25 @@ export async function teamMembershipAccess(
   teamId: string,
   userId: string,
 ): Promise<TeamMembershipAccess | null> {
-  const row = await createDatabaseRuntime(env.DB).first<{
-    role: string;
-    siteIdsJson?: string | null;
-  }>({
-    sql: "SELECT role,site_ids_json AS siteIdsJson FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
-    bindings: [teamId, userId],
-    tag: "admin.team_members.first",
-  });
+  const members = scan(schema.team_members);
+  const matching = filter(
+    members,
+    and(
+      eq(members.columns.team_id, param(teamId)),
+      eq(members.columns.user_id, param(userId)),
+    ),
+  );
+  const query = compileD1Query(
+    limit(
+      project(matching, {
+        role: matching.columns.role,
+        siteIdsJson: matching.columns.site_ids_json,
+      }),
+      1,
+    ),
+    { tag: "admin.team_members.first" },
+  );
+  const row = await database(env).first(query);
   if (!row) return null;
   return {
     role: row.role,
@@ -40,22 +68,31 @@ export async function teamById(
   env: Env,
   teamId: string,
 ): Promise<{ id: string; ownerUserId: string } | null> {
-  const row = await createDatabaseRuntime(env.DB).first<{
-    id: string;
-    ownerUserId: string;
-  }>({
-    sql: "SELECT id,owner_user_id AS ownerUserId FROM teams WHERE id=? LIMIT 1",
-    bindings: [teamId],
-    tag: "admin.teams.first",
-  });
-  return row ?? null;
+  const teams = scan(schema.teams);
+  const matching = filter(teams, eq(teams.columns.id, param(teamId)));
+  const query = compileD1Query(
+    limit(
+      project(matching, {
+        id: matching.columns.id,
+        ownerUserId: matching.columns.owner_user_id,
+      }),
+      1,
+    ),
+    { tag: "admin.teams.first" },
+  );
+  const row = await database(env).first(query);
+  if (!row) return null;
+  if (typeof row.id !== "string") throw new Error("team_row_missing_id");
+  return { id: row.id, ownerUserId: row.ownerUserId };
 }
 async function siteTeam(env: Env, siteId: string): Promise<string | null> {
-  const row = await createDatabaseRuntime(env.DB).first<{ team_id: string }>({
-    sql: "SELECT team_id FROM sites WHERE id=? LIMIT 1",
-    bindings: [siteId],
-    tag: "admin.sites.first",
-  });
+  const sites = scan(schema.sites);
+  const matching = filter(sites, eq(sites.columns.id, param(siteId)));
+  const query = compileD1Query(
+    limit(project(matching, { team_id: matching.columns.team_id }), 1),
+    { tag: "admin.sites.first" },
+  );
+  const row = await database(env).first(query);
   return row?.team_id ?? null;
 }
 export async function canReadTeam(
@@ -124,21 +161,25 @@ export async function uniqueTeamSlug(
   excludeTeamId?: string,
 ): Promise<string> {
   const base = toSlug(raw) || `team-${Date.now()}`;
+  const teams = scan(schema.teams);
+  const client = database(env);
   let slug = base;
   let i = 2;
   while (true) {
-    const e = excludeTeamId
-      ? await createDatabaseRuntime(env.DB).first<{ ok: number }>({
-          sql: "SELECT 1 AS ok FROM teams WHERE slug=? AND id<>? LIMIT 1",
-          bindings: [slug, excludeTeamId],
-          tag: "admin.teams.first",
-        })
-      : await createDatabaseRuntime(env.DB).first<{ ok: number }>({
-          sql: "SELECT 1 AS ok FROM teams WHERE slug=? LIMIT 1",
-          bindings: [slug],
-          tag: "admin.teams.first",
-        });
-    if (!e?.ok) return slug;
+    const matching = filter(
+      teams,
+      excludeTeamId
+        ? and(
+            eq(teams.columns.slug, param(slug)),
+            neq(teams.columns.id, param(excludeTeamId)),
+          )
+        : eq(teams.columns.slug, param(slug)),
+    );
+    const query = compileD1Query(
+      limit(project(matching, { slug: matching.columns.slug }), 1),
+      { tag: "admin.teams.first" },
+    );
+    if (!(await client.first(query))) return slug;
     slug = `${base}-${i}`;
     i += 1;
   }

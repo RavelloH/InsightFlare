@@ -235,6 +235,18 @@ describe("Typed DAL SQLite query-plan guards", () => {
       explainQueryPlan(database, teamByOwner),
     );
 
+    const teamSlugRows = filter(
+      teams,
+      eq(teams.columns.slug, param("team-one")),
+    );
+    const teamBySlug = compileD1Query(
+      limit(project(teamSlugRows, { id: teamSlugRows.columns.id }), 1),
+    );
+    expectIndexSearch(
+      explainQueryPlan(database, teamBySlug),
+      "sqlite_autoindex_teams_2",
+    );
+
     const members = scan(schema.team_members);
     const teamList = join(
       members,
