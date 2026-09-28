@@ -13,6 +13,7 @@ import {
   filter,
   join,
   limit,
+  neq,
   param,
   project,
   scalar,
@@ -338,5 +339,178 @@ describe("Typed DAL SQLite query-plan guards", () => {
     expectIndexSearch(typedPlan, "idx_sites_team");
     expectIndexSearch(legacyPlan, "sqlite_autoindex_team_members_1");
     expectIndexSearch(typedPlan, "sqlite_autoindex_team_members_1");
+  });
+
+  it("guards Teams and Sites admin reads against legacy access-path regressions", () => {
+    const database = createFixture();
+    const hasTempBTree = (plan: readonly string[]) =>
+      plan.some((detail) => detail.includes("USE TEMP B-TREE"));
+    const comparePlanShape = (
+      legacy: readonly string[],
+      typed: readonly string[],
+    ) => {
+      expectEquivalentScan(legacy, typed);
+      expect(hasTempBTree(typed), JSON.stringify({ legacy, typed })).toBe(
+        hasTempBTree(legacy),
+      );
+    };
+
+    const teams = scan(schema.teams);
+    const teamIdMatch = filter(teams, eq(teams.columns.id, param("team-1")));
+    const typedTeamById = compileD1Query(
+      limit(project(teamIdMatch, { id: teamIdMatch.columns.id }), 1),
+    );
+    const legacyTeamById = {
+      sql: "SELECT id FROM teams WHERE id=? LIMIT 1",
+      bindings: ["team-1"],
+    };
+    const legacyTeamByIdPlan = explainQueryPlan(database, legacyTeamById);
+    const typedTeamByIdPlan = explainQueryPlan(database, typedTeamById);
+    expectIndexSearch(legacyTeamByIdPlan, "sqlite_autoindex_teams_1");
+    expectIndexSearch(typedTeamByIdPlan, "sqlite_autoindex_teams_1");
+    comparePlanShape(legacyTeamByIdPlan, typedTeamByIdPlan);
+
+    const memberships = scan(schema.team_members);
+    const membershipMatch = filter(
+      memberships,
+      and(
+        eq(memberships.columns.team_id, param("team-1")),
+        eq(memberships.columns.user_id, param("user-1")),
+      ),
+    );
+    const typedMembershipLookup = compileD1Query(
+      limit(
+        project(membershipMatch, { role: membershipMatch.columns.role }),
+        1,
+      ),
+    );
+    const legacyMembershipPlan = explainQueryPlan(database, {
+      sql: "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
+      bindings: ["team-1", "user-1"],
+    });
+    const typedMembershipPlan = explainQueryPlan(
+      database,
+      typedMembershipLookup,
+    );
+    expectIndexSearch(legacyMembershipPlan, "sqlite_autoindex_team_members_1");
+    expectIndexSearch(typedMembershipPlan, "sqlite_autoindex_team_members_1");
+    comparePlanShape(legacyMembershipPlan, typedMembershipPlan);
+
+    const users = scan(schema.users);
+    const memberJoin = join(
+      memberships,
+      users,
+      eq(memberships.columns.user_id, users.columns.id),
+    );
+    const memberMatch = filter(
+      memberJoin,
+      eq(memberJoin.columns.left_team_id, param("team-1")),
+    );
+    const memberRows = project(memberMatch, {
+      teamId: memberMatch.columns.left_team_id,
+      userId: memberMatch.columns.left_user_id,
+      role: memberMatch.columns.left_role,
+      joinedAt: memberMatch.columns.left_joined_at,
+      username: memberMatch.columns.right_username,
+      email: memberMatch.columns.right_email,
+      name: memberMatch.columns.right_name,
+    });
+    const typedMemberList = compileD1Query(
+      sort(memberRows, [
+        { expression: memberRows.columns.joinedAt, direction: "ASC" },
+      ]),
+    );
+    const legacyMemberListPlan = explainQueryPlan(database, {
+      sql: "SELECT tm.team_id,tm.user_id,tm.role,tm.joined_at,u.username,u.email,u.name FROM team_members tm INNER JOIN users u ON u.id=tm.user_id WHERE tm.team_id=? ORDER BY tm.joined_at ASC",
+      bindings: ["team-1"],
+    });
+    const typedMemberListPlan = explainQueryPlan(database, typedMemberList);
+    expectIndexSearch(legacyMemberListPlan, "sqlite_autoindex_team_members_1");
+    expectIndexSearch(typedMemberListPlan, "sqlite_autoindex_team_members_1");
+    expectIndexSearch(legacyMemberListPlan, "sqlite_autoindex_users_1");
+    expectIndexSearch(typedMemberListPlan, "sqlite_autoindex_users_1");
+    comparePlanShape(legacyMemberListPlan, typedMemberListPlan);
+
+    const siteRows = scan(schema.sites);
+    const sitesForTeam = filter(
+      siteRows,
+      eq(siteRows.columns.team_id, param("team-1")),
+    );
+    const selectedSites = project(sitesForTeam, {
+      id: sitesForTeam.columns.id,
+      createdAt: sitesForTeam.columns.created_at,
+    });
+    const typedSiteList = compileD1Query(
+      sort(selectedSites, [
+        { expression: selectedSites.columns.createdAt, direction: "DESC" },
+      ]),
+    );
+    const legacySiteListPlan = explainQueryPlan(database, {
+      sql: "SELECT id,created_at FROM sites WHERE team_id=? ORDER BY created_at DESC",
+      bindings: ["team-1"],
+    });
+    const typedSiteListPlan = explainQueryPlan(database, typedSiteList);
+    expectIndexSearch(legacySiteListPlan, "idx_sites_team");
+    expectIndexSearch(typedSiteListPlan, "idx_sites_team");
+    comparePlanShape(legacySiteListPlan, typedSiteListPlan);
+
+    const slugMatch = filter(
+      siteRows,
+      and(
+        eq(siteRows.columns.public_slug, param("public-slug")),
+        neq(siteRows.columns.id, param("site-1")),
+      ),
+    );
+    const typedSlugCheck = compileD1Query(
+      limit(project(slugMatch, { id: slugMatch.columns.id }), 1),
+    );
+    const legacySlugPlan = explainQueryPlan(database, {
+      sql: "SELECT id FROM sites WHERE public_slug=? AND id<>? LIMIT 1",
+      bindings: ["public-slug", "site-1"],
+    });
+    const typedSlugPlan = explainQueryPlan(database, typedSlugCheck);
+    expectIndexSearch(legacySlugPlan, "sqlite_autoindex_sites_2");
+    expectIndexSearch(typedSlugPlan, "sqlite_autoindex_sites_2");
+    comparePlanShape(legacySlugPlan, typedSlugPlan);
+
+    const siteCount = scalar(
+      aggregate(
+        filter(siteRows, eq(siteRows.columns.team_id, teams.columns.id)),
+        { groupBy: {}, aggregates: { count: count() } },
+      ),
+    );
+    const memberCountRows = scan(schema.team_members);
+    const memberCount = scalar(
+      aggregate(
+        filter(
+          memberCountRows,
+          eq(memberCountRows.columns.team_id, teams.columns.id),
+        ),
+        { groupBy: {}, aggregates: { count: count() } },
+      ),
+    );
+    const adminProjection = project(teams, {
+      id: teams.columns.id,
+      name: teams.columns.name,
+      slug: teams.columns.slug,
+      createdAt: teams.columns.created_at,
+      membershipRole: param("owner"),
+      siteCount,
+      memberCount,
+    });
+    const typedAdminList = compileD1Query(
+      sort(adminProjection, [
+        { expression: adminProjection.columns.createdAt, direction: "DESC" },
+      ]),
+    );
+    const legacyAdminPlan = explainQueryPlan(database, {
+      sql: "SELECT t.id,t.name,t.slug,'owner' AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t ORDER BY t.created_at DESC",
+    });
+    const typedAdminPlan = explainQueryPlan(database, typedAdminList);
+    expectIndexSearch(legacyAdminPlan, "idx_sites_team");
+    expectIndexSearch(typedAdminPlan, "idx_sites_team");
+    expectIndexSearch(legacyAdminPlan, "sqlite_autoindex_team_members_1");
+    expectIndexSearch(typedAdminPlan, "sqlite_autoindex_team_members_1");
+    comparePlanShape(legacyAdminPlan, typedAdminPlan);
   });
 });

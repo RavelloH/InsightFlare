@@ -1945,6 +1945,7 @@ describe("private admin edge handler", () => {
       expect(insertMember.bind).toHaveBeenCalledWith(
         "00000000-0000-4000-8000-000000000201",
         "user-1",
+        "owner",
       );
     });
 
@@ -2122,8 +2123,17 @@ describe("private admin edge handler", () => {
         },
       });
       expect(ownerUpdate.bind).toHaveBeenCalledWith("user-2", "team-1");
-      expect(newOwnerMembership.bind).toHaveBeenCalledWith("team-1", "user-2");
-      expect(oldOwnerMembership.bind).toHaveBeenCalledWith("team-1", "user-1");
+      expect(newOwnerMembership.bind).toHaveBeenCalledWith(
+        "team-1",
+        "user-2",
+        "owner",
+        "owner",
+      );
+      expect(oldOwnerMembership.bind).toHaveBeenCalledWith(
+        "admin",
+        "team-1",
+        "user-1",
+      );
       expect(batch).toHaveBeenCalledWith([
         ownerUpdate,
         newOwnerMembership,
@@ -2923,7 +2933,12 @@ describe("private admin edge handler", () => {
           name: "Admin User",
         },
       });
-      expect(upsertOwner.bind).toHaveBeenCalledWith("team-1", "owner-1");
+      expect(upsertOwner.bind).toHaveBeenCalledWith(
+        "team-1",
+        "owner-1",
+        "owner",
+        "owner",
+      );
     });
 
     it("rejects direct owner assignment and owner membership rewrites", async () => {
