@@ -1,5 +1,24 @@
 import { BlockingRulesValidationError } from "@/lib/blocking";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Mutation,
+  compileD1Query,
+  createD1DatabaseClient,
+  createDatabaseRuntime,
+  deleteFrom,
+  eq,
+  filter,
+  insert,
+  limit,
+  neq,
+  param,
+  project,
+  scan,
+  schema,
+  sort,
+  unixepoch,
+  update,
+} from "@/lib/db";
 import {
   canManageSite,
   canManageTeam,
@@ -30,23 +49,44 @@ import {
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
+
+function database(env: Env) {
+  return createD1DatabaseClient(env.DB);
+}
+
+function siteByIdQuery(siteId: string) {
+  const sites = scan(schema.sites);
+  const matching = filter(sites, eq(sites.columns.id, param(siteId)));
+  return limit(
+    project(matching, {
+      id: matching.columns.id,
+      teamId: matching.columns.team_id,
+      name: matching.columns.name,
+      domain: matching.columns.domain,
+      publicEnabled: matching.columns.public_enabled,
+      publicSlug: matching.columns.public_slug,
+    }),
+    1,
+  );
+}
 export async function ensurePublicSlugAvailable(
   env: Env,
   slug: string,
   excludeSiteId?: string,
 ): Promise<boolean> {
-  const row = excludeSiteId
-    ? await createDatabaseRuntime(env.DB).first<{ ok: number }>({
-        sql: "SELECT 1 AS ok FROM sites WHERE public_slug=? AND id<>? LIMIT 1",
-        bindings: [slug, excludeSiteId],
-        tag: "admin.sites.first",
-      })
-    : await createDatabaseRuntime(env.DB).first<{ ok: number }>({
-        sql: "SELECT 1 AS ok FROM sites WHERE public_slug=? LIMIT 1",
-        bindings: [slug],
-        tag: "admin.sites.first",
-      });
-  return !row?.ok;
+  const sites = scan(schema.sites);
+  const slugMatches = eq(sites.columns.public_slug, param(slug));
+  const matching = filter(
+    sites,
+    excludeSiteId
+      ? and(slugMatches, neq(sites.columns.id, param(excludeSiteId)))
+      : slugMatches,
+  );
+  const selected = project(matching, { id: matching.columns.id });
+  const row = await database(env).first(
+    compileD1Query(limit(selected, 1), { tag: "admin.sites.first" }),
+  );
+  return row === null;
 }
 export async function createSiteWithDefaultSettings(
   env: Env,
@@ -59,29 +99,33 @@ export async function createSiteWithDefaultSettings(
   },
 ): Promise<string> {
   const siteId = crypto.randomUUID();
-  await createDatabaseRuntime(env.DB).run({
-    sql: "INSERT INTO sites (id,team_id,name,domain,public_enabled,public_slug,created_at,updated_at) VALUES (?,?,?,?,?,?,unixepoch(),unixepoch())",
-    bindings: [
-      siteId,
-      input.teamId,
-      input.name,
-      input.domain,
-      input.publicEnabled ? 1 : 0,
-      input.publicEnabled ? input.publicSlug : null,
-    ],
-    tag: "admin.sites.insert",
-  });
+  await database(env).run(
+    compileD1Mutation(
+      insert(schema.sites, {
+        id: siteId,
+        team_id: input.teamId,
+        name: input.name,
+        domain: input.domain,
+        public_enabled: input.publicEnabled ? 1 : 0,
+        public_slug: input.publicEnabled ? input.publicSlug : null,
+        created_at: unixepoch(),
+        updated_at: unixepoch(),
+      }),
+      { tag: "admin.sites.insert" },
+    ),
+  );
   try {
     await upsertSiteScriptSettings(env, siteId, {
       siteDomain: input.domain,
       settings: DEFAULT_SITE_SCRIPT_SETTINGS,
     });
   } catch (error) {
-    await createDatabaseRuntime(env.DB).run({
-      sql: "DELETE FROM sites WHERE id=?",
-      bindings: [siteId],
-      tag: "admin.sites.compensate_insert",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        deleteFrom(schema.sites, (columns) => eq(columns.id, param(siteId))),
+        { tag: "admin.sites.compensate_insert" },
+      ),
+    );
     throw error;
   }
   return siteId;
@@ -176,23 +220,33 @@ export async function handleSitesAdmin(
     if (!teamId) return bad("Missing teamId", undefined, req);
     if (!(await canReadTeam(env, a, teamId)))
       return forb("Team access denied", undefined, req);
-    const rows = await createDatabaseRuntime(env.DB).all<{
-      id: string;
-      teamId: string;
-      name: string;
-      domain: string;
-      publicEnabled: number;
-      publicSlug: string | null;
-      createdAt: number;
-      updatedAt: number;
-    }>({
-      sql: "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug,created_at AS createdAt,updated_at AS updatedAt FROM sites WHERE team_id=? ORDER BY created_at DESC",
-      bindings: [teamId],
-      tag: "admin.sites.all",
+    const sites = scan(schema.sites);
+    const matching = filter(sites, eq(sites.columns.team_id, param(teamId)));
+    const selected = project(matching, {
+      id: matching.columns.id,
+      teamId: matching.columns.team_id,
+      name: matching.columns.name,
+      domain: matching.columns.domain,
+      publicEnabled: matching.columns.public_enabled,
+      publicSlug: matching.columns.public_slug,
+      createdAt: matching.columns.created_at,
+      updatedAt: matching.columns.updated_at,
+    });
+    const rows = await database(env).all(
+      compileD1Query(
+        sort(selected, [
+          { expression: selected.columns.createdAt, direction: "DESC" },
+        ]),
+        { tag: "admin.sites.all" },
+      ),
+    );
+    const siteRows = rows.results.map((site) => {
+      if (site.id === null) throw new Error("site_row_missing_id");
+      return { ...site, id: site.id };
     });
     return jsonResponseFor(req, {
       ok: true,
-      data: await filterReadableSitesForActor(env, a, teamId, rows.results),
+      data: await filterReadableSitesForActor(env, a, teamId, siteRows),
     });
   }
   if (req.method === "POST") {
@@ -236,19 +290,20 @@ export async function handleSitesAdmin(
     const siteId = clampString(String(body.siteId || ""), 120);
     const intent = clampString(String(body.intent || ""), 20);
     if (!siteId) return bad("siteId is required", undefined, req);
-    const e = await createDatabaseRuntime(env.DB).first<{
-      id: string;
-      teamId: string;
-      name: string;
-      domain: string;
-      publicEnabled: number;
-      publicSlug: string | null;
-    }>({
-      sql: "SELECT id,team_id AS teamId,name,domain,public_enabled AS publicEnabled,public_slug AS publicSlug FROM sites WHERE id=? LIMIT 1",
-      bindings: [siteId],
-      tag: "admin.sites.first",
-    });
-    if (!e) return nf("Site not found", undefined, req);
+    const existingRow = await database(env).first(
+      compileD1Query(siteByIdQuery(siteId), { tag: "admin.sites.first" }),
+    );
+    if (!existingRow || existingRow.id === null)
+      return nf("Site not found", undefined, req);
+    const e = {
+      ...existingRow,
+      id: existingRow.id,
+      teamId: existingRow.teamId ?? "",
+      name: existingRow.name ?? "",
+      domain: existingRow.domain ?? "",
+      publicEnabled: existingRow.publicEnabled ?? 0,
+      publicSlug: existingRow.publicSlug,
+    };
     if (!(await canManageTeam(env, a, e.teamId)))
       return forb("Only team owner can update sites", undefined, req);
     if (intent === "remove") {
@@ -274,18 +329,22 @@ export async function handleSitesAdmin(
       const available = await ensurePublicSlugAvailable(env, pubSlug, siteId);
       if (!available) return bad("Public slug already exists", undefined, req);
     }
-    await createDatabaseRuntime(env.DB).run({
-      sql: "UPDATE sites SET team_id=?,name=?,domain=?,public_enabled=?,public_slug=?,updated_at=unixepoch() WHERE id=?",
-      bindings: [
-        nextTeamId,
-        name,
-        domain,
-        pub ? 1 : 0,
-        pub ? pubSlug : null,
-        siteId,
-      ],
-      tag: "admin.sites.update",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        update(schema.sites, (columns) => ({
+          set: {
+            team_id: nextTeamId,
+            name,
+            domain,
+            public_enabled: pub ? 1 : 0,
+            public_slug: pub ? pubSlug : null,
+            updated_at: unixepoch(),
+          },
+          where: eq(columns.id, param(siteId)),
+        })),
+        { tag: "admin.sites.update" },
+      ),
+    );
     await upsertSiteScriptSettings(env, siteId, {
       siteDomain: domain,
     });
@@ -342,13 +401,12 @@ export async function handleSiteConfigAdmin(
       body.config && typeof body.config === "object" ? body.config : {}
     ) as JsonRecord;
     try {
-      const site = await createDatabaseRuntime(env.DB).first<{
-        domain: string;
-      }>({
-        sql: "SELECT domain FROM sites WHERE id=? LIMIT 1",
-        bindings: [siteId],
-        tag: "admin.sites.first",
-      });
+      const sites = scan(schema.sites);
+      const siteRows = filter(sites, eq(sites.columns.id, param(siteId)));
+      const siteDomain = project(siteRows, { domain: siteRows.columns.domain });
+      const site = await database(env).first(
+        compileD1Query(limit(siteDomain, 1), { tag: "admin.sites.first" }),
+      );
       if (!site?.domain) return nf("Site not found", undefined, req);
       const next = await upsertSiteTrackingConfig(env, siteId, {
         siteDomain: site.domain,

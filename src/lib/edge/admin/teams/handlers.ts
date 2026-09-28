@@ -1,5 +1,30 @@
 import { type TeamRole, toTeamRole } from "@/lib/dashboard/permissions";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  aggregate,
+  and,
+  compileD1Mutation,
+  compileD1Query,
+  count,
+  createD1DatabaseClient,
+  createDatabaseRuntime,
+  deleteFrom,
+  eq,
+  excluded,
+  filter,
+  insert,
+  join,
+  limit,
+  onConflictDoUpdate,
+  param,
+  project,
+  scalar,
+  scan,
+  schema,
+  sort,
+  unixepoch,
+  update,
+} from "@/lib/db";
+import type { SqlExpression } from "@/lib/db/query/expression";
 import {
   canAdministerTeam,
   canManageTeam,
@@ -31,6 +56,60 @@ import {
 import { deleteSiteScriptSettings } from "@/lib/edge/sites/settings-store";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
+
+function database(env: Env) {
+  return createD1DatabaseClient(env.DB);
+}
+
+function siteCountFor(teamId: SqlExpression<string | null>) {
+  const sites = scan(schema.sites);
+  const matchingSites = filter(sites, eq(sites.columns.team_id, teamId));
+  return scalar(
+    aggregate(matchingSites, {
+      groupBy: {},
+      aggregates: { count: count() },
+    }),
+  );
+}
+
+function memberCountFor(teamId: SqlExpression<string | null>) {
+  const members = scan(schema.team_members);
+  const matchingMembers = filter(members, eq(members.columns.team_id, teamId));
+  return scalar(
+    aggregate(matchingMembers, {
+      groupBy: {},
+      aggregates: { count: count() },
+    }),
+  );
+}
+
+function teamByIdQuery(teamId: string) {
+  const teams = scan(schema.teams);
+  const matching = filter(teams, eq(teams.columns.id, param(teamId)));
+  return limit(
+    project(matching, {
+      id: matching.columns.id,
+      name: matching.columns.name,
+      slug: matching.columns.slug,
+      ownerUserId: matching.columns.owner_user_id,
+      createdAt: matching.columns.created_at,
+      updatedAt: matching.columns.updated_at,
+    }),
+    1,
+  );
+}
+
+function membershipByTeamAndUser(teamId: string, userId: string) {
+  const members = scan(schema.team_members);
+  const matching = filter(
+    members,
+    and(
+      eq(members.columns.team_id, param(teamId)),
+      eq(members.columns.user_id, param(userId)),
+    ),
+  );
+  return limit(project(matching, { role: matching.columns.role }), 1);
+}
 const MAX_SITE_IDS_PER_D1_QUERY = 100;
 async function deleteForSiteIds(
   env: Env,
@@ -59,12 +138,26 @@ export async function handleTeamsAdmin(
   if (a instanceof Response) return a;
   if (req.method === "GET") {
     if (a.isAdmin) {
-      const rows = await createDatabaseRuntime(env.DB).all<
-        Record<string, unknown>
-      >({
-        sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,'owner' AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t ORDER BY t.created_at DESC",
-        tag: "admin.sites.all",
+      const teams = scan(schema.teams);
+      const selected = project(teams, {
+        id: teams.columns.id,
+        name: teams.columns.name,
+        slug: teams.columns.slug,
+        ownerUserId: teams.columns.owner_user_id,
+        createdAt: teams.columns.created_at,
+        updatedAt: teams.columns.updated_at,
+        membershipRole: param("owner"),
+        siteCount: siteCountFor(teams.columns.id),
+        memberCount: memberCountFor(teams.columns.id),
       });
+      const rows = await database(env).all(
+        compileD1Query(
+          sort(selected, [
+            { expression: selected.columns.createdAt, direction: "DESC" },
+          ]),
+          { tag: "admin.sites.all" },
+        ),
+      );
       return jsonResponseFor(req, {
         ok: true,
         data: rows.results.map((row) => ({
@@ -87,16 +180,30 @@ export async function handleTeamsAdmin(
       clampString(String(body.slug || toSlug(name)), 80),
     );
     const teamId = crypto.randomUUID();
-    await createDatabaseRuntime(env.DB).run({
-      sql: "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
-      bindings: [teamId, name, slug, a.user.id],
-      tag: "admin.teams.insert",
-    });
-    await createDatabaseRuntime(env.DB).run({
-      sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())",
-      bindings: [teamId, a.user.id],
-      tag: "admin.team_members.insert_owner",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        insert(schema.teams, {
+          id: teamId,
+          name,
+          slug,
+          owner_user_id: a.user.id,
+          created_at: unixepoch(),
+          updated_at: unixepoch(),
+        }),
+        { tag: "admin.teams.insert" },
+      ),
+    );
+    await database(env).run(
+      compileD1Mutation(
+        insert(schema.team_members, {
+          team_id: teamId,
+          user_id: a.user.id,
+          role: param("owner"),
+          joined_at: unixepoch(),
+        }),
+        { tag: "admin.team_members.insert_owner" },
+      ),
+    );
     return jsonResponseFor(req, {
       ok: true,
       data: {
@@ -116,19 +223,20 @@ export async function handleTeamsAdmin(
     if (!(await canManageTeam(env, a, teamId)))
       return forb("Only team owner can update team", undefined, req);
 
-    const existing = await createDatabaseRuntime(env.DB).first<{
-      id: string;
-      name: string;
-      slug: string;
-      ownerUserId: string;
-      createdAt: number;
-      updatedAt: number;
-    }>({
-      sql: "SELECT id,name,slug,owner_user_id AS ownerUserId,created_at AS createdAt,updated_at AS updatedAt FROM teams WHERE id=? LIMIT 1",
-      bindings: [teamId],
-      tag: "admin.teams.first",
-    });
-    if (!existing) return nf("Team not found", undefined, req);
+    const existingRow = await database(env).first(
+      compileD1Query(teamByIdQuery(teamId), { tag: "admin.teams.first" }),
+    );
+    if (!existingRow || existingRow.id === null)
+      return nf("Team not found", undefined, req);
+    const existing = {
+      ...existingRow,
+      id: existingRow.id,
+      name: existingRow.name ?? "",
+      slug: existingRow.slug ?? "",
+      ownerUserId: existingRow.ownerUserId ?? "",
+      createdAt: existingRow.createdAt ?? 0,
+      updatedAt: existingRow.updatedAt ?? 0,
+    };
 
     if (intent === "transfer_owner") {
       if (existing.ownerUserId !== a.user.id) {
@@ -147,32 +255,48 @@ export async function handleTeamsAdmin(
       if (newOwnerUserId === existing.ownerUserId) {
         return bad("Already the team owner", undefined, req);
       }
-      const targetMembership = await createDatabaseRuntime(env.DB).first<{
-        role: string;
-      }>({
-        sql: "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
-        bindings: [teamId, newOwnerUserId],
-        tag: "admin.team_members.first",
-      });
+      const targetMembership = await database(env).first(
+        compileD1Query(membershipByTeamAndUser(teamId, newOwnerUserId), {
+          tag: "admin.team_members.first",
+        }),
+      );
       if (!targetMembership)
         return bad("Target user is not a team member", undefined, req);
 
-      await createDatabaseRuntime(env.DB).batch([
-        {
-          sql: "UPDATE teams SET owner_user_id=?,updated_at=unixepoch() WHERE id=?",
-          bindings: [newOwnerUserId, teamId],
-          tag: "admin.teams.transfer_owner",
-        },
-        {
-          sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='owner'",
-          bindings: [teamId, newOwnerUserId],
-          tag: "admin.team_members.promote_owner",
-        },
-        {
-          sql: "UPDATE team_members SET role='admin' WHERE team_id=? AND user_id=?",
-          bindings: [teamId, existing.ownerUserId],
-          tag: "admin.team_members.demote_previous_owner",
-        },
+      await database(env).batch([
+        compileD1Mutation(
+          update(schema.teams, (columns) => ({
+            set: {
+              owner_user_id: newOwnerUserId,
+              updated_at: unixepoch(),
+            },
+            where: eq(columns.id, param(teamId)),
+          })),
+          { tag: "admin.teams.transfer_owner" },
+        ),
+        compileD1Mutation(
+          onConflictDoUpdate(
+            insert(schema.team_members, {
+              team_id: teamId,
+              user_id: newOwnerUserId,
+              role: param("owner"),
+              joined_at: unixepoch(),
+            }),
+            ["team_id", "user_id"],
+            { role: param("owner") },
+          ),
+          { tag: "admin.team_members.promote_owner" },
+        ),
+        compileD1Mutation(
+          update(schema.team_members, (columns) => ({
+            set: { role: param("admin") },
+            where: and(
+              eq(columns.team_id, param(teamId)),
+              eq(columns.user_id, param(existing.ownerUserId)),
+            ),
+          })),
+          { tag: "admin.team_members.demote_previous_owner" },
+        ),
       ]);
 
       return jsonResponseFor(req, {
@@ -287,11 +411,15 @@ export async function handleTeamsAdmin(
         ? await uniqueTeamSlug(env, slugInput, teamId)
         : await uniqueTeamSlug(env, name, teamId);
 
-    await createDatabaseRuntime(env.DB).run({
-      sql: "UPDATE teams SET name=?,slug=?,updated_at=unixepoch() WHERE id=?",
-      bindings: [name, slug, teamId],
-      tag: "admin.teams.update",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        update(schema.teams, (columns) => ({
+          set: { name, slug, updated_at: unixepoch() },
+          where: eq(columns.id, param(teamId)),
+        })),
+        { tag: "admin.teams.update" },
+      ),
+    );
 
     return jsonResponseFor(req, {
       ok: true,
@@ -319,13 +447,35 @@ export async function handleMembersAdmin(
     if (!teamId) return bad("Missing teamId", undefined, req);
     if (!(await canReadTeam(env, a, teamId)))
       return forb("Team access denied", undefined, req);
-    const rows = await createDatabaseRuntime(env.DB).all<
-      Record<string, unknown>
-    >({
-      sql: "SELECT tm.team_id AS teamId,tm.user_id AS userId,tm.role,tm.site_ids_json AS siteIdsJson,tm.joined_at AS joinedAt,u.username,u.email,u.name FROM team_members tm INNER JOIN users u ON u.id=tm.user_id WHERE tm.team_id=? ORDER BY tm.joined_at ASC",
-      bindings: [teamId],
-      tag: "admin.team_members.all",
+    const members = scan(schema.team_members);
+    const users = scan(schema.users);
+    const joined = join(
+      members,
+      users,
+      eq(members.columns.user_id, users.columns.id),
+    );
+    const matching = filter(
+      joined,
+      eq(joined.columns.left_team_id, param(teamId)),
+    );
+    const selected = project(matching, {
+      teamId: matching.columns.left_team_id,
+      userId: matching.columns.left_user_id,
+      role: matching.columns.left_role,
+      siteIdsJson: matching.columns.left_site_ids_json,
+      joinedAt: matching.columns.left_joined_at,
+      username: matching.columns.right_username,
+      email: matching.columns.right_email,
+      name: matching.columns.right_name,
     });
+    const rows = await database(env).all(
+      compileD1Query(
+        sort(selected, [
+          { expression: selected.columns.joinedAt, direction: "ASC" },
+        ]),
+        { tag: "admin.team_members.all" },
+      ),
+    );
     return jsonResponseFor(req, {
       ok: true,
       data: rows.results.map((row) => {
@@ -357,11 +507,21 @@ export async function handleMembersAdmin(
       : await byIdentifier(env, identifier);
     if (!m) return nf("User not found", undefined, req);
     if (m.id === team.ownerUserId) {
-      await createDatabaseRuntime(env.DB).run({
-        sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='owner'",
-        bindings: [teamId, m.id],
-        tag: "admin.team_members.ensure_owner",
-      });
+      await database(env).run(
+        compileD1Mutation(
+          onConflictDoUpdate(
+            insert(schema.team_members, {
+              team_id: teamId,
+              user_id: m.id,
+              role: param("owner"),
+              joined_at: unixepoch(),
+            }),
+            ["team_id", "user_id"],
+            { role: param("owner") },
+          ),
+          { tag: "admin.team_members.ensure_owner" },
+        ),
+      );
       return jsonResponseFor(req, {
         ok: true,
         data: {
@@ -392,20 +552,32 @@ export async function handleMembersAdmin(
     if (!(await assertSitesBelongToTeam(env, teamId, siteIds))) {
       return bad("siteIds must belong to the team", undefined, req);
     }
-    const existingRole = await createDatabaseRuntime(env.DB).first<{
-      role: string;
-    }>({
-      sql: "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
-      bindings: [teamId, m.id],
-      tag: "admin.team_members.first",
-    });
+    const existingRole = await database(env).first(
+      compileD1Query(membershipByTeamAndUser(teamId, m.id), {
+        tag: "admin.team_members.first",
+      }),
+    );
     if (existingRole && toTeamRole(existingRole.role) === "owner")
       return forb("Cannot change team owner membership", undefined, req);
-    await createDatabaseRuntime(env.DB).run({
-      sql: "INSERT INTO team_members (team_id,user_id,role,site_ids_json,joined_at) VALUES (?,?,?,?,unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role=excluded.role, site_ids_json=excluded.site_ids_json",
-      bindings: [teamId, m.id, targetRole, serializeMemberSiteIds(siteIds)],
-      tag: "admin.team_members.upsert",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        onConflictDoUpdate(
+          insert(schema.team_members, {
+            team_id: teamId,
+            user_id: m.id,
+            role: targetRole,
+            site_ids_json: serializeMemberSiteIds(siteIds),
+            joined_at: unixepoch(),
+          }),
+          ["team_id", "user_id"],
+          {
+            role: excluded(schema.team_members.columns.role),
+            site_ids_json: excluded(schema.team_members.columns.site_ids_json),
+          },
+        ),
+        { tag: "admin.team_members.upsert" },
+      ),
+    );
     return jsonResponseFor(req, {
       ok: true,
       data: {
@@ -433,13 +605,11 @@ export async function handleMembersAdmin(
     if (!team) return nf("Team not found", undefined, req);
     if (!(await canManageTeam(env, a, teamId)))
       return forb("Only team owner can manage members", undefined, req);
-    const existing = await createDatabaseRuntime(env.DB).first<{
-      role: string;
-    }>({
-      sql: "SELECT role FROM team_members WHERE team_id=? AND user_id=? LIMIT 1",
-      bindings: [teamId, userId],
-      tag: "admin.team_members.first",
-    });
+    const existing = await database(env).first(
+      compileD1Query(membershipByTeamAndUser(teamId, userId), {
+        tag: "admin.team_members.first",
+      }),
+    );
     if (!existing) return nf("Member not found", undefined, req);
     const existingRole = toTeamRole(existing.role);
 
@@ -471,11 +641,18 @@ export async function handleMembersAdmin(
           data: { teamId, userId, role: nextRole, unchanged: true },
         });
       }
-      await createDatabaseRuntime(env.DB).run({
-        sql: "UPDATE team_members SET role=? WHERE team_id=? AND user_id=?",
-        bindings: [nextRole, teamId, userId],
-        tag: "admin.team_members.update_role",
-      });
+      await database(env).run(
+        compileD1Mutation(
+          update(schema.team_members, (columns) => ({
+            set: { role: nextRole },
+            where: and(
+              eq(columns.team_id, param(teamId)),
+              eq(columns.user_id, param(userId)),
+            ),
+          })),
+          { tag: "admin.team_members.update_role" },
+        ),
+      );
       return jsonResponseFor(req, {
         ok: true,
         data: { teamId, userId, role: nextRole, updated: true },
@@ -496,11 +673,18 @@ export async function handleMembersAdmin(
       if (!(await assertSitesBelongToTeam(env, teamId, siteIds))) {
         return bad("siteIds must belong to the team", undefined, req);
       }
-      await createDatabaseRuntime(env.DB).run({
-        sql: "UPDATE team_members SET site_ids_json=? WHERE team_id=? AND user_id=?",
-        bindings: [serializeMemberSiteIds(siteIds), teamId, userId],
-        tag: "admin.team_members.update_sites",
-      });
+      await database(env).run(
+        compileD1Mutation(
+          update(schema.team_members, (columns) => ({
+            set: { site_ids_json: serializeMemberSiteIds(siteIds) },
+            where: and(
+              eq(columns.team_id, param(teamId)),
+              eq(columns.user_id, param(userId)),
+            ),
+          })),
+          { tag: "admin.team_members.update_sites" },
+        ),
+      );
       return jsonResponseFor(req, {
         ok: true,
         data: { teamId, userId, siteIds, updated: true },
@@ -509,11 +693,17 @@ export async function handleMembersAdmin(
 
     if (userId === team.ownerUserId || existingRole === "owner")
       return bad("Cannot remove team owner", undefined, req);
-    await createDatabaseRuntime(env.DB).run({
-      sql: "DELETE FROM team_members WHERE team_id=? AND user_id=?",
-      bindings: [teamId, userId],
-      tag: "admin.team_members.delete",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        deleteFrom(schema.team_members, (columns) =>
+          and(
+            eq(columns.team_id, param(teamId)),
+            eq(columns.user_id, param(userId)),
+          ),
+        ),
+        { tag: "admin.team_members.delete" },
+      ),
+    );
     return jsonResponseFor(req, {
       ok: true,
       data: { teamId, userId, removed: true },
