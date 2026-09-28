@@ -1,4 +1,12 @@
-import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
+import {
+  compileD1Mutation,
+  createD1DatabaseClient,
+  eq,
+  insert,
+  param,
+  update,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import { measureExternalFetch } from "@/lib/edge/observability/bindings";
 import {
   currentInvocationLogger,
@@ -92,6 +100,9 @@ async function bestEffortRun(
     observability?.warn("scheduled_task.persistence_write_failed");
   }
 }
+function database(env: Pick<Env, "DB">) {
+  return createD1DatabaseClient(env.DB);
+}
 interface BufferedTaskLogger {
   logger: ScheduledTaskLogger;
   flush(): Promise<void>;
@@ -155,37 +166,33 @@ function createLogger(
     },
     async flush() {
       if (entries.length === 0) return;
-      const statements: DatabaseStatement[] = entries.map((entry) => ({
-        sql: `
-              INSERT INTO scheduled_task_run_logs (
-                id, run_id, task_key, sequence, level, event, message,
-                data_json, created_at_ms, expires_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `,
-        bindings: [
-          entry.id,
-          runId,
-          taskKey,
-          entry.sequence,
-          entry.level,
-          entry.event,
-          entry.message,
-          entry.dataJson,
-          entry.createdAtMs,
-          expiresAtSec,
-        ],
-        tag: "scheduled_tasks.run_logs.insert",
-      }));
       await bestEffortRun(
         "logs-flush",
         async () => {
+          const mutations = entries.map((entry) =>
+            compileD1Mutation(
+              insert(schema.scheduled_task_run_logs, {
+                id: entry.id,
+                run_id: runId,
+                task_key: taskKey,
+                sequence: entry.sequence,
+                level: entry.level,
+                event: entry.event,
+                message: entry.message,
+                data_json: entry.dataJson,
+                created_at_ms: entry.createdAtMs,
+                expires_at: expiresAtSec,
+              }),
+              { tag: "scheduled_tasks.run_logs.insert" },
+            ),
+          );
           for (
             let offset = 0;
-            offset < statements.length;
+            offset < mutations.length;
             offset += LOG_BATCH_SIZE
           ) {
-            await createDatabaseRuntime(env.DB).batch(
-              statements.slice(offset, offset + LOG_BATCH_SIZE),
+            await database(env).batch(
+              mutations.slice(offset, offset + LOG_BATCH_SIZE),
             );
           }
         },
@@ -220,29 +227,26 @@ export async function runScheduledTask(
   await bestEffortRun(
     "run-start",
     async () => {
-      await createDatabaseRuntime(env.DB).run({
-        sql: `
-        INSERT INTO scheduled_task_runs (
-          id, invocation_id, task_key, task_name, trigger_type, status,
-          scheduled_at_ms, started_at_ms, scope_type, scope_id, summary_json,
-          worker_version, expires_at
-        ) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, '{}', ?, ?)
-      `,
-        bindings: [
-          runId,
-          invocationId,
-          definition.key,
-          definition.name,
-          triggerType,
-          scheduledAt,
-          startedAt,
-          definition.scopeType ?? "system",
-          definition.scopeId ?? null,
-          null,
-          expiresAtSec,
-        ],
-        tag: "scheduled_tasks.runs.insert",
-      });
+      await database(env).run(
+        compileD1Mutation(
+          insert(schema.scheduled_task_runs, {
+            id: runId,
+            invocation_id: invocationId,
+            task_key: definition.key,
+            task_name: definition.name,
+            trigger_type: triggerType,
+            status: "running",
+            scheduled_at_ms: scheduledAt,
+            started_at_ms: startedAt,
+            scope_type: definition.scopeType ?? "system",
+            scope_id: definition.scopeId ?? null,
+            summary_json: "{}",
+            worker_version: null,
+            expires_at: expiresAtSec,
+          }),
+          { tag: "scheduled_tasks.runs.insert" },
+        ),
+      );
     },
     activeObservability,
   );
@@ -287,28 +291,23 @@ export async function runScheduledTask(
     await bestEffortRun(
       "run-finish",
       async () => {
-        await createDatabaseRuntime(env.DB).run({
-          sql: `
-          UPDATE scheduled_task_runs
-          SET
-            status = ?,
-            finished_at_ms = ?,
-            duration_ms = ?,
-            summary_json = ?,
-            error_name = NULL,
-            error_message = NULL,
-            error_stack = NULL
-          WHERE id = ?
-        `,
-          bindings: [
-            status,
-            finishedAt,
-            finishedAt - startedAt,
-            safeJsonStringify(summary),
-            runId,
-          ],
-          tag: "scheduled_tasks.runs.finish",
-        });
+        await database(env).run(
+          compileD1Mutation(
+            update(schema.scheduled_task_runs, (columns) => ({
+              set: {
+                status,
+                finished_at_ms: finishedAt,
+                duration_ms: finishedAt - startedAt,
+                summary_json: safeJsonStringify(summary),
+                error_name: null,
+                error_message: null,
+                error_stack: null,
+              },
+              where: eq(columns.id, param(runId)),
+            })),
+            { tag: "scheduled_tasks.runs.finish" },
+          ),
+        );
       },
       activeObservability,
     );
@@ -322,30 +321,23 @@ export async function runScheduledTask(
     await bestEffortRun(
       "run-error",
       async () => {
-        await createDatabaseRuntime(env.DB).run({
-          sql: `
-          UPDATE scheduled_task_runs
-          SET
-            status = 'failed',
-            finished_at_ms = ?,
-            duration_ms = ?,
-            summary_json = ?,
-            error_name = ?,
-            error_message = ?,
-            error_stack = ?
-          WHERE id = ?
-        `,
-          bindings: [
-            finishedAt,
-            finishedAt - startedAt,
-            "{}",
-            normalized.name.slice(0, 120),
-            normalized.message.slice(0, 1000),
-            normalized.stack?.slice(0, 4000) ?? null,
-            runId,
-          ],
-          tag: "scheduled_tasks.runs.fail",
-        });
+        await database(env).run(
+          compileD1Mutation(
+            update(schema.scheduled_task_runs, (columns) => ({
+              set: {
+                status: "failed",
+                finished_at_ms: finishedAt,
+                duration_ms: finishedAt - startedAt,
+                summary_json: "{}",
+                error_name: normalized.name.slice(0, 120),
+                error_message: normalized.message.slice(0, 1000),
+                error_stack: normalized.stack?.slice(0, 4000) ?? null,
+              },
+              where: eq(columns.id, param(runId)),
+            })),
+            { tag: "scheduled_tasks.runs.fail" },
+          ),
+        );
       },
       activeObservability,
     );

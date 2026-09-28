@@ -10,6 +10,7 @@ vi.mock("@/lib/scheduled-tasks", () => ({
 }));
 const { runScheduledTask } = await import("@/lib/edge/scheduled-tasks/runner");
 interface MockStatement {
+  sql: string;
   bind: ReturnType<typeof vi.fn>;
   first: ReturnType<typeof vi.fn>;
   all: ReturnType<typeof vi.fn>;
@@ -24,6 +25,7 @@ function statement(
   } = {},
 ): MockStatement {
   const stmt = {
+    sql: "",
     bind: vi.fn(function (this: MockStatement) {
       return this;
     }),
@@ -43,15 +45,32 @@ function statement(
   stmt.all.mockResolvedValue({ results: "all" in input ? input.all : [] });
   return stmt;
 }
-function createEnv(statements: MockStatement[] = []): Env {
+interface InstrumentedEnv extends Env {
+  preparedSql: string[];
+  batches: number[];
+}
+function createEnv(statements: MockStatement[] = []): InstrumentedEnv {
   let callIndex = 0;
-  const prepare = vi.fn(() => statements[callIndex++] ?? statement());
+  const preparedSql: string[] = [];
+  const batches: number[] = [];
+  const prepare = vi.fn((sql: string) => {
+    const prepared = statements[callIndex++] ?? statement();
+    prepared.sql = sql;
+    preparedSql.push(sql);
+    return prepared;
+  });
   const batch = vi.fn(async (batchStatements: MockStatement[]) => {
+    batches.push(batchStatements.length);
     for (const batchStatement of batchStatements) {
       await (batchStatement.run as unknown as () => Promise<unknown>)();
     }
+    return batchStatements.map(() => ({ success: true, meta: { changes: 1 } }));
   });
-  return { DB: { prepare, batch } } as unknown as Env;
+  return {
+    DB: { prepare, batch },
+    preparedSql,
+    batches,
+  } as unknown as InstrumentedEnv;
 }
 const definition = {
   key: "test-task",
@@ -98,6 +117,45 @@ describe("runScheduledTask", () => {
     expect(handler.mock.calls[0][0].scheduledTime).toBe(1000);
     expect(handler.mock.calls[0][0].runId).toBe("uuid-1");
     expect(updateStmt.run).toHaveBeenCalled();
+    expect(env.batches).toEqual([2]);
+    expect(
+      env.preparedSql.map(
+        (sql) => sql.match(/(?:INSERT INTO|UPDATE) ([^ ]+)/)?.[1],
+      ),
+    ).toEqual([
+      undefined,
+      '"scheduled_task_runs"',
+      '"scheduled_task_run_logs"',
+      '"scheduled_task_run_logs"',
+      '"scheduled_task_runs"',
+    ]);
+    expect(env.preparedSql[1]).toContain(
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    expect(insertStmt.bind.mock.calls[0]).toEqual([
+      "uuid-1",
+      "uuid-2",
+      "test-task",
+      "Test Task",
+      "cron",
+      "running",
+      1000,
+      expect.any(Number),
+      "system",
+      null,
+      "{}",
+      null,
+      expect.any(Number),
+    ]);
+    expect(updateStmt.bind.mock.calls[0]?.slice(0, 7)).toEqual([
+      "success",
+      expect.any(Number),
+      expect.any(Number),
+      JSON.stringify({ count: 42 }),
+      null,
+      null,
+      null,
+    ]);
   });
 
   it("defaults to success when handler returns void", async () => {
@@ -130,6 +188,9 @@ describe("runScheduledTask", () => {
     await runScheduledTask(env, definition, 1000, handler);
 
     expect(handler).toHaveBeenCalledTimes(1);
+    expect(env.batches).toEqual([]);
+    expect(env.preparedSql).toHaveLength(3);
+    expect(env.preparedSql[2]).toContain('UPDATE "scheduled_task_runs"');
   });
 
   it("sets scheduledAt to null when scheduledTime is undefined", async () => {
@@ -154,18 +215,21 @@ describe("runScheduledTask", () => {
 
     expect(handler.mock.calls[0][0].scheduledTime).toBe(delayedScheduledTime);
     expect(insertStmt.bind).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
+      "uuid-1",
+      "uuid-2",
       definition.key,
       definition.name,
       "cron",
+      "running",
       delayedScheduledTime,
       expect.any(Number),
       definition.scopeType,
       null,
+      "{}",
       null,
       expect.any(Number),
     );
+    expect(env.batches).toEqual([2]);
   });
 
   it("re-throws handler errors after recording failure", async () => {
@@ -189,6 +253,27 @@ describe("runScheduledTask", () => {
       runScheduledTask(env, definition, 1000, handler),
     ).rejects.toThrow("task failed");
     expect(updateStmt.run).toHaveBeenCalled();
+    expect(
+      env.preparedSql.map(
+        (sql) => sql.match(/(?:INSERT INTO|UPDATE) ([^ ]+)/)?.[1],
+      ),
+    ).toEqual([
+      undefined,
+      '"scheduled_task_runs"',
+      '"scheduled_task_run_logs"',
+      '"scheduled_task_run_logs"',
+      '"scheduled_task_runs"',
+    ]);
+    expect(updateStmt.bind.mock.calls[0]).toEqual([
+      "failed",
+      expect.any(Number),
+      expect.any(Number),
+      "{}",
+      "Error",
+      "task failed",
+      expect.any(String),
+      "uuid-1",
+    ]);
   });
 
   it("handles non-Error thrown values", async () => {
@@ -219,6 +304,32 @@ describe("runScheduledTask", () => {
     // Should not throw even though DB writes fail
     await runScheduledTask(env, definition, 1000, handler);
     expect(handler).toHaveBeenCalledTimes(1);
+    expect(env.batches).toEqual([2]);
+  });
+
+  it("keeps the fixed 50-entry batch boundaries for buffered logs", async () => {
+    const env = createEnv();
+    const handler = vi.fn(
+      async ({
+        logger,
+      }: {
+        logger: { info: (event: string, message: string) => Promise<void> };
+      }) => {
+        for (let index = 0; index < 118; index += 1) {
+          await logger.info("item", `log ${index}`);
+        }
+        return { status: "success" as const };
+      },
+    );
+
+    await runScheduledTask(env, definition, 1000, handler);
+
+    expect(env.batches).toEqual([50, 50, 20]);
+    expect(
+      env.preparedSql.filter((sql) =>
+        sql.includes('INSERT INTO "scheduled_task_run_logs"'),
+      ),
+    ).toHaveLength(120);
   });
 
   it("mirrors stable task events without persisting operator-facing data", async () => {
