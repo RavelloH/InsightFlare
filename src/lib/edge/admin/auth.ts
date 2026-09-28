@@ -1,7 +1,35 @@
 import { argon2id } from "@noble/hashes/argon2.js";
 
 import { toTeamRole } from "@/lib/dashboard/permissions";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  aggregate,
+  and,
+  callFunction,
+  coalesce,
+  compileD1Mutation,
+  compileD1Query,
+  count,
+  createD1DatabaseClient,
+  eq as queryEq,
+  filter,
+  inList,
+  insert,
+  join,
+  limit,
+  neq,
+  onConflictDoUpdate,
+  or,
+  param,
+  project,
+  scalar,
+  scan,
+  schema,
+  sort,
+  unixepoch,
+  update,
+} from "@/lib/db";
+import type { AnyExpression, SqlExpression } from "@/lib/db/query/expression";
+import type { Relation } from "@/lib/db/query/plan";
 import { uniqueTeamSlug } from "@/lib/edge/admin/access";
 import { requireSession } from "@/lib/edge/auth/session-auth";
 import type { Env } from "@/lib/edge/types";
@@ -49,6 +77,75 @@ const ARGON2_MAX_PARALLELISM = 8;
 
 export const normU = (s: string) => clampString(s.trim().toLowerCase(), 80);
 export const normE = (s: string) => clampString(s.trim().toLowerCase(), 200);
+
+function database(env: Env) {
+  return createD1DatabaseClient(env.DB);
+}
+
+function userQuery() {
+  const users = scan(schema.users);
+  return project(users, {
+    id: users.columns.id,
+    username: users.columns.username,
+    email: users.columns.email,
+    name: users.columns.name,
+    password_hash: users.columns.password_hash,
+    system_role: users.columns.system_role,
+    timezone: users.columns.timezone,
+    preferred_locale: users.columns.preferred_locale,
+    created_at: users.columns.created_at,
+    updated_at: users.columns.updated_at,
+  });
+}
+
+type UserQueryRow = NonNullable<ReturnType<typeof userQuery>["__row"]>;
+
+function requireUserRow(row: UserQueryRow): UserRow {
+  if (row.id === null || row.username === null) {
+    throw new Error("user_row_missing_required_fields");
+  }
+  return { ...row, id: row.id, username: row.username };
+}
+
+function siteCountFor(teamId: SqlExpression<string | null>) {
+  const sites = scan(schema.sites);
+  const matchingSites = filter(sites, queryEq(sites.columns.team_id, teamId));
+  return coalesce(
+    scalar(
+      aggregate(matchingSites, {
+        groupBy: {},
+        aggregates: { count: count() },
+      }),
+    ),
+    param(0),
+  );
+}
+
+function memberCountFor(teamId: SqlExpression<string | null>) {
+  const members = scan(schema.team_members);
+  const matchingMembers = filter(
+    members,
+    queryEq(members.columns.team_id, teamId),
+  );
+  return coalesce(
+    scalar(
+      aggregate(matchingMembers, {
+        groupBy: {},
+        aggregates: { count: count() },
+      }),
+    ),
+    param(0),
+  );
+}
+
+function orderedTeams<
+  Row extends object,
+  Columns extends Readonly<Record<string, AnyExpression>>,
+>(relation: Relation<Row, Columns>) {
+  return sort(relation, [
+    { expression: relation.columns.createdAt, direction: "DESC" },
+  ]);
+}
 
 const b64u = (b: Uint8Array) => {
   let bin = "";
@@ -193,13 +290,12 @@ export const toPublicUser = (u: UserRow) => ({
 });
 
 export async function byId(env: Env, id: string): Promise<UserRow | null> {
-  return (
-    (await createDatabaseRuntime(env.DB).first<UserRow>({
-      sql: "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE id=? LIMIT 1",
-      bindings: [id],
-      tag: "admin.users.first",
-    })) ?? null
+  const users = userQuery();
+  const matching = filter(users, queryEq(users.columns.id, param(id)));
+  const result = await database(env).first(
+    compileD1Query(limit(matching, 1), { tag: "admin.users.first" }),
   );
+  return result ? requireUserRow(result) : null;
 }
 
 export async function byIdentifier(
@@ -207,30 +303,49 @@ export async function byIdentifier(
   identifier: string,
 ): Promise<UserRow | null> {
   const lowered = normU(identifier);
-  return (
-    (await createDatabaseRuntime(env.DB).first<UserRow>({
-      sql: "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE lower(username)=? OR lower(email)=? LIMIT 1",
-      bindings: [lowered, lowered],
-      tag: "admin.users.first",
-    })) ?? null
+  const users = userQuery();
+  const matching = filter(
+    users,
+    or(
+      queryEq(callFunction("lower", users.columns.username), param(lowered)),
+      queryEq(callFunction("lower", users.columns.email), param(lowered)),
+    ),
   );
+  const result = await database(env).first(
+    compileD1Query(limit(matching, 1), { tag: "admin.users.first" }),
+  );
+  return result ? requireUserRow(result) : null;
 }
 
 export async function ensureDefaultTeam(
   env: Env,
   user: UserRow,
 ): Promise<void> {
-  const owned = await createDatabaseRuntime(env.DB).first<{ id: string }>({
-    sql: "SELECT id FROM teams WHERE owner_user_id=? LIMIT 1",
-    bindings: [user.id],
-    tag: "admin.teams.first",
-  });
+  const teams = scan(schema.teams);
+  const ownedTeams = filter(
+    teams,
+    queryEq(teams.columns.owner_user_id, param(user.id)),
+  );
+  const selectedTeams = project(ownedTeams, { id: ownedTeams.columns.id });
+  const owned = await database(env).first(
+    compileD1Query(limit(selectedTeams, 1), { tag: "admin.teams.first" }),
+  );
   if (owned?.id) {
-    await createDatabaseRuntime(env.DB).run({
-      sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='owner'",
-      bindings: [owned.id, user.id],
-      tag: "admin.team_members.ensure_owner",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        onConflictDoUpdate(
+          insert(schema.team_members, {
+            team_id: owned.id,
+            user_id: user.id,
+            role: "owner",
+            joined_at: unixepoch(),
+          }),
+          ["team_id", "user_id"],
+          { role: "owner" },
+        ),
+        { tag: "admin.team_members.ensure_owner" },
+      ),
+    );
     return;
   }
   const teamId = crypto.randomUUID();
@@ -239,23 +354,45 @@ export async function ensureDefaultTeam(
     120,
   );
   const slug = await uniqueTeamSlug(env, `${user.username}-team`);
-  await createDatabaseRuntime(env.DB).run({
-    sql: "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
-    bindings: [teamId, `${displayName}'s team`, slug, user.id],
-    tag: "admin.teams.create_default",
-  });
-  await createDatabaseRuntime(env.DB).run({
-    sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())",
-    bindings: [teamId, user.id],
-    tag: "admin.team_members.create_default_owner",
-  });
+  await database(env).run(
+    compileD1Mutation(
+      insert(schema.teams, {
+        id: teamId,
+        name: `${displayName}'s team`,
+        slug,
+        owner_user_id: user.id,
+        created_at: unixepoch(),
+        updated_at: unixepoch(),
+      }),
+      { tag: "admin.teams.create_default" },
+    ),
+  );
+  await database(env).run(
+    compileD1Mutation(
+      insert(schema.team_members, {
+        team_id: teamId,
+        user_id: user.id,
+        role: "owner",
+        joined_at: unixepoch(),
+      }),
+      { tag: "admin.team_members.create_default_owner" },
+    ),
+  );
 }
 
 export async function ensureBootstrapAdmin(env: Env): Promise<UserRow> {
-  const admin = await createDatabaseRuntime(env.DB).first<UserRow>({
-    sql: "SELECT id,username,email,name,password_hash,system_role,timezone,preferred_locale,created_at,updated_at FROM users WHERE system_role='admin' ORDER BY created_at ASC LIMIT 1",
-    tag: "admin.users.first",
-  });
+  const users = userQuery();
+  const admins = filter(
+    users,
+    queryEq(users.columns.system_role, param("admin")),
+  );
+  const firstAdmin = sort(admins, [
+    { expression: admins.columns.created_at, direction: "ASC" },
+  ]);
+  const adminResult = await database(env).first(
+    compileD1Query(limit(firstAdmin, 1), { tag: "admin.users.first" }),
+  );
+  const admin = adminResult ? requireUserRow(adminResult) : null;
   if (admin) {
     await ensureDefaultTeam(env, admin);
     return admin;
@@ -268,22 +405,43 @@ export async function ensureBootstrapAdmin(env: Env): Promise<UserRow> {
   );
   const found = await byIdentifier(env, username);
   if (found) {
-    await createDatabaseRuntime(env.DB).run({
-      sql: "UPDATE users SET username=?,email=?,name=?,password_hash=?,system_role='admin',updated_at=unixepoch() WHERE id=?",
-      bindings: [username, email, name, passHash, found.id],
-      tag: "admin.users.promote_bootstrap",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        update(schema.users, (columns) => ({
+          set: {
+            username,
+            email,
+            name,
+            password_hash: passHash,
+            system_role: "admin",
+            updated_at: unixepoch(),
+          },
+          where: queryEq(columns.id, param(found.id)),
+        })),
+        { tag: "admin.users.promote_bootstrap" },
+      ),
+    );
     const promoted = await byId(env, found.id);
     if (!promoted) throw new Error("bootstrap admin promote failed");
     await ensureDefaultTeam(env, promoted);
     return promoted;
   }
   const id = crypto.randomUUID();
-  await createDatabaseRuntime(env.DB).run({
-    sql: "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,'admin',unixepoch(),unixepoch())",
-    bindings: [id, username, email, name, passHash],
-    tag: "admin.users.create_bootstrap",
-  });
+  await database(env).run(
+    compileD1Mutation(
+      insert(schema.users, {
+        id,
+        username,
+        email,
+        name,
+        password_hash: passHash,
+        system_role: "admin",
+        created_at: unixepoch(),
+        updated_at: unixepoch(),
+      }),
+      { tag: "admin.users.create_bootstrap" },
+    ),
+  );
   const created = await byId(env, id);
   if (!created) throw new Error("bootstrap admin create failed");
   await ensureDefaultTeam(env, created);
@@ -307,12 +465,30 @@ export async function teamsFor(
   env: Env,
   userId: string,
 ): Promise<Array<Record<string, unknown>>> {
-  const rows = await createDatabaseRuntime(env.DB).all<Record<string, unknown>>(
-    {
-      sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? ORDER BY t.created_at DESC",
-      bindings: [userId],
-      tag: "admin.sites.all",
-    },
+  const teams = scan(schema.teams);
+  const members = scan(schema.team_members);
+  const joined = join(
+    teams,
+    members,
+    queryEq(teams.columns.id, members.columns.team_id),
+  );
+  const matching = filter(
+    joined,
+    queryEq(joined.columns.right_user_id, param(userId)),
+  );
+  const selected = project(matching, {
+    id: matching.columns.left_id,
+    name: matching.columns.left_name,
+    slug: matching.columns.left_slug,
+    ownerUserId: matching.columns.left_owner_user_id,
+    createdAt: matching.columns.left_created_at,
+    updatedAt: matching.columns.left_updated_at,
+    membershipRole: matching.columns.right_role,
+    siteCount: siteCountFor(matching.columns.left_id),
+    memberCount: memberCountFor(matching.columns.left_id),
+  });
+  const rows = await database(env).all(
+    compileD1Query(orderedTeams(selected), { tag: "admin.sites.all" }),
   );
   return rows.results.map((row) => ({
     ...row,
@@ -373,34 +549,126 @@ export async function teamGroupsForSession(
   teamGroups: SessionTeamGroups;
 }> {
   const userId = actor.user.id;
-  const createdRows = await createDatabaseRuntime(env.DB).all<
-    Record<string, unknown>
-  >({
-    sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,COALESCE(tm.role,'owner') AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.id AND tm.user_id=? WHERE t.owner_user_id=? ORDER BY t.created_at DESC",
-    bindings: [userId, userId],
-    tag: "admin.sites.all",
+  const teams = scan(schema.teams);
+  const members = scan(schema.team_members);
+  const createdJoined = join(
+    teams,
+    members,
+    and(
+      queryEq(teams.columns.id, members.columns.team_id),
+      queryEq(members.columns.user_id, param(userId)),
+    ),
+    "left",
+  );
+  const createdMatching = filter(
+    createdJoined,
+    queryEq(createdJoined.columns.left_owner_user_id, param(userId)),
+  );
+  const createdSelected = project(createdMatching, {
+    id: createdMatching.columns.left_id,
+    name: createdMatching.columns.left_name,
+    slug: createdMatching.columns.left_slug,
+    ownerUserId: createdMatching.columns.left_owner_user_id,
+    createdAt: createdMatching.columns.left_created_at,
+    updatedAt: createdMatching.columns.left_updated_at,
+    membershipRole: coalesce(
+      createdMatching.columns.right_role,
+      param("owner"),
+    ),
+    siteCount: siteCountFor(createdMatching.columns.left_id),
+    memberCount: memberCountFor(createdMatching.columns.left_id),
   });
-  const managedRows = await createDatabaseRuntime(env.DB).all<
-    Record<string, unknown>
-  >({
-    sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? AND tm.role IN ('owner','admin') AND t.owner_user_id<>? ORDER BY t.created_at DESC",
-    bindings: [userId, userId],
-    tag: "admin.sites.all",
+  const createdRows = await database(env).all(
+    compileD1Query(orderedTeams(createdSelected), { tag: "admin.sites.all" }),
+  );
+
+  const managedJoined = join(
+    teams,
+    members,
+    queryEq(teams.columns.id, members.columns.team_id),
+  );
+  const managedMatching = filter(
+    managedJoined,
+    and(
+      queryEq(managedJoined.columns.right_user_id, param(userId)),
+      inList(managedJoined.columns.right_role, ["owner", "admin"]),
+      neq(managedJoined.columns.left_owner_user_id, param(userId)),
+    ),
+  );
+  const managedSelected = project(managedMatching, {
+    id: managedMatching.columns.left_id,
+    name: managedMatching.columns.left_name,
+    slug: managedMatching.columns.left_slug,
+    ownerUserId: managedMatching.columns.left_owner_user_id,
+    createdAt: managedMatching.columns.left_created_at,
+    updatedAt: managedMatching.columns.left_updated_at,
+    membershipRole: managedMatching.columns.right_role,
+    siteCount: siteCountFor(managedMatching.columns.left_id),
+    memberCount: memberCountFor(managedMatching.columns.left_id),
   });
-  const memberRows = await createDatabaseRuntime(env.DB).all<
-    Record<string, unknown>
-  >({
-    sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t INNER JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=? AND tm.role NOT IN ('owner','admin') AND t.owner_user_id<>? ORDER BY t.created_at DESC",
-    bindings: [userId, userId],
-    tag: "admin.sites.all",
+  const managedRows = await database(env).all(
+    compileD1Query(orderedTeams(managedSelected), {
+      tag: "admin.sites.all",
+    }),
+  );
+
+  const memberJoined = join(
+    teams,
+    members,
+    queryEq(teams.columns.id, members.columns.team_id),
+  );
+  const memberMatching = filter(
+    memberJoined,
+    and(
+      queryEq(memberJoined.columns.right_user_id, param(userId)),
+      neq(memberJoined.columns.right_role, param("owner")),
+      neq(memberJoined.columns.right_role, param("admin")),
+      neq(memberJoined.columns.left_owner_user_id, param(userId)),
+    ),
+  );
+  const memberSelected = project(memberMatching, {
+    id: memberMatching.columns.left_id,
+    name: memberMatching.columns.left_name,
+    slug: memberMatching.columns.left_slug,
+    ownerUserId: memberMatching.columns.left_owner_user_id,
+    createdAt: memberMatching.columns.left_created_at,
+    updatedAt: memberMatching.columns.left_updated_at,
+    membershipRole: memberMatching.columns.right_role,
+    siteCount: siteCountFor(memberMatching.columns.left_id),
+    memberCount: memberCountFor(memberMatching.columns.left_id),
   });
-  const systemRows = actor.isAdmin
-    ? await createDatabaseRuntime(env.DB).all<Record<string, unknown>>({
-        sql: "SELECT t.id,t.name,t.slug,t.owner_user_id AS ownerUserId,t.created_at AS createdAt,t.updated_at AS updatedAt,tm.role AS membershipRole,(SELECT COUNT(*) FROM sites s WHERE s.team_id=t.id) AS siteCount,(SELECT COUNT(*) FROM team_members x WHERE x.team_id=t.id) AS memberCount FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.id AND tm.user_id=? ORDER BY t.created_at DESC",
-        bindings: [userId],
+  const memberRows = await database(env).all(
+    compileD1Query(orderedTeams(memberSelected), { tag: "admin.sites.all" }),
+  );
+
+  let systemRows: { results: Record<string, unknown>[] } = { results: [] };
+  if (actor.isAdmin) {
+    const systemJoined = join(
+      teams,
+      members,
+      and(
+        queryEq(teams.columns.id, members.columns.team_id),
+        queryEq(members.columns.user_id, param(userId)),
+      ),
+      "left",
+    );
+    const systemSelected = project(systemJoined, {
+      id: systemJoined.columns.left_id,
+      name: systemJoined.columns.left_name,
+      slug: systemJoined.columns.left_slug,
+      ownerUserId: systemJoined.columns.left_owner_user_id,
+      createdAt: systemJoined.columns.left_created_at,
+      updatedAt: systemJoined.columns.left_updated_at,
+      membershipRole: systemJoined.columns.right_role,
+      siteCount: siteCountFor(systemJoined.columns.left_id),
+      memberCount: memberCountFor(systemJoined.columns.left_id),
+    });
+    systemRows = await database(env).all(
+      compileD1Query(orderedTeams(systemSelected), {
         tag: "admin.sites.all",
-      })
-    : { results: [] };
+      }),
+    );
+  }
 
   const teamGroups: SessionTeamGroups = {
     created: mapTeamRows(createdRows.results),

@@ -964,8 +964,14 @@ describe("private admin edge handler", () => {
       expect(bootstrapOwnerUpsert.bind).toHaveBeenCalledWith(
         "admin-team",
         "admin-existing",
+        "owner",
+        "owner",
       );
-      expect(teamsStatement.bind).toHaveBeenCalledWith("user-without-team");
+      expect(teamsStatement.bind).toHaveBeenCalledWith(
+        0,
+        0,
+        "user-without-team",
+      );
       expect(prepare).toHaveBeenCalledTimes(5);
     });
 
