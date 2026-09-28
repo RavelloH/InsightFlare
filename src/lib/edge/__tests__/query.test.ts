@@ -160,14 +160,15 @@ function createEnv(options: MockEnvOptions = {}) {
 }
 function authMatches(site = siteRow): SqlMatch[] {
   return [
-    firstMatch(["FROM sites", "WHERE id=? LIMIT 1"], site),
-    firstMatch(["FROM sites s", "INNER JOIN teams"], site),
+    {
+      match: (sql) => sql.includes('"sites"') && !sql.includes('"teams"'),
+      first: site,
+    },
+    firstMatch(['"sites"', '"teams"', '"team_members"'], site),
   ];
 }
 function publicAuthMatches(site = publicSiteRow): SqlMatch[] {
-  return [
-    firstMatch(["FROM sites", "public_enabled=1", "public_slug=?"], site),
-  ];
+  return [firstMatch(['"sites"'], site)];
 }
 function request(path: string, init?: RequestInit) {
   return new Request(`https://edge.test${path}`, init);
@@ -1152,7 +1153,7 @@ describe("edge query handlers", () => {
 
   it("uses admin site lookup and returns not found when the site is missing", async () => {
     const { env, statements } = createEnv({
-      matches: [firstMatch(["FROM sites", "WHERE id=? LIMIT 1"], null)],
+      matches: [firstMatch(['"sites"'], null)],
     });
 
     const response = await privateQuery(privatePath("overview"), env);
@@ -1162,12 +1163,12 @@ describe("edge query handlers", () => {
       ok: false,
       error: { message: "Site not found" },
     });
-    expect(statements[0].bind).toHaveBeenCalledWith("site-1");
+    expect(statements[0].bind).toHaveBeenCalledWith("site-1", 1);
   });
 
   it("marks sites resolved for system administrators as manageable", async () => {
     const { env } = createEnv({
-      matches: [firstMatch(["FROM sites", "WHERE id=? LIMIT 1"], siteRow)],
+      matches: [firstMatch(['"sites"'], siteRow)],
     });
     const edgeRequest = request(privatePath("overview"));
 
@@ -1179,7 +1180,7 @@ describe("edge query handlers", () => {
   it("uses team membership lookup for non-admin users", async () => {
     requireSessionMock.mockResolvedValue(userSession);
     const { env, statements } = createEnv({
-      matches: [firstMatch(["FROM sites s", "INNER JOIN teams"], null)],
+      matches: [firstMatch(['"sites"', '"teams"', '"team_members"'], null)],
     });
 
     const response = await privateQuery(privatePath("overview"), env);
@@ -1189,7 +1190,7 @@ describe("edge query handlers", () => {
       ok: false,
       error: { message: "Site not found" },
     });
-    expect(statements[0].bind).toHaveBeenCalledWith("user-1", "site-1");
+    expect(statements[0].bind).toHaveBeenCalledWith("user-1", "site-1", 1);
   });
 
   it("returns overview metrics, comparison, detail trend, and normalized filter bindings", async () => {
@@ -2201,7 +2202,7 @@ describe("edge query handlers", () => {
 
     requireSessionMock.mockResolvedValueOnce(userSession);
     const { env: deniedEnv, statements } = createEnv({
-      matches: [firstMatch(["FROM teams t", "LEFT JOIN team_members"], null)],
+      matches: [firstMatch(['"teams"', '"team_members"'], null)],
     });
     const denied = await privateQuery(
       `/api/private/team-dashboard?teamId=team-1&${windowParams}`,
@@ -2213,12 +2214,12 @@ describe("edge query handlers", () => {
       ok: false,
       error: { message: "Team not found" },
     });
-    expect(statements[0].bind).toHaveBeenCalledWith("user-1", "team-1");
+    expect(statements[0].bind).toHaveBeenCalledWith("user-1", "team-1", 1);
   });
 
   it("rejects oversized team dashboard trends before constructing D1 trend SQL", async () => {
     const { env, statements } = createEnv({
-      matches: [firstMatch(["SELECT id FROM teams"], { id: "team-1" })],
+      matches: [firstMatch(['"teams"'], { id: "team-1" })],
     });
 
     const response = await privateQuery(
@@ -2237,13 +2238,13 @@ describe("edge query handlers", () => {
     // Team ACL resolution is still performed, but no site, rollup, or raw
     // trend query is allowed to run after the range is rejected.
     expect(statements).toHaveLength(1);
-    expect(statements[0].sql).toContain("SELECT id FROM teams");
+    expect(statements[0].sql).toContain('"teams"');
   });
 
   it("routes team dashboard with team auth, site summaries, trends, and empty teams", async () => {
     const { env } = createEnv({
       matches: [
-        firstMatch(["SELECT id FROM teams"], { id: "team-1" }),
+        firstMatch(['"teams"'], { id: "team-1" }),
         allMatch(
           ["FROM sites", "WHERE team_id = ?"],
           [
@@ -2311,7 +2312,7 @@ describe("edge query handlers", () => {
 
     const emptyEnv = createEnv({
       matches: [
-        firstMatch(["SELECT id FROM teams"], { id: "team-1" }),
+        firstMatch(['"teams"'], { id: "team-1" }),
         allMatch(["FROM sites", "WHERE team_id = ?"], []),
       ],
     }).env;
@@ -2332,7 +2333,7 @@ describe("edge query handlers", () => {
   it("applies private team filters through the scoped dataset", async () => {
     const { env, statements } = createEnv({
       matches: [
-        firstMatch(["SELECT id FROM teams"], { id: "team-1" }),
+        firstMatch(['"teams"'], { id: "team-1" }),
         allMatch(
           ["FROM sites", "WHERE team_id = ?"],
           [
@@ -2419,7 +2420,7 @@ describe("edge query handlers", () => {
       },
     });
     expectPublicPayloadWithoutIdentity(overviewPayload);
-    expect(statements[0].bind).toHaveBeenCalledWith("public-slug");
+    expect(statements[0].bind).toHaveBeenCalledWith(1, "public-slug", 1);
     expect(privateOnly.status).toBe(404);
     expect(await privateOnly.json()).toMatchObject({
       ok: false,
@@ -2455,10 +2456,10 @@ describe("edge query handlers", () => {
         }),
       ]),
     );
-    expect(statements[0].bind).toHaveBeenCalledWith("public-slug");
+    expect(statements[0].bind).toHaveBeenCalledWith(1, "public-slug", 1);
 
     const missingEnv = createEnv({
-      matches: [firstMatch(["public_enabled=1", "public_slug=?"], null)],
+      matches: [firstMatch(['"sites"'], null)],
     }).env;
     const missing = await publicQuery(publicPath("overview"), missingEnv);
 

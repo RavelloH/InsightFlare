@@ -1,4 +1,17 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  createDatabaseClient,
+  createDatabaseRuntime,
+  eq,
+  filter,
+  join,
+  limit,
+  param,
+  project,
+  scan,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import {
   canAccessMemberSite,
   parseMemberSiteIdsJson,
@@ -26,6 +39,15 @@ export interface SiteAccessRecord {
 }
 type SiteRow = SiteAccessRecord;
 const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
+
+function database(env: Pick<Env, "DB">) {
+  return createDatabaseClient(createDatabaseRuntime(env.DB));
+}
+
+function withSiteId<Row extends { id: string | null }>(row: Row | null) {
+  if (!row || row.id === null) return null;
+  return { ...row, id: row.id };
+}
 async function demoSiteById(siteId: string): Promise<SiteRow | null> {
   const { DEMO_SITE_PROFILES } = await import("@/lib/demo/data/site-profiles");
   const profile = DEMO_SITE_PROFILES.find(
@@ -78,41 +100,66 @@ export async function resolvePrivateSiteForSession(
       : notFound("Site not found", undefined, request);
   }
 
+  const sites = scan(schema.sites);
+  const matchingSites = filter(sites, eq(sites.columns.id, param(siteId)));
   if (session.systemRole === "admin") {
-    const site = await createDatabaseRuntime(env.DB).first<SiteRow>({
-      sql: "SELECT id,name,domain FROM sites WHERE id=? LIMIT 1",
-      bindings: [siteId],
-      tag: "auth.sites.first",
-    });
+    const site = withSiteId(
+      await database(env).first(
+        compileD1Query(
+          limit(
+            project(matchingSites, {
+              id: matchingSites.columns.id,
+              name: matchingSites.columns.name,
+              domain: matchingSites.columns.domain,
+            }),
+            1,
+          ),
+          { tag: "auth.sites.first" },
+        ),
+      ),
+    );
     return site
       ? { ...site, canManage: true }
       : notFound("Site not found", undefined, request);
   }
 
-  const site = await createDatabaseRuntime(env.DB).first<
-    SiteRow & {
-      ownerUserId: string;
-      role: string | null;
-      siteIdsJson: string | null;
-    }
-  >({
-    sql: `
-      SELECT
-        s.id,
-        s.name,
-        s.domain,
-        t.owner_user_id AS ownerUserId,
-        tm.role,
-        tm.site_ids_json AS siteIdsJson
-      FROM sites s
-      INNER JOIN teams t ON t.id = s.team_id
-      LEFT JOIN team_members tm ON tm.team_id = s.team_id AND tm.user_id = ?
-      WHERE s.id = ?
-      LIMIT 1
-    `,
-    bindings: [session.userId, siteId],
-    tag: "auth.sites.first",
-  });
+  const teams = scan(schema.teams);
+  const members = scan(schema.team_members);
+  const siteTeams = join(
+    sites,
+    teams,
+    eq(sites.columns.team_id, teams.columns.id),
+    "inner",
+  );
+  const siteTeamMembers = join(
+    siteTeams,
+    members,
+    and(
+      eq(siteTeams.columns.left_team_id, members.columns.team_id),
+      eq(members.columns.user_id, param(session.userId)),
+    ),
+    "left",
+  );
+  const matchingPrivateSites = filter(
+    siteTeamMembers,
+    eq(siteTeamMembers.columns.left_left_id, param(siteId)),
+  );
+  const privateSiteQuery = limit(
+    project(matchingPrivateSites, {
+      id: matchingPrivateSites.columns.left_left_id,
+      name: matchingPrivateSites.columns.left_left_name,
+      domain: matchingPrivateSites.columns.left_left_domain,
+      ownerUserId: matchingPrivateSites.columns.left_right_owner_user_id,
+      role: matchingPrivateSites.columns.right_role,
+      siteIdsJson: matchingPrivateSites.columns.right_site_ids_json,
+    }),
+    1,
+  );
+  const site = withSiteId(
+    await database(env).first(
+      compileD1Query(privateSiteQuery, { tag: "auth.sites.first" }),
+    ),
+  );
   if (!site) return notFound("Site not found", undefined, request);
   if (site.ownerUserId === session.userId) return { ...site, canManage: true };
   if (site.role === "owner" || site.role === "admin") {
@@ -146,35 +193,49 @@ export async function resolvePrivateTeamForSession(
   if (!teamId) return badRequest("teamId is required", undefined, request);
 
   if (session.systemRole === "admin") {
-    const team = await createDatabaseRuntime(env.DB).first<{ id: string }>({
-      sql: "SELECT id FROM teams WHERE id=? LIMIT 1",
-      bindings: [teamId],
-      tag: "auth.teams.first",
-    });
-    return team ?? notFound("Team not found", undefined, request);
+    const teams = scan(schema.teams);
+    const matchingTeams = filter(teams, eq(teams.columns.id, param(teamId)));
+    const team = await database(env).first(
+      compileD1Query(
+        limit(project(matchingTeams, { id: matchingTeams.columns.id }), 1),
+        { tag: "auth.teams.first" },
+      ),
+    );
+    return team?.id
+      ? { id: team.id }
+      : notFound("Team not found", undefined, request);
   }
 
-  const team = await createDatabaseRuntime(env.DB).first<{
-    id: string;
-    ownerUserId: string;
-    role: string | null;
-    siteIdsJson: string | null;
-  }>({
-    sql: `
-      SELECT
-        t.id,
-        t.owner_user_id AS ownerUserId,
-        tm.role,
-        tm.site_ids_json AS siteIdsJson
-      FROM teams t
-      LEFT JOIN team_members tm ON tm.team_id = t.id AND tm.user_id = ?
-      WHERE t.id = ?
-      LIMIT 1
-    `,
-    bindings: [session.userId, teamId],
-    tag: "auth.teams.first",
-  });
-  if (!team) return notFound("Team not found", undefined, request);
+  const teams = scan(schema.teams);
+  const members = scan(schema.team_members);
+  const teamMembers = join(
+    teams,
+    members,
+    and(
+      eq(teams.columns.id, members.columns.team_id),
+      eq(members.columns.user_id, param(session.userId)),
+    ),
+    "left",
+  );
+  const matchingTeams = filter(
+    teamMembers,
+    eq(teamMembers.columns.left_id, param(teamId)),
+  );
+  const teamQuery = limit(
+    project(matchingTeams, {
+      id: matchingTeams.columns.left_id,
+      ownerUserId: matchingTeams.columns.left_owner_user_id,
+      role: matchingTeams.columns.right_role,
+      siteIdsJson: matchingTeams.columns.right_site_ids_json,
+    }),
+    1,
+  );
+  const teamRow = await database(env).first(
+    compileD1Query(teamQuery, { tag: "auth.teams.first" }),
+  );
+  if (!teamRow || teamRow.id === null)
+    return notFound("Team not found", undefined, request);
+  const team = { ...teamRow, id: teamRow.id };
   if (team.ownerUserId === session.userId) return { id: team.id };
   if (team.role === "owner" || team.role === "admin") return { id: team.id };
   if (!team.role) return notFound("Team not found", undefined, request);
@@ -204,10 +265,28 @@ export async function fetchPublicSite(
     return site ?? notFound("Public site not found");
   }
 
-  const site = await createDatabaseRuntime(env.DB).first<SiteRow>({
-    sql: "SELECT id,name,domain FROM sites WHERE public_enabled=1 AND public_slug=? LIMIT 1",
-    bindings: [slug],
-    tag: "auth.sites.first",
-  });
+  const sites = scan(schema.sites);
+  const publicSites = filter(
+    sites,
+    and(
+      eq(sites.columns.public_enabled, param(1)),
+      eq(sites.columns.public_slug, param(slug)),
+    ),
+  );
+  const site = withSiteId(
+    await database(env).first(
+      compileD1Query(
+        limit(
+          project(publicSites, {
+            id: publicSites.columns.id,
+            name: publicSites.columns.name,
+            domain: publicSites.columns.domain,
+          }),
+          1,
+        ),
+        { tag: "auth.sites.first" },
+      ),
+    ),
+  );
   return site ?? notFound("Public site not found");
 }
