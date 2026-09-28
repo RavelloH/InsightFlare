@@ -156,6 +156,7 @@ describe("notification preferences", () => {
     ).resolves.toMatchObject({ email: true });
 
     expect(run).toHaveBeenCalled();
+    expect(env.DB.prepare).toHaveBeenCalledTimes(3);
     expect(bindCalls.at(-1)).toEqual([
       JSON.stringify({
         inApp: true,

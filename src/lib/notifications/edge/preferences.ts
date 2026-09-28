@@ -1,10 +1,28 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Mutation,
+  compileD1Query,
+  createDatabaseClient,
+  createDatabaseRuntime,
+  eq,
+  filter,
+  limit,
+  param,
+  project,
+  scan,
+  unixepoch,
+  update,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import type { Env } from "@/lib/edge/types";
 import { safeJsonStringify } from "@/lib/notifications/json";
 import type {
   NotificationChannel,
   NotificationMessageType,
 } from "@/lib/notifications/message-types";
+
+function database(env: Pick<Env, "DB">) {
+  return createDatabaseClient(createDatabaseRuntime(env.DB));
+}
 
 export interface NotificationPreferences {
   inApp: boolean;
@@ -108,13 +126,19 @@ export async function getUserNotificationPreferences(
   env: Env,
   userId: string,
 ): Promise<NotificationPreferences> {
-  const row = await createDatabaseRuntime(env.DB).first<{
-    preferencesJson: string | null;
-  }>({
-    sql: "SELECT notification_preferences_json AS preferencesJson FROM users WHERE id = ? LIMIT 1",
-    bindings: [userId],
-    tag: "notifications.users.first",
-  });
+  const users = scan(schema.users);
+  const matchingUser = filter(users, eq(users.columns.id, param(userId)));
+  const row = await database(env).first(
+    compileD1Query(
+      limit(
+        project(matchingUser, {
+          preferencesJson: matchingUser.columns.notification_preferences_json,
+        }),
+        1,
+      ),
+      { tag: "notifications.users.first" },
+    ),
+  );
   return normalizeNotificationPreferences(row?.preferencesJson);
 }
 
@@ -124,11 +148,18 @@ export async function updateUserNotificationPreferences(
 ): Promise<NotificationPreferences> {
   const current = await getUserNotificationPreferences(env, input.userId);
   const next = mergeNotificationPreferencesUpdate(current, input.preferences);
-  await createDatabaseRuntime(env.DB).run({
-    sql: "UPDATE users SET notification_preferences_json = ?, updated_at = unixepoch() WHERE id = ?",
-    bindings: [safeJsonStringify(next), input.userId],
-    tag: "notifications.preferences.update",
-  });
+  await database(env).run(
+    compileD1Mutation(
+      update(schema.users, (columns) => ({
+        set: {
+          notification_preferences_json: safeJsonStringify(next),
+          updated_at: unixepoch(),
+        },
+        where: eq(columns.id, param(input.userId)),
+      })),
+      { tag: "notifications.preferences.update" },
+    ),
+  );
   return next;
 }
 

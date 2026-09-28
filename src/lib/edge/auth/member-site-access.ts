@@ -1,8 +1,24 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  createDatabaseClient,
+  createDatabaseRuntime,
+  eq,
+  filter,
+  inList,
+  param,
+  project,
+  scan,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 
 const MAX_SITE_IDS_WITH_TEAM_BINDING = 99;
+
+function database(env: Pick<Env, "DB">) {
+  return createDatabaseClient(createDatabaseRuntime(env.DB));
+}
 
 function safeJsonArray(input: string): unknown[] {
   try {
@@ -74,6 +90,7 @@ export async function assertSitesBelongToTeam(
   if (siteIds.length === 0) return true;
   if (new Set(siteIds).size !== siteIds.length) return false;
 
+  const client = database(env);
   let matchingSiteIds = 0;
   for (
     let index = 0;
@@ -81,12 +98,19 @@ export async function assertSitesBelongToTeam(
     index += MAX_SITE_IDS_WITH_TEAM_BINDING
   ) {
     const chunk = siteIds.slice(index, index + MAX_SITE_IDS_WITH_TEAM_BINDING);
-    const placeholders = chunk.map(() => "?").join(",");
-    const rows = await createDatabaseRuntime(env.DB).all<{ id: string }>({
-      sql: `SELECT id FROM sites WHERE team_id=? AND id IN (${placeholders})`,
-      bindings: [teamId, ...chunk],
-      tag: "auth.sites.all",
-    });
+    const sites = scan(schema.sites);
+    const matchingSites = filter(
+      sites,
+      and(
+        eq(sites.columns.team_id, param(teamId)),
+        inList(sites.columns.id, chunk),
+      ),
+    );
+    const rows = await client.all(
+      compileD1Query(project(matchingSites, { id: matchingSites.columns.id }), {
+        tag: "auth.sites.all",
+      }),
+    );
     matchingSiteIds += rows.results.length;
   }
   return matchingSiteIds === siteIds.length;

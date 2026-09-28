@@ -33,6 +33,16 @@ describe("assertSitesBelongToTeam", () => {
       true,
     );
     expect(bindings.map((values) => values.length)).toEqual([100, 2]);
+    expect(env.DB.prepare).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps empty site lists as a successful no-query check", async () => {
+    const { env } = teamSiteEnv();
+
+    await expect(assertSitesBelongToTeam(env, "team-1", [])).resolves.toBe(
+      true,
+    );
+    expect(env.DB.prepare).not.toHaveBeenCalled();
   });
 
   it("preserves the previous duplicate-id rejection", async () => {
@@ -42,5 +52,6 @@ describe("assertSitesBelongToTeam", () => {
       assertSitesBelongToTeam(env, "team-1", ["site-1", "site-1"]),
     ).resolves.toBe(false);
     expect(bindings).toEqual([]);
+    expect(env.DB.prepare).not.toHaveBeenCalled();
   });
 });
