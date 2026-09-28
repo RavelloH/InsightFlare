@@ -1,8 +1,7 @@
 import {
   and,
   compileD1Query,
-  createDatabaseClient,
-  createDatabaseRuntime,
+  createD1DatabaseClient,
   eq,
   filter,
   join,
@@ -41,7 +40,7 @@ type SiteRow = SiteAccessRecord;
 const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
 
 function database(env: Pick<Env, "DB">) {
-  return createDatabaseClient(createDatabaseRuntime(env.DB));
+  return createD1DatabaseClient(env.DB);
 }
 
 function withSiteId<Row extends { id: string | null }>(row: Row | null) {

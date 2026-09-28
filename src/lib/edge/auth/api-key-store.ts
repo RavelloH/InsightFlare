@@ -3,8 +3,7 @@ import {
   coalesce,
   compileD1Mutation,
   compileD1Query,
-  createDatabaseClient,
-  createDatabaseRuntime,
+  createD1DatabaseClient,
   eq,
   filter,
   insert,
@@ -88,7 +87,7 @@ const DEFAULT_SCOPE_SET = new Set<ApiKeyScope>(API_KEY_SCOPES);
 const apiKeyHmacKeyCache = new Map<string, CryptoKey>();
 
 function database(env: Pick<Env, "DB">) {
-  return createDatabaseClient(createDatabaseRuntime(env.DB));
+  return createD1DatabaseClient(env.DB);
 }
 
 function apiKeyRows() {

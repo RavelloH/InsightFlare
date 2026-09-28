@@ -1,8 +1,7 @@
 import {
   compileD1Mutation,
   compileD1Query,
-  createDatabaseClient,
-  createDatabaseRuntime,
+  createD1DatabaseClient,
   deleteFrom,
   eq,
   excluded,
@@ -20,7 +19,7 @@ import { schema } from "@/lib/db/schema";
 import type { Env } from "./types";
 
 function database(env: Pick<Env, "DB">) {
-  return createDatabaseClient(createDatabaseRuntime(env.DB));
+  return createD1DatabaseClient(env.DB);
 }
 
 export async function readConfig(

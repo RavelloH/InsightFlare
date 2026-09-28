@@ -3,8 +3,7 @@ import {
   coalesce,
   compileD1Mutation,
   compileD1Query,
-  createDatabaseClient,
-  createDatabaseRuntime,
+  createD1DatabaseClient,
   eq,
   filter,
   insert,
@@ -78,7 +77,7 @@ const TOKEN_BYTES = 32;
 const TYPE_SET = new Set<string>(ACCOUNT_ACTION_TOKEN_TYPES);
 
 function database(env: Pick<Env, "DB">) {
-  return createDatabaseClient(createDatabaseRuntime(env.DB));
+  return createD1DatabaseClient(env.DB);
 }
 
 function accountActionTokenRows() {

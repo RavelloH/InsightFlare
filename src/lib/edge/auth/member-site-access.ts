@@ -1,8 +1,7 @@
 import {
   and,
   compileD1Query,
-  createDatabaseClient,
-  createDatabaseRuntime,
+  createD1DatabaseClient,
   eq,
   filter,
   inList,
@@ -17,7 +16,7 @@ import { clampString } from "@/lib/edge/utils";
 const MAX_SITE_IDS_WITH_TEAM_BINDING = 99;
 
 function database(env: Pick<Env, "DB">) {
-  return createDatabaseClient(createDatabaseRuntime(env.DB));
+  return createD1DatabaseClient(env.DB);
 }
 
 function safeJsonArray(input: string): unknown[] {

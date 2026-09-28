@@ -1,8 +1,7 @@
 import {
   compileD1Mutation,
   compileD1Query,
-  createDatabaseClient,
-  createDatabaseRuntime,
+  createD1DatabaseClient,
   eq,
   filter,
   limit,
@@ -21,7 +20,7 @@ import type {
 } from "@/lib/notifications/message-types";
 
 function database(env: Pick<Env, "DB">) {
-  return createDatabaseClient(createDatabaseRuntime(env.DB));
+  return createD1DatabaseClient(env.DB);
 }
 
 export interface NotificationPreferences {
