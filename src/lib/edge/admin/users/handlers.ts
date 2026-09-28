@@ -1,5 +1,29 @@
 import { normalizeTimeZone } from "@/lib/analytics/time-zone";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  aggregate,
+  and,
+  callFunction,
+  coalesce,
+  compileD1Mutation,
+  compileD1Query,
+  count,
+  createD1DatabaseClient,
+  deleteFrom,
+  eq,
+  filter,
+  insert,
+  limit,
+  neq,
+  param,
+  project,
+  scalar,
+  scan,
+  schema,
+  sort,
+  unixepoch,
+  update,
+} from "@/lib/db";
+import type { SqlExpression } from "@/lib/db/query/expression";
 import { uniqueTeamSlug } from "@/lib/edge/admin/access";
 import {
   byId,
@@ -27,6 +51,63 @@ import {
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 import { isValidLocale } from "@/lib/i18n/config";
+
+function database(env: Env) {
+  return createD1DatabaseClient(env.DB);
+}
+
+function teamCountFor(userId: SqlExpression<string | null>) {
+  const members = scan(schema.team_members);
+  const matchingMembers = filter(members, eq(members.columns.user_id, userId));
+  return coalesce(
+    scalar(
+      aggregate(matchingMembers, {
+        groupBy: {},
+        aggregates: { count: count() },
+      }),
+    ),
+    param(0),
+  );
+}
+
+function ownedTeamCountFor(userId: SqlExpression<string | null>) {
+  const teams = scan(schema.teams);
+  const matchingTeams = filter(teams, eq(teams.columns.owner_user_id, userId));
+  return coalesce(
+    scalar(
+      aggregate(matchingTeams, {
+        groupBy: {},
+        aggregates: { count: count() },
+      }),
+    ),
+    param(0),
+  );
+}
+
+async function userExists(
+  env: Env,
+  field: "username" | "email",
+  value: string,
+  excludeId?: string,
+): Promise<boolean> {
+  const users = scan(schema.users);
+  const identityMatches =
+    field === "username"
+      ? eq(callFunction("lower", users.columns.username), param(value))
+      : eq(callFunction("lower", users.columns.email), param(value));
+  const matching = filter(
+    users,
+    excludeId
+      ? and(identityMatches, neq(users.columns.id, param(excludeId)))
+      : identityMatches,
+  );
+  const selected = project(matching, { id: matching.columns.id });
+  const row = await database(env).first(
+    compileD1Query(limit(selected, 1), { tag: "admin.users.first" }),
+  );
+  return row !== null;
+}
+
 function defaultOwnedTeamName(input: { name: string; username: string }) {
   const displayName = clampString(
     (input.name || input.username || "User").trim(),
@@ -88,12 +169,28 @@ export async function handleUsersAdmin(
   if (!a.isAdmin)
     return forb("Only system admin can manage accounts", undefined, req);
   if (req.method === "GET") {
-    const rows = await createDatabaseRuntime(env.DB).all<
-      Record<string, unknown>
-    >({
-      sql: "SELECT u.id,u.username,u.email,u.name,u.system_role AS systemRole,u.timezone AS timeZone,u.preferred_locale AS preferredLocale,u.created_at AS createdAt,u.updated_at AS updatedAt,(SELECT COUNT(*) FROM team_members tm WHERE tm.user_id=u.id) AS teamCount,(SELECT COUNT(*) FROM teams t WHERE t.owner_user_id=u.id) AS ownedTeamCount FROM users u ORDER BY u.created_at ASC",
-      tag: "admin.team_members.all",
+    const users = scan(schema.users);
+    const selected = project(users, {
+      id: users.columns.id,
+      username: users.columns.username,
+      email: users.columns.email,
+      name: users.columns.name,
+      systemRole: users.columns.system_role,
+      timeZone: users.columns.timezone,
+      preferredLocale: users.columns.preferred_locale,
+      createdAt: users.columns.created_at,
+      updatedAt: users.columns.updated_at,
+      teamCount: teamCountFor(users.columns.id),
+      ownedTeamCount: ownedTeamCountFor(users.columns.id),
     });
+    const rows = await database(env).all(
+      compileD1Query(
+        sort(selected, [
+          { expression: selected.columns.createdAt, direction: "ASC" },
+        ]),
+        { tag: "admin.team_members.all" },
+      ),
+    );
     return jsonResponseFor(req, { ok: true, data: rows.results });
   }
   if (req.method === "POST") {
@@ -117,21 +214,9 @@ export async function handleUsersAdmin(
       return bad("Password must be at least 8 characters", undefined, req);
     if (teamName.length < 2)
       return bad("Team name is required", undefined, req);
-    if (
-      await createDatabaseRuntime(env.DB).first({
-        sql: "SELECT 1 AS ok FROM users WHERE lower(username)=? LIMIT 1",
-        bindings: [username],
-        tag: "admin.users.first",
-      })
-    )
+    if (await userExists(env, "username", username))
       return bad("Username already exists", undefined, req);
-    if (
-      await createDatabaseRuntime(env.DB).first({
-        sql: "SELECT 1 AS ok FROM users WHERE lower(email)=? LIMIT 1",
-        bindings: [email],
-        tag: "admin.users.first",
-      })
-    )
+    if (await userExists(env, "email", email))
       return bad("Email already exists", undefined, req);
     const id = crypto.randomUUID();
     const teamId = crypto.randomUUID();
@@ -140,22 +225,40 @@ export async function handleUsersAdmin(
       teamSlugInput || `${username}-team`,
     );
     const pass = await hashPassword(password);
-    await createDatabaseRuntime(env.DB).batch([
-      {
-        sql: "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,?,unixepoch(),unixepoch())",
-        bindings: [id, username, email, name, pass, systemRole],
-        tag: "admin.users.create",
-      },
-      {
-        sql: "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
-        bindings: [teamId, teamName, teamSlug, id],
-        tag: "admin.teams.create_for_user",
-      },
-      {
-        sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())",
-        bindings: [teamId, id],
-        tag: "admin.team_members.create_user_owner",
-      },
+    await database(env).batch([
+      compileD1Mutation(
+        insert(schema.users, {
+          id,
+          username,
+          email,
+          name,
+          password_hash: pass,
+          system_role: systemRole,
+          created_at: unixepoch(),
+          updated_at: unixepoch(),
+        }),
+        { tag: "admin.users.create" },
+      ),
+      compileD1Mutation(
+        insert(schema.teams, {
+          id: teamId,
+          name: teamName,
+          slug: teamSlug,
+          owner_user_id: id,
+          created_at: unixepoch(),
+          updated_at: unixepoch(),
+        }),
+        { tag: "admin.teams.create_for_user" },
+      ),
+      compileD1Mutation(
+        insert(schema.team_members, {
+          team_id: teamId,
+          user_id: id,
+          role: "owner",
+          joined_at: unixepoch(),
+        }),
+        { tag: "admin.team_members.create_user_owner" },
+      ),
     ]);
     const created = await byId(env, id);
     if (!created) return bad("Failed to create account", undefined, req);
@@ -187,22 +290,28 @@ export async function handleUsersAdmin(
       const target = await byId(env, id);
       if (!target) return nf("User not found", undefined, req);
 
-      const ownedTeams = await createDatabaseRuntime(env.DB).first<{
-        count: number | null;
-      }>({
-        sql: "SELECT COUNT(*) AS count FROM teams WHERE owner_user_id=?",
-        bindings: [id],
-        tag: "admin.teams.first",
+      const teams = scan(schema.teams);
+      const ownedTeams = filter(
+        teams,
+        eq(teams.columns.owner_user_id, param(id)),
+      );
+      const countQuery = aggregate(ownedTeams, {
+        groupBy: {},
+        aggregates: { count: count() },
       });
-      if (Number(ownedTeams?.count ?? 0) > 0) {
+      const ownerTeamCount = await database(env).first(
+        compileD1Query(countQuery, { tag: "admin.teams.first" }),
+      );
+      if (Number(ownerTeamCount?.count ?? 0) > 0) {
         return bad("Cannot delete user that owns teams", undefined, req);
       }
 
-      await createDatabaseRuntime(env.DB).run({
-        sql: "DELETE FROM users WHERE id=?",
-        bindings: [id],
-        tag: "admin.users.delete",
-      });
+      await database(env).run(
+        compileD1Mutation(
+          deleteFrom(schema.users, (columns) => eq(columns.id, param(id))),
+          { tag: "admin.users.delete" },
+        ),
+      );
       return jsonResponseFor(req, {
         ok: true,
         data: { userId: id, removed: true },
@@ -222,29 +331,28 @@ export async function handleUsersAdmin(
       return bad("A valid email is required", undefined, req);
     if (password.length > 0 && password.length < 8)
       return bad("Password must be at least 8 characters", undefined, req);
-    if (
-      await createDatabaseRuntime(env.DB).first({
-        sql: "SELECT 1 AS ok FROM users WHERE lower(username)=? AND id<>? LIMIT 1",
-        bindings: [username, id],
-        tag: "admin.users.first",
-      })
-    )
+    if (await userExists(env, "username", username, id))
       return bad("Username already exists", undefined, req);
-    if (
-      await createDatabaseRuntime(env.DB).first({
-        sql: "SELECT 1 AS ok FROM users WHERE lower(email)=? AND id<>? LIMIT 1",
-        bindings: [email, id],
-        tag: "admin.users.first",
-      })
-    )
+    if (await userExists(env, "email", email, id))
       return bad("Email already exists", undefined, req);
     const pass =
       password.length > 0 ? await hashPassword(password) : e.password_hash;
-    await createDatabaseRuntime(env.DB).run({
-      sql: "UPDATE users SET username=?,email=?,name=?,password_hash=?,system_role=?,updated_at=unixepoch() WHERE id=?",
-      bindings: [username, email, name, pass, role, id],
-      tag: "admin.users.update",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        update(schema.users, (columns) => ({
+          set: {
+            username,
+            email,
+            name,
+            password_hash: pass,
+            system_role: role,
+            updated_at: unixepoch(),
+          },
+          where: eq(columns.id, param(id)),
+        })),
+        { tag: "admin.users.update" },
+      ),
+    );
     const u = await byId(env, id);
     if (!u) return bad("Failed to update account", undefined, req);
     return jsonResponseFor(req, { ok: true, data: toPublicUser(u) });
@@ -300,37 +408,29 @@ export async function handleProfileAdmin(
       if (!(await verifyPassword(currentPassword, a.user.password_hash)))
         return bad("Current password is incorrect", undefined, req);
     }
-    if (
-      await createDatabaseRuntime(env.DB).first({
-        sql: "SELECT 1 AS ok FROM users WHERE lower(username)=? AND id<>? LIMIT 1",
-        bindings: [username, a.user.id],
-        tag: "admin.users.first",
-      })
-    )
+    if (await userExists(env, "username", username, a.user.id))
       return bad("Username already exists", undefined, req);
-    if (
-      await createDatabaseRuntime(env.DB).first({
-        sql: "SELECT 1 AS ok FROM users WHERE lower(email)=? AND id<>? LIMIT 1",
-        bindings: [email, a.user.id],
-        tag: "admin.users.first",
-      })
-    )
+    if (await userExists(env, "email", email, a.user.id))
       return bad("Email already exists", undefined, req);
     const pass =
       password.length > 0 ? await hashPassword(password) : a.user.password_hash;
-    await createDatabaseRuntime(env.DB).run({
-      sql: "UPDATE users SET username=?,email=?,name=?,password_hash=?,timezone=?,preferred_locale=?,updated_at=unixepoch() WHERE id=?",
-      bindings: [
-        username,
-        email,
-        name,
-        pass,
-        timeZone,
-        preferredLocale,
-        a.user.id,
-      ],
-      tag: "admin.users.update_profile",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        update(schema.users, (columns) => ({
+          set: {
+            username,
+            email,
+            name,
+            password_hash: pass,
+            timezone: timeZone,
+            preferred_locale: preferredLocale,
+            updated_at: unixepoch(),
+          },
+          where: eq(columns.id, param(a.user.id)),
+        })),
+        { tag: "admin.users.update_profile" },
+      ),
+    );
     const u = await byId(env, a.user.id);
     if (!u) return bad("Failed to update profile", undefined, req);
     return jsonResponseFor(req, { ok: true, data: toPublicUser(u) });

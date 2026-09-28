@@ -1257,10 +1257,10 @@ describe("private admin edge handler", () => {
       });
       expect(insertUser.bind).toHaveBeenCalledWith(
         "00000000-0000-4000-8000-000000000101",
-        "new.user",
         "new@example.test",
         "New User",
         expect.stringMatching(/^argon2id\$/),
+        "new.user",
         "user",
       );
       expect(insertTeam.bind).toHaveBeenCalledWith(
@@ -1272,6 +1272,7 @@ describe("private admin edge handler", () => {
       expect(insertMember.bind).toHaveBeenCalledWith(
         "00000000-0000-4000-8000-000000000102",
         "00000000-0000-4000-8000-000000000101",
+        "owner",
       );
       expect(batch).toHaveBeenCalledOnce();
     });

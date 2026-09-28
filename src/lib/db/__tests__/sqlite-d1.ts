@@ -3,12 +3,14 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 export interface SqliteD1Trace {
   readonly preparedSql: string[];
   readonly bindings: SQLInputValue[][];
+  readonly batchStatements?: string[][];
 }
 
 export function createSqliteD1Database(
   database: DatabaseSync,
   trace?: SqliteD1Trace,
 ): D1Database {
+  const statementSql = new WeakMap<object, string>();
   return {
     prepare(sql: string) {
       trace?.preparedSql.push(sql);
@@ -37,7 +39,25 @@ export function createSqliteD1Database(
           } as D1Result;
         },
       };
+      statementSql.set(prepared, sql);
       return prepared as unknown as D1PreparedStatement;
+    },
+    async batch(statements: D1PreparedStatement[]) {
+      trace?.batchStatements?.push(
+        statements.map((prepared) => statementSql.get(prepared) ?? ""),
+      );
+      database.exec("BEGIN");
+      try {
+        const results: D1Result[] = [];
+        for (const prepared of statements) {
+          results.push(await prepared.run());
+        }
+        database.exec("COMMIT");
+        return results;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
     },
   } as D1Database;
 }
