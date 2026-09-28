@@ -273,13 +273,12 @@ export async function handleSavedFilters(
       );
     }
     const createdId = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO saved_filters (
+    await createDatabaseRuntime(env.DB).run({
+      sql: `INSERT INTO saved_filters (
         id, site_id, owner_user_id, visibility, name, description,
         scope_preference, filter_dsl, filter_dsl_version, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())`,
-    )
-      .bind(
+      bindings: [
         createdId,
         siteId,
         session.userId,
@@ -289,8 +288,9 @@ export async function handleSavedFilters(
         parsed.scopePreference,
         parsed.filterDsl,
         SAVED_FILTER_DSL_VERSION,
-      )
-      .run();
+      ],
+      tag: "analytics.saved_filters.insert",
+    });
     const created = await savedFilterById(env, siteId, createdId);
     if (!created) throw new Error("saved filter was not created");
     return jsonResponseFor(
@@ -348,13 +348,12 @@ export async function handleSavedFilters(
         request,
       );
     }
-    await env.DB.prepare(
-      `UPDATE saved_filters
+    await createDatabaseRuntime(env.DB).run({
+      sql: `UPDATE saved_filters
        SET visibility = ?, scope_preference = ?, name = ?, description = ?,
            filter_dsl = ?, filter_dsl_version = ?, updated_at = unixepoch()
        WHERE id = ? AND site_id = ? AND owner_user_id = ?`,
-    )
-      .bind(
+      bindings: [
         parsed.visibility,
         parsed.scopePreference,
         parsed.name,
@@ -364,8 +363,9 @@ export async function handleSavedFilters(
         id,
         siteId,
         session.userId,
-      )
-      .run();
+      ],
+      tag: "analytics.saved_filters.update",
+    });
     const updated = await savedFilterById(env, siteId, id);
     if (!updated) throw new Error("saved filter was not updated");
     return jsonResponseFor(request, {
@@ -374,11 +374,11 @@ export async function handleSavedFilters(
   }
 
   if (request.method === "DELETE") {
-    await env.DB.prepare(
-      "DELETE FROM saved_filters WHERE id = ? AND site_id = ? AND owner_user_id = ?",
-    )
-      .bind(id, siteId, session.userId)
-      .run();
+    await createDatabaseRuntime(env.DB).run({
+      sql: "DELETE FROM saved_filters WHERE id = ? AND site_id = ? AND owner_user_id = ?",
+      bindings: [id, siteId, session.userId],
+      tag: "analytics.saved_filters.delete",
+    });
     return jsonResponseFor(request, { deletedId: id });
   }
 

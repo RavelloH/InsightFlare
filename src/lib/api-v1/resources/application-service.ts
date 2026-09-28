@@ -429,18 +429,18 @@ export function createResourceApplicationService(
           return failed("conflict") as never;
         }
         const domain = value.domain ?? site.domain;
-        await env.DB.prepare(
-          "UPDATE sites SET name=?, domain=?, public_enabled=?, public_slug=?, updated_at=unixepoch() WHERE id=? AND team_id=?",
-        )
-          .bind(
+        await createDatabaseRuntime(env.DB).run({
+          sql: "UPDATE sites SET name=?, domain=?, public_enabled=?, public_slug=?, updated_at=unixepoch() WHERE id=? AND team_id=?",
+          bindings: [
             value.name ?? site.name,
             domain,
             publicEnabled ? 1 : 0,
             publicSlug,
             site.id,
             context.teamId,
-          )
-          .run();
+          ],
+          tag: "api_v1.sites.update",
+        });
         await upsertSiteScriptSettings(env, site.id, { siteDomain: domain });
         const updated = await siteById(env, context, site.id);
         return updated
@@ -522,16 +522,16 @@ export function createResourceApplicationService(
           publicEnabled,
           publicSlug,
         };
-        await env.DB.prepare(
-          "UPDATE sites SET public_enabled=?, public_slug=?, updated_at=unixepoch() WHERE id=? AND team_id=?",
-        )
-          .bind(
+        await createDatabaseRuntime(env.DB).run({
+          sql: "UPDATE sites SET public_enabled=?, public_slug=?, updated_at=unixepoch() WHERE id=? AND team_id=?",
+          bindings: [
             sharing.publicEnabled ? 1 : 0,
             sharing.publicSlug,
             site.id,
             context.teamId,
-          )
-          .run();
+          ],
+          tag: "api_v1.sites.update_sharing",
+        });
         return ok(sharing) as never;
       }
       if (operation === "funnels.list") {
@@ -607,11 +607,10 @@ export function createResourceApplicationService(
         }
         const id = crypto.randomUUID();
         const now = Math.floor(Date.now() / 1_000);
-        await env.DB.prepare(
-          `INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at)
+        await createDatabaseRuntime(env.DB).run({
+          sql: `INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at)
            VALUES (?, ?, 'funnel', ?, ?, ?, ?, ?)`,
-        )
-          .bind(
+          bindings: [
             id,
             site.id,
             value.name,
@@ -619,8 +618,9 @@ export function createResourceApplicationService(
             encoded.configVersion,
             now,
             now,
-          )
-          .run();
+          ],
+          tag: "api_v1.funnels.insert",
+        });
         return ok(
           await funnelResource({
             id,
@@ -705,11 +705,10 @@ export function createResourceApplicationService(
         }
         const id = crypto.randomUUID();
         const now = Math.floor(Date.now() / 1_000);
-        await env.DB.prepare(
-          `INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at)
+        await createDatabaseRuntime(env.DB).run({
+          sql: `INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at)
            VALUES (?, ?, 'goal', ?, ?, ?, ?, ?)`,
-        )
-          .bind(
+          bindings: [
             id,
             site.id,
             value.name.trim(),
@@ -717,8 +716,9 @@ export function createResourceApplicationService(
             encoded.configVersion,
             now,
             now,
-          )
-          .run();
+          ],
+          tag: "api_v1.goals.insert",
+        });
         return ok(
           await goalResource({
             id,
@@ -744,11 +744,11 @@ export function createResourceApplicationService(
         }
         if (operation === "goals.delete") {
           const now = Math.floor(Date.now() / 1_000);
-          await env.DB.prepare(
-            "UPDATE analysis_definitions SET archived_at=?, updated_at=? WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL",
-          )
-            .bind(now, now, goal.id, site.id)
-            .run();
+          await createDatabaseRuntime(env.DB).run({
+            sql: "UPDATE analysis_definitions SET archived_at=?, updated_at=? WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL",
+            bindings: [now, now, goal.id, site.id],
+            tag: "api_v1.goals.archive",
+          });
           return ok(undefined) as never;
         }
         const value =
@@ -768,18 +768,18 @@ export function createResourceApplicationService(
         }
         const now = Math.floor(Date.now() / 1_000);
         const name = value.name?.trim() || goal.name;
-        await env.DB.prepare(
-          "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL",
-        )
-          .bind(
+        await createDatabaseRuntime(env.DB).run({
+          sql: "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind='goal' AND archived_at IS NULL",
+          bindings: [
             name,
             encoded.configJson,
             encoded.configVersion,
             now,
             goal.id,
             site.id,
-          )
-          .run();
+          ],
+          tag: "api_v1.goals.update",
+        });
         return ok(
           await goalResource({
             ...goal,
@@ -797,11 +797,11 @@ export function createResourceApplicationService(
         return ok(await funnelResource(funnel)) as never;
       if (operation === "funnels.delete") {
         const now = Math.floor(Date.now() / 1_000);
-        await env.DB.prepare(
-          "UPDATE analysis_definitions SET archived_at=?, updated_at=? WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL",
-        )
-          .bind(now, now, funnel.id, site.id)
-          .run();
+        await createDatabaseRuntime(env.DB).run({
+          sql: "UPDATE analysis_definitions SET archived_at=?, updated_at=? WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL",
+          bindings: [now, now, funnel.id, site.id],
+          tag: "api_v1.funnels.archive",
+        });
         return ok(undefined) as never;
       }
       const value =
@@ -835,18 +835,18 @@ export function createResourceApplicationService(
       }
       const now = Math.floor(Date.now() / 1_000);
       const name = value.name ?? funnel.name;
-      await env.DB.prepare(
-        "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL",
-      )
-        .bind(
+      await createDatabaseRuntime(env.DB).run({
+        sql: "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind='funnel' AND archived_at IS NULL",
+        bindings: [
           name,
           encoded.configJson,
           encoded.configVersion,
           now,
           funnel.id,
           site.id,
-        )
-        .run();
+        ],
+        tag: "api_v1.funnels.update",
+      });
       return ok(
         await funnelResource({
           ...funnel,

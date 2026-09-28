@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { QueryWindow } from "@/lib/edge/analytics/contract";
 import {
   createScopedFilterPlan,
@@ -251,10 +252,9 @@ export async function createFunnelDefinition(
   const encoded = encodeD1FunnelConfig(config);
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1_000);
-  await env.DB.prepare(
-    "INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-  )
-    .bind(
+  await createDatabaseRuntime(env.DB).run({
+    sql: "INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    bindings: [
       id,
       siteId,
       FUNNEL_ANALYSIS_KIND,
@@ -263,8 +263,9 @@ export async function createFunnelDefinition(
       encoded.configVersion,
       now,
       now,
-    )
-    .run();
+    ],
+    tag: "analytics.funnels.insert",
+  });
   const funnel = await queryFunnelDefinition(env, siteId, id);
   if (!funnel) throw new Error("funnel_create_readback_failed");
   return funnel;
@@ -278,10 +279,9 @@ export async function updateFunnelDefinition(
 ): Promise<FunnelDefinition> {
   const encoded = encodeD1FunnelConfig(config);
   const now = Math.floor(Date.now() / 1_000);
-  await env.DB.prepare(
-    "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind=? AND archived_at IS NULL",
-  )
-    .bind(
+  await createDatabaseRuntime(env.DB).run({
+    sql: "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind=? AND archived_at IS NULL",
+    bindings: [
       name,
       encoded.configJson,
       encoded.configVersion,
@@ -289,8 +289,9 @@ export async function updateFunnelDefinition(
       funnelId,
       siteId,
       FUNNEL_ANALYSIS_KIND,
-    )
-    .run();
+    ],
+    tag: "analytics.funnels.update",
+  });
   const funnel = await queryFunnelDefinition(env, siteId, funnelId);
   if (!funnel) throw new Error("funnel_update_readback_failed");
   return funnel;
@@ -301,9 +302,9 @@ export async function archiveFunnelDefinition(
   funnelId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1_000);
-  await env.DB.prepare(
-    "UPDATE analysis_definitions SET archived_at = ?, updated_at = ? WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL",
-  )
-    .bind(now, now, funnelId, siteId, FUNNEL_ANALYSIS_KIND)
-    .run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "UPDATE analysis_definitions SET archived_at = ?, updated_at = ? WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL",
+    bindings: [now, now, funnelId, siteId, FUNNEL_ANALYSIS_KIND],
+    tag: "analytics.funnels.archive",
+  });
 }

@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type { GoalDefinition } from "@/lib/edge/analytics/contract/goal";
 import {
   decodeGoalConfig,
@@ -136,10 +137,9 @@ export async function createGoalDefinition(
   const encoded = encodeGoalConfig(config);
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1_000);
-  await env.DB.prepare(
-    "INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-  )
-    .bind(
+  await createDatabaseRuntime(env.DB).run({
+    sql: "INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    bindings: [
       id,
       siteId,
       GOAL_ANALYSIS_KIND,
@@ -148,8 +148,9 @@ export async function createGoalDefinition(
       encoded.configVersion,
       now,
       now,
-    )
-    .run();
+    ],
+    tag: "analytics.goals.insert",
+  });
   const goal = await queryGoalDefinition(env, siteId, id);
   if (!goal) throw new Error("goal_create_readback_failed");
   return goal;
@@ -164,10 +165,9 @@ export async function updateGoalDefinition(
   validateGoalConfigForWrite(config);
   const encoded = encodeGoalConfig(config);
   const now = Math.floor(Date.now() / 1_000);
-  await env.DB.prepare(
-    "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind=? AND archived_at IS NULL",
-  )
-    .bind(
+  await createDatabaseRuntime(env.DB).run({
+    sql: "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind=? AND archived_at IS NULL",
+    bindings: [
       name,
       encoded.configJson,
       encoded.configVersion,
@@ -175,8 +175,9 @@ export async function updateGoalDefinition(
       goalId,
       siteId,
       GOAL_ANALYSIS_KIND,
-    )
-    .run();
+    ],
+    tag: "analytics.goals.update",
+  });
   const goal = await queryGoalDefinition(env, siteId, goalId);
   if (!goal) throw new Error("goal_update_readback_failed");
   return goal;
@@ -187,9 +188,9 @@ export async function archiveGoalDefinition(
   goalId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1_000);
-  await env.DB.prepare(
-    "UPDATE analysis_definitions SET archived_at = ?, updated_at = ? WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL",
-  )
-    .bind(now, now, goalId, siteId, GOAL_ANALYSIS_KIND)
-    .run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "UPDATE analysis_definitions SET archived_at = ?, updated_at = ? WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL",
+    bindings: [now, now, goalId, siteId, GOAL_ANALYSIS_KIND],
+    tag: "analytics.goals.archive",
+  });
 }
