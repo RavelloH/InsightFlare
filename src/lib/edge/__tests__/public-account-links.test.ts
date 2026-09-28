@@ -385,10 +385,11 @@ describe("public account link handler", () => {
     expect(batch).toHaveBeenCalledTimes(1);
     expect(insertUser.bind).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000123",
-      "new-user",
       "new@example.test",
       "New User",
       "new-hash",
+      "new-user",
+      "user",
     );
     expect(insertMember.bind).toHaveBeenCalledWith(
       "team-1",

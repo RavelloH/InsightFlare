@@ -1,4 +1,23 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  coalesce,
+  compileD1Mutation,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  excluded,
+  filter,
+  insert,
+  isNull,
+  limit,
+  onConflictDoUpdate,
+  param,
+  project,
+  scan,
+  schema,
+  unixepoch,
+  update,
+} from "@/lib/db";
 import {
   byId,
   byIdentifier,
@@ -16,6 +35,10 @@ import {
 import { requireSession } from "@/lib/edge/auth/session-auth";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
+
+function database(env: Env) {
+  return createD1DatabaseClient(env.DB);
+}
 
 import {
   memberSiteIdsFromInvitePayload,
@@ -71,13 +94,19 @@ async function teamInfo(
   env: Env,
   teamId: string,
 ): Promise<TeamLinkInfo | null> {
-  return (
-    (await createDatabaseRuntime(env.DB).first<TeamLinkInfo>({
-      sql: "SELECT id,name,slug FROM teams WHERE id=? LIMIT 1",
-      bindings: [teamId],
-      tag: "auth.teams.first",
-    })) ?? null
+  const teams = scan(schema.teams);
+  const matching = filter(teams, eq(teams.columns.id, param(teamId)));
+  const selected = project(matching, {
+    id: matching.columns.id,
+    name: matching.columns.name,
+    slug: matching.columns.slug,
+  });
+  const team = await database(env).first(
+    compileD1Query(limit(selected, 1), { tag: "auth.teams.first" }),
   );
+  if (!team) return null;
+  if (team.id === null) throw new Error("team_row_missing_id");
+  return { id: team.id, name: team.name, slug: team.slug };
 }
 async function completeTeamInviteForUser(input: {
   env: Env;
@@ -88,16 +117,27 @@ async function completeTeamInviteForUser(input: {
   siteIds: string[];
   userId: string;
 }) {
-  await createDatabaseRuntime(input.env.DB).run({
-    sql: "INSERT INTO team_members (team_id,user_id,role,site_ids_json,joined_at) VALUES (?,?,?,?,unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role=excluded.role, site_ids_json=excluded.site_ids_json",
-    bindings: [
-      input.teamId,
-      input.userId,
-      input.role,
-      serializeMemberSiteIds(input.role === "member" ? input.siteIds : []),
-    ],
-    tag: "auth.team_members.accept_invite",
-  });
+  await database(input.env).run(
+    compileD1Mutation(
+      onConflictDoUpdate(
+        insert(schema.team_members, {
+          team_id: input.teamId,
+          user_id: input.userId,
+          role: input.role,
+          site_ids_json: serializeMemberSiteIds(
+            input.role === "member" ? input.siteIds : [],
+          ),
+          joined_at: unixepoch(),
+        }),
+        ["team_id", "user_id"],
+        {
+          role: excluded(schema.team_members.columns.role),
+          site_ids_json: excluded(schema.team_members.columns.site_ids_json),
+        },
+      ),
+      { tag: "auth.team_members.accept_invite" },
+    ),
+  );
   await markAccountActionTokenUsed(input.env, {
     tokenId: input.tokenId,
     usedByUserId: input.userId,
@@ -170,11 +210,18 @@ export async function handlePublicAccountLinks(
     }
     if (!publicToken.userId) return fail(req, "User not found", 404);
     const passwordHash = await hashPassword(password);
-    await createDatabaseRuntime(env.DB).run({
-      sql: "UPDATE users SET password_hash=?,updated_at=unixepoch() WHERE id=?",
-      bindings: [passwordHash, publicToken.userId],
-      tag: "auth.users.reset_password",
-    });
+    await database(env).run(
+      compileD1Mutation(
+        update(schema.users, (columns) => ({
+          set: {
+            password_hash: passwordHash,
+            updated_at: unixepoch(),
+          },
+          where: eq(columns.id, param(publicToken.userId)),
+        })),
+        { tag: "auth.users.reset_password" },
+      ),
+    );
     await markAccountActionTokenUsed(env, {
       tokenId: publicToken.id,
       usedByUserId: publicToken.userId,
@@ -235,27 +282,44 @@ export async function handlePublicAccountLinks(
 
   const userId = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
-  await createDatabaseRuntime(env.DB).batch([
-    {
-      sql: "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,'user',unixepoch(),unixepoch())",
-      bindings: [userId, username, email, name, passwordHash],
-      tag: "auth.users.register_from_invite",
-    },
-    {
-      sql: "INSERT INTO team_members (team_id,user_id,role,site_ids_json,joined_at) VALUES (?,?,?,?,unixepoch())",
-      bindings: [
-        publicToken.teamId,
-        userId,
+  await database(env).batch([
+    compileD1Mutation(
+      insert(schema.users, {
+        id: userId,
+        username,
+        email,
+        name,
+        password_hash: passwordHash,
+        system_role: "user",
+        created_at: unixepoch(),
+        updated_at: unixepoch(),
+      }),
+      { tag: "auth.users.register_from_invite" },
+    ),
+    compileD1Mutation(
+      insert(schema.team_members, {
+        team_id: publicToken.teamId,
+        user_id: userId,
         role,
-        serializeMemberSiteIds(role === "member" ? siteIds : []),
-      ],
-      tag: "auth.team_members.register_from_invite",
-    },
-    {
-      sql: "UPDATE account_action_tokens SET used_at = COALESCE(used_at, unixepoch()), used_by_user_id = COALESCE(used_by_user_id, ?) WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL",
-      bindings: [userId, publicToken.id],
-      tag: "auth.account_action_tokens.use_invite",
-    },
+        site_ids_json: serializeMemberSiteIds(role === "member" ? siteIds : []),
+        joined_at: unixepoch(),
+      }),
+      { tag: "auth.team_members.register_from_invite" },
+    ),
+    compileD1Mutation(
+      update(schema.account_action_tokens, (columns) => ({
+        set: {
+          used_at: coalesce(columns.used_at, unixepoch()),
+          used_by_user_id: coalesce(columns.used_by_user_id, param(userId)),
+        },
+        where: and(
+          eq(columns.id, param(publicToken.id)),
+          isNull(columns.used_at),
+          isNull(columns.revoked_at),
+        ),
+      })),
+      { tag: "auth.account_action_tokens.use_invite" },
+    ),
   ]);
 
   const createdUser = await byId(env, userId);
