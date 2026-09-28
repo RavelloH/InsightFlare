@@ -4,6 +4,7 @@ import {
   add,
   aggregate,
   and,
+  avg,
   callFunction,
   coalesce,
   compileD1Query,
@@ -16,6 +17,7 @@ import {
   inList,
   isNotNull,
   isNull,
+  limit,
   lt,
   lte,
   max,
@@ -26,13 +28,140 @@ import {
   or,
   param,
   project,
+  scalar,
   scan,
+  sort,
   sub,
   sum,
+  union,
+  unixepoch,
 } from "@/lib/db";
+import { expressionResultType } from "@/lib/db/query/expression";
 import { schema } from "@/lib/db/schema";
 
 describe("typed SQL expressions", () => {
+  it("attaches SQL affinity and nullability metadata to every expression", () => {
+    const sites = scan(schema.sites);
+
+    expect(param("site-a").resultType).toEqual({
+      affinity: "text",
+      nullable: false,
+    });
+    expect(param(42).resultType).toEqual({
+      affinity: "numeric",
+      nullable: false,
+    });
+    expect(param(new Uint8Array([1])).resultType).toEqual({
+      affinity: "blob",
+      nullable: false,
+    });
+    expect(param(null).resultType).toEqual({
+      affinity: "unknown",
+      nullable: true,
+    });
+    expect(expressionResultType(param("site-a"))).toEqual({
+      affinity: "text",
+      nullable: false,
+    });
+    expect(callFunction("round", param(2.5)).resultType).toEqual({
+      affinity: "numeric",
+      nullable: false,
+    });
+    expect(eq(sites.columns.public_slug, param("slug")).resultType).toEqual({
+      affinity: "integer",
+      nullable: true,
+    });
+    expect(isNull(sites.columns.public_slug).resultType).toEqual({
+      affinity: "integer",
+      nullable: false,
+    });
+    expect(inList(sites.columns.public_slug, ["slug"]).resultType).toEqual({
+      affinity: "integer",
+      nullable: true,
+    });
+    expect(inList(sites.columns.public_slug, []).resultType).toEqual({
+      affinity: "integer",
+      nullable: false,
+    });
+    expect(add(sites.columns.created_at, param(1)).resultType).toEqual({
+      affinity: "numeric",
+      nullable: false,
+    });
+    expect(div(param(1), param(0)).resultType).toEqual({
+      affinity: "numeric",
+      nullable: true,
+    });
+    expect(callFunction("lower", sites.columns.public_slug).resultType).toEqual(
+      {
+        affinity: "text",
+        nullable: true,
+      },
+    );
+    expect(
+      callFunction("length", param(new Uint8Array([1]))).resultType,
+    ).toEqual({
+      affinity: "integer",
+      nullable: false,
+    });
+    expect(
+      coalesce(sites.columns.public_slug, param("fallback")).resultType,
+    ).toEqual({
+      affinity: "text",
+      nullable: false,
+    });
+    expect(
+      coalesce(sites.columns.public_slug, sites.columns.created_at).resultType,
+    ).toEqual({ affinity: "unknown", nullable: false });
+    const mixedFallback = coalesce(param("text"), param(1), param("text"));
+    expect(mixedFallback.resultType).toEqual({
+      affinity: "unknown",
+      nullable: false,
+    });
+    expect(() =>
+      compileD1Query(project(sites, { fallback: mixedFallback })),
+    ).not.toThrow();
+    expect(count().resultType).toEqual({
+      affinity: "integer",
+      nullable: false,
+    });
+    expect(sum(sites.columns.created_at).resultType).toEqual({
+      affinity: "numeric",
+      nullable: true,
+    });
+    expect(avg(sites.columns.created_at).resultType).toEqual({
+      affinity: "numeric",
+      nullable: true,
+    });
+    expect(min(sites.columns.public_slug).resultType).toEqual({
+      affinity: "text",
+      nullable: true,
+    });
+    expect(unixepoch().resultType).toEqual({
+      affinity: "integer",
+      nullable: false,
+    });
+    expect(
+      scalar(project(sites, { created_at: sites.columns.created_at }))
+        .resultType,
+    ).toEqual({ affinity: "integer", nullable: true });
+    expect(() =>
+      scalar(
+        project(sites, {
+          id: sites.columns.id,
+          name: sites.columns.name,
+        }),
+      ),
+    ).toThrowError(/exactly one output field/);
+
+    const required = project(sites, { label: sites.columns.name });
+    const optional = project(sites, { label: sites.columns.public_slug });
+    const combined = union(required, optional, true);
+    expect(combined.fields).toEqual([
+      { name: "label", affinity: "text", nullable: true },
+    ]);
+    expect(compileD1Query(combined).sql).toContain("UNION ALL");
+  });
+
   it("compiles predicates, null checks, lists, functions, and arithmetic", () => {
     const visits = scan(schema.visits);
     const where = or(
@@ -107,5 +236,24 @@ describe("typed SQL expressions", () => {
     expect(compiled.sql).toContain("MAX(");
     expect(compiled.sql).toContain("MIN(");
     expect(compiled.sql).toContain("SUM(");
+  });
+
+  it("rejects empty query builder shapes", () => {
+    const visits = scan(schema.visits);
+    expect(() => aggregate(visits, { groupBy: {}, aggregates: {} })).toThrow(
+      /groups or aggregates/,
+    );
+    expect(() => sort(visits, [])).toThrow(/at least one sort key/);
+    expect(() => limit(visits, -1)).toThrow(/non-negative safe integer/);
+
+    const sites = scan(schema.sites);
+    const byId = project(sites, { value: sites.columns.created_at });
+    const byName = project(sites, { value: sites.columns.name });
+    expect(() => union(byId, byName)).toThrow(/incompatible affinities/);
+    const namedById = project(sites, { id: sites.columns.id });
+    const namedByName = project(sites, { name: sites.columns.name });
+    expect(() =>
+      union(namedById, namedByName as unknown as typeof namedById),
+    ).toThrow(/matching output fields/);
   });
 });

@@ -4,8 +4,6 @@ import type {
   SchemaColumnValue,
   SchemaObjectReference,
   SchemaRow,
-  SchemaTableReference,
-  SqliteAffinity,
 } from "@/lib/db/schema/types";
 import type { DatabaseBinding } from "@/lib/db/types";
 
@@ -13,20 +11,25 @@ import { DatabaseCompilerError } from "./errors";
 import {
   type AnyExpression,
   type ColumnExpression,
+  commonAffinity,
+  type CommonExpressionAffinity,
   createColumnExpression,
   createRelationScope,
+  type ExpressionAffinity,
+  type ExpressionResultOf,
+  type ExpressionResultType,
   type ExpressionValue,
   parameterExpression,
   type Predicate,
   rebindColumn,
   type RelationScope,
-  type ScopedColumns,
+  type ScopedColumn,
   type SqlExpression,
 } from "./expression";
 
 export interface OutputField {
   readonly name: string;
-  readonly affinity: SqliteAffinity;
+  readonly affinity: ExpressionAffinity;
   readonly nullable: boolean;
 }
 
@@ -54,8 +57,8 @@ export type RelationRow<
 };
 
 type ColumnExpressions<T extends SchemaObjectReference> = {
-  readonly [K in keyof T["columns"]]: ColumnExpression<
-    SchemaColumnValue<T["columns"][K]>
+  readonly [K in keyof T["columns"]]: ScopedColumn<
+    Extract<T["columns"][K], SchemaColumnReference>
   >;
 };
 
@@ -154,40 +157,18 @@ export type LogicalQueryNode =
 
 function outputField(
   name: string,
-  affinity: SqliteAffinity,
+  affinity: ExpressionAffinity,
   nullable: boolean,
 ): OutputField {
   return { name, affinity, nullable };
 }
 
 function expressionField(name: string, expression: SqlExpression): OutputField {
-  if (expression.kind === "column")
-    return outputField(name, expression.affinity, expression.nullable);
-  if (expression.kind === "parameter")
-    return outputField(name, "numeric", expression.value === null);
-  if (expression.kind === "aggregate") {
-    const affinity = expression.name === "COUNT" ? "integer" : "numeric";
-    return outputField(name, affinity, expression.name !== "COUNT");
-  }
-  if (expression.kind === "function") {
-    return outputField(
-      name,
-      expression.name === "length" ||
-        expression.name === "abs" ||
-        expression.name === "round"
-        ? "numeric"
-        : "text",
-      false,
-    );
-  }
-  if (expression.kind === "binary") {
-    const nullable =
-      expression.kind === "binary" &&
-      ((expression.left.kind === "column" && expression.left.nullable) ||
-        (expression.right.kind === "column" && expression.right.nullable));
-    return outputField(name, "numeric", nullable);
-  }
-  return outputField(name, "numeric", true);
+  return outputField(
+    name,
+    expression.resultType.affinity,
+    expression.resultType.nullable,
+  );
 }
 
 function relation<
@@ -232,7 +213,10 @@ function outputColumns(
   return Object.fromEntries(
     fields.map((field, index) => [
       field.name,
-      rebindColumn(scope, index, field.name, field.affinity, field.nullable),
+      rebindColumn(scope, index, field.name, {
+        affinity: field.affinity,
+        nullable: field.nullable,
+      }),
     ]),
   );
 }
@@ -276,7 +260,10 @@ export function filter<
 
 type Projection = Readonly<Record<string, AnyExpression>>;
 type ProjectionColumns<P extends Projection> = {
-  readonly [K in keyof P]: ColumnExpression<ExpressionValue<P[K]>>;
+  readonly [K in keyof P]: ColumnExpression<
+    ExpressionValue<P[K]>,
+    ExpressionResultOf<P[K]>
+  >;
 };
 type ProjectionRow<P extends Projection> = {
   readonly [K in keyof P]: ExpressionValue<P[K]>;
@@ -328,12 +315,16 @@ type JoinColumns<
 > = {
   readonly [
     K in keyof L as K extends string ? `left_${K}` : never
-  ]: ColumnExpression<ExpressionValue<L[K]>>;
+  ]: ColumnExpression<ExpressionValue<L[K]>, ExpressionResultOf<L[K]>>;
 } & {
   readonly [
     K in keyof R as K extends string ? `right_${K}` : never
   ]: ColumnExpression<
-    ExpressionValue<R[K]> | (Kind extends "left" ? null : never)
+    ExpressionValue<R[K]> | (Kind extends "left" ? null : never),
+    ExpressionResultType<
+      ExpressionResultOf<R[K]>["affinity"],
+      Kind extends "left" ? true : ExpressionResultOf<R[K]>["nullable"]
+    >
   >;
 };
 
@@ -439,7 +430,10 @@ type ExprMapRow<T extends ExprMap> = {
   readonly [K in keyof T]: ExpressionValue<T[K]>;
 };
 type ExprMapColumns<T extends ExprMap> = {
-  readonly [K in keyof T]: ColumnExpression<ExpressionValue<T[K]>>;
+  readonly [K in keyof T]: ColumnExpression<
+    ExpressionValue<T[K]>,
+    ExpressionResultOf<T[K]>
+  >;
 };
 
 export function aggregate<
@@ -572,14 +566,48 @@ export function limit<
   );
 }
 
+type UnionResultNullable<Left, Right> = true extends
+  ExpressionResultOf<Left>["nullable"] | ExpressionResultOf<Right>["nullable"]
+  ? true
+  : false;
+type UnionResultAffinity<Left, Right> = CommonExpressionAffinity<
+  ExpressionResultOf<Left>["affinity"],
+  ExpressionResultOf<Right>["affinity"]
+>;
+type UnionRow<
+  LeftColumns extends Readonly<Record<string, AnyExpression>>,
+  RightColumns extends Readonly<Record<keyof LeftColumns, AnyExpression>>,
+> = {
+  readonly [K in keyof LeftColumns]:
+    ExpressionValue<LeftColumns[K]> | ExpressionValue<RightColumns[K]>;
+};
+type UnionColumns<
+  LeftColumns extends Readonly<Record<string, AnyExpression>>,
+  RightColumns extends Readonly<Record<keyof LeftColumns, AnyExpression>>,
+> = {
+  readonly [K in keyof LeftColumns]: ColumnExpression<
+    ExpressionValue<LeftColumns[K]> | ExpressionValue<RightColumns[K]>,
+    ExpressionResultType<
+      UnionResultAffinity<LeftColumns[K], RightColumns[K]>,
+      UnionResultNullable<LeftColumns[K], RightColumns[K]>
+    >
+  >;
+};
+
 export function union<
-  Row extends object,
-  Columns extends Readonly<Record<string, AnyExpression>>,
+  LeftRow extends object,
+  LeftColumns extends Readonly<Record<string, AnyExpression>>,
+  RightRow extends object,
+  RightColumns extends Readonly<Record<string, AnyExpression>> &
+    Readonly<Record<keyof LeftColumns, AnyExpression>>,
 >(
-  left: Relation<Row, Columns>,
-  right: Relation<Row, Columns>,
+  left: Relation<LeftRow, LeftColumns>,
+  right: Relation<RightRow, RightColumns>,
   all = false,
-): Relation<Row, Columns> {
+): Relation<
+  UnionRow<LeftColumns, RightColumns>,
+  UnionColumns<LeftColumns, RightColumns>
+> {
   if (
     left.fields.length !== right.fields.length ||
     left.fields.some((field, index) => field.name !== right.fields[index]?.name)
@@ -589,14 +617,22 @@ export function union<
       "UNION inputs must have matching output fields",
     );
   }
-  const scope = createRelationScope();
-  const fields = left.fields.map((field, index) =>
-    outputField(
+  const fields = left.fields.map((field, index) => {
+    const rightField = right.fields[index]!;
+    const affinity = commonAffinity(field.affinity, rightField.affinity);
+    if (!affinity) {
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        `UNION field "${field.name}" has incompatible affinities ${field.affinity} and ${rightField.affinity}`,
+      );
+    }
+    return outputField(
       field.name,
-      field.affinity,
-      field.nullable || right.fields[index]!.nullable,
-    ),
-  );
+      affinity,
+      field.nullable || rightField.nullable,
+    );
+  });
+  const scope = createRelationScope();
   const node: UnionNode = {
     kind: "union",
     all,
@@ -609,23 +645,8 @@ export function union<
     node,
     scope,
     fields,
-    outputColumns(fields, scope) as unknown as Columns,
+    outputColumns(fields, scope) as UnionColumns<LeftColumns, RightColumns>,
   );
-}
-
-export function scopedTableColumns<T extends SchemaTableReference>(
-  table: T,
-): ScopedColumns<T> {
-  const scope = createRelationScope();
-  const columns = Object.entries(table.columns) as Array<
-    [string, SchemaColumnReference]
-  >;
-  return Object.fromEntries(
-    columns.map(([name, column], index) => [
-      name,
-      createColumnExpression(scope, index, column),
-    ]),
-  ) as ScopedColumns<T>;
 }
 
 export type InsertRequiredKeys<T extends SchemaObjectReference> = {
@@ -644,13 +665,15 @@ export type InsertRow<T extends SchemaObjectReference> = {
   readonly [
     K in InsertRequiredKeys<T>
   ]: T["columns"][K] extends SchemaColumnReference
-    ? SchemaColumnValue<T["columns"][K]>
+    ? | SchemaColumnValue<T["columns"][K]>
+      | SqlExpression<SchemaColumnValue<T["columns"][K]>>
     : never;
 } & {
   readonly [
     K in Exclude<keyof T["columns"], InsertRequiredKeys<T>>
   ]?: T["columns"][K] extends SchemaColumnReference
-    ? SchemaColumnValue<T["columns"][K]>
+    ? | SchemaColumnValue<T["columns"][K]>
+      | SqlExpression<SchemaColumnValue<T["columns"][K]>>
     : never;
 };
 

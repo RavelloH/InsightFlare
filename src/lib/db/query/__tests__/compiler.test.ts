@@ -11,6 +11,7 @@ import {
   and,
   antiJoin,
   avg,
+  coalesce,
   compileD1Mutation,
   compileD1Query,
   countDistinct,
@@ -31,10 +32,12 @@ import {
   onConflictDoUpdate,
   param,
   project,
+  scalar,
   scan,
   semiJoin,
   sort,
   union,
+  unixepoch,
   update,
 } from "@/lib/db";
 import { compileD1Expression } from "@/lib/db/query/compiler";
@@ -180,6 +183,79 @@ describe("typed D1 query compiler", () => {
         ),
       );
 
+      const innerSites = scan(schema.site_identities);
+      const matchingSites = filter(
+        innerSites,
+        eq(innerSites.columns.site_id, sites.columns.site_id),
+      );
+      const correlatedScalar = scalar(
+        project(matchingSites, {
+          matched_pk: matchingSites.columns.site_pk,
+        }),
+      );
+      const correlatedProjection = project(sites, {
+        site_id: sites.columns.site_id,
+        matched_pk: correlatedScalar,
+      });
+      const correlatedQuery = compileD1Query(correlatedProjection);
+      expect(correlatedQuery).toEqual(compileD1Query(correlatedProjection));
+      expect(executeAll(db, correlatedQuery)).toEqual([
+        { site_id: "site-a", matched_pk: 1 },
+        { site_id: "site-b", matched_pk: 2 },
+      ]);
+
+      const updateSubquerySource = scan(schema.site_identities);
+      const correlatedUpdate = update(schema.site_identities, (columns) => {
+        const matchingRow = filter(
+          updateSubquerySource,
+          eq(updateSubquerySource.columns.site_pk, columns.site_pk),
+        );
+        return {
+          set: {
+            site_id: coalesce(
+              scalar(
+                project(matchingRow, {
+                  site_id: matchingRow.columns.site_id,
+                }),
+              ),
+              param("site-a"),
+            ),
+          },
+          where: eq(columns.site_pk, param(1)),
+        };
+      });
+      const compiledCorrelatedUpdate = compileD1Mutation(correlatedUpdate);
+      expect(compiledCorrelatedUpdate.sql).toContain('"t0"."site_pk"');
+      executeRun(db, compiledCorrelatedUpdate);
+      expect(
+        db
+          .prepare("SELECT site_id FROM site_identities WHERE site_pk = 1")
+          .get(),
+      ).toEqual({ site_id: "site-a" });
+
+      const emptyScalarSource = scan(schema.site_identities);
+      const missingSites = filter(
+        emptyScalarSource,
+        eq(emptyScalarSource.columns.site_id, param("missing")),
+      );
+      const emptyScalar = scalar(
+        project(missingSites, { missing: missingSites.columns.site_id }),
+      );
+      expect(
+        executeAll(
+          db,
+          compileD1Query(
+            project(sites, {
+              site_id: sites.columns.site_id,
+              missing: emptyScalar,
+            }),
+          ),
+        ),
+      ).toEqual([
+        { site_id: "site-a", missing: null },
+        { site_id: "site-b", missing: null },
+      ]);
+
       const find = limit(
         filter(sites, eq(sites.columns.site_id, param("site-a"))),
         1,
@@ -243,6 +319,73 @@ describe("typed D1 query compiler", () => {
       expect(
         db.prepare("SELECT COUNT(*) AS count FROM site_identities").get(),
       ).toEqual({ count: 2 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("compiles and executes unixepoch in projections and mutations without binding it", () => {
+    const db = createMigratedDatabase();
+    try {
+      const configs = scan(schema.configs);
+      const clockProjection = compileD1Query(
+        project(configs, { now: unixepoch() }),
+      );
+      expect(clockProjection.sql).toContain("unixepoch()");
+      expect(clockProjection.bindings).toEqual([]);
+
+      const insertPlan = insert(schema.configs, {
+        config_key: "clock",
+        value_json: "{}",
+        created_at: unixepoch(),
+        updated_at: unixepoch(),
+      });
+      const compiledInsert = compileD1Mutation(insertPlan);
+      expect(compiledInsert.sql).toContain("unixepoch()");
+      expect(compiledInsert.bindings).toEqual(["clock", "{}"]);
+      executeRun(db, compiledInsert);
+
+      const updatePlan = update(schema.configs, (columns) => ({
+        set: { updated_at: unixepoch() },
+        where: eq(columns.config_key, param("clock")),
+      }));
+      const compiledUpdate = compileD1Mutation(updatePlan);
+      expect(compiledUpdate.sql).toContain('"updated_at" = unixepoch()');
+      executeRun(db, compiledUpdate);
+
+      const upsert = onConflictDoUpdate(
+        insert(schema.configs, {
+          config_key: "clock",
+          value_json: '{"updated":true}',
+        }),
+        ["config_key"],
+        {
+          value_json: '{"updated":true}',
+          updated_at: unixepoch(),
+        },
+      );
+      const compiledUpsert = compileD1Mutation(upsert);
+      expect(compiledUpsert.sql).toContain("unixepoch()");
+      expect(compiledUpsert.bindings).toEqual([
+        "clock",
+        '{"updated":true}',
+        '{"updated":true}',
+      ]);
+      executeRun(db, compiledUpsert);
+      expect(
+        db
+          .prepare("SELECT value_json FROM configs WHERE config_key = ?")
+          .get("clock"),
+      ).toEqual({ value_json: '{"updated":true}' });
+
+      const currentTime = db.prepare("SELECT unixepoch() AS now").get() as {
+        now: number;
+      };
+      expect(
+        db
+          .prepare("SELECT updated_at FROM configs WHERE config_key = ?")
+          .get("clock"),
+      ).toEqual({ updated_at: currentTime.now });
     } finally {
       db.close();
     }

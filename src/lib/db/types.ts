@@ -1,5 +1,9 @@
 export type DatabaseBinding = Parameters<D1PreparedStatement["bind"]>[number];
 
+/** Values that the typed SQL expression API accepts as SQLite parameters. */
+export type SqlBinding =
+  string | number | boolean | ArrayBuffer | ArrayBufferView | null;
+
 export interface DatabaseStatement {
   readonly sql: string;
   readonly bindings?: readonly DatabaseBinding[];

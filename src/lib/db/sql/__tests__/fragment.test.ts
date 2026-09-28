@@ -7,9 +7,9 @@ import {
   parameter,
   parenthesize,
   text,
-  unsafeRawSql,
 } from "@/lib/db/sql/fragment";
 import { identifier } from "@/lib/db/sql/identifier";
+import { unsafeRawSql } from "@/lib/db/unsafe";
 
 describe("SQL fragments", () => {
   it("keeps values in binding order and quotes identifiers", () => {

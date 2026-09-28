@@ -5,6 +5,7 @@ import {
   compileD1Query,
   count,
   eq,
+  excluded,
   filter,
   join,
   limit,
@@ -15,9 +16,12 @@ import {
   union,
 } from "@/lib/db";
 import { DatabaseCompilerError } from "@/lib/db/query/errors";
+import type { SqlExpression } from "@/lib/db/query/expression";
 import type { LogicalQueryNode, QuerySource } from "@/lib/db/query/plan";
 import {
   validateLogicalQueryPlan,
+  validateMutationExpression,
+  validatePredicate,
   validateProjectionFields,
 } from "@/lib/db/query/validator";
 import { schema } from "@/lib/db/schema";
@@ -35,6 +39,69 @@ describe("logical query plan validation", () => {
       eq(users.columns.id, visits.columns.visit_id),
     );
     expectInvalid(() => compileD1Query(invalid));
+  });
+
+  it("rejects malformed expression metadata, scopes, and signatures", () => {
+    const users = scan(schema.users);
+    expectInvalid(() =>
+      validatePredicate(
+        eq(users.columns.id, param("u-1")),
+        [users.scope],
+        new Map([[users.scope, []]]),
+      ),
+    );
+
+    expectInvalid(() =>
+      validateMutationExpression(excluded(schema.users.columns.id), []),
+    );
+
+    const stringParameter = param("text");
+    expectInvalid(() =>
+      validateMutationExpression(
+        {
+          ...stringParameter,
+          resultType: { affinity: "numeric", nullable: false },
+        } as SqlExpression,
+        [],
+      ),
+    );
+
+    const validLower = {
+      kind: "function",
+      name: "lower",
+      arguments: [param("text"), param("extra")],
+      resultType: { affinity: "text", nullable: false },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(validLower, []));
+
+    const invalidLowerInput = {
+      kind: "function",
+      name: "lower",
+      arguments: [param(1)],
+      resultType: { affinity: "text", nullable: false },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidLowerInput, []));
+
+    const invalidSumInput = {
+      kind: "aggregate",
+      name: "SUM",
+      expression: param("text"),
+      resultType: { affinity: "numeric", nullable: true },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidSumInput, []));
+
+    const validCoalesce = {
+      kind: "coalesce",
+      expressions: [param("text")],
+      resultType: { affinity: "text", nullable: false },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(validCoalesce, []));
+
+    const invalidUnixepoch = {
+      kind: "unixepoch",
+      resultType: { affinity: "integer", nullable: true },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidUnixepoch, []));
   });
 
   it("checks identifiers, field uniqueness, and expression forms", () => {
@@ -102,6 +169,24 @@ describe("logical query plan validation", () => {
         projections: [{ name: "wrong", expression: users.columns.email }],
       } as LogicalQueryNode),
     );
+    expectInvalid(() =>
+      validateLogicalQueryPlan({
+        ...selectedNode,
+        fields: [{ name: "email", affinity: "numeric", nullable: false }],
+      } as LogicalQueryNode),
+    );
+
+    const filteredPredicate = filter(users, eq(users.columns.id, param("u-1")))
+      .node as Extract<LogicalQueryNode, { kind: "filter" }>;
+    expectInvalid(() =>
+      validateLogicalQueryPlan({
+        ...filteredPredicate,
+        predicate: {
+          ...filteredPredicate.predicate,
+          resultType: { affinity: "integer", nullable: false },
+        },
+      } as LogicalQueryNode),
+    );
 
     const events = scan(schema.custom_events);
     const names = scan(schema.custom_event_names);
@@ -157,6 +242,13 @@ describe("logical query plan validation", () => {
         ...unionNode,
         right: wrongShape as unknown as QuerySource,
       }),
+    );
+
+    const textShape = project(users, { value: users.columns.email });
+    const sites = scan(schema.sites);
+    const numericShape = project(sites, { value: sites.columns.created_at });
+    expect(() => union(textShape, numericShape, true)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
     );
   });
 });

@@ -1,19 +1,13 @@
 export { createDatabaseRuntime } from "./d1-runtime";
 export { compileD1Mutation } from "./mutation/compiler";
-export type {
-  CompiledMutation,
-  MutationNode,
-  MutationResultContract,
-} from "./mutation/plan";
+export type { CompiledMutation, MutationNode } from "./mutation/plan";
 export {
   deleteFrom,
   insert,
   insertFromQuery,
   insertOrIgnore,
-  mutationResultContract,
   onConflictDoNothing,
   onConflictDoUpdate,
-  unsafeRawMutation,
   update,
 } from "./mutation/plan";
 export type { DatabaseClient } from "./query/client";
@@ -46,8 +40,10 @@ export {
   not,
   or,
   param,
+  scalar,
   sub,
   sum,
+  unixepoch,
 } from "./query/expression";
 export { lowerLogicalPlan } from "./query/physical-plan";
 export {
@@ -65,7 +61,6 @@ export {
 } from "./query/plan";
 export type { GeneratedSchemaObject, GeneratedSchemaTable } from "./schema";
 export { schema } from "./schema";
-export { unsafeRawSql } from "./sql/fragment";
 export type {
   DatabaseBinding,
   DatabaseRuntime,

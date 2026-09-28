@@ -1,4 +1,6 @@
 import {
+  callFunction,
+  coalesce,
   compileD1Query,
   eq,
   insert,
@@ -6,10 +8,17 @@ import {
   param,
   project,
   scan,
+  union,
+  unixepoch,
   update,
 } from "@/lib/db";
+import * as databaseFacade from "@/lib/db";
 import type { CompiledQuery } from "@/lib/db/query/compiled";
-import type { ExpressionValue } from "@/lib/db/query/expression";
+import type {
+  ExpressionResultOf,
+  ExpressionResultType,
+  ExpressionValue,
+} from "@/lib/db/query/expression";
 import { schema } from "@/lib/db/schema";
 
 type Equal<A, B> =
@@ -19,6 +28,11 @@ type Equal<A, B> =
 type Assert<T extends true> = T;
 
 export function compileTimeDatabaseTypeAssertions(): void {
+  // @ts-expect-error Raw SQL helpers are only exported from @/lib/db/unsafe.
+  void databaseFacade.unsafeRawSql;
+  // @ts-expect-error Raw mutation helpers are only exported from @/lib/db/unsafe.
+  void databaseFacade.unsafeRawMutation;
+
   const users = scan(schema.users);
   eq(users.columns.id, param("user-1"));
   // @ts-expect-error A TEXT id cannot be compared with a number.
@@ -30,6 +44,12 @@ export function compileTimeDatabaseTypeAssertions(): void {
     typeof compiled extends CompiledQuery<infer Row> ? Row : never;
   type ProjectionIsNarrow = Assert<Equal<keyof SelectedRow, "email">>;
   type ProjectionValueIsText = Assert<Equal<SelectedRow["email"], string>>;
+  type ProjectionMetadataIsCatalogMetadata = Assert<
+    Equal<
+      ExpressionResultOf<typeof selected.columns.email>,
+      ExpressionResultType<"text", false>
+    >
+  >;
   const projectionChecks: [ProjectionIsNarrow, ProjectionValueIsText] = [
     true,
     true,
@@ -48,8 +68,58 @@ export function compileTimeDatabaseTypeAssertions(): void {
   type LeftJoinMakesRightNullable = Assert<
     Equal<Extract<LeftJoinValue, null>, null>
   >;
+  type LeftJoinMetadataIsNullable = Assert<
+    Equal<
+      ExpressionResultOf<typeof left.columns.right_name>,
+      ExpressionResultType<"text", true>
+    >
+  >;
   const leftJoinChecks: LeftJoinMakesRightNullable = true;
   void leftJoinChecks;
+
+  const sites = scan(schema.sites);
+  const mixedFallback = coalesce(param("text"), param(1), param("again"));
+  type MixedFallbackAffinityStaysUnknown = Assert<
+    Equal<
+      ExpressionResultOf<typeof mixedFallback>,
+      ExpressionResultType<"unknown", false>
+    >
+  >;
+  const mixedFallbackCheck: MixedFallbackAffinityStaysUnknown = true;
+  void mixedFallbackCheck;
+  insert(schema.configs, {
+    config_key: "typed",
+    value_json: "{}",
+    // @ts-expect-error INSERT expression affinity must match the target value type.
+    created_at: "not-a-timestamp",
+    updated_at: unixepoch(),
+  });
+  // @ts-expect-error A TEXT id cannot be compared with a number.
+  eq(sites.columns.id, param(42));
+  // @ts-expect-error lower() accepts text expressions.
+  callFunction("lower", sites.columns.created_at);
+  // @ts-expect-error length() accepts text or blob expressions.
+  callFunction("length", sites.columns.created_at);
+  // @ts-expect-error abs() accepts numeric expressions.
+  callFunction("abs", sites.columns.name);
+
+  const nullableSlug = project(sites, { slug: sites.columns.public_slug });
+  const requiredSlug = project(sites, { slug: sites.columns.name });
+  const combined = union(nullableSlug, requiredSlug, true);
+  type UnionMetadataWidensNullability = Assert<
+    Equal<
+      ExpressionResultOf<typeof combined.columns.slug>,
+      ExpressionResultType<"text", true>
+    >
+  >;
+  type UnionValueWidensNullability = Assert<
+    Equal<ExpressionValue<typeof combined.columns.slug>, string | null>
+  >;
+  const unionChecks: [
+    UnionMetadataWidensNullability,
+    UnionValueWidensNullability,
+  ] = [true, true];
+  void unionChecks;
 
   // @ts-expect-error The non-null email column is required by the generated catalog.
   insert(schema.users, { name: "No email" });

@@ -174,7 +174,7 @@ function compileDelete(
 export function compileD1Mutation(
   plan: MutationNode,
   options: MutationCompileOptions = {},
-): CompiledMutation<D1Result> {
+): CompiledMutation {
   validateMutationPlan(plan);
   const fragment =
     plan.kind === "insert"

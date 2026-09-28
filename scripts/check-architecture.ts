@@ -34,6 +34,12 @@ interface DemoDynamicImportEntry {
   readonly reason: string;
 }
 
+interface UnsafeDatabaseImportEntry {
+  readonly source: string;
+  readonly specifier: string;
+  readonly reason: string;
+}
+
 // Keep this list exact: each exception identifies one existing import and has
 // a removal task. New imports cannot inherit an exception from the same file.
 const LEGACY_ALLOWLIST: readonly LegacyAllowlistEntry[] = [
@@ -78,6 +84,11 @@ const DEMO_DYNAMIC_IMPORT_ALLOWLIST: readonly DemoDynamicImportEntry[] = [
       "Admin service dispatches to Demo only when VITE_DEMO_MODE is enabled.",
   },
 ];
+
+// Add only exact operational adapters here. Application services and request
+// handlers must use the typed database client instead of the raw escape hatch.
+const UNSAFE_DATABASE_IMPORT_ALLOWLIST: readonly UnsafeDatabaseImportEntry[] =
+  [];
 
 const FORBIDDEN_TOP_LEVEL_FILE_PREFIXES = [
   "admin-",
@@ -464,6 +475,23 @@ function isAllowlistedDemoDynamicImport(
   );
 }
 
+function isAllowedUnsafeDatabaseImport(
+  source: string,
+  specifier: string,
+): boolean {
+  if (
+    isWithin(source, "src/lib/db") ||
+    isWithin(source, "src/lib/edge/analytics")
+  )
+    return true;
+  return UNSAFE_DATABASE_IMPORT_ALLOWLIST.some(
+    (entry) =>
+      entry.source === source &&
+      entry.specifier === specifier &&
+      entry.reason.trim().length > 0,
+  );
+}
+
 export function detectForbiddenPrefixFiles(
   relativePaths: readonly string[],
 ): string[] {
@@ -634,6 +662,20 @@ export function collectArchitectureViolations(
           message: "Project alias does not resolve to a source module.",
         });
         continue;
+      }
+      if (
+        resolved === "src/lib/db/unsafe.ts" &&
+        !isAllowedUnsafeDatabaseImport(relative, imported.specifier)
+      ) {
+        violations.push({
+          rule: "unsafe-database-import-boundary",
+          source: relative,
+          specifier: imported.specifier,
+          target: resolved,
+          line: imported.line,
+          message:
+            "Raw SQL helpers are limited to database internals, Analytics SQL adapters, and explicitly registered infrastructure adapters.",
+        });
       }
       if (
         (isWithin(relative, "src/lib/api-v1") ||

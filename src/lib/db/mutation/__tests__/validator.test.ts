@@ -6,11 +6,9 @@ import {
   excluded,
   insert,
   insertFromQuery,
-  mutationResultContract,
   onConflictDoUpdate,
   param,
   scan,
-  unsafeRawMutation,
   update,
 } from "@/lib/db";
 import type { MutationNode } from "@/lib/db/mutation/plan";
@@ -18,24 +16,19 @@ import { validateMutationPlan } from "@/lib/db/mutation/validator";
 import { DatabaseCompilerError } from "@/lib/db/query/errors";
 import { parameterExpression } from "@/lib/db/query/expression";
 import { schema } from "@/lib/db/schema";
-import type { DatabaseBinding } from "@/lib/db/types";
+import type { SqlBinding } from "@/lib/db/types";
+import { mutationResultContract, unsafeRawMutation } from "@/lib/db/unsafe";
 
 describe("mutation result contracts", () => {
   it("describes results for explicitly supplied raw mutations", () => {
-    const contract = mutationResultContract<{ changes: number }>(
-      "Rows changed by the update",
-    );
+    const contract = mutationResultContract("Rows changed by the update");
     expect(contract).toEqual({
       kind: "mutation-result",
       description: "Rows changed by the update",
     });
 
     expect(
-      unsafeRawMutation<{ changes: number }>(
-        "UPDATE users SET active = ?",
-        [1],
-        contract,
-      ),
+      unsafeRawMutation("UPDATE users SET active = ?", [1], contract),
     ).toEqual({
       sql: "UPDATE users SET active = ?",
       bindings: [1],
@@ -79,7 +72,7 @@ describe("mutation plan validation", () => {
     } as unknown as MutationNode);
     expectInvalid({
       ...valid,
-      rows: [[parameterExpression({} as DatabaseBinding)]],
+      rows: [[parameterExpression({} as SqlBinding)]],
     } as unknown as MutationNode);
 
     const query = scan(schema.users);

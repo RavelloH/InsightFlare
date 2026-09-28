@@ -83,6 +83,7 @@ function resolveColumn(
 export function compileD1Expression(
   expression: SqlExpression,
   scopes: ReadonlyMap<RelationScope, ScopeBinding>,
+  context: RenderContext = renderContext(),
 ): SqlFragment {
   switch (expression.kind) {
     case "column":
@@ -98,16 +99,16 @@ export function compileD1Expression(
     case "binary":
       return parenthesize(
         concat(
-          compileD1Expression(expression.left, scopes),
+          compileD1Expression(expression.left, scopes, context),
           text(` ${expression.operator} `),
-          compileD1Expression(expression.right, scopes),
+          compileD1Expression(expression.right, scopes, context),
         ),
       );
     case "boolean":
       return parenthesize(
         join(
           expression.expressions.map((item) =>
-            compileD1Expression(item, scopes),
+            compileD1Expression(item, scopes, context),
           ),
           text(` ${expression.operator} `),
         ),
@@ -115,17 +116,19 @@ export function compileD1Expression(
     case "not":
       return concat(
         text("NOT "),
-        parenthesize(compileD1Expression(expression.expression, scopes)),
+        parenthesize(
+          compileD1Expression(expression.expression, scopes, context),
+        ),
       );
     case "null-check":
       return concat(
-        compileD1Expression(expression.expression, scopes),
+        compileD1Expression(expression.expression, scopes, context),
         text(expression.not ? " IS NOT NULL" : " IS NULL"),
       );
     case "in-list":
       if (expression.values.length === 0) return text("(0)");
       return concat(
-        compileD1Expression(expression.expression, scopes),
+        compileD1Expression(expression.expression, scopes, context),
         text(" IN ("),
         join(expression.values.map((value) => parameter(value))),
         text(")"),
@@ -135,7 +138,9 @@ export function compileD1Expression(
         text(expression.name.toUpperCase()),
         text("("),
         join(
-          expression.arguments.map((item) => compileD1Expression(item, scopes)),
+          expression.arguments.map((item) =>
+            compileD1Expression(item, scopes, context),
+          ),
         ),
         text(")"),
       );
@@ -145,7 +150,7 @@ export function compileD1Expression(
         text("("),
         expression.distinct ? text("DISTINCT ") : text(""),
         expression.expression
-          ? compileD1Expression(expression.expression, scopes)
+          ? compileD1Expression(expression.expression, scopes, context)
           : text("*"),
         text(")"),
       );
@@ -154,17 +159,31 @@ export function compileD1Expression(
         text("COALESCE("),
         join(
           expression.expressions.map((item) =>
-            compileD1Expression(item, scopes),
+            compileD1Expression(item, scopes, context),
           ),
         ),
         text(")"),
       );
+    case "unixepoch":
+      return text("unixepoch()");
+    case "scalar-subquery":
+      return parenthesize(
+        compileQuerySource(expression.query, context, scopes),
+      );
   }
+}
+
+function extendScopes(
+  outerScopes: ReadonlyMap<RelationScope, ScopeBinding>,
+  bindings: readonly (readonly [RelationScope, ScopeBinding])[],
+): Map<RelationScope, ScopeBinding> {
+  return new Map([...outerScopes, ...bindings]);
 }
 
 function compileNode(
   node: LogicalQueryNode,
   context: RenderContext,
+  outerScopes: ReadonlyMap<RelationScope, ScopeBinding>,
 ): SqlFragment {
   switch (node.kind) {
     case "scan": {
@@ -188,9 +207,9 @@ function compileNode(
       );
     }
     case "filter": {
-      const source = compileNode(node.input.node, context);
+      const source = compileNode(node.input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
-      const scopes = new Map([[node.input.scope, { alias }]]);
+      const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
       return concat(
         text("SELECT "),
         join(outputList(node.fields.length, alias)),
@@ -199,16 +218,16 @@ function compileNode(
         text(" AS "),
         identifier(alias),
         text(" WHERE "),
-        compileD1Expression(node.predicate, scopes),
+        compileD1Expression(node.predicate, scopes, context),
       );
     }
     case "project": {
-      const source = compileNode(node.input.node, context);
+      const source = compileNode(node.input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
-      const scopes = new Map([[node.input.scope, { alias }]]);
+      const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
       const selections = node.projections.map((projection, index) =>
         concat(
-          compileD1Expression(projection.expression, scopes),
+          compileD1Expression(projection.expression, scopes, context),
           text(` AS "_c${index}"`),
         ),
       );
@@ -222,11 +241,11 @@ function compileNode(
       );
     }
     case "join": {
-      const leftSql = compileNode(node.left.node, context);
-      const rightSql = compileNode(node.right.node, context);
+      const leftSql = compileNode(node.left.node, context, outerScopes);
+      const rightSql = compileNode(node.right.node, context, outerScopes);
       const leftAlias = nextAlias(context, "l");
       const rightAlias = nextAlias(context, "r");
-      const scopes = new Map<RelationScope, ScopeBinding>([
+      const scopes = extendScopes(outerScopes, [
         [node.left.scope, { alias: leftAlias }],
         [node.right.scope, { alias: rightAlias }],
       ]);
@@ -238,7 +257,6 @@ function compileNode(
           node.left.fields.length,
         ),
       ];
-      void scopes;
       return concat(
         text("SELECT "),
         join(selections),
@@ -251,16 +269,16 @@ function compileNode(
         text(" AS "),
         identifier(rightAlias),
         text(" ON "),
-        compileD1Expression(node.condition, scopes),
+        compileD1Expression(node.condition, scopes, context),
       );
     }
     case "semi-join":
     case "anti-join": {
-      const leftSql = compileNode(node.left.node, context);
-      const rightSql = compileNode(node.right.node, context);
+      const leftSql = compileNode(node.left.node, context, outerScopes);
+      const rightSql = compileNode(node.right.node, context, outerScopes);
       const leftAlias = nextAlias(context, "l");
       const rightAlias = nextAlias(context, "r");
-      const scopes = new Map<RelationScope, ScopeBinding>([
+      const scopes = extendScopes(outerScopes, [
         [node.left.scope, { alias: leftAlias }],
         [node.right.scope, { alias: rightAlias }],
       ]);
@@ -280,18 +298,18 @@ function compileNode(
         text(" AS "),
         identifier(rightAlias),
         text(" WHERE "),
-        compileD1Expression(node.condition, scopes),
+        compileD1Expression(node.condition, scopes, context),
         text(")"),
       );
     }
     case "aggregate": {
-      const source = compileNode(node.input.node, context);
+      const source = compileNode(node.input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
-      const scopes = new Map([[node.input.scope, { alias }]]);
+      const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
       const projected = [...node.groups, ...node.aggregates].map(
         (projection, index) =>
           concat(
-            compileD1Expression(projection.expression, scopes),
+            compileD1Expression(projection.expression, scopes, context),
             text(` AS "_c${index}"`),
           ),
       );
@@ -308,14 +326,14 @@ function compileNode(
               text(" GROUP BY "),
               join(
                 node.groups.map((group) =>
-                  compileD1Expression(group.expression, scopes),
+                  compileD1Expression(group.expression, scopes, context),
                 ),
               ),
             ]),
       );
     }
     case "distinct": {
-      const source = compileNode(node.input.node, context);
+      const source = compileNode(node.input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
       return concat(
         text("SELECT DISTINCT "),
@@ -327,9 +345,9 @@ function compileNode(
       );
     }
     case "sort": {
-      const source = compileNode(node.input.node, context);
+      const source = compileNode(node.input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
-      const scopes = new Map([[node.input.scope, { alias }]]);
+      const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
       return concat(
         text("SELECT "),
         join(outputList(node.fields.length, alias)),
@@ -341,7 +359,7 @@ function compileNode(
         join(
           node.keys.map((key) =>
             concat(
-              compileD1Expression(key.expression, scopes),
+              compileD1Expression(key.expression, scopes, context),
               text(` ${key.direction}`),
             ),
           ),
@@ -349,7 +367,7 @@ function compileNode(
       );
     }
     case "limit": {
-      const source = compileNode(node.input.node, context);
+      const source = compileNode(node.input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
       return concat(
         text("SELECT "),
@@ -359,15 +377,18 @@ function compileNode(
         text(" AS "),
         identifier(alias),
         text(" LIMIT "),
-        compileD1Expression(node.count, new Map()),
+        compileD1Expression(node.count, outerScopes, context),
         ...(node.offset
-          ? [text(" OFFSET "), compileD1Expression(node.offset, new Map())]
+          ? [
+              text(" OFFSET "),
+              compileD1Expression(node.offset, outerScopes, context),
+            ]
           : []),
       );
     }
     case "union": {
-      const leftSql = compileNode(node.left.node, context);
-      const rightSql = compileNode(node.right.node, context);
+      const leftSql = compileNode(node.left.node, context, outerScopes);
+      const rightSql = compileNode(node.right.node, context, outerScopes);
       const leftAlias = nextAlias(context, "l");
       const rightAlias = nextAlias(context, "r");
       return concat(
@@ -387,6 +408,26 @@ function compileNode(
       );
     }
   }
+}
+
+function compileQuerySource(
+  source: QuerySource,
+  context: RenderContext,
+  outerScopes: ReadonlyMap<RelationScope, ScopeBinding>,
+): SqlFragment {
+  const inner = compileNode(source.node, context, outerScopes);
+  const alias = nextAlias(context, "q");
+  const projections = source.fields.map((field, index) =>
+    concat(column(index, alias), text(" AS "), identifier(field.name)),
+  );
+  return concat(
+    text("SELECT "),
+    join(projections),
+    text(" FROM "),
+    parenthesize(inner),
+    text(" AS "),
+    identifier(alias),
+  );
 }
 
 function renderContext(): RenderContext {
@@ -419,21 +460,10 @@ export function compileD1Query(
       ? { node: plan.root, scope: plan.scope, fields: plan.fields }
       : plan;
   validateLogicalQueryPlan(source.node);
-  const inner = compileNode(source.node, renderContext());
-  const alias = "q0";
-  const projections = source.fields.map((field, index) =>
-    concat(column(index, alias), text(" AS "), identifier(field.name)),
-  );
+  const query = compileQuerySource(source, renderContext(), new Map());
   const statement: DatabaseStatement = {
-    sql: concat(
-      text("SELECT "),
-      join(projections),
-      text(" FROM "),
-      parenthesize(inner),
-      text(" AS "),
-      identifier(alias),
-    ).text,
-    bindings: inner.bindings,
+    sql: query.text,
+    bindings: query.bindings,
     ...(options.tag === undefined ? {} : { tag: options.tag }),
   };
   return { ...statement, kind: "query" };

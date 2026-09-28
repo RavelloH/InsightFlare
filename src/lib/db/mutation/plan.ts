@@ -17,13 +17,13 @@ import type {
   SchemaTableReference,
 } from "@/lib/db/schema/types";
 import type { DatabaseBinding } from "@/lib/db/types";
+import type { SqlBinding } from "@/lib/db/types";
 
-export type MutationValue<T> = T | DatabaseBinding | AnyExpression;
+export type MutationValue<T> = T | SqlExpression<T>;
 
-export interface MutationResultContract<Result = unknown> {
+export interface MutationResultContract {
   readonly kind: "mutation-result";
   readonly description: string;
-  readonly __result?: Result;
 }
 
 export interface InsertConflict {
@@ -84,9 +84,7 @@ function isExpression(value: unknown): value is AnyExpression {
 }
 
 function expression(value: unknown): SqlExpression {
-  return isExpression(value)
-    ? value
-    : parameterExpression(value as DatabaseBinding);
+  return isExpression(value) ? value : parameterExpression(value as SqlBinding);
 }
 
 function orderedProperties<T extends SchemaTableReference>(table: T): string[] {
@@ -154,8 +152,9 @@ export function onConflictDoNothing<T extends GeneratedSchemaTable>(
 }
 
 type ConflictSet<T extends SchemaTableReference> = Partial<{
-  readonly [K in keyof T["columns"]]:
-    SchemaColumnValue<T["columns"][K]> | AnyExpression;
+  readonly [K in keyof T["columns"]]: MutationValue<
+    SchemaColumnValue<T["columns"][K]>
+  >;
 }>;
 
 export function onConflictDoUpdate<T extends GeneratedSchemaTable>(
@@ -186,8 +185,9 @@ export function insertFromQuery<T extends GeneratedSchemaTable>(
 }
 
 export type UpdateSet<T extends SchemaTableReference> = Partial<{
-  readonly [K in keyof T["columns"]]:
-    SchemaColumnValue<T["columns"][K]> | AnyExpression;
+  readonly [K in keyof T["columns"]]: MutationValue<
+    SchemaColumnValue<T["columns"][K]>
+  >;
 }>;
 
 export interface UpdateDraft<T extends SchemaTableReference> {
@@ -262,25 +262,27 @@ export function deleteFrom<T extends GeneratedSchemaTable>(
   };
 }
 
-export interface CompiledMutation<Result = D1Result> {
+export interface CompiledMutation {
   readonly sql: string;
   readonly bindings?: readonly DatabaseBinding[];
   readonly tag?: string;
   readonly kind: "mutation";
-  readonly resultContract?: MutationResultContract<Result>;
-  readonly __resultType?: Result;
 }
 
-export function mutationResultContract<Result>(
+export type UnsafeRawMutation = CompiledMutation & {
+  readonly resultContract: MutationResultContract;
+};
+
+export function mutationResultContract(
   description: string,
-): MutationResultContract<Result> {
+): MutationResultContract {
   return { kind: "mutation-result", description };
 }
 
-export function unsafeRawMutation<Result>(
+export function unsafeRawMutation(
   sql: string,
   bindings: readonly DatabaseBinding[],
-  resultContract: MutationResultContract<Result>,
-): CompiledMutation<Result> {
+  resultContract: MutationResultContract,
+): UnsafeRawMutation {
   return { sql, bindings: [...bindings], kind: "mutation", resultContract };
 }

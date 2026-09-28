@@ -47,6 +47,34 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("limits raw database escape helpers to foundation and Analytics adapters", () => {
+    const root = fixture();
+    mkdirSync(path.join(root, "src/lib/db"), { recursive: true });
+    mkdirSync(path.join(root, "src/lib/edge/analytics/providers/d1"), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(root, "src/lib/db/unsafe.ts"),
+      "export const unsafe = true;\n",
+    );
+    writeFileSync(
+      path.join(root, "src/lib/dashboard/report.ts"),
+      'import { unsafe } from "@/lib/db/unsafe";\nexport { unsafe };\n',
+    );
+    writeFileSync(
+      path.join(root, "src/lib/edge/analytics/providers/d1/reader.ts"),
+      'import { unsafe } from "@/lib/db/unsafe";\nexport { unsafe };\n',
+    );
+
+    expect(collectArchitectureViolations(root)).toMatchObject([
+      {
+        rule: "unsafe-database-import-boundary",
+        source: "src/lib/dashboard/report.ts",
+        specifier: "@/lib/db/unsafe",
+      },
+    ]);
+  });
+
   it("keeps Analytics contracts and shared domains out of runtime modules", () => {
     const root = fixture();
     const files: Record<string, string> = {

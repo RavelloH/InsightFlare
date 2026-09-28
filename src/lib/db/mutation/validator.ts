@@ -1,5 +1,6 @@
 import { DatabaseCompilerError } from "@/lib/db/query/errors";
 import {
+  type ExpressionScopeMetadata,
   validateMutationExpression,
   validatePredicate,
 } from "@/lib/db/query/validator";
@@ -21,6 +22,21 @@ function isBinding(value: unknown): value is DatabaseBinding {
     value instanceof ArrayBuffer ||
     ArrayBuffer.isView(value)
   );
+}
+
+function mutationScopeFields(
+  plan: Extract<MutationNode, { kind: "update" | "delete" }>,
+): ExpressionScopeMetadata {
+  return new Map([
+    [
+      plan.scope,
+      Object.entries(plan.table.columns).map(([name, column]) => ({
+        name,
+        affinity: column.affinity,
+        nullable: column.nullable,
+      })),
+    ],
+  ]);
 }
 
 export function validateMutationPlan(plan: MutationNode): void {
@@ -49,10 +65,19 @@ export function validateMutationPlan(plan: MutationNode): void {
       fail("INSERT source width must match target columns");
     for (const row of plan.rows ?? []) {
       for (const value of row) {
-        if (value.kind !== "parameter")
-          fail("INSERT VALUES expressions must be parameters");
-        if (!isBinding(value.value))
-          fail("INSERT values must be SQLite/D1 bindings");
+        if (value.kind === "parameter") {
+          if (!isBinding(value.value))
+            fail("INSERT values must be SQLite/D1 bindings");
+        } else if (
+          value.kind === "unixepoch" ||
+          value.kind === "scalar-subquery"
+        ) {
+          validateMutationExpression(value, []);
+        } else {
+          fail(
+            "INSERT VALUES supports bindings, unixepoch(), and scalar subqueries",
+          );
+        }
       }
     }
     if (plan.conflict) {
@@ -76,6 +101,7 @@ export function validateMutationPlan(plan: MutationNode): void {
     return;
   }
   const validNames = new Set(plan.fields.map((field) => field.propertyName));
+  const scopeFields = mutationScopeFields(plan);
   if (plan.kind === "update") {
     if (plan.set.length === 0) fail("UPDATE requires at least one assignment");
     for (const assignment of plan.set) {
@@ -83,8 +109,13 @@ export function validateMutationPlan(plan: MutationNode): void {
         fail(
           `UPDATE column "${assignment.propertyName}" is not in the target table`,
         );
-      validateMutationExpression(assignment.expression, [plan.scope]);
+      validateMutationExpression(
+        assignment.expression,
+        [plan.scope],
+        false,
+        scopeFields,
+      );
     }
   }
-  validatePredicate(plan.where, [plan.scope]);
+  validatePredicate(plan.where, [plan.scope], scopeFields);
 }
