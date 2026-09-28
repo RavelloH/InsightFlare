@@ -15,6 +15,7 @@ export { createD1DatabaseClient, createDatabaseClient } from "./query/client";
 export type { CompiledQuery } from "./query/compiled";
 export { compileD1Query } from "./query/compiler";
 export { DatabaseCompilerError } from "./query/errors";
+export type { SqlExpression } from "./query/expression";
 export {
   add,
   and,
