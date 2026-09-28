@@ -1,14 +1,32 @@
 import type { MiddlewareHandler } from "hono";
 
 import { jsonError } from "@/lib/api-v1";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  limit,
+  param,
+  project,
+  scan,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import { canAccessSiteId } from "@/lib/edge/auth/api-key-auth";
 import {
   fetchPublicSite,
   resolvePrivateSiteForSession,
 } from "@/lib/edge/auth/site-access";
-import type { AppEnv, HonoApiSite } from "@/lib/hono/types";
+import type { AppEnv } from "@/lib/hono/types";
 import { requestUrl } from "@/lib/hono/utils/context";
+
+function hasStringId<Row extends { id: string | null }>(
+  row: Row,
+): row is Row & { id: string } {
+  return typeof row.id === "string";
+}
+
 export function resolvePrivateSiteMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const session = c.get("session");
@@ -60,26 +78,32 @@ export function resolveApiSiteMiddleware(): MiddlewareHandler<AppEnv> {
       return response;
     }
 
-    const row = await createDatabaseRuntime(c.env.DB).first<HonoApiSite>({
-      sql: `
-        SELECT
-          id,
-          team_id AS teamId,
-          name,
-          domain,
-          public_enabled AS publicEnabled,
-          public_slug AS publicSlug,
-          created_at AS createdAt,
-          updated_at AS updatedAt
-        FROM sites
-        WHERE id=? AND team_id=?
-        LIMIT 1
-      `,
-      bindings: [siteId, principal.teamId],
-      tag: "hono.sites.first",
-    });
+    const sites = scan(schema.sites);
+    const matchingSites = filter(
+      sites,
+      and(
+        eq(sites.columns.id, param(siteId)),
+        eq(sites.columns.team_id, param(principal.teamId)),
+      ),
+    );
+    const apiSiteQuery = limit(
+      project(matchingSites, {
+        id: matchingSites.columns.id,
+        teamId: matchingSites.columns.team_id,
+        name: matchingSites.columns.name,
+        domain: matchingSites.columns.domain,
+        publicEnabled: matchingSites.columns.public_enabled,
+        publicSlug: matchingSites.columns.public_slug,
+        createdAt: matchingSites.columns.created_at,
+        updatedAt: matchingSites.columns.updated_at,
+      }),
+      1,
+    );
+    const row = await createD1DatabaseClient(c.env.DB).first(
+      compileD1Query(apiSiteQuery, { tag: "hono.sites.first" }),
+    );
 
-    if (!row) {
+    if (!row || !hasStringId(row)) {
       const response = jsonError(
         "site_not_found",
         "Site not found",

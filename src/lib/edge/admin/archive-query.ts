@@ -1,10 +1,25 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  gte,
+  join,
+  limit,
+  lte,
+  param,
+  project,
+  scan,
+  sort,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import {
   canAccessMemberSite,
   parseMemberSiteIdsJson,
 } from "@/lib/edge/auth/member-site-access";
 import { requireSession } from "@/lib/edge/auth/session-auth";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
+import { sitePkForSiteId } from "@/lib/edge/sites/identity-query";
 import type { Env } from "@/lib/edge/types";
 import { coerceNumber, ONE_HOUR_MS } from "@/lib/edge/utils";
 import {
@@ -48,27 +63,40 @@ async function assertSiteAccess(
   siteId: string,
   userId: string,
 ): Promise<boolean> {
-  const row = await createDatabaseRuntime(env.DB).first<{
-    id: string;
-    ownerUserId: string;
-    role: string | null;
-    siteIdsJson: string | null;
-  }>({
-    sql: `
-      SELECT
-        s.id,
-        t.owner_user_id AS ownerUserId,
-        tm.role,
-        tm.site_ids_json AS siteIdsJson
-      FROM sites s
-      INNER JOIN teams t ON t.id = s.team_id
-      LEFT JOIN team_members tm ON tm.team_id = s.team_id AND tm.user_id = ?
-      WHERE s.id = ?
-      LIMIT 1
-    `,
-    bindings: [userId, siteId],
-    tag: "admin.sites.first",
-  });
+  const sites = scan(schema.sites);
+  const teams = scan(schema.teams);
+  const members = scan(schema.team_members);
+  const siteTeams = join(
+    sites,
+    teams,
+    eq(sites.columns.team_id, teams.columns.id),
+    "inner",
+  );
+  const siteTeamMembers = join(
+    siteTeams,
+    members,
+    and(
+      eq(siteTeams.columns.left_team_id, members.columns.team_id),
+      eq(members.columns.user_id, param(userId)),
+    ),
+    "left",
+  );
+  const matchingPrivateSites = filter(
+    siteTeamMembers,
+    eq(siteTeamMembers.columns.left_left_id, param(siteId)),
+  );
+  const privateSiteQuery = limit(
+    project(matchingPrivateSites, {
+      id: matchingPrivateSites.columns.left_left_id,
+      ownerUserId: matchingPrivateSites.columns.left_right_owner_user_id,
+      role: matchingPrivateSites.columns.right_role,
+      siteIdsJson: matchingPrivateSites.columns.right_site_ids_json,
+    }),
+    1,
+  );
+  const row = await createD1DatabaseClient(env.DB).first(
+    compileD1Query(privateSiteQuery, { tag: "admin.sites.first" }),
+  );
   if (!row?.id) return false;
   if (row.ownerUserId === userId) return true;
   if (row.role === "owner" || row.role === "admin") return true;
@@ -131,41 +159,38 @@ export async function handlePrivateArchiveManifest(
     return badRequest("Invalid time window");
   }
 
-  const result = await createDatabaseRuntime(env.DB).all<{
-    archiveKey: string;
-    siteId: string;
-    startHour: number;
-    endHour: number;
-    granularity: string;
-    format: string;
-    rowCount: number;
-    sizeBytes: number;
-    createdAt: number;
-  }>({
-    sql: `
-      SELECT
-        archive_key AS archiveKey,
-        site_id AS siteId,
-        start_hour AS startHour,
-        end_hour AS endHour,
-        granularity,
-        format,
-        row_count AS rowCount,
-        size_bytes AS sizeBytes,
-        created_at AS createdAt
-      FROM archive_objects
-      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-        AND end_hour >= ?
-        AND start_hour <= ?
-      ORDER BY start_hour ASC
-    `,
-    bindings: [siteId, window.fromHour, window.toHour],
-    tag: "admin.archive_objects.all",
+  const archiveObjects = scan(schema.archive_objects);
+  const matchingObjects = filter(
+    archiveObjects,
+    and(
+      eq(archiveObjects.columns.site_pk, sitePkForSiteId(siteId)),
+      gte(archiveObjects.columns.end_hour, param(window.fromHour)),
+      lte(archiveObjects.columns.start_hour, param(window.toHour)),
+    ),
+  );
+  const selectedObjects = project(matchingObjects, {
+    archiveKey: matchingObjects.columns.archive_key,
+    siteId: matchingObjects.columns.site_id,
+    startHour: matchingObjects.columns.start_hour,
+    endHour: matchingObjects.columns.end_hour,
+    granularity: matchingObjects.columns.granularity,
+    format: matchingObjects.columns.format,
+    rowCount: matchingObjects.columns.row_count,
+    sizeBytes: matchingObjects.columns.size_bytes,
+    createdAt: matchingObjects.columns.created_at,
   });
+  const orderedObjects = sort(selectedObjects, [
+    { expression: selectedObjects.columns.startHour, direction: "ASC" },
+  ]);
+  const result = await createD1DatabaseClient(env.DB).all(
+    compileD1Query(orderedObjects, { tag: "admin.archive_objects.all" }),
+  );
 
   const files = result.results.map((row) => ({
     ...row,
-    fetchUrl: `/api/private/archive/file?key=${encodeURIComponent(row.archiveKey)}`,
+    fetchUrl: `/api/private/archive/file?key=${encodeURIComponent(
+      row.archiveKey === null ? "null" : row.archiveKey,
+    )}`,
   }));
 
   return jsonResponse({
@@ -198,20 +223,22 @@ export async function handlePrivateArchiveFile(
     return badRequest("Missing key");
   }
 
-  const row = await createDatabaseRuntime(env.DB).first<{
-    archiveKey: string;
-    format: string;
-    siteId: string;
-  }>({
-    sql: `
-      SELECT archive_key AS archiveKey, format, site_id AS siteId
-      FROM archive_objects
-      WHERE archive_key = ?
-      LIMIT 1
-    `,
-    bindings: [key],
-    tag: "admin.archive_objects.first",
-  });
+  const archiveObjects = scan(schema.archive_objects);
+  const matchingObjects = filter(
+    archiveObjects,
+    eq(archiveObjects.columns.archive_key, param(key)),
+  );
+  const archiveObjectQuery = limit(
+    project(matchingObjects, {
+      archiveKey: matchingObjects.columns.archive_key,
+      format: matchingObjects.columns.format,
+      siteId: matchingObjects.columns.site_id,
+    }),
+    1,
+  );
+  const row = await createD1DatabaseClient(env.DB).first(
+    compileD1Query(archiveObjectQuery, { tag: "admin.archive_objects.first" }),
+  );
   if (!row?.archiveKey) {
     return notFound("Archive object not found");
   }

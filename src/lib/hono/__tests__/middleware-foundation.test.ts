@@ -1,6 +1,11 @@
 import { type Handler, Hono, type MiddlewareHandler } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createMigratedDatabase } from "@/../scripts/schema/database";
+import {
+  createSqliteD1Database,
+  type SqliteD1Trace,
+} from "@/lib/db/__tests__/sqlite-d1";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type * as ApiKeyAuthModule from "@/lib/edge/auth/api-key-auth";
 import type { Env } from "@/lib/edge/types";
@@ -413,9 +418,7 @@ describe("Hono middleware foundation", () => {
       await next();
     });
     apiApp.use("/sites/:siteId/*", resolveApiSiteMiddleware());
-    apiApp.get("/sites/:siteId/overview", (c) =>
-      c.json({ id: c.get("apiSite")?.id }),
-    );
+    apiApp.get("/sites/:siteId/overview", (c) => c.json(c.get("apiSite")));
 
     const privateResponse = await privateApp.fetch(
       request("/api/private/overview"),
@@ -452,7 +455,16 @@ describe("Hono middleware foundation", () => {
       session,
     );
     await expect(publicResponse.json()).resolves.toEqual({ slug: "demo" });
-    await expect(apiResponse.json()).resolves.toEqual({ id: "site-1" });
+    await expect(apiResponse.json()).resolves.toEqual({
+      id: "site-1",
+      teamId: "team-1",
+      name: "API Site",
+      domain: "api.test",
+      publicEnabled: 0,
+      publicSlug: null,
+      createdAt: 1,
+      updatedAt: 2,
+    });
   });
 
   it("passes through site resolver response failures", async () => {
@@ -520,6 +532,91 @@ describe("Hono middleware foundation", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "site_not_found" },
     });
+  });
+
+  it("matches the legacy API site row through a typed D1 lookup", async () => {
+    const database = createMigratedDatabase();
+    try {
+      database
+        .prepare(
+          "INSERT INTO users (id,email,name,username) VALUES ('owner-1','owner@example.test','Owner','owner')",
+        )
+        .run();
+      database
+        .prepare(
+          "INSERT INTO teams (id,name,slug,owner_user_id) VALUES ('team-1','Team','team','owner-1')",
+        )
+        .run();
+      database
+        .prepare(
+          "INSERT INTO sites (id,team_id,name,domain,public_slug) VALUES ('site-1','team-1','Site','site.test','public-site')",
+        )
+        .run();
+      const legacyRow = database
+        .prepare(
+          `SELECT id,team_id AS teamId,name,domain,
+                  public_enabled AS publicEnabled,
+                  public_slug AS publicSlug,
+                  created_at AS createdAt,updated_at AS updatedAt
+           FROM sites WHERE id=? AND team_id=? LIMIT 1`,
+        )
+        .get("site-1", "team-1");
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const app = new Hono<AppEnv>();
+      app.use("*", async (c, next) => {
+        c.set("apiPrincipal", principal);
+        await next();
+      });
+      app.use("/sites/:siteId/*", resolveApiSiteMiddleware());
+      app.get("/sites/:siteId/overview", (c) => c.json(c.get("apiSite")));
+
+      const response = await app.fetch(
+        request("/sites/site-1/overview"),
+        {
+          DB: createSqliteD1Database(database, trace),
+        } as unknown as Env,
+        ctx,
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(legacyRow);
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(trace.bindings[0]).toEqual(["site-1", "team-1", 1]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("returns not found when API site ID is missing or outside key access", async () => {
+    const missingIdApp = new Hono<AppEnv>();
+    missingIdApp.use("*", async (c, next) => {
+      c.set("apiPrincipal", principal);
+      await next();
+    });
+    missingIdApp.use("*", resolveApiSiteMiddleware());
+    missingIdApp.get("*", () => Response.json({ ok: true }));
+
+    const deniedApp = new Hono<AppEnv>();
+    deniedApp.use("*", async (c, next) => {
+      c.set("apiPrincipal", { ...principal, siteIds: ["other-site"] });
+      await next();
+    });
+    deniedApp.use("/sites/:siteId/*", resolveApiSiteMiddleware());
+    deniedApp.get("/sites/:siteId/overview", () => Response.json({ ok: true }));
+
+    const missingIdResponse = await missingIdApp.fetch(
+      request("/overview"),
+      createEnv(),
+      ctx,
+    );
+    const deniedResponse = await deniedApp.fetch(
+      request("/sites/site-1/overview"),
+      createEnv(),
+      ctx,
+    );
+
+    expect(missingIdResponse.status).toBe(404);
+    expect(deniedResponse.status).toBe(404);
   });
 
   it("wraps responses with dashboard cache middleware", async () => {

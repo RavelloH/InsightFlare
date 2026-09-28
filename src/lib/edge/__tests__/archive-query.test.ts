@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createMigratedDatabase } from "@/../scripts/schema/database";
+import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
+import {
+  createSqliteD1Database,
+  type SqliteD1Trace,
+} from "@/lib/db/__tests__/sqlite-d1";
 import { handlePrivateArchive } from "@/lib/edge/admin/archive-query";
 import {
   type EdgeSessionClaims,
@@ -116,6 +122,187 @@ describe("private archive edge query handler", () => {
     vi.restoreAllMocks();
   });
 
+  it("matches legacy manifest and archive-key SQL against migrated D1 queries", async () => {
+    const database = createMigratedDatabase();
+    try {
+      database
+        .prepare(
+          "INSERT INTO users (id,email,name,username) VALUES ('owner-1','owner@example.test','Owner','owner')",
+        )
+        .run();
+      database
+        .prepare(
+          "INSERT INTO teams (id,name,slug,owner_user_id) VALUES ('team-1','Team','team','owner-1')",
+        )
+        .run();
+      const insertSite = database.prepare(
+        "INSERT INTO sites (id,team_id,name,domain) VALUES (?,?,?,?)",
+      );
+      insertSite.run("site-1", "team-1", "Site One", "one.test");
+      insertSite.run("site-2", "team-1", "Site Two", "two.test");
+      const insertIdentity = database.prepare(
+        "INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)",
+      );
+      insertIdentity.run("site-1");
+      insertIdentity.run("site-2");
+      const sitePk = (siteId: string) =>
+        (
+          database
+            .prepare(
+              "SELECT site_pk AS sitePk FROM site_identities WHERE site_id=?",
+            )
+            .get(siteId) as { sitePk: number }
+        ).sitePk;
+      const insertArchive = database.prepare(
+        `INSERT INTO archive_objects (
+          archive_key,site_id,start_hour,end_hour,granularity,format,site_pk
+        ) VALUES (?,?,?,?,?,?,?)`,
+      );
+      insertArchive.run(
+        "site-1/later.parquet",
+        "site-1",
+        3,
+        4,
+        "hour",
+        "parquet",
+        sitePk("site-1"),
+      );
+      insertArchive.run(
+        "site-1/earlier.parquet",
+        "site-1",
+        2,
+        3,
+        "hour",
+        "parquet",
+        sitePk("site-1"),
+      );
+      insertArchive.run(
+        "site-1/outside.parquet",
+        "site-1",
+        0,
+        1,
+        "hour",
+        "parquet",
+        sitePk("site-1"),
+      );
+      insertArchive.run(
+        "site-2/other.parquet",
+        "site-2",
+        2,
+        3,
+        "hour",
+        "parquet",
+        sitePk("site-2"),
+      );
+
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const bucket = createBucket(r2Object({ body: "parquet-content" }));
+      const env = {
+        DB: createSqliteD1Database(database, trace),
+        ARCHIVE_BUCKET: bucket as unknown as R2Bucket,
+      } as Env;
+      requireSessionMock.mockResolvedValue(adminSession);
+
+      const legacyManifestQuery = {
+        sql: `SELECT archive_key AS archiveKey, site_id AS siteId,
+                     start_hour AS startHour, end_hour AS endHour,
+                     granularity, format, row_count AS rowCount,
+                     size_bytes AS sizeBytes, created_at AS createdAt
+              FROM archive_objects
+              WHERE site_pk=(SELECT site_pk FROM site_identities WHERE site_id=?)
+                AND end_hour>=? AND start_hour<=?
+              ORDER BY start_hour ASC`,
+        bindings: ["site-1", 2, 4],
+      };
+      const legacyRows = database
+        .prepare(legacyManifestQuery.sql)
+        .all(...legacyManifestQuery.bindings);
+
+      const manifest = await dispatch(
+        "/api/private/archive/manifest?siteId=site-1&from=7200000&to=14400000",
+        env,
+      );
+      const payload = (await manifest.json()) as {
+        files: Array<Record<string, unknown>>;
+      };
+
+      expect(manifest.status).toBe(200);
+      expect(
+        payload.files.map(({ archiveKey, startHour, endHour }) => ({
+          archiveKey,
+          startHour,
+          endHour,
+        })),
+      ).toEqual(
+        (legacyRows as Array<Record<string, unknown>>).map(
+          ({ archiveKey, startHour, endHour }) => ({
+            archiveKey,
+            startHour,
+            endHour,
+          }),
+        ),
+      );
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(trace.preparedSql[0]).toContain('"site_identities"');
+      expect(trace.bindings[0]).toEqual(["site-1", 2, 4]);
+      const legacyManifestPlan = explainQueryPlan(
+        database,
+        legacyManifestQuery,
+      );
+      const typedManifestPlan = explainQueryPlan(database, {
+        sql: trace.preparedSql[0],
+        bindings: trace.bindings[0],
+      });
+      expect(legacyManifestPlan.join("\n")).toContain(
+        "idx_archive_objects_site_pk_hour",
+      );
+      expect(typedManifestPlan.join("\n")).toContain(
+        "idx_archive_objects_site_pk_hour",
+      );
+      expect(legacyManifestPlan.join("\n")).toContain(
+        "sqlite_autoindex_site_identities_1",
+      );
+      expect(typedManifestPlan.join("\n")).toContain(
+        "sqlite_autoindex_site_identities_1",
+      );
+
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      const legacyFileQuery = {
+        sql: "SELECT archive_key AS archiveKey,format,site_id AS siteId FROM archive_objects WHERE archive_key=? LIMIT 1",
+        bindings: ["site-1/earlier.parquet"],
+      };
+      const legacyFile = database
+        .prepare(legacyFileQuery.sql)
+        .get(...legacyFileQuery.bindings);
+      const file = await dispatch(
+        "/api/private/archive/file?key=site-1%2Fearlier.parquet",
+        env,
+      );
+
+      expect(file.status).toBe(200);
+      expect(legacyFile).toEqual({
+        archiveKey: "site-1/earlier.parquet",
+        format: "parquet",
+        siteId: "site-1",
+      });
+      expect(await file.text()).toBe("parquet-content");
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(trace.bindings[0]).toEqual(["site-1/earlier.parquet", 1]);
+      expect(explainQueryPlan(database, legacyFileQuery).join("\n")).toContain(
+        "sqlite_autoindex_archive_objects_1",
+      );
+      expect(
+        explainQueryPlan(database, {
+          sql: trace.preparedSql[0],
+          bindings: trace.bindings[0],
+        }).join("\n"),
+      ).toContain("sqlite_autoindex_archive_objects_1");
+    } finally {
+      database.close();
+    }
+  });
+
   it("returns not found for unknown private archive paths", async () => {
     const { env } = createEnv();
 
@@ -182,7 +369,7 @@ describe("private archive edge query handler", () => {
         ok: false,
         error: { message: "Site access denied for current user" },
       });
-      expect(membership.bind).toHaveBeenCalledWith("user-1", "site-1");
+      expect(membership.bind).toHaveBeenCalledWith("user-1", "site-1", 1);
     });
 
     it("rejects invalid manifest time windows after authorization", async () => {
@@ -305,7 +492,7 @@ describe("private archive edge query handler", () => {
           },
         ],
       });
-      expect(membership.bind).toHaveBeenCalledWith("user-1", "site-1");
+      expect(membership.bind).toHaveBeenCalledWith("user-1", "site-1", 1);
       expect(list.bind).toHaveBeenCalledWith("site-1", 2, 4);
       expect(prepare).toHaveBeenCalledTimes(2);
     });
@@ -403,8 +590,8 @@ describe("private archive edge query handler", () => {
         ok: false,
         error: { message: "Archive object is not queryable in precise mode" },
       });
-      expect(missingRow.bind).toHaveBeenCalledWith("missing.parquet");
-      expect(csvRow.bind).toHaveBeenCalledWith("site/export.csv");
+      expect(missingRow.bind).toHaveBeenCalledWith("missing.parquet", 1);
+      expect(csvRow.bind).toHaveBeenCalledWith("site/export.csv", 1);
     });
 
     it("denies file access when a non-admin member lacks site access", async () => {
@@ -437,7 +624,7 @@ describe("private archive edge query handler", () => {
         ok: false,
         error: { message: "Site access denied for current user" },
       });
-      expect(membership.bind).toHaveBeenCalledWith("user-1", "site-1");
+      expect(membership.bind).toHaveBeenCalledWith("user-1", "site-1", 1);
       expect(bucket.get).not.toHaveBeenCalled();
     });
 
@@ -463,7 +650,7 @@ describe("private archive edge query handler", () => {
         ok: false,
         error: { message: "Archive object content is missing" },
       });
-      expect(archiveRow.bind).toHaveBeenCalledWith("site/day.parquet");
+      expect(archiveRow.bind).toHaveBeenCalledWith("site/day.parquet", 1);
       expect(bucket.get).toHaveBeenCalledWith("site/day.parquet", undefined);
     });
 
@@ -503,7 +690,7 @@ describe("private archive edge query handler", () => {
       expect(response.headers.get("etag")).toBe('"archive-etag"');
       expect(response.headers.get("content-length")).toBe("12");
       expect(await response.text()).toBe("full-parquet");
-      expect(membership.bind).toHaveBeenCalledWith("user-1", "site-1");
+      expect(membership.bind).toHaveBeenCalledWith("user-1", "site-1", 1);
       expect(bucket.get).toHaveBeenCalledWith("site/day.parquet", undefined);
     });
 

@@ -1,4 +1,16 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  join,
+  limit,
+  param,
+  project,
+  scan,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import {
   canAccessMemberSite,
   parseMemberSiteIdsJson,
@@ -119,34 +131,53 @@ async function canSessionReadSite(
   session: Record<string, string>,
   siteId: string,
 ): Promise<boolean> {
+  const sites = scan(schema.sites);
+  const matchingSites = filter(sites, eq(sites.columns.id, param(siteId)));
+  const client = createD1DatabaseClient(env.DB);
+
   if (session.systemRole === "admin") {
-    const site = await createDatabaseRuntime(env.DB).first<{ id: string }>({
-      sql: "SELECT id FROM sites WHERE id=? LIMIT 1",
-      bindings: [siteId],
-      tag: "admin.sites.first",
-    });
+    const site = await client.first(
+      compileD1Query(
+        limit(project(matchingSites, { id: matchingSites.columns.id }), 1),
+        { tag: "admin.sites.first" },
+      ),
+    );
     return Boolean(site?.id);
   }
 
-  const site = await createDatabaseRuntime(env.DB).first<{
-    id: string;
-    ownerUserId: string;
-    role: string | null;
-    siteIdsJson: string | null;
-  }>({
-    sql: `SELECT
-       s.id,
-       t.owner_user_id AS ownerUserId,
-       tm.role,
-       tm.site_ids_json AS siteIdsJson
-     FROM sites s
-     INNER JOIN teams t ON t.id = s.team_id
-     LEFT JOIN team_members tm ON tm.team_id = s.team_id AND tm.user_id = ?
-     WHERE s.id = ?
-     LIMIT 1`,
-    bindings: [session.userId, siteId],
-    tag: "admin.sites.first",
-  });
+  const teams = scan(schema.teams);
+  const members = scan(schema.team_members);
+  const siteTeams = join(
+    sites,
+    teams,
+    eq(sites.columns.team_id, teams.columns.id),
+    "inner",
+  );
+  const siteTeamMembers = join(
+    siteTeams,
+    members,
+    and(
+      eq(siteTeams.columns.left_team_id, members.columns.team_id),
+      eq(members.columns.user_id, param(session.userId)),
+    ),
+    "left",
+  );
+  const matchingPrivateSites = filter(
+    siteTeamMembers,
+    eq(siteTeamMembers.columns.left_left_id, param(siteId)),
+  );
+  const privateSiteQuery = limit(
+    project(matchingPrivateSites, {
+      id: matchingPrivateSites.columns.left_left_id,
+      ownerUserId: matchingPrivateSites.columns.left_right_owner_user_id,
+      role: matchingPrivateSites.columns.right_role,
+      siteIdsJson: matchingPrivateSites.columns.right_site_ids_json,
+    }),
+    1,
+  );
+  const site = await client.first(
+    compileD1Query(privateSiteQuery, { tag: "admin.sites.first" }),
+  );
 
   if (!site?.id) return false;
   if (site.ownerUserId === session.userId) return true;
