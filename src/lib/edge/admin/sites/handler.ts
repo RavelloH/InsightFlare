@@ -59,25 +59,29 @@ export async function createSiteWithDefaultSettings(
   },
 ): Promise<string> {
   const siteId = crypto.randomUUID();
-  await env.DB.prepare(
-    "INSERT INTO sites (id,team_id,name,domain,public_enabled,public_slug,created_at,updated_at) VALUES (?,?,?,?,?,?,unixepoch(),unixepoch())",
-  )
-    .bind(
+  await createDatabaseRuntime(env.DB).run({
+    sql: "INSERT INTO sites (id,team_id,name,domain,public_enabled,public_slug,created_at,updated_at) VALUES (?,?,?,?,?,?,unixepoch(),unixepoch())",
+    bindings: [
       siteId,
       input.teamId,
       input.name,
       input.domain,
       input.publicEnabled ? 1 : 0,
       input.publicEnabled ? input.publicSlug : null,
-    )
-    .run();
+    ],
+    tag: "admin.sites.insert",
+  });
   try {
     await upsertSiteScriptSettings(env, siteId, {
       siteDomain: input.domain,
       settings: DEFAULT_SITE_SCRIPT_SETTINGS,
     });
   } catch (error) {
-    await env.DB.prepare("DELETE FROM sites WHERE id=?").bind(siteId).run();
+    await createDatabaseRuntime(env.DB).run({
+      sql: "DELETE FROM sites WHERE id=?",
+      bindings: [siteId],
+      tag: "admin.sites.compensate_insert",
+    });
     throw error;
   }
   return siteId;
@@ -99,55 +103,61 @@ async function filterReadableSitesForActor<T extends { id: string }>(
   return sites.filter((site) => allowed.has(site.id));
 }
 export async function deleteSiteData(env: Env, siteId: string): Promise<void> {
-  await env.DB.prepare("DELETE FROM configs WHERE config_key=?")
-    .bind(`site:${siteId}`)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM custom_event_json_values WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL})`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM custom_events WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM custom_event_names WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM custom_event_json_keys WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM custom_event_json_paths WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM visits WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM visit_hourly_rollups WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare(
-    `DELETE FROM visit_hourly_aggregation_state WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
-  )
-    .bind(siteId)
-    .run();
-  await env.DB.prepare("DELETE FROM sites WHERE id=?").bind(siteId).run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "DELETE FROM configs WHERE config_key=?",
+    bindings: [`site:${siteId}`],
+    tag: "admin.sites.delete_config",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM custom_event_json_values WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_custom_event_json_values",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM custom_event_json_nodes WHERE event_pk IN (SELECT event_pk FROM custom_events WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL})`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_custom_event_json_nodes",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM custom_events WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_custom_events",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM custom_event_names WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_custom_event_names",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM custom_event_json_keys WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_custom_event_json_keys",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM custom_event_json_paths WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_custom_event_json_paths",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM visits WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_visits",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM visit_hourly_rollups WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_hourly_rollups",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: `DELETE FROM visit_hourly_aggregation_state WHERE site_pk=${SITE_PK_FROM_SITE_ID_SQL}`,
+    bindings: [siteId],
+    tag: "admin.sites.delete_hourly_aggregation_state",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: "DELETE FROM sites WHERE id=?",
+    bindings: [siteId],
+    tag: "admin.sites.delete",
+  });
   try {
     await deleteSiteScriptSettings(env, siteId);
   } catch {
@@ -264,11 +274,18 @@ export async function handleSitesAdmin(
       const available = await ensurePublicSlugAvailable(env, pubSlug, siteId);
       if (!available) return bad("Public slug already exists", undefined, req);
     }
-    await env.DB.prepare(
-      "UPDATE sites SET team_id=?,name=?,domain=?,public_enabled=?,public_slug=?,updated_at=unixepoch() WHERE id=?",
-    )
-      .bind(nextTeamId, name, domain, pub ? 1 : 0, pub ? pubSlug : null, siteId)
-      .run();
+    await createDatabaseRuntime(env.DB).run({
+      sql: "UPDATE sites SET team_id=?,name=?,domain=?,public_enabled=?,public_slug=?,updated_at=unixepoch() WHERE id=?",
+      bindings: [
+        nextTeamId,
+        name,
+        domain,
+        pub ? 1 : 0,
+        pub ? pubSlug : null,
+        siteId,
+      ],
+      tag: "admin.sites.update",
+    });
     await upsertSiteScriptSettings(env, siteId, {
       siteDomain: domain,
     });
