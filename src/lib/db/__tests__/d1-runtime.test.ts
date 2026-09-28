@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createDatabaseRuntime } from "@/lib/db";
+import { createD1DatabaseClient, createDatabaseRuntime } from "@/lib/db";
 
 function createDatabase() {
   const result = {
@@ -32,6 +32,22 @@ function createDatabase() {
 }
 
 describe("D1 database runtime", () => {
+  it("creates a typed database client from a D1 binding", async () => {
+    const { database, prepared, row } = createDatabase();
+    const client = createD1DatabaseClient(database);
+    const query = {
+      kind: "query",
+      sql: "SELECT value FROM records WHERE id=?",
+      bindings: ["record-1"],
+    } as const;
+
+    await expect(client.first<{ value: number }>(query)).resolves.toBe(row);
+
+    expect(database.prepare).toHaveBeenCalledExactlyOnceWith(query.sql);
+    expect(prepared.bind).toHaveBeenCalledExactlyOnceWith("record-1");
+    expect(prepared.first).toHaveBeenCalledExactlyOnceWith();
+  });
+
   it("passes SQL and bindings to D1 without changing them", async () => {
     const { database, prepared, result } = createDatabase();
     const sql = " SELECT value FROM records WHERE id=? AND timestamp>=? ";

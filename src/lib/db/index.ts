@@ -11,7 +11,7 @@ export {
   update,
 } from "./mutation/plan";
 export type { DatabaseClient } from "./query/client";
-export { createDatabaseClient } from "./query/client";
+export { createD1DatabaseClient, createDatabaseClient } from "./query/client";
 export type { CompiledQuery } from "./query/compiled";
 export { compileD1Query } from "./query/compiler";
 export { DatabaseCompilerError } from "./query/errors";

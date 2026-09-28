@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db/d1-runtime";
 import type { CompiledMutation } from "@/lib/db/mutation/plan";
 import type { DatabaseRuntime } from "@/lib/db/types";
 
@@ -27,4 +28,8 @@ export function createDatabaseClient(runtime: DatabaseRuntime): DatabaseClient {
       return runtime.batch(mutations);
     },
   };
+}
+
+export function createD1DatabaseClient(database: D1Database): DatabaseClient {
+  return createDatabaseClient(createDatabaseRuntime(database));
 }
