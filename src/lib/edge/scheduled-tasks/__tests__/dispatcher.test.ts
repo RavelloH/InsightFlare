@@ -26,6 +26,8 @@ const { dispatchInternalScheduledTasks } =
 
 class FakeD1Database {
   readonly db = new DatabaseSync(":memory:");
+  readonly calls: Array<{ method: "all" | "run"; sql: string }> = [];
+  failNextUpdate = false;
 
   constructor() {
     this.db.exec(`
@@ -46,17 +48,27 @@ class FakeD1Database {
     const database = this.db;
     return {
       bind: (...bindings: Array<string | number | null>) => ({
-        all: async <T>() => ({
-          results: database
-            .prepare(sql)
-            .all(...bindings)
-            .map((row) => ({ ...row }) as T),
-        }),
-        run: async () => ({
-          meta: {
-            changes: Number(database.prepare(sql).run(...bindings).changes),
-          },
-        }),
+        all: async <T>() => {
+          this.calls.push({ method: "all", sql });
+          return {
+            results: database
+              .prepare(sql)
+              .all(...bindings)
+              .map((row) => ({ ...row }) as T),
+          };
+        },
+        run: async () => {
+          this.calls.push({ method: "run", sql });
+          if (this.failNextUpdate && sql.includes("UPDATE")) {
+            this.failNextUpdate = false;
+            throw new Error("database unavailable");
+          }
+          return {
+            meta: {
+              changes: Number(database.prepare(sql).run(...bindings).changes),
+            },
+          };
+        },
       }),
     };
   }
@@ -137,6 +149,10 @@ describe("internal scheduled task dispatcher", () => {
       { task_key: "notification_tick", nextRunAt: nowSeconds + 1800 },
       { task_key: "visit_hourly_rollup", nextRunAt: nowSeconds + 3600 },
     ]);
+    expect(d1.calls.filter(({ method }) => method === "run")).toHaveLength(6);
+    expect(
+      d1.calls.filter(({ method }) => method === "all")[0]?.sql,
+    ).not.toMatch(/ORDER BY/i);
     d1.close();
   });
 
@@ -151,6 +167,98 @@ describe("internal scheduled task dispatcher", () => {
     ]);
 
     expect(runScheduledTask).toHaveBeenCalledTimes(1);
+    const attemptedClaims = d1.calls.filter(
+      ({ method, sql }) =>
+        method === "run" && sql.includes('SET "claim_token" = ?'),
+    );
+    expect(attemptedClaims).toHaveLength(2);
+    expect(
+      d1.calls.filter(
+        ({ method, sql }) => method === "run" && sql.includes("UPDATE"),
+      ),
+    ).toHaveLength(3);
+    d1.close();
+  });
+
+  it("replaces an expired claim with one conditional update", async () => {
+    const d1 = new FakeD1Database();
+    const now = Date.UTC(2026, 7, 31, 10, 30);
+    const nowSeconds = now / 1000;
+    seed(d1, "notification_tick", 0);
+    d1.db
+      .prepare(
+        "UPDATE scheduled_task_schedule_state SET claim_token = ?, claim_expires_at = ? WHERE task_key = ?",
+      )
+      .run("expired-token", nowSeconds - 1, "notification_tick");
+    runScheduledTask.mockImplementationOnce(async () => {
+      const row = d1.db
+        .prepare(
+          "SELECT claim_token, claim_expires_at FROM scheduled_task_schedule_state WHERE task_key = ?",
+        )
+        .get("notification_tick") as {
+        claim_token: string;
+        claim_expires_at: number;
+      };
+      expect(row.claim_token).not.toBe("expired-token");
+      expect(row.claim_expires_at).toBe(nowSeconds + 6 * 60 * 60);
+    });
+
+    await dispatchInternalScheduledTasks(createEnv(d1), now, observability());
+
+    const claimUpdates = d1.calls.filter(
+      ({ method, sql }) =>
+        method === "run" &&
+        sql.includes("UPDATE") &&
+        sql.includes("claim_expires_at") &&
+        sql.includes("claim_token"),
+    );
+    expect(claimUpdates).toHaveLength(2);
+    expect(runScheduledTask).toHaveBeenCalledTimes(1);
+    d1.close();
+  });
+
+  it("fails closed when the atomic claim update errors", async () => {
+    const d1 = new FakeD1Database();
+    const now = Date.UTC(2026, 7, 31, 10, 30);
+    seed(d1, "notification_tick", 0);
+    d1.failNextUpdate = true;
+
+    await dispatchInternalScheduledTasks(createEnv(d1), now, observability());
+
+    expect(runScheduledTask).not.toHaveBeenCalled();
+    expect(
+      d1.calls.filter(
+        ({ method, sql }) => method === "run" && sql.includes("UPDATE"),
+      ),
+    ).toHaveLength(1);
+    d1.close();
+  });
+
+  it("does not release a claim after ownership changes", async () => {
+    const d1 = new FakeD1Database();
+    const now = Date.UTC(2026, 7, 31, 10, 30);
+    seed(d1, "notification_tick", 0);
+    runScheduledTask.mockImplementationOnce(async () => {
+      d1.db
+        .prepare(
+          "UPDATE scheduled_task_schedule_state SET claim_token = ? WHERE task_key = ?",
+        )
+        .run("replacement-owner", "notification_tick");
+    });
+
+    await dispatchInternalScheduledTasks(createEnv(d1), now, observability());
+
+    expect(
+      d1.db
+        .prepare(
+          "SELECT claim_token, last_run_at, next_run_at FROM scheduled_task_schedule_state WHERE task_key = ?",
+        )
+        .get("notification_tick"),
+    ).toEqual({
+      claim_token: "replacement-owner",
+      last_run_at: null,
+      next_run_at: 0,
+    });
     d1.close();
   });
 
@@ -162,6 +270,19 @@ describe("internal scheduled task dispatcher", () => {
     await dispatchInternalScheduledTasks(createEnv(d1), now, observability());
 
     expect(runScheduledTask).not.toHaveBeenCalled();
+    expect(d1.calls.filter(({ method }) => method === "run")).toHaveLength(0);
+    d1.close();
+  });
+
+  it("does not issue a claim update for a task that is not due", async () => {
+    const d1 = new FakeD1Database();
+    const now = Date.UTC(2026, 7, 31, 10, 30);
+    seed(d1, "notification_tick", now / 1000 + 1);
+
+    await dispatchInternalScheduledTasks(createEnv(d1), now, observability());
+
+    expect(runScheduledTask).not.toHaveBeenCalled();
+    expect(d1.calls.filter(({ method }) => method === "run")).toHaveLength(0);
     d1.close();
   });
 });

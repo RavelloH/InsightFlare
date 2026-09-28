@@ -1,4 +1,21 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Mutation,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  isNull,
+  lt,
+  lte,
+  or,
+  param,
+  project,
+  scan,
+  unixepoch,
+  update,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import type { InvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 import { runNotificationTick } from "@/lib/notifications/edge/notification-task";
@@ -44,22 +61,35 @@ async function loadDueStates(
   env: Env,
   now: number,
 ): Promise<ScheduleStateRow[]> {
-  const result = await createDatabaseRuntime(env.DB).all<ScheduleStateRow>({
-    sql: `
-      SELECT
-        task_key AS taskKey,
-        enabled,
-        next_run_at AS nextRunAt
-      FROM scheduled_task_schedule_state
-      WHERE enabled = 1 AND next_run_at <= ?
-    `,
-    bindings: [now],
-    tag: "scheduled-tasks.scheduled_task_schedule_state.all",
+  const scheduleState = schema.scheduled_task_schedule_state;
+  const states = scan(scheduleState);
+  const dueStates = filter(
+    states,
+    and(
+      eq(states.columns.enabled, param(1)),
+      lte(states.columns.next_run_at, param(now)),
+    ),
+  );
+  const query = project(dueStates, {
+    taskKey: dueStates.columns.task_key,
+    enabled: dueStates.columns.enabled,
+    nextRunAt: dueStates.columns.next_run_at,
   });
-  const due = new Map(result.results.map((row) => [String(row.taskKey), row]));
+  const result = await createD1DatabaseClient(env.DB).all(
+    compileD1Query(query, {
+      tag: "scheduled-tasks.scheduled_task_schedule_state.all",
+    }),
+  );
+  const due = new Map<string, (typeof result.results)[number]>();
+  for (const row of result.results) {
+    if (typeof row.taskKey !== "string") continue;
+    due.set(row.taskKey, row);
+  }
   return TASK_ORDER.flatMap((key) => {
     const row = due.get(key);
-    return row ? [row] : [];
+    // Only known scheduled tasks survive this allowlisted key lookup, so the
+    // nullable PK reported by generated schema metadata is refined here.
+    return row ? [{ ...row, taskKey: key }] : [];
   });
 }
 
@@ -70,28 +100,29 @@ async function claimTask(
   claimToken: string,
 ): Promise<boolean> {
   try {
-    const result = await createDatabaseRuntime(env.DB).run({
-      sql: `
-        UPDATE scheduled_task_schedule_state
-        SET claim_token = ?,
-            claim_expires_at = ?,
-            updated_at = unixepoch()
-        WHERE task_key = ?
-          AND enabled = 1
-          AND next_run_at <= ?
-          AND (
-            claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at < ?
-          )
-      `,
-      bindings: [
-        claimToken,
-        now + Math.trunc(STALE_RUNNING_MS / 1000),
-        taskKey,
-        now,
-        now,
-      ],
-      tag: "scheduled_tasks.dispatcher.claim",
-    });
+    const scheduleState = schema.scheduled_task_schedule_state;
+    const result = await createD1DatabaseClient(env.DB).run(
+      compileD1Mutation(
+        update(scheduleState, (columns) => ({
+          set: {
+            claim_token: claimToken,
+            claim_expires_at: now + Math.trunc(STALE_RUNNING_MS / 1000),
+            updated_at: unixepoch(),
+          },
+          where: and(
+            eq(columns.task_key, param(taskKey)),
+            eq(columns.enabled, param(1)),
+            lte(columns.next_run_at, param(now)),
+            or(
+              isNull(columns.claim_token),
+              isNull(columns.claim_expires_at),
+              lt(columns.claim_expires_at, param(now)),
+            ),
+          ),
+        })),
+        { tag: "scheduled_tasks.dispatcher.claim" },
+      ),
+    );
     return Number(result.meta?.changes ?? 0) === 1;
   } catch {
     // Claiming is fail-closed: a database error must not turn into duplicate
@@ -110,20 +141,26 @@ async function releaseTask(
   const now = nowSeconds(scheduledTime);
   const next = nextRunAt(taskKey, now);
   const lastError = error ? String(error).slice(0, 1000) : null;
-  await createDatabaseRuntime(env.DB).run({
-    sql: `
-      UPDATE scheduled_task_schedule_state
-      SET last_run_at = ?,
-          next_run_at = ?,
-          claim_token = NULL,
-          claim_expires_at = NULL,
-          last_error = ?,
-          updated_at = unixepoch()
-      WHERE task_key = ? AND claim_token = ?
-    `,
-    bindings: [now, next, lastError, taskKey, claimToken],
-    tag: "scheduled_tasks.dispatcher.complete",
-  });
+  const scheduleState = schema.scheduled_task_schedule_state;
+  await createD1DatabaseClient(env.DB).run(
+    compileD1Mutation(
+      update(scheduleState, (columns) => ({
+        set: {
+          last_run_at: now,
+          next_run_at: next,
+          claim_token: null,
+          claim_expires_at: null,
+          last_error: lastError,
+          updated_at: unixepoch(),
+        },
+        where: and(
+          eq(columns.task_key, param(taskKey)),
+          eq(columns.claim_token, param(claimToken)),
+        ),
+      })),
+      { tag: "scheduled_tasks.dispatcher.complete" },
+    ),
+  );
 }
 
 async function executeTask(
