@@ -336,7 +336,7 @@ describe("notification report data", () => {
     );
     expect(bind).toHaveBeenCalledWith("site-1");
     expect(env.DB.prepare).toHaveBeenCalledWith(
-      expect.stringContaining("FROM visits"),
+      expect.stringContaining('FROM "visits"'),
     );
     expect(env.DB.prepare).not.toHaveBeenCalledWith(
       expect.stringContaining("visits_archive"),

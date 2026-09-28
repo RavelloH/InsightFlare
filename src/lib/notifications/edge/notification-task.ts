@@ -1,4 +1,11 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  limit,
+  param,
+} from "@/lib/db";
 import { appNow } from "@/lib/edge/runtime/e2e-clock";
 import type {
   ScheduledTaskContext,
@@ -14,6 +21,7 @@ import type {
 import { DEFAULT_RETENTION_CONFIG } from "@/lib/retention";
 import type { ScheduledTaskRetentionConfig } from "@/lib/scheduled-tasks";
 
+import { notificationRecipientRows } from "./database-projections";
 import { deliverNotificationMessage } from "./delivery";
 import {
   evaluateNotificationRule,
@@ -440,27 +448,16 @@ export async function createManualTestNotification(input: {
   const cache = createNotificationInvocationCache();
   const retention = context.retention ?? DEFAULT_RETENTION_CONFIG;
   const now = Math.floor(appNow() / 1000);
-  const user = await createDatabaseRuntime(env.DB).first<{
-    id: string;
-    email: string;
-    preferencesJson: string;
-    preferredLocale?: string | null;
-    timeZone?: string | null;
-  }>({
-    sql: `
-      SELECT
-        id,
-        email,
-        notification_preferences_json AS preferencesJson,
-        preferred_locale AS preferredLocale,
-        timezone AS timeZone
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-    `,
-    bindings: [userId],
-    tag: "notifications.users.first",
-  });
+  const users = notificationRecipientRows();
+  const matchingUser = filter(users, eq(users.columns.id, param(userId)));
+  const userQuery = limit(matchingUser, 1);
+  const userRow = await createD1DatabaseClient(env.DB).first(
+    compileD1Query(userQuery, { tag: "notifications.users.first" }),
+  );
+  const user =
+    userRow && typeof userRow.id === "string"
+      ? { ...userRow, id: userRow.id }
+      : null;
   if (!user) {
     await context.logger.warn(
       "notification_delivery_skipped",

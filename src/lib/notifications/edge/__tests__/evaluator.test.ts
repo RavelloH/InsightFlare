@@ -11,6 +11,7 @@ const loadReportData = vi.hoisted(() => vi.fn());
 const loadMetricValue = vi.hoisted(() => vi.fn());
 const loadPreviousMetricValue = vi.hoisted(() => vi.fn());
 const loadCumulativeMetricValue = vi.hoisted(() => vi.fn());
+const loadSiteInfo = vi.hoisted(() => vi.fn());
 const loadSiteLastSeenAt = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/notifications/edge/report-data", () => ({
@@ -19,6 +20,7 @@ vi.mock("@/lib/notifications/edge/report-data", () => ({
   loadMetricValue,
   loadPreviousMetricValue,
   loadCumulativeMetricValue,
+  loadSiteInfo,
   loadSiteLastSeenAt,
 }));
 
@@ -63,6 +65,10 @@ function envWithSite() {
 describe("notification evaluator", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    loadSiteInfo.mockResolvedValue({
+      name: "Example",
+      domain: "example.com",
+    });
   });
 
   it("returns a triggered draft for test rules", async () => {

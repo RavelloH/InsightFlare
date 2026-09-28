@@ -1,4 +1,3 @@
-import { createDatabaseRuntime } from "@/lib/db";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 import type { NotificationMessageDraft } from "@/lib/notifications/message";
@@ -336,19 +335,7 @@ async function getSiteDisplay(
   siteId: string,
   cache?: NotificationInvocationCache,
 ): Promise<string | null> {
-  if (cache) {
-    const row = await loadSiteInfo(env, siteId, cache);
-    if (!row) return null;
-    return row.domain || row.name || "Site";
-  }
-  const row = await createDatabaseRuntime(env.DB).first<{
-    name: string;
-    domain: string;
-  }>({
-    sql: "SELECT name, domain FROM sites WHERE id = ? LIMIT 1",
-    bindings: [siteId],
-    tag: "notifications.sites.first",
-  });
+  const row = await loadSiteInfo(env, siteId, cache);
   if (!row) return null;
   return row.domain || row.name || "Site";
 }

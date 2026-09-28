@@ -1,4 +1,16 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  aggregate,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  limit,
+  max,
+  param,
+  project,
+  scan,
+  schema,
+} from "@/lib/db";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type {
   FilterDocument,
@@ -7,7 +19,7 @@ import type {
 import { queryOverviewAggregate } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import { queryTopPagesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/pages";
 import { queryTopReferrersFromD1 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
+import { sitePkForSiteId } from "@/lib/edge/sites/identity-query";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -327,11 +339,18 @@ async function loadSiteInfoUncached(
   env: Env,
   siteId: string,
 ): Promise<NotificationSiteInfo | null> {
-  const row = await createDatabaseRuntime(env.DB).first<NotificationSiteInfo>({
-    sql: "SELECT name, domain FROM sites WHERE id = ? LIMIT 1",
-    bindings: [siteId],
-    tag: "notifications.sites.first",
-  });
+  const sites = scan(schema.sites);
+  const matchingSite = filter(sites, eq(sites.columns.id, param(siteId)));
+  const query = limit(
+    project(matchingSite, {
+      name: matchingSite.columns.name,
+      domain: matchingSite.columns.domain,
+    }),
+    1,
+  );
+  const row = await createD1DatabaseClient(env.DB).first(
+    compileD1Query(query, { tag: "notifications.sites.first" }),
+  );
   return row ?? null;
 }
 export async function loadDailyReportData(
@@ -626,15 +645,20 @@ async function loadSiteLastSeenAtUncached(
   env: Env,
   siteId: string,
 ): Promise<number | null> {
-  const row = await createDatabaseRuntime(env.DB).first<{
-    lastSeenAt: number | null;
-  }>({
-    sql: `SELECT MAX(last_activity_at) AS lastSeenAt
-     FROM visits
-     WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}`,
-    bindings: [siteId],
-    tag: "notifications.visits.first",
+  const visits = scan(schema.visits);
+  const matchingVisits = filter(
+    visits,
+    eq(visits.columns.site_pk, sitePkForSiteId(siteId)),
+  );
+  const query = aggregate(matchingVisits, {
+    groupBy: {},
+    aggregates: {
+      lastSeenAt: max(matchingVisits.columns.last_activity_at),
+    },
   });
+  const row = await createD1DatabaseClient(env.DB).first(
+    compileD1Query(query, { tag: "notifications.visits.first" }),
+  );
   const value = Number(row?.lastSeenAt ?? 0);
   return Number.isFinite(value) && value > 0 ? Math.floor(value / 1000) : null;
 }
