@@ -328,10 +328,11 @@ describe("edge public site lookup", () => {
     );
 
     expect(site).toMatchObject({ id: "site-1" });
-    expect(prepare).toHaveBeenCalledWith(
-      "SELECT id,name,domain FROM sites WHERE public_enabled=1 AND public_slug=? LIMIT 1",
-    );
-    expect(bind).toHaveBeenCalledWith("blog");
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare.mock.calls[0]?.[0]).toContain('FROM "sites"');
+    expect(prepare.mock.calls[0]?.[0]).toContain('"public_enabled"');
+    expect(prepare.mock.calls[0]?.[0]).toContain('"public_slug"');
+    expect(bind).toHaveBeenCalledWith(1, "blog", 1);
   });
 
   it("returns 404 for disabled, deleted, old, empty, or malformed slugs", async () => {

@@ -378,6 +378,7 @@ describe("request observation admin reader", () => {
     expect(detailSql).toContain("double20 AS schemaVersion");
     expect(config.bind).toHaveBeenCalledWith(
       SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY,
+      1,
     );
   });
 

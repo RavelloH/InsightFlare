@@ -528,7 +528,7 @@ describe("edge team query coverage", () => {
     });
     expect(calls[0]).toMatchObject({
       kind: "first",
-      bindings: ["team-1"],
+      bindings: ["team-1", 1],
     });
     expect(calls[1]).toMatchObject({
       kind: "all",
@@ -635,7 +635,7 @@ describe("edge team query coverage", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({
       kind: "first",
-      bindings: ["team-empty"],
+      bindings: ["team-empty", 1],
     });
     expect(calls[1]).toMatchObject({
       kind: "all",

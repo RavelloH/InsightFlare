@@ -190,9 +190,9 @@ describe("edge team query low branch coverage", () => {
     });
     expect(calls[0]).toMatchObject({
       kind: "first",
-      bindings: ["user-1", "team-1"],
+      bindings: ["user-1", "team-1", 1],
     });
-    expect(calls[0].sql).toContain("LEFT JOIN team_members");
+    expect(calls[0].sql).toContain('FROM "team_members"');
   });
 
   it("passes through team not found responses before listing sites", async () => {
@@ -213,7 +213,7 @@ describe("edge team query low branch coverage", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       kind: "first",
-      bindings: ["missing-team"],
+      bindings: ["missing-team", 1],
     });
   });
 
