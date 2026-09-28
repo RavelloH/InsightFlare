@@ -140,16 +140,22 @@ export async function handleUsersAdmin(
       teamSlugInput || `${username}-team`,
     );
     const pass = await hashPassword(password);
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,?,unixepoch(),unixepoch())",
-      ).bind(id, username, email, name, pass, systemRole),
-      env.DB.prepare(
-        "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
-      ).bind(teamId, teamName, teamSlug, id),
-      env.DB.prepare(
-        "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())",
-      ).bind(teamId, id),
+    await createDatabaseRuntime(env.DB).batch([
+      {
+        sql: "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,?,unixepoch(),unixepoch())",
+        bindings: [id, username, email, name, pass, systemRole],
+        tag: "admin.users.create",
+      },
+      {
+        sql: "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
+        bindings: [teamId, teamName, teamSlug, id],
+        tag: "admin.teams.create_for_user",
+      },
+      {
+        sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())",
+        bindings: [teamId, id],
+        tag: "admin.team_members.create_user_owner",
+      },
     ]);
     const created = await byId(env, id);
     if (!created) return bad("Failed to create account", undefined, req);
@@ -192,7 +198,11 @@ export async function handleUsersAdmin(
         return bad("Cannot delete user that owns teams", undefined, req);
       }
 
-      await env.DB.prepare("DELETE FROM users WHERE id=?").bind(id).run();
+      await createDatabaseRuntime(env.DB).run({
+        sql: "DELETE FROM users WHERE id=?",
+        bindings: [id],
+        tag: "admin.users.delete",
+      });
       return jsonResponseFor(req, {
         ok: true,
         data: { userId: id, removed: true },
@@ -230,11 +240,11 @@ export async function handleUsersAdmin(
       return bad("Email already exists", undefined, req);
     const pass =
       password.length > 0 ? await hashPassword(password) : e.password_hash;
-    await env.DB.prepare(
-      "UPDATE users SET username=?,email=?,name=?,password_hash=?,system_role=?,updated_at=unixepoch() WHERE id=?",
-    )
-      .bind(username, email, name, pass, role, id)
-      .run();
+    await createDatabaseRuntime(env.DB).run({
+      sql: "UPDATE users SET username=?,email=?,name=?,password_hash=?,system_role=?,updated_at=unixepoch() WHERE id=?",
+      bindings: [username, email, name, pass, role, id],
+      tag: "admin.users.update",
+    });
     const u = await byId(env, id);
     if (!u) return bad("Failed to update account", undefined, req);
     return jsonResponseFor(req, { ok: true, data: toPublicUser(u) });
@@ -308,11 +318,19 @@ export async function handleProfileAdmin(
       return bad("Email already exists", undefined, req);
     const pass =
       password.length > 0 ? await hashPassword(password) : a.user.password_hash;
-    await env.DB.prepare(
-      "UPDATE users SET username=?,email=?,name=?,password_hash=?,timezone=?,preferred_locale=?,updated_at=unixepoch() WHERE id=?",
-    )
-      .bind(username, email, name, pass, timeZone, preferredLocale, a.user.id)
-      .run();
+    await createDatabaseRuntime(env.DB).run({
+      sql: "UPDATE users SET username=?,email=?,name=?,password_hash=?,timezone=?,preferred_locale=?,updated_at=unixepoch() WHERE id=?",
+      bindings: [
+        username,
+        email,
+        name,
+        pass,
+        timeZone,
+        preferredLocale,
+        a.user.id,
+      ],
+      tag: "admin.users.update_profile",
+    });
     const u = await byId(env, a.user.id);
     if (!u) return bad("Failed to update profile", undefined, req);
     return jsonResponseFor(req, { ok: true, data: toPublicUser(u) });
