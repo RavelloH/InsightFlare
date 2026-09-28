@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   errorLogData,
   type InvocationLogger,
@@ -18,9 +19,10 @@ export async function sweepIngestAlarms(
 ): Promise<void> {
   let sites: SiteRow[];
   try {
-    const result = await env.DB.prepare(
-      "SELECT id FROM sites ORDER BY created_at ASC",
-    ).all<SiteRow>();
+    const result = await createDatabaseRuntime(env.DB).all<SiteRow>({
+      sql: "SELECT id FROM sites ORDER BY created_at ASC",
+      tag: "ingest.alarm_sweep.sites",
+    });
     sites = result.results;
   } catch (error) {
     logger.error("scheduled.ingest_alarm_sweep_failed", errorLogData(error));

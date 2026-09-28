@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type {
   Env,
@@ -309,8 +310,9 @@ export async function findRecentVisitorSession(
   );
   if (buffered) return buffered;
 
-  const persisted = await context.env.DB.prepare(
-    `
+  const persisted = await createDatabaseRuntime(context.env.DB)
+    .first<RecentVisitorSession>({
+      sql: `
       SELECT
         session_id AS sessionId,
         visit_id AS visitId,
@@ -347,26 +349,26 @@ export async function findRecentVisitorSession(
         started_at DESC
       LIMIT 1
     `,
-  )
-    .bind(
-      routeMatchEnabled,
-      routePreviousHostname,
-      routePreviousPathname,
-      routePreviousQueryString,
-      routePreviousHashFragment,
-      routeMatchEnabled,
-      routePreviousHostname,
-      routePreviousPathname,
-      routePreviousQueryString,
-      routePreviousQueryString,
-      routePreviousHashFragment,
-      routePreviousHashFragment,
-      input.siteId,
-      input.visitorId,
-      input.visitId,
-      cutoff,
-    )
-    .first<RecentVisitorSession>()
+      bindings: [
+        routeMatchEnabled,
+        routePreviousHostname,
+        routePreviousPathname,
+        routePreviousQueryString,
+        routePreviousHashFragment,
+        routeMatchEnabled,
+        routePreviousHostname,
+        routePreviousPathname,
+        routePreviousQueryString,
+        routePreviousQueryString,
+        routePreviousHashFragment,
+        routePreviousHashFragment,
+        input.siteId,
+        input.visitorId,
+        input.visitId,
+        cutoff,
+      ],
+      tag: "ingest.visits.find_recent_session",
+    })
     // A persisted-session lookup is an optimization for session continuity;
     // a D1 outage must not turn a valid pageview into a failed ingest.
     .catch(() => null);
@@ -441,8 +443,10 @@ export async function readPersistedVisitRow(
   siteId: string,
   visitId: string,
 ): Promise<BufferedVisitRow | null> {
-  const row = await context.env.DB.prepare(
-    `
+  const row = await createDatabaseRuntime(
+    context.env.DB,
+  ).first<BufferedVisitRow>({
+    sql: `
       SELECT
         visit_id AS visitId,
         status,
@@ -502,9 +506,9 @@ export async function readPersistedVisitRow(
       WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND visit_id = ?
       LIMIT 1
     `,
-  )
-    .bind(siteId, visitId)
-    .first<BufferedVisitRow>();
+    bindings: [siteId, visitId],
+    tag: "ingest.visits.find_persisted",
+  });
 
   return row
     ? {

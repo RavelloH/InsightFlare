@@ -1,3 +1,4 @@
+import { createDatabaseRuntime } from "@/lib/db";
 import type {
   TrafficSessionEndedInput,
   TrafficVisitFinalizedInput,
@@ -47,28 +48,32 @@ export async function resolveSitePk(
   const cached = context.sitePks.get(siteId);
   if (cached !== undefined) return cached;
 
-  const existing = await context.env.DB.prepare(
-    `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
-  )
-    .bind(siteId)
-    .first<{ sitePk: number }>();
+  const existing = await createDatabaseRuntime(context.env.DB).first<{
+    sitePk: number;
+  }>({
+    sql: `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
+    bindings: [siteId],
+    tag: "ingest.site_identities.first",
+  });
   const existingPk = Number(existing?.sitePk ?? 0);
   if (Number.isSafeInteger(existingPk) && existingPk > 0) {
     context.sitePks.set(siteId, existingPk);
     return existingPk;
   }
 
-  await context.env.DB.prepare(
-    `INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)`,
-  )
-    .bind(siteId)
-    .run();
+  await createDatabaseRuntime(context.env.DB).run({
+    sql: `INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)`,
+    bindings: [siteId],
+    tag: "ingest.site_identities.insert",
+  });
 
-  const created = await context.env.DB.prepare(
-    `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
-  )
-    .bind(siteId)
-    .first<{ sitePk: number }>();
+  const created = await createDatabaseRuntime(context.env.DB).first<{
+    sitePk: number;
+  }>({
+    sql: `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
+    bindings: [siteId],
+    tag: "ingest.site_identities.first",
+  });
   const sitePk = Number(created?.sitePk ?? 0);
   if (!Number.isSafeInteger(sitePk) || sitePk <= 0) {
     throw new Error(`Failed to resolve site identity for ${siteId}`);

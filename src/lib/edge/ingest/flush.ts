@@ -1,3 +1,4 @@
+import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
 import type { TrafficVisitSnapshot } from "@/lib/edge/analytics-engine/traffic-writer";
 import { clampString } from "@/lib/edge/utils";
 
@@ -353,10 +354,10 @@ export async function flushPendingToD1(
           if (sitePk === undefined) {
             throw new Error(`Missing site identity for ${row.siteId}`);
           }
-          return prepareVisitStatements(context, row, sitePk);
+          return prepareVisitStatements(row, sitePk);
         });
         const preparedVisits = preparedVisitGroups.flat();
-        await context.env.DB.batch(preparedVisits);
+        await createDatabaseRuntime(context.env.DB).batch(preparedVisits);
         recordFlushCounter(context, "flushedVisits", visitRows.length);
         markVisitRowsFlushed(context, visitRows);
       } catch (error) {
@@ -987,17 +988,20 @@ function nextDueAtAfterRetry(
   return Math.min(row.nextDueAt, retryAt);
 }
 function prepareVisitStatements(
-  context: IngestFlushContext,
   row: BufferedVisitRow,
   sitePk: number,
-): D1PreparedStatement[] {
+): DatabaseStatement[] {
   return [
-    context.env.DB.prepare(visitStateUpsertSql(row.status)).bind(
-      ...visitBindings(row, sitePk),
-    ),
-    context.env.DB.prepare(visitDetailsUpdateSql(row.status)).bind(
-      ...visitDetailBindings(row),
-    ),
+    {
+      sql: visitStateUpsertSql(row.status),
+      bindings: visitBindings(row, sitePk),
+      tag: "ingest.visits.upsert_state",
+    },
+    {
+      sql: visitDetailsUpdateSql(row.status),
+      bindings: visitDetailBindings(row),
+      tag: "ingest.visits.update_details",
+    },
   ];
 }
 async function flushRowsIndividually(
@@ -1018,7 +1022,9 @@ async function flushVisitRowIndividually(
 ): Promise<void> {
   try {
     const sitePk = await resolveSitePk(context, row.siteId);
-    await context.env.DB.batch(prepareVisitStatements(context, row, sitePk));
+    await createDatabaseRuntime(context.env.DB).batch(
+      prepareVisitStatements(row, sitePk),
+    );
     recordFlushCounter(context, "flushedVisits");
     markVisitRowsFlushed(context, [row]);
   } catch (error) {

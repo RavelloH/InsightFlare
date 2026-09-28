@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
+import { createDatabaseRuntime } from "@/lib/db";
 import {
   type TrafficVisitSnapshot,
   writeEventAnalyticsPoint,
@@ -1558,8 +1559,12 @@ export class IngestDurableObject extends DurableObject {
 
     if (rowsUpdated === 0 && !localVisit) {
       const instrumentedEnv = instrumentEnv(this.doEnv, logger);
-      const persistedVisit = await instrumentedEnv.DB.prepare(
-        `
+      const persistedVisit = await createDatabaseRuntime(instrumentedEnv.DB)
+        .first<{
+          sessionId: string;
+          visitorId: string;
+        }>({
+          sql: `
           SELECT
             session_id AS sessionId,
             visitor_id AS visitorId
@@ -1567,26 +1572,27 @@ export class IngestDurableObject extends DurableObject {
           WHERE visit_id = ? AND site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
           LIMIT 1
         `,
-      )
-        .bind(record.visitId, record.siteId)
-        .first<{ sessionId: string; visitorId: string }>()
+          bindings: [record.visitId, record.siteId],
+          tag: "ingest.visits.find_persisted_identify",
+        })
         .catch(() => null);
       serverSessionId = persistedVisit?.sessionId || "";
       serverVisitorId = persistedVisit?.visitorId || "";
-      await instrumentedEnv.DB.prepare(
-        `
+      await createDatabaseRuntime(instrumentedEnv.DB)
+        .run({
+          sql: `
           UPDATE visits
           SET user_id = ?, user_name = ?
           WHERE visit_id = ? AND site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
         `,
-      )
-        .bind(
-          record.userId,
-          record.userName || null,
-          record.visitId,
-          record.siteId,
-        )
-        .run()
+          bindings: [
+            record.userId,
+            record.userName || null,
+            record.visitId,
+            record.siteId,
+          ],
+          tag: "ingest.visits.update_identify",
+        })
         .catch(() => {});
     }
     logger.info(

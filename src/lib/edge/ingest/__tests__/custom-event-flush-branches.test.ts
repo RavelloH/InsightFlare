@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FLUSHED_BUFFER_RETENTION_MS } from "@/lib/edge/ingest/constants";
 import { flushCustomEventRowIndividually } from "@/lib/edge/ingest/custom-event-flush";
+import { hashCustomEventStringValue } from "@/lib/edge/ingest/custom-event-json";
 import type { IngestFlushContext } from "@/lib/edge/ingest/flush-types";
 import type { BufferedCustomEventRow } from "@/lib/edge/ingest/types";
 import type { InvocationPerformanceCounter } from "@/lib/edge/observability/logger";
@@ -164,6 +165,53 @@ describe("custom event individual flush branch coverage", () => {
 
     expect(context.batch).toHaveBeenCalledTimes(1);
     expect(context.batch.mock.calls[0]![0]).toHaveLength(4);
+    const batchCalls = context.calls.slice(-5, -1);
+    expect(
+      batchCalls.map(
+        (call) => call.sql.match(/INSERT OR IGNORE INTO ([a-z_]+)/u)?.[1],
+      ),
+    ).toEqual([
+      "custom_events",
+      "custom_event_json_nodes",
+      "custom_event_json_nodes",
+      "custom_event_json_values",
+    ]);
+    const createdAt = Math.floor(NOW / 1000);
+    expect(batchCalls.map((call) => call.bindings)).toEqual([
+      [
+        "event-1",
+        "site-1",
+        1,
+        "visit-1",
+        10,
+        row.occurredAt,
+        NOW,
+        7,
+        2,
+        1,
+        "user-1",
+        createdAt,
+        1,
+        "visit-1",
+      ],
+      [1, null, null, 30, 4, null, null, 0, "event-1"],
+      [2, 1, 20, 31, 1, 0, null, 1, "event-1"],
+      [
+        2,
+        "site-1",
+        1,
+        10,
+        31,
+        row.occurredAt,
+        null,
+        1,
+        "pro",
+        hashCustomEventStringValue("pro"),
+        null,
+        null,
+        "event-1",
+      ],
+    ]);
     expect(context.dictionaryIds).toEqual(
       new Map([
         ["name:site-1:Signup", 10],
@@ -175,7 +223,6 @@ describe("custom event individual flush branch coverage", () => {
     expect(
       context.calls.some((call) => call.sql.includes("event_name_id")),
     ).toBe(true);
-    const createdAt = Math.floor(NOW / 1000);
     expect(context.calls).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ bindings: [1, "visit-1"] }),
