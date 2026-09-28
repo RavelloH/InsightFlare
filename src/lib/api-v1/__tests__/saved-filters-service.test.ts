@@ -76,7 +76,9 @@ describe("API v1 saved-filter application service", () => {
     });
     expect(result.ok && "ownerUserId" in result.value).toBe(false);
     expect(result.ok && "filterDsl" in result.value).toBe(false);
-    expect(fake.bind).toHaveBeenCalledWith("site-1", "filter-1", "team-1");
+    expect(fake.bind.mock.calls[0]).toEqual(
+      expect.arrayContaining(["site-1", "filter-1", "team", "team-1", 1]),
+    );
   });
 
   it("migrates a missing scope preference to Auto", async () => {

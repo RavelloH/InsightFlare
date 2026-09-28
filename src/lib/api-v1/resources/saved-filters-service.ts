@@ -13,7 +13,22 @@ import {
   type SavedFilterDefinition,
   type SavedFilterPage,
 } from "@/lib/api-v1/contract/resources";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  join,
+  limit,
+  lt,
+  or,
+  param,
+  project,
+  scan,
+  schema,
+  sort,
+} from "@/lib/db";
 import type { Env } from "@/lib/edge/types";
 import {
   decodePageCursor,
@@ -33,9 +48,40 @@ interface SavedFilterRow {
   readonly createdAt: number;
   readonly updatedAt: number;
 }
+interface SavedFilterQueryRow extends Omit<
+  SavedFilterRow,
+  "id" | "scopePreference"
+> {
+  readonly id: string | null;
+  readonly scopePreference: string | null;
+}
 interface SavedFilterCursor {
   readonly updatedAt: number;
   readonly id: string;
+}
+function isSavedFilterScopePreference(
+  value: string,
+): value is SavedFilterScopePreference {
+  return (
+    value === "auto" ||
+    value === "event" ||
+    value === "session" ||
+    value === "visitor"
+  );
+}
+function savedFilterRow(row: SavedFilterQueryRow): SavedFilterRow {
+  if (
+    typeof row.id !== "string" ||
+    (row.scopePreference !== null &&
+      !isSavedFilterScopePreference(row.scopePreference))
+  ) {
+    throw new AnalysisDefinitionIntegrityError();
+  }
+  return {
+    ...row,
+    id: row.id,
+    scopePreference: row.scopePreference ?? "auto",
+  };
 }
 function savedFiltersBinding(siteId: string, teamId: string): Promise<string> {
   return paginationBinding([
@@ -106,21 +152,43 @@ export function createSavedFilterApplicationService(
       return { ok: false, error: { code: "not_found" } };
     }
     try {
-      const row = await createDatabaseRuntime(env.DB).first<SavedFilterRow>({
-        sql: `SELECT sf.id, sf.name, sf.description,
-                sf.scope_preference AS scopePreference,
-                sf.filter_dsl AS filterDsl, sf.filter_dsl_version AS filterDslVersion,
-                sf.created_at AS createdAt, sf.updated_at AS updatedAt
-         FROM saved_filters sf
-         INNER JOIN sites s ON s.id = sf.site_id
-         WHERE sf.site_id = ? AND sf.id = ?
-           AND sf.visibility = 'team' AND s.team_id = ?
-         LIMIT 1`,
-        bindings: [input.siteId, input.id, context.teamId],
-        tag: "api-v1.saved_filters.first",
+      const savedFilters = scan(schema.saved_filters);
+      const sites = scan(schema.sites);
+      const savedFiltersWithSites = join(
+        savedFilters,
+        sites,
+        eq(savedFilters.columns.site_id, sites.columns.id),
+        "inner",
+      );
+      const matchingDefinitions = filter(
+        savedFiltersWithSites,
+        and(
+          eq(savedFiltersWithSites.columns.left_site_id, param(input.siteId)),
+          eq(savedFiltersWithSites.columns.left_id, param(input.id)),
+          eq(savedFiltersWithSites.columns.left_visibility, param("team")),
+          eq(
+            savedFiltersWithSites.columns.right_team_id,
+            param(context.teamId),
+          ),
+        ),
+      );
+      const selectedDefinitions = project(matchingDefinitions, {
+        id: matchingDefinitions.columns.left_id,
+        name: matchingDefinitions.columns.left_name,
+        description: matchingDefinitions.columns.left_description,
+        scopePreference: matchingDefinitions.columns.left_scope_preference,
+        filterDsl: matchingDefinitions.columns.left_filter_dsl,
+        filterDslVersion: matchingDefinitions.columns.left_filter_dsl_version,
+        createdAt: matchingDefinitions.columns.left_created_at,
+        updatedAt: matchingDefinitions.columns.left_updated_at,
       });
+      const row = await createD1DatabaseClient(env.DB).first(
+        compileD1Query(limit(selectedDefinitions, 1), {
+          tag: "api-v1.saved_filters.first",
+        }),
+      );
       if (!row) return { ok: false, error: { code: "not_found" } };
-      return { ok: true, value: toDefinition(row) };
+      return { ok: true, value: toDefinition(savedFilterRow(row)) };
     } catch (error) {
       if (error instanceof AnalysisDefinitionIntegrityError) {
         return { ok: false, error: { code: "internal_error" } };
@@ -172,39 +240,70 @@ export function createSavedFilterApplicationService(
       throw error;
     }
     try {
-      const cursorClause = cursor
-        ? "AND (sf.updated_at < ? OR (sf.updated_at = ? AND sf.id < ?))"
-        : "";
-      const bindings: Array<string | number> = cursor
-        ? [
-            input.siteId,
-            context.teamId,
-            cursor.updatedAt,
-            cursor.updatedAt,
-            cursor.id,
-            input.page.limit + 1,
-          ]
-        : [input.siteId, context.teamId, input.page.limit + 1];
-      const rows = await createDatabaseRuntime(env.DB).all<SavedFilterRow>({
-        sql: `SELECT sf.id, sf.name, sf.description,
-                sf.scope_preference AS scopePreference,
-                sf.filter_dsl AS filterDsl, sf.filter_dsl_version AS filterDslVersion,
-                sf.created_at AS createdAt, sf.updated_at AS updatedAt
-         FROM saved_filters sf
-         INNER JOIN sites s ON s.id = sf.site_id
-         WHERE sf.site_id = ? AND sf.visibility = 'team' AND s.team_id = ?
-           ${cursorClause}
-         ORDER BY sf.updated_at DESC, sf.id DESC
-         LIMIT ?`,
-        bindings: [...bindings],
-        tag: "api-v1.saved_filters.all",
+      const savedFilters = scan(schema.saved_filters);
+      const sites = scan(schema.sites);
+      const savedFiltersWithSites = join(
+        savedFilters,
+        sites,
+        eq(savedFilters.columns.site_id, sites.columns.id),
+        "inner",
+      );
+      const basePredicate = and(
+        eq(savedFiltersWithSites.columns.left_site_id, param(input.siteId)),
+        eq(savedFiltersWithSites.columns.left_visibility, param("team")),
+        eq(savedFiltersWithSites.columns.right_team_id, param(context.teamId)),
+      );
+      const cursorPredicate = cursor
+        ? or(
+            lt(
+              savedFiltersWithSites.columns.left_updated_at,
+              param(cursor.updatedAt),
+            ),
+            and(
+              eq(
+                savedFiltersWithSites.columns.left_updated_at,
+                param(cursor.updatedAt),
+              ),
+              lt(savedFiltersWithSites.columns.left_id, param(cursor.id)),
+            ),
+          )
+        : null;
+      const matchingDefinitions = filter(
+        savedFiltersWithSites,
+        cursorPredicate ? and(basePredicate, cursorPredicate) : basePredicate,
+      );
+      const selectedDefinitions = project(matchingDefinitions, {
+        id: matchingDefinitions.columns.left_id,
+        name: matchingDefinitions.columns.left_name,
+        description: matchingDefinitions.columns.left_description,
+        scopePreference: matchingDefinitions.columns.left_scope_preference,
+        filterDsl: matchingDefinitions.columns.left_filter_dsl,
+        filterDslVersion: matchingDefinitions.columns.left_filter_dsl_version,
+        createdAt: matchingDefinitions.columns.left_created_at,
+        updatedAt: matchingDefinitions.columns.left_updated_at,
       });
+      const orderedDefinitions = sort(selectedDefinitions, [
+        {
+          expression: selectedDefinitions.columns.updatedAt,
+          direction: "DESC",
+        },
+        {
+          expression: selectedDefinitions.columns.id,
+          direction: "DESC",
+        },
+      ]);
+      const rows = await createD1DatabaseClient(env.DB).all(
+        compileD1Query(limit(orderedDefinitions, input.page.limit + 1), {
+          tag: "api-v1.saved_filters.all",
+        }),
+      );
       const hasMore = rows.results.length > input.page.limit;
       const visibleRows = hasMore
         ? rows.results.slice(0, input.page.limit)
         : rows.results;
-      const items = visibleRows.map(toDefinition);
-      const last = visibleRows.at(-1);
+      const savedFilterRows = visibleRows.map(savedFilterRow);
+      const items = savedFilterRows.map(toDefinition);
+      const last = savedFilterRows.at(-1);
       return {
         ok: true,
         value: {

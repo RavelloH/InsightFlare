@@ -12,7 +12,17 @@ import {
   jsonSuccess,
   methodNotAllowed,
 } from "@/lib/api-v1/contract/wire-helpers";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  limit,
+  param,
+  project,
+  scan,
+  schema,
+} from "@/lib/db";
 import {
   type ApiKeyPrincipal,
   canAccessSiteId,
@@ -34,36 +44,48 @@ async function teamByPrincipal(
   env: Env,
   principal: ApiKeyPrincipal,
 ): Promise<TeamRow> {
-  const row = await createDatabaseRuntime(env.DB).first<TeamRow>({
-    sql: `
-      SELECT id, name, created_at AS createdAt
-      FROM teams
-      WHERE id=?
-      LIMIT 1
-    `,
-    bindings: [principal.teamId],
-    tag: "api-v1.teams.first",
-  });
-  return (
-    row ?? {
-      id: principal.teamId,
-      name: principal.teamId,
-      createdAt: principal.createdAt ?? 0,
-    }
+  const teams = scan(schema.teams);
+  const matchingTeams = filter(
+    teams,
+    eq(teams.columns.id, param(principal.teamId)),
   );
+  const teamQuery = limit(
+    project(matchingTeams, {
+      id: matchingTeams.columns.id,
+      name: matchingTeams.columns.name,
+      createdAt: matchingTeams.columns.created_at,
+    }),
+    1,
+  );
+  const row = await createD1DatabaseClient(env.DB).first(
+    compileD1Query(teamQuery, { tag: "api-v1.teams.first" }),
+  );
+  if (row && row.id !== null) {
+    return { id: row.id, name: row.name, createdAt: row.createdAt };
+  }
+  return {
+    id: principal.teamId,
+    name: principal.teamId,
+    createdAt: principal.createdAt ?? 0,
+  };
 }
 async function visibleSiteCount(
   env: Env,
   principal: ApiKeyPrincipal,
 ): Promise<number> {
-  const rows = await createDatabaseRuntime(env.DB).all<{ id: string }>({
-    sql: "SELECT id FROM sites WHERE team_id=?",
-    bindings: [principal.teamId],
-    tag: "api-v1.sites.all",
-  });
+  const sites = scan(schema.sites);
+  const teamSites = filter(
+    sites,
+    eq(sites.columns.team_id, param(principal.teamId)),
+  );
+  const siteIds = project(teamSites, { id: teamSites.columns.id });
+  const rows = await createD1DatabaseClient(env.DB).all(
+    compileD1Query(siteIds, { tag: "api-v1.sites.all" }),
+  );
   if (hasFullSiteAccess(principal)) return rows.results.length;
-  return rows.results.filter((site) => canAccessSiteId(principal, site.id))
-    .length;
+  return rows.results.filter(
+    (site) => site.id !== null && canAccessSiteId(principal, site.id),
+  ).length;
 }
 function rootResponse(request: Request): Response {
   if (request.method !== "GET") return methodNotAllowed(request, "GET");

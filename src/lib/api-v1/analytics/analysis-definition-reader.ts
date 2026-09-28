@@ -1,4 +1,17 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  coalesce,
+  compileD1Query,
+  createD1DatabaseClient,
+  eq,
+  filter,
+  join,
+  limit,
+  param,
+  project,
+  scan,
+  schema,
+} from "@/lib/db";
 import type { FilterScopePreference } from "@/lib/edge/analytics/contract";
 import {
   attachSavedFilterScopePreference,
@@ -89,22 +102,42 @@ export function createAnalysisDefinitionReader(
   return {
     async resolveTeamVisibleSavedFilter({ siteId, id, signal }) {
       assertNotAborted(signal);
-      const row = await createDatabaseRuntime(
-        env.DB,
-      ).first<SavedFilterDefinitionRow>({
-        sql: `SELECT sf.filter_dsl AS filterDsl,
-                sf.filter_dsl_version AS filterDslVersion,
-                COALESCE(sf.scope_preference, 'auto') AS scopePreference
-         FROM saved_filters sf
-         INNER JOIN sites s ON s.id = sf.site_id
-         WHERE sf.site_id = ?
-           AND sf.id = ?
-           AND sf.visibility = 'team'
-           AND s.team_id = ?
-         LIMIT 1`,
-        bindings: [siteId, id, principal.teamId],
-        tag: "api-v1.saved_filters.first",
-      });
+      const savedFilters = scan(schema.saved_filters);
+      const sites = scan(schema.sites);
+      const savedFiltersWithSites = join(
+        savedFilters,
+        sites,
+        eq(savedFilters.columns.site_id, sites.columns.id),
+        "inner",
+      );
+      const matchingDefinitions = filter(
+        savedFiltersWithSites,
+        and(
+          eq(savedFiltersWithSites.columns.left_site_id, param(siteId)),
+          eq(savedFiltersWithSites.columns.left_id, param(id)),
+          eq(savedFiltersWithSites.columns.left_visibility, param("team")),
+          eq(
+            savedFiltersWithSites.columns.right_team_id,
+            param(principal.teamId),
+          ),
+        ),
+      );
+      const definitionQuery = limit(
+        project(matchingDefinitions, {
+          filterDsl: matchingDefinitions.columns.left_filter_dsl,
+          filterDslVersion: matchingDefinitions.columns.left_filter_dsl_version,
+          scopePreference: coalesce(
+            matchingDefinitions.columns.left_scope_preference,
+            param("auto"),
+          ),
+        }),
+        1,
+      );
+      const row = (await createD1DatabaseClient(env.DB).first(
+        compileD1Query(definitionQuery, {
+          tag: "api-v1.saved_filters.first",
+        }),
+      )) as SavedFilterDefinitionRow | null;
       assertNotAborted(signal);
       if (!row) return null;
 
