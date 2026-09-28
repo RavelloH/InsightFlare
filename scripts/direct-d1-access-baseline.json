@@ -14,8 +14,5 @@
   "src/lib/edge/scheduled-tasks/dispatcher.ts": 2,
   "src/lib/edge/scheduled-tasks/hourly-rollup.ts": 5,
   "src/lib/edge/scheduled-tasks/runner.ts": 5,
-  "src/lib/hono/routes/e2e.ts": 1,
-  "src/lib/notifications/edge/message-store.ts": 5,
-  "src/lib/notifications/edge/preferences.ts": 1,
-  "src/lib/notifications/edge/rule-store.ts": 6
+  "src/lib/hono/routes/e2e.ts": 1
 }

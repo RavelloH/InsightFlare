@@ -124,11 +124,11 @@ export async function updateUserNotificationPreferences(
 ): Promise<NotificationPreferences> {
   const current = await getUserNotificationPreferences(env, input.userId);
   const next = mergeNotificationPreferencesUpdate(current, input.preferences);
-  await env.DB.prepare(
-    "UPDATE users SET notification_preferences_json = ?, updated_at = unixepoch() WHERE id = ?",
-  )
-    .bind(safeJsonStringify(next), input.userId)
-    .run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "UPDATE users SET notification_preferences_json = ?, updated_at = unixepoch() WHERE id = ?",
+    bindings: [safeJsonStringify(next), input.userId],
+    tag: "notifications.preferences.update",
+  });
   return next;
 }
 

@@ -203,16 +203,15 @@ export async function createNotificationRule(
   const recipient = normalizeNotificationRecipientConfig(
     input.recipient ?? { mode: "creator" },
   );
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       INSERT INTO notification_rules (
         id, team_id, site_id, name, description, type, enabled,
         schedule_json, condition_json, recipient_json, state_json, next_run_at,
         created_by_user_id, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
-  )
-    .bind(
+    bindings: [
       id,
       input.teamId,
       input.siteId ?? null,
@@ -228,8 +227,9 @@ export async function createNotificationRule(
       actor.user.id,
       now,
       now,
-    )
-    .run();
+    ],
+    tag: "notifications.rules.insert",
+  });
   const rule = await getNotificationRule(env, id);
   if (!rule) throw new Error("Notification rule was not created");
   return rule;
@@ -315,8 +315,8 @@ export async function updateNotificationRule(
     safeJsonStringify(nextCondition) !== safeJsonStringify(current.condition);
   const nextState = stateShouldReset ? {} : current.state;
   const nextCooldownUntil = stateShouldReset ? null : current.cooldownUntil;
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE notification_rules
       SET
         team_id = ?,
@@ -334,8 +334,7 @@ export async function updateNotificationRule(
         updated_at = ?
       WHERE id = ?
     `,
-  )
-    .bind(
+    bindings: [
       teamId,
       siteId,
       clampString((input.name ?? current.name).trim(), 160),
@@ -350,8 +349,9 @@ export async function updateNotificationRule(
       nextRunAt,
       now,
       input.ruleId,
-    )
-    .run();
+    ],
+    tag: "notifications.rules.update",
+  });
   const updated = await getNotificationRule(env, input.ruleId);
   if (!updated) throw new Error("Notification rule disappeared");
   return updated;
@@ -371,9 +371,11 @@ export async function deleteNotificationRule(
   ) {
     throw new Error("Forbidden");
   }
-  await env.DB.prepare("DELETE FROM notification_rules WHERE id=?")
-    .bind(ruleId)
-    .run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "DELETE FROM notification_rules WHERE id=?",
+    bindings: [ruleId],
+    tag: "notifications.rules.delete",
+  });
   return true;
 }
 export async function listDueNotificationRules(
@@ -411,8 +413,8 @@ export async function advanceNotificationRuleSchedule(
     input.rule.schedule,
     input.checkedAt,
   );
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE notification_rules
       SET
         last_checked_at = ?,
@@ -427,8 +429,7 @@ export async function advanceNotificationRuleSchedule(
         updated_at = ?
       WHERE id = ?
     `,
-  )
-    .bind(
+    bindings: [
       input.checkedAt,
       input.triggeredAt ?? null,
       nextRunAt,
@@ -438,8 +439,9 @@ export async function advanceNotificationRuleSchedule(
       input.checkedAt,
       input.checkedAt,
       input.rule.id,
-    )
-    .run();
+    ],
+    tag: "notifications.rules.advance_schedule",
+  });
 }
 export async function applyNotificationRuleManualRunResult(
   env: Env,
@@ -456,8 +458,8 @@ export async function applyNotificationRuleManualRunResult(
   const nextRunAt = shouldAdvanceNextRunAt
     ? computeNextNotificationRunAt(input.rule.schedule, input.checkedAt)
     : input.rule.nextRunAt;
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE notification_rules
       SET
         last_checked_at = ?,
@@ -472,8 +474,7 @@ export async function applyNotificationRuleManualRunResult(
         updated_at = ?
       WHERE id = ?
     `,
-  )
-    .bind(
+    bindings: [
       input.checkedAt,
       input.triggeredAt ?? null,
       nextRunAt,
@@ -483,8 +484,9 @@ export async function applyNotificationRuleManualRunResult(
       input.checkedAt,
       input.checkedAt,
       input.rule.id,
-    )
-    .run();
+    ],
+    tag: "notifications.rules.apply_manual_run",
+  });
 }
 export async function updateNotificationRuleState(
   env: Env,
@@ -495,15 +497,15 @@ export async function updateNotificationRuleState(
   },
 ): Promise<void> {
   const now = Math.trunc(input.now ?? appNow() / 1000);
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE notification_rules
       SET state_json = ?, updated_at = ?
       WHERE id = ?
     `,
-  )
-    .bind(safeJsonStringify(input.state), now, input.ruleId)
-    .run();
+    bindings: [safeJsonStringify(input.state), now, input.ruleId],
+    tag: "notifications.rules.update_state",
+  });
 }
 export async function resolveNotificationRecipients(
   env: Env,

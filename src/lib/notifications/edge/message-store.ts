@@ -213,8 +213,8 @@ export async function createNotificationMessage(
     retention: input.retention,
   });
 
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       INSERT INTO notification_messages (
         id, team_id, site_id, user_id, rule_id, run_id, batch_id,
         type, severity, requires_attention, title, summary, body_text,
@@ -223,8 +223,7 @@ export async function createNotificationMessage(
         sent_at, failed_at, expires_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
-  )
-    .bind(
+    bindings: [
       id,
       input.teamId,
       input.siteId ?? null,
@@ -249,8 +248,9 @@ export async function createNotificationMessage(
       deliveryStatus === "sent" ? now : null,
       deliveryStatus === "failed" ? now : null,
       expiresAt,
-    )
-    .run();
+    ],
+    tag: "notifications.messages.insert",
+  });
 
   const message = await getNotificationMessage(env, id, {
     includeExpired: true,
@@ -386,16 +386,16 @@ export async function markNotificationMessageRead(
   input: { messageId: string; userId: string; now?: number },
 ): Promise<NotificationMessage | null> {
   const now = Math.trunc(input.now ?? Date.now() / 1000);
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE notification_messages
       SET read_at = COALESCE(read_at, ?), updated_at = ?
       WHERE id = ? AND user_id = ?
         AND (expires_at IS NULL OR expires_at > ?)
     `,
-  )
-    .bind(now, now, input.messageId, input.userId, now)
-    .run();
+    bindings: [now, now, input.messageId, input.userId, now],
+    tag: "notifications.messages.mark_read",
+  });
   const row = await createDatabaseRuntime(env.DB).first<MessageRow>({
     sql: `SELECT ${MESSAGE_SELECT} FROM notification_messages WHERE id=? AND user_id=? AND (expires_at IS NULL OR expires_at > ?) LIMIT 1`,
     bindings: [input.messageId, input.userId, now],
@@ -409,28 +409,28 @@ export async function markAllNotificationMessagesRead(
 ): Promise<number> {
   const now = Math.trunc(input.now ?? Date.now() / 1000);
   if (input.teamId) {
-    const result = await env.DB.prepare(
-      `
+    const result = await createDatabaseRuntime(env.DB).run({
+      sql: `
         UPDATE notification_messages
         SET read_at = COALESCE(read_at, ?), updated_at = ?
         WHERE user_id = ? AND team_id = ? AND read_at IS NULL
           AND (expires_at IS NULL OR expires_at > ?)
       `,
-    )
-      .bind(now, now, input.userId, input.teamId, now)
-      .run();
+      bindings: [now, now, input.userId, input.teamId, now],
+      tag: "notifications.messages.mark_all_read_for_team",
+    });
     return Number(result.meta?.changes ?? 0);
   }
-  const result = await env.DB.prepare(
-    `
+  const result = await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE notification_messages
       SET read_at = COALESCE(read_at, ?), updated_at = ?
       WHERE user_id = ? AND read_at IS NULL
         AND (expires_at IS NULL OR expires_at > ?)
     `,
-  )
-    .bind(now, now, input.userId, now)
-    .run();
+    bindings: [now, now, input.userId, now],
+    tag: "notifications.messages.mark_all_read",
+  });
   return Number(result.meta?.changes ?? 0);
 }
 export async function updateNotificationDeliveryResult(
@@ -446,8 +446,8 @@ export async function updateNotificationDeliveryResult(
 ): Promise<NotificationMessage | null> {
   const now = Math.trunc(input.now ?? Date.now() / 1000);
   const status = normalizeNotificationDeliveryStatus(input.status);
-  await env.DB.prepare(
-    `
+  await createDatabaseRuntime(env.DB).run({
+    sql: `
       UPDATE notification_messages
       SET
         delivery_status = ?,
@@ -459,8 +459,7 @@ export async function updateNotificationDeliveryResult(
         failed_at = CASE WHEN ? = 'failed' THEN COALESCE(failed_at, ?) ELSE failed_at END
       WHERE id = ?
     `,
-  )
-    .bind(
+    bindings: [
       status,
       safeJsonStringify(input.deliveryResults),
       input.channels ? safeJsonStringify(input.channels) : null,
@@ -471,7 +470,8 @@ export async function updateNotificationDeliveryResult(
       status,
       now,
       input.messageId,
-    )
-    .run();
+    ],
+    tag: "notifications.messages.update_delivery_result",
+  });
   return getNotificationMessage(env, input.messageId);
 }
