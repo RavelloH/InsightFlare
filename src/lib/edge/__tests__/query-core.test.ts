@@ -310,7 +310,7 @@ describe("edge public site lookup", () => {
   function envWithPublicSite(row: Record<string, unknown> | null) {
     const first = vi.fn().mockResolvedValue(row);
     const bind = vi.fn(() => ({ first }));
-    const prepare = vi.fn(() => ({ bind }));
+    const prepare = vi.fn((_sql: string) => ({ bind }));
     const env = { DB: { prepare } } as unknown as Env;
     return { env, prepare, bind, first };
   }
