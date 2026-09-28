@@ -208,4 +208,28 @@ describe("D1 database runtime", () => {
       createDatabaseRuntime(database).batch([{ sql: "DELETE FROM records" }]),
     ).rejects.toBe(error);
   });
+
+  it("passes exec SQL through unchanged and returns the native result", async () => {
+    const result = { count: 2, duration: 1 } satisfies D1ExecResult;
+    const exec = vi.fn(async () => result);
+    const database = { exec } as unknown as D1Database;
+    const sql = " INSERT INTO records VALUES (1); DELETE FROM records ";
+
+    await expect(createDatabaseRuntime(database).exec(sql)).resolves.toBe(
+      result,
+    );
+
+    expect(exec).toHaveBeenCalledExactlyOnceWith(sql);
+  });
+
+  it("propagates the original exec error", async () => {
+    const error = new Error("D1 exec failed");
+    const database = {
+      exec: vi.fn().mockRejectedValue(error),
+    } as unknown as D1Database;
+
+    await expect(createDatabaseRuntime(database).exec("SELECT 1")).rejects.toBe(
+      error,
+    );
+  });
 });

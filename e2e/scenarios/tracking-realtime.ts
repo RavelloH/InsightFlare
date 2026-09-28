@@ -1,6 +1,6 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
 
-import { apiRequest } from "../support/api";
+import { apiRequest, siteQueryPathForWindow } from "../support/api";
 import { signIn, waitForCollectResponse } from "../support/browser";
 import type {
   DashboardPage,
@@ -304,13 +304,15 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
 
     await signIn(page, "owner-a", ownerAPassword);
     await flushSite(page, siteA?.id || "");
+    const queryToMs = browserNowMs() + 1;
+    const queryFromMs = queryToMs - 24 * 60 * 60 * 1000;
 
     const aliceVisitors = await apiRequest<{
       items: Array<{ userId: string; userName: string; visitorId: string }>;
     }>(
       page,
       "GET",
-      `${siteQueryPath(siteA?.id || "", "visitors")}&search=${encodeURIComponent(aliceId)}`,
+      `${siteQueryPathForWindow(siteA?.id || "", "visitors", queryFromMs, queryToMs)}&search=${encodeURIComponent(aliceId)}`,
       undefined,
       "no-store",
     );
@@ -330,7 +332,7 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
     }>(
       page,
       "GET",
-      `${siteQueryPath(siteA?.id || "", "sessions")}&search=${encodeURIComponent(bobId)}`,
+      `${siteQueryPathForWindow(siteA?.id || "", "sessions", queryFromMs, queryToMs)}&search=${encodeURIComponent(bobId)}`,
       undefined,
       "no-store",
     );

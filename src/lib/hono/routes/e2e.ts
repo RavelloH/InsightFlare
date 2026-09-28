@@ -79,7 +79,10 @@ e2eRoutes.post("/d1/execute", async (c) => {
   const sql = typeof input?.sql === "string" ? input.sql : "";
   if (!sql.trim()) return c.json({ ok: false, error: "sql is required" }, 400);
   try {
-    return c.json({ ok: true, data: await c.env.DB.exec(sql) });
+    return c.json({
+      ok: true,
+      data: await createDatabaseRuntime(c.env.DB).exec(sql),
+    });
   } catch {
     return c.json({ ok: false, error: "d1_execute_failed" }, 500);
   }

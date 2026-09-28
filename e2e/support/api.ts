@@ -73,7 +73,7 @@ export function siteQueryPath(
   toMs: number,
 ): string {
   const params = new URLSearchParams({
-    from: "0",
+    from: String(Math.max(0, toMs - 24 * 60 * 60 * 1000)),
     siteId,
     to: String(toMs),
   });

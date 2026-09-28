@@ -31,5 +31,8 @@ export function createDatabaseRuntime(database: D1Database): DatabaseRuntime {
         statements.map((statement) => prepare(database, statement)),
       );
     },
+    exec(sql: string): Promise<D1ExecResult> {
+      return database.exec(sql);
+    },
   };
 }

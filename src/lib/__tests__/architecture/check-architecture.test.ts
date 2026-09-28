@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   collectArchitectureViolations,
   detectForbiddenPrefixFiles,
+  directD1AccessViolations,
   isGeneratedFile,
 } from "../../../../scripts/check-architecture";
 const temporaryDirectories: string[] = [];
@@ -233,5 +234,44 @@ describe("architecture checker", () => {
         specifier: "@/lib/demo/data/site-profiles",
       },
     ]);
+  });
+
+  it("forbids direct D1 access through DB properties and local aliases", () => {
+    const root = fixture();
+    const sourcePath = path.join(root, "src/lib/edge/direct-d1.ts");
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(
+      sourcePath,
+      [
+        "export function run(env: { DB: D1Database }) {",
+        "  const database = env.DB;",
+        "  const alias = database;",
+        '  alias.prepare("SELECT 1");',
+        "  env.DB.batch([]);",
+        '  env["DB"].exec("SELECT 1");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(directD1AccessViolations(root)).toMatchObject([
+      {
+        rule: "direct-d1-access-forbidden",
+        source: "src/lib/edge/direct-d1.ts",
+        message: expect.stringContaining("3 direct D1 access(es)"),
+      },
+    ]);
+  });
+
+  it("allows DatabaseRuntime internals and Durable Object SQLite access", () => {
+    const root = fixture();
+    const runtimePath = path.join(root, "src/lib/db/d1-runtime.ts");
+    const durableObjectPath = path.join(root, "src/lib/edge/ingest/storage.ts");
+    mkdirSync(path.dirname(runtimePath), { recursive: true });
+    mkdirSync(path.dirname(durableObjectPath), { recursive: true });
+    writeFileSync(runtimePath, 'database.prepare("SELECT 1");\n');
+    writeFileSync(durableObjectPath, 'state.storage.sql.exec("SELECT 1");\n');
+
+    expect(directD1AccessViolations(root)).toEqual([]);
   });
 });

@@ -34,10 +34,6 @@ interface DemoDynamicImportEntry {
   readonly reason: string;
 }
 
-type DirectD1AccessBaseline = Record<string, number>;
-
-const DIRECT_D1_BASELINE_PATH = "scripts/direct-d1-access-baseline.json";
-
 // Keep this list exact: each exception identifies one existing import and has
 // a removal task. New imports cannot inherit an exception from the same file.
 const LEGACY_ALLOWLIST: readonly LegacyAllowlistEntry[] = [
@@ -804,56 +800,45 @@ function directD1Accesses(root: string): Map<string, number> {
   return counts;
 }
 
-function directD1BaselineViolations(root: string): ArchitectureViolation[] {
-  const baselineAbsolute = path.join(root, DIRECT_D1_BASELINE_PATH);
-  const baseline = JSON.parse(
-    readFileSync(baselineAbsolute, "utf8"),
-  ) as DirectD1AccessBaseline;
+export function directD1AccessViolations(
+  rootDirectory = process.cwd(),
+): ArchitectureViolation[] {
+  const root = path.resolve(rootDirectory);
   const actual = directD1Accesses(root);
   const violations: ArchitectureViolation[] = [];
 
   for (const [source, count] of actual) {
-    const expectedMaximum = baseline[source];
-    if (expectedMaximum === undefined) {
-      violations.push({
-        rule: "direct-d1-access-not-baselined",
-        source,
-        specifier: "D1Database",
-        target: source,
-        line: 1,
-        message: `${count} direct D1 access(es) are not in the remaining-access baseline; route read queries through DatabaseRuntime or update the baseline only for existing deferred writes/operational access.`,
-      });
-    } else if (count !== expectedMaximum) {
-      const increased = count > expectedMaximum;
-      violations.push({
-        rule: increased
-          ? "direct-d1-access-baseline-increased"
-          : "direct-d1-access-baseline-not-ratcheted",
-        source,
-        specifier: "D1Database",
-        target: source,
-        line: 1,
-        message: increased
-          ? `Direct D1 access count increased from ${expectedMaximum} to ${count}.`
-          : `Direct D1 access count decreased from ${expectedMaximum} to ${count}; update the baseline in this commit.`,
-      });
-    }
-  }
-
-  for (const source of Object.keys(baseline)) {
-    if (!actual.has(source)) {
-      violations.push({
-        rule: "direct-d1-access-stale-baseline",
-        source,
-        specifier: "D1Database",
-        target: source,
-        line: 1,
-        message:
-          "This source no longer has direct D1 access; remove it from the remaining-access baseline.",
-      });
-    }
+    violations.push({
+      rule: "direct-d1-access-forbidden",
+      source,
+      specifier: "DB.prepare/batch/exec",
+      target: source,
+      line: 1,
+      message: `${count} direct D1 access(es) remain outside src/lib/db; route them through DatabaseRuntime.`,
+    });
   }
   return violations;
+}
+
+function legacyBaselineFileViolations(root: string): ArchitectureViolation[] {
+  const baselinePath = path.join(
+    root,
+    "scripts/direct-d1-access-baseline.json",
+  );
+  if (statSync(baselinePath, { throwIfNoEntry: false })?.isFile()) {
+    return [
+      {
+        rule: "direct-d1-access-baseline-forbidden",
+        source: "scripts/direct-d1-access-baseline.json",
+        specifier: "legacy baseline",
+        target: "scripts/direct-d1-access-baseline.json",
+        line: 1,
+        message:
+          "Remove the legacy direct-D1 baseline; all direct D1 access is forbidden.",
+      },
+    ];
+  }
+  return [];
 }
 
 function printFileSizeWarnings(root: string): void {
@@ -885,7 +870,8 @@ export function runArchitectureCheck(rootDirectory = process.cwd()): number {
   const root = path.resolve(rootDirectory);
   const violations = [
     ...collectArchitectureViolations(root),
-    ...directD1BaselineViolations(root),
+    ...directD1AccessViolations(root),
+    ...legacyBaselineFileViolations(root),
   ];
   const errors = violations.filter((violation) => !isAllowlisted(violation));
   const legacy = violations.filter(isAllowlisted);
