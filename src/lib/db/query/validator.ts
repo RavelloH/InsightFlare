@@ -317,6 +317,59 @@ function validateExpression(
         expression.expressions.every((child) => child.resultType.nullable),
       );
       return;
+    case "case": {
+      if (!Array.isArray(expression.branches) || expression.branches.length < 1)
+        invalid("caseWhen() requires at least one WHEN branch");
+
+      const resultExpressions: SqlExpression[] = [];
+      for (const branch of expression.branches) {
+        if (
+          !branch ||
+          typeof branch !== "object" ||
+          !branch.when ||
+          typeof branch.when !== "object" ||
+          !branch.then ||
+          typeof branch.then !== "object"
+        )
+          invalid("CASE contains an invalid WHEN branch");
+        validateExpression(branch.when, scopes, activeSources, allowExcluded);
+        if (branch.when.resultType.affinity !== "integer")
+          invalid("CASE WHEN expression must have integer predicate affinity");
+        validateExpression(branch.then, scopes, activeSources, allowExcluded);
+        resultExpressions.push(branch.then);
+      }
+
+      if (expression.else !== undefined) {
+        if (!expression.else || typeof expression.else !== "object")
+          invalid("CASE ELSE must be an expression");
+        validateExpression(
+          expression.else,
+          scopes,
+          activeSources,
+          allowExcluded,
+        );
+        resultExpressions.push(expression.else);
+      }
+
+      let affinity: OutputField["affinity"] | undefined;
+      for (const resultExpression of resultExpressions) {
+        const common =
+          affinity === undefined
+            ? resultExpression.resultType.affinity
+            : commonAffinity(affinity, resultExpression.resultType.affinity);
+        if (common === undefined)
+          invalid("CASE result branches have incompatible SQL affinities");
+        affinity = common;
+      }
+
+      validateResultType(
+        expression,
+        affinity ?? "unknown",
+        expression.else === undefined ||
+          resultExpressions.some((item) => item.resultType.nullable),
+      );
+      return;
+    }
     case "unixepoch":
       if (
         expression.resultType.affinity !== "integer" ||

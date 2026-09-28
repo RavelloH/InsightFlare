@@ -6,6 +6,7 @@ import {
   and,
   avg,
   callFunction,
+  caseWhen,
   coalesce,
   compileD1Query,
   count,
@@ -174,6 +175,68 @@ describe("typed SQL expressions", () => {
       { name: "label", affinity: "text", nullable: true },
     ]);
     expect(compileD1Query(combined).sql).toContain("UNION ALL");
+  });
+
+  it("derives CASE affinity and nullability and rejects invalid result branches", () => {
+    const sites = scan(schema.sites);
+    const requiredText = caseWhen(
+      [
+        {
+          when: isNotNull(sites.columns.name),
+          then: param("matched"),
+        },
+        {
+          when: eq(sites.columns.id, param("site-a")),
+          then: param("also matched"),
+        },
+      ],
+      param("fallback"),
+    );
+    expect(requiredText.resultType).toEqual({
+      affinity: "text",
+      nullable: false,
+    });
+
+    const noElse = caseWhen([
+      { when: isNotNull(sites.columns.name), then: sites.columns.name },
+    ]);
+    expect(noElse.resultType).toEqual({ affinity: "text", nullable: true });
+
+    const nullableThen = caseWhen(
+      [
+        {
+          when: isNotNull(sites.columns.name),
+          then: sites.columns.public_slug,
+        },
+      ],
+      param("fallback"),
+    );
+    expect(nullableThen.resultType).toEqual({
+      affinity: "text",
+      nullable: true,
+    });
+
+    const nullableElse = caseWhen(
+      [
+        {
+          when: isNotNull(sites.columns.name),
+          then: param("matched"),
+        },
+      ],
+      param(null),
+    );
+    expect(nullableElse.resultType).toEqual({
+      affinity: "text",
+      nullable: true,
+    });
+
+    expect(() => caseWhen([] as never)).toThrowError(/at least one WHEN/);
+    expect(() =>
+      caseWhen([
+        { when: isNotNull(sites.columns.name), then: param("text") },
+        { when: isNotNull(sites.columns.name), then: param(1) },
+      ] as never),
+    ).toThrowError(/incompatible SQL affinities/);
   });
 
   it("compiles predicates, null checks, lists, functions, and arithmetic", () => {

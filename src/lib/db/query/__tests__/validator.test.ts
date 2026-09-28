@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregate,
+  caseWhen,
   compileD1Query,
   count,
   eq,
@@ -32,6 +33,92 @@ function expectInvalid(callback: () => unknown): void {
 }
 
 describe("logical query plan validation", () => {
+  it("independently validates CASE branches, affinities, and result metadata", () => {
+    const users = scan(schema.users);
+    const valid = caseWhen(
+      [
+        {
+          when: eq(users.columns.id, param("user-1")),
+          then: param("matched"),
+        },
+      ],
+      param("fallback"),
+    );
+    expect(() =>
+      validateMutationExpression(valid, [users.scope]),
+    ).not.toThrow();
+
+    const empty = {
+      kind: "case",
+      branches: [],
+      resultType: { affinity: "text", nullable: true },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(empty, []));
+
+    const invalidWhen = {
+      ...valid,
+      branches: [{ when: param("not a predicate"), then: param("matched") }],
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidWhen, []));
+
+    const invalidThen = {
+      ...valid,
+      branches: [
+        {
+          when: eq(users.columns.id, param("user-1")),
+          then: {
+            ...param("matched"),
+            resultType: { affinity: "numeric", nullable: false },
+          },
+        },
+      ],
+      else: param("fallback"),
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidThen, [users.scope]));
+
+    const invalidElseMetadata = {
+      ...valid,
+      else: {
+        ...param("fallback"),
+        resultType: { affinity: "numeric", nullable: false },
+      },
+    } as unknown as SqlExpression;
+    expectInvalid(() =>
+      validateMutationExpression(invalidElseMetadata, [users.scope]),
+    );
+
+    const incompatible = {
+      ...valid,
+      branches: [
+        {
+          when: eq(users.columns.id, param("user-1")),
+          then: param("text"),
+        },
+        {
+          when: eq(users.columns.id, param("user-2")),
+          then: param(1),
+        },
+      ],
+    } as unknown as SqlExpression;
+    expectInvalid(() =>
+      validateMutationExpression(incompatible, [users.scope]),
+    );
+
+    const wrongMetadata = {
+      ...valid,
+      resultType: { affinity: "text", nullable: true },
+    } as unknown as SqlExpression;
+    expectInvalid(() =>
+      validateMutationExpression(wrongMetadata, [users.scope]),
+    );
+
+    const invalidElse = {
+      ...valid,
+      else: param(1),
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidElse, [users.scope]));
+  });
+
   it("rejects invalid IN subquery shapes, affinity, and result metadata", () => {
     const sites = scan(schema.site_identities);
     const oneColumn = project(sites, { site_pk: sites.columns.site_pk });

@@ -148,6 +148,23 @@ export interface CoalesceExpression<
   ];
 }
 
+export interface CaseWhenBranch<
+  When extends Predicate = Predicate,
+  Then extends AnyExpression = AnyExpression,
+> {
+  readonly when: When;
+  readonly then: Then;
+}
+
+export interface CaseExpression<
+  T = unknown,
+  Result extends ExpressionResultType = ExpressionResultType,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "case";
+  readonly branches: readonly CaseWhenBranch[];
+  readonly else?: SqlExpression;
+}
+
 export interface UnixepochExpression<
   T = number,
   Result extends ExpressionResultType = ExpressionResultType<"integer", false>,
@@ -190,6 +207,7 @@ export type SqlExpression<
   | FunctionExpression<T, Result>
   | AggregateExpression<T, Result>
   | CoalesceExpression<T, Result>
+  | CaseExpression<T, Result>
   | UnixepochExpression<T, Result>
   | ScalarSubqueryExpression<T, Result>
   | InSubqueryExpression<T, Result>;
@@ -320,6 +338,80 @@ export type CommonExpressionAffinity<
           ? "numeric"
           : "unknown"
         : "unknown";
+
+type CaseThenExpressions<Branches extends readonly CaseWhenBranch[]> = {
+  readonly [Index in keyof Branches]: Branches[Index] extends {
+    readonly then: infer Expression extends AnyExpression;
+  }
+    ? Expression
+    : never;
+};
+
+type CaseResultExpressions<
+  Branches extends readonly CaseWhenBranch[],
+  Else extends AnyExpression | undefined,
+> = Else extends AnyExpression
+  ? [...CaseThenExpressions<Branches>, Else]
+  : CaseThenExpressions<Branches>;
+
+type CaseAffinityStep<
+  Current extends ExpressionAffinity | "unseen" | "conflict",
+  Incoming extends ExpressionAffinity,
+> = Incoming extends "unknown"
+  ? Current
+  : Current extends "unseen"
+    ? Incoming
+    : Current extends "conflict"
+      ? "conflict"
+      : CommonExpressionAffinity<
+            Extract<Current, ExpressionAffinity>,
+            Incoming
+          > extends infer Common extends ExpressionAffinity
+        ? Common extends "unknown"
+          ? "conflict"
+          : Common
+        : "conflict";
+
+type CaseAffinityFold<
+  Expressions extends readonly AnyExpression[],
+  Current extends ExpressionAffinity | "unseen" | "conflict" = "unseen",
+> = Expressions extends readonly [
+  infer First extends AnyExpression,
+  ...infer Rest extends readonly AnyExpression[],
+]
+  ? CaseAffinityFold<
+      Rest,
+      CaseAffinityStep<Current, ExpressionResultOf<First>["affinity"]>
+    >
+  : Current extends "unseen"
+    ? "unknown"
+    : Current;
+
+type CaseResultAffinity<Expressions extends readonly AnyExpression[]> = Extract<
+  CaseAffinityFold<Expressions>,
+  ExpressionAffinity
+>;
+
+type CaseAffinityCompatibility<Expressions extends readonly AnyExpression[]> =
+  CaseAffinityFold<Expressions> extends "conflict" ? never : unknown;
+
+type CaseResultNullable<
+  Expressions extends readonly AnyExpression[],
+  Else extends AnyExpression | undefined,
+> = Else extends AnyExpression ? AnyNullable<Expressions> : true;
+
+type CaseResultValue<
+  Branches extends readonly CaseWhenBranch[],
+  Else extends AnyExpression | undefined,
+> =
+  | Exclude<ExpressionValue<Branches[number]["then"]>, null>
+  | (Else extends AnyExpression ? Exclude<ExpressionValue<Else>, null> : never)
+  | (CaseResultNullable<
+      CaseResultExpressions<Branches, Else>,
+      Else
+    > extends true
+      ? null
+      : never);
 
 function affinityOfBinding(value: SqlBinding): ExpressionAffinity {
   if (value === null) return "unknown";
@@ -782,6 +874,66 @@ export function coalesce<
       CoalesceAffinity<Expressions>,
       AllNullable<Expressions>
     >,
+  };
+}
+
+export function caseWhen<
+  const Branches extends readonly [CaseWhenBranch, ...CaseWhenBranch[]],
+  Else extends AnyExpression | undefined = undefined,
+>(
+  branches: Branches &
+    CaseAffinityCompatibility<CaseResultExpressions<Branches, Else>>,
+  elseExpression?: Else,
+): CaseExpression<
+  CaseResultValue<Branches, Else>,
+  ExpressionResultType<
+    CaseResultAffinity<CaseResultExpressions<Branches, Else>>,
+    CaseResultNullable<CaseResultExpressions<Branches, Else>, Else>
+  >
+> {
+  if (!Array.isArray(branches) || branches.length === 0) {
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "caseWhen() requires at least one WHEN branch",
+    );
+  }
+
+  const expressions: AnyExpression[] = [
+    ...branches.map((branch) => branch.then),
+    ...(elseExpression ? [elseExpression] : []),
+  ];
+  let affinity: ExpressionAffinity | undefined;
+  for (const expression of expressions) {
+    const next = expression.resultType.affinity;
+    if (affinity === undefined) {
+      affinity = next;
+      continue;
+    }
+    const common = commonAffinity(affinity, next);
+    if (!common) {
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "CASE result branches have incompatible SQL affinities",
+      );
+    }
+    affinity = common;
+  }
+
+  const resultType = {
+    affinity: affinity ?? "unknown",
+    nullable:
+      elseExpression === undefined ||
+      expressions.some((expression) => expression.resultType.nullable),
+  } as ExpressionResultType<
+    CaseResultAffinity<CaseResultExpressions<Branches, Else>>,
+    CaseResultNullable<CaseResultExpressions<Branches, Else>, Else>
+  >;
+
+  return {
+    kind: "case",
+    branches,
+    ...(elseExpression ? { else: elseExpression } : {}),
+    resultType,
   };
 }
 

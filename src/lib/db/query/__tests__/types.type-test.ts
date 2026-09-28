@@ -1,5 +1,6 @@
 import {
   callFunction,
+  caseWhen,
   coalesce,
   compileD1Query,
   eq,
@@ -133,6 +134,62 @@ export function compileTimeDatabaseTypeAssertions(): void {
   >;
   const mixedFallbackCheck: MixedFallbackAffinityStaysUnknown = true;
   void mixedFallbackCheck;
+
+  const typedCase = caseWhen(
+    [
+      {
+        when: eq(users.columns.id, param("user-1")),
+        then: param("matched"),
+      },
+    ],
+    param("fallback"),
+  );
+  type CaseValueIsText = Assert<
+    ExpressionValue<typeof typedCase> extends string ? true : false
+  >;
+  type CaseMetadataIsNonNullableText = Assert<
+    Equal<
+      ExpressionResultOf<typeof typedCase>,
+      ExpressionResultType<"text", false>
+    >
+  >;
+  const caseChecks: [CaseValueIsText, CaseMetadataIsNonNullableText] = [
+    true,
+    true,
+  ];
+  void caseChecks;
+
+  const nullableCase = caseWhen([
+    {
+      when: eq(users.columns.id, param("user-1")),
+      then: param("matched"),
+    },
+  ]);
+  type CaseWithoutElseIncludesNull = Assert<
+    Equal<Extract<ExpressionValue<typeof nullableCase>, null>, null>
+  >;
+  type CaseWithoutElseIsNullable = Assert<
+    Equal<
+      ExpressionResultOf<typeof nullableCase>,
+      ExpressionResultType<"text", true>
+    >
+  >;
+  const nullableCaseChecks: [
+    CaseWithoutElseIncludesNull,
+    CaseWithoutElseIsNullable,
+  ] = [true, true];
+  void nullableCaseChecks;
+
+  // @ts-expect-error Searched CASE requires at least one WHEN branch.
+  caseWhen([]);
+  // @ts-expect-error WHEN must be a predicate, not an arbitrary text expression.
+  caseWhen([{ when: users.columns.email, then: param("matched") }]);
+  // @ts-expect-error CASE result branches must have compatible affinities.
+  caseWhen([
+    { when: eq(users.columns.id, param("user-1")), then: param("matched") },
+    { when: eq(users.columns.id, param("user-2")), then: param(1) },
+  ]);
+
   insert(schema.configs, {
     config_key: "typed",
     value_json: "{}",

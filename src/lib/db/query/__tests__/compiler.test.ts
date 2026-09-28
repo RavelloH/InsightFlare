@@ -11,6 +11,8 @@ import {
   and,
   antiJoin,
   avg,
+  callFunction,
+  caseWhen,
   coalesce,
   compileD1Mutation,
   compileD1Query,
@@ -25,6 +27,7 @@ import {
   insertFromQuery,
   insertOrIgnore,
   inSubquery,
+  isNotNull,
   join,
   limit,
   lowerLogicalPlan,
@@ -37,6 +40,7 @@ import {
   scan,
   semiJoin,
   sort,
+  sum,
   union,
   unixepoch,
   update,
@@ -381,6 +385,172 @@ describe("typed D1 query compiler", () => {
       expect(
         db.prepare("SELECT COUNT(*) AS count FROM site_identities").get(),
       ).toEqual({ count: 2 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("executes searched CASE expressions in projections, functions, aggregates, and updates", () => {
+    const db = createMigratedDatabase();
+    try {
+      executeRun(
+        db,
+        compileD1Mutation(
+          insert(schema.site_identities, { site_id: "site-a" }),
+        ),
+      );
+      executeRun(
+        db,
+        compileD1Mutation(
+          insert(schema.site_identities, { site_id: "site-b" }),
+        ),
+      );
+
+      const sites = scan(schema.site_identities);
+      const label = caseWhen(
+        [
+          {
+            when: eq(sites.columns.site_id, param("site-a")),
+            then: param("alpha"),
+          },
+          {
+            when: eq(sites.columns.site_id, param("site-b")),
+            then: param("beta"),
+          },
+        ],
+        param("fallback"),
+      );
+      const nested = caseWhen(
+        [
+          {
+            when: eq(sites.columns.site_id, param("site-a")),
+            then: caseWhen(
+              [
+                {
+                  when: isNotNull(sites.columns.site_id),
+                  then: param("inner"),
+                },
+              ],
+              param("inner-fallback"),
+            ),
+          },
+        ],
+        param("outer"),
+      );
+      const noElse = caseWhen([
+        {
+          when: eq(sites.columns.site_id, param("site-a")),
+          then: param("only-a"),
+        },
+      ]);
+      const functionArgument = callFunction(
+        "lower",
+        caseWhen(
+          [
+            {
+              when: eq(sites.columns.site_id, param("site-a")),
+              then: param("ALPHA"),
+            },
+          ],
+          param("OTHER"),
+        ),
+      );
+      const projection = project(sites, {
+        site_id: sites.columns.site_id,
+        label,
+        no_else: noElse,
+        nested,
+        function_value: functionArgument,
+      });
+      const compiledProjection = compileD1Query(
+        sort(projection, [
+          { expression: projection.columns.site_id, direction: "ASC" },
+        ]),
+      );
+      expect(compiledProjection.sql).toContain("CASE WHEN");
+      expect(compiledProjection.sql).toContain("ELSE");
+      expect(compiledProjection.bindings).toEqual([
+        "site-a",
+        "alpha",
+        "site-b",
+        "beta",
+        "fallback",
+        "site-a",
+        "only-a",
+        "site-a",
+        "inner",
+        "inner-fallback",
+        "outer",
+        "site-a",
+        "ALPHA",
+        "OTHER",
+      ]);
+      expect(executeAll(db, compiledProjection)).toEqual([
+        {
+          site_id: "site-a",
+          label: "alpha",
+          no_else: "only-a",
+          nested: "inner",
+          function_value: "alpha",
+        },
+        {
+          site_id: "site-b",
+          label: "beta",
+          no_else: null,
+          nested: "outer",
+          function_value: "other",
+        },
+      ]);
+
+      const totalMatched = aggregate(sites, {
+        groupBy: {},
+        aggregates: {
+          matched: sum(
+            caseWhen(
+              [
+                {
+                  when: eq(sites.columns.site_id, param("site-a")),
+                  then: param(1),
+                },
+              ],
+              param(0),
+            ),
+          ),
+        },
+      });
+      expect(executeAll(db, compileD1Query(totalMatched))).toEqual([
+        { matched: 1 },
+      ]);
+
+      const updateStatement = compileD1Mutation(
+        update(schema.site_identities, (columns) => ({
+          set: {
+            site_id: caseWhen(
+              [
+                {
+                  when: eq(columns.site_id, param("site-a")),
+                  then: param("site-renamed"),
+                },
+              ],
+              columns.site_id,
+            ),
+          },
+          where: eq(columns.site_id, param("site-a")),
+        })),
+      );
+      expect(updateStatement.bindings).toEqual([
+        "site-a",
+        "site-renamed",
+        "site-a",
+      ]);
+      executeRun(db, updateStatement);
+      const renamedSites = scan(schema.site_identities);
+      const renamed = compileD1Query(
+        project(renamedSites, { site_id: renamedSites.columns.site_id }),
+      );
+      expect(executeAll(db, renamed)).toContainEqual({
+        site_id: "site-renamed",
+      });
     } finally {
       db.close();
     }

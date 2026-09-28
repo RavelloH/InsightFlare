@@ -171,6 +171,27 @@ export function compileD1Expression(
         ),
         text(")"),
       );
+    case "case":
+      return concat(
+        text("CASE"),
+        ...expression.branches.map((branch) =>
+          concat(
+            text(" WHEN "),
+            compileD1Expression(branch.when, scopes, context),
+            text(" THEN "),
+            compileD1Expression(branch.then, scopes, context),
+          ),
+        ),
+        ...(expression.else
+          ? [
+              concat(
+                text(" ELSE "),
+                compileD1Expression(expression.else, scopes, context),
+              ),
+            ]
+          : []),
+        text(" END"),
+      );
     case "unixepoch":
       return text("unixepoch()");
     case "scalar-subquery":
