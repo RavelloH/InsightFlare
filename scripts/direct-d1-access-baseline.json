@@ -3,7 +3,6 @@
   "src/lib/edge/admin/sites/handler.ts": 14,
   "src/lib/edge/admin/teams/handlers.ts": 14,
   "src/lib/edge/admin/users/handlers.ts": 7,
-  "src/lib/edge/admin/auth.ts": 5,
   "src/lib/edge/ingest/alarm-sweep.ts": 1,
   "src/lib/edge/ingest/buffer-store.ts": 2,
   "src/lib/edge/ingest/custom-event-flush.ts": 8,

@@ -226,11 +226,11 @@ export async function ensureDefaultTeam(
     tag: "admin.teams.first",
   });
   if (owned?.id) {
-    await env.DB.prepare(
-      "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='owner'",
-    )
-      .bind(owned.id, user.id)
-      .run();
+    await createDatabaseRuntime(env.DB).run({
+      sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch()) ON CONFLICT(team_id,user_id) DO UPDATE SET role='owner'",
+      bindings: [owned.id, user.id],
+      tag: "admin.team_members.ensure_owner",
+    });
     return;
   }
   const teamId = crypto.randomUUID();
@@ -239,16 +239,16 @@ export async function ensureDefaultTeam(
     120,
   );
   const slug = await uniqueTeamSlug(env, `${user.username}-team`);
-  await env.DB.prepare(
-    "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
-  )
-    .bind(teamId, `${displayName}'s team`, slug, user.id)
-    .run();
-  await env.DB.prepare(
-    "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())",
-  )
-    .bind(teamId, user.id)
-    .run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,unixepoch(),unixepoch())",
+    bindings: [teamId, `${displayName}'s team`, slug, user.id],
+    tag: "admin.teams.create_default",
+  });
+  await createDatabaseRuntime(env.DB).run({
+    sql: "INSERT INTO team_members (team_id,user_id,role,joined_at) VALUES (?,?,'owner',unixepoch())",
+    bindings: [teamId, user.id],
+    tag: "admin.team_members.create_default_owner",
+  });
 }
 
 export async function ensureBootstrapAdmin(env: Env): Promise<UserRow> {
@@ -268,22 +268,22 @@ export async function ensureBootstrapAdmin(env: Env): Promise<UserRow> {
   );
   const found = await byIdentifier(env, username);
   if (found) {
-    await env.DB.prepare(
-      "UPDATE users SET username=?,email=?,name=?,password_hash=?,system_role='admin',updated_at=unixepoch() WHERE id=?",
-    )
-      .bind(username, email, name, passHash, found.id)
-      .run();
+    await createDatabaseRuntime(env.DB).run({
+      sql: "UPDATE users SET username=?,email=?,name=?,password_hash=?,system_role='admin',updated_at=unixepoch() WHERE id=?",
+      bindings: [username, email, name, passHash, found.id],
+      tag: "admin.users.promote_bootstrap",
+    });
     const promoted = await byId(env, found.id);
     if (!promoted) throw new Error("bootstrap admin promote failed");
     await ensureDefaultTeam(env, promoted);
     return promoted;
   }
   const id = crypto.randomUUID();
-  await env.DB.prepare(
-    "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,'admin',unixepoch(),unixepoch())",
-  )
-    .bind(id, username, email, name, passHash)
-    .run();
+  await createDatabaseRuntime(env.DB).run({
+    sql: "INSERT INTO users (id,username,email,name,password_hash,system_role,created_at,updated_at) VALUES (?,?,?,?,?,'admin',unixepoch(),unixepoch())",
+    bindings: [id, username, email, name, passHash],
+    tag: "admin.users.create_bootstrap",
+  });
   const created = await byId(env, id);
   if (!created) throw new Error("bootstrap admin create failed");
   await ensureDefaultTeam(env, created);
