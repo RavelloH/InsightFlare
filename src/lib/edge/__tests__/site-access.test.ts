@@ -3,7 +3,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
-import { createSqliteD1Database } from "@/lib/db/__tests__/sqlite-d1";
+import {
+  createSqliteD1Database,
+  type SqliteD1Trace,
+} from "@/lib/db/__tests__/sqlite-d1";
 import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
 import {
   fetchPublicSite,
@@ -63,10 +66,12 @@ const unrelatedSession: EdgeSessionClaims = {
 describe("typed site access DAL", () => {
   let database: DatabaseSync;
   let env: Env;
+  let trace: SqliteD1Trace;
 
   beforeEach(() => {
     database = createMigratedDatabase();
-    env = { DB: createSqliteD1Database(database) } as Env;
+    trace = { preparedSql: [], bindings: [] };
+    env = { DB: createSqliteD1Database(database, trace) } as Env;
 
     const insertUser = database.prepare(
       "INSERT INTO users (id, email, name) VALUES (?, ?, ?)",
@@ -153,6 +158,7 @@ describe("typed site access DAL", () => {
     );
     expect(unrelated).toBeInstanceOf(Response);
     expect((unrelated as Response).status).toBe(404);
+    expect(trace.preparedSql).toHaveLength(5);
   });
 
   it("preserves private team authorization and allowed-site scope", async () => {
@@ -180,6 +186,7 @@ describe("typed site access DAL", () => {
     );
     expect(unrelated).toBeInstanceOf(Response);
     expect((unrelated as Response).status).toBe(404);
+    expect(trace.preparedSql).toHaveLength(5);
   });
 
   it("returns not found for missing sites and teams", async () => {
@@ -201,6 +208,7 @@ describe("typed site access DAL", () => {
     expect((missingSite as Response).status).toBe(404);
     expect(missingTeam).toBeInstanceOf(Response);
     expect((missingTeam as Response).status).toBe(404);
+    expect(trace.preparedSql).toHaveLength(2);
   });
 
   it("exposes enabled public sites by slug and hides disabled or missing sites", async () => {
@@ -227,6 +235,7 @@ describe("typed site access DAL", () => {
     expect((disabled as Response).status).toBe(404);
     expect(missing).toBeInstanceOf(Response);
     expect((missing as Response).status).toBe(404);
+    expect(trace.preparedSql).toHaveLength(3);
   });
 
   it("matches the legacy site and team join results", async () => {
@@ -280,5 +289,6 @@ describe("typed site access DAL", () => {
       id: legacyTeam.id,
       allowedSiteIds: JSON.parse(legacyTeam.siteIdsJson),
     });
+    expect(trace.preparedSql).toHaveLength(2);
   });
 });

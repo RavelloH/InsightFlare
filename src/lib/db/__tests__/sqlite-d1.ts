@@ -1,13 +1,23 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
-export function createSqliteD1Database(database: DatabaseSync): D1Database {
+export interface SqliteD1Trace {
+  readonly preparedSql: string[];
+  readonly bindings: SQLInputValue[][];
+}
+
+export function createSqliteD1Database(
+  database: DatabaseSync,
+  trace?: SqliteD1Trace,
+): D1Database {
   return {
     prepare(sql: string) {
+      trace?.preparedSql.push(sql);
       const statement = database.prepare(sql);
       let bindings: SQLInputValue[] = [];
       const prepared = {
         bind(...values: SQLInputValue[]) {
           bindings = values;
+          trace?.bindings.push(values);
           return prepared;
         },
         async first<Row>() {
