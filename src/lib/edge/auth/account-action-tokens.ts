@@ -1,4 +1,23 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  and,
+  coalesce,
+  compileD1Mutation,
+  compileD1Query,
+  createDatabaseClient,
+  createDatabaseRuntime,
+  eq,
+  filter,
+  insert,
+  isNull,
+  limit,
+  param,
+  project,
+  scan,
+  sort,
+  unixepoch,
+  update,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import type { Env } from "@/lib/edge/types";
 import { clampString, nowEpochSeconds } from "@/lib/edge/utils";
 import { accountActionTokenHashSecret as resolveTokenHashSecret } from "@/lib/secrets";
@@ -30,6 +49,10 @@ export interface AccountActionTokenRow {
   revoked_at: number | null;
 }
 
+type AccountActionTokenSelectRow = Omit<AccountActionTokenRow, "id"> & {
+  id: string | null;
+};
+
 export interface PublicAccountActionToken {
   id: string;
   type: AccountActionTokenType;
@@ -53,6 +76,36 @@ export interface CreatedAccountActionToken {
 
 const TOKEN_BYTES = 32;
 const TYPE_SET = new Set<string>(ACCOUNT_ACTION_TOKEN_TYPES);
+
+function database(env: Pick<Env, "DB">) {
+  return createDatabaseClient(createDatabaseRuntime(env.DB));
+}
+
+function accountActionTokenRows() {
+  const tokens = scan(schema.account_action_tokens);
+  return project(tokens, {
+    id: tokens.columns.id,
+    type: tokens.columns.type,
+    token_hash: tokens.columns.token_hash,
+    team_id: tokens.columns.team_id,
+    user_id: tokens.columns.user_id,
+    email: tokens.columns.email,
+    payload_json: tokens.columns.payload_json,
+    created_by_user_id: tokens.columns.created_by_user_id,
+    created_at: tokens.columns.created_at,
+    expires_at: tokens.columns.expires_at,
+    used_at: tokens.columns.used_at,
+    used_by_user_id: tokens.columns.used_by_user_id,
+    revoked_at: tokens.columns.revoked_at,
+  });
+}
+
+function requireAccountActionTokenRow(
+  row: AccountActionTokenSelectRow,
+): AccountActionTokenRow {
+  if (row.id === null) throw new Error("account_action_token_missing_id");
+  return { ...row, id: row.id };
+}
 
 async function accountActionTokenHashSecret(env: Env): Promise<string> {
   const secret = await resolveTokenHashSecret(env);
@@ -222,27 +275,23 @@ export async function createAccountActionToken(
   const payload = input.tokenPayload
     ? await input.tokenPayload(token)
     : input.payload;
-  await createDatabaseRuntime(env.DB).run({
-    sql: `
-      INSERT INTO account_action_tokens (
-        id, type, token_hash, team_id, user_id, email, payload_json,
-        created_by_user_id, created_at, expires_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)
-    `,
-    bindings: [
-      id,
-      input.type,
-      tokenHash,
-      normalizeNullableString(input.teamId),
-      normalizeNullableString(input.userId),
-      normalizeEmail(input.email),
-      JSON.stringify(safePayload(payload)),
-      normalizeNullableString(input.createdByUserId),
-      Math.max(0, Math.floor(input.expiresAt)),
-    ],
-    tag: "auth.account_action_tokens.insert",
-  });
+  await database(env).run(
+    compileD1Mutation(
+      insert(schema.account_action_tokens, {
+        id,
+        type: input.type,
+        token_hash: tokenHash,
+        team_id: normalizeNullableString(input.teamId),
+        user_id: normalizeNullableString(input.userId),
+        email: normalizeEmail(input.email),
+        payload_json: JSON.stringify(safePayload(payload)),
+        created_by_user_id: normalizeNullableString(input.createdByUserId),
+        created_at: unixepoch(),
+        expires_at: Math.max(0, Math.floor(input.expiresAt)),
+      }),
+      { tag: "auth.account_action_tokens.insert" },
+    ),
+  );
 
   const row = await getAccountActionTokenById(env, id);
   if (!row) throw new Error("account_action_token_create_failed");
@@ -256,21 +305,14 @@ export async function getAccountActionTokenById(
   env: Env,
   tokenId: string,
 ): Promise<AccountActionTokenRow | null> {
-  return (
-    (await createDatabaseRuntime(env.DB).first<AccountActionTokenRow>({
-      sql: `
-        SELECT
-          id, type, token_hash, team_id, user_id, email, payload_json,
-          created_by_user_id, created_at, expires_at, used_at,
-          used_by_user_id, revoked_at
-        FROM account_action_tokens
-        WHERE id = ?
-        LIMIT 1
-      `,
-      bindings: [tokenId],
-      tag: "auth.account_action_tokens.first",
-    })) ?? null
+  const tokens = accountActionTokenRows();
+  const row = await database(env).first(
+    compileD1Query(
+      limit(filter(tokens, eq(tokens.columns.id, param(tokenId))), 1),
+      { tag: "auth.account_action_tokens.first" },
+    ),
   );
+  return row ? requireAccountActionTokenRow(row) : null;
 }
 
 export async function getAccountActionTokenByToken(
@@ -278,21 +320,14 @@ export async function getAccountActionTokenByToken(
   token: string,
 ): Promise<AccountActionTokenRow | null> {
   const tokenHash = await hashAccountActionToken(env, token.trim());
-  return (
-    (await createDatabaseRuntime(env.DB).first<AccountActionTokenRow>({
-      sql: `
-        SELECT
-          id, type, token_hash, team_id, user_id, email, payload_json,
-          created_by_user_id, created_at, expires_at, used_at,
-          used_by_user_id, revoked_at
-        FROM account_action_tokens
-        WHERE token_hash = ?
-        LIMIT 1
-      `,
-      bindings: [tokenHash],
-      tag: "auth.account_action_tokens.first",
-    })) ?? null
+  const tokens = accountActionTokenRows();
+  const row = await database(env).first(
+    compileD1Query(
+      limit(filter(tokens, eq(tokens.columns.token_hash, param(tokenHash))), 1),
+      { tag: "auth.account_action_tokens.first" },
+    ),
   );
+  return row ? requireAccountActionTokenRow(row) : null;
 }
 
 export async function getValidAccountActionToken(
@@ -315,16 +350,25 @@ export async function markAccountActionTokenUsed(
     usedByUserId?: string | null;
   },
 ): Promise<AccountActionTokenRow | null> {
-  await createDatabaseRuntime(env.DB).run({
-    sql: `
-      UPDATE account_action_tokens
-      SET used_at = COALESCE(used_at, unixepoch()),
-          used_by_user_id = COALESCE(used_by_user_id, ?)
-      WHERE id = ? AND used_at IS NULL AND revoked_at IS NULL
-    `,
-    bindings: [normalizeNullableString(input.usedByUserId), input.tokenId],
-    tag: "auth.account_action_tokens.mark_used",
-  });
+  await database(env).run(
+    compileD1Mutation(
+      update(schema.account_action_tokens, (columns) => ({
+        set: {
+          used_at: coalesce(columns.used_at, unixepoch()),
+          used_by_user_id: coalesce(
+            columns.used_by_user_id,
+            param(normalizeNullableString(input.usedByUserId)),
+          ),
+        },
+        where: and(
+          eq(columns.id, param(input.tokenId)),
+          isNull(columns.used_at),
+          isNull(columns.revoked_at),
+        ),
+      })),
+      { tag: "auth.account_action_tokens.mark_used" },
+    ),
+  );
   return getAccountActionTokenById(env, input.tokenId);
 }
 
@@ -334,15 +378,18 @@ export async function revokeAccountActionToken(
     tokenId: string;
   },
 ): Promise<AccountActionTokenRow | null> {
-  await createDatabaseRuntime(env.DB).run({
-    sql: `
-      UPDATE account_action_tokens
-      SET revoked_at = COALESCE(revoked_at, unixepoch())
-      WHERE id = ? AND used_at IS NULL
-    `,
-    bindings: [input.tokenId],
-    tag: "auth.account_action_tokens.revoke",
-  });
+  await database(env).run(
+    compileD1Mutation(
+      update(schema.account_action_tokens, (columns) => ({
+        set: { revoked_at: coalesce(columns.revoked_at, unixepoch()) },
+        where: and(
+          eq(columns.id, param(input.tokenId)),
+          isNull(columns.used_at),
+        ),
+      })),
+      { tag: "auth.account_action_tokens.revoke" },
+    ),
+  );
   return getAccountActionTokenById(env, input.tokenId);
 }
 
@@ -350,18 +397,23 @@ export async function listTeamInviteTokens(
   env: Env,
   teamId: string,
 ): Promise<PublicAccountActionToken[]> {
-  const rows = await createDatabaseRuntime(env.DB).all<AccountActionTokenRow>({
-    sql: `
-      SELECT
-        id, type, token_hash, team_id, user_id, email, payload_json,
-        created_by_user_id, created_at, expires_at, used_at,
-        used_by_user_id, revoked_at
-      FROM account_action_tokens
-      WHERE team_id = ? AND type = 'team_invite'
-      ORDER BY created_at DESC
-    `,
-    bindings: [teamId],
-    tag: "auth.account_action_tokens.all",
-  });
-  return rows.results.map(toPublicAccountActionToken);
+  const tokens = accountActionTokenRows();
+  const inviteTokens = filter(
+    tokens,
+    and(
+      eq(tokens.columns.team_id, param(teamId)),
+      eq(tokens.columns.type, param("team_invite")),
+    ),
+  );
+  const orderedTokens = sort(inviteTokens, [
+    { expression: inviteTokens.columns.created_at, direction: "DESC" },
+  ]);
+  const rows = await database(env).all(
+    compileD1Query(orderedTokens, {
+      tag: "auth.account_action_tokens.all",
+    }),
+  );
+  return rows.results
+    .map(requireAccountActionTokenRow)
+    .map(toPublicAccountActionToken);
 }

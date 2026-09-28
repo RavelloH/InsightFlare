@@ -35,27 +35,21 @@ function createEnv() {
       }),
       first: vi.fn(async function (this: MockStatement) {
         const args = (this.bound ?? []) as unknown[];
-        if (this.sql.includes("WHERE id = ?")) {
-          const row = rows.find((item) => item.id === args[0]);
-          return row ? cloneRow(row) : null;
-        }
-        if (this.sql.includes("WHERE token_hash = ?")) {
-          const row = rows.find((item) => item.token_hash === args[0]);
-          return row ? cloneRow(row) : null;
-        }
-        return null;
+        const row = rows.find(
+          (item) => item.id === args[0] || item.token_hash === args[0],
+        );
+        return row ? cloneRow(row) : null;
       }),
       all: vi.fn(async function (this: MockStatement) {
         const args = (this.bound ?? []) as unknown[];
         if (
-          this.sql.includes("WHERE team_id = ?") &&
-          this.sql.includes("type = 'team_invite'")
+          this.sql.includes('"account_action_tokens"') &&
+          this.sql.includes("ORDER BY")
         ) {
           return {
             results: rows
               .filter(
-                (item) =>
-                  item.team_id === args[0] && item.type === "team_invite",
+                (item) => item.team_id === args[0] && item.type === args[1],
               )
               .sort((left, right) => right.created_at - left.created_at)
               .map(cloneRow),
@@ -65,7 +59,7 @@ function createEnv() {
       }),
       run: vi.fn(async function (this: MockStatement) {
         const args = (this.bound ?? []) as unknown[];
-        if (this.sql.includes("INSERT INTO account_action_tokens")) {
+        if (this.sql.startsWith('INSERT INTO "account_action_tokens"')) {
           rows.push({
             id: String(args[0]),
             type: String(args[1]),
@@ -83,8 +77,8 @@ function createEnv() {
           });
         }
         if (
-          this.sql.includes("SET used_at") &&
-          this.sql.includes("used_by_user_id")
+          this.sql.includes('SET "used_at"') &&
+          this.sql.includes('"used_by_user_id"')
         ) {
           const row = rows.find((item) => item.id === args[1]);
           if (row && row.used_at === null && row.revoked_at === null) {
@@ -94,7 +88,7 @@ function createEnv() {
               : row.used_by_user_id;
           }
         }
-        if (this.sql.includes("SET revoked_at")) {
+        if (this.sql.includes('SET "revoked_at"')) {
           const row = rows.find((item) => item.id === args[0]);
           if (row && row.used_at === null) {
             row.revoked_at = Math.floor(Date.now() / 1000);
@@ -285,5 +279,27 @@ describe("account action token utilities", () => {
     expect(list[0]).not.toHaveProperty("token");
     expect(list[0]).not.toHaveProperty("tokenHash");
     expect(list[0]).not.toHaveProperty("token_hash");
+  });
+
+  it("preserves lookup and mutation query counts", async () => {
+    const { env, prepare } = createEnv();
+    const created = await createAccountActionToken(env, {
+      type: "team_invite",
+      teamId: "team-1",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    expect(prepare).toHaveBeenCalledTimes(2);
+
+    await getAccountActionTokenByToken(env, created.token);
+    expect(prepare).toHaveBeenCalledTimes(3);
+
+    await markAccountActionTokenUsed(env, { tokenId: created.record.id });
+    expect(prepare).toHaveBeenCalledTimes(5);
+
+    await revokeAccountActionToken(env, { tokenId: created.record.id });
+    expect(prepare).toHaveBeenCalledTimes(7);
+
+    await listTeamInviteTokens(env, "team-1");
+    expect(prepare).toHaveBeenCalledTimes(8);
   });
 });
