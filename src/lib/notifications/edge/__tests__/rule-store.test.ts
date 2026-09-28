@@ -116,7 +116,7 @@ describe("notification rule store", () => {
               }),
             };
           }
-          if (sql.includes("SELECT team_id FROM sites")) {
+          if (sql.includes('FROM "sites"') && sql.includes('"team_id"')) {
             return {
               bind: vi.fn(() => ({
                 first: vi.fn(() => Promise.resolve({ team_id: "team-1" })),
@@ -336,7 +336,7 @@ describe("notification rule store", () => {
       DB: {
         prepare: vi.fn((sql: string) => {
           preparedSql.push(sql);
-          if (sql.includes("SELECT id,owner_user_id")) {
+          if (sql.includes('FROM "teams"') && sql.includes('"owner_user_id"')) {
             return {
               bind: vi.fn(() => ({
                 first: vi.fn(() =>
@@ -345,7 +345,10 @@ describe("notification rule store", () => {
               })),
             };
           }
-          if (sql.includes("SELECT role,site_ids_json")) {
+          if (
+            sql.includes('FROM "team_members"') &&
+            sql.includes('"site_ids_json"')
+          ) {
             return {
               bind: vi.fn(() => ({
                 first: vi.fn(() =>
@@ -381,7 +384,7 @@ describe("notification rule store", () => {
           if (sql.includes("DELETE FROM notification_rules")) {
             return { bind: vi.fn(() => ({ run })) };
           }
-          if (sql.includes("SELECT team_id FROM sites")) {
+          if (sql.includes('FROM "sites"') && sql.includes('"team_id"')) {
             return {
               bind: vi.fn(() => ({
                 first: vi.fn(() => Promise.resolve({ team_id: "team-1" })),
@@ -528,7 +531,7 @@ describe("notification rule store", () => {
           if (sql.includes("UPDATE notification_rules")) {
             return { bind: updateBind };
           }
-          if (sql.includes("SELECT team_id FROM sites")) {
+          if (sql.includes('FROM "sites"') && sql.includes('"team_id"')) {
             return {
               bind: vi.fn(() => ({
                 first: vi.fn(() => Promise.resolve({ team_id: "team-1" })),
@@ -602,7 +605,7 @@ describe("notification rule store", () => {
               }),
             };
           }
-          if (sql.includes("SELECT team_id FROM sites")) {
+          if (sql.includes('FROM "sites"') && sql.includes('"team_id"')) {
             return {
               bind: vi.fn(() => ({
                 first: vi.fn(() => Promise.resolve({ team_id: "team-1" })),
@@ -682,7 +685,7 @@ describe("notification rule store", () => {
               }),
             };
           }
-          if (sql.includes("SELECT team_id FROM sites")) {
+          if (sql.includes('FROM "sites"') && sql.includes('"team_id"')) {
             return {
               bind: vi.fn(() => ({
                 first: vi.fn(() => Promise.resolve({ team_id: "team-1" })),
@@ -755,7 +758,7 @@ describe("notification rule store", () => {
               }),
             };
           }
-          if (sql.includes("SELECT team_id FROM sites")) {
+          if (sql.includes('FROM "sites"') && sql.includes('"team_id"')) {
             return {
               bind: vi.fn(() => ({
                 first: vi.fn(() => Promise.resolve({ team_id: "team-1" })),

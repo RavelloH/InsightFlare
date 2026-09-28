@@ -337,7 +337,7 @@ describe("admin auth low branches", () => {
       { id: "team-1", membershipRole: "admin", siteCount: 2 },
       { id: "team-2", membershipRole: "member", memberCount: 4 },
     ]);
-    expect(teamsStatement.bind).toHaveBeenCalledWith("user-1");
+    expect(teamsStatement.bind).toHaveBeenCalledWith(0, 0, "user-1");
 
     const ownedLookup = statement({ first: { id: "owned-team" } });
     const ownedRepair = statement();
@@ -345,7 +345,12 @@ describe("admin auth low branches", () => {
       createEnv([ownedLookup, ownedRepair]).env,
       userRow({ id: "owner-1" }),
     );
-    expect(ownedRepair.bind).toHaveBeenCalledWith("owned-team", "owner-1");
+    expect(ownedRepair.bind).toHaveBeenCalledWith(
+      "owned-team",
+      "owner-1",
+      "owner",
+      "owner",
+    );
     expect(uniqueTeamSlugMock).not.toHaveBeenCalled();
 
     const uuidSpy = vi
@@ -370,6 +375,7 @@ describe("admin auth low branches", () => {
     expect(insertMember.bind).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "blank-user",
+      "owner",
     );
   });
 

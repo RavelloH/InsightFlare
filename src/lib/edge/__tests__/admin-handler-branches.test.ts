@@ -359,10 +359,11 @@ describe("admin handler low branches", () => {
       createEnv([usernameConflict, emailConflict, updateUser]).env,
     );
     expect(updated.status).toBe(200);
-    expect(usernameConflict.bind).toHaveBeenCalledWith("actor", "target-1");
+    expect(usernameConflict.bind).toHaveBeenCalledWith("actor", "target-1", 1);
     expect(emailConflict.bind).toHaveBeenCalledWith(
       "actor@example.test",
       "target-1",
+      1,
     );
     expect(hashPasswordMock).toHaveBeenCalledWith("updated-password");
     expect(updateUser.bind).toHaveBeenCalledWith(
