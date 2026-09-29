@@ -141,6 +141,17 @@ export function compileD1Expression(
         text(")"),
       );
     case "function":
+      if (expression.name === "trim") {
+        // Match ECMAScript String.prototype.trim(), used by Filter v1's
+        // trimmed-text fields. SQLite's default TRIM() only removes U+0020.
+        return concat(
+          text("TRIM("),
+          compileD1Expression(expression.arguments[0]!, scopes, context),
+          text(
+            ", char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279))",
+          ),
+        );
+      }
       return concat(
         text(expression.name.toUpperCase()),
         text("("),

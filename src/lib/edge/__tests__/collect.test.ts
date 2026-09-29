@@ -915,6 +915,27 @@ describe("collect route", () => {
     ).toBe(false);
   });
 
+  it("removes literal tab and Unicode whitespace before ingest forwarding", async () => {
+    const request = makeRuntimeRequest({
+      origin: "https://example.com",
+      body: await makePayload({
+        pathname: "pricing\t/plan\u00a0\u3000",
+      }),
+      headers: { "user-agent": CHROME_UA },
+    });
+
+    const response = await handleCollectRequest(
+      request,
+      env as never,
+      ctx as never,
+      new URL(request.url),
+    );
+
+    expect(response.status).toBe(204);
+    const envelope = await readForwardedEnvelope();
+    expect(envelope.client).toMatchObject({ pathname: "/pricing/plan" });
+  });
+
   it("normalizes query-only pageview paths to root while ignoring empty blacklist entries", async () => {
     readSiteTrackingConfigMock.mockResolvedValue({
       ...baseSettings,

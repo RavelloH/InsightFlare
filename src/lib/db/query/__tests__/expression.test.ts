@@ -112,6 +112,10 @@ describe("typed SQL expressions", () => {
         nullable: true,
       },
     );
+    expect(callFunction("trim", sites.columns.public_slug).resultType).toEqual({
+      affinity: "text",
+      nullable: true,
+    });
     expect(
       callFunction("length", param(new Uint8Array([1]))).resultType,
     ).toEqual({

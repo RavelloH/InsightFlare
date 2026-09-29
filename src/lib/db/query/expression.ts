@@ -115,7 +115,8 @@ export interface InListExpression<
   readonly values: readonly SqlBinding[];
 }
 
-export type SqlFunctionName = "lower" | "upper" | "length" | "abs" | "round";
+export type SqlFunctionName =
+  "lower" | "upper" | "trim" | "length" | "abs" | "round";
 
 export interface FunctionExpression<
   T = unknown,
@@ -748,7 +749,7 @@ export function callFunction<
   E extends SqlExpression<string | null>,
   Result extends ExpressionResultType,
 >(
-  name: "lower" | "upper",
+  name: "lower" | "upper" | "trim",
   expression: SqlExpression<ExpressionValue<E>, Result> & E,
 ): FunctionExpression<
   NullableValue<E, string>,
@@ -782,6 +783,7 @@ export function callFunction(
   switch (name) {
     case "lower":
     case "upper":
+    case "trim":
       affinity = "text";
       break;
     case "length":
