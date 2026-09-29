@@ -44,6 +44,15 @@ function pathCondition(path: string) {
   } as const;
 }
 
+function eventNameCondition(name: string) {
+  return {
+    kind: "condition",
+    target: { kind: "field", field: "event.name" },
+    operator: "eq",
+    value: name,
+  } as const;
+}
+
 function filterDocument(root: unknown): FilterDocument {
   return { version: 1, root } as unknown as FilterDocument;
 }
@@ -70,6 +79,8 @@ interface EventSeed {
   readonly site: SiteSeed;
   readonly visit: PageSeed;
   readonly occurredAt: number;
+  readonly eventName?: string;
+  readonly eventNameId?: number;
 }
 
 function setupSites(db: DatabaseSync): {
@@ -125,7 +136,7 @@ function insertEvent(db: DatabaseSync, event: EventSeed): void {
     event.site.id,
     event.site.key,
     event.visit.visitId,
-    event.site.eventNameId,
+    event.eventNameId ?? event.site.eventNameId,
     event.occurredAt,
     event.occurredAt,
   );
@@ -151,9 +162,23 @@ function eventEntity(event: EventSeed): FilterEvaluationEntity {
     sessionId: event.visit.sessionId,
     visitorId: `visitor-${event.visit.visitId}`,
     time: event.occurredAt,
-    fields: {},
+    fields: { "event.name": event.eventName ?? "activity" },
     payload: {},
   };
+}
+
+function ensureEventNameId(
+  db: DatabaseSync,
+  site: SiteSeed,
+  name: string,
+): number {
+  db.prepare(
+    "INSERT INTO custom_event_names (site_id, name, last_seen_at, site_pk) VALUES (?, ?, ?, ?) ON CONFLICT(site_pk, name) DO NOTHING",
+  ).run(site.id, name, 1, site.key);
+  const row = db
+    .prepare("SELECT id FROM custom_event_names WHERE site_pk = ? AND name = ?")
+    .get(site.key, name) as { readonly id: number };
+  return row.id;
 }
 
 function addPage(
@@ -215,11 +240,11 @@ function evaluateCandidateRestrictedSets(
   candidateIds: ReadonlySet<string>,
 ): ReadonlySet<string> {
   // With an explicit filterRange, Filter Evaluator enumerates Sessions from
-  // the filter evidence. Wave 1 defines NOT over the bounded candidate set,
-  // so evaluate each leaf first and apply Boolean set algebra to that universe.
+  // the filter evidence. Session filtering defines NOT over the bounded
+  // candidate set, so evaluate each leaf first and apply set algebra there.
   const evaluate = (input: unknown): Set<string> => {
     if (!input || typeof input !== "object") {
-      throw new Error("Expected a normalized page.path expression.");
+      throw new Error("Expected a normalized page.path/event.name expression.");
     }
     const node = input as Record<string, unknown>;
     if (node.kind === "condition") {
@@ -260,7 +285,7 @@ function evaluateCandidateRestrictedSets(
   return evaluate(expression);
 }
 
-describe("Analytics page.path → Session D1 lowering", () => {
+describe("Analytics page.path/event.name → Session D1 lowering", () => {
   it("executes the verified slice as one composite-key D1 query", async () => {
     const db = createMigratedDatabase();
     try {
@@ -1059,6 +1084,531 @@ describe("Analytics page.path → Session D1 lowering", () => {
     }
   });
 
+  it("lowers event.name evidence across distinct activity records and preserves D1 boundaries", async () => {
+    const db = createMigratedDatabase();
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      const { siteA, siteB } = setupSites(db);
+      const evaluatorPages: FilterEvaluationEntity[] = [];
+      const evaluatorEvents: FilterEvaluationEntity[] = [];
+      const page = (
+        site: SiteSeed,
+        visitId: string,
+        sessionId: string,
+        startedAt: number,
+        pathname: string,
+      ) => {
+        const row = addPage(db, site, visitId, sessionId, startedAt, pathname);
+        if (site.id === SITE_A) evaluatorPages.push(pageEntity(row));
+        return row;
+      };
+      const event = (
+        eventId: string,
+        site: SiteSeed,
+        owner: PageSeed,
+        occurredAt: number,
+        eventName = "activity",
+        eventNameId = ensureEventNameId(db, site, eventName),
+      ) => {
+        const row = {
+          eventId,
+          site,
+          visit: owner,
+          occurredAt,
+          eventName,
+          eventNameId,
+        };
+        insertEvent(db, row);
+        if (
+          site.id === SITE_A &&
+          owner.site.key === site.key &&
+          eventNameId === ensureEventNameId(db, site, eventName)
+        ) {
+          evaluatorEvents.push(eventEntity(row));
+        }
+        return row;
+      };
+
+      // Each Event's owner visit is outside both activity windows. Its own
+      // occurred_at decides whether the Event is read evidence or candidate
+      // membership, while its persisted site/session supplies the identity.
+      page(siteA, "event-owner-both-1", "s-page-event", 350, "/owner");
+      event(
+        "read-purchase-both-1",
+        siteA,
+        {
+          visitId: "event-owner-both-1",
+          site: siteA,
+          sessionId: "s-page-event",
+          startedAt: 350,
+          pathname: "/owner",
+        },
+        20,
+        "purchase",
+      );
+      page(siteA, "read-page-both-1", "s-page-event", 10, "/pricing");
+      page(siteA, "candidate-page-both-1", "s-page-event", 110, "/other");
+
+      const eventOnlyOwner = page(
+        siteA,
+        "event-owner-only",
+        "s-event-only",
+        360,
+        "/owner",
+      );
+      event("read-purchase-event-only", siteA, eventOnlyOwner, 30, "purchase");
+      page(siteA, "candidate-page-event-only", "s-event-only", 120, "/other");
+
+      page(siteA, "read-page-only", "s-page-only", 12, "/pricing");
+      page(siteA, "candidate-page-only", "s-page-only", 130, "/other");
+      page(siteA, "candidate-neither", "s-neither", 140, "/other");
+      page(siteA, "candidate-only", "s-candidate-only", 150, "/other");
+
+      const secondEventOwner = page(
+        siteA,
+        "event-owner-both-2",
+        "s-event-page",
+        370,
+        "/owner",
+      );
+      event(
+        "read-purchase-event-page",
+        siteA,
+        secondEventOwner,
+        40,
+        "purchase",
+      );
+      const candidateEventOwner = page(
+        siteA,
+        "candidate-event-owner",
+        "s-event-page",
+        380,
+        "/owner",
+      );
+      event(
+        "candidate-event-membership",
+        siteA,
+        candidateEventOwner,
+        130,
+        "other-event",
+      );
+
+      const readStartOwner = page(
+        siteA,
+        "read-start-owner",
+        "s-read-start",
+        390,
+        "/owner",
+      );
+      event("purchase-at-read-start", siteA, readStartOwner, 0, "purchase");
+      page(siteA, "read-start-candidate", "s-read-start", 160, "/other");
+
+      const readEndOwner = page(
+        siteA,
+        "read-end-owner",
+        "s-read-end",
+        391,
+        "/owner",
+      );
+      event("purchase-at-read-end", siteA, readEndOwner, 100, "purchase");
+
+      page(siteA, "duplicate-event-owner", "s-duplicate-event", 392, "/owner");
+      const duplicateOwner = {
+        visitId: "duplicate-event-owner",
+        site: siteA,
+        sessionId: "s-duplicate-event",
+        startedAt: 392,
+        pathname: "/owner",
+      };
+      event("purchase-duplicate-1", siteA, duplicateOwner, 50, "purchase");
+      event("purchase-duplicate-2", siteA, duplicateOwner, 51, "purchase");
+      page(siteA, "duplicate-candidate", "s-duplicate-event", 170, "/other");
+
+      const whitespaceOwner = page(
+        siteA,
+        "whitespace-event-owner",
+        "s-whitespace-event",
+        393,
+        "/owner",
+      );
+      event(
+        "purchase-with-unicode-whitespace",
+        siteA,
+        whitespaceOwner,
+        60,
+        " \u00a0purchase\t",
+      );
+      page(siteA, "whitespace-candidate", "s-whitespace-event", 171, "/other");
+
+      const caseOwner = page(
+        siteA,
+        "case-event-owner",
+        "s-case-event",
+        394,
+        "/owner",
+      );
+      event("case-sensitive-event", siteA, caseOwner, 61, "Purchase");
+      page(siteA, "case-candidate", "s-case-event", 172, "/other");
+
+      const sharedCandidate = page(
+        siteA,
+        "shared-candidate-a",
+        "s-shared",
+        173,
+        "/other",
+      );
+      const siteBPurchaseId = ensureEventNameId(db, siteB, "purchase");
+      const sharedSiteBOwner = page(
+        siteB,
+        "shared-event-owner-b",
+        "s-shared",
+        395,
+        "/owner",
+      );
+      event(
+        "site-b-purchase-shared",
+        siteB,
+        sharedSiteBOwner,
+        62,
+        "purchase",
+        siteBPurchaseId,
+      );
+      void sharedCandidate;
+
+      const crossNameCandidate = page(
+        siteA,
+        "cross-name-candidate",
+        "s-cross-name",
+        174,
+        "/other",
+      );
+      const crossNameOwner = page(
+        siteA,
+        "cross-name-owner",
+        "s-cross-name",
+        396,
+        "/owner",
+      );
+      event(
+        "site-a-event-with-site-b-name-id",
+        siteA,
+        crossNameOwner,
+        63,
+        "purchase",
+        siteBPurchaseId,
+      );
+      void crossNameCandidate;
+
+      page(siteA, "cross-owner-candidate", "s-cross-owner", 175, "/other");
+      const crossSiteOwner = page(
+        siteB,
+        "cross-owner-b",
+        "s-cross-owner",
+        397,
+        "/owner",
+      );
+      event(
+        "site-a-event-with-site-b-owner",
+        siteA,
+        crossSiteOwner,
+        64,
+        "purchase",
+      );
+
+      const emptyOwner = page(siteA, "empty-session-owner", "", 398, "/owner");
+      event("empty-session-purchase", siteA, emptyOwner, 65, "purchase");
+      page(siteA, "empty-session-candidate", "", 176, "/other");
+
+      const candidateEndOwner = page(
+        siteA,
+        "candidate-end-owner",
+        "s-candidate-end",
+        399,
+        "/owner",
+      );
+      event(
+        "event-at-candidate-end",
+        siteA,
+        candidateEndOwner,
+        200,
+        "purchase",
+      );
+
+      const pageA = filterDocument(pathCondition("/pricing"));
+      const eventPurchase = filterDocument(
+        eventNameCondition(" \u00a0purchase\t"),
+      );
+      const eventPurchaseNormalized = filterDocument(
+        eventNameCondition("purchase"),
+      );
+      const cases = [
+        {
+          name: "event-only",
+          document: eventPurchase,
+          expected: [
+            "s-page-event",
+            "s-event-only",
+            "s-event-page",
+            "s-read-start",
+            "s-duplicate-event",
+            "s-whitespace-event",
+          ],
+        },
+        {
+          name: "page-and-event",
+          document: filterDocument({
+            kind: "and",
+            children: [pageA.root, eventPurchase.root],
+          }),
+          expected: ["s-page-event"],
+        },
+        {
+          name: "page-or-event",
+          document: filterDocument({
+            kind: "or",
+            children: [pageA.root, eventPurchase.root],
+          }),
+          expected: [
+            "s-page-event",
+            "s-event-only",
+            "s-event-page",
+            "s-page-only",
+            "s-read-start",
+            "s-duplicate-event",
+            "s-whitespace-event",
+          ],
+        },
+        {
+          name: "not-event",
+          document: filterDocument({
+            kind: "not",
+            child: eventPurchaseNormalized.root,
+          }),
+          expected: [
+            "s-page-only",
+            "s-neither",
+            "s-candidate-only",
+            "s-read-end",
+            "s-case-event",
+            "s-shared",
+            "s-cross-name",
+            "s-cross-owner",
+          ],
+        },
+        {
+          name: "page-and-not-event",
+          document: filterDocument({
+            kind: "and",
+            children: [
+              pageA.root,
+              { kind: "not", child: eventPurchaseNormalized.root },
+            ],
+          }),
+          expected: ["s-page-only"],
+        },
+      ] as const;
+
+      const evaluatorDataset = {
+        pages: evaluatorPages,
+        events: evaluatorEvents,
+        coverageRange: { startMs: 0, endExclusiveMs: 400 },
+      };
+      const candidateSessionIds = new Set(
+        [
+          ...evaluatorPages
+            .filter(
+              (entity) =>
+                entity.time !== undefined &&
+                entity.time >= CANDIDATE_RANGE.startMs &&
+                entity.time < CANDIDATE_RANGE.endExclusiveMs,
+            )
+            .map((entity) => entity.sessionId),
+          ...evaluatorEvents
+            .filter(
+              (entity) =>
+                entity.time !== undefined &&
+                entity.time >= CANDIDATE_RANGE.startMs &&
+                entity.time < CANDIDATE_RANGE.endExclusiveMs,
+            )
+            .map((entity) => entity.sessionId),
+        ].filter((sessionId): sessionId is string => Boolean(sessionId)),
+      );
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const client = createD1DatabaseClient(createSqliteD1Database(db, trace));
+      const observedCosts: Record<
+        string,
+        {
+          statements: number;
+          bindings: number;
+          sqlLength: number;
+          explain: {
+            operations: number;
+            candidatePageCoveringScans: number;
+            candidateEventCoveringScans: number;
+            readEventTimeRangeSearches: number;
+            integerPrimaryKeyLookups: number;
+            ownerVisitIndexLookups: number;
+            unionTempTrees: number;
+          };
+        }
+      > = {};
+
+      for (const item of cases) {
+        const lowered = lower(item.document);
+        expect(lowered.kind, item.name).toBe("supported");
+        if (lowered.kind !== "supported")
+          throw new Error(`Expected ${item.name} to lower.`);
+        const direct = lowerAnalyticsPagePathSessionPlan(lowered.logicalPlan);
+        expect(direct.kind, `${item.name} direct plan`).toBe("supported");
+        if (direct.kind !== "supported")
+          throw new Error(`Expected ${item.name} plan to lower directly.`);
+        expect(direct.query.sql).toBe(lowered.query.sql);
+        expect(direct.query.bindings).toEqual(lowered.query.bindings);
+
+        const result = await client.all(lowered.query);
+        const rows = result.results as Array<{
+          readonly site_pk: number;
+          readonly session_id: string;
+        }>;
+        const actual = new Set(rows.map((row) => row.session_id));
+        const evaluated = evaluateCandidateRestrictedSets(
+          item.document.root,
+          evaluatorDataset,
+          candidateSessionIds,
+        );
+        expect(actual, item.name).toEqual(evaluated);
+        expect([...actual].sort(), item.name).toEqual(
+          [...item.expected].sort(),
+        );
+        expect(rows.every((row) => row.site_pk === siteA.key)).toBe(true);
+        expect(rows).toHaveLength(actual.size);
+        expect(trace.preparedSql).toHaveLength(cases.indexOf(item) + 1);
+
+        if (item.name === "event-only") {
+          const explainLines = explainQueryPlan(db, lowered.query);
+          const explain = explainLines.join("\n");
+          const countExplain = (pattern: RegExp) =>
+            explainLines.filter((line) => pattern.test(line)).length;
+          observedCosts[item.name] = {
+            statements: 1,
+            bindings: lowered.query.bindings?.length ?? 0,
+            sqlLength: lowered.query.sql.length,
+            explain: {
+              operations: explainLines.length,
+              candidatePageCoveringScans: countExplain(
+                /SCAN \w+ USING COVERING INDEX idx_visits_site_pk_session_started_at/u,
+              ),
+              candidateEventCoveringScans: countExplain(
+                /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u,
+              ),
+              readEventTimeRangeSearches: countExplain(
+                /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
+              ),
+              integerPrimaryKeyLookups: countExplain(
+                /USING INTEGER PRIMARY KEY \(rowid=\?\)/u,
+              ),
+              ownerVisitIndexLookups: countExplain(
+                /sqlite_autoindex_visits_1 \(visit_id=\?\)/u,
+              ),
+              unionTempTrees: countExplain(/UNION USING TEMP B-TREE/u),
+            },
+          };
+          expect(lowered.query.bindings).toContain("purchase");
+          expect(lowered.query.sql).toContain(
+            "char(9, 10, 11, 12, 13, 32, 160",
+          );
+          expect(explain).toMatch(
+            /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
+          );
+          expect(
+            countExplain(/USING INTEGER PRIMARY KEY \(rowid=\?\)/u),
+          ).toBeGreaterThanOrEqual(2);
+          expect(explain).toMatch(/sqlite_autoindex_visits_1/u);
+          expect(
+            countExplain(/sqlite_autoindex_visits_1 \(visit_id=\?\)/u),
+          ).toBe(2);
+        }
+      }
+
+      expect(observedCosts["event-only"]).toEqual({
+        statements: 1,
+        bindings: 13,
+        sqlLength: 19095,
+        explain: {
+          operations: 18,
+          candidatePageCoveringScans: 1,
+          candidateEventCoveringScans: 1,
+          readEventTimeRangeSearches: 1,
+          integerPrimaryKeyLookups: 4,
+          ownerVisitIndexLookups: 2,
+          unionTempTrees: 1,
+        },
+      });
+      expect(trace.preparedSql).toHaveLength(cases.length);
+
+      const eventLowering = lower(eventPurchaseNormalized);
+      expect(eventLowering.kind).toBe("supported");
+      if (eventLowering.kind !== "supported")
+        throw new Error("Expected event.name plan.");
+      const eventPlan = mutablePlan(eventLowering.logicalPlan);
+      const eventSource = eventPlan.nodes.find(
+        (node) => node.kind === "source" && node.entity === "event",
+      );
+      const eventBindings = eventSource?.values as
+        Array<Record<string, unknown>> | undefined;
+      const observationBinding = eventBindings?.find(
+        (binding) => binding.kind === "related-entity",
+      );
+      if (!observationBinding)
+        throw new Error("Expected event.observation source binding.");
+      observationBinding.relationship = "observation.session";
+      const unsupportedEventRelationship = lowerAnalyticsPagePathSessionPlan(
+        asLogicalPlan(eventPlan),
+      );
+      expect(unsupportedEventRelationship).toMatchObject({
+        kind: "unsupported",
+      });
+      expect("query" in unsupportedEventRelationship).toBe(false);
+
+      const eventUnion = mutablePlan(eventLowering.logicalPlan);
+      const root = eventUnion.nodes.find(
+        (node) => node.id === eventUnion.outputs[0]!.relation,
+      );
+      if (root?.kind !== "set-operation")
+        throw new Error("Expected candidate-scoped set operation.");
+      root.operation = "union";
+      const unsupportedUnion = lowerAnalyticsPagePathSessionPlan(
+        asLogicalPlan(eventUnion),
+      );
+      expect(unsupportedUnion).toMatchObject({
+        kind: "unsupported",
+        capability: "session-boolean-plan-shape",
+        node: `nodes[${String(root.id)}]`,
+        reason: expect.stringContaining("candidate Session universe"),
+      });
+      expect("query" in unsupportedUnion).toBe(false);
+
+      const eventDomain = mutablePlan(eventLowering.logicalPlan);
+      const eventDomainSource = eventDomain.nodes.find(
+        (node) => node.kind === "source" && node.entity === "event",
+      );
+      if (!eventDomainSource)
+        throw new Error("Expected the read Event Source node.");
+      eventDomainSource.temporalDomain = "candidate";
+      const unsupportedEventDomain = lowerAnalyticsPagePathSessionPlan(
+        asLogicalPlan(eventDomain),
+      );
+      expect(unsupportedEventDomain).toMatchObject({
+        kind: "unsupported",
+        capability: "session-boolean-plan-shape",
+        node: expect.stringContaining("temporalDomain"),
+      });
+      expect("query" in unsupportedEventDomain).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
   it("rejects unsupported fields and multiple site identities before building DB SQL", () => {
     const unsupportedField = lower(
       filterDocument({
@@ -1070,9 +1620,40 @@ describe("Analytics page.path → Session D1 lowering", () => {
     );
     expect(unsupportedField).toMatchObject({
       kind: "unsupported",
-      capability: "page-path-equality-only",
+      capability: "session-equality-leaf-only",
     });
     expect("query" in unsupportedField).toBe(false);
+
+    const unsupportedEventPayload = lower(
+      filterDocument({
+        kind: "condition",
+        target: { kind: "field", field: "event.payload" },
+        operator: "eq",
+        value: "purchase",
+      }),
+    );
+    expect(unsupportedEventPayload).toMatchObject({
+      kind: "unsupported",
+      capability: "valid-filter-document-required",
+    });
+    expect("query" in unsupportedEventPayload).toBe(false);
+
+    const tooManyLeaves = lower(
+      filterDocument({
+        kind: "and",
+        children: [
+          PATH_A.root,
+          filterDocument(eventNameCondition("purchase")).root,
+          PATH_B.root,
+        ],
+      }),
+    );
+    expect(tooManyLeaves).toMatchObject({
+      kind: "unsupported",
+      capability: "two-session-filter-leaves-only",
+      node: "root.children[2]",
+    });
+    expect("query" in tooManyLeaves).toBe(false);
 
     const unsupportedSites = lower(DOCUMENT, [SITE_A, SITE_B]);
     expect(unsupportedSites).toMatchObject({
@@ -1086,7 +1667,7 @@ describe("Analytics page.path → Session D1 lowering", () => {
     );
     expect(oneChildBoolean).toMatchObject({
       kind: "unsupported",
-      capability: "page-path-boolean-shape",
+      capability: "session-boolean-shape",
     });
     expect("query" in oneChildBoolean).toBe(false);
   });
@@ -1095,7 +1676,7 @@ describe("Analytics page.path → Session D1 lowering", () => {
     const empty = lower({ version: 1, root: null });
     expect(empty).toMatchObject({
       kind: "unsupported",
-      capability: "page-path-equality-only",
+      capability: "session-equality-leaf-only",
       node: "empty-document",
     });
     expect("query" in empty).toBe(false);
