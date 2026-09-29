@@ -4,6 +4,7 @@ import {
   elapsedDurationLiteral,
   type LogicalExpr,
   type LogicalLiteralValue,
+  type LogicalStringNormalization,
 } from "@/lib/edge/analytics/engine/logical/expression";
 import type { LogicalGrain } from "@/lib/edge/analytics/engine/logical/grain";
 import {
@@ -65,6 +66,8 @@ export interface LogicalRelationHandle {
   readonly slots: Readonly<Record<string, SlotId>>;
   readonly grain: LogicalGrain;
   readonly entityKey?: SlotId;
+  /** Explicit source-domain provenance propagated through relational operators. */
+  readonly temporalDomains: readonly TemporalDomainRef[];
 }
 
 export interface LogicalExpressionHandle extends InferredLogicalExpression {
@@ -213,7 +216,73 @@ export class LogicalPlanBuilder {
       output: values.map((value) => value.slot),
       grain: { kind: "entity", entity, key: self.id },
     } satisfies LogicalNode;
-    return this.#addNode(node, namedSlots, node.grain);
+    return this.#addNode(node, namedSlots, node.grain, [temporalDomain]);
+  }
+
+  relationshipLookup(
+    input: LogicalRelationHandle,
+    relationshipId: SemanticRelationshipId,
+  ): LogicalRelationHandle {
+    const state = this.#owned(input);
+    const relationship = semanticRelationship(relationshipId);
+    if (!relationship) {
+      throw new Error(`logical_builder_unknown_relationship:${relationshipId}`);
+    }
+    if (
+      relationship.cardinality !== "one-to-one" &&
+      relationship.cardinality !== "many-to-one"
+    ) {
+      throw new Error(
+        `logical_builder_relationship_lookup_not_single_valued:${relationshipId}`,
+      );
+    }
+    if (
+      input.grain.kind !== "entity" ||
+      input.grain.entity !== relationship.from ||
+      input.entityKey !== input.grain.key ||
+      !state.node.output.includes(input.grain.key)
+    ) {
+      throw new Error(
+        `logical_builder_relationship_lookup_requires_entity:${relationshipId}`,
+      );
+    }
+    const inputKey = this.#slotById.get(input.grain.key);
+    if (
+      !inputKey ||
+      inputKey.type.kind !== "entity" ||
+      inputKey.type.entity !== relationship.from ||
+      inputKey.nullable
+    ) {
+      throw new Error(
+        `logical_builder_relationship_lookup_requires_nonnull_key:${relationshipId}`,
+      );
+    }
+    const name = `relationship:${relationshipId}`;
+    if (name in input.slots) {
+      throw new Error(`logical_builder_duplicate_name:${name}`);
+    }
+    const related = this.#newSlot(
+      { kind: "entity", entity: relationship.to },
+      relationship.optional,
+      { kind: "relationship", relationship: relationship.id },
+    );
+    const node = {
+      kind: "relationship-lookup",
+      id: this.#newRelationId(),
+      input: input.id,
+      relationship: relationshipId,
+      inputKey: input.grain.key,
+      relatedSlot: related.id,
+      timeSemantics: "identity-no-activity-filter",
+      output: [...state.node.output, related.id],
+      grain: input.grain,
+    } satisfies LogicalNode;
+    return this.#addNode(
+      node,
+      { ...input.slots, [name]: related.id },
+      node.grain,
+      input.temporalDomains,
+    );
   }
 
   slot(relation: LogicalRelationHandle, name: string): LogicalExpressionHandle {
@@ -255,12 +324,14 @@ export class LogicalPlanBuilder {
     operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte",
     left: LogicalExpressionHandle,
     right: LogicalExpressionHandle,
+    stringNormalization?: LogicalStringNormalization,
   ): LogicalExpressionHandle {
     return this.#expression({
       kind: "comparison",
       operator,
       left: left.expression,
       right: right.expression,
+      ...(stringNormalization ? { stringNormalization } : {}),
     });
   }
 
@@ -291,6 +362,7 @@ export class LogicalPlanBuilder {
     input: LogicalExpressionHandle,
     values: readonly LogicalExpressionHandle[],
     negated = false,
+    stringNormalization?: LogicalStringNormalization,
   ): LogicalExpressionHandle {
     const literals = values.map((value) => {
       if (value.expression.kind !== "literal") {
@@ -303,6 +375,7 @@ export class LogicalPlanBuilder {
       input: input.expression,
       values: literals,
       negated,
+      ...(stringNormalization ? { stringNormalization } : {}),
     });
   }
 
@@ -311,6 +384,7 @@ export class LogicalPlanBuilder {
     input: LogicalExpressionHandle,
     value: string,
     caseSensitive = false,
+    stringNormalization?: LogicalStringNormalization,
   ): LogicalExpressionHandle {
     return this.#expression({
       kind: "string-match",
@@ -318,6 +392,7 @@ export class LogicalPlanBuilder {
       input: input.expression,
       value,
       caseSensitive,
+      ...(stringNormalization ? { stringNormalization } : {}),
     });
   }
 
@@ -401,7 +476,7 @@ export class LogicalPlanBuilder {
       output: source.node.output,
       grain: input.grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, input.slots, node.grain);
+    return this.#addNode(node, input.slots, node.grain, input.temporalDomains);
   }
 
   project(
@@ -470,7 +545,7 @@ export class LogicalPlanBuilder {
       output: bindings.map((binding) => binding.slot),
       grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, slots, grain);
+    return this.#addNode(node, slots, grain, input.temporalDomains);
   }
 
   aggregate(
@@ -564,7 +639,7 @@ export class LogicalPlanBuilder {
       ],
       grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, slots, grain);
+    return this.#addNode(node, slots, grain, input.temporalDomains);
   }
 
   distinct(
@@ -627,7 +702,7 @@ export class LogicalPlanBuilder {
       output: keyBindings.map((key) => key.output),
       grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, slots, grain);
+    return this.#addNode(node, slots, grain, input.temporalDomains);
   }
 
   distinctEntity(
@@ -721,7 +796,12 @@ export class LogicalPlanBuilder {
       output,
       grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, slots, grain);
+    return this.#addNode(
+      node,
+      slots,
+      grain,
+      this.#mergeTemporalDomains(...inputs),
+    );
   }
 
   semiJoin(
@@ -784,7 +864,12 @@ export class LogicalPlanBuilder {
       output: [...leftState.node.output, ...rightOutput],
       grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, slots, grain);
+    return this.#addNode(
+      node,
+      slots,
+      grain,
+      this.#mergeTemporalDomains(left, right),
+    );
   }
 
   sort(
@@ -810,7 +895,7 @@ export class LogicalPlanBuilder {
       output: source.node.output,
       grain: input.grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, input.slots, node.grain);
+    return this.#addNode(node, input.slots, node.grain, input.temporalDomains);
   }
 
   limit(input: LogicalRelationHandle, count: number): LogicalRelationHandle {
@@ -825,7 +910,7 @@ export class LogicalPlanBuilder {
       output: source.node.output,
       grain: input.grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, input.slots, node.grain);
+    return this.#addNode(node, input.slots, node.grain, input.temporalDomains);
   }
 
   output(
@@ -883,7 +968,12 @@ export class LogicalPlanBuilder {
       output: leftState.node.output,
       grain: left.grain,
     } satisfies LogicalNode;
-    return this.#addNode(node, left.slots, node.grain);
+    return this.#addNode(
+      node,
+      left.slots,
+      node.grain,
+      this.#mergeTemporalDomains(left, right),
+    );
   }
 
   #joinKeys(
@@ -1061,12 +1151,14 @@ export class LogicalPlanBuilder {
     node: LogicalNode,
     namedSlots: Readonly<Record<string, SlotId>>,
     grain: LogicalGrain,
+    temporalDomains: readonly TemporalDomainRef[],
   ): LogicalRelationHandle {
     this.#nodes.push(node);
     const handle: LogicalRelationHandle = Object.freeze({
       id: node.id,
       slots: Object.freeze({ ...namedSlots }),
       grain,
+      temporalDomains: Object.freeze([...temporalDomains]),
       ...(grain.kind === "entity" ? { entityKey: grain.key } : {}),
     });
     this.#relationById.set(node.id, { handle, node });
@@ -1078,5 +1170,13 @@ export class LogicalPlanBuilder {
     if (!state || state.handle !== handle)
       throw new Error("logical_builder_foreign_relation_handle");
     return state;
+  }
+
+  #mergeTemporalDomains(
+    ...relations: readonly LogicalRelationHandle[]
+  ): readonly TemporalDomainRef[] {
+    return [
+      ...new Set(relations.flatMap((relation) => relation.temporalDomains)),
+    ];
   }
 }

@@ -30,7 +30,10 @@ import {
   validateResolvedAnalyticsScope,
 } from "@/lib/edge/analytics/engine/semantic/entities";
 import { semanticMetric } from "@/lib/edge/analytics/engine/semantic/metrics";
-import { semanticRelationship } from "@/lib/edge/analytics/engine/semantic/relationships";
+import {
+  isSemanticRelationshipId,
+  semanticRelationship,
+} from "@/lib/edge/analytics/engine/semantic/relationships";
 import { isCanonicalSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import {
   createSemanticTemporalDomains,
@@ -96,6 +99,36 @@ function requireCompatible(
   if (!sameType(left, right)) {
     throw new LogicalPlanError([
       { code: "invalid-expression", path, message: detail },
+    ]);
+  }
+}
+
+function validateStringNormalization(
+  normalization: unknown,
+  operands: readonly LogicalValueType[],
+  path: string,
+): void {
+  if (normalization === undefined) return;
+  if (normalization !== "trim" && normalization !== "trim-case-fold") {
+    throw new LogicalPlanError([
+      {
+        code: "invalid-expression",
+        path,
+        message: "String normalization mode is invalid.",
+      },
+    ]);
+  }
+  if (
+    operands.some(
+      (operand) => operand.kind !== "scalar" || operand.scalar !== "string",
+    )
+  ) {
+    throw new LogicalPlanError([
+      {
+        code: "invalid-expression",
+        path,
+        message: "String normalization requires string scalar operands.",
+      },
     ]);
   }
 }
@@ -186,6 +219,11 @@ function infer(
       const left = infer(expression.left, resolveSlot, `${path}.left`);
       const right = infer(expression.right, resolveSlot, `${path}.right`);
       requireCompatible(left.type, right.type, path);
+      validateStringNormalization(
+        expression.stringNormalization,
+        [left.type, right.type],
+        `${path}.stringNormalization`,
+      );
       if (
         left.type.kind === "entity" &&
         !["eq", "neq"].includes(expression.operator)
@@ -277,6 +315,11 @@ function infer(
       return { type: scalar("boolean"), nullable: false };
     case "set-membership": {
       const input = infer(expression.input, resolveSlot, `${path}.input`);
+      validateStringNormalization(
+        expression.stringNormalization,
+        [input.type],
+        `${path}.stringNormalization`,
+      );
       expression.values.forEach((value, index) => {
         infer(value, resolveSlot, `${path}.values[${index}]`);
         requireCompatible(
@@ -303,6 +346,11 @@ function infer(
           },
         ]);
       }
+      validateStringNormalization(
+        expression.stringNormalization,
+        [input.type],
+        `${path}.stringNormalization`,
+      );
       return { type: scalar("boolean"), nullable: input.nullable };
     }
     case "arithmetic": {
@@ -934,6 +982,92 @@ function validateNode(
       expectedGrain = { kind: "entity", entity: node.entity, key: self.slot };
       break;
     }
+    case "relationship-lookup": {
+      if (!isSemanticRelationshipId(node.relationship)) {
+        fail(
+          "invalid-topology",
+          `${path}.relationship`,
+          "Relationship lookup references an unknown semantic relationship.",
+        );
+      }
+      const relationship = semanticRelationship(node.relationship);
+      if (!relationship) {
+        fail(
+          "invalid-topology",
+          `${path}.relationship`,
+          "Relationship lookup references an unknown semantic relationship.",
+        );
+      }
+      if (node.timeSemantics !== "identity-no-activity-filter") {
+        fail(
+          "invalid-topology",
+          `${path}.timeSemantics`,
+          "Relationship lookup must use identity semantics without activity-time filtering.",
+        );
+      }
+      if (
+        relationship.cardinality !== "one-to-one" &&
+        relationship.cardinality !== "many-to-one"
+      ) {
+        fail(
+          "invalid-topology",
+          `${path}.relationship`,
+          "Relationship lookup requires a single-valued relationship.",
+        );
+      }
+      const input = assertRelation(node.input, states, `${path}.input`);
+      if (
+        input.grain.kind !== "entity" ||
+        input.grain.entity !== relationship.from
+      ) {
+        fail(
+          "invalid-grain",
+          `${path}.input`,
+          "Relationship lookup input must have the relationship source entity grain.",
+        );
+      }
+      if (node.inputKey !== input.grain.key) {
+        fail(
+          "invalid-topology",
+          `${path}.inputKey`,
+          "Relationship lookup must use the input entity grain key.",
+        );
+      }
+      const inputKey = resolveVisibleSlot(
+        input,
+        node.inputKey,
+        `${path}.inputKey`,
+      );
+      if (
+        inputKey.type.kind !== "entity" ||
+        inputKey.type.entity !== relationship.from ||
+        inputKey.nullable
+      ) {
+        fail(
+          "invalid-grain",
+          `${path}.inputKey`,
+          "Relationship lookup key must be a visible, non-null source entity key.",
+        );
+      }
+      const relatedSlot = types.get(node.relatedSlot);
+      if (
+        !relatedSlot ||
+        relatedSlot.type.kind !== "entity" ||
+        relatedSlot.type.entity !== relationship.to ||
+        relatedSlot.nullable !== relationship.optional ||
+        relatedSlot.lineage.kind !== "relationship" ||
+        relatedSlot.lineage.relationship !== relationship.id
+      ) {
+        fail(
+          "invalid-expression",
+          `${path}.relatedSlot`,
+          "Relationship lookup output type, nullability, or lineage differs from the semantic catalog.",
+        );
+      }
+      expectedOutput = [...input.node.output, node.relatedSlot];
+      expectedGrain = input.grain;
+      break;
+    }
     case "filter": {
       const input = assertRelation(node.input, states, `${path}.input`);
       const predicate = inferLogicalExpression(
@@ -1397,6 +1531,8 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
       switch (node.kind) {
         case "source":
           return node.values.map((binding) => binding.slot);
+        case "relationship-lookup":
+          return [node.relatedSlot];
         case "project":
           return node.projections.map((binding) => binding.slot);
         case "aggregate":

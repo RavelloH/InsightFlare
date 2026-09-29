@@ -36,6 +36,16 @@ export interface SourceNode extends LogicalNodeBase {
   readonly values: readonly SourceValueBinding[];
 }
 
+export interface RelationshipLookupNode extends LogicalNodeBase {
+  readonly kind: "relationship-lookup";
+  readonly input: RelationId;
+  readonly relationship: SemanticRelationshipId;
+  readonly inputKey: SlotId;
+  readonly relatedSlot: SlotId;
+  /** Identity reads use the entity key and do not filter relationship evidence by activity time. */
+  readonly timeSemantics: "identity-no-activity-filter";
+}
+
 export interface FilterNode extends LogicalNodeBase {
   readonly kind: "filter";
   readonly input: RelationId;
@@ -159,6 +169,7 @@ export interface LimitNode extends LogicalNodeBase {
 
 export type LogicalNode =
   | SourceNode
+  | RelationshipLookupNode
   | FilterNode
   | ProjectNode
   | AggregateNode

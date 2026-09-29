@@ -6,6 +6,8 @@ import type {
   SiteId,
 } from "@/lib/edge/analytics/contract/types";
 import {
+  createCandidateScopeUniverse,
+  createNativeMatchConverter,
   LazyEligibleDataset,
   type LogicalPlan,
   LogicalPlanBuilder,
@@ -201,36 +203,44 @@ function countryBreakdownPrinterPlan(): LogicalPlan {
 
 function booleanScopePrinterPlan(): LogicalPlan {
   const builder = new LogicalPlanBuilder(context());
-  const candidate = builder.source("visitor");
+  const candidate = createCandidateScopeUniverse(builder, "visitor");
   const matchingA = builder.distinctEntity(
-    builder.source("observation", { relationships: ["observation.visitor"] }),
+    builder.source("observation", {
+      temporalDomain: "read",
+      relationships: ["observation.visitor"],
+    }),
     "relationship:observation.visitor",
-    "visitor",
+    "entity",
   );
   const matchingB = builder.distinctEntity(
-    builder.source("observation", { relationships: ["observation.visitor"] }),
+    builder.source("observation", {
+      temporalDomain: "read",
+      relationships: ["observation.visitor"],
+    }),
     "relationship:observation.visitor",
-    "visitor",
+    "entity",
   );
   const matchA = {
     kind: "match" as const,
     value: {
-      nativeEntity: "observation" as const,
+      nativeEntity: "visitor" as const,
       relation: matchingA,
-      entitySlot: "visitor",
+      entitySlot: "entity",
+      temporalDomain: "read" as const,
     },
   };
   const matchB = {
     kind: "match" as const,
     value: {
-      nativeEntity: "observation" as const,
+      nativeEntity: "visitor" as const,
       relation: matchingB,
-      entitySlot: "visitor",
+      entitySlot: "entity",
+      temporalDomain: "read" as const,
     },
   };
   const selection = resolveScopeFilterSelection(
     builder,
-    { scope: "visitor", relation: candidate, entitySlot: "entity" },
+    candidate,
     {
       kind: "or",
       children: [
@@ -238,13 +248,7 @@ function booleanScopePrinterPlan(): LogicalPlan {
         matchB,
       ],
     },
-    {
-      convert(match, target) {
-        return builder.semiJoin(target.relation, match.relation, [
-          { left: target.entitySlot, right: match.entitySlot },
-        ]);
-      },
-    },
+    createNativeMatchConverter(builder),
   );
   if (selection.kind !== "matching")
     throw new Error("expected_matching_scope_fixture");
@@ -382,64 +386,90 @@ describe("Phase 4A golden logical plans", () => {
         SUBJECT site sites=[site-a]
         SCOPE requested=auto contract=auto logical=auto
 
-      r0 Source<visitor> grain=Entity<visitor>[s0] domain=candidate
-        VALUE self -> s0:Entity<visitor>!{entity:visitor}
-        OUTPUT s0:Entity<visitor>!{entity:visitor}
+      r0 Source<observation> grain=Entity<observation>[s0] domain=candidate
+        VALUE self -> s0:Entity<observation>!{entity:observation}
+        VALUE relationship=observation.visitor -> s1:Entity<visitor>?{relationship:observation.visitor}
+        OUTPUT s0:Entity<observation>!{entity:observation}, s1:Entity<visitor>?{relationship:observation.visitor}
 
-      r1 Source<observation> grain=Entity<observation>[s1] domain=candidate
-        VALUE self -> s1:Entity<observation>!{entity:observation}
-        VALUE relationship=observation.visitor -> s2:Entity<visitor>?{relationship:observation.visitor}
-        OUTPUT s1:Entity<observation>!{entity:observation}, s2:Entity<visitor>?{relationship:observation.visitor}
+      r1 Distinct grain=Entity<visitor>[s2] excludeNull=true
+        KEY s2:Entity<visitor>!{alias:s1} := s1:Entity<visitor>?{relationship:observation.visitor}
+        OUTPUT s2:Entity<visitor>!{alias:s1}
 
-      r2 Distinct grain=Entity<visitor>[s3] excludeNull=true
-        KEY s3:Entity<visitor>!{alias:s2} := s2:Entity<visitor>?{relationship:observation.visitor}
-        OUTPUT s3:Entity<visitor>!{alias:s2}
+      r2 Source<observation> grain=Entity<observation>[s3] domain=read
+        VALUE self -> s3:Entity<observation>!{entity:observation}
+        VALUE relationship=observation.visitor -> s4:Entity<visitor>?{relationship:observation.visitor}
+        OUTPUT s3:Entity<observation>!{entity:observation}, s4:Entity<visitor>?{relationship:observation.visitor}
 
-      r3 Source<observation> grain=Entity<observation>[s4] domain=candidate
-        VALUE self -> s4:Entity<observation>!{entity:observation}
-        VALUE relationship=observation.visitor -> s5:Entity<visitor>?{relationship:observation.visitor}
-        OUTPUT s4:Entity<observation>!{entity:observation}, s5:Entity<visitor>?{relationship:observation.visitor}
+      r3 Distinct grain=Entity<visitor>[s5] excludeNull=true
+        KEY s5:Entity<visitor>!{alias:s4} := s4:Entity<visitor>?{relationship:observation.visitor}
+        OUTPUT s5:Entity<visitor>!{alias:s4}
 
-      r4 Distinct grain=Entity<visitor>[s6] excludeNull=true
-        KEY s6:Entity<visitor>!{alias:s5} := s5:Entity<visitor>?{relationship:observation.visitor}
-        OUTPUT s6:Entity<visitor>!{alias:s5}
+      r4 Source<observation> grain=Entity<observation>[s6] domain=read
+        VALUE self -> s6:Entity<observation>!{entity:observation}
+        VALUE relationship=observation.visitor -> s7:Entity<visitor>?{relationship:observation.visitor}
+        OUTPUT s6:Entity<observation>!{entity:observation}, s7:Entity<visitor>?{relationship:observation.visitor}
 
-      r5 SemiJoin grain=Entity<visitor>[s0]
-        LEFT r0
-        RIGHT r2
-        ON s0:Entity<visitor>!{entity:visitor} = s3:Entity<visitor>!{alias:s2}
-        OUTPUT s0:Entity<visitor>!{entity:visitor}
+      r5 Distinct grain=Entity<visitor>[s8] excludeNull=true
+        KEY s8:Entity<visitor>!{alias:s7} := s7:Entity<visitor>?{relationship:observation.visitor}
+        OUTPUT s8:Entity<visitor>!{alias:s7}
 
-      r6 SemiJoin grain=Entity<visitor>[s0]
-        LEFT r0
-        RIGHT r4
-        ON s0:Entity<visitor>!{entity:visitor} = s6:Entity<visitor>!{alias:s5}
-        OUTPUT s0:Entity<visitor>!{entity:visitor}
+      r6 Project grain=Entity<visitor>[s9] input=r3
+        s9:Entity<visitor>!{alias:s5} := s5
+        OUTPUT s9:Entity<visitor>!{alias:s5}
 
-      r7 Difference grain=Entity<visitor>[s7] inputs=[r0, r6]
-        INPUT r0
-        INPUT r6
-        OUTPUT s7:Entity<visitor>!{derived:set:difference(s0,s0)}
+      r7 Distinct grain=Entity<visitor>[s10] excludeNull=true
+        KEY s10:Entity<visitor>!{alias:s9} := s9:Entity<visitor>!{alias:s5}
+        OUTPUT s10:Entity<visitor>!{alias:s9}
 
-      r8 Intersect grain=Entity<visitor>[s8] inputs=[r5, r7]
-        INPUT r5
+      r8 Intersect grain=Entity<visitor>[s11] inputs=[r1, r7]
+        INPUT r1
         INPUT r7
-        OUTPUT s8:Entity<visitor>!{derived:set:intersect(s0,s7)}
+        OUTPUT s11:Entity<visitor>!{derived:set:intersect(s2,s10)}
 
-      r9 SemiJoin grain=Entity<visitor>[s0]
-        LEFT r0
-        RIGHT r4
-        ON s0:Entity<visitor>!{entity:visitor} = s6:Entity<visitor>!{alias:s5}
-        OUTPUT s0:Entity<visitor>!{entity:visitor}
+      r9 Project grain=Entity<visitor>[s12] input=r5
+        s12:Entity<visitor>!{alias:s8} := s8
+        OUTPUT s12:Entity<visitor>!{alias:s8}
 
-      r10 Union grain=Entity<visitor>[s9] inputs=[r8, r9]
+      r10 Distinct grain=Entity<visitor>[s13] excludeNull=true
+        KEY s13:Entity<visitor>!{alias:s12} := s12:Entity<visitor>!{alias:s8}
+        OUTPUT s13:Entity<visitor>!{alias:s12}
+
+      r11 Intersect grain=Entity<visitor>[s14] inputs=[r1, r10]
+        INPUT r1
+        INPUT r10
+        OUTPUT s14:Entity<visitor>!{derived:set:intersect(s2,s13)}
+
+      r12 Difference grain=Entity<visitor>[s15] inputs=[r1, r11]
+        INPUT r1
+        INPUT r11
+        OUTPUT s15:Entity<visitor>!{derived:set:difference(s2,s14)}
+
+      r13 Intersect grain=Entity<visitor>[s16] inputs=[r8, r12]
         INPUT r8
-        INPUT r9
-        OUTPUT s9:Entity<visitor>!{derived:set:union(s8,s0)}
+        INPUT r12
+        OUTPUT s16:Entity<visitor>!{derived:set:intersect(s11,s15)}
+
+      r14 Project grain=Entity<visitor>[s17] input=r5
+        s17:Entity<visitor>!{alias:s8} := s8
+        OUTPUT s17:Entity<visitor>!{alias:s8}
+
+      r15 Distinct grain=Entity<visitor>[s18] excludeNull=true
+        KEY s18:Entity<visitor>!{alias:s17} := s17:Entity<visitor>!{alias:s8}
+        OUTPUT s18:Entity<visitor>!{alias:s17}
+
+      r16 Intersect grain=Entity<visitor>[s19] inputs=[r1, r15]
+        INPUT r1
+        INPUT r15
+        OUTPUT s19:Entity<visitor>!{derived:set:intersect(s2,s18)}
+
+      r17 Union grain=Entity<visitor>[s20] inputs=[r13, r16]
+        INPUT r13
+        INPUT r16
+        OUTPUT s20:Entity<visitor>!{derived:set:union(s16,s19)}
 
       Outputs
-        "visitor-scope" from r10
-          "visitor" -> s9:Entity<visitor>!{derived:set:union(s8,s0)}
+        "visitor-scope" from r17
+          "visitor" -> s20:Entity<visitor>!{derived:set:union(s16,s19)}
       "
     `);
   });

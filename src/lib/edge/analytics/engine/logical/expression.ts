@@ -11,6 +11,7 @@ import type {
 } from "@/lib/edge/analytics/engine/semantic/value-types";
 
 export type LogicalLiteralValue = string | number | boolean | null;
+export type LogicalStringNormalization = "trim" | "trim-case-fold";
 
 export interface LogicalSlotExpression {
   readonly kind: "slot";
@@ -40,6 +41,8 @@ export interface LogicalComparisonExpression {
   readonly operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
   readonly left: LogicalExpr;
   readonly right: LogicalExpr;
+  /** Storage-independent Filter v1 string comparison semantics. */
+  readonly stringNormalization?: LogicalStringNormalization;
 }
 
 export interface LogicalBooleanExpression {
@@ -64,6 +67,8 @@ export interface LogicalSetMembershipExpression {
   readonly input: LogicalExpr;
   readonly values: readonly LogicalLiteralExpression[];
   readonly negated: boolean;
+  /** Storage-independent Filter v1 string comparison semantics. */
+  readonly stringNormalization?: LogicalStringNormalization;
 }
 
 export interface LogicalStringMatchExpression {
@@ -72,6 +77,8 @@ export interface LogicalStringMatchExpression {
   readonly input: LogicalExpr;
   readonly value: string;
   readonly caseSensitive: boolean;
+  /** Storage-independent Filter v1 string normalization semantics. */
+  readonly stringNormalization?: LogicalStringNormalization;
 }
 
 export interface LogicalArithmeticExpression {

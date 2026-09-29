@@ -88,6 +88,159 @@ describe("logical relational IR", () => {
     });
   });
 
+  it("models relationship lookup by entity identity without activity-time filtering", () => {
+    const builder = createBuilder();
+    const sessions = builder.source("session", { temporalDomain: "read" });
+    const visitors = builder.relationshipLookup(sessions, "session.visitor");
+    const lookup = builder
+      .finish()
+      .nodes.find((node) => node.id === visitors.id);
+
+    expect(visitors.grain).toEqual(sessions.grain);
+    expect(visitors.temporalDomains).toEqual(sessions.temporalDomains);
+    expect(Object.keys(visitors.slots)).toEqual([
+      "entity",
+      "relationship:session.visitor",
+    ]);
+    expect(
+      builder.slot(visitors, "relationship:session.visitor"),
+    ).toMatchObject({
+      type: { kind: "entity", entity: "visitor" },
+      nullable: true,
+    });
+    expect(lookup).toMatchObject({
+      kind: "relationship-lookup",
+      relationship: "session.visitor",
+      input: sessions.id,
+      inputKey: sessions.entityKey,
+      timeSemantics: "identity-no-activity-filter",
+      grain: sessions.grain,
+      output: [
+        sessions.entityKey,
+        visitors.slots["relationship:session.visitor"],
+      ],
+    });
+
+    builder.output("sessions", visitors, [{ name: "session", slot: "entity" }]);
+    const plan = builder.finish();
+    expect(
+      validateLogicalPlan(JSON.parse(JSON.stringify(plan)) as LogicalPlan),
+    ).toEqual(plan);
+    expect(printLogicalPlan(plan)).toContain(
+      "identity read; no activity-time filter",
+    );
+
+    const metricBuilder = createBuilder();
+    const matchedVisitors = metricBuilder.source("visitor");
+    const visitorCount = metricBuilder.aggregate(matchedVisitors, {}, [
+      { name: "sessions", kind: "count-rows" },
+    ]);
+    metricBuilder.output("sessions", visitorCount, [
+      {
+        name: "sessions",
+        slot: "sessions",
+        semantic: { kind: "metric", id: "sessions" },
+      },
+    ]);
+    const metricPlan = metricBuilder.finish();
+    expect(() => validateLogicalPlan(metricPlan)).not.toThrow();
+    const mismatchedDimension: LogicalPlan = {
+      ...metricPlan,
+      outputs: metricPlan.outputs.map((output) => ({
+        ...output,
+        fields: output.fields.map((field) => ({
+          ...field,
+          semantic: { kind: "dimension", id: "page.path" },
+        })),
+      })),
+    };
+    expect(() => validateLogicalPlan(mismatchedDimension)).toThrow(
+      "Dimension output slot does not match its semantic value type",
+    );
+  });
+
+  it("rejects forged relationship lookup semantics and invalid handles", () => {
+    const builder = createBuilder();
+    const sessions = builder.source("session", { temporalDomain: "candidate" });
+    const visitors = builder.relationshipLookup(sessions, "session.visitor");
+    builder.output("sessions", visitors, [{ name: "session", slot: "entity" }]);
+    const plan = builder.finish();
+    const lookup = plan.nodes.find((node) => node.id === visitors.id);
+    if (lookup?.kind !== "relationship-lookup") {
+      throw new Error("relationship_lookup_fixture_missing");
+    }
+
+    expect(() =>
+      validateLogicalPlan({
+        ...plan,
+        nodes: plan.nodes.map((node) =>
+          node.id === lookup.id
+            ? { ...lookup, relationship: "observation.visitor" as never }
+            : node,
+        ),
+      }),
+    ).toThrow("input must have the relationship source entity grain");
+    expect(() =>
+      validateLogicalPlan({
+        ...plan,
+        nodes: plan.nodes.map((node) =>
+          node.id === lookup.id
+            ? { ...lookup, relationship: "unknown.relationship" as never }
+            : node,
+        ),
+      }),
+    ).toThrow("unknown semantic relationship");
+    expect(() =>
+      validateLogicalPlan({
+        ...plan,
+        nodes: plan.nodes.map((node) =>
+          node.id === lookup.id
+            ? { ...lookup, timeSemantics: "candidate-window" as never }
+            : node,
+        ),
+      }),
+    ).toThrow("identity semantics without activity-time filtering");
+    expect(() =>
+      validateLogicalPlan({
+        ...plan,
+        nodes: plan.nodes.map((node) =>
+          node.id === lookup.id
+            ? { ...lookup, inputKey: lookup.relatedSlot }
+            : node,
+        ),
+      }),
+    ).toThrow("input entity grain key");
+    expect(() =>
+      validateLogicalPlan({
+        ...plan,
+        slots: plan.slots.map((slot) =>
+          slot.id === lookup.relatedSlot ? { ...slot, nullable: false } : slot,
+        ),
+      }),
+    ).toThrow("output type, nullability, or lineage differs");
+
+    const foreignBuilder = createBuilder();
+    const foreignSessions = foreignBuilder.source("session");
+    expect(() =>
+      builder.relationshipLookup(foreignSessions, "session.visitor"),
+    ).toThrow("logical_builder_foreign_relation_handle");
+    const visitorsSource = builder.source("visitor");
+    expect(() =>
+      builder.relationshipLookup(visitorsSource, "session.visitor"),
+    ).toThrow("logical_builder_relationship_lookup_requires_entity");
+    expect(() =>
+      builder.relationshipLookup(sessions, "unknown.relationship" as never),
+    ).toThrow("logical_builder_unknown_relationship");
+
+    const duplicateBuilder = createBuilder();
+    const linkedSessions = duplicateBuilder.source("session", {
+      relationships: ["session.visitor"],
+    });
+    expect(() =>
+      duplicateBuilder.relationshipLookup(linkedSessions, "session.visitor"),
+    ).toThrow("logical_builder_duplicate_name");
+  });
+
   it("authors typed scalar, boolean, case, and time expressions", () => {
     const builder = createBuilder();
     const pages = builder.source("page", {
@@ -393,6 +546,60 @@ describe("logical relational IR", () => {
         right: { kind: "calendar-period-literal", amount: 1, unit: "mo" },
       },
       {
+        kind: "comparison",
+        operator: "eq",
+        left: slot(path),
+        right: literal("/docs", string),
+        stringNormalization: "case-fold" as never,
+      },
+      {
+        kind: "comparison",
+        operator: "eq",
+        left: slot(pages.slots.entity!),
+        right: slot(pages.slots.entity!),
+        stringNormalization: "trim",
+      },
+      {
+        kind: "comparison",
+        operator: "gt",
+        left: {
+          kind: "time-bucket",
+          input: slot(pages.slots.time!),
+          granularity: "day",
+          reportingTimeZone: "UTC" as ReportingTimeZone,
+        },
+        right: {
+          kind: "time-bucket",
+          input: slot(pages.slots.time!),
+          granularity: "day",
+          reportingTimeZone: "UTC" as ReportingTimeZone,
+        },
+      },
+      {
+        kind: "comparison",
+        operator: "eq",
+        left: slot(duration),
+        right: literal(1, number),
+        stringNormalization: "trim",
+      },
+      {
+        kind: "set-membership",
+        input: slot(path),
+        values: [
+          literal("/docs", string) as Extract<LogicalExpr, { kind: "literal" }>,
+        ],
+        negated: false,
+        stringNormalization: "case-fold" as never,
+      },
+      {
+        kind: "string-match",
+        operator: "contains",
+        input: slot(path),
+        value: "docs",
+        caseSensitive: true,
+        stringNormalization: "case-fold" as never,
+      },
+      {
         kind: "arithmetic",
         operator: "multiply",
         left: literal(2, milliseconds),
@@ -444,6 +651,12 @@ describe("logical relational IR", () => {
         input: slot(path),
         granularity: "day",
         reportingTimeZone: "" as ReportingTimeZone,
+      },
+      {
+        kind: "time-bucket",
+        input: slot(pages.slots.entity!),
+        granularity: "day",
+        reportingTimeZone: "UTC" as ReportingTimeZone,
       },
     ];
     for (const expression of badExpressions) {
@@ -949,6 +1162,62 @@ describe("logical relational IR", () => {
     };
     expect(() => validateLogicalPlan(unknownOutput)).toThrow(
       "is not visible from this relation",
+    );
+  });
+
+  it("rejects forged source entities, temporal domains, and attributes", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", { attributes: ["page.path"] });
+    builder.output("pages", pages, [{ name: "page", slot: "entity" }]);
+    const plan = builder.finish();
+
+    const unknownEntity: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "source" ? { ...node, entity: "unknown" as never } : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(unknownEntity)).toThrow(
+      "Unknown source entity",
+    );
+
+    const invalidTemporalDomain: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "source"
+          ? { ...node, temporalDomain: "unknown" as never }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(invalidTemporalDomain)).toThrow(
+      "Source temporal domain is invalid",
+    );
+
+    const unknownAttribute: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "source"
+          ? {
+              ...node,
+              values: node.values.map((binding) =>
+                binding.kind === "attribute"
+                  ? { ...binding, attribute: "unknown.attribute" as never }
+                  : binding,
+              ),
+            }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(unknownAttribute)).toThrow(
+      "Unknown attribute unknown.attribute",
+    );
+
+    const invalidTimeContext: LogicalPlan = {
+      ...plan,
+      context: { ...plan.context, time: null as never },
+    };
+    expect(() => validateLogicalPlan(invalidTimeContext)).toThrow(
+      "Semantic query context is invalid",
     );
   });
 

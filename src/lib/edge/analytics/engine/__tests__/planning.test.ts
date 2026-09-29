@@ -7,6 +7,7 @@ import type {
 } from "@/lib/edge/analytics/contract/types";
 import {
   allCanonicalMetricIds,
+  createCandidateScopeUniverse,
   type EligibleDatasetScope,
   groupingFieldDescriptors,
   LazyEligibleDataset,
@@ -435,14 +436,10 @@ describe("analytics logical planning contracts", () => {
 
     const context = createPlanningContext();
     const builder = new LogicalPlanBuilder(context);
-    const candidate = builder.source("session");
+    const universe = createCandidateScopeUniverse(builder, "session");
+    const candidate = universe.relation;
     const matchA = builder.source("session");
     const matchB = builder.source("session");
-    const universe = {
-      scope: "session" as const,
-      relation: candidate,
-      entitySlot: "entity",
-    };
     expect(validateScopeUniverse(universe)).toEqual([]);
     expect(
       validateScopeUniverse({ ...universe, entitySlot: "missing" }),
@@ -455,6 +452,7 @@ describe("analytics logical planning contracts", () => {
         scope: "session",
         relation: builder.source("visitor"),
         entitySlot: "entity",
+        temporalDomain: "candidate",
       }),
     ).toEqual(["relation: expected Entity<session> grain"]);
     expect(
@@ -478,8 +476,14 @@ describe("analytics logical planning contracts", () => {
       ),
     ).toThrow("scope_boolean_group_empty");
     const converter = {
-      convert(match: { readonly relation: typeof matchA }) {
-        return match.relation;
+      convert(
+        match: { readonly relation: typeof matchA },
+        target: { readonly relation: typeof candidate },
+      ) {
+        return builder.setOperation("intersect", [
+          target.relation,
+          match.relation,
+        ]);
       },
     };
     const andSelection = resolveScopeFilterSelection(
@@ -494,6 +498,7 @@ describe("analytics logical planning contracts", () => {
               nativeEntity: "session",
               relation: matchA,
               entitySlot: "entity",
+              temporalDomain: "candidate",
             },
           },
           {
@@ -502,6 +507,7 @@ describe("analytics logical planning contracts", () => {
               nativeEntity: "session",
               relation: matchB,
               entitySlot: "entity",
+              temporalDomain: "candidate",
             },
           },
         ],
@@ -520,6 +526,7 @@ describe("analytics logical planning contracts", () => {
               nativeEntity: "session",
               relation: matchA,
               entitySlot: "entity",
+              temporalDomain: "candidate",
             },
           },
           {
@@ -528,6 +535,7 @@ describe("analytics logical planning contracts", () => {
               nativeEntity: "session",
               relation: matchB,
               entitySlot: "entity",
+              temporalDomain: "candidate",
             },
           },
         ],
@@ -545,14 +553,35 @@ describe("analytics logical planning contracts", () => {
             nativeEntity: "session",
             relation: matchA,
             entitySlot: "entity",
+            temporalDomain: "candidate",
           },
         },
+      },
+      converter,
+    );
+    const singleSelection = resolveScopeFilterSelection(
+      builder,
+      universe,
+      {
+        kind: "and",
+        children: [
+          {
+            kind: "match",
+            value: {
+              nativeEntity: "session",
+              relation: matchA,
+              entitySlot: "entity",
+              temporalDomain: "candidate",
+            },
+          },
+        ],
       },
       converter,
     );
     expect(andSelection.kind).toBe("matching");
     expect(orSelection.kind).toBe("matching");
     expect(notSelection.kind).toBe("matching");
+    expect(singleSelection.kind).toBe("matching");
     if (
       andSelection.kind !== "matching" ||
       orSelection.kind !== "matching" ||
@@ -574,7 +603,17 @@ describe("analytics logical planning contracts", () => {
         .finish()
         .nodes.filter((node) => node.kind === "set-operation")
         .map((node) => (node.kind === "set-operation" ? node.operation : null)),
-    ).toEqual(["intersect", "union", "difference"]);
+    ).toEqual([
+      "intersect",
+      "intersect",
+      "intersect",
+      "intersect",
+      "intersect",
+      "union",
+      "intersect",
+      "difference",
+      "intersect",
+    ]);
   });
 
   it("rejects planner context, subject, grouping, and scope mismatches", () => {

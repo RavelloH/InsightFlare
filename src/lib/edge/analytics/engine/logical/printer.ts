@@ -83,7 +83,7 @@ function expression(value: LogicalExpr): string {
     case "calendar-period-literal":
       return `CALENDAR_PERIOD<${value.unit}>(${JSON.stringify(value.amount)})`;
     case "comparison":
-      return `(${expression(value.left)} ${value.operator} ${expression(value.right)})`;
+      return `(${expression(value.left)} ${value.operator} ${expression(value.right)}${value.stringNormalization ? ` normalization=${value.stringNormalization}` : ""})`;
     case "boolean":
       return `(${value.terms.map(expression).join(` ${value.operator.toUpperCase()} `)})`;
     case "not":
@@ -91,9 +91,9 @@ function expression(value: LogicalExpr): string {
     case "null-test":
       return `(${expression(value.input)} IS ${value.negated ? "NOT " : ""}NULL)`;
     case "set-membership":
-      return `(${expression(value.input)} ${value.negated ? "NOT " : ""}IN [${value.values.map(expression).join(", ")}])`;
+      return `(${expression(value.input)} ${value.negated ? "NOT " : ""}IN [${value.values.map(expression).join(", ")}]${value.stringNormalization ? ` normalization=${value.stringNormalization}` : ""})`;
     case "string-match":
-      return `(${expression(value.input)} ${value.operator}${value.caseSensitive ? " case-sensitive" : " case-insensitive"} ${JSON.stringify(value.value)})`;
+      return `(${expression(value.input)} ${value.operator}${value.caseSensitive ? " case-sensitive" : " case-insensitive"}${value.stringNormalization ? ` normalization=${value.stringNormalization}` : ""} ${JSON.stringify(value.value)})`;
     case "arithmetic":
       return `(${expression(value.left)} ${value.operator}${value.operator === "divide" ? " NULL_ON_ZERO" : ""} ${expression(value.right)})`;
     case "round":
@@ -123,6 +123,8 @@ function nodeHeader(node: LogicalNode): string {
   switch (node.kind) {
     case "source":
       return `${relation(node.id)} Source<${node.entity}> grain=${grain(node.grain)} domain=${node.temporalDomain}`;
+    case "relationship-lookup":
+      return `${relation(node.id)} RelationshipLookup<${node.relationship}> grain=${grain(node.grain)} input=${relation(node.input)} time=${node.timeSemantics}`;
     case "filter":
       return `${relation(node.id)} Filter grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "project":
@@ -164,6 +166,11 @@ function nodeLines(
                 : "occurrence-time";
         lines.push(`  VALUE ${detail} -> ${formatSlot(value.slot, slots)}`);
       }
+      break;
+    case "relationship-lookup":
+      lines.push(
+        `  LOOKUP ${node.relationship} BY ${formatSlot(node.inputKey, slots)} -> ${formatSlot(node.relatedSlot, slots)} (identity read; no activity-time filter)`,
+      );
       break;
     case "filter":
       lines.push(`  WHERE ${expression(node.predicate)}`);
