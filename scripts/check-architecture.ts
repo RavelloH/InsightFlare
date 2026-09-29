@@ -108,6 +108,11 @@ const RUNTIME_BOUNDARY_PACKAGES = [
   "@tanstack/react-router",
   "@tanstack/router-core",
 ] as const;
+const ANALYTICS_PHYSICAL_PACKAGES = [
+  "cloudflare:workers",
+  "@cloudflare/workers-types",
+  "@cloudflare/workers-types/experimental",
+] as const;
 
 function slash(value: string): string {
   return value.replaceAll("\\", "/");
@@ -118,6 +123,11 @@ function isWithin(file: string, directory: string): boolean {
 }
 
 function runtimeBoundaryPackageTarget(specifier: string): string | null {
+  const physicalPackage = ANALYTICS_PHYSICAL_PACKAGES.find(
+    (candidate) =>
+      specifier === candidate || specifier.startsWith(`${candidate}/`),
+  );
+  if (physicalPackage) return `__package__:${physicalPackage}`;
   const packageName = RUNTIME_BOUNDARY_PACKAGES.find(
     (candidate) =>
       specifier === candidate || specifier.startsWith(`${candidate}/`),
@@ -310,6 +320,21 @@ function ruleViolations(
     "src/lib/db/mutation",
     "src/lib/db/sql",
   ].some((directory) => isWithin(source, directory));
+  const analyticsEngine = isWithin(source, `${analytics}/engine`);
+  const analyticsPhysicalDependency =
+    isWithin(target, "src/lib/db") ||
+    isWithin(target, `${analytics}/providers/d1`) ||
+    /(?:^|\/)(?:archive|r2)(?:\/|\.|$)/iu.test(target) ||
+    ANALYTICS_PHYSICAL_PACKAGES.some(
+      (packageName) => target === `__package__:${packageName}`,
+    );
+
+  if (analyticsEngine && analyticsPhysicalDependency)
+    findings.push({
+      rule: "analytics-engine-physical-isolation",
+      message:
+        "Analytics engine must remain independent of database, D1 provider, Cloudflare D1, Archive, and R2 implementations.",
+    });
 
   if (
     databaseFoundation &&

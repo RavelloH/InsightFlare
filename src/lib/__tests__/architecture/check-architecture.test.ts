@@ -31,6 +31,72 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 describe("architecture checker", () => {
+  it("keeps the Analytics engine independent from physical storage", () => {
+    const root = fixture();
+    mkdirSync(path.join(root, "src/lib/edge/analytics/engine"), {
+      recursive: true,
+    });
+    mkdirSync(path.join(root, "src/lib/db"), { recursive: true });
+    mkdirSync(path.join(root, "src/lib/edge/analytics/providers/d1"), {
+      recursive: true,
+    });
+    mkdirSync(path.join(root, "src/lib/edge/archive"), { recursive: true });
+    mkdirSync(path.join(root, "src/lib/filter-contract"), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(root, "src/lib/db/query.ts"),
+      "export const query = true;\n",
+    );
+    writeFileSync(
+      path.join(root, "src/lib/edge/analytics/providers/d1/reader.ts"),
+      "export const reader = true;\n",
+    );
+    writeFileSync(
+      path.join(root, "src/lib/edge/archive/reader.ts"),
+      "export const archive = true;\n",
+    );
+    writeFileSync(
+      path.join(root, "src/lib/filter-contract/types.ts"),
+      "export const filter = true;\n",
+    );
+    writeFileSync(
+      path.join(root, "src/lib/edge/analytics/engine/plan.ts"),
+      [
+        'import { query } from "@/lib/db/query";',
+        'import { reader } from "@/lib/edge/analytics/providers/d1/reader";',
+        'import { archive } from "@/lib/edge/archive/reader";',
+        'import type { D1Database } from "cloudflare:workers";',
+        'import { filter } from "@/lib/filter-contract/types";',
+        "export { query, reader, archive, filter, D1Database };",
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ source }) => source.endsWith("engine/plan.ts"))
+        .map(({ rule, specifier }) => ({ rule, specifier })),
+    ).toEqual([
+      {
+        rule: "analytics-engine-physical-isolation",
+        specifier: "@/lib/db/query",
+      },
+      {
+        rule: "analytics-engine-physical-isolation",
+        specifier: "@/lib/edge/analytics/providers/d1/reader",
+      },
+      {
+        rule: "analytics-engine-physical-isolation",
+        specifier: "@/lib/edge/archive/reader",
+      },
+      {
+        rule: "analytics-engine-physical-isolation",
+        specifier: "cloudflare:workers",
+      },
+    ]);
+  });
+
   it("parses imports and re-exports and reports forbidden contract edges", () => {
     const root = fixture();
     writeFileSync(
