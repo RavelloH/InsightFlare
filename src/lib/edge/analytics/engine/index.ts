@@ -1,4 +1,5 @@
 export * from "./eligible-dataset";
+export * from "./filter-document-lowering";
 export * from "./filter-lowering";
 export * from "./grouping";
 export * from "./logical";

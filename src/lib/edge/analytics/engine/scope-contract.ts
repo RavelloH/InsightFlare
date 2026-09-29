@@ -315,6 +315,24 @@ function validateCandidateSubset(
 export function resolveScopeFilterSelection(
   builder: LogicalPlanBuilder,
   candidate: ScopeUniverse,
+  root: ScopeBooleanExpression,
+  converter: NativeMatchConverter,
+): Extract<ScopeFilterSelection, { kind: "matching" }>;
+export function resolveScopeFilterSelection(
+  builder: LogicalPlanBuilder,
+  candidate: ScopeUniverse,
+  root: null,
+  converter: NativeMatchConverter,
+): Extract<ScopeFilterSelection, { kind: "unfiltered" }>;
+export function resolveScopeFilterSelection(
+  builder: LogicalPlanBuilder,
+  candidate: ScopeUniverse,
+  root: ScopeBooleanExpression | null,
+  converter: NativeMatchConverter,
+): ScopeFilterSelection;
+export function resolveScopeFilterSelection(
+  builder: LogicalPlanBuilder,
+  candidate: ScopeUniverse,
   root: ScopeBooleanExpression | null,
   converter: NativeMatchConverter,
 ): ScopeFilterSelection {
