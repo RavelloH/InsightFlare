@@ -3,5 +3,6 @@ export * from "./grouping";
 export * from "./logical";
 export * from "./metric-planner";
 export * from "./query";
+export * from "./scope-contract";
 export * from "./semantic";
 export * from "./semantic-planner";

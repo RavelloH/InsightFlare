@@ -7,6 +7,8 @@ export const SEMANTIC_RELATIONSHIP_IDS = [
   "event.observation",
   "event.session",
   "event.visitor",
+  "observation.session",
+  "observation.visitor",
   "session.visitor",
 ] as const;
 
@@ -60,6 +62,20 @@ export const semanticRelationshipCatalog: readonly SemanticRelationshipDefinitio
     {
       id: "event.visitor",
       from: "event",
+      to: "visitor",
+      cardinality: "many-to-one",
+      optional: true,
+    },
+    {
+      id: "observation.session",
+      from: "observation",
+      to: "session",
+      cardinality: "many-to-one",
+      optional: true,
+    },
+    {
+      id: "observation.visitor",
+      from: "observation",
       to: "visitor",
       cardinality: "many-to-one",
       optional: true,
