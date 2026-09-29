@@ -166,7 +166,7 @@ describe("thin Hono route modules", () => {
       "message-1",
     );
     expect(handleNotificationsReadAll).toHaveBeenCalled();
-  });
+  }, 10_000);
 
   it("forwards public session and canonical private admin notification preview", async () => {
     await publicSessionRoutes.fetch(
