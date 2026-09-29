@@ -121,7 +121,7 @@ function unsupported(
   code: FilterLoweringUnsupportedCode,
   fieldId: string | undefined,
   operator: FilterOperator,
-): FilterConditionLoweringResult {
+): Extract<FilterConditionLoweringResult, { kind: "unsupported" }> {
   return {
     kind: "unsupported",
     code,
@@ -157,7 +157,87 @@ function literal(
   return builder.literal(value, attributeValueType);
 }
 
-function predicateFor(
+export interface PreparedPrimitiveFieldCondition {
+  readonly kind: "prepared";
+  readonly condition: FilterCondition;
+  readonly field: RegisteredFilterField;
+  readonly attribute: SemanticAttributeDefinition;
+}
+
+export type PrimitiveFieldPreparationResult =
+  | PreparedPrimitiveFieldCondition
+  | {
+      readonly kind: "unsupported";
+      readonly code: FilterLoweringUnsupportedCode;
+      readonly fieldId?: string;
+      readonly operator: FilterOperator;
+    };
+
+/** Normalize and capability-check a raw field condition without lowering it. */
+export function preparePrimitiveFieldCondition(
+  condition: FilterCondition,
+): PrimitiveFieldPreparationResult {
+  if (!condition || typeof condition !== "object") {
+    return invalid("invalid_condition");
+  }
+  if (!condition.target || typeof condition.target !== "object") {
+    return invalid("invalid_target");
+  }
+  if (condition.target.kind !== "field") {
+    return unsupported("unsupported-target", undefined, condition.operator);
+  }
+  const field = analyticsFilterRegistry.get(condition.target.field);
+  const attribute = semanticAttribute(condition.target.field);
+  if (!field || !attribute) return invalid("unknown_field");
+
+  const normalized = normalizeFilterDocument(
+    { version: 1, root: condition },
+    analyticsFilterRegistry,
+  );
+  if (!normalized.root || normalized.root.kind !== "condition") {
+    return invalid("invalid_condition");
+  }
+  const loweredCondition = normalized.root;
+  if (
+    (loweredCondition.operator === "isEmpty" ||
+      loweredCondition.operator === "notEmpty") &&
+    attribute.empty === "unsupported"
+  ) {
+    return unsupported(
+      "unsupported-presence",
+      field.id,
+      loweredCondition.operator,
+    );
+  }
+  if (
+    !SUPPORTED_COMPARISONS.has(loweredCondition.operator) &&
+    !SUPPORTED_SET_OPERATORS.has(loweredCondition.operator) &&
+    !SUPPORTED_STRING_MATCHES.has(loweredCondition.operator) &&
+    !SUPPORTED_NULL_TESTS.has(loweredCondition.operator)
+  ) {
+    return unsupported(
+      "unsupported-operator",
+      field.id,
+      loweredCondition.operator,
+    );
+  }
+  if (attribute.presence === "json-path") {
+    return unsupported(
+      "unsupported-presence",
+      field.id,
+      loweredCondition.operator,
+    );
+  }
+  return {
+    kind: "prepared",
+    condition: loweredCondition,
+    field,
+    attribute,
+  };
+}
+
+/** Build a prepared primitive predicate against an existing shared source. */
+export function primitivePredicateForSource(
   builder: LogicalPlanBuilder,
   source: LogicalRelationHandle,
   condition: FilterCondition,
@@ -239,7 +319,7 @@ function lowerObservationCondition(
     });
     const relation = builder.filter(
       source,
-      predicateFor(builder, source, condition, field, attribute),
+      primitivePredicateForSource(builder, source, condition, field, attribute),
     );
     return {
       kind: "supported",
@@ -261,7 +341,7 @@ function lowerObservationCondition(
   });
   const filtered = builder.filter(
     source,
-    predicateFor(builder, source, condition, field, attribute),
+    primitivePredicateForSource(builder, source, condition, field, attribute),
   );
   const projected = builder.project(filtered, {
     observation: builder.slot(filtered, `relationship:${relationship}`),
@@ -315,54 +395,9 @@ export function lowerFilterCondition(
     return invalid("invalid_temporal_domain");
   }
 
-  if (!condition.target || typeof condition.target !== "object") {
-    return invalid("invalid_target");
-  }
-  if (condition.target.kind !== "field") {
-    return unsupported("unsupported-target", undefined, condition.operator);
-  }
-  const field = analyticsFilterRegistry.get(condition.target.field);
-  const attribute = semanticAttribute(condition.target.field);
-  if (!field || !attribute) return invalid("unknown_field");
-
-  const normalized = normalizeFilterDocument(
-    { version: 1, root: condition },
-    analyticsFilterRegistry,
-  );
-  if (!normalized.root || normalized.root.kind !== "condition") {
-    return invalid("invalid_condition");
-  }
-  const loweredCondition = normalized.root;
-  if (
-    (loweredCondition.operator === "isEmpty" ||
-      loweredCondition.operator === "notEmpty") &&
-    attribute.empty === "unsupported"
-  ) {
-    return unsupported(
-      "unsupported-presence",
-      field.id,
-      loweredCondition.operator,
-    );
-  }
-  if (
-    !SUPPORTED_COMPARISONS.has(loweredCondition.operator) &&
-    !SUPPORTED_SET_OPERATORS.has(loweredCondition.operator) &&
-    !SUPPORTED_STRING_MATCHES.has(loweredCondition.operator) &&
-    !SUPPORTED_NULL_TESTS.has(loweredCondition.operator)
-  ) {
-    return unsupported(
-      "unsupported-operator",
-      field.id,
-      loweredCondition.operator,
-    );
-  }
-  if (attribute.presence === "json-path") {
-    return unsupported(
-      "unsupported-presence",
-      field.id,
-      loweredCondition.operator,
-    );
-  }
+  const prepared = preparePrimitiveFieldCondition(condition);
+  if (prepared.kind === "unsupported") return prepared;
+  const { condition: loweredCondition, field, attribute } = prepared;
 
   if (
     attribute.evaluation === "session-fact" &&
@@ -375,7 +410,13 @@ export function lowerFilterCondition(
     });
     const relation = builder.filter(
       source,
-      predicateFor(builder, source, loweredCondition, field, attribute),
+      primitivePredicateForSource(
+        builder,
+        source,
+        loweredCondition,
+        field,
+        attribute,
+      ),
     );
     return {
       kind: "supported",
@@ -398,7 +439,13 @@ export function lowerFilterCondition(
     });
     const relation = builder.filter(
       source,
-      predicateFor(builder, source, loweredCondition, field, attribute),
+      primitivePredicateForSource(
+        builder,
+        source,
+        loweredCondition,
+        field,
+        attribute,
+      ),
     );
     return {
       kind: "supported",

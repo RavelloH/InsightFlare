@@ -10,6 +10,7 @@ import {
   lowerFilterCondition,
   observationCapabilityForAttribute,
   observationSourceForAttribute,
+  preparePrimitiveFieldCondition,
 } from "@/lib/edge/analytics/engine/filter-lowering";
 import {
   type LogicalPlan,
@@ -909,5 +910,26 @@ describe("primitive Filter v1 condition lowering", () => {
       ),
     ).toThrow("filter_lowering_invalid_condition");
     expect(emptyBuilder.finish().nodes).toEqual([]);
+  });
+
+  it("classifies malformed primitive conditions before normalization", () => {
+    expect(() => preparePrimitiveFieldCondition(null as never)).toThrow(
+      "filter_lowering_invalid_condition",
+    );
+    expect(() =>
+      preparePrimitiveFieldCondition({ kind: "condition" } as never),
+    ).toThrow("filter_lowering_invalid_target");
+    expect(
+      preparePrimitiveFieldCondition({
+        kind: "condition",
+        target: { kind: "event-payload", path: "/amount" },
+        operator: "eq",
+        value: 4,
+      } as FilterCondition),
+    ).toEqual({
+      kind: "unsupported",
+      code: "unsupported-target",
+      operator: "eq",
+    });
   });
 });

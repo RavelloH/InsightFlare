@@ -7,7 +7,10 @@ import {
   type ScopeFilterSelection,
 } from "@/lib/edge/analytics/engine/scope-contract";
 import { createNativeMatchConverter } from "@/lib/edge/analytics/engine/scope-rebase";
-import type { LogicalFilterScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import type {
+  LogicalFilterScope,
+  ObservationKind,
+} from "@/lib/edge/analytics/engine/semantic/entities";
 import {
   temporalDomainExists,
   type TemporalDomainRef,
@@ -26,6 +29,10 @@ import {
 import {
   type FilterLoweringUnsupportedCode,
   lowerFilterCondition,
+  observationCapabilityForAttribute,
+  type PreparedPrimitiveFieldCondition,
+  preparePrimitiveFieldCondition,
+  primitivePredicateForSource,
 } from "./filter-lowering";
 
 export type FilterDocumentLoweringUnsupportedCode =
@@ -37,7 +44,11 @@ export type FilterDocumentLoweringUnsupportedCode =
   | "invalid-condition-time-domain"
   | "time-domain-resolution-failed"
   | "invalid-target-scope"
-  | "unsupported-scope-conversion";
+  | "unsupported-scope-conversion"
+  | "unsupported-selector"
+  | "unsupported-selector-scope"
+  | "unsupported-selector-operator"
+  | "selector-temporal-domain-mismatch";
 
 export interface FilterConditionTimeDomainContext {
   readonly analysis: AnalyzedFilterDocument;
@@ -82,10 +93,30 @@ type PreparedExpression =
       readonly match: NativeMatchRelation;
     }
   | {
+      readonly kind: "selector";
+      readonly collection: ObservationKind;
+      readonly predicate: PreparedActivityPredicate;
+      readonly temporalDomain: TemporalDomainRef;
+      readonly negative: boolean;
+      readonly match: NativeMatchRelation;
+    }
+  | {
       readonly kind: "and" | "or";
       readonly children: readonly PreparedExpression[];
     }
   | { readonly kind: "not"; readonly child: PreparedExpression };
+
+type PreparedActivityPredicate =
+  | {
+      readonly kind: "field";
+      readonly originalCondition: FilterCondition;
+      readonly preparedCondition: PreparedPrimitiveFieldCondition;
+    }
+  | {
+      readonly kind: "and" | "or";
+      readonly children: readonly PreparedActivityPredicate[];
+    }
+  | { readonly kind: "not"; readonly child: PreparedActivityPredicate };
 
 type PrepareResult =
   | { readonly kind: "prepared"; readonly expression: PreparedExpression }
@@ -137,6 +168,13 @@ function asScopeBooleanExpression(
 ): ScopeBooleanExpression {
   if (expression.kind === "match")
     return { kind: "match", value: expression.match };
+  if (expression.kind === "selector") {
+    const match: ScopeBooleanExpression = {
+      kind: "match",
+      value: expression.match,
+    };
+    return expression.negative ? { kind: "not", child: match } : match;
+  }
   if (expression.kind === "not")
     return {
       kind: "not",
@@ -165,6 +203,18 @@ function lowerPreparedExpression(
     }
     return { kind: "match", value: lowered.match };
   }
+  if (expression.kind === "selector") {
+    const match = lowerActivitySelector(
+      builder,
+      expression.collection,
+      expression.predicate,
+      expression.temporalDomain,
+    );
+    const scopeMatch: ScopeBooleanExpression = { kind: "match", value: match };
+    return expression.negative
+      ? { kind: "not", child: scopeMatch }
+      : scopeMatch;
+  }
   if (expression.kind === "not")
     return {
       kind: "not",
@@ -176,6 +226,412 @@ function lowerPreparedExpression(
       lowerPreparedExpression(builder, analysis, child),
     ),
   };
+}
+
+type ActivityPredicatePrepareResult =
+  | { readonly kind: "prepared"; readonly predicate: PreparedActivityPredicate }
+  | {
+      readonly kind: "unsupported";
+      readonly result: Extract<
+        FilterDocumentLoweringResult,
+        { kind: "unsupported" }
+      >;
+    };
+
+function prepareActivityPredicate(
+  probeBuilder: LogicalPlanBuilder,
+  analysis: AnalyzedFilterDocument,
+  verifiedAnalysis: AnalyzedFilterDocument,
+  targetScope: LogicalFilterScope,
+  collection: ObservationKind,
+  selectorPath: string,
+  selectorTemporalDomain: TemporalDomainRef,
+  resolveTemporalDomain: FilterDocumentLoweringOptions["resolveTemporalDomain"],
+  expression: FilterExpression,
+  path: string,
+): ActivityPredicatePrepareResult {
+  if (expression.kind === "not") {
+    const child = prepareActivityPredicate(
+      probeBuilder,
+      analysis,
+      verifiedAnalysis,
+      targetScope,
+      collection,
+      selectorPath,
+      selectorTemporalDomain,
+      resolveTemporalDomain,
+      expression.child,
+      `${path}.child`,
+    );
+    return child.kind === "unsupported"
+      ? child
+      : {
+          kind: "prepared",
+          predicate: { kind: "not", child: child.predicate },
+        };
+  }
+
+  if (expression.kind === "and" || expression.kind === "or") {
+    if (expression.children.length === 0) {
+      return {
+        kind: "unsupported",
+        result: unsupported(
+          "invalid-document",
+          path,
+          "Activity selector Boolean groups must contain at least one child.",
+        ),
+      };
+    }
+    const children: PreparedActivityPredicate[] = [];
+    for (const [index, child] of expression.children.entries()) {
+      const prepared = prepareActivityPredicate(
+        probeBuilder,
+        analysis,
+        verifiedAnalysis,
+        targetScope,
+        collection,
+        selectorPath,
+        selectorTemporalDomain,
+        resolveTemporalDomain,
+        child,
+        `${path}.children[${index}]`,
+      );
+      if (prepared.kind === "unsupported") return prepared;
+      children.push(prepared.predicate);
+    }
+    return {
+      kind: "prepared",
+      predicate: { kind: expression.kind, children },
+    };
+  }
+
+  if (expression.kind !== "condition") {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "invalid-document",
+        path,
+        "Activity selector predicates must be field conditions or Boolean groups.",
+      ),
+    };
+  }
+  const condition = expression;
+  let analyzed = false;
+  try {
+    analyzed =
+      Boolean(analysis.conditions?.get(condition)) &&
+      verifiedAnalysis.conditions.has(condition);
+  } catch {
+    analyzed = false;
+  }
+  if (!analyzed) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "invalid-analysis",
+        path,
+        "Activity predicate condition identity is missing from the analyzed document sidecar.",
+        condition,
+      ),
+    };
+  }
+
+  let temporalDomain: TemporalDomainRef | undefined;
+  try {
+    temporalDomain = resolveTemporalDomain({
+      analysis,
+      condition,
+      path,
+      targetScope,
+    });
+  } catch (error) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "time-domain-resolution-failed",
+        path,
+        `Activity predicate time-domain selection failed: ${errorMessage(error)}`,
+        condition,
+      ),
+    };
+  }
+  if (temporalDomain === undefined) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "missing-condition-time-domain",
+        path,
+        "The caller did not assign this activity predicate a candidate, filter, or read time domain.",
+        condition,
+      ),
+    };
+  }
+  if (temporalDomain !== selectorTemporalDomain) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "selector-temporal-domain-mismatch",
+        path,
+        `Activity selector at ${selectorPath} uses '${selectorTemporalDomain}', but this predicate uses '${temporalDomain}'.`,
+        condition,
+        condition.target.kind === "field" ? condition.target.field : undefined,
+      ),
+    };
+  }
+  if (!temporalDomainExists(probeBuilder.context.time, temporalDomain)) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "invalid-condition-time-domain",
+        path,
+        `The selected time domain '${temporalDomain}' is unavailable in the builder context.`,
+        condition,
+      ),
+    };
+  }
+
+  let preparedCondition: ReturnType<typeof preparePrimitiveFieldCondition>;
+  try {
+    preparedCondition = preparePrimitiveFieldCondition(condition);
+  } catch (error) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "condition-lowering-failed",
+        path,
+        `Analyzed activity predicate could not be lowered: ${errorMessage(error)}`,
+        condition,
+      ),
+    };
+  }
+  if (preparedCondition.kind === "unsupported") {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        preparedCondition.code,
+        path,
+        `Activity selector does not support ${targetName(condition)} ${condition.operator} (${preparedCondition.code}).`,
+        condition,
+        preparedCondition.fieldId,
+      ),
+    };
+  }
+
+  const attribute = preparedCondition.attribute;
+  const capability = observationCapabilityForAttribute(attribute);
+  if (capability.kind === "unsupported") {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        capability.code,
+        path,
+        `Activity selector cannot read ${attribute.id} (${capability.code}).`,
+        condition,
+        attribute.id,
+      ),
+    };
+  }
+  // The capability check above guarantees observation evaluation, non-null
+  // presence, and at least one supported observation collection.
+  if (attribute.nativeEntity !== collection) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "unsupported-native-entity",
+        path,
+        `Activity selector for ${collection} cannot read ${attribute.id}, whose native entity is ${attribute.nativeEntity}.`,
+        condition,
+        attribute.id,
+      ),
+    };
+  }
+
+  return {
+    kind: "prepared",
+    predicate: {
+      kind: "field",
+      originalCondition: condition,
+      preparedCondition,
+    },
+  };
+}
+
+function activityPredicateFields(
+  predicate: PreparedActivityPredicate,
+): string[] {
+  if (predicate.kind === "field") return [predicate.preparedCondition.field.id];
+  if (predicate.kind === "not") return activityPredicateFields(predicate.child);
+  return predicate.children.flatMap(activityPredicateFields);
+}
+
+function compileActivityPredicate(
+  builder: LogicalPlanBuilder,
+  source: ReturnType<LogicalPlanBuilder["source"]>,
+  predicate: PreparedActivityPredicate,
+): ReturnType<LogicalPlanBuilder["coalesce"]> {
+  if (predicate.kind === "field") {
+    const prepared = predicate.preparedCondition;
+    return builder.coalesce(
+      primitivePredicateForSource(
+        builder,
+        source,
+        prepared.condition,
+        prepared.field,
+        prepared.attribute,
+      ),
+      builder.literal(false, { kind: "scalar", scalar: "boolean" }),
+    );
+  }
+  if (predicate.kind === "not") {
+    return builder.not(
+      compileActivityPredicate(builder, source, predicate.child),
+    );
+  }
+  const children: ReturnType<LogicalPlanBuilder["coalesce"]>[] =
+    predicate.children.map((child) =>
+      compileActivityPredicate(builder, source, child),
+    );
+  return predicate.kind === "and"
+    ? builder.and(...children)
+    : builder.or(...children);
+}
+
+function lowerActivitySelector(
+  builder: LogicalPlanBuilder,
+  collection: ObservationKind,
+  predicate: PreparedActivityPredicate,
+  temporalDomain: TemporalDomainRef,
+): NativeMatchRelation {
+  const relationship = `${collection}.observation` as const;
+  const attributeIds = [...new Set(activityPredicateFields(predicate))];
+  const source = builder.source(collection, {
+    attributes: attributeIds,
+    relationships: [relationship],
+    temporalDomain,
+  });
+  const filtered = builder.filter(
+    source,
+    compileActivityPredicate(builder, source, predicate),
+  );
+  const projected = builder.project(filtered, {
+    observation: builder.slot(filtered, `relationship:${relationship}`),
+  });
+  const relation = builder.distinctEntity(projected, "observation");
+  return {
+    nativeEntity: "observation",
+    relation,
+    entitySlot: "observation",
+    temporalDomain,
+  };
+}
+
+function prepareActivitySelector(
+  probeBuilder: LogicalPlanBuilder,
+  analysis: AnalyzedFilterDocument,
+  verifiedAnalysis: AnalyzedFilterDocument,
+  targetScope: LogicalFilterScope,
+  resolveTemporalDomain: FilterDocumentLoweringOptions["resolveTemporalDomain"],
+  condition: FilterCondition,
+  temporalDomain: TemporalDomainRef,
+  path: string,
+): PrepareResult {
+  if (targetScope === "observation") {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "unsupported-selector-scope",
+        path,
+        "Page/Event selectors are supported only for Session or Visitor targets; Observation selector anchoring remains unresolved.",
+        condition,
+      ),
+    };
+  }
+  if (condition.operator !== "exists" && condition.operator !== "notExists") {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "unsupported-selector-operator",
+        path,
+        `Page/Event selectors support exists or notExists; received '${condition.operator}'.`,
+        condition,
+      ),
+    };
+  }
+
+  const target = condition.target;
+  if (
+    target.kind !== "selector" ||
+    !target.collection ||
+    target.collection.kind !== "entity-root" ||
+    (target.collection.entity !== "page" &&
+      target.collection.entity !== "event")
+  ) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "unsupported-selector",
+        path,
+        "Only an entity-root Page or Event selector is supported.",
+        condition,
+      ),
+    };
+  }
+  if (!target.predicate || typeof target.predicate !== "object") {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "unsupported-selector",
+        path,
+        "The Page/Event selector has no Boolean predicate.",
+        condition,
+      ),
+    };
+  }
+
+  const collection = target.collection.entity;
+  const preparedPredicate = prepareActivityPredicate(
+    probeBuilder,
+    analysis,
+    verifiedAnalysis,
+    targetScope,
+    collection,
+    path,
+    temporalDomain,
+    resolveTemporalDomain,
+    target.predicate,
+    `${path}.target.predicate`,
+  );
+  if (preparedPredicate.kind === "unsupported") return preparedPredicate;
+
+  try {
+    const match = lowerActivitySelector(
+      probeBuilder,
+      collection,
+      preparedPredicate.predicate,
+      temporalDomain,
+    );
+    return {
+      kind: "prepared",
+      expression: {
+        kind: "selector",
+        collection,
+        predicate: preparedPredicate.predicate,
+        temporalDomain,
+        negative: condition.operator === "notExists",
+        match,
+      },
+    };
+  } catch (error) {
+    return {
+      kind: "unsupported",
+      result: unsupported(
+        "condition-lowering-failed",
+        path,
+        `Page/Event selector could not be lowered: ${errorMessage(error)}`,
+        condition,
+      ),
+    };
+  }
 }
 
 function prepareExpression(
@@ -249,6 +705,19 @@ function prepareExpression(
           condition,
         ),
       };
+    }
+
+    if (condition.target.kind === "selector") {
+      return prepareActivitySelector(
+        probeBuilder,
+        analysis,
+        verifiedAnalysis,
+        targetScope,
+        resolveTemporalDomain,
+        condition,
+        temporalDomain,
+        path,
+      );
     }
 
     let lowered: ReturnType<typeof lowerFilterCondition>;

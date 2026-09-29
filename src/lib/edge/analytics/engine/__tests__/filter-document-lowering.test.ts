@@ -29,6 +29,10 @@ import {
   createSemanticTemporalDomains,
   type TemporalDomainRef,
 } from "@/lib/edge/analytics/engine/semantic/time";
+import {
+  evaluateFilterDocument,
+  type FilterEvaluationDataset,
+} from "@/lib/filter-contract";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import {
@@ -79,6 +83,28 @@ function createBuilder(
 function analyzeDocument(document: FilterDocument): AnalyzedFilterDocument {
   const normalized = normalizeFilterDocument(document, analyticsFilterRegistry);
   return analyzeFilterDocument(normalized, analyticsFilterRegistry);
+}
+
+function analyzeDsl(source: string): AnalyzedFilterDocument {
+  return analyzeDocument(parseFilterDsl(source, analyticsFilterRegistry));
+}
+
+function evaluateFilterIds(
+  source: string,
+  scope: "session" | "visitor",
+  dataset: FilterEvaluationDataset,
+): ReadonlySet<string> {
+  return evaluateFilterDocument(
+    parseFilterDsl(source, analyticsFilterRegistry),
+    dataset,
+    {
+      scope,
+      candidateRange: CANDIDATE_RANGE,
+      readRange: READ_RANGE,
+      reportingTimeZone: "UTC",
+      capturedAtMs: CANDIDATE_RANGE.endExclusiveMs,
+    },
+  ).matchingScopeEntityIds;
 }
 
 function analyzeExpression(root: FilterExpression | null) {
@@ -171,6 +197,49 @@ function evaluatePredicate(
         (evaluatePredicate(expression.input, row) == null) !==
         expression.negated
       );
+    case "set-membership": {
+      const input = evaluatePredicate(expression.input, row);
+      if (input == null) return false;
+      const normalize = (value: unknown) => {
+        if (typeof value !== "string" || !expression.stringNormalization)
+          return value;
+        const trimmed = value.trim();
+        return expression.stringNormalization === "trim-case-fold"
+          ? trimmed.toLowerCase()
+          : trimmed;
+      };
+      const found = expression.values.some(
+        (value) => normalize(value.value) === normalize(input),
+      );
+      return expression.negated ? !found : found;
+    }
+    case "string-match": {
+      const input = evaluatePredicate(expression.input, row);
+      if (typeof input !== "string") return false;
+      const normalize = (value: string) => {
+        const normalized = expression.stringNormalization
+          ? value.trim()
+          : value;
+        return !expression.caseSensitive ||
+          expression.stringNormalization === "trim-case-fold"
+          ? normalized.toLowerCase()
+          : normalized;
+      };
+      const left = normalize(input);
+      const right = normalize(expression.value);
+      return expression.operator === "starts-with"
+        ? left.startsWith(right)
+        : expression.operator === "ends-with"
+          ? left.endsWith(right)
+          : left.includes(right);
+    }
+    case "coalesce": {
+      for (const value of expression.values) {
+        const resolved = evaluatePredicate(value, row);
+        if (resolved != null) return resolved;
+      }
+      return null;
+    }
     default:
       throw new Error(`set_fixture_unhandled_expression:${expression.kind}`);
   }
@@ -345,6 +414,188 @@ function evaluateEntitySet(
   }
   const grain = relation.grain;
   return new Set(relationRows.map((row) => String(row.get(grain.key))));
+}
+
+function selectorFixture(): {
+  readonly sources: ReadonlyMap<string, readonly Record<string, unknown>[]>;
+  readonly identities: readonly IdentityRow[];
+  readonly dataset: FilterEvaluationDataset;
+} {
+  const candidatePages = [
+    {
+      kind: "page" as const,
+      id: "candidate-page-a",
+      time: 1_500,
+      sessionId: "s-a",
+      visitorId: "u-a",
+      fields: { "page.path": "/candidate" },
+    },
+    {
+      kind: "page" as const,
+      id: "candidate-page-b",
+      time: 1_500,
+      sessionId: "s-b",
+      visitorId: "u-b",
+      fields: { "page.path": "/candidate" },
+    },
+  ];
+  const readPages = [
+    {
+      kind: "page" as const,
+      id: "read-page-a",
+      time: 500,
+      sessionId: "s-a",
+      visitorId: "u-a",
+      fields: { "page.path": "/hit" },
+    },
+    {
+      kind: "page" as const,
+      id: "read-page-orphan",
+      time: 600,
+      sessionId: "s-old",
+      visitorId: "u-old",
+      fields: { "page.path": "/hit" },
+    },
+  ];
+  const readEvents = [
+    {
+      kind: "event" as const,
+      id: "read-event-a",
+      time: 500,
+      sessionId: "s-a",
+      visitorId: "u-a",
+      fields: { "event.name": "purchase" },
+    },
+    {
+      kind: "event" as const,
+      id: "read-event-orphan",
+      time: 600,
+      sessionId: "s-old",
+      visitorId: "u-old",
+      fields: { "event.name": "purchase" },
+    },
+  ];
+  const observation = (
+    entity: string,
+    sessionId: string,
+    visitorId: string,
+  ) => ({
+    entity,
+    "relationship:observation.session": sessionId,
+    "relationship:observation.visitor": visitorId,
+  });
+  const identities: IdentityRow[] = [
+    {
+      siteId: SITE_ID,
+      relationship: "page.observation",
+      from: "read-page-a",
+      to: "read-observation-a",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "page.observation",
+      from: "read-page-orphan",
+      to: "read-observation-orphan",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "event.observation",
+      from: "read-event-a",
+      to: "read-event-observation-a",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "event.observation",
+      from: "read-event-orphan",
+      to: "read-event-observation-orphan",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "observation.session",
+      from: "read-observation-a",
+      to: "s-a",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "observation.visitor",
+      from: "read-observation-a",
+      to: "u-a",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "observation.session",
+      from: "read-observation-orphan",
+      to: "s-old",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "observation.visitor",
+      from: "read-observation-orphan",
+      to: "u-old",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "observation.session",
+      from: "read-event-observation-a",
+      to: "s-a",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "observation.visitor",
+      from: "read-event-observation-a",
+      to: "u-a",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "observation.session",
+      from: "read-event-observation-orphan",
+      to: "s-old",
+    },
+    {
+      siteId: SITE_ID,
+      relationship: "observation.visitor",
+      from: "read-event-observation-orphan",
+      to: "u-old",
+    },
+  ];
+
+  return {
+    sources: new Map<string, readonly Record<string, unknown>[]>([
+      [
+        "observation:candidate",
+        [
+          observation("candidate-observation-a", "s-a", "u-a"),
+          observation("candidate-observation-b", "s-b", "u-b"),
+        ],
+      ],
+      [
+        "page:read",
+        readPages.map((page, index) => ({
+          entity: page.id,
+          "relationship:page.observation":
+            index === 0 ? "read-observation-a" : "read-observation-orphan",
+          "attribute:page.path": page.fields["page.path"],
+        })),
+      ],
+      [
+        "event:read",
+        readEvents.map((event, index) => ({
+          entity: event.id,
+          "relationship:event.observation":
+            index === 0
+              ? "read-event-observation-a"
+              : "read-event-observation-orphan",
+          "attribute:event.name": event.fields["event.name"],
+        })),
+      ],
+    ]),
+    identities,
+    dataset: {
+      pages: [...candidatePages, ...readPages],
+      events: readEvents,
+      coverageRange: { startMs: 0, endExclusiveMs: 2_000 },
+    },
+  };
 }
 
 function materialize(
@@ -1078,5 +1329,915 @@ describe("FilterDocument Boolean lowering", () => {
     );
 
     expect(entities).toEqual(new Set(["V2"]));
+  });
+
+  it("lowers Page/Event exists and notExists against Session/Visitor candidates", () => {
+    const fixture = selectorFixture();
+    const cases = [
+      {
+        collection: "page",
+        field: 'page.path eq "/hit"',
+        attribute: "page.path",
+      },
+      {
+        collection: "event",
+        field: 'event.name eq "purchase"',
+        attribute: "event.name",
+      },
+    ] as const;
+
+    for (const item of cases) {
+      for (const targetScope of ["session", "visitor"] as const) {
+        for (const operator of ["exists", "notExists"] as const) {
+          const source = `${item.collection} { ${item.field} } ${operator}`;
+          const analysis = analyzeDsl(source);
+          const resolvedPaths: string[] = [];
+          const lowered = materialize(createBuilder(), analysis, {
+            targetScope,
+            resolveTemporalDomain: ({ path }) => {
+              resolvedPaths.push(path);
+              return "read";
+            },
+          });
+
+          expect(lowered.result, JSON.stringify(lowered.result)).toMatchObject({
+            kind: "supported",
+            scope: targetScope,
+          });
+          expect(resolvedPaths).toEqual(["root", "root.target.predicate"]);
+          const selectorSources = lowered.plan!.nodes.filter(
+            (node) =>
+              node.kind === "source" &&
+              node.entity === item.collection &&
+              node.temporalDomain === "read",
+          );
+          expect(selectorSources).toHaveLength(1);
+          const sourceNode = selectorSources[0];
+          if (sourceNode?.kind !== "source")
+            throw new Error("selector_source_expected");
+          expect(
+            sourceNode.values
+              .filter((value) => value.kind === "attribute")
+              .map((value) => value.attribute),
+          ).toEqual([item.attribute]);
+          const selectorFilters = lowered.plan!.nodes.filter(
+            (node) => node.kind === "filter" && node.input === sourceNode.id,
+          );
+          expect(selectorFilters).toHaveLength(1);
+          expect(
+            lowered.plan!.nodes.filter((node) => node.kind === "filter"),
+          ).toHaveLength(1);
+          expect(
+            selectorFilters[0]?.kind === "filter" &&
+              selectorFilters[0].predicate.kind,
+          ).toBe("coalesce");
+          expect(
+            lowered.plan!.nodes.some(
+              (node) =>
+                node.kind === "source" &&
+                node.entity === targetScope &&
+                node.temporalDomain === "read",
+            ),
+          ).toBe(false);
+
+          const actual = evaluateEntitySet(
+            lowered.plan!,
+            fixture.sources,
+            fixture.identities,
+            lowered.result.kind === "supported"
+              ? lowered.result.selection.relation.id
+              : (0 as RelationId),
+          );
+          const expected = evaluateFilterIds(
+            source,
+            targetScope,
+            fixture.dataset,
+          );
+          expect(actual).toEqual(expected);
+          expect(actual).toEqual(
+            operator === "exists"
+              ? new Set([targetScope === "session" ? "s-a" : "u-a"])
+              : new Set([targetScope === "session" ? "s-b" : "u-b"]),
+          );
+        }
+      }
+    }
+  });
+
+  it("keeps selector AND predicates on one Page/Event occurrence", () => {
+    const candidateObservations = [
+      {
+        entity: "candidate-observation-a",
+        "relationship:observation.session": "s-a",
+        "relationship:observation.visitor": "u-a",
+      },
+      {
+        entity: "candidate-observation-b",
+        "relationship:observation.session": "s-b",
+        "relationship:observation.visitor": "u-b",
+      },
+    ];
+    const pageRows = [
+      {
+        entity: "page-a",
+        "relationship:page.observation": "observation-page-a",
+        "attribute:page.path": "/x",
+        "attribute:page.title": "Home",
+      },
+      {
+        entity: "page-b",
+        "relationship:page.observation": "observation-page-b",
+        "attribute:page.path": "/other",
+        "attribute:page.title": "Checkout",
+      },
+      {
+        entity: "page-c",
+        "relationship:page.observation": "observation-page-c",
+        "attribute:page.path": "/x",
+        "attribute:page.title": "Checkout",
+      },
+    ];
+    const eventRows = [
+      {
+        entity: "event-a-signup",
+        "relationship:event.observation": "observation-event-a-signup",
+        "attribute:event.name": "signup",
+      },
+      {
+        entity: "event-a-purchase",
+        "relationship:event.observation": "observation-event-a-purchase",
+        "attribute:event.name": "purchase",
+      },
+      {
+        entity: "event-b-signup",
+        "relationship:event.observation": "observation-event-b-signup",
+        "attribute:event.name": "signup",
+      },
+      {
+        entity: "event-b-purchase",
+        "relationship:event.observation": "observation-event-b-purchase",
+        "attribute:event.name": "purchase",
+      },
+    ];
+    const observationRows = [
+      {
+        entity: "observation-page-a",
+        "attribute:page.path": "/x",
+        "attribute:page.title": "Home",
+      },
+      {
+        entity: "observation-page-b",
+        "attribute:page.path": "/other",
+        "attribute:page.title": "Checkout",
+      },
+      {
+        entity: "observation-page-c",
+        "attribute:page.path": "/x",
+        "attribute:page.title": "Checkout",
+      },
+    ];
+    const identities: IdentityRow[] = [];
+    for (const [observationId, sessionId, visitorId] of [
+      ["observation-page-a", "s-a", "u-a"],
+      ["observation-page-b", "s-a", "u-a"],
+      ["observation-page-c", "s-b", "u-b"],
+      ["observation-event-a-signup", "s-a", "u-a"],
+      ["observation-event-a-purchase", "s-a", "u-a"],
+      ["observation-event-b-signup", "s-b", "u-b"],
+      ["observation-event-b-purchase", "s-b", "u-b"],
+    ] as const) {
+      identities.push(
+        {
+          siteId: SITE_ID,
+          relationship: "observation.session",
+          from: observationId,
+          to: sessionId,
+        },
+        {
+          siteId: SITE_ID,
+          relationship: "observation.visitor",
+          from: observationId,
+          to: visitorId,
+        },
+      );
+    }
+    identities.push(
+      ...pageRows.map((row) => ({
+        siteId: SITE_ID,
+        relationship: "page.observation",
+        from: row.entity,
+        to: row["relationship:page.observation"],
+      })),
+      ...eventRows.map((row) => ({
+        siteId: SITE_ID,
+        relationship: "event.observation",
+        from: row.entity,
+        to: row["relationship:event.observation"],
+      })),
+    );
+
+    const sources = new Map<string, readonly Record<string, unknown>[]>([
+      ["observation:candidate", candidateObservations],
+      ["observation:read", observationRows],
+      ["page:read", pageRows],
+      ["event:read", eventRows],
+    ]);
+    const candidatePages = [
+      {
+        kind: "page" as const,
+        id: "candidate-page-a",
+        time: 1_500,
+        sessionId: "s-a",
+        visitorId: "u-a",
+        fields: { "page.path": "/candidate", "page.title": "Candidate" },
+      },
+      {
+        kind: "page" as const,
+        id: "candidate-page-b",
+        time: 1_500,
+        sessionId: "s-b",
+        visitorId: "u-b",
+        fields: { "page.path": "/candidate", "page.title": "Candidate" },
+      },
+    ];
+    const readPages = [
+      {
+        kind: "page" as const,
+        id: "page-a",
+        time: 500,
+        sessionId: "s-a",
+        visitorId: "u-a",
+        fields: { "page.path": "/x", "page.title": "Home" },
+      },
+      {
+        kind: "page" as const,
+        id: "page-b",
+        time: 550,
+        sessionId: "s-a",
+        visitorId: "u-a",
+        fields: { "page.path": "/other", "page.title": "Checkout" },
+      },
+      {
+        kind: "page" as const,
+        id: "page-c",
+        time: 600,
+        sessionId: "s-b",
+        visitorId: "u-b",
+        fields: { "page.path": "/x", "page.title": "Checkout" },
+      },
+    ];
+    const readEvents = [
+      {
+        kind: "event" as const,
+        id: "event-a-signup",
+        time: 500,
+        sessionId: "s-a",
+        visitorId: "u-a",
+        fields: { "event.name": "signup" },
+      },
+      {
+        kind: "event" as const,
+        id: "event-a-purchase",
+        time: 550,
+        sessionId: "s-a",
+        visitorId: "u-a",
+        fields: { "event.name": "purchase" },
+      },
+      {
+        kind: "event" as const,
+        id: "event-b-signup",
+        time: 600,
+        sessionId: "s-b",
+        visitorId: "u-b",
+        fields: { "event.name": "signup" },
+      },
+      {
+        kind: "event" as const,
+        id: "event-b-purchase",
+        time: 650,
+        sessionId: "s-b",
+        visitorId: "u-b",
+        fields: { "event.name": "purchase" },
+      },
+    ];
+    const dataset: FilterEvaluationDataset = {
+      pages: [...candidatePages, ...readPages],
+      events: readEvents,
+      coverageRange: { startMs: 0, endExclusiveMs: 2_000 },
+    };
+
+    const lowerForSessions = (source: string) => {
+      const lowered = materialize(createBuilder(), analyzeDsl(source), {
+        targetScope: "session",
+        resolveTemporalDomain: explicitDomain("read"),
+      });
+      if (lowered.result.kind !== "supported" || !lowered.plan)
+        throw new Error(JSON.stringify(lowered.result));
+      const entities = evaluateEntitySet(
+        lowered.plan,
+        sources,
+        identities,
+        lowered.result.selection.relation.id,
+      );
+      return { ...lowered, entities };
+    };
+
+    const ordinaryPageAnd = 'page.path eq "/x" AND page.title eq "Checkout"';
+    const samePageAnd =
+      'page { page.path eq "/x" AND page.title eq "Checkout" } exists';
+    const ordinaryPage = lowerForSessions(ordinaryPageAnd);
+    const selectedPage = lowerForSessions(samePageAnd);
+    expect(ordinaryPage.entities).toEqual(new Set(["s-a", "s-b"]));
+    expect(selectedPage.entities).toEqual(new Set(["s-b"]));
+    expect(selectedPage.entities).toEqual(
+      evaluateFilterIds(samePageAnd, "session", dataset),
+    );
+    const pageSource = selectedPage.plan!.nodes.find(
+      (node) => node.kind === "source" && node.entity === "page",
+    );
+    expect(
+      pageSource?.kind === "source" &&
+        pageSource.values
+          .filter((value) => value.kind === "attribute")
+          .map((value) => value.attribute),
+    ).toEqual(["page.path", "page.title"]);
+    expect(
+      selectedPage.plan!.nodes.filter(
+        (node) => node.kind === "filter" && node.input === pageSource?.id,
+      ),
+    ).toHaveLength(1);
+
+    const ordinaryEventAnd =
+      'event.name eq "signup" AND event.name eq "purchase"';
+    const sameEventAnd =
+      'event { event.name eq "signup" AND event.name eq "purchase" } exists';
+    const ordinaryEvent = lowerForSessions(ordinaryEventAnd);
+    const selectedEvent = lowerForSessions(sameEventAnd);
+    expect(ordinaryEvent.entities).toEqual(new Set(["s-a", "s-b"]));
+    expect(selectedEvent.entities).toEqual(new Set());
+    expect(selectedEvent.entities).toEqual(
+      evaluateFilterIds(sameEventAnd, "session", dataset),
+    );
+
+    const matchingEventAnd =
+      'event { event.name contains "pur" AND event.name eq "purchase" } exists';
+    const matchingEvent = lowerForSessions(matchingEventAnd);
+    expect(matchingEvent.entities).toEqual(new Set(["s-a", "s-b"]));
+    expect(matchingEvent.entities).toEqual(
+      evaluateFilterIds(matchingEventAnd, "session", dataset),
+    );
+    expect(
+      matchingEvent.plan!.nodes.filter(
+        (node) => node.kind === "source" && node.entity === "event",
+      ),
+    ).toHaveLength(1);
+    expect(
+      matchingEvent.plan!.nodes.filter((node) => node.kind === "filter"),
+    ).toHaveLength(1);
+  });
+
+  it("uses two-valued leaf predicates for internal NOT, neq, and notIn", () => {
+    const sessions = ["s-null", "s-missing", "s-home", "s-other", "s-mixed"];
+    const candidatePages = sessions.map((sessionId) => ({
+      kind: "page" as const,
+      id: `candidate-${sessionId}`,
+      time: 1_500,
+      sessionId,
+      visitorId: `u-${sessionId}`,
+      fields: { "page.path": "/candidate" },
+    }));
+    const readPages = [
+      {
+        id: "history-null",
+        sessionId: "s-null",
+        visitorId: "u-s-null",
+        fields: { "page.path": null },
+      },
+      {
+        id: "history-missing",
+        sessionId: "s-missing",
+        visitorId: "u-s-missing",
+        fields: {},
+      },
+      {
+        id: "history-home",
+        sessionId: "s-home",
+        visitorId: "u-s-home",
+        fields: { "page.path": "/home" },
+      },
+      {
+        id: "history-other",
+        sessionId: "s-other",
+        visitorId: "u-s-other",
+        fields: { "page.path": "/other" },
+      },
+      {
+        id: "history-mixed-home",
+        sessionId: "s-mixed",
+        visitorId: "u-s-mixed",
+        fields: { "page.path": "/home" },
+      },
+      {
+        id: "history-mixed-other",
+        sessionId: "s-mixed",
+        visitorId: "u-s-mixed",
+        fields: { "page.path": "/other" },
+      },
+    ];
+    const observationRows = readPages.map((page) => ({
+      entity: `observation-${page.id}`,
+      "relationship:observation.session": page.sessionId,
+      "relationship:observation.visitor": page.visitorId,
+    }));
+    const pageSourceRows = readPages.map((page) => ({
+      entity: page.id,
+      "relationship:page.observation": `observation-${page.id}`,
+      ...(Object.hasOwn(page.fields, "page.path")
+        ? { "attribute:page.path": page.fields["page.path"] }
+        : {}),
+    }));
+    const identities: IdentityRow[] = readPages.flatMap((page) => [
+      {
+        siteId: SITE_ID,
+        relationship: "page.observation",
+        from: page.id,
+        to: `observation-${page.id}`,
+      },
+      {
+        siteId: SITE_ID,
+        relationship: "observation.session",
+        from: `observation-${page.id}`,
+        to: page.sessionId,
+      },
+      {
+        siteId: SITE_ID,
+        relationship: "observation.visitor",
+        from: `observation-${page.id}`,
+        to: page.visitorId,
+      },
+    ]);
+    const sources = new Map<string, readonly Record<string, unknown>[]>([
+      [
+        "observation:candidate",
+        sessions.map((sessionId) => ({
+          entity: `candidate-observation-${sessionId}`,
+          "relationship:observation.session": sessionId,
+          "relationship:observation.visitor": `u-${sessionId}`,
+        })),
+      ],
+      ["page:read", pageSourceRows],
+      ["observation:read", observationRows],
+    ]);
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        ...candidatePages,
+        ...readPages.map((page) => ({
+          kind: "page" as const,
+          id: page.id,
+          time: 500,
+          sessionId: page.sessionId,
+          visitorId: page.visitorId,
+          fields: page.fields,
+        })),
+      ],
+      events: [],
+      coverageRange: { startMs: 0, endExclusiveMs: 2_000 },
+    };
+    const cases = [
+      {
+        source: 'page { NOT page.path eq "/home" } exists',
+        expected: new Set(["s-null", "s-missing", "s-other", "s-mixed"]),
+      },
+      {
+        source: 'page { page.path neq "/home" } exists',
+        expected: new Set(["s-other", "s-mixed"]),
+      },
+      {
+        source: 'page { page.path notIn ["/home"] } exists',
+        expected: new Set(["s-other", "s-mixed"]),
+      },
+      {
+        source: 'page { page.path eq "/home" } notExists',
+        expected: new Set(["s-null", "s-missing", "s-other"]),
+      },
+    ];
+
+    for (const item of cases) {
+      const lowered = materialize(createBuilder(), analyzeDsl(item.source), {
+        targetScope: "session",
+        resolveTemporalDomain: explicitDomain("read"),
+      });
+      expect(lowered.result.kind).toBe("supported");
+      if (lowered.result.kind !== "supported" || !lowered.plan)
+        throw new Error("supported_null_selector_expected");
+      const actual = evaluateEntitySet(
+        lowered.plan,
+        sources,
+        identities,
+        lowered.result.selection.relation.id,
+      );
+      expect(actual).toEqual(item.expected);
+      expect(actual).toEqual(
+        evaluateFilterIds(item.source, "session", dataset),
+      );
+    }
+  });
+
+  it("combines selectors with outer AND/OR/NOT using candidate set algebra", () => {
+    const pageSelector = analyzeDsl('page { page.path eq "/hit" } exists')
+      .document.root;
+    const eventSelector = analyzeDsl(
+      'event { event.name eq "purchase" } exists',
+    ).document.root;
+    if (
+      !pageSelector ||
+      pageSelector.kind !== "condition" ||
+      !eventSelector ||
+      eventSelector.kind !== "condition"
+    ) {
+      throw new Error("selector_condition_expected");
+    }
+    const analysis = analyzeExpression({
+      kind: "or",
+      children: [
+        {
+          kind: "and",
+          children: [
+            fieldCondition("visitor.sessions", "gte", 1),
+            pageSelector,
+          ],
+        },
+        { kind: "not", child: eventSelector },
+      ],
+    });
+    const fixture = selectorFixture();
+    const sources = new Map(fixture.sources);
+    sources.set("visitor:candidate", [
+      { entity: "u-a", "attribute:visitor.sessions": 1 },
+      { entity: "u-b", "attribute:visitor.sessions": 1 },
+    ]);
+    const builder = createBuilder();
+    const resolvedPaths: string[] = [];
+    const lowered = materialize(builder, analysis, {
+      targetScope: "visitor",
+      resolveTemporalDomain: ({ condition, path }) => {
+        resolvedPaths.push(path);
+        return path.includes("target.predicate") ||
+          condition.target.kind === "selector"
+          ? "read"
+          : "candidate";
+      },
+    });
+
+    expect(lowered.result.kind).toBe("supported");
+    expect([...resolvedPaths].sort()).toEqual(
+      [
+        "root.children[0].child",
+        "root.children[0].child.target.predicate",
+        "root.children[1].children[0]",
+        "root.children[1].children[1]",
+        "root.children[1].children[1].target.predicate",
+      ].sort(),
+    );
+    const operations = lowered
+      .plan!.nodes.filter((node) => node.kind === "set-operation")
+      .map((node) => node.operation);
+    expect(operations).toContain("intersect");
+    expect(operations).toContain("difference");
+    expect(operations).toContain("union");
+    expect(
+      evaluateEntitySet(
+        lowered.plan!,
+        sources,
+        fixture.identities,
+        lowered.result.kind === "supported"
+          ? lowered.result.selection.relation.id
+          : (0 as RelationId),
+      ),
+    ).toEqual(new Set(["u-a", "u-b"]));
+  });
+
+  it("rejects selector time-domain conflicts and unsupported nested targets atomically", () => {
+    const analysis = analyzeDsl('page { page.path eq "/hit" } exists');
+    const conflictingBuilder = createBuilder();
+    expect(
+      lowerFilterDocumentToScope(conflictingBuilder, analysis, {
+        targetScope: "session",
+        resolveTemporalDomain: ({ path }) =>
+          path === "root" ? "read" : "filter",
+      }),
+    ).toMatchObject({
+      kind: "unsupported",
+      code: "selector-temporal-domain-mismatch",
+      path: "root.target.predicate",
+      fieldId: "page.path",
+    });
+    expect(conflictingBuilder.finish().nodes).toHaveLength(0);
+
+    const missingBuilder = createBuilder();
+    expect(
+      lowerFilterDocumentToScope(missingBuilder, analysis, {
+        targetScope: "session",
+        resolveTemporalDomain: ({ path }) =>
+          path === "root" ? "read" : undefined,
+      }),
+    ).toMatchObject({
+      kind: "unsupported",
+      code: "missing-condition-time-domain",
+      path: "root.target.predicate",
+    });
+    expect(missingBuilder.finish().nodes).toHaveLength(0);
+
+    const observationBuilder = createBuilder();
+    expect(
+      lowerFilterDocumentToScope(observationBuilder, analysis, {
+        targetScope: "observation",
+        resolveTemporalDomain: explicitDomain("read"),
+      }),
+    ).toMatchObject({
+      kind: "unsupported",
+      code: "unsupported-selector-scope",
+      path: "root",
+    });
+    expect(observationBuilder.finish().nodes).toHaveLength(0);
+
+    const unsupportedDocuments = [
+      {
+        source: 'event { event.payload("/amount") eq 4 } exists',
+        code: "unsupported-target",
+        path: "root.target.predicate",
+      },
+      {
+        source: 'event { event { event.name eq "purchase" } exists } exists',
+        code: "unsupported-target",
+        path: "root.target.predicate",
+      },
+      {
+        source: 'event { geo.country eq "US" } exists',
+        code: "unsupported-native-entity",
+        path: "root.target.predicate",
+      },
+    ] as const;
+    for (const item of unsupportedDocuments) {
+      const builder = createBuilder();
+      expect(
+        lowerFilterDocumentToScope(builder, analyzeDsl(item.source), {
+          targetScope: "visitor",
+          resolveTemporalDomain: explicitDomain("read"),
+        }),
+      ).toMatchObject({
+        kind: "unsupported",
+        code: item.code,
+        path: item.path,
+      });
+      expect(builder.finish().nodes).toHaveLength(0);
+    }
+
+    const nestedReducer = "event { count(event) eq 2 } exists";
+    const reducerBuilder = createBuilder();
+    expect(
+      lowerFilterDocumentToScope(reducerBuilder, analyzeDsl(nestedReducer), {
+        targetScope: "session",
+        resolveTemporalDomain: explicitDomain("read"),
+      }),
+    ).toMatchObject({
+      kind: "unsupported",
+      code: "unsupported-target",
+      path: "root.target.predicate",
+    });
+    expect(reducerBuilder.finish().nodes).toHaveLength(0);
+  });
+
+  it("rejects selector predicate resolver failures and mismatched domains atomically", () => {
+    const analysis = analyzeDsl('page { page.path eq "/hit" } exists');
+    const resolverFailureBuilder = createBuilder();
+    expect(
+      lowerFilterDocumentToScope(resolverFailureBuilder, analysis, {
+        targetScope: "session",
+        resolveTemporalDomain: ({ path }) => {
+          if (path === "root.target.predicate") {
+            throw new Error("predicate-domain-unavailable");
+          }
+          return "read";
+        },
+      }),
+    ).toMatchObject({
+      kind: "unsupported",
+      code: "time-domain-resolution-failed",
+      path: "root.target.predicate",
+      reason: expect.stringContaining("predicate-domain-unavailable"),
+    });
+    expect(resolverFailureBuilder.finish().nodes).toHaveLength(0);
+
+    const invalidDomainBuilder = createBuilder();
+    expect(
+      lowerFilterDocumentToScope(invalidDomainBuilder, analysis, {
+        targetScope: "session",
+        resolveTemporalDomain: ({ path }) =>
+          path === "root.target.predicate"
+            ? ("missing" as TemporalDomainRef)
+            : "read",
+      }),
+    ).toMatchObject({
+      kind: "unsupported",
+      code: "selector-temporal-domain-mismatch",
+      path: "root.target.predicate",
+    });
+    expect(invalidDomainBuilder.finish().nodes).toHaveLength(0);
+  });
+
+  it("reports invalid selector predicate sidecar identity without partial plans", () => {
+    const analysis = analyzeDsl('page { page.path eq "/hit" } exists');
+    const root = analysis.document.root;
+    if (root?.kind !== "condition" || root.target.kind !== "selector") {
+      throw new Error("expected selector condition");
+    }
+    const predicate = root.target.predicate;
+    const originalConditions = analysis.conditions;
+    const conditions = new Proxy(originalConditions, {
+      get(target, property) {
+        if (property === "get") {
+          return (condition: FilterCondition) => {
+            if (condition === predicate) {
+              throw new Error("predicate-sidecar-unavailable");
+            }
+            return target.get(condition);
+          };
+        }
+        return Reflect.get(target, property, target);
+      },
+    });
+    const staleSidecar = { ...analysis, conditions } as AnalyzedFilterDocument;
+    const builder = createBuilder();
+
+    expect(
+      lowerFilterDocumentToScope(builder, staleSidecar, {
+        targetScope: "session",
+        resolveTemporalDomain: explicitDomain("read"),
+      }),
+    ).toMatchObject({
+      kind: "unsupported",
+      code: "invalid-analysis",
+      path: "root.target.predicate",
+    });
+    expect(builder.finish().nodes).toHaveLength(0);
+  });
+
+  it("rejects an entity-root selector outside Page or Event", () => {
+    const builder = createBuilder();
+    expect(
+      lowerFilterDocumentToScope(
+        builder,
+        analyzeDsl("session { session.views gte 1 } exists"),
+        {
+          targetScope: "visitor",
+          resolveTemporalDomain: explicitDomain("read"),
+        },
+      ),
+    ).toMatchObject({
+      kind: "unsupported",
+      code: "unsupported-selector",
+      path: "root",
+    });
+    expect(builder.finish().nodes).toHaveLength(0);
+  });
+
+  it.each([
+    ['event { page.path eq "/hit" } exists', "unsupported-native-entity"],
+    ['page { session.entryPath eq "/hit" } exists', "unsupported-evaluation"],
+  ])(
+    "rejects selector field capabilities before lowering (%s)",
+    (source, code) => {
+      const builder = createBuilder();
+      expect(
+        lowerFilterDocumentToScope(builder, analyzeDsl(source), {
+          targetScope: "session",
+          resolveTemporalDomain: explicitDomain("read"),
+        }),
+      ).toMatchObject({
+        kind: "unsupported",
+        code,
+        path: "root.target.predicate",
+      });
+      expect(builder.finish().nodes).toHaveLength(0);
+    },
+  );
+
+  it("deduplicates selector attributes across repeated leaves and one-child groups", () => {
+    const repeated = fieldCondition("page.path", "eq", "/hit");
+    const repeatedField = fieldCondition("page.path", "neq", "/other");
+    const selector: FilterCondition = {
+      kind: "condition",
+      target: {
+        kind: "selector",
+        collection: { kind: "entity-root", entity: "page" },
+        predicate: { kind: "and", children: [repeated, repeatedField] },
+      },
+      operator: "exists",
+    };
+    const analysis = analyzeExpression(selector);
+    const seenPaths: string[] = [];
+    const lowered = materialize(createBuilder(), analysis, {
+      targetScope: "session",
+      resolveTemporalDomain: ({ path }) => {
+        seenPaths.push(path);
+        return "read";
+      },
+    });
+
+    expect(lowered.result.kind).toBe("supported");
+    expect(seenPaths).toEqual([
+      "root",
+      "root.target.predicate.children[0]",
+      "root.target.predicate.children[1]",
+    ]);
+    const pageSource = lowered.plan!.nodes.find(
+      (node) => node.kind === "source" && node.entity === "page",
+    );
+    expect(
+      pageSource?.kind === "source" &&
+        pageSource.values
+          .filter((value) => value.kind === "attribute")
+          .map((value) => value.attribute),
+    ).toEqual(["page.path"]);
+    expect(
+      lowered.plan!.nodes.filter((node) => node.kind === "filter"),
+    ).toHaveLength(1);
+  });
+
+  it("prints a deterministic same-occurrence selector golden", () => {
+    const analysis = analyzeDsl(
+      'page { page.path eq "/hit" AND page.title eq "Checkout" } exists',
+    );
+    const lowered = materialize(createBuilder(), analysis, {
+      targetScope: "session",
+      resolveTemporalDomain: explicitDomain("read"),
+    });
+    expect(lowered.result.kind).toBe("supported");
+    expect(printLogicalPlan(lowered.plan!)).toMatchInlineSnapshot(`
+      "LogicalPlan v1
+        SUBJECT site sites=[site-a]
+        SCOPE requested=auto contract=auto logical=auto
+
+      r0 Source<page> grain=Entity<page>[s0] domain=read
+        VALUE self -> s0:Entity<page>!{entity:page}
+        VALUE relationship=page.observation -> s1:Entity<observation>!{relationship:page.observation}
+        VALUE attribute=page.path -> s2:Scalar<string>?{attribute:page.path}
+        VALUE attribute=page.title -> s3:Scalar<string>?{attribute:page.title}
+        OUTPUT s0:Entity<page>!{entity:page}, s1:Entity<observation>!{relationship:page.observation}, s2:Scalar<string>?{attribute:page.path}, s3:Scalar<string>?{attribute:page.title}
+
+      r1 Filter grain=Entity<page>[s0] input=r0
+        WHERE (COALESCE((s2 eq "/hit":Scalar<string> normalization=trim), false:Scalar<boolean>) AND COALESCE((s3 eq "Checkout":Scalar<string> normalization=trim), false:Scalar<boolean>))
+        OUTPUT s0:Entity<page>!{entity:page}, s1:Entity<observation>!{relationship:page.observation}, s2:Scalar<string>?{attribute:page.path}, s3:Scalar<string>?{attribute:page.title}
+
+      r2 Project grain=Entity<page>[s5] input=r1
+        s4:Entity<observation>!{alias:s1} := s1
+        s5:Entity<page>!{alias:s0} := s0
+        OUTPUT s4:Entity<observation>!{alias:s1}, s5:Entity<page>!{alias:s0}
+
+      r3 Distinct grain=Entity<observation>[s6] excludeNull=true
+        KEY s6:Entity<observation>!{alias:s4} := s4:Entity<observation>!{alias:s1}
+        OUTPUT s6:Entity<observation>!{alias:s4}
+
+      r4 Source<observation> grain=Entity<observation>[s7] domain=candidate
+        VALUE self -> s7:Entity<observation>!{entity:observation}
+        VALUE relationship=observation.session -> s8:Entity<session>?{relationship:observation.session}
+        OUTPUT s7:Entity<observation>!{entity:observation}, s8:Entity<session>?{relationship:observation.session}
+
+      r5 Distinct grain=Entity<session>[s9] excludeNull=true
+        KEY s9:Entity<session>!{alias:s8} := s8:Entity<session>?{relationship:observation.session}
+        OUTPUT s9:Entity<session>!{alias:s8}
+
+      r6 Project grain=Entity<observation>[s10] input=r3
+        s10:Entity<observation>!{alias:s6} := s6
+        OUTPUT s10:Entity<observation>!{alias:s6}
+
+      r7 Distinct grain=Entity<observation>[s11] excludeNull=true
+        KEY s11:Entity<observation>!{alias:s10} := s10:Entity<observation>!{alias:s6}
+        OUTPUT s11:Entity<observation>!{alias:s10}
+
+      r8 RelationshipLookup<observation.session> grain=Entity<observation>[s11] input=r7 time=identity-no-activity-filter
+        LOOKUP observation.session BY s11:Entity<observation>!{alias:s10} -> s12:Entity<session>?{relationship:observation.session} (identity read; no activity-time filter)
+        OUTPUT s11:Entity<observation>!{alias:s10}, s12:Entity<session>?{relationship:observation.session}
+
+      r9 Project grain=Entity<observation>[s14] input=r8
+        s13:Entity<session>?{alias:s12} := s12
+        s14:Entity<observation>!{alias:s11} := s11
+        OUTPUT s13:Entity<session>?{alias:s12}, s14:Entity<observation>!{alias:s11}
+
+      r10 Distinct grain=Entity<session>[s15] excludeNull=true
+        KEY s15:Entity<session>!{alias:s13} := s13:Entity<session>?{alias:s12}
+        OUTPUT s15:Entity<session>!{alias:s13}
+
+      r11 Intersect grain=Entity<session>[s16] inputs=[r5, r10]
+        INPUT r5
+        INPUT r10
+        OUTPUT s16:Entity<session>!{derived:set:intersect(s9,s15)}
+
+      Outputs
+        "matches" from r11
+          "entity" -> s16:Entity<session>!{derived:set:intersect(s9,s15)}
+      "
+    `);
   });
 });
