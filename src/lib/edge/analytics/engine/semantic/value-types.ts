@@ -1,5 +1,7 @@
 import type { FilterScalarType } from "@/lib/filter-contract/filter-types";
 
+import type { AnalyticsEntityKind } from "./entities";
+
 export type SemanticScalarType = FilterScalarType;
 export type SemanticUnit = "ms" | "px" | "ratio";
 
@@ -17,3 +19,8 @@ export interface SemanticEntityValueType<Entity extends string = string> {
 export interface SemanticBucketValueType {
   readonly kind: "bucket";
 }
+
+export type LogicalValueType =
+  | SemanticScalarValueType
+  | SemanticEntityValueType<AnalyticsEntityKind>
+  | SemanticBucketValueType;
