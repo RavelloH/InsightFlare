@@ -1,11 +1,13 @@
 import {
   and,
+  antiJoin,
   callFunction,
   compileD1Query,
   type CompiledQuery,
   eq,
   filter,
   gte,
+  inList,
   isNotNull,
   join,
   lowerLogicalPlan,
@@ -17,6 +19,8 @@ import {
   semiJoin,
   union,
 } from "@/lib/db";
+import type { AnyExpression } from "@/lib/db/query/expression";
+import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 import type {
   EpochMs,
@@ -33,7 +37,12 @@ import type {
   SlotId,
 } from "@/lib/edge/analytics/engine/logical/ids";
 import type {
+  DistinctNode,
+  FilterNode,
   LogicalNode,
+  ProjectNode,
+  RelationshipLookupNode,
+  SetOperationNode,
   SourceNode,
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import type {
@@ -49,10 +58,7 @@ import {
   type AnalyzedFilterDocument,
   analyzeFilterDocument,
 } from "@/lib/filter-contract/filter-semantics";
-import {
-  type FilterCondition,
-  normalizeFilterDocument,
-} from "@/lib/filter-contract/filters";
+import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
 
 export interface AnalyticsPageSessionLoweringInput {
   readonly document: unknown;
@@ -62,12 +68,6 @@ export interface AnalyticsPageSessionLoweringInput {
   readonly reportingTimeZone: ReportingTimeZone;
   readonly capturedAtMs: EpochMs;
 }
-
-type PagePathEqualityCondition = FilterCondition & {
-  readonly target: { readonly kind: "field"; readonly field: "page.path" };
-  readonly operator: "eq";
-  readonly value: string;
-};
 
 export interface AnalyticsSessionIdentityRow {
   readonly site_pk: number;
@@ -92,11 +92,25 @@ type UnsupportedResult = Extract<
   { readonly kind: "unsupported" }
 >;
 
-interface PagePathSessionSemantics {
+type SessionSetPlan =
+  | { readonly kind: "candidate"; readonly relationId: RelationId }
+  | {
+      readonly kind: "page-path";
+      readonly relationId: RelationId;
+      readonly paths: readonly string[];
+    }
+  | {
+      readonly kind: "set-operation";
+      readonly relationId: RelationId;
+      readonly operation: SetOperationNode["operation"];
+      readonly inputs: readonly SessionSetPlan[];
+    };
+
+interface SessionPlanSemantics {
   readonly siteId: SiteId;
   readonly candidateRange: TimeRange;
   readonly readRange: TimeRange;
-  readonly pagePath: string;
+  readonly set: SessionSetPlan;
 }
 
 class PlanShapeMismatch extends Error {
@@ -134,18 +148,49 @@ function nodeAt<Kind extends LogicalNode["kind"]>(
   id: RelationId,
   kind: Kind,
   path: string,
+  visited?: Set<RelationId>,
 ): Extract<LogicalNode, { readonly kind: Kind }> {
   const node = plan.nodes.find((candidate) => candidate.id === id);
   if (!node || node.kind !== kind) {
     mismatch(path, `Expected a ${kind} node for relation ${String(id)}.`);
   }
+  visited?.add(node.id);
   return node as Extract<LogicalNode, { readonly kind: Kind }>;
+}
+
+function relationNodeAt(
+  plan: ValidatedLogicalPlan,
+  id: RelationId,
+  path: string,
+  visited: Set<RelationId>,
+): LogicalNode {
+  const node = plan.nodes.find((candidate) => candidate.id === id);
+  if (!node) mismatch(path, `Relation ${String(id)} is missing.`);
+  visited.add(node.id);
+  return node;
 }
 
 function slotAt(plan: ValidatedLogicalPlan, id: SlotId, path: string) {
   const slot = plan.slots.find((candidate) => candidate.id === id);
   if (!slot) mismatch(path, `Slot ${String(id)} is missing.`);
   return slot;
+}
+
+function entitySlotAt(
+  plan: ValidatedLogicalPlan,
+  id: SlotId,
+  entity: "observation" | "session",
+  nullable: boolean,
+  path: string,
+): void {
+  const slot = slotAt(plan, id, path);
+  requirePlan(
+    slot.type.kind === "entity" &&
+      slot.type.entity === entity &&
+      slot.nullable === nullable,
+    path,
+    `Expected ${nullable ? "nullable" : "non-null"} ${entity} identity slot.`,
+  );
 }
 
 function sameSlots(left: readonly SlotId[], right: readonly SlotId[]): boolean {
@@ -163,110 +208,525 @@ function rangeIsSafe(range: TimeRange): boolean {
   );
 }
 
-function exactSourceBindings(
+function planNodePath(id: RelationId): string {
+  return `nodes[${String(id)}]`;
+}
+
+function requireObservationGrain(
+  node: LogicalNode,
+  key: SlotId,
+  path: string,
+): void {
+  requirePlan(
+    node.grain.kind === "entity" &&
+      node.grain.entity === "observation" &&
+      node.grain.key === key,
+    path,
+    "Expected the Observation identity as the relation grain.",
+  );
+}
+
+function requireSessionGrain(
+  node: LogicalNode,
+  plan: ValidatedLogicalPlan,
+  path: string,
+): void {
+  requirePlan(
+    node.output.length === 1 &&
+      node.grain.kind === "entity" &&
+      node.grain.entity === "session" &&
+      node.grain.key === node.output[0],
+    path,
+    "Expected a unary Session identity relation.",
+  );
+  entitySlotAt(plan, node.output[0]!, "session", false, `${path}.output[0]`);
+}
+
+function readPageSourceBindings(
   plan: ValidatedLogicalPlan,
   source: SourceNode,
+  visited: Set<RelationId>,
   path: string,
-  expected: "page-path-read" | "candidate-observation",
-): { readonly entity: SlotId; readonly value: SlotId } {
+): { readonly observation: SlotId; readonly pagePath: SlotId } {
+  visited.add(source.id);
   requirePlan(
-    source.entity === "observation",
-    path,
-    "Expected Observation source.",
-  );
-  requirePlan(source.values.length === 2, path, "Unexpected Source bindings.");
-  const entityBindings = source.values.filter(
-    (binding) => binding.kind === "self",
+    source.entity === "observation" && source.temporalDomain === "read",
+    `${path}.temporalDomain`,
+    "Page.path evidence must come from Source<observation>[read].",
   );
   requirePlan(
-    entityBindings.length === 1,
+    source.values.length === 2,
     path,
-    "Expected one entity identity binding.",
+    "Unexpected read Source bindings.",
   );
-  const entity = entityBindings[0]!.slot;
+  const self = source.values.filter((binding) => binding.kind === "self");
+  const attributes = source.values.filter(
+    (binding) => binding.kind === "attribute",
+  );
+  requirePlan(
+    self.length === 1 &&
+      attributes.length === 1 &&
+      attributes[0]!.attribute === "page.path",
+    path,
+    "The read Source must expose Observation identity and page.path only.",
+  );
+  const observation = self[0]!.slot;
+  const pagePath = attributes[0]!.slot;
+  entitySlotAt(plan, observation, "observation", false, `${path}.self`);
+  const pagePathSlot = slotAt(plan, pagePath, `${path}.page.path`);
+  requirePlan(
+    pagePathSlot.type.kind === "scalar" &&
+      pagePathSlot.type.scalar === "string" &&
+      pagePathSlot.nullable &&
+      pagePathSlot.lineage.kind === "attribute" &&
+      pagePathSlot.lineage.attribute === "page.path",
+    `${path}.page.path`,
+    "The page.path slot must be a nullable string attribute.",
+  );
+  requirePlan(
+    sameSlots(source.output, [observation, pagePath]) &&
+      source.grain.kind === "entity" &&
+      source.grain.entity === "observation" &&
+      source.grain.key === observation,
+    path,
+    "The read Source output and grain must preserve Observation identity.",
+  );
+  return { observation, pagePath };
+}
 
-  if (expected === "page-path-read") {
-    const attributeBindings = source.values.filter(
-      (binding) => binding.kind === "attribute",
-    );
+function pagePathValues(
+  filterNode: FilterNode,
+  pagePathSlot: SlotId,
+): readonly string[] {
+  const path = `${planNodePath(filterNode.id)}.predicate`;
+  const predicate = filterNode.predicate;
+  if (predicate.kind === "comparison") {
     requirePlan(
-      attributeBindings.length === 1 &&
-        attributeBindings[0]!.attribute === "page.path",
+      predicate.operator === "eq" &&
+        predicate.stringNormalization === "trim" &&
+        predicate.left.kind === "slot" &&
+        predicate.left.slot === pagePathSlot &&
+        predicate.right.kind === "literal" &&
+        typeof predicate.right.value === "string" &&
+        predicate.right.valueType.kind === "scalar" &&
+        predicate.right.valueType.scalar === "string",
       path,
-      "The read Source must expose only page.path.",
+      "Only page.path eq <string> with trim normalization is supported.",
     );
-    const value = attributeBindings[0]!.slot;
-    const valueSlot = slotAt(plan, value, `${path}.page.path`);
-    requirePlan(
-      valueSlot.type.kind === "scalar" &&
-        valueSlot.type.scalar === "string" &&
-        valueSlot.nullable &&
-        valueSlot.lineage.kind === "attribute" &&
-        valueSlot.lineage.attribute === "page.path",
-      `${path}.page.path`,
-      "The page.path slot must be a nullable string attribute.",
-    );
-    requirePlan(
-      sameSlots(source.output, [entity, value]) &&
-        source.grain.kind === "entity" &&
-        source.grain.entity === "observation" &&
-        source.grain.key === entity,
-      path,
-      "The read Source output or grain is not the expected Observation shape.",
-    );
-    return { entity, value };
+    return [predicate.right.value];
   }
+  if (predicate.kind === "set-membership") {
+    requirePlan(
+      !predicate.negated &&
+        predicate.stringNormalization === "trim" &&
+        predicate.input.kind === "slot" &&
+        predicate.input.slot === pagePathSlot &&
+        predicate.values.length === 2 &&
+        predicate.values.every(
+          (value) =>
+            typeof value.value === "string" &&
+            value.valueType.kind === "scalar" &&
+            value.valueType.scalar === "string",
+        ),
+      path,
+      "Only the two-value page.path OR normalized to positive set-membership is supported.",
+    );
+    return predicate.values.map((value) => value.value as string);
+  }
+  mismatch(
+    path,
+    "Only equality and its normalized two-value OR set-membership are supported.",
+  );
+}
 
-  const relationshipBindings = source.values.filter(
+function validateReadPathFilter(
+  plan: ValidatedLogicalPlan,
+  node: FilterNode,
+  source: SourceNode,
+  sourceBindings: { readonly observation: SlotId; readonly pagePath: SlotId },
+  visited: Set<RelationId>,
+): readonly string[] {
+  visited.add(node.id);
+  requirePlan(
+    node.input === source.id &&
+      sameSlots(node.output, source.output) &&
+      node.grain.kind === "entity" &&
+      node.grain.entity === "observation" &&
+      node.grain.key === sourceBindings.observation,
+    `${planNodePath(node.id)}.input/output`,
+    "The page.path Filter must preserve its read Observation bindings.",
+  );
+  return pagePathValues(node, sourceBindings.pagePath);
+}
+
+function validateReadPageProjection(
+  node: ProjectNode,
+  input: RelationId,
+  observation: SlotId,
+  visited: Set<RelationId>,
+): SlotId {
+  visited.add(node.id);
+  requirePlan(
+    node.input === input &&
+      node.projections.length === 1 &&
+      node.projections[0]!.expression.kind === "slot" &&
+      node.projections[0]!.expression.slot === observation &&
+      node.output.length === 1 &&
+      node.output[0] === node.projections[0]!.slot &&
+      node.grain.kind === "entity" &&
+      node.grain.entity === "observation" &&
+      node.grain.key === node.output[0],
+    planNodePath(node.id),
+    "The page.path match must project its Page Observation identity.",
+  );
+  return node.output[0]!;
+}
+
+function validateObservationDistinct(
+  node: DistinctNode,
+  input: ProjectNode,
+  inputKey: SlotId,
+  plan: ValidatedLogicalPlan,
+  visited: Set<RelationId>,
+): SlotId {
+  visited.add(node.id);
+  requirePlan(
+    node.input === input.id &&
+      node.excludeNull &&
+      node.keys.length === 1 &&
+      node.keys[0]!.input === inputKey &&
+      node.keys[0]!.output === node.output[0] &&
+      node.output.length === 1,
+    planNodePath(node.id),
+    "Matched Page observations must be non-null and distinct by the projected identity.",
+  );
+  requireObservationGrain(node, node.output[0]!, planNodePath(node.id));
+  entitySlotAt(
+    plan,
+    node.output[0]!,
+    "observation",
+    false,
+    `${planNodePath(node.id)}.output`,
+  );
+  return node.output[0]!;
+}
+
+function validateSessionRelationship(
+  node: RelationshipLookupNode,
+  input: RelationId,
+  inputKey: SlotId,
+  visited: Set<RelationId>,
+): SlotId {
+  visited.add(node.id);
+  requirePlan(
+    node.input === input &&
+      node.relationship === "observation.session" &&
+      node.inputKey === inputKey &&
+      node.timeSemantics === "identity-no-activity-filter" &&
+      node.output.includes(inputKey) &&
+      node.output.includes(node.relatedSlot) &&
+      node.grain.kind === "entity" &&
+      node.grain.entity === "observation" &&
+      node.grain.key === inputKey,
+    planNodePath(node.id),
+    "Historical identity lookup must attach observation.session without another activity-time filter.",
+  );
+  return node.relatedSlot;
+}
+
+function validateSessionProjection(
+  node: ProjectNode,
+  input: RelationId,
+  relationship: RelationshipLookupNode,
+  visited: Set<RelationId>,
+): { readonly session: SlotId; readonly observation: SlotId } {
+  visited.add(node.id);
+  requirePlan(
+    node.input === input &&
+      node.projections.length === 2 &&
+      node.projections[0]!.expression.kind === "slot" &&
+      node.projections[0]!.expression.slot === relationship.relatedSlot &&
+      node.projections[1]!.expression.kind === "slot" &&
+      node.projections[1]!.expression.slot === relationship.inputKey &&
+      node.output.length === 2 &&
+      node.output[0] === node.projections[0]!.slot &&
+      node.output[1] === node.projections[1]!.slot &&
+      node.grain.kind === "entity" &&
+      node.grain.entity === "observation" &&
+      node.grain.key === node.output[1],
+    planNodePath(node.id),
+    "The relationship projection must preserve Session and Page identity slots.",
+  );
+  return { session: node.output[0]!, observation: node.output[1]! };
+}
+
+function validateSessionDistinct(
+  node: DistinctNode,
+  input: ProjectNode,
+  inputKey: SlotId,
+  plan: ValidatedLogicalPlan,
+  visited: Set<RelationId>,
+): void {
+  visited.add(node.id);
+  requirePlan(
+    node.input === input.id &&
+      node.excludeNull &&
+      node.keys.length === 1 &&
+      node.keys[0]!.input === inputKey &&
+      node.keys[0]!.output === node.output[0],
+    planNodePath(node.id),
+    "Session identity must be null-excluding and distinct by the mapped Session slot.",
+  );
+  requireSessionGrain(node, plan, planNodePath(node.id));
+}
+
+function parsePagePathSessionSet(
+  plan: ValidatedLogicalPlan,
+  sessionDistinct: DistinctNode,
+  sessionProjection: ProjectNode,
+  visited: Set<RelationId>,
+): readonly string[] {
+  const relationship = nodeAt(
+    plan,
+    sessionProjection.input,
+    "relationship-lookup",
+    `${planNodePath(sessionProjection.id)}.input`,
+    visited,
+  );
+  const observationDistinct = nodeAt(
+    plan,
+    relationship.input,
+    "distinct",
+    `${planNodePath(relationship.id)}.input`,
+    visited,
+  );
+  const pageProjection = nodeAt(
+    plan,
+    observationDistinct.input,
+    "project",
+    `${planNodePath(observationDistinct.id)}.input`,
+    visited,
+  );
+  const filterNode = nodeAt(
+    plan,
+    pageProjection.input,
+    "filter",
+    `${planNodePath(pageProjection.id)}.input`,
+    visited,
+  );
+  const readSource = nodeAt(
+    plan,
+    filterNode.input,
+    "source",
+    `${planNodePath(filterNode.id)}.input`,
+    visited,
+  );
+  const readBindings = readPageSourceBindings(
+    plan,
+    readSource,
+    visited,
+    planNodePath(readSource.id),
+  );
+  const values = validateReadPathFilter(
+    plan,
+    filterNode,
+    readSource,
+    readBindings,
+    visited,
+  );
+  const pageObservation = validateReadPageProjection(
+    pageProjection,
+    filterNode.id,
+    readBindings.observation,
+    visited,
+  );
+  const matchedObservation = validateObservationDistinct(
+    observationDistinct,
+    pageProjection,
+    pageObservation,
+    plan,
+    visited,
+  );
+  validateSessionRelationship(
+    relationship,
+    observationDistinct.id,
+    matchedObservation,
+    visited,
+  );
+  const sessionSlots = validateSessionProjection(
+    sessionProjection,
+    relationship.id,
+    relationship,
+    visited,
+  );
+  requirePlan(
+    sessionSlots.session === sessionDistinct.keys[0]!.input &&
+      sessionSlots.observation === sessionProjection.output[1],
+    `${planNodePath(sessionDistinct.id)}.input`,
+    "The historical Session set must use the looked-up Session relationship.",
+  );
+  validateSessionDistinct(
+    sessionDistinct,
+    sessionProjection,
+    sessionSlots.session,
+    plan,
+    visited,
+  );
+  return values;
+}
+
+function parseCandidateSessionSet(
+  plan: ValidatedLogicalPlan,
+  sessionDistinct: DistinctNode,
+  source: SourceNode,
+  visited: Set<RelationId>,
+): void {
+  visited.add(sessionDistinct.id);
+  visited.add(source.id);
+  requirePlan(
+    source.entity === "observation" &&
+      source.temporalDomain === "candidate" &&
+      source.values.length === 2,
+    `${planNodePath(source.id)}.temporalDomain`,
+    "The candidate universe must be Source<observation>[candidate].",
+  );
+  const self = source.values.filter((binding) => binding.kind === "self");
+  const relationships = source.values.filter(
     (binding) => binding.kind === "related-entity",
   );
   requirePlan(
-    relationshipBindings.length === 1 &&
-      relationshipBindings[0]!.relationship === "observation.session",
-    path,
-    "The candidate Source must expose observation.session.",
+    self.length === 1 &&
+      relationships.length === 1 &&
+      relationships[0]!.relationship === "observation.session",
+    `${planNodePath(source.id)}.values`,
+    "The candidate Source must expose Observation identity and observation.session only.",
   );
-  const value = relationshipBindings[0]!.slot;
-  const valueSlot = slotAt(plan, value, `${path}.observation.session`);
-  requirePlan(
-    valueSlot.type.kind === "entity" &&
-      valueSlot.type.entity === "session" &&
-      valueSlot.nullable &&
-      valueSlot.lineage.kind === "relationship" &&
-      valueSlot.lineage.relationship === "observation.session",
-    `${path}.observation.session`,
-    "The candidate Session relationship must remain nullable.",
+  const observation = self[0]!.slot;
+  const session = relationships[0]!.slot;
+  entitySlotAt(
+    plan,
+    observation,
+    "observation",
+    false,
+    `${planNodePath(source.id)}.self`,
+  );
+  entitySlotAt(
+    plan,
+    session,
+    "session",
+    true,
+    `${planNodePath(source.id)}.observation.session`,
   );
   requirePlan(
-    sameSlots(source.output, [entity, value]) &&
+    sameSlots(source.output, [observation, session]) &&
       source.grain.kind === "entity" &&
       source.grain.entity === "observation" &&
-      source.grain.key === entity,
-    path,
-    "The candidate Source output or grain is not the expected Observation shape.",
+      source.grain.key === observation,
+    planNodePath(source.id),
+    "Candidate Observation identity and Session relationship slots must be preserved.",
   );
-  return { entity, value };
+  requirePlan(
+    sessionDistinct.input === source.id &&
+      sessionDistinct.excludeNull &&
+      sessionDistinct.keys.length === 1 &&
+      sessionDistinct.keys[0]!.input === session &&
+      sessionDistinct.keys[0]!.output === sessionDistinct.output[0],
+    planNodePath(sessionDistinct.id),
+    "Candidate Session identities must be null-excluding and distinct by observation.session.",
+  );
+  requireSessionGrain(sessionDistinct, plan, planNodePath(sessionDistinct.id));
 }
 
-function matchPagePathSessionPlan(
+function parseSessionSetPlan(
   plan: ValidatedLogicalPlan,
-): PagePathSessionSemantics {
-  requirePlan(
-    plan.nodes.length === 10,
-    "nodes",
-    "Expected the ten-node Wave 0 plan.",
-  );
-  requirePlan(
-    plan.slots.length === 12,
-    "slots",
-    "Unexpected Wave 0 slot schema.",
-  );
-  requirePlan(
-    plan.outputs.length === 1,
-    "outputs",
-    "Expected one logical output.",
-  );
+  relationId: RelationId,
+  path: string,
+  visited: Set<RelationId>,
+  memo: Map<RelationId, SessionSetPlan>,
+): SessionSetPlan {
+  const existing = memo.get(relationId);
+  if (existing) return existing;
+  const node = relationNodeAt(plan, relationId, path, visited);
+  let lowered: SessionSetPlan;
+  if (node.kind === "set-operation") {
+    requirePlan(
+      node.inputs.length === 2,
+      `${planNodePath(node.id)}.inputs`,
+      "Only binary Session set operations are supported in this wave.",
+    );
+    requireSessionGrain(node, plan, planNodePath(node.id));
+    const inputs = node.inputs.map((input, index) =>
+      parseSessionSetPlan(
+        plan,
+        input,
+        `${planNodePath(node.id)}.inputs[${index}]`,
+        visited,
+        memo,
+      ),
+    );
+    lowered = {
+      kind: "set-operation",
+      relationId: node.id,
+      operation: node.operation,
+      inputs,
+    };
+  } else if (node.kind === "distinct") {
+    requirePlan(
+      node.excludeNull && node.keys.length === 1 && node.output.length === 1,
+      planNodePath(node.id),
+      "Session sources must be null-excluding distinct relations.",
+    );
+    requireSessionGrain(node, plan, planNodePath(node.id));
+    const input = relationNodeAt(
+      plan,
+      node.input,
+      `${planNodePath(node.id)}.input`,
+      visited,
+    );
+    if (input.kind === "source") {
+      parseCandidateSessionSet(plan, node, input, visited);
+      lowered = { kind: "candidate", relationId: node.id };
+    } else if (input.kind === "project") {
+      const paths = parsePagePathSessionSet(plan, node, input, visited);
+      lowered = { kind: "page-path", relationId: node.id, paths };
+    } else {
+      mismatch(
+        `${planNodePath(node.id)}.input`,
+        "Only candidate Observation sets and historical page.path Session sets are supported.",
+      );
+    }
+  } else {
+    mismatch(
+      planNodePath(node.id),
+      "Only Session set-operation roots, candidate Session sets, and page.path Session sets are supported.",
+    );
+  }
+  memo.set(relationId, lowered);
+  return lowered;
+}
 
+function candidateSubsetViolation(set: SessionSetPlan): RelationId | undefined {
+  if (set.kind === "candidate") return undefined;
+  if (set.kind === "page-path") return set.relationId;
+
+  const [left, right] = set.inputs;
+  const leftViolation = candidateSubsetViolation(left!);
+  const rightViolation = candidateSubsetViolation(right!);
+  switch (set.operation) {
+    case "union":
+      return leftViolation === undefined && rightViolation === undefined
+        ? undefined
+        : set.relationId;
+    case "intersect":
+      return leftViolation === undefined || rightViolation === undefined
+        ? undefined
+        : set.relationId;
+    case "difference":
+      return leftViolation === undefined ? undefined : set.relationId;
+  }
+}
+
+function matchSessionPlan(plan: ValidatedLogicalPlan): SessionPlanSemantics {
   const context = plan.context;
   requirePlan(
     context.scope.requested === "session" &&
@@ -281,328 +741,188 @@ function matchPagePathSessionPlan(
       typeof context.subject.siteIds[0] === "string" &&
       context.subject.siteIds[0]!.length > 0,
     "context.subject",
-    "Exactly one non-empty site identity is required.",
+    "Exactly one non-empty authorized site identity is required.",
   );
   requirePlan(
-    context.time.read.kind === "bounded" &&
+    context.time.filter === undefined &&
+      context.time.read.kind === "bounded" &&
       rangeIsSafe(context.time.candidate) &&
       rangeIsSafe(context.time.read.range),
     "context.time",
-    "Candidate and read domains must be bounded safe integer ranges.",
+    "Only bounded candidate/read domains are supported; a filter domain is not.",
+  );
+  requirePlan(
+    plan.outputs.length === 1 &&
+      plan.outputs[0]!.id === "matches" &&
+      plan.outputs[0]!.fields.length === 1 &&
+      plan.outputs[0]!.fields[0]!.name === "entity" &&
+      plan.outputs[0]!.fields[0]!.semantic === undefined,
+    "outputs",
+    "Expected one matches.entity Session key output.",
   );
 
   const output = plan.outputs[0]!;
-  requirePlan(
-    output.id === "matches" &&
-      output.fields.length === 1 &&
-      output.fields[0]!.name === "entity" &&
-      output.fields[0]!.semantic === undefined,
-    "outputs[0]",
-    "Expected the unadorned Session entity output named matches.entity.",
-  );
-  const intersection = nodeAt(
+  const visited = new Set<RelationId>();
+  const outputRelation = relationNodeAt(
     plan,
     output.relation,
-    "set-operation",
     "outputs[0].relation",
+    visited,
   );
   requirePlan(
-    intersection.operation === "intersect" && intersection.inputs.length === 2,
-    `nodes[${String(intersection.id)}]`,
-    "The root must intersect candidate and historical Session sets.",
+    outputRelation.kind === "set-operation",
+    "outputs[0].relation",
+    "The output must remain a candidate-scoped Session set operation.",
   );
-
-  const candidateSessions = nodeAt(
+  const set = parseSessionSetPlan(
     plan,
-    intersection.inputs[0]!,
-    "distinct",
-    `nodes[${String(intersection.id)}].inputs[0]`,
+    output.relation,
+    "outputs[0].relation",
+    visited,
+    new Map(),
   );
-  const historicSessions = nodeAt(
-    plan,
-    intersection.inputs[1]!,
-    "distinct",
-    `nodes[${String(intersection.id)}].inputs[1]`,
-  );
-  requirePlan(
-    candidateSessions.excludeNull &&
-      candidateSessions.keys.length === 1 &&
-      candidateSessions.output.length === 1 &&
-      candidateSessions.keys[0]!.output === candidateSessions.output[0],
-    `nodes[${String(candidateSessions.id)}]`,
-    "Candidate Session identities must be null-excluding and distinct.",
-  );
-  const candidateSource = nodeAt(
-    plan,
-    candidateSessions.input,
-    "source",
-    `nodes[${String(candidateSessions.id)}].input`,
-  );
-  requirePlan(
-    candidateSource.temporalDomain === "candidate",
-    `nodes[${String(candidateSource.id)}].temporalDomain`,
-    "Candidate Observation activity must use the candidate time domain.",
-  );
-  const candidateBindings = exactSourceBindings(
-    plan,
-    candidateSource,
-    `nodes[${String(candidateSource.id)}]`,
-    "candidate-observation",
-  );
-  requirePlan(
-    candidateSessions.keys[0]!.input === candidateBindings.value &&
-      candidateSessions.grain.kind === "entity" &&
-      candidateSessions.grain.entity === "session" &&
-      candidateSessions.grain.key === candidateSessions.output[0],
-    `nodes[${String(candidateSessions.id)}]`,
-    "Candidate distinct must key the Session relationship slot.",
-  );
-  const candidateResultSlot = slotAt(
-    plan,
-    candidateSessions.output[0]!,
-    `nodes[${String(candidateSessions.id)}].output`,
-  );
-  requirePlan(
-    candidateResultSlot.type.kind === "entity" &&
-      candidateResultSlot.type.entity === "session" &&
-      !candidateResultSlot.nullable,
-    `nodes[${String(candidateSessions.id)}].output`,
-    "Candidate Session identities must be non-null after distinct.",
-  );
-
-  requirePlan(
-    historicSessions.excludeNull &&
-      historicSessions.keys.length === 1 &&
-      historicSessions.output.length === 1 &&
-      historicSessions.keys[0]!.output === historicSessions.output[0],
-    `nodes[${String(historicSessions.id)}]`,
-    "Historical Session identities must be null-excluding and distinct.",
-  );
-  const historicProjection = nodeAt(
-    plan,
-    historicSessions.input,
-    "project",
-    `nodes[${String(historicSessions.id)}].input`,
-  );
-  const relationship = nodeAt(
-    plan,
-    historicProjection.input,
-    "relationship-lookup",
-    `nodes[${String(historicProjection.id)}].input`,
-  );
-  requirePlan(
-    relationship.relationship === "observation.session" &&
-      relationship.timeSemantics === "identity-no-activity-filter",
-    `nodes[${String(relationship.id)}]`,
-    "Historical Session lookup must use observation.session identity semantics.",
-  );
-  const historicObservationDistinct = nodeAt(
-    plan,
-    relationship.input,
-    "distinct",
-    `nodes[${String(relationship.id)}].input`,
-  );
-  requirePlan(
-    historicObservationDistinct.excludeNull &&
-      historicObservationDistinct.keys.length === 1 &&
-      historicObservationDistinct.output.length === 1,
-    `nodes[${String(historicObservationDistinct.id)}]`,
-    "Historical Page observations must be non-null and distinct before identity lookup.",
-  );
-  const historicObservationProjection = nodeAt(
-    plan,
-    historicObservationDistinct.input,
-    "project",
-    `nodes[${String(historicObservationDistinct.id)}].input`,
-  );
-  requirePlan(
-    historicObservationDistinct.keys[0]!.input ===
-      historicObservationProjection.output[0] &&
-      historicObservationDistinct.keys[0]!.output ===
-        historicObservationDistinct.output[0],
-    `nodes[${String(historicObservationDistinct.id)}]`,
-    "The historical Observation distinct must preserve its projected key.",
-  );
-  const pagePathFilter = nodeAt(
-    plan,
-    historicObservationProjection.input,
-    "filter",
-    `nodes[${String(historicObservationProjection.id)}].input`,
-  );
-  const readSource = nodeAt(
-    plan,
-    pagePathFilter.input,
-    "source",
-    `nodes[${String(pagePathFilter.id)}].input`,
-  );
-  requirePlan(
-    readSource.temporalDomain === "read",
-    `nodes[${String(readSource.id)}].temporalDomain`,
-    "Historical Page evidence must use the read time domain.",
-  );
-  const readBindings = exactSourceBindings(
-    plan,
-    readSource,
-    `nodes[${String(readSource.id)}]`,
-    "page-path-read",
-  );
-  requirePlan(
-    pagePathFilter.output.length === readSource.output.length &&
-      pagePathFilter.output.every(
-        (slot, index) => slot === readSource.output[index],
-      ),
-    `nodes[${String(pagePathFilter.id)}].output`,
-    "The Filter must preserve its read Source bindings.",
-  );
-  const predicate = pagePathFilter.predicate;
-  if (predicate.kind !== "comparison") {
+  const candidateSubsetIssue = candidateSubsetViolation(set);
+  if (candidateSubsetIssue !== undefined) {
     mismatch(
-      `nodes[${String(pagePathFilter.id)}].predicate`,
-      "Expected page.path eq <string> with trim normalization.",
+      planNodePath(candidateSubsetIssue),
+      "The output Session set is not proven to be a subset of the candidate Session universe.",
     );
   }
+  const outputSlot = output.fields[0]!.slot;
   requirePlan(
-    predicate.operator === "eq" &&
-      predicate.stringNormalization === "trim" &&
-      predicate.left.kind === "slot" &&
-      predicate.left.slot === readBindings.value &&
-      predicate.right.kind === "literal" &&
-      typeof predicate.right.value === "string" &&
-      predicate.right.valueType.kind === "scalar" &&
-      predicate.right.valueType.scalar === "string",
-    `nodes[${String(pagePathFilter.id)}].predicate`,
-    "Expected page.path eq <string> with trim normalization.",
-  );
-
-  requirePlan(
-    historicObservationProjection.projections.length === 1 &&
-      historicObservationProjection.projections[0]!.expression.kind ===
-        "slot" &&
-      historicObservationProjection.projections[0]!.expression.slot ===
-        readBindings.entity &&
-      historicObservationProjection.output.length === 1 &&
-      historicObservationProjection.output[0] ===
-        historicObservationProjection.projections[0]!.slot &&
-      historicObservationProjection.grain.kind === "entity" &&
-      historicObservationProjection.grain.entity === "observation" &&
-      historicObservationProjection.grain.key ===
-        historicObservationProjection.output[0],
-    `nodes[${String(historicObservationProjection.id)}]`,
-    "The historical path match must project the Page Observation identity.",
-  );
-  const historicObservationSlot = historicObservationDistinct.keys[0]!.output;
-  requirePlan(
-    relationship.inputKey === historicObservationSlot &&
-      historicObservationDistinct.grain.kind === "entity" &&
-      historicObservationDistinct.grain.entity === "observation" &&
-      historicObservationDistinct.grain.key === historicObservationSlot &&
-      relationship.output.includes(relationship.inputKey) &&
-      relationship.output.includes(relationship.relatedSlot),
-    `nodes[${String(relationship.id)}]`,
-    "The relationship lookup must attach Session identity to the matched Page key.",
-  );
-  requirePlan(
-    historicProjection.projections.length === 2 &&
-      historicProjection.projections[0]!.expression.kind === "slot" &&
-      historicProjection.projections[0]!.expression.slot ===
-        relationship.relatedSlot &&
-      historicProjection.projections[1]!.expression.kind === "slot" &&
-      historicProjection.projections[1]!.expression.slot ===
-        relationship.inputKey &&
-      historicProjection.output.length === 2 &&
-      historicProjection.output[0] ===
-        historicProjection.projections[0]!.slot &&
-      historicProjection.output[1] ===
-        historicProjection.projections[1]!.slot &&
-      historicProjection.grain.kind === "entity" &&
-      historicProjection.grain.entity === "observation" &&
-      historicProjection.grain.key === historicProjection.output[1],
-    `nodes[${String(historicProjection.id)}]`,
-    "The historical projection must preserve Session and Page identity slots.",
-  );
-  requirePlan(
-    historicSessions.keys[0]!.input === historicProjection.output[0] &&
-      historicSessions.grain.kind === "entity" &&
-      historicSessions.grain.entity === "session" &&
-      historicSessions.grain.key === historicSessions.output[0],
-    `nodes[${String(historicSessions.id)}]`,
-    "Historical distinct must key the looked-up Session relationship.",
-  );
-  const historicResultSlot = slotAt(
-    plan,
-    historicSessions.output[0]!,
-    `nodes[${String(historicSessions.id)}].output`,
-  );
-  requirePlan(
-    historicResultSlot.type.kind === "entity" &&
-      historicResultSlot.type.entity === "session" &&
-      !historicResultSlot.nullable,
-    `nodes[${String(historicSessions.id)}].output`,
-    "Historical Session identities must be non-null after distinct.",
-  );
-  const outputSlot = slotAt(
-    plan,
-    intersection.output[0]!,
+    outputRelation.output.length === 1 &&
+      outputRelation.output[0] === outputSlot,
     "outputs[0].fields[0].slot",
+    "The output field must reference the output relation's Session key.",
   );
-  requirePlan(
-    sameSlots(intersection.output, [output.fields[0]!.slot]) &&
-      intersection.grain.kind === "entity" &&
-      intersection.grain.entity === "session" &&
-      intersection.grain.key === output.fields[0]!.slot &&
-      output.fields[0]!.slot === intersection.output[0] &&
-      outputSlot.type.kind === "entity" &&
-      outputSlot.type.entity === "session" &&
-      outputSlot.nullable === false,
-    "outputs[0].fields[0].slot",
-    "The output must be the non-null Session key produced by the intersection.",
-  );
-
+  entitySlotAt(plan, outputSlot, "session", false, "outputs[0].fields[0].slot");
+  if (visited.size !== plan.nodes.length) {
+    const unreachable = plan.nodes.find((node) => !visited.has(node.id));
+    mismatch(
+      unreachable ? planNodePath(unreachable.id) : "nodes",
+      "The output cannot leave any Boolean or relational subtree unreachable.",
+    );
+  }
   return {
     siteId: context.subject.siteIds[0] as SiteId,
     candidateRange: context.time.candidate,
     readRange: context.time.read.range,
-    pagePath: predicate.right.value.trim(),
+    set,
   };
 }
 
-function isPagePathEquality(
-  analysis: AnalyzedFilterDocument,
-): analysis is AnalyzedFilterDocument & {
-  readonly document: {
-    readonly version: 1;
-    readonly root: PagePathEqualityCondition;
-  };
-} {
-  const root = analysis.document.root;
-  return (
-    root?.kind === "condition" &&
-    root.target.kind === "field" &&
-    root.target.field === "page.path" &&
-    root.operator === "eq" &&
-    typeof root.value === "string"
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function validatePagePathDocumentExpression(
+  expression: unknown,
+  path: string,
+  state: { leaves: number },
+): UnsupportedResult | undefined {
+  const record = recordOf(expression);
+  if (!record) {
+    return unsupported(
+      "page-path-equality-only",
+      path,
+      "Expected a page.path equality expression.",
+    );
+  }
+
+  if (record.kind === "condition") {
+    const target = recordOf(record.target);
+    if (
+      target?.kind !== "field" ||
+      target.field !== "page.path" ||
+      record.operator !== "eq" ||
+      typeof record.value !== "string"
+    ) {
+      return unsupported(
+        "page-path-equality-only",
+        path,
+        "Only page.path eq <string> leaves are supported.",
+      );
+    }
+    state.leaves += 1;
+    return state.leaves > 2
+      ? unsupported(
+          "two-page-path-leaves-only",
+          path,
+          "This wave supports at most two page.path equality leaves.",
+        )
+      : undefined;
+  }
+
+  if (record.kind === "not") {
+    return validatePagePathDocumentExpression(
+      record.child,
+      `${path}.child`,
+      state,
+    );
+  }
+
+  if (record.kind === "and" || record.kind === "or") {
+    if (!Array.isArray(record.children) || record.children.length < 2) {
+      return unsupported(
+        "page-path-boolean-shape",
+        path,
+        "AND and OR require at least two child expressions.",
+      );
+    }
+    for (const [index, child] of record.children.entries()) {
+      const unsupportedChild = validatePagePathDocumentExpression(
+        child,
+        `${path}.children[${index}]`,
+        state,
+      );
+      if (unsupportedChild) return unsupportedChild;
+    }
+    return undefined;
+  }
+
+  return unsupported(
+    "page-path-boolean-shape",
+    path,
+    "Only AND, OR, NOT, and page.path equality conditions are supported.",
   );
 }
 
-function analyzeExactPagePathDocument(
+function analyzePagePathDocument(
   document: unknown,
 ):
   | { readonly kind: "supported"; readonly analysis: AnalyzedFilterDocument }
   | UnsupportedResult {
+  let normalized: ReturnType<typeof normalizeFilterDocument>;
   try {
-    const normalized = normalizeFilterDocument(
-      document,
-      analyticsFilterRegistry,
+    normalized = normalizeFilterDocument(document, analyticsFilterRegistry);
+  } catch (error) {
+    return unsupported(
+      "valid-filter-document-required",
+      "root",
+      error instanceof Error ? error.message : String(error),
     );
-    const analysis = analyzeFilterDocument(normalized, analyticsFilterRegistry);
-    if (!isPagePathEquality(analysis)) {
-      return unsupported(
-        "page-path-equality-only",
-        analysis.document.root?.kind ?? "empty-document",
-        "Wave 0 accepts only one root condition: page.path eq <string>.",
-      );
-    }
-    return { kind: "supported", analysis };
+  }
+
+  const rawRoot = recordOf(document)?.root;
+  if (rawRoot === null || rawRoot === undefined) {
+    return unsupported(
+      "page-path-equality-only",
+      "empty-document",
+      "A non-empty page.path equality expression is required.",
+    );
+  }
+  const shapeIssue = validatePagePathDocumentExpression(rawRoot, "root", {
+    leaves: 0,
+  });
+  if (shapeIssue) return shapeIssue;
+
+  try {
+    return {
+      kind: "supported",
+      analysis: analyzeFilterDocument(normalized, analyticsFilterRegistry),
+    };
   } catch (error) {
     return unsupported(
       "valid-filter-document-required",
@@ -612,31 +932,49 @@ function analyzeExactPagePathDocument(
   }
 }
 
-function compilePagePathSessionQuery(
-  semantics: PagePathSessionSemantics,
-): CompiledQuery<AnalyticsSessionIdentityRow> {
-  const siteIdentitySource = scan(schema.site_identities);
-  const selectedSite = filter(
-    siteIdentitySource,
-    eq(siteIdentitySource.columns.site_id, param(semantics.siteId)),
-  );
+type SessionSetColumns = Readonly<{
+  site_pk: AnyExpression;
+  session_id: AnyExpression;
+}>;
+type SessionSetRelation = Relation<object, SessionSetColumns>;
 
+function asSessionSetRelation<
+  Row extends object,
+  Columns extends SessionSetColumns,
+>(relation: Relation<Row, Columns>): SessionSetRelation {
+  return relation as unknown as SessionSetRelation;
+}
+
+function compositeSessionKeyMatch(
+  left: SessionSetRelation,
+  right: SessionSetRelation,
+) {
+  return and(
+    eq(left.columns.site_pk, right.columns.site_pk),
+    eq(left.columns.session_id, right.columns.session_id),
+  );
+}
+
+function compileCandidateSessionSet(
+  site: ReturnType<typeof filter>,
+  candidateRange: TimeRange,
+): SessionSetRelation {
   const candidatePagesSource = scan(schema.visits);
   const candidatePagesScoped = semiJoin(
     candidatePagesSource,
-    selectedSite,
-    eq(candidatePagesSource.columns.site_pk, selectedSite.columns.site_pk),
+    site,
+    eq(candidatePagesSource.columns.site_pk, site.columns.site_pk),
   );
   const candidatePagesInRange = filter(
     candidatePagesScoped,
     and(
       gte(
         candidatePagesScoped.columns.started_at,
-        param(semantics.candidateRange.startMs),
+        param(candidateRange.startMs),
       ),
       lt(
         candidatePagesScoped.columns.started_at,
-        param(semantics.candidateRange.endExclusiveMs),
+        param(candidateRange.endExclusiveMs),
       ),
       isNotNull(candidatePagesScoped.columns.session_id),
       neq(candidatePagesScoped.columns.session_id, param("")),
@@ -650,19 +988,19 @@ function compilePagePathSessionQuery(
   const candidateEventsSource = scan(schema.custom_events);
   const candidateEventsScoped = semiJoin(
     candidateEventsSource,
-    selectedSite,
-    eq(candidateEventsSource.columns.site_pk, selectedSite.columns.site_pk),
+    site,
+    eq(candidateEventsSource.columns.site_pk, site.columns.site_pk),
   );
   const candidateEventsInRange = filter(
     candidateEventsScoped,
     and(
       gte(
         candidateEventsScoped.columns.occurred_at,
-        param(semantics.candidateRange.startMs),
+        param(candidateRange.startMs),
       ),
       lt(
         candidateEventsScoped.columns.occurred_at,
-        param(semantics.candidateRange.endExclusiveMs),
+        param(candidateRange.endExclusiveMs),
       ),
     ),
   );
@@ -693,62 +1031,114 @@ function compilePagePathSessionQuery(
     session_id: candidateEventsWithSession.columns.right_session_id,
   });
 
-  // UNION (without ALL) deduplicates the composite identity across activities.
-  const candidateSessions = union(
-    candidatePageSessions,
-    candidateEventSessions,
+  return asSessionSetRelation(
+    union(candidatePageSessions, candidateEventSessions),
   );
+}
 
+function compilePagePathSessionSet(
+  site: ReturnType<typeof filter>,
+  readRange: TimeRange,
+  paths: readonly string[],
+): SessionSetRelation {
   const readPagesSource = scan(schema.visits);
   const readPagesScoped = semiJoin(
     readPagesSource,
-    selectedSite,
-    eq(readPagesSource.columns.site_pk, selectedSite.columns.site_pk),
+    site,
+    eq(readPagesSource.columns.site_pk, site.columns.site_pk),
   );
+  const normalizedPaths = paths.map((path) => path.trim());
+  const pathExpression = callFunction("trim", readPagesScoped.columns.pathname);
+  const pathPredicate =
+    normalizedPaths.length === 1
+      ? eq(pathExpression, param(normalizedPaths[0]!))
+      : inList(pathExpression, normalizedPaths);
   const readPagesMatching = filter(
     readPagesScoped,
     and(
-      gte(
-        readPagesScoped.columns.started_at,
-        param(semantics.readRange.startMs),
-      ),
-      lt(
-        readPagesScoped.columns.started_at,
-        param(semantics.readRange.endExclusiveMs),
-      ),
+      gte(readPagesScoped.columns.started_at, param(readRange.startMs)),
+      lt(readPagesScoped.columns.started_at, param(readRange.endExclusiveMs)),
       isNotNull(readPagesScoped.columns.session_id),
       neq(readPagesScoped.columns.session_id, param("")),
-      eq(
-        callFunction("trim", readPagesScoped.columns.pathname),
-        param(semantics.pagePath),
-      ),
+      pathPredicate,
     ),
   );
-  const readPageSessions = project(readPagesMatching, {
-    site_pk: readPagesMatching.columns.site_pk,
-    session_id: readPagesMatching.columns.session_id,
-  });
+  // A semi/anti join only tests membership, so duplicate historical Pages
+  // cannot change the Session set and do not need a standalone DISTINCT.
+  return asSessionSetRelation(
+    project(readPagesMatching, {
+      site_pk: readPagesMatching.columns.site_pk,
+      session_id: readPagesMatching.columns.session_id,
+    }),
+  );
+}
 
-  const matchingCandidateSessions = semiJoin(
-    candidateSessions,
-    readPageSessions,
-    and(
-      eq(candidateSessions.columns.site_pk, readPageSessions.columns.site_pk),
-      eq(
-        candidateSessions.columns.session_id,
-        readPageSessions.columns.session_id,
-      ),
-    ),
+function compileSessionSetPlan(
+  set: SessionSetPlan,
+  site: ReturnType<typeof filter>,
+  semantics: SessionPlanSemantics,
+  memo: Map<RelationId, SessionSetRelation>,
+): SessionSetRelation {
+  const existing = memo.get(set.relationId);
+  if (existing) return existing;
+
+  let relation: SessionSetRelation;
+  switch (set.kind) {
+    case "candidate":
+      relation = compileCandidateSessionSet(site, semantics.candidateRange);
+      break;
+    case "page-path":
+      relation = compilePagePathSessionSet(
+        site,
+        semantics.readRange,
+        set.paths,
+      );
+      break;
+    case "set-operation": {
+      const left = compileSessionSetPlan(set.inputs[0]!, site, semantics, memo);
+      const right = compileSessionSetPlan(
+        set.inputs[1]!,
+        site,
+        semantics,
+        memo,
+      );
+      if (set.operation === "union") {
+        relation = asSessionSetRelation(union(left, right));
+      } else if (set.operation === "intersect") {
+        relation = semiJoin(left, right, compositeSessionKeyMatch(left, right));
+      } else {
+        relation = antiJoin(left, right, compositeSessionKeyMatch(left, right));
+      }
+      break;
+    }
+  }
+  memo.set(set.relationId, relation);
+  return relation;
+}
+
+function compileSessionPlanQuery(
+  semantics: SessionPlanSemantics,
+): CompiledQuery<AnalyticsSessionIdentityRow> {
+  const siteIdentitySource = scan(schema.site_identities);
+  const selectedSite = filter(
+    siteIdentitySource,
+    eq(siteIdentitySource.columns.site_id, param(semantics.siteId)),
   );
-  return compileD1Query(lowerLogicalPlan(matchingCandidateSessions), {
-    tag: "analytics.page-path-session.wave-0",
-  });
+  const matchingSessions = compileSessionSetPlan(
+    semantics.set,
+    selectedSite,
+    semantics,
+    new Map(),
+  );
+  return compileD1Query(lowerLogicalPlan(matchingSessions), {
+    tag: "analytics.page-path-session.wave-1",
+  }) as CompiledQuery<AnalyticsSessionIdentityRow>;
 }
 
 /**
- * Lowers only the verified ten-node Session/page.path plan shape. The site,
- * time domains, path literal, set operation, and output key all come from the
- * supplied Analytics plan; unrelated or modified shapes produce no SQL.
+ * Lowers supported Session sets by following the validated Analytics plan
+ * from its output relation. Unknown nodes, expressions, or disconnected
+ * subtrees are rejected before Generic DB IR is constructed.
  */
 export function lowerAnalyticsPagePathSessionPlan(
   input: LogicalPlan,
@@ -764,19 +1154,19 @@ export function lowerAnalyticsPagePathSessionPlan(
     );
   }
 
-  let semantics: PagePathSessionSemantics;
+  let semantics: SessionPlanSemantics;
   try {
-    semantics = matchPagePathSessionPlan(logicalPlan);
+    semantics = matchSessionPlan(logicalPlan);
   } catch (error) {
     if (error instanceof PlanShapeMismatch) {
       return unsupported(
-        "page-path-session-plan-shape",
+        "session-boolean-plan-shape",
         error.node,
         error.message,
       );
     }
     return unsupported(
-      "page-path-session-plan-shape",
+      "session-boolean-plan-shape",
       "plan",
       error instanceof Error ? error.message : String(error),
     );
@@ -786,7 +1176,7 @@ export function lowerAnalyticsPagePathSessionPlan(
     return {
       kind: "supported",
       logicalPlan,
-      query: compilePagePathSessionQuery(semantics),
+      query: compileSessionPlanQuery(semantics),
     };
   } catch (error) {
     return unsupported(
@@ -805,11 +1195,11 @@ export function lowerAnalyticsPagePathToSessionQuery(
     return unsupported(
       "single-site-only",
       "context.subject",
-      "Wave 0 requires exactly one authorized site identity.",
+      "Wave 1 requires exactly one authorized site identity.",
     );
   }
 
-  const analyzed = analyzeExactPagePathDocument(input.document);
+  const analyzed = analyzePagePathDocument(input.document);
   if (analyzed.kind !== "supported") return analyzed;
 
   let builder: LogicalPlanBuilder;
@@ -850,7 +1240,7 @@ export function lowerAnalyticsPagePathToSessionQuery(
     return unsupported(
       "non-empty-page-path-filter-required",
       "root",
-      "Wave 0 requires one supported page.path condition.",
+      "Wave 1 requires a supported non-empty page.path expression.",
     );
   }
 

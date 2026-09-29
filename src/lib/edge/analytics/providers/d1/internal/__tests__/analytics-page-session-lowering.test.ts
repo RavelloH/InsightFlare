@@ -35,6 +35,22 @@ const DOCUMENT = {
   },
 } as FilterDocument;
 
+function pathCondition(path: string) {
+  return {
+    kind: "condition",
+    target: { kind: "field", field: "page.path" },
+    operator: "eq",
+    value: path,
+  } as const;
+}
+
+function filterDocument(root: unknown): FilterDocument {
+  return { version: 1, root } as unknown as FilterDocument;
+}
+
+const PATH_A = filterDocument(pathCondition("/a"));
+const PATH_B = filterDocument(pathCondition("/b"));
+
 interface SiteSeed {
   readonly id: string;
   readonly key: number;
@@ -171,7 +187,11 @@ function lower(
 
 interface MutablePlanForTest {
   readonly nodes: Array<Record<string, unknown>>;
-  readonly outputs: Array<{ readonly fields: Array<Record<string, unknown>> }>;
+  readonly slots: Array<Record<string, unknown>>;
+  readonly outputs: Array<{
+    readonly relation: number;
+    readonly fields: Array<Record<string, unknown>>;
+  }>;
 }
 
 function mutablePlan(plan: LogicalPlan): MutablePlanForTest {
@@ -180,6 +200,64 @@ function mutablePlan(plan: LogicalPlan): MutablePlanForTest {
 
 function asLogicalPlan(plan: MutablePlanForTest): LogicalPlan {
   return plan as unknown as LogicalPlan;
+}
+
+function evaluateCandidateRestrictedSets(
+  expression: unknown,
+  dataset: {
+    readonly pages: readonly FilterEvaluationEntity[];
+    readonly events: readonly FilterEvaluationEntity[];
+    readonly coverageRange: {
+      readonly startMs: number;
+      readonly endExclusiveMs: number;
+    };
+  },
+  candidateIds: ReadonlySet<string>,
+): ReadonlySet<string> {
+  // With an explicit filterRange, Filter Evaluator enumerates Sessions from
+  // the filter evidence. Wave 1 defines NOT over the bounded candidate set,
+  // so evaluate each leaf first and apply Boolean set algebra to that universe.
+  const evaluate = (input: unknown): Set<string> => {
+    if (!input || typeof input !== "object") {
+      throw new Error("Expected a normalized page.path expression.");
+    }
+    const node = input as Record<string, unknown>;
+    if (node.kind === "condition") {
+      const leafMatches = evaluateFilterDocument(
+        filterDocument(node),
+        dataset,
+        {
+          scope: "session",
+          candidateRange: CANDIDATE_RANGE,
+          filterRange: READ_RANGE,
+          readRange: READ_RANGE,
+          reportingTimeZone: "UTC",
+          capturedAtMs: 200,
+        },
+      ).matchingScopeEntityIds;
+      return new Set([...leafMatches].filter((id) => candidateIds.has(id)));
+    }
+    if (node.kind === "not") {
+      const child = evaluate(node.child);
+      return new Set([...candidateIds].filter((id) => !child.has(id)));
+    }
+    if (node.kind === "and" || node.kind === "or") {
+      if (!Array.isArray(node.children)) {
+        throw new Error("Expected Boolean child expressions.");
+      }
+      const children = node.children.map(evaluate);
+      if (node.kind === "and") {
+        return new Set(
+          [...(children[0] ?? [])].filter((id) =>
+            children.slice(1).every((child) => child.has(id)),
+          ),
+        );
+      }
+      return new Set(children.flatMap((child) => [...child]));
+    }
+    throw new Error(`Unsupported test expression '${String(node.kind)}'.`);
+  };
+  return evaluate(expression);
 }
 
 describe("Analytics page.path → Session D1 lowering", () => {
@@ -411,6 +489,73 @@ describe("Analytics page.path → Session D1 lowering", () => {
     }
   });
 
+  it("rejects a direct-plan union that escapes the candidate Session universe", async () => {
+    const documentLowering = lower(DOCUMENT);
+    expect(documentLowering.kind).toBe("supported");
+    if (documentLowering.kind !== "supported") {
+      throw new Error("Expected the page.path document to lower.");
+    }
+
+    const db = createMigratedDatabase();
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      const { siteA } = setupSites(db);
+      addPage(db, siteA, "history-only", "s-history-only", 10, "/pricing");
+
+      const candidatePages = db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM visits WHERE site_pk = ? AND started_at >= ? AND started_at < ?",
+        )
+        .get(
+          siteA.key,
+          CANDIDATE_RANGE.startMs,
+          CANDIDATE_RANGE.endExclusiveMs,
+        ) as {
+        readonly count: number;
+      };
+      expect(candidatePages.count).toBe(0);
+      const historyMatch = db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM visits WHERE site_pk = ? AND started_at >= ? AND started_at < ? AND pathname = ?",
+        )
+        .get(
+          siteA.key,
+          READ_RANGE.startMs,
+          READ_RANGE.endExclusiveMs,
+          "/pricing",
+        ) as {
+        readonly count: number;
+      };
+      expect(historyMatch.count).toBe(1);
+
+      const client = createD1DatabaseClient(createSqliteD1Database(db));
+      const documentResult = await client.all(documentLowering.query);
+      expect(documentResult.results).toEqual([]);
+
+      const mutatedPlan = mutablePlan(documentLowering.logicalPlan);
+      const rootRelation = mutatedPlan.outputs[0]!.relation;
+      const root = mutatedPlan.nodes.find((node) => node.id === rootRelation);
+      if (root?.kind !== "set-operation") {
+        throw new Error("Expected the candidate-scoped set-operation root.");
+      }
+      expect(root.operation).toBe("intersect");
+      root.operation = "union";
+
+      const directPlanResult = lowerAnalyticsPagePathSessionPlan(
+        asLogicalPlan(mutatedPlan),
+      );
+      expect(directPlanResult).toMatchObject({
+        kind: "unsupported",
+        capability: "session-boolean-plan-shape",
+        node: `nodes[${rootRelation}]`,
+        reason: expect.stringContaining("candidate Session universe"),
+      });
+      expect("query" in directPlanResult).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
   it("lowers the supplied plan expression and rejects unsupported node or output changes", async () => {
     const base = lower();
     expect(base.kind).toBe("supported");
@@ -468,7 +613,7 @@ describe("Analytics page.path → Session D1 lowering", () => {
     );
     expect(unsupportedDomain).toMatchObject({
       kind: "unsupported",
-      capability: "page-path-session-plan-shape",
+      capability: "session-boolean-plan-shape",
       node: expect.stringContaining("temporalDomain"),
     });
     expect("query" in unsupportedDomain).toBe(false);
@@ -480,8 +625,8 @@ describe("Analytics page.path → Session D1 lowering", () => {
     );
     expect(unsupportedOutput).toMatchObject({
       kind: "unsupported",
-      capability: "page-path-session-plan-shape",
-      node: "outputs[0]",
+      capability: "session-boolean-plan-shape",
+      node: "outputs",
     });
     expect("query" in unsupportedOutput).toBe(false);
 
@@ -502,10 +647,80 @@ describe("Analytics page.path → Session D1 lowering", () => {
     );
     expect(unsupportedExpression).toMatchObject({
       kind: "unsupported",
-      capability: "page-path-session-plan-shape",
+      capability: "session-boolean-plan-shape",
       node: expect.stringContaining("predicate"),
     });
     expect("query" in unsupportedExpression).toBe(false);
+
+    const wrongSlot = mutablePlan(base.logicalPlan);
+    const wrongSlotFilter = wrongSlot.nodes.find(
+      (node) => node.kind === "filter",
+    );
+    const wrongSlotPredicate = wrongSlotFilter?.predicate as
+      Record<string, unknown> | undefined;
+    const wrongSlotLeft = wrongSlotPredicate?.left as
+      Record<string, unknown> | undefined;
+    if (typeof wrongSlotLeft?.slot !== "number") {
+      throw new Error("Expected a slot reference in the Filter predicate.");
+    }
+    wrongSlotLeft.slot = -1;
+    const unsupportedSlot = lowerAnalyticsPagePathSessionPlan(
+      asLogicalPlan(wrongSlot),
+    );
+    expect(unsupportedSlot).toMatchObject({
+      kind: "unsupported",
+      capability: "valid-analytics-plan-required",
+      node: "plan",
+    });
+    expect("query" in unsupportedSlot).toBe(false);
+
+    const unreachablePlan = mutablePlan(base.logicalPlan);
+    const sourceTemplate = unreachablePlan.nodes.find(
+      (node) => node.kind === "source",
+    );
+    const sourceValues = sourceTemplate?.values as
+      Array<Record<string, unknown>> | undefined;
+    const selfBinding = sourceValues?.find(
+      (binding) => binding.kind === "self",
+    );
+    if (
+      !sourceTemplate ||
+      typeof selfBinding?.slot !== "number" ||
+      typeof sourceTemplate.entity !== "string"
+    ) {
+      throw new Error("Expected a self-bound Source node to clone.");
+    }
+    const sourceSlot = unreachablePlan.slots.find(
+      (slot) => slot.id === selfBinding.slot,
+    );
+    if (!sourceSlot) throw new Error("Expected the Source slot definition.");
+    const orphanSlotId =
+      Math.max(...unreachablePlan.slots.map((slot) => Number(slot.id))) + 1;
+    const orphanRelationId =
+      Math.max(...unreachablePlan.nodes.map((node) => Number(node.id))) + 1;
+    unreachablePlan.slots.push({ ...sourceSlot, id: orphanSlotId });
+    unreachablePlan.nodes.push({
+      kind: "source",
+      id: orphanRelationId,
+      entity: sourceTemplate.entity,
+      temporalDomain: sourceTemplate.temporalDomain,
+      values: [{ kind: "self", slot: orphanSlotId }],
+      output: [orphanSlotId],
+      grain: {
+        kind: "entity",
+        entity: sourceTemplate.entity,
+        key: orphanSlotId,
+      },
+    });
+    const unsupportedUnreachable = lowerAnalyticsPagePathSessionPlan(
+      asLogicalPlan(unreachablePlan),
+    );
+    expect(unsupportedUnreachable).toMatchObject({
+      kind: "unsupported",
+      capability: "session-boolean-plan-shape",
+      node: expect.stringContaining("nodes["),
+    });
+    expect("query" in unsupportedUnreachable).toBe(false);
 
     const invalidPlan = lowerAnalyticsPagePathSessionPlan({} as LogicalPlan);
     expect(invalidPlan).toMatchObject({
@@ -516,28 +731,348 @@ describe("Analytics page.path → Session D1 lowering", () => {
     expect("query" in invalidPlan).toBe(false);
   });
 
-  it("rejects boolean trees and multiple site identities before building DB SQL", () => {
-    const andDocument = {
-      version: 1,
-      root: {
-        kind: "and",
-        children: [
-          DOCUMENT.root,
-          {
-            kind: "condition",
-            target: { kind: "field", field: "page.path" },
-            operator: "eq",
-            value: "/about",
+  it("executes composable Session AND/OR/NOT sets and locks D1 cost baselines", async () => {
+    const db = createMigratedDatabase();
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      const { siteA, siteB } = setupSites(db);
+      const evaluatorPages: FilterEvaluationEntity[] = [];
+      const evaluatorEvents: FilterEvaluationEntity[] = [];
+      const page = (
+        site: SiteSeed,
+        visitId: string,
+        sessionId: string,
+        startedAt: number,
+        pathname: string,
+      ) => {
+        const row = addPage(db, site, visitId, sessionId, startedAt, pathname);
+        if (site.id === SITE_A) evaluatorPages.push(pageEntity(row));
+        return row;
+      };
+      const event = (
+        eventId: string,
+        site: SiteSeed,
+        owner: PageSeed,
+        occurredAt: number,
+      ) => {
+        const row = { eventId, site, visit: owner, occurredAt };
+        insertEvent(db, row);
+        if (site.id === SITE_A && owner.site.key === site.key) {
+          evaluatorEvents.push(eventEntity(row));
+        }
+      };
+
+      // A and B are separate historical Pages in one Session. Candidate
+      // membership for this Session comes from Events only.
+      page(siteA, "ab-history-a", "s-ab", 10, "/a");
+      page(siteA, "ab-history-b", "s-ab", 11, "/b");
+      const abOwner = page(siteA, "ab-event-owner", "s-ab", 20, "/other");
+      event("ab-candidate-event-1", siteA, abOwner, 100);
+      event("ab-candidate-event-2", siteA, abOwner, 101);
+
+      page(siteA, "a-history-1", "s-a", 21, "/a");
+      page(siteA, "a-history-duplicate", "s-a", 22, "/a");
+      const aCandidate = page(siteA, "a-candidate", "s-a", 110, "/other");
+      page(siteA, "a-candidate-duplicate", "s-a", 111, "/other");
+      event("a-candidate-event", siteA, aCandidate, 112);
+
+      page(siteA, "b-history", "s-b", 23, "/b");
+      page(siteA, "b-candidate", "s-b", 120, "/other");
+      page(siteA, "neither-history", "s-neither", 24, "/other");
+      page(siteA, "neither-candidate", "s-neither", 130, "/other");
+      page(siteA, "history-only", "s-history-only", 25, "/a");
+      page(siteA, "candidate-only", "s-candidate-only", 140, "/other");
+
+      page(siteA, "trim-history", "s-trim", 26, " \u00a0/a\t");
+      const trimOwner = page(siteA, "trim-event-owner", "s-trim", 27, "/other");
+      event("trim-candidate-event", siteA, trimOwner, 150);
+      page(siteA, "case-history", "s-case", 28, "/A");
+      page(siteA, "case-candidate", "s-case", 160, "/other");
+
+      const readEnd = page(siteA, "read-end", "s-read-end", 100, "/a");
+      event("read-end-candidate-event", siteA, readEnd, 170);
+      page(siteA, "candidate-end-history", "s-candidate-end", 29, "/a");
+      const candidateEndOwner = page(
+        siteA,
+        "candidate-end-owner",
+        "s-candidate-end",
+        30,
+        "/other",
+      );
+      event("candidate-event-at-end", siteA, candidateEndOwner, 200);
+      page(siteA, "candidate-start-history", "s-start", 31, "/b");
+      const startOwner = page(
+        siteA,
+        "candidate-start-owner",
+        "s-start",
+        32,
+        "/other",
+      );
+      event("candidate-event-at-start", siteA, startOwner, 100);
+
+      // The same Session string exists on another site; B there cannot satisfy
+      // the site A predicate or change its NOT result.
+      page(siteA, "shared-history-a", "s-shared", 33, "/a");
+      page(siteA, "shared-candidate-a", "s-shared", 150, "/other");
+      page(siteB, "shared-history-b", "s-shared", 34, "/b");
+      page(siteB, "shared-candidate-b", "s-shared", 151, "/other");
+
+      const documentA = PATH_A;
+      const documentB = PATH_B;
+      const cases = [
+        {
+          name: "and",
+          document: filterDocument({
+            kind: "and",
+            children: [documentA.root, documentB.root],
+          }),
+          expected: ["s-ab"],
+        },
+        {
+          name: "or",
+          document: filterDocument({
+            kind: "or",
+            children: [documentA.root, documentB.root],
+          }),
+          expected: ["s-ab", "s-a", "s-b", "s-trim", "s-start", "s-shared"],
+        },
+        {
+          name: "not",
+          document: filterDocument({ kind: "not", child: documentA.root }),
+          expected: [
+            "s-b",
+            "s-neither",
+            "s-candidate-only",
+            "s-case",
+            "s-read-end",
+            "s-start",
+          ],
+        },
+        {
+          name: "nested-and-not",
+          document: filterDocument({
+            kind: "and",
+            children: [documentA.root, { kind: "not", child: documentB.root }],
+          }),
+          expected: ["s-a", "s-trim", "s-shared"],
+        },
+        {
+          name: "or-set-operation",
+          document: filterDocument({
+            kind: "or",
+            children: [{ kind: "not", child: documentA.root }, documentB.root],
+          }),
+          expected: [
+            "s-ab",
+            "s-b",
+            "s-neither",
+            "s-candidate-only",
+            "s-case",
+            "s-read-end",
+            "s-start",
+          ],
+        },
+      ] as const;
+
+      const costs: Record<
+        string,
+        {
+          readonly statements: number;
+          readonly bindings: number;
+          readonly sqlLength: number;
+          readonly explain: {
+            readonly operations: number;
+            readonly candidatePageCoveringScans: number;
+            readonly candidateEventCoveringScans: number;
+            readonly historicalKeyRangeSearches: number;
+            readonly visitPrimaryKeyLookups: number;
+            readonly unionTempTrees: number;
+          };
+        }
+      > = {};
+      for (const item of cases) {
+        const lowered = lower(item.document);
+        expect(lowered.kind, item.name).toBe("supported");
+        if (lowered.kind !== "supported") {
+          throw new Error(`Expected ${item.name} to lower.`);
+        }
+        const directlyLowered = lowerAnalyticsPagePathSessionPlan(
+          lowered.logicalPlan,
+        );
+        expect(directlyLowered.kind, `${item.name} direct plan`).toBe(
+          "supported",
+        );
+        if (directlyLowered.kind !== "supported") {
+          throw new Error(`Expected ${item.name} plan to lower directly.`);
+        }
+        expect(directlyLowered.query.sql).toBe(lowered.query.sql);
+        expect(directlyLowered.query.bindings).toEqual(lowered.query.bindings);
+
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const client = createD1DatabaseClient(
+          createSqliteD1Database(db, trace),
+        );
+        const result = await client.all(lowered.query);
+        const actualRows = result.results as Array<{
+          readonly site_pk: number;
+          readonly session_id: string;
+        }>;
+        const actual = new Set(actualRows.map((row) => row.session_id));
+        const evaluatorDataset = {
+          pages: evaluatorPages,
+          events: evaluatorEvents,
+          coverageRange: { startMs: 0, endExclusiveMs: 250 },
+        };
+        const candidateSessionIds = new Set(
+          [
+            ...evaluatorPages
+              .filter(
+                (entity) =>
+                  entity.time !== undefined &&
+                  entity.time >= CANDIDATE_RANGE.startMs &&
+                  entity.time < CANDIDATE_RANGE.endExclusiveMs,
+              )
+              .map((entity) => entity.sessionId),
+            ...evaluatorEvents
+              .filter(
+                (entity) =>
+                  entity.time !== undefined &&
+                  entity.time >= CANDIDATE_RANGE.startMs &&
+                  entity.time < CANDIDATE_RANGE.endExclusiveMs,
+              )
+              .map((entity) => entity.sessionId),
+          ].filter((sessionId): sessionId is string => Boolean(sessionId)),
+        );
+        const evaluatorSessions = evaluateCandidateRestrictedSets(
+          item.document.root,
+          evaluatorDataset,
+          candidateSessionIds,
+        );
+        expect(actual).toEqual(evaluatorSessions);
+        expect([...actual].sort()).toEqual([...item.expected].sort());
+        expect(actualRows.every((row) => row.site_pk === siteA.key)).toBe(true);
+        expect(actualRows).toHaveLength(actual.size);
+        expect(trace.preparedSql).toHaveLength(1);
+        expect(trace.bindings).toHaveLength(1);
+
+        const explain = explainQueryPlan(db, lowered.query);
+        const explainText = explain.join("\n");
+        expect(explainText).toMatch(
+          /SCAN \w+ USING COVERING INDEX idx_visits_site_pk_session_started_at/u,
+        );
+        expect(explainText).toMatch(
+          /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u,
+        );
+        const countExplain = (pattern: RegExp) =>
+          explain.filter((line) => pattern.test(line)).length;
+        costs[item.name] = {
+          statements: trace.preparedSql.length,
+          bindings: lowered.query.bindings?.length ?? 0,
+          sqlLength: lowered.query.sql.length,
+          explain: {
+            operations: explain.length,
+            candidatePageCoveringScans: countExplain(
+              /SCAN \w+ USING COVERING INDEX idx_visits_site_pk_session_started_at/u,
+            ),
+            candidateEventCoveringScans: countExplain(
+              /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u,
+            ),
+            historicalKeyRangeSearches: countExplain(
+              /SEARCH \w+ USING INDEX idx_visits_site_pk_session_started_at \(site_pk=\? AND session_id=\? AND started_at>\? AND started_at<\?\)/u,
+            ),
+            visitPrimaryKeyLookups: countExplain(
+              /SEARCH \w+ USING INTEGER PRIMARY KEY \(rowid=\?\)/u,
+            ),
+            unionTempTrees: countExplain(/UNION USING TEMP B-TREE/u),
           },
-        ],
-      },
-    } as unknown as FilterDocument;
-    const unsupportedTree = lower(andDocument);
-    expect(unsupportedTree).toMatchObject({
+        };
+      }
+      expect(costs).toEqual({
+        and: {
+          statements: 1,
+          bindings: 26,
+          sqlLength: 32834,
+          explain: {
+            operations: 34,
+            candidatePageCoveringScans: 2,
+            candidateEventCoveringScans: 2,
+            historicalKeyRangeSearches: 2,
+            visitPrimaryKeyLookups: 6,
+            unionTempTrees: 2,
+          },
+        },
+        or: {
+          statements: 1,
+          bindings: 14,
+          sqlLength: 16161,
+          explain: {
+            operations: 16,
+            candidatePageCoveringScans: 1,
+            candidateEventCoveringScans: 1,
+            historicalKeyRangeSearches: 1,
+            visitPrimaryKeyLookups: 3,
+            unionTempTrees: 1,
+          },
+        },
+        not: {
+          statements: 1,
+          bindings: 21,
+          sqlLength: 27698,
+          explain: {
+            operations: 30,
+            candidatePageCoveringScans: 2,
+            candidateEventCoveringScans: 2,
+            historicalKeyRangeSearches: 1,
+            visitPrimaryKeyLookups: 5,
+            unionTempTrees: 2,
+          },
+        },
+        "nested-and-not": {
+          statements: 1,
+          bindings: 34,
+          sqlLength: 44610,
+          explain: {
+            operations: 48,
+            candidatePageCoveringScans: 3,
+            candidateEventCoveringScans: 3,
+            historicalKeyRangeSearches: 2,
+            visitPrimaryKeyLookups: 8,
+            unionTempTrees: 3,
+          },
+        },
+        "or-set-operation": {
+          statements: 1,
+          bindings: 34,
+          sqlLength: 44574,
+          explain: {
+            operations: 51,
+            candidatePageCoveringScans: 3,
+            candidateEventCoveringScans: 3,
+            historicalKeyRangeSearches: 2,
+            visitPrimaryKeyLookups: 8,
+            unionTempTrees: 4,
+          },
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects unsupported fields and multiple site identities before building DB SQL", () => {
+    const unsupportedField = lower(
+      filterDocument({
+        kind: "condition",
+        target: { kind: "field", field: "page.title" },
+        operator: "eq",
+        value: "Welcome",
+      }),
+    );
+    expect(unsupportedField).toMatchObject({
       kind: "unsupported",
       capability: "page-path-equality-only",
     });
-    expect("query" in unsupportedTree).toBe(false);
+    expect("query" in unsupportedField).toBe(false);
 
     const unsupportedSites = lower(DOCUMENT, [SITE_A, SITE_B]);
     expect(unsupportedSites).toMatchObject({
@@ -545,6 +1080,15 @@ describe("Analytics page.path → Session D1 lowering", () => {
       capability: "single-site-only",
     });
     expect("query" in unsupportedSites).toBe(false);
+
+    const oneChildBoolean = lower(
+      filterDocument({ kind: "and", children: [PATH_A.root] }),
+    );
+    expect(oneChildBoolean).toMatchObject({
+      kind: "unsupported",
+      capability: "page-path-boolean-shape",
+    });
+    expect("query" in oneChildBoolean).toBe(false);
   });
 
   it("returns located unsupported results for empty, invalid, and unbounded inputs", () => {
