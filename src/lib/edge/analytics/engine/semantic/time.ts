@@ -104,7 +104,8 @@ export function temporalDomainExists(
   domains: SemanticTemporalDomains,
   reference: TemporalDomainRef,
 ): boolean {
+  if (reference === "candidate") return true;
   if (reference === "filter") return domains.filter !== undefined;
   if (reference === "read") return domains.read !== undefined;
-  return domains.candidate !== undefined;
+  return false;
 }
