@@ -111,6 +111,8 @@ describe("analytics logical planning contracts", () => {
           expect.objectContaining({ path: "metrics[0]" }),
           expect.objectContaining({ path: "metrics[1]" }),
           expect.objectContaining({ path: "metrics[2]" }),
+          expect.objectContaining({ path: "sort[0].direction" }),
+          expect.objectContaining({ path: "sort[0].nulls" }),
           expect.objectContaining({ path: "sort[0].field" }),
           expect.objectContaining({ path: "limit" }),
         ]),
@@ -126,6 +128,47 @@ describe("analytics logical planning contracts", () => {
     expect(Object.isFrozen(valid)).toBe(true);
     expect(Object.isFrozen(valid.context.subject.siteIds)).toBe(true);
     expect(Object.isFrozen(valid.sort[0])).toBe(true);
+    expect(() =>
+      validateSemanticAggregateQuery({
+        ...valid,
+        timeBucket: { granularity: "year" as never },
+      }),
+    ).toThrow("Time bucket granularity is invalid");
+    expect(() => validateSemanticAggregateQuery(null as never)).toThrow(
+      "Semantic aggregate query must be an object",
+    );
+    try {
+      validateSemanticAggregateQuery({
+        context: {
+          ...createPlanningContext(),
+          scope: {
+            requested: "auto",
+            contractScope: "session",
+            logicalScope: "visitor",
+          },
+        },
+        dimensions: null,
+        metrics: null,
+        sort: null,
+      } as unknown as SemanticAggregateQuery);
+      throw new Error("malformed_query_expected");
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "SemanticQueryError",
+        issues: expect.arrayContaining([
+          expect.objectContaining({ path: "context.scope" }),
+          expect.objectContaining({ path: "dimensions" }),
+          expect.objectContaining({ path: "metrics" }),
+          expect.objectContaining({ path: "sort" }),
+        ]),
+      });
+    }
+    expect(() =>
+      validateSemanticAggregateQuery({
+        ...valid,
+        sort: [null as never],
+      }),
+    ).toThrow("Sort key must be an object");
   });
 
   it("resolves metric dependency closure in deterministic topological order", () => {

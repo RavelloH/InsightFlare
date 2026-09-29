@@ -1,4 +1,5 @@
 import type {
+  CalendarGranularity,
   EpochMs,
   QueryTime,
   ReportingTimeZone,
@@ -99,6 +100,23 @@ export function semanticTemporalDomainsFromQueryTime(
 }
 
 export type TemporalDomainRef = "candidate" | "filter" | "read";
+
+export const CALENDAR_GRANULARITIES = [
+  "minute",
+  "hour",
+  "day",
+  "week",
+  "month",
+] as const satisfies readonly CalendarGranularity[];
+
+export function isCalendarGranularity(
+  value: unknown,
+): value is CalendarGranularity {
+  return (
+    typeof value === "string" &&
+    CALENDAR_GRANULARITIES.includes(value as CalendarGranularity)
+  );
+}
 
 export function temporalDomainExists(
   domains: SemanticTemporalDomains,

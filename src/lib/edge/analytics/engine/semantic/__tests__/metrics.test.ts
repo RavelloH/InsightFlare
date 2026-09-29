@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { COMPARISON_METRIC_KEYS } from "@/lib/edge/analytics/contract/types";
 import {
+  COMPARISON_TO_SEMANTIC_METRIC,
+  SEMANTIC_METRIC_IDS,
   semanticMetric,
   semanticMetricCatalog,
   type SemanticMetricDefinition,
@@ -11,7 +13,18 @@ import {
 describe("canonical semantic metrics", () => {
   it("registers every canonical metric with the intended visibility and measure", () => {
     expect(semanticMetricCatalog.map(({ id }) => id)).toEqual(
+      [...SEMANTIC_METRIC_IDS].sort(),
+    );
+    expect(Object.keys(COMPARISON_TO_SEMANTIC_METRIC).sort()).toEqual(
       [...COMPARISON_METRIC_KEYS].sort(),
+    );
+    expect(
+      Object.values(COMPARISON_TO_SEMANTIC_METRIC).every((id) =>
+        SEMANTIC_METRIC_IDS.includes(id),
+      ),
+    ).toBe(true);
+    expect(COMPARISON_TO_SEMANTIC_METRIC).toEqual(
+      Object.fromEntries(COMPARISON_METRIC_KEYS.map((key) => [key, key])),
     );
     expect(semanticMetric("views")).toMatchObject({
       kind: "atomic",

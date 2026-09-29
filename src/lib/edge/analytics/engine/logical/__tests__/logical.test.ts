@@ -21,11 +21,14 @@ import {
   isSameLogicalValueType,
   type LogicalValueType,
 } from "@/lib/edge/analytics/engine/logical/slots";
+import type { ResolvedAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
-function createBuilder(): LogicalPlanBuilder {
+function createBuilder(
+  scope: ResolvedAnalyticsScope = resolveAnalyticsScope("auto"),
+): LogicalPlanBuilder {
   const candidate = {
     startMs: 0 as EpochMs,
     endExclusiveMs: 10_000 as EpochMs,
@@ -41,7 +44,7 @@ function createBuilder(): LogicalPlanBuilder {
       reportingTimeZone: "UTC" as ReportingTimeZone,
       capturedAtMs: 10_000 as EpochMs,
     }),
-    scope: resolveAnalyticsScope("auto"),
+    scope,
   });
 }
 
@@ -172,6 +175,133 @@ describe("logical relational IR", () => {
     expect(printed).toContain("TIME_BUCKET");
   });
 
+  it("preserves an upstream concrete scope when auto was requested", () => {
+    const scope = {
+      requested: "auto",
+      contractScope: "session",
+      logicalScope: "session",
+    } as const;
+    const builder = createBuilder(scope);
+    const sessions = builder.source("session");
+    builder.output("sessions", sessions, [{ name: "session", slot: "entity" }]);
+    const plan = builder.finish();
+
+    expect(builder.context.scope).toEqual(scope);
+    expect(
+      validateLogicalPlan(JSON.parse(JSON.stringify(plan)) as LogicalPlan)
+        .context.scope,
+    ).toEqual(scope);
+    expect(() =>
+      validateLogicalPlan({
+        ...plan,
+        context: {
+          ...plan.context,
+          scope: { ...scope, logicalScope: "visitor" },
+        },
+      }),
+    ).toThrow("Resolved scope is invalid or inconsistent");
+  });
+
+  it("models elapsed durations separately from calendar periods", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", { includeOccurrenceTime: true });
+    const occurrenceTime = builder.slot(pages, "time");
+    const elapsedSeconds = builder.elapsedDuration(1, "s");
+    const elapsedMinutes = builder.elapsedDuration(1, "m");
+    const scalarTwo = builder.literal(2, { kind: "scalar", scalar: "number" });
+    const elapsedSum = builder.arithmetic(
+      "add",
+      elapsedSeconds,
+      elapsedMinutes,
+    );
+    const elapsedSinceSelf = builder.arithmetic(
+      "subtract",
+      occurrenceTime,
+      occurrenceTime,
+    );
+    const month = builder.calendarPeriod(1, "mo");
+    const year = builder.calendarPeriod(1, "y");
+    const calendarPeriodSum = builder.arithmetic("add", month, year);
+    const elapsedProduct = builder.arithmetic(
+      "multiply",
+      elapsedSeconds,
+      scalarTwo,
+    );
+    const elapsedReverseProduct = builder.arithmetic(
+      "multiply",
+      scalarTwo,
+      elapsedSeconds,
+    );
+    const elapsedQuotient = builder.arithmetic(
+      "divide",
+      elapsedSeconds,
+      scalarTwo,
+    );
+    const elapsedRatio = builder.arithmetic(
+      "divide",
+      elapsedSeconds,
+      elapsedMinutes,
+    );
+    expect(builder.elapsedDuration(-0, "ms").expression).toEqual({
+      kind: "elapsed-duration-literal",
+      amount: 0,
+      unit: "ms",
+    });
+    expect(builder.calendarPeriod(-0, "d").expression).toEqual({
+      kind: "calendar-period-literal",
+      amount: 0,
+      unit: "d",
+    });
+    expect(() => builder.arithmetic("add", elapsedSeconds, month)).toThrow(
+      "Elapsed duration arithmetic",
+    );
+    expect(() => builder.arithmetic("multiply", month, scalarTwo)).toThrow(
+      "Calendar periods only support addition and subtraction",
+    );
+    expect(() => builder.compare("gt", month, year)).toThrow(
+      "Calendar periods only support equality and inequality",
+    );
+
+    const projected = builder.project(pages, {
+      entity: builder.slot(pages, "entity"),
+      elapsedSum,
+      elapsedSinceSelf,
+      calendarPeriodSum,
+      elapsedProduct,
+      elapsedReverseProduct,
+      elapsedQuotient,
+      elapsedRatio,
+    });
+    builder.output("temporal-values", projected, [
+      { name: "elapsedSum", slot: "elapsedSum" },
+      { name: "elapsedSinceSelf", slot: "elapsedSinceSelf" },
+      { name: "calendarPeriodSum", slot: "calendarPeriodSum" },
+      { name: "elapsedProduct", slot: "elapsedProduct" },
+      { name: "elapsedReverseProduct", slot: "elapsedReverseProduct" },
+      { name: "elapsedQuotient", slot: "elapsedQuotient" },
+      { name: "elapsedRatio", slot: "elapsedRatio" },
+    ]);
+    const plan = builder.finish();
+    const roundTrip = validateLogicalPlan(
+      JSON.parse(JSON.stringify(plan)) as LogicalPlan,
+    );
+    expect(roundTrip).toEqual(plan);
+    expect(
+      plan.slots.find((slot) => slot.id === projected.slots.elapsedSum)?.type,
+    ).toEqual({ kind: "duration" });
+    expect(
+      plan.slots.find((slot) => slot.id === projected.slots.calendarPeriodSum)
+        ?.type,
+    ).toEqual({ kind: "calendar-period" });
+    const printed = printLogicalPlan(plan);
+    expect(printed).toContain("ELAPSED_DURATION<s>(1)");
+    expect(printed).toContain("ELAPSED_DURATION<m>(1)");
+    expect(printed).toContain("CALENDAR_PERIOD<mo>(1)");
+    expect(printed).toContain("CALENDAR_PERIOD<y>(1)");
+    expect(printed).toContain("ElapsedDuration");
+    expect(printed).toContain("CalendarPeriod");
+  });
+
   it("independently rejects forged expressions with invalid scalar semantics", () => {
     const builder = createBuilder();
     const pages = builder.source("page", {
@@ -196,6 +326,28 @@ describe("logical relational IR", () => {
       ({ kind: "slot", slot: id }) as LogicalExpr;
     const badExpressions: LogicalExpr[] = [
       literal(Number.POSITIVE_INFINITY, number),
+      literal(1, { ...number, unit: "unknown" as never }),
+      literal(1, { ...string, unit: "ms" as never }),
+      {
+        kind: "literal",
+        value: "page",
+        valueType: { kind: "entity", entity: "page" } as never,
+      },
+      {
+        kind: "elapsed-duration-literal",
+        amount: Number.POSITIVE_INFINITY,
+        unit: "s",
+      },
+      {
+        kind: "elapsed-duration-literal",
+        amount: 1,
+        unit: "mo" as never,
+      },
+      {
+        kind: "calendar-period-literal",
+        amount: 1,
+        unit: "ms" as never,
+      },
       {
         kind: "comparison",
         operator: "gt",
@@ -233,6 +385,12 @@ describe("logical relational IR", () => {
         operator: "add",
         left: slot(duration),
         right: slot(path),
+      },
+      {
+        kind: "comparison",
+        operator: "eq",
+        left: { kind: "elapsed-duration-literal", amount: 1, unit: "m" },
+        right: { kind: "calendar-period-literal", amount: 1, unit: "mo" },
       },
       {
         kind: "arithmetic",
@@ -278,8 +436,14 @@ describe("logical relational IR", () => {
       {
         kind: "time-bucket",
         input: slot(path),
-        granularity: "day",
+        granularity: "year" as never,
         reportingTimeZone: "UTC" as ReportingTimeZone,
+      },
+      {
+        kind: "time-bucket",
+        input: slot(path),
+        granularity: "day",
+        reportingTimeZone: "" as ReportingTimeZone,
       },
     ];
     for (const expression of badExpressions) {
@@ -596,6 +760,131 @@ describe("logical relational IR", () => {
     expect(printed).toContain("SemiJoin");
     expect(printed).toContain("AntiJoin");
     expect(printed).toContain("LeftJoin");
+  });
+
+  it("allows non-unique right relations for semi and anti membership joins", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", { relationships: ["page.visitor"] });
+    const observations = builder.source("observation", {
+      relationships: ["observation.visitor"],
+    });
+    const keys = [
+      {
+        left: "relationship:page.visitor",
+        right: "relationship:observation.visitor",
+      },
+    ] as const;
+    const included = builder.semiJoin(pages, observations, keys);
+    const excluded = builder.antiJoin(pages, observations, keys);
+    builder.output("included-pages", included, [
+      { name: "page", slot: "entity" },
+    ]);
+    builder.output("excluded-pages", excluded, [
+      { name: "page", slot: "entity" },
+    ]);
+
+    const plan = builder.finish();
+    expect(plan.nodes.filter((node) => node.kind === "semi-join")).toHaveLength(
+      1,
+    );
+    expect(plan.nodes.filter((node) => node.kind === "anti-join")).toHaveLength(
+      1,
+    );
+    expect(
+      validateLogicalPlan(JSON.parse(JSON.stringify(plan)) as LogicalPlan),
+    ).toEqual(plan);
+  });
+
+  it("derives set operation nullability and restricts difference to two inputs", () => {
+    const builder = createBuilder();
+    const joinedSession = (joinType: "inner" | "left") => {
+      const pages = builder.source("page", {
+        relationships: ["page.session"],
+      });
+      return builder.join(
+        pages,
+        builder.source("session"),
+        [{ left: "relationship:page.session", right: "entity" }],
+        joinType,
+      );
+    };
+    const nonNullableRight = joinedSession("inner");
+    const nullableRight = joinedSession("left");
+    const anotherNonNullableRight = joinedSession("inner");
+    const union = builder.setOperation("union", [
+      nonNullableRight,
+      nullableRight,
+    ]);
+    const intersect = builder.setOperation("intersect", [
+      nonNullableRight,
+      nullableRight,
+    ]);
+    const differenceNullableLeft = builder.setOperation("difference", [
+      nullableRight,
+      nonNullableRight,
+    ]);
+    const differenceNonNullableLeft = builder.setOperation("difference", [
+      nonNullableRight,
+      nullableRight,
+    ]);
+    const threeInputUnion = builder.setOperation("union", [
+      nonNullableRight,
+      nullableRight,
+      anotherNonNullableRight,
+    ]);
+    builder.output("union", union, [{ name: "right", slot: "right.entity" }]);
+    builder.output("intersect", intersect, [
+      { name: "right", slot: "right.entity" },
+    ]);
+    builder.output("difference-nullable-left", differenceNullableLeft, [
+      { name: "right", slot: "right.entity" },
+    ]);
+    builder.output("difference-nonnullable-left", differenceNonNullableLeft, [
+      { name: "right", slot: "right.entity" },
+    ]);
+    builder.output("three-input-union", threeInputUnion, [
+      { name: "right", slot: "right.entity" },
+    ]);
+
+    expect(() =>
+      builder.setOperation("difference", [
+        nonNullableRight,
+        nullableRight,
+        anotherNonNullableRight,
+      ]),
+    ).toThrow("logical_builder_difference_requires_two_inputs");
+
+    const plan = builder.finish();
+    const nullableOf = (id: number | undefined) =>
+      plan.slots.find((item) => item.id === id)?.nullable;
+    expect(nullableOf(union.slots["right.entity"])).toBe(true);
+    expect(nullableOf(intersect.slots["right.entity"])).toBe(false);
+    expect(nullableOf(differenceNullableLeft.slots["right.entity"])).toBe(true);
+    expect(nullableOf(differenceNonNullableLeft.slots["right.entity"])).toBe(
+      false,
+    );
+    const forgedDifference: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "set-operation" && node.id === threeInputUnion.id
+          ? { ...node, operation: "difference" }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(forgedDifference)).toThrow(
+      "Difference requires exactly two input relations",
+    );
+    const forgedNullability: LogicalPlan = {
+      ...plan,
+      slots: plan.slots.map((slot) =>
+        slot.id === intersect.slots["right.entity"]
+          ? { ...slot, nullable: true }
+          : slot,
+      ),
+    };
+    expect(() => validateLogicalPlan(forgedNullability)).toThrow(
+      "Set output metadata must represent all inputs",
+    );
   });
 
   it("rejects entity-type mismatches, invalid attributes, and non-unique joins early", () => {

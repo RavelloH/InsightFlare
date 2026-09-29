@@ -35,6 +35,40 @@ export function resolveAnalyticsScope(
   };
 }
 
+/** Validates an upstream-resolved scope without discarding its concrete result. */
+export function validateResolvedAnalyticsScope(
+  scope: ResolvedAnalyticsScope,
+): ResolvedAnalyticsScope {
+  if (!scope || typeof scope !== "object") {
+    throw new Error("invalid_resolved_analytics_scope");
+  }
+
+  if (scope.requested === "auto") {
+    const validAutoResolution =
+      (scope.contractScope === null && scope.logicalScope === null) ||
+      (scope.contractScope === "event" &&
+        scope.logicalScope === "observation") ||
+      (scope.contractScope === "session" && scope.logicalScope === "session") ||
+      (scope.contractScope === "visitor" && scope.logicalScope === "visitor");
+    if (!validAutoResolution) {
+      throw new Error("invalid_resolved_analytics_scope");
+    }
+    return Object.freeze({ ...scope });
+  }
+
+  if (!["event", "session", "visitor"].includes(scope.requested)) {
+    throw new Error("invalid_resolved_analytics_scope");
+  }
+  const canonical = resolveAnalyticsScope(scope.requested);
+  if (
+    scope.contractScope !== canonical.contractScope ||
+    scope.logicalScope !== canonical.logicalScope
+  ) {
+    throw new Error("invalid_resolved_analytics_scope");
+  }
+  return Object.freeze({ ...scope });
+}
+
 export function isAnalyticsEntityKind(
   value: unknown,
 ): value is AnalyticsEntityKind {

@@ -3,8 +3,12 @@ import type {
   ReportingTimeZone,
 } from "@/lib/edge/analytics/contract/types";
 import type { SlotId } from "@/lib/edge/analytics/engine/logical/ids";
-import type { LogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
-import type { SemanticScalarType } from "@/lib/edge/analytics/engine/semantic/value-types";
+import type {
+  CalendarPeriodUnit,
+  ElapsedDurationUnit,
+  LogicalValueType,
+  SemanticScalarType,
+} from "@/lib/edge/analytics/engine/semantic/value-types";
 
 export type LogicalLiteralValue = string | number | boolean | null;
 
@@ -16,7 +20,19 @@ export interface LogicalSlotExpression {
 export interface LogicalLiteralExpression {
   readonly kind: "literal";
   readonly value: LogicalLiteralValue;
-  readonly valueType: LogicalValueType;
+  readonly valueType: Extract<LogicalValueType, { readonly kind: "scalar" }>;
+}
+
+export interface LogicalElapsedDurationLiteralExpression {
+  readonly kind: "elapsed-duration-literal";
+  readonly amount: number;
+  readonly unit: ElapsedDurationUnit;
+}
+
+export interface LogicalCalendarPeriodLiteralExpression {
+  readonly kind: "calendar-period-literal";
+  readonly amount: number;
+  readonly unit: CalendarPeriodUnit;
 }
 
 export interface LogicalComparisonExpression {
@@ -96,6 +112,8 @@ export interface TimeBucketExpr {
 export type LogicalExpr =
   | LogicalSlotExpression
   | LogicalLiteralExpression
+  | LogicalElapsedDurationLiteralExpression
+  | LogicalCalendarPeriodLiteralExpression
   | LogicalComparisonExpression
   | LogicalBooleanExpression
   | LogicalNotExpression
@@ -121,5 +139,27 @@ export function scalarLiteral(
       scalar,
       ...(unit ? { unit } : {}),
     },
+  };
+}
+
+export function elapsedDurationLiteral(
+  amount: number,
+  unit: ElapsedDurationUnit,
+): LogicalElapsedDurationLiteralExpression {
+  return {
+    kind: "elapsed-duration-literal",
+    amount: Object.is(amount, -0) ? 0 : amount,
+    unit,
+  };
+}
+
+export function calendarPeriodLiteral(
+  amount: number,
+  unit: CalendarPeriodUnit,
+): LogicalCalendarPeriodLiteralExpression {
+  return {
+    kind: "calendar-period-literal",
+    amount: Object.is(amount, -0) ? 0 : amount,
+    unit,
   };
 }

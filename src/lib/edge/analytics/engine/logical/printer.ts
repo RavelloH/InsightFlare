@@ -26,6 +26,10 @@ function valueType(type: LogicalValueType): string {
       return `Entity<${type.entity}>`;
     case "bucket":
       return "Bucket";
+    case "duration":
+      return "ElapsedDuration";
+    case "calendar-period":
+      return "CalendarPeriod";
     case "scalar":
       return `Scalar<${type.scalar}${type.unit ? `,${type.unit}` : ""}>`;
   }
@@ -74,6 +78,10 @@ function expression(value: LogicalExpr): string {
       return slot(value.slot);
     case "literal":
       return `${JSON.stringify(value.value)}:${valueType(value.valueType)}`;
+    case "elapsed-duration-literal":
+      return `ELAPSED_DURATION<${value.unit}>(${JSON.stringify(value.amount)})`;
+    case "calendar-period-literal":
+      return `CALENDAR_PERIOD<${value.unit}>(${JSON.stringify(value.amount)})`;
     case "comparison":
       return `(${expression(value.left)} ${value.operator} ${expression(value.right)})`;
     case "boolean":

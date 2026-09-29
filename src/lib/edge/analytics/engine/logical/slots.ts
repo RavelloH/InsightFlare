@@ -42,6 +42,9 @@ export function isSameLogicalValueType(
     return left.entity === right.entity;
   }
   if (left.kind === "bucket" && right.kind === "bucket") return true;
+  if (left.kind === "duration" && right.kind === "duration") return true;
+  if (left.kind === "calendar-period" && right.kind === "calendar-period")
+    return true;
   if (left.kind === "scalar" && right.kind === "scalar") {
     return left.scalar === right.scalar && left.unit === right.unit;
   }

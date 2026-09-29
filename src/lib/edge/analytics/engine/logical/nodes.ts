@@ -91,6 +91,20 @@ export interface SetOperationNode extends LogicalNodeBase {
   readonly inputs: readonly RelationId[];
 }
 
+export function setOperationResultNullable(
+  operation: SetOperationNode["operation"],
+  inputNullability: readonly boolean[],
+): boolean {
+  switch (operation) {
+    case "union":
+      return inputNullability.some(Boolean);
+    case "intersect":
+      return inputNullability.every(Boolean);
+    case "difference":
+      return inputNullability[0]!;
+  }
+}
+
 export interface JoinKey {
   readonly left: SlotId;
   readonly right: SlotId;

@@ -1,7 +1,9 @@
 import type { CalendarGranularity } from "@/lib/edge/analytics/contract/types";
-import type {
-  LogicalExpr,
-  LogicalLiteralValue,
+import {
+  calendarPeriodLiteral,
+  elapsedDurationLiteral,
+  type LogicalExpr,
+  type LogicalLiteralValue,
 } from "@/lib/edge/analytics/engine/logical/expression";
 import type { LogicalGrain } from "@/lib/edge/analytics/engine/logical/grain";
 import {
@@ -14,11 +16,12 @@ import {
   type SlotId,
   slotId,
 } from "@/lib/edge/analytics/engine/logical/ids";
-import type {
-  LogicalAggregateMeasure,
-  LogicalNode,
-  ProjectBinding,
-  SortKey,
+import {
+  type LogicalAggregateMeasure,
+  type LogicalNode,
+  type ProjectBinding,
+  setOperationResultNullable,
+  type SortKey,
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import type {
   LogicalOutputField,
@@ -37,10 +40,14 @@ import {
   type InferredLogicalExpression,
   validateLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/validator";
-import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
-import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
-import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
-import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import {
+  semanticAttribute,
+  type SemanticAttributeId,
+} from "@/lib/edge/analytics/engine/semantic/attributes";
+import {
+  type AnalyticsEntityKind,
+  validateResolvedAnalyticsScope,
+} from "@/lib/edge/analytics/engine/semantic/entities";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import { semanticRelationship } from "@/lib/edge/analytics/engine/semantic/relationships";
 import {
@@ -48,6 +55,10 @@ import {
   temporalDomainExists,
   type TemporalDomainRef,
 } from "@/lib/edge/analytics/engine/semantic/time";
+import type {
+  CalendarPeriodUnit,
+  ElapsedDurationUnit,
+} from "@/lib/edge/analytics/engine/semantic/value-types";
 
 export interface LogicalRelationHandle {
   readonly id: RelationId;
@@ -103,7 +114,7 @@ export class LogicalPlanBuilder {
     this.#context = Object.freeze({
       ...context,
       time,
-      scope: resolveAnalyticsScope(context.scope.requested),
+      scope: validateResolvedAnalyticsScope(context.scope),
       subject: Object.freeze({
         ...context.subject,
         siteIds: Object.freeze([...context.subject.siteIds]),
@@ -224,6 +235,20 @@ export class LogicalPlanBuilder {
       value,
       valueType: type,
     });
+  }
+
+  elapsedDuration(
+    amount: number,
+    unit: ElapsedDurationUnit,
+  ): LogicalExpressionHandle {
+    return this.#expression(elapsedDurationLiteral(amount, unit));
+  }
+
+  calendarPeriod(
+    amount: number,
+    unit: CalendarPeriodUnit,
+  ): LogicalExpressionHandle {
+    return this.#expression(calendarPeriodLiteral(amount, unit));
   }
 
   compare(
@@ -629,6 +654,8 @@ export class LogicalPlanBuilder {
   ): LogicalRelationHandle {
     if (inputs.length < 2)
       throw new Error("logical_builder_set_requires_two_inputs");
+    if (operation === "difference" && inputs.length !== 2)
+      throw new Error("logical_builder_difference_requires_two_inputs");
     const states = inputs.map((input) => this.#owned(input));
     const first = inputs[0]!;
     const firstNode = states[0]!.node;
@@ -657,7 +684,10 @@ export class LogicalPlanBuilder {
       }
       const key = this.#newSlot(
         sourceSlots[0]!.type,
-        sourceSlots.some((slot) => slot.nullable),
+        setOperationResultNullable(
+          operation,
+          sourceSlots.map((slot) => slot.nullable),
+        ),
         {
           kind: "derived",
           operation: `set:${operation}`,
@@ -844,7 +874,6 @@ export class LogicalPlanBuilder {
     const leftState = this.#owned(left);
     this.#owned(right);
     const keys = this.#joinKeys(left, right, namedKeys);
-    this.#assertRightUnique(right, keys);
     const node = {
       kind,
       id: this.#newRelationId(),
@@ -948,6 +977,8 @@ export class LogicalPlanBuilder {
           result.add(value.slot);
           return;
         case "literal":
+        case "elapsed-duration-literal":
+        case "calendar-period-literal":
           return;
         case "comparison":
         case "arithmetic":

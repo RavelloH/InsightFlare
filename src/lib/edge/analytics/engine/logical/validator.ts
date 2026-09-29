@@ -8,11 +8,12 @@ import type {
   RelationId,
   SlotId,
 } from "@/lib/edge/analytics/engine/logical/ids";
-import type {
-  AggregateNode,
-  LogicalAggregateMeasure,
-  LogicalNode,
-  SourceValueBinding,
+import {
+  type AggregateNode,
+  type LogicalAggregateMeasure,
+  type LogicalNode,
+  setOperationResultNullable,
+  type SourceValueBinding,
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import type {
   LogicalPlan,
@@ -26,13 +27,14 @@ import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attribut
 import { semanticDimension } from "@/lib/edge/analytics/engine/semantic/dimensions";
 import {
   isAnalyticsEntityKind,
-  resolveAnalyticsScope,
+  validateResolvedAnalyticsScope,
 } from "@/lib/edge/analytics/engine/semantic/entities";
 import { semanticMetric } from "@/lib/edge/analytics/engine/semantic/metrics";
 import { semanticRelationship } from "@/lib/edge/analytics/engine/semantic/relationships";
 import { isCanonicalSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import {
   createSemanticTemporalDomains,
+  isCalendarGranularity,
   temporalDomainExists,
 } from "@/lib/edge/analytics/engine/semantic/time";
 
@@ -108,21 +110,31 @@ function infer(
       return resolveSlot(expression.slot, `${path}.slot`);
     case "literal":
       if (
-        expression.valueType.kind === "entity" ||
-        expression.valueType.kind === "bucket" ||
-        (expression.valueType.kind === "scalar" &&
-          expression.valueType.scalar === "boolean" &&
+        expression.valueType.kind !== "scalar" ||
+        ![
+          "boolean",
+          "number",
+          "string",
+          "date",
+          "datetime",
+          "json-scalar",
+          "unknown",
+        ].includes(expression.valueType.scalar) ||
+        (expression.valueType.unit !== undefined &&
+          (!(["ms", "px", "ratio"] as const).includes(
+            expression.valueType.unit,
+          ) ||
+            expression.valueType.scalar !== "number")) ||
+        (expression.valueType.scalar === "boolean" &&
           expression.value !== null &&
           typeof expression.value !== "boolean") ||
-        (expression.valueType.kind === "scalar" &&
-          expression.valueType.scalar === "number" &&
+        (expression.valueType.scalar === "number" &&
           expression.value !== null &&
           (typeof expression.value !== "number" ||
             !Number.isFinite(expression.value))) ||
-        (expression.valueType.kind === "scalar" &&
-          ["string", "date", "datetime", "json-scalar"].includes(
-            expression.valueType.scalar,
-          ) &&
+        (["string", "date", "datetime", "json-scalar"].includes(
+          expression.valueType.scalar,
+        ) &&
           expression.value !== null &&
           typeof expression.value !== "string")
       ) {
@@ -138,6 +150,38 @@ function infer(
         type: expression.valueType,
         nullable: expression.value === null,
       };
+    case "elapsed-duration-literal":
+      if (
+        typeof expression.amount !== "number" ||
+        !Number.isFinite(expression.amount) ||
+        !["ms", "s", "m", "h", "d", "w"].includes(expression.unit)
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message:
+              "Elapsed duration literals require a finite amount and elapsed unit.",
+          },
+        ]);
+      }
+      return { type: { kind: "duration" }, nullable: false };
+    case "calendar-period-literal":
+      if (
+        typeof expression.amount !== "number" ||
+        !Number.isFinite(expression.amount) ||
+        !["d", "w", "mo", "y"].includes(expression.unit)
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message:
+              "Calendar period literals require a finite amount and calendar unit.",
+          },
+        ]);
+      }
+      return { type: { kind: "calendar-period" }, nullable: false };
     case "comparison": {
       const left = infer(expression.left, resolveSlot, `${path}.left`);
       const right = infer(expression.right, resolveSlot, `${path}.right`);
@@ -163,6 +207,18 @@ function infer(
             code: "invalid-expression",
             path,
             message: "Bucket values only support equality and inequality.",
+          },
+        ]);
+      }
+      if (
+        left.type.kind === "calendar-period" &&
+        !["eq", "neq"].includes(expression.operator)
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message: "Calendar periods only support equality and inequality.",
           },
         ]);
       }
@@ -264,6 +320,65 @@ function infer(
       }
       const left = infer(expression.left, resolveSlot, `${path}.left`);
       const right = infer(expression.right, resolveSlot, `${path}.right`);
+      const nullable = left.nullable || right.nullable;
+      if (
+        expression.operator === "subtract" &&
+        left.type.kind === "scalar" &&
+        right.type.kind === "scalar" &&
+        left.type.scalar === "datetime" &&
+        right.type.scalar === "datetime"
+      ) {
+        return { type: { kind: "duration" }, nullable };
+      }
+      if (
+        (expression.operator === "add" || expression.operator === "subtract") &&
+        left.type.kind === right.type.kind &&
+        (left.type.kind === "duration" || left.type.kind === "calendar-period")
+      ) {
+        return { type: left.type, nullable };
+      }
+      if (left.type.kind === "duration" || right.type.kind === "duration") {
+        const leftDuration = left.type.kind === "duration";
+        const rightDuration = right.type.kind === "duration";
+        const leftNumber =
+          left.type.kind === "scalar" &&
+          left.type.scalar === "number" &&
+          left.type.unit === undefined;
+        const rightNumber =
+          right.type.kind === "scalar" &&
+          right.type.scalar === "number" &&
+          right.type.unit === undefined;
+        if (expression.operator === "divide" && leftDuration && rightDuration)
+          return { type: scalar("number", "ratio"), nullable };
+        if (
+          (expression.operator === "multiply" &&
+            ((leftDuration && rightNumber) || (rightDuration && leftNumber))) ||
+          (expression.operator === "divide" && leftDuration && rightNumber)
+        ) {
+          return { type: { kind: "duration" }, nullable };
+        }
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message:
+              "Elapsed duration arithmetic requires durations or unitless numbers.",
+          },
+        ]);
+      }
+      if (
+        left.type.kind === "calendar-period" ||
+        right.type.kind === "calendar-period"
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message:
+              "Calendar periods only support addition and subtraction with calendar periods.",
+          },
+        ]);
+      }
       if (
         left.type.kind !== "scalar" ||
         right.type.kind !== "scalar" ||
@@ -319,7 +434,7 @@ function infer(
       }
       return {
         type: resultType,
-        nullable: left.nullable || right.nullable,
+        nullable,
       };
     }
     case "round": {
@@ -399,6 +514,20 @@ function infer(
     }
     case "time-bucket": {
       const input = infer(expression.input, resolveSlot, `${path}.input`);
+      if (
+        !isCalendarGranularity(expression.granularity) ||
+        typeof expression.reportingTimeZone !== "string" ||
+        expression.reportingTimeZone.length === 0
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message:
+              "Time buckets require a supported granularity and reporting time zone.",
+          },
+        ]);
+      }
       if (
         input.type.kind !== "scalar" ||
         !["date", "datetime", "number"].includes(input.type.scalar)
@@ -959,11 +1088,27 @@ function validateNode(
       break;
     }
     case "set-operation": {
+      if (
+        !(["union", "intersect", "difference"] as const).includes(
+          node.operation,
+        )
+      )
+        fail(
+          "invalid-topology",
+          `${path}.operation`,
+          "Set operation kind is invalid.",
+        );
       if (node.inputs.length < 2)
         fail(
           "invalid-topology",
           `${path}.inputs`,
           "Set operations require at least two input relations.",
+        );
+      if (node.operation === "difference" && node.inputs.length !== 2)
+        fail(
+          "invalid-topology",
+          `${path}.inputs`,
+          "Difference requires exactly two input relations.",
         );
       const inputs = node.inputs.map((id, index) =>
         assertRelation(id, states, `${path}.inputs[${index}]`),
@@ -1024,8 +1169,9 @@ function validateNode(
         const inputsAtPosition = inputs.map((input) =>
           types.get(input.node.output[index]!)!,
         );
-        const expectedNullable = inputsAtPosition.some(
-          (input) => input.nullable,
+        const expectedNullable = setOperationResultNullable(
+          node.operation,
+          inputsAtPosition.map((input) => input.nullable),
         );
         if (
           !sameType(slot.type, inputsAtPosition[0]!.type) ||
@@ -1066,13 +1212,6 @@ function validateNode(
       const left = assertRelation(node.left, states, `${path}.left`);
       const right = assertRelation(node.right, states, `${path}.right`);
       validateJoinKeys(left, right, node.keys, `${path}.keys`);
-      if (!joinKeysCoverGrain(right, node.keys)) {
-        fail(
-          "invalid-join",
-          `${path}.keys`,
-          "Join keys do not cover right grain.",
-        );
-      }
       expectedOutput = left.node.output;
       expectedGrain = left.grain;
       break;
@@ -1134,9 +1273,22 @@ function validateNode(
     }
     case "sort": {
       const input = assertRelation(node.input, states, `${path}.input`);
-      node.keys.forEach((key, index) =>
-        resolveVisibleSlot(input, key.slot, `${path}.keys[${index}].slot`),
-      );
+      node.keys.forEach((key, index) => {
+        const keyPath = `${path}.keys[${index}]`;
+        resolveVisibleSlot(input, key.slot, `${keyPath}.slot`);
+        if (key.direction !== "asc" && key.direction !== "desc")
+          fail(
+            "invalid-topology",
+            `${keyPath}.direction`,
+            "Sort direction is invalid.",
+          );
+        if (key.nulls !== "first" && key.nulls !== "last")
+          fail(
+            "invalid-topology",
+            `${keyPath}.nulls`,
+            "Sort null ordering is invalid.",
+          );
+      });
       expectedOutput = input.node.output;
       expectedGrain = input.grain;
       break;
@@ -1194,31 +1346,19 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
   }
   try {
     createSemanticTemporalDomains(plan.context.time);
-    if (
-      !["auto", "event", "session", "visitor"].includes(
-        plan.context.scope.requested,
-      )
-    ) {
-      fail(
-        "invalid-envelope",
-        "context.scope.requested",
-        "Filter scope is invalid.",
-      );
-    }
-    const canonicalScope = resolveAnalyticsScope(plan.context.scope.requested);
-    if (
-      canonicalScope.contractScope !== plan.context.scope.contractScope ||
-      canonicalScope.logicalScope !== plan.context.scope.logicalScope
-    ) {
-      fail(
-        "invalid-envelope",
-        "context.scope",
-        "Resolved scope does not match the requested scope.",
-      );
-    }
   } catch (error) {
     if (error instanceof LogicalPlanError) throw error;
     fail("invalid-envelope", "context", "Semantic query context is invalid.");
+  }
+  try {
+    validateResolvedAnalyticsScope(plan.context.scope);
+  } catch (error) {
+    if (error instanceof LogicalPlanError) throw error;
+    fail(
+      "invalid-envelope",
+      "context.scope",
+      "Resolved scope is invalid or inconsistent.",
+    );
   }
   if (
     !plan.context.subject ||

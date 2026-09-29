@@ -1,5 +1,8 @@
 import type { LogicalRelationHandle } from "./logical/builder";
-import type { AnalyticsEntityKind } from "./semantic/entities";
+import type {
+  AnalyticsEntityKind,
+  LogicalFilterScope,
+} from "./semantic/entities";
 import type { MetricTimeGroupingPolicy } from "./semantic/metrics";
 import type { SemanticSubjectDomain } from "./semantic/subject";
 import type { PlannedGrouping } from "./grouping";
@@ -8,7 +11,7 @@ export type EligibleDatasetScope =
   | { readonly kind: "unfiltered" }
   | {
       readonly kind: "matching";
-      readonly target: AnalyticsEntityKind;
+      readonly target: LogicalFilterScope;
       readonly relation: LogicalRelationHandle;
       readonly entitySlotName: string;
     };

@@ -11,6 +11,7 @@ import type { QuerySubject } from "@/lib/edge/analytics/contract/types";
 import {
   type AnalyticsEntityKind,
   resolveAnalyticsScope,
+  validateResolvedAnalyticsScope,
 } from "@/lib/edge/analytics/engine/semantic/entities";
 import {
   createSemanticSubjectDomain,
@@ -35,6 +36,73 @@ describe("semantic foundation", () => {
       logicalScope: null,
     });
     expect(resolveAnalyticsScope("session").logicalScope).toBe("session");
+  });
+
+  it.each([
+    {
+      requested: "auto",
+      contractScope: null,
+      logicalScope: null,
+    },
+    {
+      requested: "auto",
+      contractScope: "event",
+      logicalScope: "observation",
+    },
+    {
+      requested: "auto",
+      contractScope: "session",
+      logicalScope: "session",
+    },
+    {
+      requested: "auto",
+      contractScope: "visitor",
+      logicalScope: "visitor",
+    },
+    {
+      requested: "event",
+      contractScope: "event",
+      logicalScope: "observation",
+    },
+    {
+      requested: "session",
+      contractScope: "session",
+      logicalScope: "session",
+    },
+    {
+      requested: "visitor",
+      contractScope: "visitor",
+      logicalScope: "visitor",
+    },
+  ] as const)("validates and preserves resolved scope %#", (scope) => {
+    expect(validateResolvedAnalyticsScope(scope)).toEqual(scope);
+  });
+
+  it("rejects inconsistent resolved scopes", () => {
+    expect(() => validateResolvedAnalyticsScope(null as never)).toThrow(
+      "invalid_resolved_analytics_scope",
+    );
+    expect(() =>
+      validateResolvedAnalyticsScope({
+        requested: "unknown",
+        contractScope: null,
+        logicalScope: null,
+      } as never),
+    ).toThrow("invalid_resolved_analytics_scope");
+    expect(() =>
+      validateResolvedAnalyticsScope({
+        requested: "auto",
+        contractScope: "session",
+        logicalScope: "observation",
+      }),
+    ).toThrow("invalid_resolved_analytics_scope");
+    expect(() =>
+      validateResolvedAnalyticsScope({
+        requested: "event",
+        contractScope: null,
+        logicalScope: null,
+      }),
+    ).toThrow("invalid_resolved_analytics_scope");
   });
 
   it("canonicalizes authorized site domains without treating site as an entity", () => {

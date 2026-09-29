@@ -4,11 +4,17 @@ import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 import type { SemanticDimensionId } from "./semantic/dimensions";
 import { semanticDimension } from "./semantic/dimensions";
-import type { ResolvedAnalyticsScope } from "./semantic/entities";
+import {
+  type ResolvedAnalyticsScope,
+  validateResolvedAnalyticsScope,
+} from "./semantic/entities";
 import type { SemanticMetricId } from "./semantic/metrics";
 import { semanticMetric } from "./semantic/metrics";
 import type { SemanticSubjectDomain } from "./semantic/subject";
-import type { SemanticTemporalDomains } from "./semantic/time";
+import {
+  isCalendarGranularity,
+  type SemanticTemporalDomains,
+} from "./semantic/time";
 
 export interface SemanticQueryContext {
   readonly subject: SemanticSubjectDomain;
@@ -53,14 +59,49 @@ export function validateSemanticAggregateQuery(
   query: SemanticAggregateQuery,
 ): SemanticAggregateQuery {
   const issues: SemanticQueryIssue[] = [];
-  if (query.metrics.length === 0) {
+  if (!query || typeof query !== "object") {
+    throw new SemanticQueryError([
+      { path: "query", message: "Semantic aggregate query must be an object." },
+    ]);
+  }
+  if (!query.context || typeof query.context !== "object") {
+    issues.push({
+      path: "context",
+      message: "Semantic aggregate query requires a context object.",
+    });
+  } else {
+    try {
+      validateResolvedAnalyticsScope(query.context.scope);
+    } catch {
+      issues.push({
+        path: "context.scope",
+        message: "Resolved analytics scope is invalid or inconsistent.",
+      });
+    }
+  }
+  const dimensionsInput = Array.isArray(query.dimensions)
+    ? query.dimensions
+    : [];
+  const metricsInput = Array.isArray(query.metrics) ? query.metrics : [];
+  const sortInput = Array.isArray(query.sort) ? query.sort : [];
+  if (!Array.isArray(query.dimensions))
+    issues.push({
+      path: "dimensions",
+      message: "Dimensions must be an array.",
+    });
+  if (!Array.isArray(query.metrics))
+    issues.push({ path: "metrics", message: "Metrics must be an array." });
+  if (!Array.isArray(query.sort))
+    issues.push({ path: "sort", message: "Sort keys must be an array." });
+
+  if (metricsInput.length === 0) {
     issues.push({
       path: "metrics",
       message: "Semantic aggregate queries require at least one metric.",
     });
   }
   const dimensions = new Set<string>();
-  query.dimensions.forEach((id, index) => {
+  dimensionsInput.forEach((id, index) => {
     if (!semanticDimension(id))
       issues.push({
         path: `dimensions[${index}]`,
@@ -74,7 +115,7 @@ export function validateSemanticAggregateQuery(
     dimensions.add(id);
   });
   const metrics = new Set<string>();
-  query.metrics.forEach((id, index) => {
+  metricsInput.forEach((id, index) => {
     const metric = semanticMetric(id);
     if (!metric || metric.visibility !== "public")
       issues.push({
@@ -88,7 +129,24 @@ export function validateSemanticAggregateQuery(
       });
     metrics.add(id);
   });
-  query.sort.forEach((item, index) => {
+  sortInput.forEach((item, index) => {
+    const path = `sort[${index}]`;
+    if (!item || typeof item !== "object") {
+      issues.push({ path, message: "Sort key must be an object." });
+      return;
+    }
+    if (item.direction !== "asc" && item.direction !== "desc") {
+      issues.push({
+        path: `${path}.direction`,
+        message: "Sort direction must be asc or desc.",
+      });
+    }
+    if (item.nulls !== "first" && item.nulls !== "last") {
+      issues.push({
+        path: `${path}.nulls`,
+        message: "Sort null ordering must be first or last.",
+      });
+    }
     if (
       !dimensions.has(item.field) &&
       !metrics.has(item.field) &&
@@ -100,6 +158,21 @@ export function validateSemanticAggregateQuery(
       });
     }
   });
+  if (query.timeBucket !== undefined) {
+    const timeBucket = query.timeBucket as unknown;
+    if (
+      !timeBucket ||
+      typeof timeBucket !== "object" ||
+      !isCalendarGranularity(
+        (timeBucket as { readonly granularity?: unknown }).granularity,
+      )
+    ) {
+      issues.push({
+        path: "timeBucket.granularity",
+        message: "Time bucket granularity is invalid.",
+      });
+    }
+  }
   if (
     query.limit !== undefined &&
     (!Number.isInteger(query.limit) || query.limit < 0)
@@ -121,8 +194,11 @@ export function validateSemanticAggregateQuery(
       time: query.context.time,
       scope: Object.freeze({ ...query.context.scope }),
     }),
-    dimensions: Object.freeze([...query.dimensions]),
-    metrics: Object.freeze([...query.metrics]),
-    sort: Object.freeze(query.sort.map((item) => Object.freeze({ ...item }))),
+    dimensions: Object.freeze([...dimensionsInput]),
+    metrics: Object.freeze([...metricsInput]),
+    sort: Object.freeze(sortInput.map((item) => Object.freeze({ ...item }))),
+    ...(query.timeBucket
+      ? { timeBucket: Object.freeze({ ...query.timeBucket }) }
+      : {}),
   });
 }

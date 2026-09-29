@@ -1,12 +1,36 @@
-import {
-  COMPARISON_METRIC_KEYS,
-  type ComparisonMetricKey,
-} from "@/lib/edge/analytics/contract/types";
+import type { ComparisonMetricKey } from "@/lib/edge/analytics/contract/types";
 
 import type { SemanticAttributeId } from "./attributes";
 import type { LogicalValueType } from "./value-types";
 
-export type SemanticMetricId = ComparisonMetricKey;
+export const SEMANTIC_METRIC_IDS = [
+  "views",
+  "sessions",
+  "visitors",
+  "bounces",
+  "totalDurationMs",
+  "durationViews",
+  "avgDurationMs",
+  "bounceRate",
+  "viewsPerSession",
+  "events",
+] as const;
+
+export type SemanticMetricId = (typeof SEMANTIC_METRIC_IDS)[number];
+
+/** Boundary mapping keeps the public comparison subset separate from engine IDs. */
+export const COMPARISON_TO_SEMANTIC_METRIC = {
+  views: "views",
+  sessions: "sessions",
+  visitors: "visitors",
+  bounces: "bounces",
+  totalDurationMs: "totalDurationMs",
+  durationViews: "durationViews",
+  avgDurationMs: "avgDurationMs",
+  bounceRate: "bounceRate",
+  viewsPerSession: "viewsPerSession",
+  events: "events",
+} as const satisfies Readonly<Record<ComparisonMetricKey, SemanticMetricId>>;
 export type MetricVisibility = "public" | "internal";
 export type MetricTimeGroupingPolicy =
   "occurrence" | "entity-first-observation" | "distinct-entity-per-bucket";
@@ -321,7 +345,7 @@ export function validateMetricCatalog(
     }
   }
 
-  for (const key of COMPARISON_METRIC_KEYS) {
+  for (const key of SEMANTIC_METRIC_IDS) {
     if (!byId.has(key)) {
       issues.push({
         code: "missing-dependency",
