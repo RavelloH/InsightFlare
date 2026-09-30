@@ -10,8 +10,6 @@ import {
   param,
 } from "@/lib/db";
 import type { Predicate, SqlExpression } from "@/lib/db/query/expression";
-import type { LogicalExpr } from "@/lib/edge/analytics/engine/logical/expression";
-import type { SlotId } from "@/lib/edge/analytics/engine/logical/ids";
 import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
 import {
   analyticsFilterRegistry,
@@ -20,11 +18,6 @@ import {
 
 export type NativePrimitiveFieldId =
   "page.path" | "page.title" | "page.query" | "page.hash" | "event.name";
-
-export type NativePagePrimitiveFieldId = Exclude<
-  NativePrimitiveFieldId,
-  "event.name"
->;
 
 export interface NativePrimitiveFieldContract {
   readonly id: NativePrimitiveFieldId;
@@ -137,74 +130,6 @@ export function nativePrimitiveFieldContract(
   }
 
   return contract;
-}
-
-type StringLiteralExpression = Extract<
-  LogicalExpr,
-  { readonly kind: "literal" }
-> & { readonly value: string };
-
-function isStringLiteral(
-  expression: LogicalExpr,
-): expression is StringLiteralExpression {
-  return (
-    expression.kind === "literal" &&
-    typeof expression.value === "string" &&
-    expression.valueType.kind === "scalar" &&
-    expression.valueType.scalar === "string" &&
-    expression.valueType.unit === undefined
-  );
-}
-
-/** Decode one already-normalized Logical primitive without changing its meaning. */
-export function readNativePrimitivePredicate(
-  expression: LogicalExpr,
-  valueSlot: SlotId,
-  fieldId: NativePrimitiveFieldId,
-): NativePrimitivePredicate | undefined {
-  const contract = nativePrimitiveFieldContract(fieldId);
-  if (!contract) return undefined;
-
-  if (expression.kind === "comparison") {
-    if (
-      (expression.operator !== "eq" && expression.operator !== "neq") ||
-      expression.stringNormalization !== "trim" ||
-      expression.left.kind !== "slot" ||
-      expression.left.slot !== valueSlot ||
-      !isStringLiteral(expression.right)
-    ) {
-      return undefined;
-    }
-    return { operator: expression.operator, value: expression.right.value };
-  }
-
-  if (expression.kind === "set-membership") {
-    if (
-      expression.stringNormalization !== "trim" ||
-      expression.input.kind !== "slot" ||
-      expression.input.slot !== valueSlot ||
-      expression.values.length === 0 ||
-      expression.values.some((value) => !isStringLiteral(value))
-    ) {
-      return undefined;
-    }
-    const values = expression.values.map((value) => value.value as string);
-    if (new Set(values).size !== values.length) return undefined;
-    return {
-      operator: expression.negated ? "notIn" : "in",
-      values,
-    };
-  }
-
-  if (
-    expression.kind === "null-test" &&
-    expression.input.kind === "slot" &&
-    expression.input.slot === valueSlot
-  ) {
-    return { operator: expression.negated ? "notNull" : "isNull" };
-  }
-
-  return undefined;
 }
 
 /** Compile native string primitives against the original typed storage column. */

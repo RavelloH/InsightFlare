@@ -574,6 +574,394 @@ function evaluateCandidateRestrictedSets(
 }
 
 describe("Analytics native Page/Event primitive → Session D1 lowering", () => {
+  it("compares complete entity identities in filters and rejects nullable identity equality", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA, siteB } = setupSites(db);
+      addPage(db, siteA, "identity-a", "shared-session", 10, "/a");
+      addPage(db, siteA, "identity-b", "", 11, "/b");
+      addPage(db, siteB, "identity-other-site", "shared-session", 12, "/other");
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+      for (const operator of ["eq", "neq"] as const) {
+        const builder = new LogicalPlanBuilder(context);
+        const pages = builder.source("page", { temporalDomain: "read" });
+        const filtered = builder.filter(
+          pages,
+          builder.compare(
+            operator,
+            builder.slot(pages, "entity"),
+            builder.slot(pages, "entity"),
+          ),
+        );
+        builder.output("identity", filtered, [
+          { name: "page", slot: "entity" },
+        ]);
+        const plan = builder.finish();
+        const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+          siteId: SITE_A,
+          time: plan.context.time,
+        });
+        const lowered = lowerer.lower(plan.outputs[0]!);
+        const query = compileD1Query(
+          lowerer.projectOutput(lowered, [
+            {
+              name: "siteId",
+              slot: plan.outputs[0]!.fields[0]!.slot,
+              component: 0,
+            },
+            {
+              name: "visitId",
+              slot: plan.outputs[0]!.fields[0]!.slot,
+              component: 1,
+            },
+          ]),
+        );
+        const rows = (
+          await createD1DatabaseClient(createSqliteD1Database(db)).all(query)
+        ).results;
+        expect(rows).toEqual(
+          operator === "eq"
+            ? [
+                { siteId: siteA.key, visitId: "identity-a" },
+                { siteId: siteA.key, visitId: "identity-b" },
+              ]
+            : [],
+        );
+      }
+      const builder = new LogicalPlanBuilder(context);
+      const pages = builder.source("page", {
+        temporalDomain: "read",
+        relationships: ["page.session"],
+      });
+      const session = builder.slot(pages, "relationship:page.session");
+      const filtered = builder.filter(
+        pages,
+        builder.compare("eq", session, session),
+      );
+      builder.output("nullableIdentity", filtered, [
+        { name: "page", slot: "entity" },
+      ]);
+      const plan = builder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(plan, {
+          siteId: SITE_A,
+          time: plan.context.time,
+        }).lower(plan.outputs[0]!),
+      ).toThrow(/Only matching non-null composite entity keys are comparable/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects sorted and limited logical outputs before emitting SQL", () => {
+    for (const kind of ["sort", "limit"] as const) {
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+      const builder = new LogicalPlanBuilder(context);
+      const pages = builder.source("page", {
+        temporalDomain: "read",
+        attributes: ["page.path"],
+      });
+      const output =
+        kind === "sort"
+          ? builder.sort(pages, [
+              { slot: "attribute:page.path", direction: "asc", nulls: "last" },
+            ])
+          : builder.limit(pages, 1);
+      builder.output("unsupported", output, [{ name: "page", slot: "entity" }]);
+      const plan = builder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(plan, {
+          siteId: SITE_A,
+          time: plan.context.time,
+        }).lower(plan.outputs[0]!),
+      ).toThrow(`Logical ${kind} is outside the current D1 capability set.`);
+    }
+  });
+
+  it("rejects inconsistent slot metadata and malformed predicates at the DB lowering boundary", () => {
+    const context = {
+      subject: createSemanticSubjectDomain({
+        origin: "site",
+        siteIds: [SITE_A as never],
+      }),
+      time: createSemanticTemporalDomains({
+        candidate: CANDIDATE_RANGE as never,
+        read: { kind: "bounded", range: READ_RANGE as never },
+        reportingTimeZone: "UTC" as never,
+        capturedAtMs: 200 as never,
+      }),
+      scope: resolveAnalyticsScope("session"),
+    };
+    const builder = new LogicalPlanBuilder(context);
+    const pages = builder.source("page", {
+      temporalDomain: "read",
+      attributes: ["page.path"],
+    });
+    const path = builder.slot(pages, "attribute:page.path");
+    const filtered = builder.filter(
+      pages,
+      builder.compare(
+        "eq",
+        path,
+        builder.literal("/a", { kind: "scalar", scalar: "string" }),
+      ),
+    );
+    const projected = builder.project(filtered, {
+      path: builder.slot(filtered, "attribute:page.path"),
+      page: builder.slot(filtered, "entity"),
+    });
+    builder.output("boundary", projected, [
+      { name: "path", slot: "path" },
+      { name: "page", slot: "page" },
+    ]);
+    const base = builder.finish();
+    const sourcePath = pages.slots["attribute:page.path"]!;
+    const sourceEntity = pages.slots.entity!;
+    const outputPath = projected.slots.path!;
+    const outputEntity = projected.slots.page!;
+    const text = {
+      kind: "literal",
+      value: "constant",
+      valueType: { kind: "scalar", scalar: "string" },
+    };
+    const slot = (id: unknown) => ({ kind: "slot", slot: id });
+    const cases: Array<{
+      change: (plan: MutablePlanForTest) => void;
+      reason: RegExp;
+    }> = [
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate = {
+            kind: "set-membership",
+            input: {
+              kind: "literal",
+              value: 1,
+              valueType: { kind: "scalar", scalar: "number" },
+            },
+            values: [],
+            negated: false,
+            stringNormalization: "trim",
+          };
+        },
+        reason: /Trim normalization is supported only for string values/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate =
+            slot(999_999);
+        },
+        reason: /is not visible in this relation/u,
+      },
+      {
+        change: (plan) => {
+          const source = plan.nodes.find((node) => node.kind === "source")!;
+          source.values = (source.values as Array<{ slot: unknown }>).map(
+            (item) =>
+              item.slot === sourcePath
+                ? { kind: "occurrence-time", slot: sourcePath }
+                : item,
+          );
+        },
+        reason:
+          /Occurrence-time bindings are outside the current D1 capability set/u,
+      },
+      {
+        change: (plan) => {
+          const source = plan.nodes.find((node) => node.kind === "source")!;
+          source.values = (source.values as Array<{ slot: unknown }>).map(
+            (item) =>
+              item.slot === sourcePath
+                ? {
+                    kind: "attribute",
+                    slot: sourcePath,
+                    attribute: "event.name",
+                  }
+                : item,
+          );
+        },
+        reason: /A Page source cannot bind Event fields/u,
+      },
+      {
+        change: (plan) => {
+          plan.slots.find((item) => item.id === sourcePath)!.type = {
+            kind: "entity",
+            entity: "page",
+          };
+        },
+        reason: /A source attribute cannot bind an entity slot/u,
+      },
+      {
+        change: (plan) => {
+          plan.slots.find((item) => item.id === sourceEntity)!.nullable = true;
+        },
+        reason: /differs from its registered Logical metadata/u,
+      },
+      {
+        change: (plan) => {
+          const source = plan.nodes.find((node) => node.kind === "source")!;
+          source.values = (source.values as Array<{ slot: unknown }>).filter(
+            (item) => item.slot !== sourcePath,
+          );
+        },
+        reason: /The source does not bind slot/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate = text;
+        },
+        reason: /A relational predicate must lower to an integer expression/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate =
+            slot(sourceEntity);
+        },
+        reason: /requires a scalar Logical value/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate = {
+            kind: "comparison",
+            operator: "eq",
+            left: slot(sourceEntity),
+            right: text,
+          };
+        },
+        reason: /Entity comparison requires two entity identities/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate = {
+            kind: "comparison",
+            operator: "eq",
+            left: slot(sourceEntity),
+            right: slot(sourceEntity),
+            stringNormalization: "trim",
+          };
+        },
+        reason: /Entity comparisons do not use string normalization/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate = {
+            kind: "comparison",
+            operator: "gt",
+            left: slot(sourceEntity),
+            right: slot(sourceEntity),
+          };
+        },
+        reason: /Entity identities support equality only/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate = {
+            kind: "set-membership",
+            input: slot(sourcePath),
+            values: [text],
+            negated: false,
+            stringNormalization: "trim-case-fold",
+          };
+        },
+        reason: /does not support case-fold normalization/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate = {
+            kind: "set-membership",
+            input: slot(sourcePath),
+            values: [slot(sourcePath)],
+            negated: false,
+          };
+        },
+        reason: /Membership values must be literals/u,
+      },
+      {
+        change: (plan) => {
+          plan.nodes.find((node) => node.kind === "filter")!.predicate = {
+            kind: "comparison",
+            operator: "eq",
+            left: { kind: "coalesce", values: [] },
+            right: text,
+          };
+        },
+        reason: /COALESCE requires at least one value/u,
+      },
+      {
+        change: (plan) => {
+          const projections = plan.nodes.find(
+            (node) => node.kind === "project",
+          )!.projections as Array<{ slot: unknown; expression: unknown }>;
+          projections.find((item) => item.slot === outputPath)!.expression =
+            text;
+          plan.slots.find((item) => item.id === outputPath)!.type = {
+            kind: "entity",
+            entity: "page",
+          };
+        },
+        reason: /An entity slot cannot be mapped from a scalar expression/u,
+      },
+      {
+        change: (plan) => {
+          const projections = plan.nodes.find(
+            (node) => node.kind === "project",
+          )!.projections as Array<{ slot: unknown; expression: unknown }>;
+          projections.find((item) => item.slot === outputPath)!.expression = {
+            ...text,
+            value: null,
+          };
+          plan.slots.find((item) => item.id === outputPath)!.nullable = false;
+        },
+        reason: /lowered scalar can be NULL but the Logical slot cannot/u,
+      },
+      {
+        change: (plan) => {
+          plan.slots.find((item) => item.id === outputEntity)!.type = {
+            kind: "entity",
+            entity: "event",
+          };
+        },
+        reason: /lowered entity key does not match its Logical slot/u,
+      },
+    ];
+    for (const { change, reason } of cases) {
+      const changed = mutablePlan(base);
+      change(changed);
+      const plan = asLogicalPlan(changed);
+      expect(() =>
+        // Deliberately bypass the validation brand to exercise defensive
+        // adapter checks against corrupted plans; production callers validate.
+        new AnalyticsLogicalToDbLowerer(plan as typeof base, {
+          siteId: SITE_A,
+          time: plan.context.time,
+        }).lower(plan.outputs[0]!),
+      ).toThrow(reason);
+    }
+  });
+
   it("preserves NULL, membership, coalesce, and entity-presence semantics in Project", async () => {
     const db = createMigratedDatabase();
     try {

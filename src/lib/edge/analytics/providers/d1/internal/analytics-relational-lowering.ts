@@ -785,28 +785,6 @@ export class AnalyticsLogicalToDbLowerer {
     return this.#lowerNode(relation).candidateActivitySessionRelation;
   }
 
-  lowerRelation(relation: RelationId): LoweredAnalyticsLogicalOutput {
-    const entry = this.#lowerNode(relation);
-    const output: LogicalOutput = {
-      id: "internal",
-      relation,
-      fields: this.#plan.nodes
-        .find((node) => node.id === relation)!
-        .output.map((slot) => ({ name: String(slot), slot })),
-    };
-    return {
-      relation: entry.relation,
-      slots: entry.slots,
-      output,
-      candidateBounded: false,
-      candidateActivity: entry.candidateActivity,
-      candidateActivitySessionRelation: entry.candidateActivitySessionRelation,
-      candidateActivitySessionRestricted:
-        entry.candidateActivitySessionRestricted,
-      relationId: relation,
-    };
-  }
-
   #lowerNode(id: RelationId): LoweredRelation {
     const existing = this.#memo.get(id);
     if (existing) return existing;
@@ -1609,8 +1587,6 @@ export class AnalyticsLogicalToDbLowerer {
         );
       }
       case "filter":
-      case "sort":
-      case "limit":
         return this.#hasStorageBackedObservationIdentity(
           node.input,
           slot,
@@ -1627,17 +1603,6 @@ export class AnalyticsLogicalToDbLowerer {
           )
         );
       }
-      case "aggregate": {
-        const group = node.groups.find((item) => item.slot === slot);
-        return (
-          group?.expression.kind === "slot" &&
-          this.#hasStorageBackedObservationIdentity(
-            node.input,
-            group.expression.slot,
-            nextActive,
-          )
-        );
-      }
       case "distinct": {
         const key = node.keys.find((item) => item.output === slot);
         return (
@@ -1649,24 +1614,6 @@ export class AnalyticsLogicalToDbLowerer {
           )
         );
       }
-      case "set-operation": {
-        const index = node.output.indexOf(slot);
-        return (
-          index >= 0 &&
-          node.inputs.every((inputId) => {
-            const input = this.#nodes.get(inputId);
-            const inputSlot = input?.output[index];
-            return (
-              inputSlot !== undefined &&
-              this.#hasStorageBackedObservationIdentity(
-                inputId,
-                inputSlot,
-                nextActive,
-              )
-            );
-          })
-        );
-      }
       case "semi-join":
       case "anti-join":
         return this.#hasStorageBackedObservationIdentity(
@@ -1674,27 +1621,15 @@ export class AnalyticsLogicalToDbLowerer {
           slot,
           nextActive,
         );
-      case "join": {
-        if (this.#nodes.get(node.left)?.output.includes(slot))
-          return this.#hasStorageBackedObservationIdentity(
-            node.left,
-            slot,
-            nextActive,
-          );
-        const alias = node.rightAliases.find((item) => item.alias === slot);
-        const sourceSlot = alias?.source ?? slot;
-        return (
-          node.joinType === "inner" &&
-          (alias !== undefined ||
-            this.#nodes.get(node.right)?.output.includes(sourceSlot) ===
-              true) &&
-          this.#hasStorageBackedObservationIdentity(
-            node.right,
-            sourceSlot,
-            nextActive,
-          )
-        );
-      }
+      case "aggregate":
+      case "set-operation":
+      case "join":
+      case "sort":
+      case "limit":
+        // The supported aggregates/joins expose scalars, and set operations
+        // expose Session keys. Sort/Limit cannot be lowered yet. None can
+        // supply a storage-backed Observation identity in this capability set.
+        return false;
       case "relationship-lookup":
         return (
           slot !== node.relatedSlot &&
