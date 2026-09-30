@@ -121,23 +121,23 @@ export function targetSuggestion(
   target: DeployTarget,
 ): string {
   if (target === "cf") {
-    if (scriptName === "build") return "Use `npm run build:local` locally.";
+    if (scriptName === "build") return "Use `pnpm run build:local` locally.";
     if (scriptName === "prebuild")
-      return "Use `npm run build:pre:local` locally.";
+      return "Use `pnpm run build:pre:local` locally.";
     if (scriptName === "deploy")
       return "Run this only as the Cloudflare deploy command, or use a demo/local command.";
     if (scriptName === "publish")
-      return "Run this only from Cloudflare, or use `npm run publish:demo` for demo publishing.";
+      return "Run this only from Cloudflare, or use `pnpm run publish:demo` for demo publishing.";
     if (scriptName === "db")
-      return "Use `npm run db:migrate:local` for local D1, or run the Cloudflare database command in Cloudflare.";
+      return "Use `pnpm run db:migrate:local` for local D1, or run the Cloudflare database command in Cloudflare.";
     if (scriptName === "ops")
       return "Run Cloudflare operations only in Cloudflare, or use Wrangler directly if you intentionally need an interactive local operation.";
   }
 
   if (target === "local") {
-    if (scriptName === "build") return "Use `npm run build` in Cloudflare.";
+    if (scriptName === "build") return "Use `pnpm run build` in Cloudflare.";
     if (scriptName === "prebuild")
-      return "Use `npm run build:pre` in Cloudflare.";
+      return "Use `pnpm run build:pre` in Cloudflare.";
   }
 
   return "Choose the command whose target matches the current environment.";
@@ -296,17 +296,4 @@ export function localCli(rootDir: string, packageName: string, bin: string) {
   const candidate = path.join(rootDir, "node_modules", packageName, bin);
   if (fs.existsSync(candidate)) return candidate;
   throw new Error(`Cannot resolve local ${packageName} CLI (${candidate})`);
-}
-
-export function npmCommand(args: string[]): {
-  args: string[];
-  command: string;
-} {
-  if (process.platform !== "win32") {
-    return { args, command: "npm" };
-  }
-  return {
-    args: ["/d", "/s", "/c", commandLine("npm", args)],
-    command: process.env.ComSpec || "cmd.exe",
-  };
 }

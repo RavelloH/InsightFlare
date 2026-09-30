@@ -24,7 +24,7 @@ const actual = readFileSync(SKILLS_OUTPUT_PATH, "utf8");
 
 if (actual !== expected) {
   rlog.error(
-    "docs/skills.json is stale. Run npm run generate:skills and commit the generated artifact.",
+    "docs/skills.json is stale. Run pnpm run generate:skills and commit the generated artifact.",
   );
   process.exitCode = 1;
 } else {

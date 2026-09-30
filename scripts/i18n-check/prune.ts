@@ -85,7 +85,7 @@ export function getMessages(locale: Locale): AppMessages {
 }
 
 function formatMessagesFile(): void {
-  execSync(`npx prettier --write ${JSON.stringify(APP_MESSAGES_PATH)}`, {
+  execSync(`pnpm exec prettier --write ${JSON.stringify(APP_MESSAGES_PATH)}`, {
     stdio: "pipe",
   });
 }

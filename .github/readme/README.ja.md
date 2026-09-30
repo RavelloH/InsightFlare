@@ -354,30 +354,30 @@ window.insightflare.identify("user-456", { name: "Bob" });
 ### ローカル開発
 
 1. `git clone https://github.com/RavelloH/InsightFlare`
-2. `npm install`
-3. `npm run db:migrate:local`
+2. `pnpm install`
+3. `pnpm run db:migrate:local`
 4. `.dev.vars.example` を参照して環境変数を設定します。
-5. `npm run dev`
+5. `pnpm run dev`
 
-`npm run dev:ui` はデモモードで Vite 開発サーバーを起動します。通常の `npm run dev` でデモモードを有効にするには、`DEMO_MODE=1` を設定してください。
+`pnpm run dev:ui` はデモモードで Vite 開発サーバーを起動します。通常の `pnpm run dev` でデモモードを有効にするには、`DEMO_MODE=1` を設定してください。
 
 ## 主なコマンド
 
 | コマンド | 説明 |
 | --- | --- |
-| `npm run dev` | Vite と Cloudflare Workers によるローカル開発 |
-| `npm run dev:ui` | デモモードでダッシュボード開発サーバーを起動 |
-| `npm run build` | Cloudflare 管理ビルドのエントリポイント |
-| `npm run build:local` | ローカル事前確認、D1 マイグレーション、ビルド |
-| `npm run build:demo` | リソースバインドなしのデモビルド |
-| `npm run deploy` | Cloudflare 管理デプロイのエントリポイント |
-| `npm run publish` | 許可された Cloudflare 環境からビルドして公開 |
-| `npm run check` | format と lint を自動修正してから、build、型、i18n、テスト、仕様をチェック |
-| `npm run check:verify` | 自動修正なしで完全なチェックを実行 |
-| `npm run typecheck` | TypeScript の型チェック |
-| `npm run lint` / `lint:fix` | ESLint |
-| `npm run format` / `format:check` | Prettier |
-| `npm run check:i18n` | 翻訳キーの完全性を検証 |
+| `pnpm run dev` | Vite と Cloudflare Workers によるローカル開発 |
+| `pnpm run dev:ui` | デモモードでダッシュボード開発サーバーを起動 |
+| `pnpm run build` | Cloudflare 管理ビルドのエントリポイント |
+| `pnpm run build:local` | ローカル事前確認、D1 マイグレーション、ビルド |
+| `pnpm run build:demo` | リソースバインドなしのデモビルド |
+| `pnpm run deploy` | Cloudflare 管理デプロイのエントリポイント |
+| `pnpm run publish` | 許可された Cloudflare 環境からビルドして公開 |
+| `pnpm run check` | format と lint を自動修正してから、build、型、i18n、テスト、仕様をチェック |
+| `pnpm run check:verify` | 自動修正なしで完全なチェックを実行 |
+| `pnpm run typecheck` | TypeScript の型チェック |
+| `pnpm run lint` / `lint:fix` | ESLint |
+| `pnpm run format` / `format:check` | Prettier |
+| `pnpm run check:i18n` | 翻訳キーの完全性を検証 |
 
 ---
 

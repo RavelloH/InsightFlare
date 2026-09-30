@@ -1,4 +1,4 @@
--- D1 schema (generated). Do not edit by hand; run `npm run generate:schema`
+-- D1 schema (generated). Do not edit by hand; run `pnpm run generate:schema`
 
 -- Regenerates the current table structure by replaying migrations/.
 

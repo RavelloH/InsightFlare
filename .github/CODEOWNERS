@@ -12,7 +12,8 @@
 # Build, validation, and maintenance scripts.
 /scripts/ @RavelloH
 /package.json @RavelloH
-/package-lock.json @RavelloH
+/pnpm-lock.yaml @RavelloH
+/pnpm-workspace.yaml @RavelloH
 
 # Analytics ingestion, edge runtime behavior, and tracker SDK.
 /src/app/collect/ @RavelloH

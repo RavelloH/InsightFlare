@@ -67,24 +67,30 @@ jobs:
           echo "file_path=$NEW_FILE" >> "$GITHUB_OUTPUT"
           echo "Detected release changelog: $NEW_FILE"
 
+      - name: Setup pnpm
+        if: steps.changelog.outputs.has_release == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+
       - name: Setup Node.js
         if: steps.changelog.outputs.has_release == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
         if: steps.changelog.outputs.has_release == 'true'
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install Chromium for E2E
         if: steps.changelog.outputs.has_release == 'true'
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run full E2E gate
         if: steps.changelog.outputs.has_release == 'true'
-        run: npm run test:e2e
+        run: pnpm run test:e2e
 
       - name: Upload E2E diagnostics
         if: failure() && steps.changelog.outputs.has_release == 'true'
@@ -116,28 +122,17 @@ jobs:
             fs.writeFileSync(filePath, JSON.stringify(json, null, 2) + "\n");
           }
 
-          function updatePackageLock(filePath) {
-            if (!fs.existsSync(filePath)) return;
-
-            const raw = fs.readFileSync(filePath, "utf8");
-            const json = JSON.parse(raw);
-            json.version = version;
-            if (json.packages && json.packages[""]) {
-              json.packages[""].version = version;
-            }
-            fs.writeFileSync(filePath, JSON.stringify(json, null, 2) + "\n");
-          }
-
           updatePackageJson("package.json");
-          updatePackageLock("package-lock.json");
           NODE
 
-          npm run generate:openapi
-          npm run generate:release-index
-          npm run generate:skills
-          npx tsx scripts/check-openapi-contract.ts
+          pnpm run generate:openapi
+          pnpm run generate:release-index
+          pnpm run generate:skills
+          pnpm exec tsx scripts/check-openapi-contract.ts
 
-          git add package.json package-lock.json .github/releases/version.json scripts/skills-template.json docs/openapi.json docs/openapi.yaml docs/skills.json
+          git diff --exit-code -- pnpm-lock.yaml
+
+          git add package.json .github/releases/version.json scripts/skills-template.json docs/openapi.json docs/openapi.yaml docs/skills.json
 
           if git diff --cached --quiet; then
             echo "Release artifacts are already up to date."

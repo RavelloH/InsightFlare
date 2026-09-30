@@ -6,11 +6,11 @@ This project is still early, so the most useful contributions are focused bug fi
 
 ## Development Setup
 
-InsightFlare uses Node.js 24 and npm.
+InsightFlare uses Node.js 24 and pnpm 10.33.0.
 
 ```bash
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 For local Cloudflare-related development, copy the example environment file and fill in local values:
@@ -26,7 +26,7 @@ At minimum, local secret-backed flows need `MAIN_SECRET` and `BOOTSTRAP_ADMIN_PA
 Before opening a pull request, run:
 
 ```bash
-npm run check
+pnpm run check
 ```
 
 This runs the same core checks expected by CI:
@@ -40,7 +40,7 @@ This runs the same core checks expected by CI:
 For build-related changes, also run:
 
 ```bash
-npm run build:demo
+pnpm run build:demo
 ```
 
 ## Pull Requests
@@ -59,8 +59,8 @@ Avoid mixing unrelated refactors with feature or bug-fix changes.
 Tests are written with Vitest. Prefer colocated tests under `__tests__` directories near the code being tested.
 
 ```bash
-npm run test
-npm run test:coverage
+pnpm run test
+pnpm run test:coverage
 ```
 
 ## Documentation

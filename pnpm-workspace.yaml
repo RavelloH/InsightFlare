@@ -1,0 +1,9 @@
+overrides:
+  browserslist: ^4.28.9
+  fast-uri: ^3.1.7
+  qs: ^6.16.0
+
+allowBuilds:
+  esbuild: true
+  msw: false
+  workerd: true

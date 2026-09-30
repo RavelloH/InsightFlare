@@ -85,7 +85,7 @@ function Page() {
                 {copy.commandDescription}
               </p>
               <code className="block overflow-x-auto border bg-muted px-3 py-2 text-xs">
-                npm run ops:secret:main
+                pnpm run ops:secret:main
               </code>
               <p className="text-xs text-muted-foreground">
                 {copy.quickStartHint}

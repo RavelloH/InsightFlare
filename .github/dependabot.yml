@@ -14,9 +14,9 @@ updates:
         update-types:
           - version-update:semver-major
     groups:
-      npm-production:
+      pnpm-production:
         dependency-type: production
-      npm-development:
+      pnpm-development:
         dependency-type: development
 
   - package-ecosystem: github-actions

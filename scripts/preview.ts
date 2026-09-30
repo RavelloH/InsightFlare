@@ -27,7 +27,7 @@ function wranglerDevArgs(options: CommonOptions): string[] {
 }
 
 async function runBuild(options: CommonOptions): Promise<void> {
-  const command = process.platform === "win32" ? "npm.cmd" : "npm";
+  const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   await runtime.runCommand(
     command,
     buildArgs(options),

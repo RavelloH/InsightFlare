@@ -164,17 +164,17 @@ function createTasks(fix: boolean): CheckTask[] {
   ];
 }
 
-function npmSpawnCommand(args: string[]): { command: string; args: string[] } {
+function pnpmSpawnCommand(args: string[]): { command: string; args: string[] } {
   if (process.platform !== "win32") {
     return {
-      command: "npm",
+      command: "pnpm",
       args,
     };
   }
 
   return {
     command: process.env.ComSpec || "cmd.exe",
-    args: ["/d", "/s", "/c", ["npm", ...args].join(" ")],
+    args: ["/d", "/s", "/c", ["pnpm", ...args].join(" ")],
   };
 }
 
@@ -183,7 +183,7 @@ async function runStep(
   step: CheckStep,
   verbose: boolean,
 ): Promise<StepResult> {
-  const command = npmSpawnCommand(step.args);
+  const command = pnpmSpawnCommand(step.args);
   const result = await runCapturedProcess({
     command: command.command,
     args: command.args,

@@ -360,38 +360,38 @@ If you do not use the deploy button, deploy with the steps below:
 ### Local Development
 
 1. Clone this repository locally: `git clone https://github.com/RavelloH/InsightFlare`
-2. Install dependencies: `npm install`
-3. Create the local database: `npm run db:migrate:local`
+2. Install dependencies: `pnpm install`
+3. Create the local database: `pnpm run db:migrate:local`
 4. Set environment variables by referring to `.dev.vars.example`
-5. Start the development server: `npm run dev`
+5. Start the development server: `pnpm run dev`
 
-`npm run dev:ui` starts the Vite development server in Demo Mode and uses frontend mock data for UI testing. To enable Demo Mode with `npm run dev`, set `DEMO_MODE=1`.
+`pnpm run dev:ui` starts the Vite development server in Demo Mode and uses frontend mock data for UI testing. To enable Demo Mode with `pnpm run dev`, set `DEMO_MODE=1`.
 
 ## Common Commands
 
 | Command                                       | Purpose                                                                       |
 | --------------------------------------------- | ----------------------------------------------------------------------------- |
-| `npm run dev`                                 | Vite + Cloudflare Workers local development (use `http://localhost:3000`)     |
-| `npm run dev:ui`                              | Start the Vite dashboard development server in Demo Mode                      |
-| `npm run preview:local`                       | Build with local resources and run Wrangler preview                           |
-| `npm run build`                               | Cloudflare managed build entrypoint                                           |
-| `npm run build:local`                         | Local precheck + local D1 migration + build                                   |
-| `npm run build:demo`                          | Demo build without resource bindings                                          |
-| `npm run deploy`                              | Cloudflare managed deploy entrypoint                                          |
-| `npm run publish`                             | Build and publish from an allowed Cloudflare environment                      |
-| `npm run publish:demo`                        | Build and publish the demo Worker                                             |
-| `npm run check`                               | Auto-fix format/lint, then run build + typecheck + i18n + tests + spec checks |
-| `npm run check:verify`                        | Run the full check suite without automatic fixes                              |
-| `npm run typecheck`                           | TypeScript type checking                                                      |
-| `npm run lint` / `lint:fix`                   | ESLint                                                                        |
-| `npm run format` / `format:check`             | Prettier                                                                      |
-| `npm run check:i18n`                          | Validate translation key completeness                                         |
-| `npm run db:migrate:local`                    | Local D1 migration                                                            |
-| `npm run db:migrate:cf`                       | Cloudflare D1 migration                                                       |
-| `npm run db:migration:create`                 | Create a new migration file                                                   |
-| `npm run ops:secret:main`                     | Set the `MAIN_SECRET` Worker secret                                           |
-| `npm run ops:secret:bootstrap-admin-password` | Set the bootstrap admin password secret                                       |
-| `npm run ops:tail`                            | View online Worker logs                                                       |
+| `pnpm run dev`                                 | Vite + Cloudflare Workers local development (use `http://localhost:3000`)     |
+| `pnpm run dev:ui`                              | Start the Vite dashboard development server in Demo Mode                      |
+| `pnpm run preview:local`                       | Build with local resources and run Wrangler preview                           |
+| `pnpm run build`                               | Cloudflare managed build entrypoint                                           |
+| `pnpm run build:local`                         | Local precheck + local D1 migration + build                                   |
+| `pnpm run build:demo`                          | Demo build without resource bindings                                          |
+| `pnpm run deploy`                              | Cloudflare managed deploy entrypoint                                          |
+| `pnpm run publish`                             | Build and publish from an allowed Cloudflare environment                      |
+| `pnpm run publish:demo`                        | Build and publish the demo Worker                                             |
+| `pnpm run check`                               | Auto-fix format/lint, then run build + typecheck + i18n + tests + spec checks |
+| `pnpm run check:verify`                        | Run the full check suite without automatic fixes                              |
+| `pnpm run typecheck`                           | TypeScript type checking                                                      |
+| `pnpm run lint` / `lint:fix`                   | ESLint                                                                        |
+| `pnpm run format` / `format:check`             | Prettier                                                                      |
+| `pnpm run check:i18n`                          | Validate translation key completeness                                         |
+| `pnpm run db:migrate:local`                    | Local D1 migration                                                            |
+| `pnpm run db:migrate:cf`                       | Cloudflare D1 migration                                                       |
+| `pnpm run db:migration:create`                 | Create a new migration file                                                   |
+| `pnpm run ops:secret:main`                     | Set the `MAIN_SECRET` Worker secret                                           |
+| `pnpm run ops:secret:bootstrap-admin-password` | Set the bootstrap admin password secret                                       |
+| `pnpm run ops:tail`                            | View online Worker logs                                                       |
 
 ---
 

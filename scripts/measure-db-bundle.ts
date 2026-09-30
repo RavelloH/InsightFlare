@@ -153,9 +153,9 @@ function runWorkerBuild(
   commitSha: string,
 ): void {
   skipIrrelevantSkillPreflight(directory);
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const result = spawnSync(
-    npm,
+    pnpm,
     ["run", "build:cf", "--", "--skip-prebuild", "--skip-sdk"],
     {
       cwd: directory,

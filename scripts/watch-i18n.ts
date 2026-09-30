@@ -4,9 +4,9 @@
  * Runtime reads translations from messages.ts (the generated artifact), not
  * from the yaml sources directly. This script keeps the artifact in sync while
  * editing yaml, so changes take effect without manually re-running
- * `npm run check:i18n -- --prune`.
+ * `pnpm run check:i18n -- --prune`.
  *
- * Use `npm run watch:i18n`, or just `npm run dev` (the dev runner embeds the
+ * Use `pnpm run watch:i18n`, or just `pnpm run dev` (the dev runner embeds the
  * same watcher).
  */
 import { createYamlWatcher } from "./i18n-check/watch";
