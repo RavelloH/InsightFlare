@@ -48,6 +48,7 @@ vi.mock("@/components/dashboard/common/data-table-switch", () => ({
     loading,
     hasContent,
     header,
+    loadingLabel,
     loadingRows,
     rows,
     footer,
@@ -55,6 +56,7 @@ vi.mock("@/components/dashboard/common/data-table-switch", () => ({
     loading: boolean;
     hasContent: boolean;
     header: ReactNode;
+    loadingLabel: string;
     loadingRows?: ReactNode;
     rows: ReactNode;
     footer?: ReactNode;
@@ -62,7 +64,15 @@ vi.mock("@/components/dashboard/common/data-table-switch", () => ({
     loading ? (
       <table data-testid="loading">
         <thead>{header}</thead>
-        <tbody>{loadingRows}</tbody>
+        <tbody>
+          {loadingRows ?? (
+            <tr>
+              <td>
+                <span data-testid="loading-indicator">{loadingLabel}</span>
+              </td>
+            </tr>
+          )}
+        </tbody>
       </table>
     ) : hasContent ? (
       <table>
@@ -176,7 +186,7 @@ describe("TabbedDataTableCard loader contract", () => {
     container = undefined;
   });
 
-  it("renders a loading skeleton row for each item in the requested page", () => {
+  it("renders a loading indicator while the requested page is pending", () => {
     const loader = vi.fn(
       (_options: TabbedDataTableLoaderOptions<TestTab, TestSortKey>) =>
         new Promise<TabbedDataTablePage<TestRow>>(() => undefined),
@@ -184,8 +194,9 @@ describe("TabbedDataTableCard loader contract", () => {
     ({ client, container, root } = renderTable(loader));
 
     expect(
-      container!.querySelectorAll('[data-testid="loading"] tbody tr'),
-    ).toHaveLength(2);
+      container!.querySelector('[data-testid="loading-indicator"]')
+        ?.textContent,
+    ).toBe("Loading");
   });
 
   it("renders rows in the order returned by the loader", async () => {

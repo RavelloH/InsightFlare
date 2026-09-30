@@ -139,6 +139,7 @@ function TabbedDataTableCardImpl<
   const [internalTab, setInternalTab] = useState<TTab>(
     defaultValue ?? tabs[0].value,
   );
+  const [pendingTab, setPendingTab] = useState<TTab | null>(null);
   const selectedTab = controlled ? value : internalTab;
   const activeTab: TTab =
     selectedTab !== undefined && tabs.some((tab) => tab.value === selectedTab)
@@ -296,6 +297,7 @@ function TabbedDataTableCardImpl<
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isFetching,
     isPending,
     isPlaceholderData,
   } = dataQuery;
@@ -401,9 +403,26 @@ function TabbedDataTableCardImpl<
   );
   const activeTabMeta = tabByValue.get(activeTab) ?? tabs[0];
   const activeSearchTabMeta = tabByValue.get(activeSearchTab) ?? activeTabMeta;
-  const activeLoading = completedRows ? false : isPending;
+  const activeLoading = completedRows
+    ? false
+    : isPending || (pendingTab === activeTab && isFetching);
   const searchLoading =
     activeSearchTab === activeTab ? (completedRows ? false : isPending) : false;
+  useEffect(() => {
+    if (
+      pendingTab === activeTab &&
+      (completedRows || (!isPending && !isPlaceholderData && !isFetching))
+    ) {
+      setPendingTab(null);
+    }
+  }, [
+    activeTab,
+    completedRows,
+    isFetching,
+    isPending,
+    isPlaceholderData,
+    pendingTab,
+  ]);
   const activeSearchColumns = getColumnsForTab(columns, activeSearchTab);
   const colSpan = 1 + activeColumns.length;
   const searchColSpan = 1 + activeSearchColumns.length;
@@ -457,6 +476,7 @@ function TabbedDataTableCardImpl<
   ]);
 
   function setActiveTab(next: TTab) {
+    if (next !== activeTab) setPendingTab(next);
     if (!controlled) {
       setInternalTab(next);
     }
@@ -1206,11 +1226,6 @@ function TabbedDataTableCardImpl<
           emptyLabel={emptyLabel}
           colSpan={colSpan}
           header={renderTableHeader(activeTab, activeColumns)}
-          loadingRows={
-            activeLoading
-              ? renderInitialLoadingRows(activeTab, activeColumns, "card")
-              : undefined
-          }
           rows={renderRows(activeTab, activeRows, activeColumns, "card")}
           footer={
             activeHasMore ? renderLoadMoreRows(activeTab, activeColumns) : null
