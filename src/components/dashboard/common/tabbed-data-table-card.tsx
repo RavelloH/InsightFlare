@@ -1,6 +1,5 @@
 import {
   memo,
-  startTransition,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -14,7 +13,7 @@ import {
   RiDownloadLine,
   RiSearchLine,
 } from "@remixicon/react";
-import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
 import { AnimatedDataTableRow } from "@/components/dashboard/common/animated-data-table-row";
@@ -282,10 +281,15 @@ function TabbedDataTableCardImpl<
       lastPage.pagination.hasMore
         ? (lastPage.pagination.nextCursor ?? undefined)
         : undefined,
-    // A changing request key should refresh rows in place. In particular,
-    // realtime snapshots must not replace the whole table with a loading
-    // state before the next snapshot arrives.
-    placeholderData: keepPreviousData,
+    // Keep the previous rows during same-tab refreshes (for example,
+    // realtime snapshots), but never show another tab's rows while loading.
+    placeholderData: (previousData, previousQuery) => {
+      const previousQueryKey = previousQuery?.queryKey;
+      return previousQueryKey?.[3] === tabsKey &&
+        previousQueryKey[4] === activeTab
+        ? previousData
+        : undefined;
+    },
     enabled: typeof window !== "undefined" && completedRows === null,
   });
   const {
@@ -454,7 +458,7 @@ function TabbedDataTableCardImpl<
 
   function setActiveTab(next: TTab) {
     if (!controlled) {
-      startTransition(() => setInternalTab(next));
+      setInternalTab(next);
     }
     onValueChange?.(next);
   }
@@ -1212,6 +1216,7 @@ function TabbedDataTableCardImpl<
             activeHasMore ? renderLoadMoreRows(activeTab, activeColumns) : null
           }
           contentKey={`card-${contentTransitionKey ?? requestKey ?? ""}-${activeTab}`}
+          animate={!activeLoading}
         />
       </TabbedScrollMaskCard>
       {searchPanel}
