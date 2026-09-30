@@ -19,3 +19,4 @@ plan/
 playwright-report/
 test-results/
 .tmp/
+/AGENTS.md
