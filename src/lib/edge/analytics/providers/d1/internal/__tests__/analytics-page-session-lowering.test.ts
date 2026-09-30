@@ -4,15 +4,23 @@ import { describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
+  caseWhen,
+  compileD1Query,
   createD1DatabaseClient,
   D1_MAX_BOUND_PARAMETERS,
   D1_MAX_SQL_UTF8_BYTES,
+  eq,
+  inList,
+  param,
+  project,
+  scan,
 } from "@/lib/db";
 import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
 import {
   createSqliteD1Database,
   type SqliteD1Trace,
 } from "@/lib/db/__tests__/sqlite-d1";
+import { schema } from "@/lib/db/schema";
 import {
   LazyEligibleDataset,
   LogicalPlanBuilder,
@@ -26,9 +34,15 @@ import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/seman
 import {
   type AnalyticsPageSessionLoweringInput,
   lowerAnalyticsFilteredSessionCountPlan,
+  lowerAnalyticsFilteredSessionOverviewPairPlan,
+  lowerAnalyticsFilteredSessionViewsPlan,
   lowerAnalyticsPagePathSessionPlan,
   lowerAnalyticsPagePathToSessionQuery,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-page-session-lowering";
+import {
+  lowerNativePrimitivePredicate,
+  type NativePrimitiveFieldId,
+} from "@/lib/edge/analytics/providers/d1/internal/analytics-primitive-predicate-lowering";
 import {
   evaluateFilterDocument,
   type FilterEvaluationEntity,
@@ -37,6 +51,7 @@ import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import { analyzeFilterDocument } from "@/lib/filter-contract/filter-semantics";
 import {
   type FilterDocument,
+  type FilterOperator,
   normalizeFilterDocument,
 } from "@/lib/filter-contract/filters";
 
@@ -72,7 +87,20 @@ function eventNameCondition(name: string) {
   } as const;
 }
 
-function inCondition(field: "page.path" | "event.name", values: string[]) {
+function fieldCondition(
+  field: NativePrimitiveFieldId,
+  operator: FilterOperator,
+  value?: string | readonly string[],
+) {
+  return {
+    kind: "condition",
+    target: { kind: "field", field },
+    operator,
+    ...(value === undefined ? {} : { value }),
+  } as const;
+}
+
+function inCondition(field: NativePrimitiveFieldId, values: string[]) {
   return {
     kind: "condition",
     target: { kind: "field", field },
@@ -149,6 +177,67 @@ function buildDirectSessionPlan(
   return builder.finish();
 }
 
+function buildDirectMetricPlan(
+  input: unknown,
+  metrics: readonly ("sessions" | "views")[],
+): LogicalPlan {
+  const document = normalizeFilterDocument(input, analyticsFilterRegistry);
+  const context = {
+    subject: createSemanticSubjectDomain({
+      origin: "site",
+      siteIds: [SITE_A as never],
+    }),
+    time: createSemanticTemporalDomains({
+      candidate: CANDIDATE_RANGE as never,
+      read: { kind: "bounded", range: READ_RANGE as never },
+      reportingTimeZone: "UTC" as never,
+      capturedAtMs: 200 as never,
+    }),
+    scope: resolveAnalyticsScope("session"),
+  };
+  const builder = new LogicalPlanBuilder(context);
+  const lowered = lowerFilterDocumentToScope(
+    builder,
+    analyzeFilterDocument(document, analyticsFilterRegistry),
+    { targetScope: "session", resolveTemporalDomain: () => "read" },
+  );
+  if (lowered.kind !== "supported") {
+    throw new Error(
+      `Expected a supported Session filter, received ${lowered.kind}.`,
+    );
+  }
+  const candidatePages = builder.source("page", {
+    relationships: ["page.session"],
+  });
+  const eligiblePages = builder.semiJoin(
+    candidatePages,
+    lowered.selection.relation,
+    [{ left: "relationship:page.session", right: "entity" }],
+  );
+  const dataset = new LazyEligibleDataset({
+    subject: context.subject,
+    scope: {
+      kind: "matching",
+      target: "session",
+      relation: lowered.selection.relation,
+      entitySlotName: "entity",
+    },
+    resolveRelation(entity) {
+      if (entity === "page") return eligiblePages;
+      if (entity === "session") return lowered.selection.relation;
+      return builder.source(entity);
+    },
+    resolveAssociation() {
+      throw new Error("An ungrouped aggregate does not use associations.");
+    },
+  });
+  return planSemanticAggregateQuery(
+    builder,
+    { context, dimensions: [], metrics: [...metrics], sort: [] },
+    dataset,
+  );
+}
+
 const PATH_A = filterDocument(pathCondition("/a"));
 const PATH_B = filterDocument(pathCondition("/b"));
 
@@ -164,6 +253,9 @@ interface PageSeed {
   readonly sessionId: string;
   readonly startedAt: number;
   readonly pathname: string;
+  readonly title?: string;
+  readonly query?: string;
+  readonly hash?: string;
 }
 
 interface EventSeed {
@@ -242,7 +334,12 @@ function pageEntity(page: PageSeed): FilterEvaluationEntity {
     sessionId: page.sessionId,
     visitorId: `visitor-${page.visitId}`,
     time: page.startedAt,
-    fields: { "page.path": page.pathname },
+    fields: {
+      "page.path": page.pathname,
+      "page.title": page.title ?? "",
+      "page.query": page.query ?? "",
+      "page.hash": page.hash ?? "",
+    },
   };
 }
 
@@ -284,6 +381,24 @@ function addPage(
   const page = { visitId, site, sessionId, startedAt, pathname };
   insertPage(db, page);
   return page;
+}
+
+function withPageAttributes(
+  db: DatabaseSync,
+  page: PageSeed,
+  attributes: {
+    readonly title?: string;
+    readonly query?: string;
+    readonly hash?: string;
+  },
+): PageSeed {
+  const title = attributes.title ?? "";
+  const query = attributes.query ?? "";
+  const hash = attributes.hash ?? "";
+  db.prepare(
+    "UPDATE visits SET title = ?, query_string = ?, hash_fragment = ? WHERE visit_id = ?",
+  ).run(title, query, hash, page.visitId);
+  return { ...page, title, query, hash };
 }
 
 function lower(
@@ -457,7 +572,107 @@ function evaluateCandidateRestrictedSets(
   return evaluate(expression);
 }
 
-describe("Analytics page.path/event.name → Session D1 lowering", () => {
+describe("Analytics native Page/Event primitive → Session D1 lowering", () => {
+  it("keeps nullable SQL expression truth distinct inside native primitive lowering", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA } = setupSites(db);
+      const visitNullability = db
+        .prepare("PRAGMA table_info(visits)")
+        .all() as Array<{ readonly name: string; readonly notnull: number }>;
+      const eventNameNullability = db
+        .prepare("PRAGMA table_info(custom_event_names)")
+        .all() as Array<{ readonly name: string; readonly notnull: number }>;
+      for (const [column, schemaColumn] of [
+        ["pathname", schema.visits.columns.pathname],
+        ["title", schema.visits.columns.title],
+        ["query_string", schema.visits.columns.query_string],
+        ["hash_fragment", schema.visits.columns.hash_fragment],
+      ] as const) {
+        expect(schemaColumn.nullable, `${column} typed nullability`).toBe(
+          false,
+        );
+        expect(
+          visitNullability.find((item) => item.name === column)?.notnull,
+          `${column} migrated nullability`,
+        ).toBe(1);
+      }
+      expect(schema.custom_event_names.columns.name.nullable).toBe(false);
+      expect(
+        eventNameNullability.find((item) => item.name === "name")?.notnull,
+      ).toBe(1);
+      addPage(db, siteA, "nullable-probe", "s-nullable", 10, "/probe");
+      addPage(db, siteA, "value-probe", "s-value", 11, "/probe");
+
+      const visits = scan(schema.visits);
+      const maybeNull = caseWhen(
+        [
+          {
+            when: eq(visits.columns.visit_id, param("nullable-probe")),
+            then: param(null),
+          },
+        ],
+        param(" Match "),
+      );
+      const projected = project(visits, {
+        visitId: visits.columns.visit_id,
+        eqValue: lowerNativePrimitivePredicate(maybeNull, {
+          operator: "eq",
+          value: "Match",
+        }),
+        neqValue: lowerNativePrimitivePredicate(maybeNull, {
+          operator: "neq",
+          value: "Match",
+        }),
+        inValue: lowerNativePrimitivePredicate(maybeNull, {
+          operator: "in",
+          values: ["Other", "Match"],
+        }),
+        notInValue: lowerNativePrimitivePredicate(maybeNull, {
+          operator: "notIn",
+          values: ["Other"],
+        }),
+        isNullValue: lowerNativePrimitivePredicate(maybeNull, {
+          operator: "isNull",
+        }),
+        notNullValue: lowerNativePrimitivePredicate(maybeNull, {
+          operator: "notNull",
+        }),
+      });
+      const client = createD1DatabaseClient(createSqliteD1Database(db));
+      const query = compileD1Query(projected);
+      const result = await client.all(query);
+      const rows = result.results as Array<{
+        readonly visitId: string;
+        readonly eqValue: number | null;
+        readonly neqValue: number | null;
+        readonly inValue: number | null;
+        readonly notInValue: number | null;
+        readonly isNullValue: number | null;
+        readonly notNullValue: number | null;
+      }>;
+      const byId = new Map(rows.map((row) => [row.visitId, row]));
+      expect(byId.get("nullable-probe")).toMatchObject({
+        eqValue: null,
+        neqValue: 0,
+        inValue: null,
+        notInValue: 0,
+        isNullValue: 1,
+        notNullValue: 0,
+      });
+      expect(byId.get("value-probe")).toMatchObject({
+        eqValue: 1,
+        neqValue: 0,
+        inValue: 1,
+        notInValue: 1,
+        isNullValue: 0,
+        notNullValue: 1,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("executes the verified slice as one composite-key D1 query", async () => {
     const db = createMigratedDatabase();
     try {
@@ -1059,6 +1274,82 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
       node: "plan",
     });
     expect("query" in unsupportedSlot).toBe(false);
+
+    const titlePlan = lower(
+      filterDocument(fieldCondition("page.title", "eq", "Checkout")),
+    );
+    expect(titlePlan.kind).toBe("supported");
+    if (titlePlan.kind !== "supported") {
+      throw new Error("Expected a native page.title plan.");
+    }
+    const wrongTitleLineage = mutablePlan(titlePlan.logicalPlan);
+    const titleSource = wrongTitleLineage.nodes.find(
+      (node) =>
+        node.kind === "source" &&
+        Array.isArray(node.values) &&
+        (node.values as Array<Record<string, unknown>>).some(
+          (binding) =>
+            binding.kind === "attribute" && binding.attribute === "page.title",
+        ),
+    );
+    const titleBindings = titleSource?.values as
+      Array<Record<string, unknown>> | undefined;
+    const titleBinding = titleBindings?.find(
+      (binding) => binding.kind === "attribute",
+    );
+    const titleSlotId = titleBinding?.slot;
+    const titleSlot = wrongTitleLineage.slots.find(
+      (slot) => slot.id === titleSlotId,
+    );
+    if (!titleSlot || typeof titleSlot.lineage !== "object") {
+      throw new Error("Expected the page.title slot lineage.");
+    }
+    (titleSlot.lineage as Record<string, unknown>).attribute = "page.path";
+    const unsupportedWrongTitleLineage = lowerAnalyticsPagePathSessionPlan(
+      asLogicalPlan(wrongTitleLineage),
+    );
+    expect(unsupportedWrongTitleLineage).toMatchObject({
+      kind: "unsupported",
+      capability: "session-boolean-plan-shape",
+      node: expect.stringContaining("page.title"),
+    });
+    expect("query" in unsupportedWrongTitleLineage).toBe(false);
+
+    const wrongTitleNormalization = mutablePlan(titlePlan.logicalPlan);
+    const wrongNormalizationFilter = wrongTitleNormalization.nodes.find(
+      (node) => node.kind === "filter",
+    );
+    const wrongNormalizationPredicate = wrongNormalizationFilter?.predicate as
+      Record<string, unknown> | undefined;
+    if (!wrongNormalizationPredicate) {
+      throw new Error("Expected the page.title primitive predicate.");
+    }
+    wrongNormalizationPredicate.stringNormalization = "trim-case-fold";
+    const unsupportedWrongNormalization = lowerAnalyticsPagePathSessionPlan(
+      asLogicalPlan(wrongTitleNormalization),
+    );
+    expect(unsupportedWrongNormalization.kind).toBe("unsupported");
+    expect("query" in unsupportedWrongNormalization).toBe(false);
+
+    const wrongTitleLiteralType = mutablePlan(titlePlan.logicalPlan);
+    const wrongLiteralFilter = wrongTitleLiteralType.nodes.find(
+      (node) => node.kind === "filter",
+    );
+    const wrongLiteralPredicate = wrongLiteralFilter?.predicate as
+      Record<string, unknown> | undefined;
+    const wrongLiteral = wrongLiteralPredicate?.right as
+      Record<string, unknown> | undefined;
+    const wrongLiteralValueType = wrongLiteral?.valueType as
+      Record<string, unknown> | undefined;
+    if (!wrongLiteralValueType) {
+      throw new Error("Expected the page.title string literal type.");
+    }
+    wrongLiteralValueType.scalar = "number";
+    const unsupportedWrongLiteralType = lowerAnalyticsPagePathSessionPlan(
+      asLogicalPlan(wrongTitleLiteralType),
+    );
+    expect(unsupportedWrongLiteralType.kind).toBe("unsupported");
+    expect("query" in unsupportedWrongLiteralType).toBe(false);
 
     const unreachablePlan = mutablePlan(base.logicalPlan);
     const sourceTemplate = unreachablePlan.nodes.find(
@@ -2176,13 +2467,455 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
     }
   });
 
+  it("lowers native Page primitives, keeps Event evidence separate, and shares them across adapters", async () => {
+    const db = createMigratedDatabase();
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      const { siteA } = setupSites(db);
+      const evaluatorPages: FilterEvaluationEntity[] = [];
+      const evaluatorEvents: FilterEvaluationEntity[] = [];
+      const page = (
+        visitId: string,
+        sessionId: string,
+        startedAt: number,
+        attributes: {
+          readonly title?: string;
+          readonly query?: string;
+          readonly hash?: string;
+        } = {},
+      ) => {
+        const inserted = addPage(
+          db,
+          siteA,
+          visitId,
+          sessionId,
+          startedAt,
+          "/same-path",
+        );
+        const row = withPageAttributes(db, inserted, attributes);
+        evaluatorPages.push(pageEntity(row));
+        return row;
+      };
+      const event = (
+        eventId: string,
+        owner: PageSeed,
+        occurredAt: number,
+        eventName: string,
+      ) => {
+        const row = {
+          eventId,
+          site: siteA,
+          visit: owner,
+          occurredAt,
+          eventName,
+          eventNameId: ensureEventNameId(db, siteA, eventName),
+        };
+        insertEvent(db, row);
+        evaluatorEvents.push(eventEntity(row));
+      };
+
+      page("title-match-read", "s-title-match", 10, {
+        title: " \u00a0Checkout\t",
+        query: "title-query",
+        hash: "title-hash",
+      });
+      page("title-match-candidate", "s-title-match", 100);
+      page("title-conflict-read-1", "s-title-conflict", 11, {
+        title: "Checkout",
+      });
+      page("title-conflict-read-2", "s-title-conflict", 12, {
+        title: "Pricing",
+      });
+      page("title-conflict-candidate", "s-title-conflict", 101);
+      page("title-negative-read", "s-title-negative", 13, {
+        title: "Other",
+      });
+      page("title-negative-candidate", "s-title-negative", 102);
+      page("title-empty-read", "s-title-empty", 14, { title: "" });
+      page("title-empty-candidate", "s-title-empty", 103);
+      page("title-whitespace-read", "s-title-whitespace", 15, {
+        title: "\u00a0 \t",
+      });
+      page("title-whitespace-candidate", "s-title-whitespace", 104);
+      page("query-map-read", "s-query-map", 16, {
+        title: "Else",
+        query: "campaign=gold",
+        hash: "query-only-hash",
+      });
+      page("query-map-candidate", "s-query-map", 105);
+      page("hash-map-read", "s-hash-map", 17, {
+        title: "Else",
+        query: "hash-only-query",
+        hash: "section-setup",
+      });
+      page("hash-map-candidate", "s-hash-map", 106);
+      page("no-read-candidate", "s-no-read", 107);
+
+      page("mixed-title-read", "s-mixed", 18, { title: "Checkout" });
+      page("mixed-candidate-1", "s-mixed", 108);
+      page("mixed-candidate-2", "s-mixed", 109);
+      const mixedEventOwner = page("mixed-event-owner", "s-mixed", 350, {
+        title: "Checkout",
+      });
+      event("mixed-purchase-read", mixedEventOwner, 50, "purchase");
+      event("mixed-other-read", mixedEventOwner, 51, "other");
+
+      page("page-only-title-read", "s-page-only", 19, { title: "Checkout" });
+      page("page-only-candidate", "s-page-only", 110);
+      const pageOnlyEventOwner = page(
+        "page-only-event-owner",
+        "s-page-only",
+        351,
+      );
+      event("page-only-other-read", pageOnlyEventOwner, 52, "other");
+
+      page("event-only-candidate", "s-event-only", 111, { title: "Other" });
+      const eventOnlyOwner = page("event-only-owner", "s-event-only", 352, {
+        title: "Checkout",
+      });
+      event("event-only-purchase-read", eventOnlyOwner, 53, "purchase");
+
+      const evaluatorDataset = {
+        pages: evaluatorPages,
+        events: evaluatorEvents,
+        coverageRange: { startMs: 0, endExclusiveMs: 400 },
+      };
+      const candidateSessionIds = new Set(
+        evaluatorPages
+          .filter(
+            (entity) =>
+              entity.time !== undefined &&
+              entity.time >= CANDIDATE_RANGE.startMs &&
+              entity.time < CANDIDATE_RANGE.endExclusiveMs,
+          )
+          .map((entity) => entity.sessionId)
+          .filter((sessionId): sessionId is string => Boolean(sessionId)),
+      );
+      const pageEq = fieldCondition("page.title", "eq", "Checkout");
+      const eventEq = eventNameCondition("purchase");
+      const cases = [
+        {
+          name: "title-eq-trim",
+          document: filterDocument(pageEq),
+          expected: [
+            "s-title-match",
+            "s-title-conflict",
+            "s-mixed",
+            "s-page-only",
+          ],
+        },
+        {
+          name: "title-neq-primitive",
+          document: filterDocument(
+            fieldCondition("page.title", "neq", "Checkout"),
+          ),
+          expected: [
+            "s-title-conflict",
+            "s-title-negative",
+            "s-title-empty",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+          ],
+        },
+        {
+          name: "title-in",
+          document: filterDocument(
+            inCondition("page.title", ["Checkout", "Pricing"]),
+          ),
+          expected: [
+            "s-title-match",
+            "s-title-conflict",
+            "s-mixed",
+            "s-page-only",
+          ],
+        },
+        {
+          name: "title-not-in-primitive",
+          document: filterDocument(
+            fieldCondition("page.title", "notIn", ["Checkout"]),
+          ),
+          expected: [
+            "s-title-conflict",
+            "s-title-negative",
+            "s-title-empty",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+          ],
+        },
+        {
+          name: "title-is-null-on-non-null-storage",
+          document: filterDocument(fieldCondition("page.title", "isNull")),
+          expected: [],
+        },
+        {
+          name: "title-not-null-includes-empty-values",
+          document: filterDocument(fieldCondition("page.title", "notNull")),
+          expected: [
+            "s-title-match",
+            "s-title-conflict",
+            "s-title-negative",
+            "s-title-empty",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+            "s-mixed",
+            "s-page-only",
+          ],
+        },
+        {
+          name: "root-not-title-eq-includes-no-read-candidates",
+          document: filterDocument({ kind: "not", child: pageEq }),
+          expected: [
+            "s-title-negative",
+            "s-title-empty",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+            "s-no-read",
+            "s-event-only",
+          ],
+        },
+        {
+          name: "query-maps-query-string-column",
+          document: filterDocument(
+            fieldCondition("page.query", "eq", "campaign=gold"),
+          ),
+          expected: ["s-query-map"],
+        },
+        {
+          name: "query-in",
+          document: filterDocument(
+            inCondition("page.query", ["unused", "campaign=gold"]),
+          ),
+          expected: ["s-query-map"],
+        },
+        {
+          name: "hash-maps-hash-fragment-column",
+          document: filterDocument(
+            fieldCondition("page.hash", "eq", "section-setup"),
+          ),
+          expected: ["s-hash-map"],
+        },
+        {
+          name: "hash-in",
+          document: filterDocument(
+            inCondition("page.hash", ["unused", "section-setup"]),
+          ),
+          expected: ["s-hash-map"],
+        },
+        {
+          name: "nary-page-field-or",
+          document: filterDocument({
+            kind: "or",
+            children: [
+              pageEq,
+              fieldCondition("page.query", "eq", "campaign=gold"),
+              fieldCondition("page.hash", "eq", "section-setup"),
+            ],
+          }),
+          expected: [
+            "s-title-match",
+            "s-title-conflict",
+            "s-query-map",
+            "s-hash-map",
+            "s-mixed",
+            "s-page-only",
+          ],
+        },
+        {
+          name: "event-neq-uses-matching-event-evidence",
+          document: filterDocument(
+            fieldCondition("event.name", "neq", "purchase"),
+          ),
+          expected: ["s-mixed", "s-page-only"],
+        },
+        {
+          name: "event-not-in-uses-matching-event-evidence",
+          document: filterDocument(
+            fieldCondition("event.name", "notIn", ["purchase"]),
+          ),
+          expected: ["s-mixed", "s-page-only"],
+        },
+        {
+          name: "event-is-null-does-not-invent-event-evidence",
+          document: filterDocument(fieldCondition("event.name", "isNull")),
+          expected: [],
+        },
+        {
+          name: "event-not-null-requires-a-read-event",
+          document: filterDocument(fieldCondition("event.name", "notNull")),
+          expected: ["s-mixed", "s-page-only", "s-event-only"],
+        },
+        {
+          name: "root-not-event-eq-includes-sessions-without-read-event",
+          document: filterDocument({ kind: "not", child: eventEq }),
+          expected: [
+            "s-title-match",
+            "s-title-conflict",
+            "s-title-negative",
+            "s-title-empty",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+            "s-no-read",
+            "s-page-only",
+          ],
+        },
+        {
+          name: "page-title-and-event-name-use-separate-native-domains",
+          document: filterDocument({
+            kind: "and",
+            children: [pageEq, eventEq],
+          }),
+          expected: ["s-mixed"],
+        },
+      ] as const;
+
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const client = createD1DatabaseClient(createSqliteD1Database(db, trace));
+      for (const item of cases) {
+        const lowered = lower(item.document);
+        expect(lowered.kind, item.name).toBe("supported");
+        if (lowered.kind !== "supported") {
+          throw new Error(`Expected ${item.name} to lower.`);
+        }
+        const direct = lowerAnalyticsPagePathSessionPlan(lowered.logicalPlan);
+        expect(direct.kind, `${item.name} direct plan`).toBe("supported");
+        if (direct.kind !== "supported") {
+          throw new Error(`Expected ${item.name} direct plan to lower.`);
+        }
+        expect(direct.query.sql).toBe(lowered.query.sql);
+        const result = await client.all(lowered.query);
+        const rows = result.results as Array<{
+          readonly site_pk: number;
+          readonly session_id: string;
+        }>;
+        const actual = new Set(rows.map((row) => row.session_id));
+        // The generic evaluator treats a missing cross-domain field as NULL.
+        // A bare Page/Event condition is anchored to its native activity, so
+        // null tests use only that activity's evidence for the leaf oracle.
+        const leafDataset =
+          item.name === "title-is-null-on-non-null-storage"
+            ? { ...evaluatorDataset, events: [] }
+            : item.name === "event-is-null-does-not-invent-event-evidence"
+              ? { ...evaluatorDataset, pages: [] }
+              : evaluatorDataset;
+        const evaluated = evaluateCandidateRestrictedSets(
+          item.document.root,
+          leafDataset,
+          candidateSessionIds,
+        );
+        expect(actual, item.name).toEqual(evaluated);
+        expect([...actual].sort(), item.name).toEqual(
+          [...item.expected].sort(),
+        );
+        expect(rows.every((row) => row.site_pk === siteA.key)).toBe(true);
+        expect(rows).toHaveLength(actual.size);
+      }
+
+      const mixedDocument = cases.find(
+        (item) =>
+          item.name === "page-title-and-event-name-use-separate-native-domains",
+      )!.document;
+      const mixedIdentity = lower(mixedDocument);
+      if (mixedIdentity.kind !== "supported") {
+        throw new Error("Expected mixed Page/Event identity query.");
+      }
+      const identityStart = trace.preparedSql.length;
+      const identityResult = await client.all(mixedIdentity.query);
+      expect(identityResult.results).toEqual([
+        { site_pk: siteA.key, session_id: "s-mixed" },
+      ]);
+      expect(trace.preparedSql).toHaveLength(identityStart + 1);
+
+      const countLowering = lowerAnalyticsFilteredSessionCountPlan(
+        buildDirectSessionPlan(mixedDocument, "sessions"),
+      );
+      expect(countLowering.kind).toBe("supported");
+      if (countLowering.kind !== "supported") {
+        throw new Error("Expected mixed Page/Event sessions count query.");
+      }
+      const countStart = trace.preparedSql.length;
+      expect((await client.all(countLowering.query)).results).toEqual([
+        { sessions: 1 },
+      ]);
+      expect(trace.preparedSql).toHaveLength(countStart + 1);
+
+      const expectedContext = {
+        siteId: SITE_A,
+        candidateRange: CANDIDATE_RANGE as never,
+        readRange: READ_RANGE as never,
+      };
+      const viewsLowering = lowerAnalyticsFilteredSessionViewsPlan(
+        buildDirectMetricPlan(mixedDocument, ["views"]),
+        expectedContext,
+      );
+      expect(viewsLowering.kind).toBe("supported");
+      if (viewsLowering.kind !== "supported") {
+        throw new Error("Expected mixed Page/Event views query.");
+      }
+      const viewsStart = trace.preparedSql.length;
+      expect((await client.all(viewsLowering.query)).results).toEqual([
+        { views: 2 },
+      ]);
+      expect(trace.preparedSql).toHaveLength(viewsStart + 1);
+
+      const overviewLowering = lowerAnalyticsFilteredSessionOverviewPairPlan(
+        buildDirectMetricPlan(mixedDocument, ["sessions", "views"]),
+        expectedContext,
+      );
+      expect(overviewLowering.kind).toBe("supported");
+      if (overviewLowering.kind !== "supported") {
+        throw new Error("Expected mixed Page/Event overview pair query.");
+      }
+      const overviewStart = trace.preparedSql.length;
+      expect((await client.all(overviewLowering.query)).results).toEqual([
+        { sessions: 1, views: 2 },
+      ]);
+      expect(trace.preparedSql).toHaveLength(overviewStart + 1);
+
+      const costs = Object.fromEntries(
+        Object.entries({
+          identity: mixedIdentity.query,
+          count: countLowering.query,
+          views: viewsLowering.query,
+          overviewPair: overviewLowering.query,
+        }).map(([name, query]) => {
+          const sqlBytes = new TextEncoder().encode(query.sql).length;
+          expect(sqlBytes, `${name} SQL bytes`).toBeLessThanOrEqual(
+            D1_MAX_SQL_UTF8_BYTES,
+          );
+          expect(
+            query.bindings?.length ?? 0,
+            `${name} binding count`,
+          ).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+          return [
+            name,
+            {
+              statements: 1,
+              sqlBytes,
+              bindings: query.bindings?.length ?? 0,
+              sharedCtes: cteDefinitionCount(query.sql),
+            },
+          ];
+        }),
+      );
+      expect(trace.preparedSql).toHaveLength(cases.length + 4);
+      console.info("Wave 8 native predicate costs", JSON.stringify(costs));
+    } finally {
+      db.close();
+    }
+  });
+
   it("rejects unsupported fields and multiple site identities before building DB SQL", () => {
     const unsupportedField = lower(
       filterDocument({
         kind: "condition",
-        target: { kind: "field", field: "page.title" },
+        target: { kind: "field", field: "page.hostname" },
         operator: "eq",
-        value: "Welcome",
+        value: "example.test",
       }),
     );
     expect(unsupportedField).toMatchObject({
@@ -2229,19 +2962,14 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
     });
     expect("query" in emptyMembership).toBe(false);
 
-    const negativeMembership = lower(
-      filterDocument({
-        kind: "condition",
-        target: { kind: "field", field: "page.path" },
-        operator: "notIn",
-        value: ["/a", "/b"],
-      }),
+    const unsupportedStringMatch = lower(
+      filterDocument(fieldCondition("page.path", "contains", "/a")),
     );
-    expect(negativeMembership).toMatchObject({
+    expect(unsupportedStringMatch).toMatchObject({
       kind: "unsupported",
       capability: "session-equality-leaf-only",
     });
-    expect("query" in negativeMembership).toBe(false);
+    expect("query" in unsupportedStringMatch).toBe(false);
 
     const unsupportedSites = lower(DOCUMENT, [SITE_A, SITE_B]);
     expect(unsupportedSites).toMatchObject({

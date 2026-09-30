@@ -2,7 +2,6 @@ import {
   aggregate,
   and,
   antiJoin,
-  callFunction,
   compileD1Query,
   type CompiledQuery,
   count,
@@ -10,7 +9,6 @@ import {
   eq,
   filter,
   gte,
-  inList,
   isNotNull,
   join,
   lowerLogicalPlan,
@@ -64,6 +62,15 @@ import {
   analyzeFilterDocument,
 } from "@/lib/filter-contract/filter-semantics";
 import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
+
+import {
+  lowerNativePrimitivePredicate,
+  type NativePagePrimitiveFieldId,
+  nativePrimitiveFieldContract,
+  type NativePrimitiveFieldId,
+  type NativePrimitivePredicate,
+  readNativePrimitivePredicate,
+} from "./analytics-primitive-predicate-lowering";
 
 export interface AnalyticsPageSessionLoweringInput {
   readonly document: unknown;
@@ -143,14 +150,10 @@ type UnsupportedResult = Extract<
 type SessionSetPlan =
   | { readonly kind: "candidate"; readonly relationId: RelationId }
   | {
-      readonly kind: "page-path";
+      readonly kind: "native-predicate";
       readonly relationId: RelationId;
-      readonly paths: readonly string[];
-    }
-  | {
-      readonly kind: "event-name";
-      readonly relationId: RelationId;
-      readonly names: readonly string[];
+      readonly fieldId: NativePrimitiveFieldId;
+      readonly predicate: NativePrimitivePredicate;
     }
   | {
       readonly kind: "set-operation";
@@ -319,14 +322,23 @@ function requireSessionGrain(
 function readPageSourceBindings(
   plan: ValidatedLogicalPlan,
   source: SourceNode,
+  fieldId: NativePagePrimitiveFieldId,
   visited: Set<RelationId>,
   path: string,
-): { readonly observation: SlotId; readonly pagePath: SlotId } {
+): {
+  readonly observation: SlotId;
+  readonly fieldId: NativePagePrimitiveFieldId;
+  readonly valueSlot: SlotId;
+} {
   visited.add(source.id);
+  const contract = nativePrimitiveFieldContract(fieldId);
   requirePlan(
-    source.entity === "observation" && source.temporalDomain === "read",
+    contract?.activity === "page" &&
+      contract.storageSource === "visit" &&
+      source.entity === "observation" &&
+      source.temporalDomain === "read",
     `${path}.temporalDomain`,
-    "Page.path evidence must come from Source<observation>[read].",
+    "Native Page evidence must come from a registered Page field on Source<observation>[read].",
   );
   requirePlan(
     source.values.length === 2,
@@ -340,32 +352,32 @@ function readPageSourceBindings(
   requirePlan(
     self.length === 1 &&
       attributes.length === 1 &&
-      attributes[0]!.attribute === "page.path",
+      attributes[0]!.attribute === fieldId,
     path,
-    "The read Source must expose Observation identity and page.path only.",
+    `The read Source must expose Observation identity and ${fieldId} only.`,
   );
   const observation = self[0]!.slot;
-  const pagePath = attributes[0]!.slot;
+  const valueSlot = attributes[0]!.slot;
   entitySlotAt(plan, observation, "observation", false, `${path}.self`);
-  const pagePathSlot = slotAt(plan, pagePath, `${path}.page.path`);
+  const attributeSlot = slotAt(plan, valueSlot, `${path}.${fieldId}`);
   requirePlan(
-    pagePathSlot.type.kind === "scalar" &&
-      pagePathSlot.type.scalar === "string" &&
-      pagePathSlot.nullable &&
-      pagePathSlot.lineage.kind === "attribute" &&
-      pagePathSlot.lineage.attribute === "page.path",
-    `${path}.page.path`,
-    "The page.path slot must be a nullable string attribute.",
+    attributeSlot.type.kind === "scalar" &&
+      attributeSlot.type.scalar === "string" &&
+      attributeSlot.nullable === contract.nullable &&
+      attributeSlot.lineage.kind === "attribute" &&
+      attributeSlot.lineage.attribute === fieldId,
+    `${path}.${fieldId}`,
+    `The ${fieldId} slot must preserve its registered string type, nullability, and attribute lineage.`,
   );
   requirePlan(
-    sameSlots(source.output, [observation, pagePath]) &&
+    sameSlots(source.output, [observation, valueSlot]) &&
       source.grain.kind === "entity" &&
       source.grain.entity === "observation" &&
       source.grain.key === observation,
     path,
-    "The read Source output and grain must preserve Observation identity.",
+    "The read Page Source output and grain must preserve Observation identity.",
   );
-  return { observation, pagePath };
+  return { observation, fieldId, valueSlot };
 }
 
 function readEventSourceBindings(
@@ -379,8 +391,12 @@ function readEventSourceBindings(
   readonly eventName: SlotId;
 } {
   visited.add(source.id);
+  const contract = nativePrimitiveFieldContract("event.name");
   requirePlan(
-    source.entity === "event" && source.temporalDomain === "read",
+    contract?.activity === "event" &&
+      contract.storageSource === "event" &&
+      source.entity === "event" &&
+      source.temporalDomain === "read",
     `${path}.temporalDomain`,
     "event.name evidence must come from Source<event>[read].",
   );
@@ -434,6 +450,11 @@ function readEventSourceBindings(
     "The event.name slot must be a non-null string attribute.",
   );
   requirePlan(
+    eventNameSlot.nullable === contract.nullable,
+    `${path}.event.name`,
+    "The event.name slot nullability must match its registered primitive contract.",
+  );
+  requirePlan(
     sameSlots(source.output, [event, observation, eventName]) &&
       source.grain.kind === "entity" &&
       source.grain.entity === "event" &&
@@ -444,73 +465,36 @@ function readEventSourceBindings(
   return { event, observation, eventName };
 }
 
-function pagePathValues(
-  filterNode: FilterNode,
-  pagePathSlot: SlotId,
-): readonly string[] {
-  return normalizedStringValues(filterNode, pagePathSlot, "page.path");
-}
-
-function eventNameValues(
-  filterNode: FilterNode,
-  eventNameSlot: SlotId,
-): readonly string[] {
-  return normalizedStringValues(filterNode, eventNameSlot, "event.name");
-}
-
-function normalizedStringValues(
+function nativePrimitivePredicate(
   filterNode: FilterNode,
   valueSlot: SlotId,
-  field: "page.path" | "event.name",
-): readonly string[] {
+  fieldId: NativePrimitiveFieldId,
+): NativePrimitivePredicate {
   const path = `${planNodePath(filterNode.id)}.predicate`;
-  const predicate = filterNode.predicate;
-  if (predicate.kind === "comparison") {
-    requirePlan(
-      predicate.operator === "eq" &&
-        predicate.stringNormalization === "trim" &&
-        predicate.left.kind === "slot" &&
-        predicate.left.slot === valueSlot &&
-        predicate.right.kind === "literal" &&
-        typeof predicate.right.value === "string" &&
-        predicate.right.valueType.kind === "scalar" &&
-        predicate.right.valueType.scalar === "string",
-      path,
-      `Only ${field} eq <string> with trim normalization is supported.`,
-    );
-    return [predicate.right.value];
-  }
-  if (predicate.kind === "set-membership") {
-    requirePlan(
-      !predicate.negated &&
-        predicate.stringNormalization === "trim" &&
-        predicate.input.kind === "slot" &&
-        predicate.input.slot === valueSlot &&
-        predicate.values.length > 0 &&
-        predicate.values.every(
-          (value) =>
-            typeof value.value === "string" &&
-            value.valueType.kind === "scalar" &&
-            value.valueType.scalar === "string",
-        ),
-      path,
-      `Only positive ${field} string membership with trim normalization is supported.`,
-    );
-    return predicate.values.map((value) => value.value as string);
-  }
-  mismatch(
-    path,
-    `Only ${field} equality and positive string membership are supported.`,
+  const predicate = readNativePrimitivePredicate(
+    filterNode.predicate,
+    valueSlot,
+    fieldId,
   );
+  if (!predicate) {
+    mismatch(
+      path,
+      `Only registered ${fieldId} eq/neq, in/notIn, isNull/notNull primitives with matching slots, literal types, and normalization are supported.`,
+    );
+  }
+  return predicate;
 }
 
-function validateReadPathFilter(
-  plan: ValidatedLogicalPlan,
+function validateReadPageFilter(
   node: FilterNode,
   source: SourceNode,
-  sourceBindings: { readonly observation: SlotId; readonly pagePath: SlotId },
+  sourceBindings: {
+    readonly observation: SlotId;
+    readonly fieldId: NativePagePrimitiveFieldId;
+    readonly valueSlot: SlotId;
+  },
   visited: Set<RelationId>,
-): readonly string[] {
+): NativePrimitivePredicate {
   visited.add(node.id);
   requirePlan(
     node.input === source.id &&
@@ -519,9 +503,13 @@ function validateReadPathFilter(
       node.grain.entity === "observation" &&
       node.grain.key === sourceBindings.observation,
     `${planNodePath(node.id)}.input/output`,
-    "The page.path Filter must preserve its read Observation bindings.",
+    "The native Page Filter must preserve its read Observation bindings.",
   );
-  return pagePathValues(node, sourceBindings.pagePath);
+  return nativePrimitivePredicate(
+    node,
+    sourceBindings.valueSlot,
+    sourceBindings.fieldId,
+  );
 }
 
 function validateReadEventFilter(
@@ -529,7 +517,7 @@ function validateReadEventFilter(
   source: SourceNode,
   sourceBindings: { readonly event: SlotId; readonly eventName: SlotId },
   visited: Set<RelationId>,
-): readonly string[] {
+): NativePrimitivePredicate {
   visited.add(node.id);
   requirePlan(
     node.input === source.id &&
@@ -540,7 +528,7 @@ function validateReadEventFilter(
     `${planNodePath(node.id)}.input/output`,
     "The event.name Filter must preserve its read Event bindings.",
   );
-  return eventNameValues(node, sourceBindings.eventName);
+  return nativePrimitivePredicate(node, sourceBindings.eventName, "event.name");
 }
 
 function validateReadPageProjection(
@@ -561,7 +549,7 @@ function validateReadPageProjection(
       node.grain.entity === "observation" &&
       node.grain.key === node.output[0],
     planNodePath(node.id),
-    "The page.path match must project its Page Observation identity.",
+    "The native Page match must project its Page Observation identity.",
   );
   return node.output[0]!;
 }
@@ -713,15 +701,10 @@ function parseHistoricalSessionSet(
   sessionDistinct: DistinctNode,
   sessionProjection: ProjectNode,
   visited: Set<RelationId>,
-):
-  | {
-      readonly kind: "page-path";
-      readonly values: readonly string[];
-    }
-  | {
-      readonly kind: "event-name";
-      readonly values: readonly string[];
-    } {
+): {
+  readonly fieldId: NativePrimitiveFieldId;
+  readonly predicate: NativePrimitivePredicate;
+} {
   const relationship = nodeAt(
     plan,
     sessionProjection.input,
@@ -750,8 +733,14 @@ function parseHistoricalSessionSet(
     visited,
   );
   let evidence:
-    | { readonly kind: "page-path"; readonly values: readonly string[] }
-    | { readonly kind: "event-name"; readonly values: readonly string[] };
+    | {
+        readonly fieldId: NativePagePrimitiveFieldId;
+        readonly predicate: NativePrimitivePredicate;
+      }
+    | {
+        readonly fieldId: "event.name";
+        readonly predicate: NativePrimitivePredicate;
+      };
 
   if (nativeInput.kind === "filter") {
     const readSource = nodeAt(
@@ -761,14 +750,24 @@ function parseHistoricalSessionSet(
       `${planNodePath(nativeInput.id)}.input`,
       visited,
     );
+    const pageAttributes = readSource.values.filter(
+      (binding) => binding.kind === "attribute",
+    );
+    const fieldId = pageAttributes[0]?.attribute;
+    const contract = nativePrimitiveFieldContract(fieldId ?? "");
+    requirePlan(
+      pageAttributes.length === 1 && contract?.activity === "page",
+      `${planNodePath(readSource.id)}.values`,
+      "The read Observation Source must bind one registered native Page condition field.",
+    );
     const readBindings = readPageSourceBindings(
       plan,
       readSource,
+      fieldId as NativePagePrimitiveFieldId,
       visited,
       planNodePath(readSource.id),
     );
-    const values = validateReadPathFilter(
-      plan,
+    const predicate = validateReadPageFilter(
       nativeInput,
       readSource,
       readBindings,
@@ -787,7 +786,7 @@ function parseHistoricalSessionSet(
       plan,
       visited,
     );
-    evidence = { kind: "page-path", values };
+    evidence = { fieldId: readBindings.fieldId, predicate };
   } else if (nativeInput.kind === "distinct") {
     const nativeObservationDistinct = nativeInput;
     const eventProjection = nodeAt(
@@ -817,7 +816,7 @@ function parseHistoricalSessionSet(
       visited,
       planNodePath(readSource.id),
     );
-    const values = validateReadEventFilter(
+    const predicate = validateReadEventFilter(
       eventFilter,
       readSource,
       readBindings,
@@ -866,11 +865,11 @@ function parseHistoricalSessionSet(
       plan,
       visited,
     );
-    evidence = { kind: "event-name", values };
+    evidence = { fieldId: "event.name", predicate };
   } else {
     mismatch(
       `${planNodePath(observationProjection.id)}.input`,
-      "Historical Session evidence must lower through a read Page Filter or Event Filter.",
+      "Historical Session evidence must lower through a read native Page Filter or Event Filter.",
     );
   }
   validateSessionRelationship(
@@ -1022,28 +1021,22 @@ function parseSessionSetPlan(
       lowered = { kind: "candidate", relationId: node.id };
     } else if (input.kind === "project") {
       const evidence = parseHistoricalSessionSet(plan, node, input, visited);
-      lowered =
-        evidence.kind === "page-path"
-          ? {
-              kind: "page-path",
-              relationId: node.id,
-              paths: evidence.values,
-            }
-          : {
-              kind: "event-name",
-              relationId: node.id,
-              names: evidence.values,
-            };
+      lowered = {
+        kind: "native-predicate",
+        relationId: node.id,
+        fieldId: evidence.fieldId,
+        predicate: evidence.predicate,
+      };
     } else {
       mismatch(
         `${planNodePath(node.id)}.input`,
-        "Only candidate Observation sets and historical page.path/event.name Session sets are supported.",
+        "Only candidate Observation sets and historical native Page/Event predicate Session sets are supported.",
       );
     }
   } else {
     mismatch(
       planNodePath(node.id),
-      "Only Session set-operation roots, candidate Session sets, and page.path/event.name Session sets are supported.",
+      "Only Session set-operation roots, candidate Session sets, and native Page/Event primitive Session sets are supported.",
     );
   }
   memo.set(relationId, lowered);
@@ -1052,7 +1045,7 @@ function parseSessionSetPlan(
 
 function candidateSubsetViolation(set: SessionSetPlan): RelationId | undefined {
   if (set.kind === "candidate") return undefined;
-  if (set.kind === "page-path" || set.kind === "event-name") {
+  if (set.kind === "native-predicate") {
     return set.relationId;
   }
 
@@ -1821,27 +1814,36 @@ function validateSessionDocumentExpression(
     return unsupported(
       "session-equality-leaf-only",
       path,
-      "Expected a page.path or event.name equality expression.",
+      "Expected a registered native Page/Event primitive condition.",
     );
   }
 
   if (record.kind === "condition") {
     const target = recordOf(record.target);
-    const validEquality =
-      record.operator === "eq" && typeof record.value === "string";
+    const contract =
+      target?.kind === "field" && typeof target.field === "string"
+        ? nativePrimitiveFieldContract(target.field)
+        : undefined;
+    const validComparison =
+      (record.operator === "eq" || record.operator === "neq") &&
+      typeof record.value === "string";
     const validMembership =
-      record.operator === "in" &&
+      (record.operator === "in" || record.operator === "notIn") &&
       Array.isArray(record.value) &&
+      record.value.length > 0 &&
       record.value.every((value) => typeof value === "string");
+    const validNullTest =
+      (record.operator === "isNull" || record.operator === "notNull") &&
+      record.value === undefined;
     if (
       target?.kind !== "field" ||
-      (target.field !== "page.path" && target.field !== "event.name") ||
-      (!validEquality && !validMembership)
+      !contract ||
+      (!validComparison && !validMembership && !validNullTest)
     ) {
       return unsupported(
         "session-equality-leaf-only",
         path,
-        "Only page.path or event.name eq <string> and positive in <string[]> leaves are supported.",
+        "Only registered native Page/Event eq/neq, in/notIn, isNull/notNull primitive conditions are supported.",
       );
     }
     return undefined;
@@ -1872,7 +1874,7 @@ function validateSessionDocumentExpression(
   return unsupported(
     "session-boolean-shape",
     path,
-    "Only AND, OR, NOT, and page.path/event.name equality or positive membership conditions are supported.",
+    "Only AND, OR, NOT, and registered native Page/Event primitive conditions are supported.",
   );
 }
 
@@ -1897,7 +1899,7 @@ function analyzeSessionFilterDocument(
     return unsupported(
       "session-equality-leaf-only",
       "empty-document",
-      "A non-empty page.path/event.name equality expression is required.",
+      "A non-empty native Page/Event primitive expression is required.",
     );
   }
   const shapeIssue = validateSessionDocumentExpression(rawRoot, "root");
@@ -2021,10 +2023,11 @@ function compileCandidateSessionSet(
   );
 }
 
-function compilePagePathSessionSet(
+function compilePagePredicateSessionSet(
   site: ReturnType<typeof filter>,
   readRange: TimeRange,
-  paths: readonly string[],
+  fieldId: NativePagePrimitiveFieldId,
+  predicate: NativePrimitivePredicate,
 ): SessionSetRelation {
   const readPagesSource = scan(schema.visits);
   const readPagesScoped = semiJoin(
@@ -2032,12 +2035,45 @@ function compilePagePathSessionSet(
     site,
     eq(readPagesSource.columns.site_pk, site.columns.site_pk),
   );
-  const normalizedPaths = paths.map((path) => path.trim());
-  const pathExpression = callFunction("trim", readPagesScoped.columns.pathname);
-  const pathPredicate =
-    normalizedPaths.length === 1
-      ? eq(pathExpression, param(normalizedPaths[0]!))
-      : inList(pathExpression, normalizedPaths);
+  const fieldContract = nativePrimitiveFieldContract(fieldId);
+  requirePlan(
+    fieldContract?.activity === "page" &&
+      fieldContract.storageSource === "visit",
+    `native-predicate.${fieldId}`,
+    `The native Page field ${fieldId} has no verified visit storage contract.`,
+  );
+  type NativePageColumn =
+    | typeof readPagesScoped.columns.pathname
+    | typeof readPagesScoped.columns.title
+    | typeof readPagesScoped.columns.query_string
+    | typeof readPagesScoped.columns.hash_fragment;
+  let fieldColumn: NativePageColumn;
+  switch (fieldContract.compilerStrategy) {
+    case "column.pathname":
+      fieldColumn = readPagesScoped.columns.pathname;
+      break;
+    case "column.title":
+      fieldColumn = readPagesScoped.columns.title;
+      break;
+    case "column.query_string":
+      fieldColumn = readPagesScoped.columns.query_string;
+      break;
+    case "column.hash_fragment":
+      fieldColumn = readPagesScoped.columns.hash_fragment;
+      break;
+    default:
+      mismatch(
+        `native-predicate.${fieldId}`,
+        `The native Page field ${fieldId} has no verified visits column mapping.`,
+      );
+  }
+  requirePlan(
+    fieldColumn.resultType.affinity === "text" &&
+      fieldColumn.resultType.nullable === fieldContract.storageNullable,
+    `native-predicate.${fieldId}.column`,
+    `The typed storage column for ${fieldId} no longer matches its registered TEXT/nullability contract.`,
+  );
+  const pagePredicate = lowerNativePrimitivePredicate(fieldColumn, predicate);
   const readPagesMatching = filter(
     readPagesScoped,
     and(
@@ -2045,7 +2081,7 @@ function compilePagePathSessionSet(
       lt(readPagesScoped.columns.started_at, param(readRange.endExclusiveMs)),
       isNotNull(readPagesScoped.columns.session_id),
       neq(readPagesScoped.columns.session_id, param("")),
-      pathPredicate,
+      pagePredicate,
     ),
   );
   // Evidence may retain duplicates here. Set-operation lowering restores
@@ -2061,7 +2097,7 @@ function compilePagePathSessionSet(
 function compileEventNameSessionSet(
   site: ReturnType<typeof filter>,
   readRange: TimeRange,
-  names: readonly string[],
+  predicate: NativePrimitivePredicate,
 ): SessionSetRelation {
   const readEventsSource = scan(schema.custom_events);
   const readEventsScoped = semiJoin(
@@ -2078,15 +2114,25 @@ function compileEventNameSessionSet(
       eq(readEventsScoped.columns.site_pk, eventNamesSource.columns.site_pk),
     ),
   );
-  const normalizedNames = names.map((name) => name.trim());
-  const eventNameExpression = callFunction(
-    "trim",
-    readEventsWithName.columns.right_name,
+  const fieldContract = nativePrimitiveFieldContract("event.name");
+  requirePlan(
+    fieldContract?.activity === "event" &&
+      fieldContract.storageSource === "event" &&
+      fieldContract.compilerStrategy === "event.name",
+    "native-predicate.event.name",
+    "The event.name field no longer matches its registered Event storage contract.",
   );
-  const eventNamePredicate =
-    normalizedNames.length === 1
-      ? eq(eventNameExpression, param(normalizedNames[0]!))
-      : inList(eventNameExpression, normalizedNames);
+  const eventNameColumn = readEventsWithName.columns.right_name;
+  requirePlan(
+    eventNameColumn.resultType.affinity === "text" &&
+      eventNameColumn.resultType.nullable === fieldContract.storageNullable,
+    "native-predicate.event.name.column",
+    "The typed event dictionary name column no longer matches its TEXT/nullability contract.",
+  );
+  const eventNamePredicate = lowerNativePrimitivePredicate(
+    eventNameColumn,
+    predicate,
+  );
   const readEventsMatching = filter(
     readEventsWithName,
     and(
@@ -2146,20 +2192,28 @@ function compileSessionSetPlan(
     case "candidate":
       relation = compileCandidateSessionSet(site, semantics.candidateRange);
       break;
-    case "page-path":
-      relation = compilePagePathSessionSet(
-        site,
-        semantics.readRange,
-        set.paths,
+    case "native-predicate": {
+      const fieldContract = nativePrimitiveFieldContract(set.fieldId);
+      requirePlan(
+        fieldContract !== undefined,
+        `${planNodePath(set.relationId)}.field`,
+        `The native field ${set.fieldId} no longer matches its registered primitive contract.`,
       );
+      relation =
+        fieldContract.activity === "page"
+          ? compilePagePredicateSessionSet(
+              site,
+              semantics.readRange,
+              set.fieldId as NativePagePrimitiveFieldId,
+              set.predicate,
+            )
+          : compileEventNameSessionSet(
+              site,
+              semantics.readRange,
+              set.predicate,
+            );
       break;
-    case "event-name":
-      relation = compileEventNameSessionSet(
-        site,
-        semantics.readRange,
-        set.names,
-      );
-      break;
+    }
     case "set-operation": {
       const inputs = set.inputs.map((input) =>
         compileSessionSetPlan(input, site, semantics, memo),
@@ -2590,7 +2644,7 @@ export function lowerAnalyticsPagePathToSessionQuery(
     return unsupported(
       "non-empty-session-filter-required",
       "root",
-      "Wave 2 requires a supported non-empty page.path/event.name expression.",
+      "A supported non-empty native Page/Event primitive expression is required.",
     );
   }
 
