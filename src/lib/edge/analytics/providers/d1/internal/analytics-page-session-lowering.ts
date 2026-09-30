@@ -6,6 +6,7 @@ import {
   compileD1Query,
   type CompiledQuery,
   count,
+  distinct,
   eq,
   filter,
   gte,
@@ -187,6 +188,21 @@ function unsupported(
   reason: string,
 ): UnsupportedResult {
   return { kind: "unsupported", capability, node, reason };
+}
+
+function compilationFailure(error: unknown): UnsupportedResult {
+  if (error instanceof D1StatementBudgetError) {
+    return unsupported(
+      "d1-query-budget-exceeded",
+      "compiled-query",
+      `${error.item === "sql_bytes" ? "SQL UTF-8 bytes" : "bound parameters"}: ${error.actual} (limit ${error.limit}); the compiled query cannot be submitted to D1.`,
+    );
+  }
+  return unsupported(
+    "generic-db-ir-lowering-failed",
+    "generic-db-ir",
+    error instanceof Error ? error.message : String(error),
+  );
 }
 
 function mismatch(node: string, reason: string): never {
@@ -470,7 +486,7 @@ function normalizedStringValues(
         predicate.stringNormalization === "trim" &&
         predicate.input.kind === "slot" &&
         predicate.input.slot === valueSlot &&
-        predicate.values.length === 2 &&
+        predicate.values.length > 0 &&
         predicate.values.every(
           (value) =>
             typeof value.value === "string" &&
@@ -478,13 +494,13 @@ function normalizedStringValues(
             value.valueType.scalar === "string",
         ),
       path,
-      `Only two-value ${field} OR normalized to positive set-membership is supported.`,
+      `Only positive ${field} string membership with trim normalization is supported.`,
     );
     return predicate.values.map((value) => value.value as string);
   }
   mismatch(
     path,
-    `Only ${field} equality and its normalized two-value OR set-membership are supported.`,
+    `Only ${field} equality and positive string membership are supported.`,
   );
 }
 
@@ -959,11 +975,19 @@ function parseSessionSetPlan(
   const node = relationNodeAt(plan, relationId, path, visited);
   let lowered: SessionSetPlan;
   if (node.kind === "set-operation") {
-    requirePlan(
-      node.inputs.length === 2,
-      `${planNodePath(node.id)}.inputs`,
-      "Only binary Session set operations are supported in this wave.",
-    );
+    if (node.operation === "difference") {
+      requirePlan(
+        node.inputs.length === 2,
+        `${planNodePath(node.id)}.inputs`,
+        "Session difference requires exactly two ordered inputs.",
+      );
+    } else {
+      requirePlan(
+        node.inputs.length >= 2,
+        `${planNodePath(node.id)}.inputs`,
+        "Session union and intersection require at least two inputs.",
+      );
+    }
     requireSessionGrain(node, plan, planNodePath(node.id));
     const inputs = node.inputs.map((input, index) =>
       parseSessionSetPlan(
@@ -1032,20 +1056,18 @@ function candidateSubsetViolation(set: SessionSetPlan): RelationId | undefined {
     return set.relationId;
   }
 
-  const [left, right] = set.inputs;
-  const leftViolation = candidateSubsetViolation(left!);
-  const rightViolation = candidateSubsetViolation(right!);
+  const violations = set.inputs.map(candidateSubsetViolation);
   switch (set.operation) {
     case "union":
-      return leftViolation === undefined && rightViolation === undefined
+      return violations.every((violation) => violation === undefined)
         ? undefined
         : set.relationId;
     case "intersect":
-      return leftViolation === undefined || rightViolation === undefined
+      return violations.some((violation) => violation === undefined)
         ? undefined
         : set.relationId;
     case "difference":
-      return leftViolation === undefined ? undefined : set.relationId;
+      return violations[0] === undefined ? undefined : set.relationId;
   }
 }
 
@@ -1793,7 +1815,6 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
 function validateSessionDocumentExpression(
   expression: unknown,
   path: string,
-  state: { leaves: number },
 ): UnsupportedResult | undefined {
   const record = recordOf(expression);
   if (!record) {
@@ -1806,34 +1827,28 @@ function validateSessionDocumentExpression(
 
   if (record.kind === "condition") {
     const target = recordOf(record.target);
+    const validEquality =
+      record.operator === "eq" && typeof record.value === "string";
+    const validMembership =
+      record.operator === "in" &&
+      Array.isArray(record.value) &&
+      record.value.every((value) => typeof value === "string");
     if (
       target?.kind !== "field" ||
       (target.field !== "page.path" && target.field !== "event.name") ||
-      record.operator !== "eq" ||
-      typeof record.value !== "string"
+      (!validEquality && !validMembership)
     ) {
       return unsupported(
         "session-equality-leaf-only",
         path,
-        "Only page.path or event.name eq <string> leaves are supported.",
+        "Only page.path or event.name eq <string> and positive in <string[]> leaves are supported.",
       );
     }
-    state.leaves += 1;
-    return state.leaves > 2
-      ? unsupported(
-          "two-session-filter-leaves-only",
-          path,
-          "This wave supports at most two page.path/event.name equality leaves.",
-        )
-      : undefined;
+    return undefined;
   }
 
   if (record.kind === "not") {
-    return validateSessionDocumentExpression(
-      record.child,
-      `${path}.child`,
-      state,
-    );
+    return validateSessionDocumentExpression(record.child, `${path}.child`);
   }
 
   if (record.kind === "and" || record.kind === "or") {
@@ -1848,7 +1863,6 @@ function validateSessionDocumentExpression(
       const unsupportedChild = validateSessionDocumentExpression(
         child,
         `${path}.children[${index}]`,
-        state,
       );
       if (unsupportedChild) return unsupportedChild;
     }
@@ -1858,7 +1872,7 @@ function validateSessionDocumentExpression(
   return unsupported(
     "session-boolean-shape",
     path,
-    "Only AND, OR, NOT, and page.path/event.name equality conditions are supported.",
+    "Only AND, OR, NOT, and page.path/event.name equality or positive membership conditions are supported.",
   );
 }
 
@@ -1886,9 +1900,7 @@ function analyzeSessionFilterDocument(
       "A non-empty page.path/event.name equality expression is required.",
     );
   }
-  const shapeIssue = validateSessionDocumentExpression(rawRoot, "root", {
-    leaves: 0,
-  });
+  const shapeIssue = validateSessionDocumentExpression(rawRoot, "root");
   if (shapeIssue) return shapeIssue;
 
   try {
@@ -2036,8 +2048,8 @@ function compilePagePathSessionSet(
       pathPredicate,
     ),
   );
-  // A semi/anti join only tests membership, so duplicate historical Pages
-  // cannot change the Session set and do not need a standalone DISTINCT.
+  // Evidence may retain duplicates here. Set-operation lowering restores
+  // uniqueness after semi/anti joins when this relation is a left input.
   return asSessionSetRelation(
     project(readPagesMatching, {
       site_pk: readPagesMatching.columns.site_pk,
@@ -2149,19 +2161,35 @@ function compileSessionSetPlan(
       );
       break;
     case "set-operation": {
-      const left = compileSessionSetPlan(set.inputs[0]!, site, semantics, memo);
-      const right = compileSessionSetPlan(
-        set.inputs[1]!,
-        site,
-        semantics,
-        memo,
+      const inputs = set.inputs.map((input) =>
+        compileSessionSetPlan(input, site, semantics, memo),
       );
-      if (set.operation === "union") {
-        relation = asSessionSetRelation(union(left, right));
-      } else if (set.operation === "intersect") {
-        relation = semiJoin(left, right, compositeSessionKeyMatch(left, right));
+      if (set.operation === "difference") {
+        const left = inputs[0]!;
+        const right = inputs[1]!;
+        relation = asSessionSetRelation(
+          distinct(
+            antiJoin(left, right, compositeSessionKeyMatch(left, right)),
+          ),
+        );
       } else {
-        relation = antiJoin(left, right, compositeSessionKeyMatch(left, right));
+        relation = inputs
+          .slice(1)
+          .reduce<SessionSetRelation>(
+            (left, right) =>
+              set.operation === "union"
+                ? asSessionSetRelation(union(left, right))
+                : asSessionSetRelation(
+                    distinct(
+                      semiJoin(
+                        left,
+                        right,
+                        compositeSessionKeyMatch(left, right),
+                      ),
+                    ),
+                  ),
+            inputs[0]!,
+          );
       }
       break;
     }
@@ -2359,11 +2387,7 @@ export function lowerAnalyticsPagePathSessionPlan(
       query: compileSessionPlanQuery(semantics),
     };
   } catch (error) {
-    return unsupported(
-      "generic-db-ir-lowering-failed",
-      "generic-db-ir",
-      error instanceof Error ? error.message : String(error),
-    );
+    return compilationFailure(error);
   }
 }
 
@@ -2410,11 +2434,7 @@ export function lowerAnalyticsFilteredSessionCountPlan(
       query: compileSessionCountQuery(semantics),
     };
   } catch (error) {
-    return unsupported(
-      "generic-db-ir-lowering-failed",
-      "generic-db-ir",
-      error instanceof Error ? error.message : String(error),
-    );
+    return compilationFailure(error);
   }
 }
 
@@ -2463,11 +2483,7 @@ export function lowerAnalyticsFilteredSessionViewsPlan(
       query: compileSessionViewsQuery(semantics),
     };
   } catch (error) {
-    return unsupported(
-      "generic-db-ir-lowering-failed",
-      "generic-db-ir",
-      error instanceof Error ? error.message : String(error),
-    );
+    return compilationFailure(error);
   }
 }
 
@@ -2517,18 +2533,7 @@ export function lowerAnalyticsFilteredSessionOverviewPairPlan(
       query,
     };
   } catch (error) {
-    if (error instanceof D1StatementBudgetError) {
-      return unsupported(
-        "d1-query-budget-exceeded",
-        "compiled-query",
-        `${error.item === "sql_bytes" ? "SQL UTF-8 bytes" : "bound parameters"}: ${error.actual} (limit ${error.limit}); the compiled query cannot be submitted to D1.`,
-      );
-    }
-    return unsupported(
-      "generic-db-ir-lowering-failed",
-      "generic-db-ir",
-      error instanceof Error ? error.message : String(error),
-    );
+    return compilationFailure(error);
   }
 }
 

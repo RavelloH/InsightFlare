@@ -3,15 +3,29 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
-import { createD1DatabaseClient } from "@/lib/db";
+import {
+  createD1DatabaseClient,
+  D1_MAX_BOUND_PARAMETERS,
+  D1_MAX_SQL_UTF8_BYTES,
+} from "@/lib/db";
 import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
 import {
   createSqliteD1Database,
   type SqliteD1Trace,
 } from "@/lib/db/__tests__/sqlite-d1";
+import {
+  LazyEligibleDataset,
+  LogicalPlanBuilder,
+  lowerFilterDocumentToScope,
+  planSemanticAggregateQuery,
+} from "@/lib/edge/analytics/engine";
 import type { LogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 import {
   type AnalyticsPageSessionLoweringInput,
+  lowerAnalyticsFilteredSessionCountPlan,
   lowerAnalyticsPagePathSessionPlan,
   lowerAnalyticsPagePathToSessionQuery,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-page-session-lowering";
@@ -19,7 +33,12 @@ import {
   evaluateFilterDocument,
   type FilterEvaluationEntity,
 } from "@/lib/filter-contract/filter-evaluator";
-import { type FilterDocument } from "@/lib/filter-contract/filters";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import { analyzeFilterDocument } from "@/lib/filter-contract/filter-semantics";
+import {
+  type FilterDocument,
+  normalizeFilterDocument,
+} from "@/lib/filter-contract/filters";
 
 const CANDIDATE_RANGE = { startMs: 100, endExclusiveMs: 200 } as const;
 const READ_RANGE = { startMs: 0, endExclusiveMs: 100 } as const;
@@ -53,8 +72,81 @@ function eventNameCondition(name: string) {
   } as const;
 }
 
+function inCondition(field: "page.path" | "event.name", values: string[]) {
+  return {
+    kind: "condition",
+    target: { kind: "field", field },
+    operator: "in",
+    value: values,
+  } as const;
+}
+
 function filterDocument(root: unknown): FilterDocument {
   return { version: 1, root } as unknown as FilterDocument;
+}
+
+function buildDirectSessionPlan(
+  input: unknown,
+  output: "matches" | "sessions" = "matches",
+): LogicalPlan {
+  const document = normalizeFilterDocument(input, analyticsFilterRegistry);
+  const context = {
+    subject: createSemanticSubjectDomain({
+      origin: "site",
+      siteIds: [SITE_A as never],
+    }),
+    time: createSemanticTemporalDomains({
+      candidate: CANDIDATE_RANGE as never,
+      read: { kind: "bounded", range: READ_RANGE as never },
+      reportingTimeZone: "UTC" as never,
+      capturedAtMs: 200 as never,
+    }),
+    scope: resolveAnalyticsScope("session"),
+  };
+  const builder = new LogicalPlanBuilder(context);
+  const lowered = lowerFilterDocumentToScope(
+    builder,
+    analyzeFilterDocument(document, analyticsFilterRegistry),
+    {
+      targetScope: "session",
+      resolveTemporalDomain: () => "read",
+    },
+  );
+  if (lowered.kind !== "supported") {
+    throw new Error(
+      `Expected a supported Session filter, received ${lowered.kind}.`,
+    );
+  }
+  if (output === "sessions") {
+    const dataset = new LazyEligibleDataset({
+      subject: context.subject,
+      scope: {
+        kind: "matching",
+        target: "session",
+        relation: lowered.selection.relation,
+        entitySlotName: "entity",
+      },
+      resolveRelation(entity) {
+        return entity === "session"
+          ? lowered.selection.relation
+          : builder.source(entity);
+      },
+      resolveAssociation() {
+        throw new Error(
+          "An ungrouped sessions count does not use associations.",
+        );
+      },
+    });
+    return planSemanticAggregateQuery(
+      builder,
+      { context, dimensions: [], metrics: ["sessions"], sort: [] },
+      dataset,
+    );
+  }
+  builder.output("matches", lowered.selection.relation, [
+    { name: "entity", slot: "entity" },
+  ]);
+  return builder.finish();
 }
 
 const PATH_A = filterDocument(pathCondition("/a"));
@@ -225,6 +317,86 @@ function mutablePlan(plan: LogicalPlan): MutablePlanForTest {
 
 function asLogicalPlan(plan: MutablePlanForTest): LogicalPlan {
   return plan as unknown as LogicalPlan;
+}
+
+function reverseEvidenceLeftIntersections(input: LogicalPlan): {
+  readonly plan: LogicalPlan;
+  readonly reversed: number;
+} {
+  const plan = mutablePlan(input);
+  const nodeAt = (id: unknown) => plan.nodes.find((node) => node.id === id);
+  const setInputKind = (id: unknown): "candidate" | "evidence" | undefined => {
+    const distinct = nodeAt(id);
+    if (distinct?.kind !== "distinct") return undefined;
+    const inputNode = nodeAt(distinct.input);
+    if (
+      inputNode?.kind === "source" &&
+      inputNode.temporalDomain === "candidate"
+    ) {
+      return "candidate";
+    }
+    if (inputNode?.kind === "project") return "evidence";
+    return undefined;
+  };
+
+  let reversed = 0;
+  for (const node of plan.nodes) {
+    if (
+      node.kind !== "set-operation" ||
+      node.operation !== "intersect" ||
+      !Array.isArray(node.inputs) ||
+      node.inputs.length !== 2
+    ) {
+      continue;
+    }
+    const [leftId, rightId] = node.inputs;
+    if (
+      setInputKind(leftId) !== "candidate" ||
+      setInputKind(rightId) !== "evidence"
+    ) {
+      continue;
+    }
+    node.inputs = [rightId, leftId];
+    const left = nodeAt(rightId);
+    const right = nodeAt(leftId);
+    const output = Array.isArray(node.output) ? node.output[0] : undefined;
+    const outputSlot = plan.slots.find((slot) => slot.id === output);
+    const lineage = outputSlot?.lineage as Record<string, unknown> | undefined;
+    if (
+      left &&
+      right &&
+      Array.isArray(left.output) &&
+      Array.isArray(right.output) &&
+      lineage?.kind === "derived" &&
+      lineage.operation === "set:intersect"
+    ) {
+      lineage.inputs = [left.output[0], right.output[0]];
+      reversed += 1;
+    }
+  }
+  return { plan: asLogicalPlan(plan), reversed };
+}
+
+function countConditionLeaves(expression: unknown): number {
+  if (!expression || typeof expression !== "object") return 0;
+  const node = expression as Record<string, unknown>;
+  if (node.kind === "condition") return 1;
+  if (node.kind === "not") return countConditionLeaves(node.child);
+  if (node.kind === "and" || node.kind === "or") {
+    return Array.isArray(node.children)
+      ? node.children.reduce<number>(
+          (sum, child) => sum + countConditionLeaves(child),
+          0,
+        )
+      : 0;
+  }
+  return 0;
+}
+
+function cteDefinitionCount(sql: string): number {
+  return [
+    ...sql.matchAll(/(?:\bWITH|,)\s*(?:"[^"]+"|[A-Za-z_]\w*)\s+AS\s*\(/giu),
+  ].length;
 }
 
 function evaluateCandidateRestrictedSets(
@@ -581,6 +753,195 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
     }
   });
 
+  it("deduplicates historical evidence on the left of intersections before later set operations", async () => {
+    const db = createMigratedDatabase();
+    try {
+      db.exec("PRAGMA foreign_keys = ON");
+      const { siteA } = setupSites(db);
+      const firstHistory = addPage(
+        db,
+        siteA,
+        "repeat-history-1",
+        "s-repeat",
+        10,
+        "/repeat",
+      );
+      addPage(db, siteA, "repeat-history-2", "s-repeat", 11, "/repeat");
+      const eventOwner = addPage(
+        db,
+        siteA,
+        "repeat-event-owner",
+        "s-repeat",
+        20,
+        "/ignored",
+      );
+      insertEvent(db, {
+        eventId: "repeat-event-1",
+        site: siteA,
+        visit: eventOwner,
+        occurredAt: 30,
+      });
+      insertEvent(db, {
+        eventId: "repeat-event-2",
+        site: siteA,
+        visit: eventOwner,
+        occurredAt: 31,
+      });
+      const candidate = addPage(
+        db,
+        siteA,
+        "repeat-candidate",
+        "s-repeat",
+        110,
+        "/candidate",
+      );
+      insertEvent(db, {
+        eventId: "repeat-candidate-event",
+        site: siteA,
+        visit: candidate,
+        occurredAt: 120,
+      });
+
+      const direct = createD1DatabaseClient(createSqliteD1Database(db));
+      const simpleFilter = filterDocument(pathCondition("/repeat"));
+      const simple = lower(simpleFilter);
+      expect(simple.kind).toBe("supported");
+      if (simple.kind !== "supported") {
+        throw new Error("Expected the duplicate-evidence filter to lower.");
+      }
+      const reversedSimple = reverseEvidenceLeftIntersections(
+        simple.logicalPlan,
+      );
+      expect(reversedSimple.reversed).toBe(1);
+      const reversedSimpleLowering = lowerAnalyticsPagePathSessionPlan(
+        reversedSimple.plan,
+      );
+      expect(reversedSimpleLowering.kind).toBe("supported");
+      if (reversedSimpleLowering.kind !== "supported") {
+        throw new Error("Expected the reversed intersection to remain legal.");
+      }
+      const canonicalRows = (await direct.all(simple.query)).results;
+      const reversedRows = (await direct.all(reversedSimpleLowering.query))
+        .results as Array<{
+        readonly site_pk: number;
+        readonly session_id: string;
+      }>;
+      expect(canonicalRows).toHaveLength(1);
+      expect(reversedRows).toEqual([
+        { site_pk: siteA.key, session_id: "s-repeat" },
+      ]);
+
+      const canonicalSimpleCount = lowerAnalyticsFilteredSessionCountPlan(
+        buildDirectSessionPlan(simpleFilter, "sessions"),
+      );
+      const reversedSimpleCountPlan = reverseEvidenceLeftIntersections(
+        buildDirectSessionPlan(simpleFilter, "sessions"),
+      );
+      expect(reversedSimpleCountPlan.reversed).toBe(1);
+      const reversedSimpleCount = lowerAnalyticsFilteredSessionCountPlan(
+        reversedSimpleCountPlan.plan,
+      );
+      expect(canonicalSimpleCount.kind).toBe("supported");
+      expect(reversedSimpleCount.kind).toBe("supported");
+      if (
+        canonicalSimpleCount.kind !== "supported" ||
+        reversedSimpleCount.kind !== "supported"
+      ) {
+        throw new Error("Expected both simple filtered counts to lower.");
+      }
+      expect((await direct.all(canonicalSimpleCount.query)).results).toEqual([
+        { sessions: 1 },
+      ]);
+      expect((await direct.all(reversedSimpleCount.query)).results).toEqual([
+        { sessions: 1 },
+      ]);
+
+      const compositeFilter = filterDocument({
+        kind: "and",
+        children: [
+          filterDocument({
+            kind: "or",
+            children: [
+              pathCondition("/repeat"),
+              eventNameCondition("activity"),
+              filterDocument({
+                kind: "and",
+                children: [
+                  pathCondition("/repeat"),
+                  eventNameCondition("activity"),
+                ],
+              }).root,
+            ],
+          }).root,
+          pathCondition("/repeat"),
+          { kind: "not", child: eventNameCondition("missing") },
+        ],
+      });
+      const composite = lower(compositeFilter);
+      expect(composite.kind).toBe("supported");
+      if (composite.kind !== "supported") {
+        throw new Error("Expected the composite evidence filter to lower.");
+      }
+      const reversedComposite = reverseEvidenceLeftIntersections(
+        composite.logicalPlan,
+      );
+      expect(reversedComposite.reversed).toBeGreaterThan(1);
+      const compositeOperations = composite.logicalPlan.nodes
+        .filter((node) => node.kind === "set-operation")
+        .map((node) => node.operation);
+      expect(compositeOperations).toContain("union");
+      expect(compositeOperations).toContain("intersect");
+      expect(compositeOperations).toContain("difference");
+      const reversedCompositeLowering = lowerAnalyticsPagePathSessionPlan(
+        reversedComposite.plan,
+      );
+      expect(reversedCompositeLowering.kind).toBe("supported");
+      if (reversedCompositeLowering.kind !== "supported") {
+        throw new Error("Expected the composite reordered plan to be legal.");
+      }
+      const compositeRows = (await direct.all(reversedCompositeLowering.query))
+        .results as Array<{
+        readonly site_pk: number;
+        readonly session_id: string;
+      }>;
+      expect(compositeRows).toEqual([
+        { site_pk: siteA.key, session_id: "s-repeat" },
+      ]);
+      expect(compositeRows).toHaveLength(
+        new Set(compositeRows.map((row) => `${row.site_pk}:${row.session_id}`))
+          .size,
+      );
+
+      const canonicalCompositeCount = lowerAnalyticsFilteredSessionCountPlan(
+        buildDirectSessionPlan(compositeFilter, "sessions"),
+      );
+      const reversedCompositeCountPlan = reverseEvidenceLeftIntersections(
+        buildDirectSessionPlan(compositeFilter, "sessions"),
+      );
+      expect(reversedCompositeCountPlan.reversed).toBeGreaterThan(1);
+      const reversedCompositeCount = lowerAnalyticsFilteredSessionCountPlan(
+        reversedCompositeCountPlan.plan,
+      );
+      expect(canonicalCompositeCount.kind).toBe("supported");
+      expect(reversedCompositeCount.kind).toBe("supported");
+      if (
+        canonicalCompositeCount.kind !== "supported" ||
+        reversedCompositeCount.kind !== "supported"
+      ) {
+        throw new Error("Expected both composite filtered counts to lower.");
+      }
+      expect((await direct.all(canonicalCompositeCount.query)).results).toEqual(
+        [{ sessions: 1 }],
+      );
+      expect((await direct.all(reversedCompositeCount.query)).results).toEqual([
+        { sessions: 1 },
+      ]);
+      expect(firstHistory.sessionId).toBe("s-repeat");
+    } finally {
+      db.close();
+    }
+  });
+
   it("lowers the supplied plan expression and rejects unsupported node or output changes", async () => {
     const base = lower();
     expect(base.kind).toBe("supported");
@@ -792,6 +1153,8 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
       page(siteA, "ab-history-a", "s-ab", 10, "/a");
       page(siteA, "ab-history-b", "s-ab", 11, "/b");
       const abOwner = page(siteA, "ab-event-owner", "s-ab", 20, "/other");
+      event("ab-history-event-1", siteA, abOwner, 30);
+      event("ab-history-event-2", siteA, abOwner, 31);
       event("ab-candidate-event-1", siteA, abOwner, 100);
       event("ab-candidate-event-2", siteA, abOwner, 101);
 
@@ -799,6 +1162,8 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
       page(siteA, "a-history-duplicate", "s-a", 22, "/a");
       const aCandidate = page(siteA, "a-candidate", "s-a", 110, "/other");
       page(siteA, "a-candidate-duplicate", "s-a", 111, "/other");
+      event("a-history-event-1", siteA, aCandidate, 35);
+      event("a-history-event-2", siteA, aCandidate, 36);
       event("a-candidate-event", siteA, aCandidate, 112);
 
       page(siteA, "b-history", "s-b", 23, "/b");
@@ -897,14 +1262,131 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
             "s-start",
           ],
         },
+        {
+          name: "nary-union",
+          document: filterDocument({
+            kind: "or",
+            children: [
+              documentA.root,
+              eventNameCondition("activity"),
+              filterDocument({
+                kind: "and",
+                children: [documentB.root, eventNameCondition("activity")],
+              }).root,
+            ],
+          }),
+        },
+        {
+          name: "nary-intersect",
+          document: filterDocument({
+            kind: "and",
+            children: [
+              documentA.root,
+              eventNameCondition("activity"),
+              filterDocument({
+                kind: "or",
+                children: [documentB.root, eventNameCondition("missing")],
+              }).root,
+            ],
+          }),
+        },
+        {
+          name: "six-leaf-mixed",
+          document: filterDocument({
+            kind: "and",
+            children: [
+              documentA.root,
+              documentB.root,
+              eventNameCondition("activity"),
+              { kind: "not", child: eventNameCondition("missing") },
+              filterDocument({
+                kind: "or",
+                children: [documentA.root, eventNameCondition("signup")],
+              }).root,
+            ],
+          }),
+        },
+        {
+          name: "three-path-or",
+          document: filterDocument({
+            kind: "or",
+            children: [
+              documentA.root,
+              documentB.root,
+              pathCondition("/not-seen"),
+            ],
+          }),
+          expected: ["s-ab", "s-a", "s-b", "s-trim", "s-start", "s-shared"],
+        },
+        {
+          name: "three-leaf-page-event-and-not",
+          document: filterDocument({
+            kind: "and",
+            children: [
+              documentA.root,
+              eventNameCondition("activity"),
+              { kind: "not", child: eventNameCondition("missing") },
+            ],
+          }),
+        },
+        {
+          name: "positive-in-trim-and-deduplicate",
+          document: filterDocument(
+            inCondition("page.path", [" /a ", "\t/b\t", "/b"]),
+          ),
+          expected: ["s-ab", "s-a", "s-b", "s-trim", "s-start", "s-shared"],
+        },
+        {
+          name: "positive-singleton-in",
+          document: filterDocument(inCondition("page.path", ["/a"])),
+        },
+        {
+          name: "32-value-supported-in",
+          document: filterDocument(
+            inCondition("page.path", [
+              "/a",
+              ...Array.from({ length: 31 }, (_, index) => `/unused-${index}`),
+            ]),
+          ),
+          expected: ["s-ab", "s-a", "s-trim", "s-shared"],
+        },
+        {
+          name: "no-candidate-match",
+          document: filterDocument(
+            inCondition("page.path", ["/unseen-a", "/unseen-b"]),
+          ),
+          expected: [],
+        },
       ] as const;
+
+      const normalizedThreePathOr = normalizeFilterDocument(
+        cases.find((item) => item.name === "three-path-or")!.document,
+        analyticsFilterRegistry,
+      );
+      expect(normalizedThreePathOr.root).toMatchObject({
+        kind: "condition",
+        operator: "in",
+        value: ["/a", "/b", "/not-seen"],
+      });
+      const normalizedPositiveIn = normalizeFilterDocument(
+        cases.find((item) => item.name === "positive-in-trim-and-deduplicate")!
+          .document,
+        analyticsFilterRegistry,
+      );
+      expect(normalizedPositiveIn.root).toMatchObject({
+        kind: "condition",
+        operator: "in",
+        value: ["/a", "/b"],
+      });
 
       const costs: Record<
         string,
         {
           readonly statements: number;
           readonly bindings: number;
-          readonly sqlLength: number;
+          readonly sqlBytes: number;
+          readonly cteCount: number;
+          readonly conditionLeaves: number;
           readonly explain: {
             readonly operations: number;
             readonly candidatePageCoveringScans: number;
@@ -974,11 +1456,30 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
           candidateSessionIds,
         );
         expect(actual).toEqual(evaluatorSessions);
-        expect([...actual].sort()).toEqual([...item.expected].sort());
+        if ("expected" in item) {
+          expect([...actual].sort()).toEqual([...item.expected].sort());
+        }
         expect(actualRows.every((row) => row.site_pk === siteA.key)).toBe(true);
         expect(actualRows).toHaveLength(actual.size);
         expect(trace.preparedSql).toHaveLength(1);
         expect(trace.bindings).toHaveLength(1);
+        const sqlBytes = new TextEncoder().encode(lowered.query.sql).length;
+        expect(sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(lowered.query.bindings?.length ?? 0).toBeLessThanOrEqual(
+          D1_MAX_BOUND_PARAMETERS,
+        );
+        if (item.name === "nary-union" || item.name === "nary-intersect") {
+          const expectedOperation =
+            item.name === "nary-union" ? "union" : "intersect";
+          expect(
+            lowered.logicalPlan.nodes.some(
+              (node) =>
+                node.kind === "set-operation" &&
+                node.operation === expectedOperation &&
+                node.inputs.length === 3,
+            ),
+          ).toBe(true);
+        }
 
         const explain = explainQueryPlan(db, lowered.query);
         const explainText = explain.join("\n");
@@ -993,7 +1494,9 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
         costs[item.name] = {
           statements: trace.preparedSql.length,
           bindings: lowered.query.bindings?.length ?? 0,
-          sqlLength: lowered.query.sql.length,
+          sqlBytes,
+          cteCount: cteDefinitionCount(lowered.query.sql),
+          conditionLeaves: countConditionLeaves(item.document.root),
           explain: {
             operations: explain.length,
             candidatePageCoveringScans: countExplain(
@@ -1019,7 +1522,7 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
         and: {
           statements: 1,
           bindings: 15,
-          sqlLength: 21386,
+          sqlBytes: 21611,
           explain: {
             candidatePageCoveringScans: 1,
             candidateEventCoveringScans: 1,
@@ -1030,7 +1533,7 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
         or: {
           statements: 1,
           bindings: 12,
-          sqlLength: 16071,
+          sqlBytes: 16146,
           explain: {
             candidatePageCoveringScans: 1,
             candidateEventCoveringScans: 1,
@@ -1041,7 +1544,7 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
         not: {
           statements: 1,
           bindings: 11,
-          sqlLength: 16475,
+          sqlBytes: 16625,
           explain: {
             candidatePageCoveringScans: 1,
             candidateEventCoveringScans: 1,
@@ -1052,7 +1555,7 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
         "nested-and-not": {
           statements: 1,
           bindings: 15,
-          sqlLength: 21635,
+          sqlBytes: 21935,
           explain: {
             candidatePageCoveringScans: 1,
             candidateEventCoveringScans: 1,
@@ -1063,7 +1566,7 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
         "or-set-operation": {
           statements: 1,
           bindings: 15,
-          sqlLength: 21601,
+          sqlBytes: 21826,
           explain: {
             candidatePageCoveringScans: 1,
             candidateEventCoveringScans: 1,
@@ -1072,10 +1575,23 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
           },
         },
       });
+      console.info(
+        "Wave 7 Analytics Session filter costs",
+        JSON.stringify(
+          Object.fromEntries(
+            [2, 3, 6].map((leafCount) => [
+              `${leafCount}-condition`,
+              Object.entries(costs)
+                .filter(([, cost]) => cost.conditionLeaves === leafCount)
+                .map(([name, cost]) => ({ name, ...cost })),
+            ]),
+          ),
+        ),
+      );
       for (const [name, maxOperations, maxUnionTempTrees] of [
         ["and", 36, 2],
-        ["or", 17, 1],
-        ["not", 32, 2],
+        ["or", 20, 1],
+        ["not", 40, 2],
         ["nested-and-not", 51, 3],
         ["or-set-operation", 56, 4],
       ] as const) {
@@ -1084,6 +1600,46 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
         );
         expect(costs[name].explain.unionTempTrees, name).toBeLessThanOrEqual(
           maxUnionTempTrees,
+        );
+      }
+      const budgetRejected = lower(
+        filterDocument(
+          inCondition(
+            "page.path",
+            Array.from({ length: 128 }, (_, index) => `/budget-${index}`),
+          ),
+        ),
+      );
+      expect(budgetRejected).toMatchObject({
+        kind: "unsupported",
+        capability: "d1-query-budget-exceeded",
+        node: "compiled-query",
+        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
+      });
+      if (budgetRejected.kind === "unsupported") {
+        console.info("Wave 7 Session budget refusal", budgetRejected.reason);
+      }
+      expect("query" in budgetRejected).toBe(false);
+      const directPlanBudgetRejected = lowerAnalyticsPagePathSessionPlan(
+        buildDirectSessionPlan(
+          filterDocument(
+            inCondition(
+              "page.path",
+              Array.from({ length: 128 }, (_, index) => `/budget-${index}`),
+            ),
+          ),
+        ),
+      );
+      expect(directPlanBudgetRejected).toMatchObject({
+        kind: "unsupported",
+        capability: "d1-query-budget-exceeded",
+        node: "compiled-query",
+        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
+      });
+      if (directPlanBudgetRejected.kind === "unsupported") {
+        console.info(
+          "Wave 7 direct Session plan budget refusal",
+          directPlanBudgetRejected.reason,
         );
       }
     } finally {
@@ -1540,7 +2096,7 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
       expect(observedCosts["event-only"]).toMatchObject({
         statements: 1,
         bindings: 11,
-        sqlLength: 19081,
+        sqlLength: 19156,
         explain: {
           candidatePageCoveringScans: 1,
           candidateEventCoveringScans: 1,
@@ -1551,7 +2107,7 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
       });
       expect(
         observedCosts["event-only"].explain.operations,
-      ).toBeLessThanOrEqual(19);
+      ).toBeLessThanOrEqual(21);
       expect(
         observedCosts["event-only"].explain.unionTempTrees,
       ).toBeLessThanOrEqual(1);
@@ -1649,22 +2205,43 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
     });
     expect("query" in unsupportedEventPayload).toBe(false);
 
-    const tooManyLeaves = lower(
+    const contractLimitExceeded = lower(
       filterDocument({
-        kind: "and",
-        children: [
-          PATH_A.root,
-          filterDocument(eventNameCondition("purchase")).root,
-          PATH_B.root,
-        ],
+        kind: "or",
+        children: Array.from({ length: 129 }, (_, index) =>
+          pathCondition(`/condition-${index}`),
+        ),
       }),
     );
-    expect(tooManyLeaves).toMatchObject({
+    expect(contractLimitExceeded).toMatchObject({
       kind: "unsupported",
-      capability: "two-session-filter-leaves-only",
-      node: "root.children[2]",
+      capability: "valid-filter-document-required",
+      node: "root",
+      reason: "Filter condition limit exceeded.",
     });
-    expect("query" in tooManyLeaves).toBe(false);
+    expect("query" in contractLimitExceeded).toBe(false);
+
+    const emptyMembership = lower(filterDocument(inCondition("page.path", [])));
+    expect(emptyMembership).toMatchObject({
+      kind: "unsupported",
+      capability: "valid-filter-document-required",
+      node: "root",
+    });
+    expect("query" in emptyMembership).toBe(false);
+
+    const negativeMembership = lower(
+      filterDocument({
+        kind: "condition",
+        target: { kind: "field", field: "page.path" },
+        operator: "notIn",
+        value: ["/a", "/b"],
+      }),
+    );
+    expect(negativeMembership).toMatchObject({
+      kind: "unsupported",
+      capability: "session-equality-leaf-only",
+    });
+    expect("query" in negativeMembership).toBe(false);
 
     const unsupportedSites = lower(DOCUMENT, [SITE_A, SITE_B]);
     expect(unsupportedSites).toMatchObject({

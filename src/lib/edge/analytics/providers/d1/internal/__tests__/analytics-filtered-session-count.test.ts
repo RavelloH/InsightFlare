@@ -3,7 +3,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
-import { createD1DatabaseClient } from "@/lib/db";
+import {
+  createD1DatabaseClient,
+  D1_MAX_BOUND_PARAMETERS,
+  D1_MAX_SQL_UTF8_BYTES,
+} from "@/lib/db";
 import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
 import {
   createSqliteD1Database,
@@ -43,6 +47,15 @@ function condition(field: string, value: string) {
     target: { kind: "field", field },
     operator: "eq",
     value,
+  } as const;
+}
+
+function inCondition(field: string, values: readonly string[]) {
+  return {
+    kind: "condition",
+    target: { kind: "field", field },
+    operator: "in",
+    value: values,
   } as const;
 }
 
@@ -463,8 +476,12 @@ describe("semantic sessions aggregate → filtered Session D1 count", () => {
         expect(trace.bindings.at(-1)).toHaveLength(
           lowered.query.bindings?.length ?? 0,
         );
-        expect(lowered.query.sql.length).toBeLessThan(40_000);
-        expect(lowered.query.bindings?.length ?? 0).toBeLessThanOrEqual(30);
+        expect(
+          new TextEncoder().encode(lowered.query.sql).length,
+        ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(lowered.query.bindings?.length ?? 0).toBeLessThanOrEqual(
+          D1_MAX_BOUND_PARAMETERS,
+        );
         const explain = explainQueryPlan(db, lowered.query).join("\n");
         expect(explain).toContain("idx_visits_site_pk_session_started_at");
         return lowered.query;
@@ -510,6 +527,74 @@ describe("semantic sessions aggregate → filtered Session D1 count", () => {
         new Set(),
       );
       expect(emptyQuery.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
+
+      const membershipFilter = document(
+        inCondition("page.path", [
+          "/match",
+          ...Array.from({ length: 31 }, (_, index) => `/unused-${index}`),
+        ]),
+      );
+      const membershipExpected = candidateRestrictedEvaluatorSet(
+        membershipFilter,
+        evaluatorDataset,
+      );
+      const membershipQuery = await assertCount(
+        membershipFilter,
+        membershipExpected,
+      );
+      expect(membershipQuery.bindings?.length ?? 0).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      const eventMembershipFilter = document(
+        inCondition("event.name", ["signup", "other"]),
+      );
+      await assertCount(
+        eventMembershipFilter,
+        candidateRestrictedEvaluatorSet(
+          eventMembershipFilter,
+          evaluatorDataset,
+        ),
+      );
+
+      const mixedFilter = document({
+        kind: "and",
+        children: [
+          inCondition("page.path", ["/match", "/event-only-history"]),
+          {
+            kind: "or",
+            children: [
+              condition("event.name", "signup"),
+              condition("page.path", "/read-start"),
+              condition("event.name", "other"),
+            ],
+          },
+        ],
+      });
+      await assertCount(
+        mixedFilter,
+        candidateRestrictedEvaluatorSet(mixedFilter, evaluatorDataset),
+      );
+
+      const overBudgetFilter = document(
+        inCondition(
+          "page.path",
+          Array.from({ length: 128 }, (_, index) => `/over-budget-${index}`),
+        ),
+      );
+      const beforeBudgetRejection = trace.preparedSql.length;
+      const overBudget = lowerAnalyticsFilteredSessionCountPlan(
+        buildSemanticSessionsPlan(overBudgetFilter),
+      );
+      expect(overBudget).toMatchObject({
+        kind: "unsupported",
+        capability: "d1-query-budget-exceeded",
+        node: "compiled-query",
+        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
+      });
+      if (overBudget.kind === "unsupported") {
+        console.info("Wave 7 session count budget refusal", overBudget.reason);
+      }
+      expect(trace.preparedSql).toHaveLength(beforeBudgetRejection);
     } finally {
       db.close();
     }

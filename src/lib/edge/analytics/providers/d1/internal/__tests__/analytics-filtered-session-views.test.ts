@@ -60,6 +60,15 @@ function condition(field: string, value: string) {
   } as const;
 }
 
+function inCondition(field: string, values: readonly string[]) {
+  return {
+    kind: "condition",
+    target: { kind: "field", field },
+    operator: "in",
+    value: values,
+  } as const;
+}
+
 function document(root: unknown): FilterDocument {
   return normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
 }
@@ -921,6 +930,75 @@ describe("semantic Session-filtered views plan", () => {
 
       const noMatch = document(condition("page.path", "/never-seen"));
       await executeViewsQuery(db, client, trace, noMatch, 0);
+
+      const positiveMembership = document(
+        inCondition("page.path", [" /match ", "/match", "/event-only-history"]),
+      );
+      await executeViewsQuery(
+        db,
+        client,
+        trace,
+        positiveMembership,
+        expectedViews(positiveMembership, evaluation),
+      );
+      const eventMembership = document(
+        inCondition("event.name", ["signup", "other"]),
+      );
+      await executeViewsQuery(
+        db,
+        client,
+        trace,
+        eventMembership,
+        expectedViews(eventMembership, evaluation),
+      );
+
+      const mixedMembership = document({
+        kind: "and",
+        children: [
+          inCondition("page.path", ["/match", "/event-only-history"]),
+          {
+            kind: "or",
+            children: [
+              condition("event.name", "signup"),
+              condition("page.path", "/event-only-history"),
+              condition("event.name", "other"),
+            ],
+          },
+        ],
+      });
+      await executeViewsQuery(
+        db,
+        client,
+        trace,
+        mixedMembership,
+        expectedViews(mixedMembership, evaluation),
+      );
+
+      const overBudgetFilter = document(
+        inCondition(
+          "page.path",
+          Array.from({ length: 128 }, (_, index) => `/over-budget-${index}`),
+        ),
+      );
+      const beforeBudgetRejection = trace.preparedSql.length;
+      const overBudget = lowerAnalyticsFilteredSessionViewsPlan(
+        buildSemanticViewsPlan(overBudgetFilter),
+        {
+          siteId: SITE_A,
+          candidateRange: CANDIDATE_RANGE as never,
+          readRange: READ_RANGE as never,
+        },
+      );
+      expect(overBudget).toMatchObject({
+        kind: "unsupported",
+        capability: "d1-query-budget-exceeded",
+        node: "compiled-query",
+        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
+      });
+      if (overBudget.kind === "unsupported") {
+        console.info("Wave 7 views budget refusal", overBudget.reason);
+      }
+      expect(trace.preparedSql).toHaveLength(beforeBudgetRejection);
     } finally {
       db.close();
     }
@@ -1198,6 +1276,39 @@ describe("formal sessions + views overview pair plan", () => {
           label: "Event-only candidate",
           filters: document(condition("page.path", "/event-only")),
         },
+        {
+          label: "positive page.path membership",
+          filters: document(
+            inCondition("page.path", ["/match", "/read-start"]),
+          ),
+        },
+        {
+          label: "positive event.name membership",
+          filters: document(inCondition("event.name", ["signup", "other"])),
+        },
+        {
+          label: "multi-condition positive membership",
+          filters: document({
+            kind: "or",
+            children: [
+              {
+                kind: "and",
+                children: [
+                  inCondition("page.path", ["/match", "/event-only"]),
+                  condition("event.name", "signup"),
+                ],
+              },
+              {
+                kind: "and",
+                children: [
+                  condition("page.path", "/read-start"),
+                  condition("event.name", "other"),
+                ],
+              },
+              condition("page.path", "/event-only"),
+            ],
+          }),
+        },
         { label: "NOT event.name", filters: NOT_EVENT_FILTER },
         {
           label: "read start boundary",
@@ -1219,6 +1330,9 @@ describe("formal sessions + views overview pair plan", () => {
         "NOT(two-leaf OR)",
         "AND(NOT page.path, event.name)",
         "Event-only candidate",
+        "positive page.path membership",
+        "positive event.name membership",
+        "multi-condition positive membership",
         "NOT event.name",
         "read start boundary",
         "read end boundary",
@@ -1288,6 +1402,32 @@ describe("formal sessions + views overview pair plan", () => {
       expect(budgetRejections.map((cost) => cost.label).sort()).toEqual(
         expectedBudgetRejectedLabels.sort(),
       );
+
+      const overBudgetFilter = document(
+        inCondition(
+          "page.path",
+          Array.from({ length: 128 }, (_, index) => `/over-budget-${index}`),
+        ),
+      );
+      const beforeBudgetRejection = trace.preparedSql.length;
+      const overBudget = lowerAnalyticsFilteredSessionOverviewPairPlan(
+        buildSemanticOverviewPairPlan(overBudgetFilter),
+        {
+          siteId: SITE_A,
+          candidateRange: CANDIDATE_RANGE,
+          readRange: READ_RANGE,
+        } as never,
+      );
+      expect(overBudget).toMatchObject({
+        kind: "unsupported",
+        capability: "d1-query-budget-exceeded",
+        node: "compiled-query",
+        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
+      });
+      if (overBudget.kind === "unsupported") {
+        console.info("Wave 7 overview pair budget refusal", overBudget.reason);
+      }
+      expect(trace.preparedSql).toHaveLength(beforeBudgetRejection);
       const maxSqlCost = measuredCosts.reduce((maximum, cost) =>
         cost.sqlBytes > maximum.sqlBytes ? cost : maximum,
       );
