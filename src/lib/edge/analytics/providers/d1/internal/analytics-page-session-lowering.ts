@@ -1,9 +1,11 @@
 import {
+  aggregate,
   and,
   antiJoin,
   callFunction,
   compileD1Query,
   type CompiledQuery,
+  count,
   eq,
   filter,
   gte,
@@ -74,6 +76,10 @@ export interface AnalyticsSessionIdentityRow {
   readonly session_id: string;
 }
 
+export interface AnalyticsSessionCountRow {
+  readonly sessions: number;
+}
+
 export type AnalyticsPageSessionLoweringResult =
   | {
       readonly kind: "supported";
@@ -86,6 +92,14 @@ export type AnalyticsPageSessionLoweringResult =
       readonly node: string;
       readonly reason: string;
     };
+
+export type AnalyticsSessionCountLoweringResult =
+  | {
+      readonly kind: "supported";
+      readonly logicalPlan: ValidatedLogicalPlan;
+      readonly query: CompiledQuery<AnalyticsSessionCountRow>;
+    }
+  | UnsupportedResult;
 
 type UnsupportedResult = Extract<
   AnalyticsPageSessionLoweringResult,
@@ -116,6 +130,12 @@ interface SessionPlanSemantics {
   readonly candidateRange: TimeRange;
   readonly readRange: TimeRange;
   readonly set: SessionSetPlan;
+}
+
+interface SessionPlanContextSemantics {
+  readonly siteId: SiteId;
+  readonly candidateRange: TimeRange;
+  readonly readRange: TimeRange;
 }
 
 class PlanShapeMismatch extends Error {
@@ -996,7 +1016,9 @@ function candidateSubsetViolation(set: SessionSetPlan): RelationId | undefined {
   }
 }
 
-function matchSessionPlan(plan: ValidatedLogicalPlan): SessionPlanSemantics {
+function matchSessionPlanContext(
+  plan: ValidatedLogicalPlan,
+): SessionPlanContextSemantics {
   const context = plan.context;
   requirePlan(
     context.scope.requested === "session" &&
@@ -1021,6 +1043,51 @@ function matchSessionPlan(plan: ValidatedLogicalPlan): SessionPlanSemantics {
     "context.time",
     "Only bounded candidate/read domains are supported; a filter domain is not.",
   );
+  return {
+    siteId: context.subject.siteIds[0] as SiteId,
+    candidateRange: context.time.candidate,
+    readRange: context.time.read.range,
+  };
+}
+
+function matchCandidateBoundedSessionSet(
+  plan: ValidatedLogicalPlan,
+  relationId: RelationId,
+  path: string,
+  visited: Set<RelationId>,
+): SessionSetPlan {
+  const outputRelation = relationNodeAt(plan, relationId, path, visited);
+  requirePlan(
+    outputRelation.kind === "set-operation",
+    path,
+    "The Session set must remain a candidate-scoped set operation.",
+  );
+  const set = parseSessionSetPlan(plan, relationId, path, visited, new Map());
+  const candidateSubsetIssue = candidateSubsetViolation(set);
+  if (candidateSubsetIssue !== undefined) {
+    mismatch(
+      planNodePath(candidateSubsetIssue),
+      "The Session set is not proven to be a subset of the candidate Session universe.",
+    );
+  }
+  return set;
+}
+
+function requireAllPlanNodesVisited(
+  plan: ValidatedLogicalPlan,
+  visited: ReadonlySet<RelationId>,
+): void {
+  if (visited.size !== plan.nodes.length) {
+    const unreachable = plan.nodes.find((node) => !visited.has(node.id));
+    mismatch(
+      unreachable ? planNodePath(unreachable.id) : "nodes",
+      "The output cannot leave any Boolean or relational subtree unreachable.",
+    );
+  }
+}
+
+function matchSessionPlan(plan: ValidatedLogicalPlan): SessionPlanSemantics {
+  const context = matchSessionPlanContext(plan);
   requirePlan(
     plan.outputs.length === 1 &&
       plan.outputs[0]!.id === "matches" &&
@@ -1039,25 +1106,12 @@ function matchSessionPlan(plan: ValidatedLogicalPlan): SessionPlanSemantics {
     "outputs[0].relation",
     visited,
   );
-  requirePlan(
-    outputRelation.kind === "set-operation",
-    "outputs[0].relation",
-    "The output must remain a candidate-scoped Session set operation.",
-  );
-  const set = parseSessionSetPlan(
+  const set = matchCandidateBoundedSessionSet(
     plan,
-    output.relation,
+    outputRelation.id,
     "outputs[0].relation",
     visited,
-    new Map(),
   );
-  const candidateSubsetIssue = candidateSubsetViolation(set);
-  if (candidateSubsetIssue !== undefined) {
-    mismatch(
-      planNodePath(candidateSubsetIssue),
-      "The output Session set is not proven to be a subset of the candidate Session universe.",
-    );
-  }
   const outputSlot = output.fields[0]!.slot;
   requirePlan(
     outputRelation.output.length === 1 &&
@@ -1066,19 +1120,152 @@ function matchSessionPlan(plan: ValidatedLogicalPlan): SessionPlanSemantics {
     "The output field must reference the output relation's Session key.",
   );
   entitySlotAt(plan, outputSlot, "session", false, "outputs[0].fields[0].slot");
-  if (visited.size !== plan.nodes.length) {
-    const unreachable = plan.nodes.find((node) => !visited.has(node.id));
-    mismatch(
-      unreachable ? planNodePath(unreachable.id) : "nodes",
-      "The output cannot leave any Boolean or relational subtree unreachable.",
-    );
-  }
+  requireAllPlanNodesVisited(plan, visited);
   return {
-    siteId: context.subject.siteIds[0] as SiteId,
-    candidateRange: context.time.candidate,
-    readRange: context.time.read.range,
+    ...context,
     set,
   };
+}
+
+function validateSessionCountProjection(
+  plan: ValidatedLogicalPlan,
+  node: ProjectNode,
+  input: RelationId,
+  inputSlot: SlotId,
+  path: string,
+  visited: Set<RelationId>,
+): SlotId {
+  visited.add(node.id);
+  requirePlan(
+    node.input === input &&
+      node.projections.length === 1 &&
+      node.projections[0]!.expression.kind === "slot" &&
+      node.projections[0]!.expression.slot === inputSlot &&
+      node.output.length === 1 &&
+      node.output[0] === node.projections[0]!.slot &&
+      node.grain.kind === "scalar",
+    path,
+    "A sessions output Project must preserve the scalar count slot exactly.",
+  );
+  const outputSlot = slotAt(plan, node.output[0]!, `${path}.output[0]`);
+  requirePlan(
+    outputSlot.type.kind === "scalar" &&
+      outputSlot.type.scalar === "number" &&
+      !outputSlot.nullable &&
+      outputSlot.lineage.kind === "alias" &&
+      outputSlot.lineage.source === inputSlot,
+    `${path}.output[0]`,
+    "The sessions Project output must remain a non-null numeric alias.",
+  );
+  return outputSlot.id;
+}
+
+function matchSessionCountPlan(
+  plan: ValidatedLogicalPlan,
+): SessionPlanSemantics {
+  const context = matchSessionPlanContext(plan);
+  requirePlan(
+    plan.outputs.length === 1 &&
+      plan.outputs[0]!.id === "semantic-aggregate" &&
+      plan.outputs[0]!.fields.length === 1 &&
+      plan.outputs[0]!.fields[0]!.name === "sessions" &&
+      plan.outputs[0]!.fields[0]!.semantic?.kind === "metric" &&
+      plan.outputs[0]!.fields[0]!.semantic?.id === "sessions",
+    "outputs",
+    "Expected the semantic-aggregate.sessions metric output only.",
+  );
+
+  const output = plan.outputs[0]!;
+  const visited = new Set<RelationId>();
+  const finalProject = nodeAt(
+    plan,
+    output.relation,
+    "project",
+    "outputs[0].relation",
+    visited,
+  );
+  const metricProject = nodeAt(
+    plan,
+    finalProject.input,
+    "project",
+    `${planNodePath(finalProject.id)}.input`,
+    visited,
+  );
+  const aggregateNode = nodeAt(
+    plan,
+    metricProject.input,
+    "aggregate",
+    `${planNodePath(metricProject.id)}.input`,
+    visited,
+  );
+  requirePlan(
+    aggregateNode.groups.length === 0 &&
+      aggregateNode.measures.length === 1 &&
+      aggregateNode.measures[0]!.kind === "count-rows" &&
+      aggregateNode.output.length === 1 &&
+      aggregateNode.output[0] === aggregateNode.measures[0]!.output &&
+      aggregateNode.grain.kind === "scalar",
+    planNodePath(aggregateNode.id),
+    "Only an ungrouped single COUNT_ROWS Aggregate is supported for sessions.",
+  );
+  const aggregateOutput = slotAt(
+    plan,
+    aggregateNode.output[0]!,
+    `${planNodePath(aggregateNode.id)}.output[0]`,
+  );
+  requirePlan(
+    aggregateOutput.type.kind === "scalar" &&
+      aggregateOutput.type.scalar === "number" &&
+      !aggregateOutput.nullable &&
+      aggregateOutput.lineage.kind === "derived" &&
+      aggregateOutput.lineage.operation === "aggregate:count-rows",
+    `${planNodePath(aggregateNode.id)}.output[0]`,
+    "The sessions Aggregate must produce a non-null count-rows number.",
+  );
+
+  const metricProjectOutput = validateSessionCountProjection(
+    plan,
+    metricProject,
+    aggregateNode.id,
+    aggregateOutput.id,
+    planNodePath(metricProject.id),
+    visited,
+  );
+  const finalProjectOutput = validateSessionCountProjection(
+    plan,
+    finalProject,
+    metricProject.id,
+    metricProjectOutput,
+    planNodePath(finalProject.id),
+    visited,
+  );
+  requirePlan(
+    finalProject.output.length === 1 &&
+      finalProject.output[0] === output.fields[0]!.slot,
+    "outputs[0].fields[0].slot",
+    "The semantic output must reference the projected sessions count.",
+  );
+  const outputSlot = slotAt(
+    plan,
+    finalProjectOutput,
+    "outputs[0].fields[0].slot",
+  );
+  requirePlan(
+    finalProjectOutput === output.fields[0]!.slot &&
+      outputSlot.type.kind === "scalar" &&
+      outputSlot.type.scalar === "number" &&
+      !outputSlot.nullable,
+    "outputs[0].fields[0].slot",
+    "The sessions output must be a non-null numeric value.",
+  );
+  const set = matchCandidateBoundedSessionSet(
+    plan,
+    aggregateNode.input,
+    `${planNodePath(aggregateNode.id)}.input`,
+    visited,
+  );
+  requireAllPlanNodesVisited(plan, visited);
+  return { ...context, set };
 }
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {
@@ -1467,23 +1654,42 @@ function compileSessionSetPlan(
   return relation;
 }
 
-function compileSessionPlanQuery(
+function buildSessionKeyRelation(
   semantics: SessionPlanSemantics,
-): CompiledQuery<AnalyticsSessionIdentityRow> {
+): SessionSetRelation {
   const siteIdentitySource = scan(schema.site_identities);
   const selectedSite = filter(
     siteIdentitySource,
     eq(siteIdentitySource.columns.site_id, param(semantics.siteId)),
   );
-  const matchingSessions = compileSessionSetPlan(
+  return compileSessionSetPlan(
     semantics.set,
     selectedSite,
     semantics,
     new Map(),
   );
+}
+
+function compileSessionPlanQuery(
+  semantics: SessionPlanSemantics,
+): CompiledQuery<AnalyticsSessionIdentityRow> {
+  const matchingSessions = buildSessionKeyRelation(semantics);
   return compileD1Query(lowerLogicalPlan(matchingSessions), {
     tag: "analytics.session-filter.wave-2",
   }) as CompiledQuery<AnalyticsSessionIdentityRow>;
+}
+
+function compileSessionCountQuery(
+  semantics: SessionPlanSemantics,
+): CompiledQuery<AnalyticsSessionCountRow> {
+  const matchingSessions = buildSessionKeyRelation(semantics);
+  const sessionCount = aggregate(matchingSessions, {
+    groupBy: {},
+    aggregates: { sessions: count() },
+  });
+  return compileD1Query(lowerLogicalPlan(sessionCount), {
+    tag: "analytics.filtered-session-count.wave-3",
+  }) as CompiledQuery<AnalyticsSessionCountRow>;
 }
 
 /**
@@ -1528,6 +1734,57 @@ export function lowerAnalyticsPagePathSessionPlan(
       kind: "supported",
       logicalPlan,
       query: compileSessionPlanQuery(semantics),
+    };
+  } catch (error) {
+    return unsupported(
+      "generic-db-ir-lowering-failed",
+      "generic-db-ir",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+/**
+ * Lowers the exact validated sessions metric plan over a bounded filtered
+ * Session set, then counts that set inside the Generic DB IR query.
+ */
+export function lowerAnalyticsFilteredSessionCountPlan(
+  input: LogicalPlan,
+): AnalyticsSessionCountLoweringResult {
+  let logicalPlan: ValidatedLogicalPlan;
+  try {
+    logicalPlan = validateLogicalPlan(input);
+  } catch (error) {
+    return unsupported(
+      "valid-analytics-plan-required",
+      "plan",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  let semantics: SessionPlanSemantics;
+  try {
+    semantics = matchSessionCountPlan(logicalPlan);
+  } catch (error) {
+    if (error instanceof PlanShapeMismatch) {
+      return unsupported(
+        "filtered-session-count-plan-shape",
+        error.node,
+        error.message,
+      );
+    }
+    return unsupported(
+      "filtered-session-count-plan-shape",
+      "plan",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  try {
+    return {
+      kind: "supported",
+      logicalPlan,
+      query: compileSessionCountQuery(semantics),
     };
   } catch (error) {
     return unsupported(
