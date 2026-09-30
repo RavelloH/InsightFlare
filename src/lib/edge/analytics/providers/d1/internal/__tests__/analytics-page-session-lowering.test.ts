@@ -3756,12 +3756,16 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         sqlBytes: 41_187,
         cteCount: 10,
         explain: {
-          operations: 196,
           pageRangeIndexSearches: 4,
           eventRangeIndexSearches: 4,
           visitPrimaryKeyLookups: 7,
         },
       });
+      // SQLite versions emit different bookkeeping rows for the same accesses
+      // (196 locally, 198 in CI). Keep accesses exact and bound total plan size.
+      expect(costs["six-leaf-mixed"].explain.operations).toBeLessThanOrEqual(
+        198,
+      );
       for (const [name, maxOperations, maxUnionTempTrees] of [
         ["and", 70, 2],
         ["or", 40, 1],
