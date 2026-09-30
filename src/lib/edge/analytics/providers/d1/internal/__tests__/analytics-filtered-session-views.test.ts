@@ -3,7 +3,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
-import { createD1DatabaseClient } from "@/lib/db";
+import {
+  createD1DatabaseClient,
+  D1_MAX_BOUND_PARAMETERS,
+  D1_MAX_SQL_UTF8_BYTES,
+} from "@/lib/db";
 import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
 import {
   createSqliteD1Database,
@@ -598,8 +602,10 @@ async function executeOverviewPairQuery(
     lowered.query.bindings?.length ?? 0,
   );
   const sqlBytes = new TextEncoder().encode(lowered.query.sql).length;
-  expect(sqlBytes).toBeLessThanOrEqual(100_000);
-  expect(lowered.query.bindings?.length ?? 0).toBeLessThanOrEqual(100);
+  expect(sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+  expect(lowered.query.bindings?.length ?? 0).toBeLessThanOrEqual(
+    D1_MAX_BOUND_PARAMETERS,
+  );
   const explain = explainQueryPlan(db, lowered.query);
   expect(
     explain.some(
@@ -887,9 +893,8 @@ describe("semantic Session-filtered views plan", () => {
         "analytics.filtered-session-views.wave-4",
       );
       expect(executed.query.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
-      // Two-leaf baseline: one statement, 30 bindings, 42,114 SQL characters.
-      expect(executed.query.bindings).toHaveLength(30);
-      expect(executed.query.sql).toHaveLength(42_114);
+      // Shared candidate Session relations keep the two-leaf shape compact.
+      expect(executed.query.bindings).toHaveLength(18);
       const explainText = executed.explain.join("\n");
       expect(explainText).toContain("idx_visits_site_pk_session_started_at");
       expect(explainText).toContain("idx_custom_events_site_pk_visit_time");
@@ -1210,17 +1215,16 @@ describe("formal sessions + views overview pair plan", () => {
       const expectedSupportedLabels = [
         "two-leaf AND",
         "two-leaf OR",
+        "NOT(two-leaf AND)",
+        "NOT(two-leaf OR)",
+        "AND(NOT page.path, event.name)",
         "Event-only candidate",
         "NOT event.name",
         "read start boundary",
         "read end boundary",
         "empty match",
       ];
-      const expectedBudgetRejectedLabels = [
-        "NOT(two-leaf AND)",
-        "NOT(two-leaf OR)",
-        "AND(NOT page.path, event.name)",
-      ];
+      const expectedBudgetRejectedLabels: string[] = [];
       const measuredCosts: Array<{
         readonly label: string;
         readonly query: {
@@ -1250,9 +1254,7 @@ describe("formal sessions + views overview pair plan", () => {
           expect(expectedBudgetRejectedLabels).toContain(scenario.label);
           expect(budgetCheck.capability).toBe("d1-query-budget-exceeded");
           expect(budgetCheck.node).toBe("compiled-query");
-          expect(budgetCheck.reason).toMatch(
-            /UTF-8 SQL bytes \(limit 100000\)/u,
-          );
+          expect(budgetCheck.reason).toMatch(/limit 100000|limit 100/iu);
           expect(trace.preparedSql).toHaveLength(beforePrepare);
           budgetRejections.push({
             label: scenario.label,
@@ -1295,6 +1297,10 @@ describe("formal sessions + views overview pair plan", () => {
           ? cost
           : maximum,
       );
+      const countPlanLines = (
+        cost: (typeof measuredCosts)[number],
+        pattern: RegExp,
+      ) => cost.explain.filter((line) => pattern.test(line)).length;
       {
         const visitScans = maxSqlCost.explain.filter(
           (line) => line.startsWith("SCAN ") && line.includes("idx_visits_"),
@@ -1308,26 +1314,67 @@ describe("formal sessions + views overview pair plan", () => {
             line.startsWith("SEARCH ") && line.includes("idx_custom_events_"),
         );
         console.info(
-          "Wave 5 D1 cost baseline",
+          "Wave 6 optimized D1 cost",
           JSON.stringify({
-            statementsPerQuery: 1,
+            baselineWave5: [
+              { filter: "two-leaf AND", sqlBytes: 79_011, bindings: 58 },
+              { filter: "two-leaf OR", sqlBytes: 78_939, bindings: 58 },
+              {
+                filter: "NOT(two-leaf AND)",
+                sqlBytes: 102_612,
+                bindings: 74,
+                disposition: "over SQL budget",
+              },
+              {
+                filter: "NOT(two-leaf OR)",
+                sqlBytes: 102_540,
+                bindings: 74,
+                disposition: "over SQL budget",
+              },
+              {
+                filter: "AND(NOT page.path, event.name)",
+                sqlBytes: 102_588,
+                bindings: 74,
+                disposition: "over SQL budget",
+              },
+            ],
             testedShapes: measuredCosts.map((cost) => ({
               filter: cost.label,
               disposition: "supported",
               sqlBytes: cost.sqlBytes,
               bindings: cost.query.bindings?.length ?? 0,
+              statements: 1,
+              sharedCteDefinitions: (
+                cost.query.sql.match(/"_d1_shared_\d+" AS \(/gu) ?? []
+              ).length,
+              explainScans: {
+                visitsCovering: countPlanLines(
+                  cost,
+                  /^SCAN .*USING COVERING INDEX idx_visits_/u,
+                ),
+                customEventsCovering: countPlanLines(
+                  cost,
+                  /^SCAN .*USING COVERING INDEX idx_custom_events_/u,
+                ),
+                customEventsIndexedLookups: countPlanLines(
+                  cost,
+                  /^SEARCH .*USING .*INDEX idx_custom_events_/u,
+                ),
+              },
             })),
             rejectedOverBudgetShapes: budgetRejections,
             maximumMeasuredSupportedShape: {
               sql: {
                 filter: maxSqlCost.label,
                 bytes: maxSqlCost.sqlBytes,
-                remainingBytes: 100_000 - maxSqlCost.sqlBytes,
+                remainingBytes: D1_MAX_SQL_UTF8_BYTES - maxSqlCost.sqlBytes,
               },
               bindings: {
                 filter: maxBindingCost.label,
                 count: maxBindingCost.query.bindings?.length ?? 0,
-                remaining: 100 - (maxBindingCost.query.bindings?.length ?? 0),
+                remaining:
+                  D1_MAX_BOUND_PARAMETERS -
+                  (maxBindingCost.query.bindings?.length ?? 0),
               },
             },
             explain: {

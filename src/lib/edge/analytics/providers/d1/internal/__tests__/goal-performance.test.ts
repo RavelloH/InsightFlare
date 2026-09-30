@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
+import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
 import { GOAL_TIMESERIES_MAX_BUCKETS } from "@/lib/edge/analytics/application/goal-cost";
 import {
   analyticsFilterRegistry,
@@ -164,7 +165,10 @@ describe("Goal D1 performance fixture", () => {
       d1.calls[0]!.bindings.length,
     );
     for (const call of d1.calls) {
-      expect(call.sql.length).toBeLessThan(250_000);
+      expect(new TextEncoder().encode(call.sql).length).toBeLessThanOrEqual(
+        D1_MAX_SQL_UTF8_BYTES,
+      );
+      expect(call.bindings.length).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
         .all(...call.bindings);
@@ -190,6 +194,7 @@ describe("Goal D1 performance fixture", () => {
       expect(calendarBuckets).toHaveLength(bucketCount);
       expect(calendarBuckets[bucketCount - 1]?.index).toBe(bucketCount - 1);
 
+      const simpleStarted = performance.now();
       const simpleRows = await queryGoalTimeseriesFromD1(
         { DB: d1 } as never,
         "site-1",
@@ -199,6 +204,8 @@ describe("Goal D1 performance fixture", () => {
         simple,
         dataset,
       );
+      const simpleElapsedMs = performance.now() - simpleStarted;
+      const complexStarted = performance.now();
       const complexRows = await queryGoalTimeseriesFromD1(
         { DB: d1 } as never,
         "site-1",
@@ -208,6 +215,7 @@ describe("Goal D1 performance fixture", () => {
         complex,
         dataset,
       );
+      const complexElapsedMs = performance.now() - complexStarted;
 
       expect(simpleRows).toHaveLength(bucketCount);
       expect(complexRows).toHaveLength(bucketCount);
@@ -222,14 +230,36 @@ describe("Goal D1 performance fixture", () => {
         d1.calls[0]!.bindings.length,
       );
 
-      for (const call of d1.calls) {
-        expect(call.sql.length).toBeLessThan(300_000);
+      const costs = d1.calls.map((call, index) => {
+        const sqlBytes = new TextEncoder().encode(call.sql).length;
+        expect(sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(call.bindings.length).toBeLessThanOrEqual(
+          D1_MAX_BOUND_PARAMETERS,
+        );
+        expect(
+          call.sql.match(/CASE WHEN observations\.observed_at >=/g),
+        ).toHaveLength(1);
         expect(call.sql.match(/\?/g)?.length ?? 0).toBe(call.bindings.length);
         const plan = d1.database
           .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
           .all(...call.bindings);
         expect(plan.length).toBeGreaterThan(0);
-      }
+        return {
+          filter: index === 0 ? "simple" : "complex",
+          sqlBytes,
+          bindings: call.bindings.length,
+          statements: 1,
+          resultRows: index === 0 ? simpleRows.length : complexRows.length,
+          explainSteps: plan.length,
+          executionMs: Number(
+            (index === 0 ? simpleElapsedMs : complexElapsedMs).toFixed(3),
+          ),
+        };
+      });
+      console.info(
+        "Goal calendar D1 cost",
+        JSON.stringify({ bucketCount, costs }),
+      );
     },
   );
 });

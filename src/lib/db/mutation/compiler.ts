@@ -1,3 +1,4 @@
+import { assertD1StatementBudget } from "@/lib/db/d1-budget";
 import {
   compileD1Expression,
   compileD1Query,
@@ -5,7 +6,7 @@ import {
 } from "@/lib/db/query/compiler";
 import { DatabaseCompilerError } from "@/lib/db/query/errors";
 import type { RelationScope } from "@/lib/db/query/expression";
-import type { PhysicalQueryPlan } from "@/lib/db/query/physical-plan";
+import { lowerLogicalQuerySource } from "@/lib/db/query/physical-plan";
 import { concat, join, type SqlFragment, text } from "@/lib/db/sql/fragment";
 import { identifier } from "@/lib/db/sql/identifier";
 import type { DatabaseBinding } from "@/lib/db/types";
@@ -19,14 +20,12 @@ export interface MutationCompileOptions {
 
 function insertValues(
   plan: Extract<MutationNode, { kind: "insert" }>,
+  options: MutationCompileOptions,
 ): SqlFragment {
   if (plan.source) {
-    const query = compileD1Query({
-      kind: "physical-query",
-      root: plan.source.node,
-      scope: plan.source.scope,
-      fields: plan.source.fields,
-    } as PhysicalQueryPlan<object>);
+    const query = compileD1Query(lowerLogicalQuerySource(plan.source), {
+      ...(options.tag === undefined ? {} : { tag: options.tag }),
+    });
     const alias = "q0";
     return concat(
       text("SELECT "),
@@ -81,6 +80,7 @@ function fieldSqlName(
 
 function compileInsert(
   plan: Extract<MutationNode, { kind: "insert" }>,
+  options: MutationCompileOptions,
 ): SqlFragment {
   const prefix = plan.orIgnore ? "INSERT OR IGNORE INTO " : "INSERT INTO ";
   const columns = plan.columns.map((name) =>
@@ -89,13 +89,13 @@ function compileInsert(
   const target = concat(text(prefix), identifier(plan.table.name));
   const statement =
     plan.columns.length === 0
-      ? concat(target, text(" "), insertValues(plan))
+      ? concat(target, text(" "), insertValues(plan, options))
       : concat(
           target,
           text(" ("),
           join(columns),
           text(") "),
-          insertValues(plan),
+          insertValues(plan, options),
         );
   if (!plan.conflict) return statement;
   const conflictTarget = join(
@@ -178,14 +178,16 @@ export function compileD1Mutation(
   validateMutationPlan(plan);
   const fragment =
     plan.kind === "insert"
-      ? compileInsert(plan)
+      ? compileInsert(plan, options)
       : plan.kind === "update"
         ? compileUpdate(plan)
         : compileDelete(plan);
-  return {
+  const statement: CompiledMutation = {
     sql: fragment.text,
     bindings: fragment.bindings as readonly DatabaseBinding[],
     kind: "mutation",
     ...(options.tag === undefined ? {} : { tag: options.tag }),
   };
+  assertD1StatementBudget(statement);
+  return statement;
 }

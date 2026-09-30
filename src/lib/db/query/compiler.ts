@@ -1,3 +1,4 @@
+import { assertD1StatementBudget } from "@/lib/db/d1-budget";
 import {
   concat,
   join,
@@ -12,9 +13,12 @@ import type { DatabaseStatement } from "@/lib/db/types";
 import type { CompiledQuery } from "./compiled";
 import { DatabaseCompilerError } from "./errors";
 import type { AnyExpression, RelationScope, SqlExpression } from "./expression";
-import type { PhysicalQueryPlan } from "./physical-plan";
+import {
+  lowerLogicalPlan,
+  type PhysicalQueryPlan,
+  validatePhysicalQueryPlan,
+} from "./physical-plan";
 import type { LogicalQueryNode, QuerySource, Relation } from "./plan";
-import { validateLogicalQueryPlan } from "./validator";
 
 export interface ScopeBinding {
   readonly alias: string;
@@ -26,6 +30,8 @@ interface RenderContext {
   queryAlias: number;
   leftAlias: number;
   rightAlias: number;
+  readonly sharedRelations: ReadonlyMap<LogicalQueryNode, string>;
+  bypassSharedNode?: LogicalQueryNode;
 }
 
 function nextAlias(
@@ -83,7 +89,7 @@ function resolveColumn(
 export function compileD1Expression(
   expression: SqlExpression,
   scopes: ReadonlyMap<RelationScope, ScopeBinding>,
-  context: RenderContext = renderContext(),
+  context: RenderContext = renderContext(new Map()),
 ): SqlFragment {
   switch (expression.kind) {
     case "column":
@@ -224,6 +230,18 @@ function compileNode(
   context: RenderContext,
   outerScopes: ReadonlyMap<RelationScope, ScopeBinding>,
 ): SqlFragment {
+  const sharedName = context.sharedRelations.get(node);
+  if (sharedName && context.bypassSharedNode !== node) {
+    const alias = nextAlias(context, "q");
+    return concat(
+      text("SELECT "),
+      join(outputList(node.fields.length, alias)),
+      text(" FROM "),
+      identifier(sharedName),
+      text(" AS "),
+      identifier(alias),
+    );
+  }
   switch (node.kind) {
     case "scan": {
       const alias = nextAlias(context, "t");
@@ -469,8 +487,16 @@ function compileQuerySource(
   );
 }
 
-function renderContext(): RenderContext {
-  return { scanAlias: 0, queryAlias: 0, leftAlias: 0, rightAlias: 0 };
+function renderContext(
+  sharedRelations: ReadonlyMap<LogicalQueryNode, string>,
+): RenderContext {
+  return {
+    scanAlias: 0,
+    queryAlias: 0,
+    leftAlias: 0,
+    rightAlias: 0,
+    sharedRelations,
+  };
 }
 
 export interface D1CompileOptions {
@@ -494,16 +520,59 @@ export function compileD1Query(
     | PhysicalQueryPlan<object>,
   options: D1CompileOptions = {},
 ): CompiledQuery<object> {
-  const source: QuerySource =
+  return compileD1QueryInternal(plan, options, true);
+}
+
+/** Internal, budget-checked expansion path for compiler differential tests. */
+export function compileD1QueryUnoptimizedForTest(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+  options: D1CompileOptions = {},
+): CompiledQuery<object> {
+  return compileD1QueryInternal(plan, options, false);
+}
+
+function compileD1QueryInternal(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+  options: D1CompileOptions,
+  includeSharedRelations: boolean,
+): CompiledQuery<object> {
+  const physical: PhysicalQueryPlan<object> =
     "kind" in plan && plan.kind === "physical-query"
-      ? { node: plan.root, scope: plan.scope, fields: plan.fields }
-      : plan;
-  validateLogicalQueryPlan(source.node);
-  const query = compileQuerySource(source, renderContext(), new Map());
+      ? plan
+      : lowerLogicalPlan(plan);
+  validatePhysicalQueryPlan(physical);
+  const source: QuerySource = {
+    node: physical.root,
+    scope: physical.scope,
+    fields: physical.fields,
+  };
+  const sharedRelations = includeSharedRelations
+    ? physical.sharedRelations
+    : [];
+  const sharedNames = new Map(
+    sharedRelations.map(({ node, name }) => [node, name] as const),
+  );
+  const context = renderContext(sharedNames);
+  const definitions = sharedRelations.map((shared) => {
+    context.bypassSharedNode = shared.node;
+    const body = compileNode(shared.node, context, new Map());
+    context.bypassSharedNode = undefined;
+    return concat(identifier(shared.name), text(" AS ("), body, text(")"));
+  });
+  const main = compileQuerySource(source, context, new Map());
+  const query =
+    definitions.length === 0
+      ? main
+      : concat(text("WITH "), join(definitions, text(", ")), text(" "), main);
   const statement: DatabaseStatement = {
     sql: query.text,
     bindings: query.bindings,
     ...(options.tag === undefined ? {} : { tag: options.tag }),
   };
+  assertD1StatementBudget(statement);
   return { ...statement, kind: "query" };
 }

@@ -1,4 +1,4 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import { createDatabaseRuntime, D1_MAX_BOUND_PARAMETERS } from "@/lib/db";
 import { type StoredRollupRow } from "@/lib/edge/analytics/contract/hourly-rollup";
 import { sitePksFromSiteIdsSql } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
@@ -13,9 +13,11 @@ import type {
   TrendAggregateRow,
 } from "./core-types";
 import { type D1ReadDiagnostics, recordD1RowsRead } from "./diagnostics";
-const D1_MAX_BOUND_PARAMETERS = 100;
 function siteIdChunks(siteIds: string[], fixedBindingCount = 0): string[][] {
   const maxSiteIds = D1_MAX_BOUND_PARAMETERS - fixedBindingCount;
+  if (maxSiteIds < 1 && siteIds.length > 0) {
+    throw new Error("hourly_rollup_site_binding_limit");
+  }
   const chunks: string[][] = [];
   for (let index = 0; index < siteIds.length; index += maxSiteIds) {
     chunks.push(siteIds.slice(index, index + maxSiteIds));

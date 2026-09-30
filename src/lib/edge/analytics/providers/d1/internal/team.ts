@@ -1,4 +1,4 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import { createDatabaseRuntime, D1_MAX_BOUND_PARAMETERS } from "@/lib/db";
 import type { TeamDashboardData } from "@/lib/edge/analytics/contract";
 import {
   type FilterDocument,
@@ -34,10 +34,8 @@ import {
   recordD1RowsRead,
 } from "./diagnostics";
 import { compileScopedDatasetSql } from "./scoped-dataset";
-// D1 permits at most 100 bound parameters per statement; visit sources use
-// two additional bindings for the half-open time window.
-const MAX_SITE_IDS_PER_D1_QUERY = 98;
-const MAX_D1_BINDINGS = 100;
+// Visit sources use two bindings for their half-open time window.
+const MAX_SITE_IDS_PER_D1_QUERY = D1_MAX_BOUND_PARAMETERS - 2;
 function hasEffectiveFilter(
   filters?: FilterDocument,
 ): filters is FilterDocument {
@@ -74,7 +72,7 @@ function scopedDatasetsForSites(
   });
   const fixedBindingCount = probe.bindings.length - 2;
   const maxSitesPerQuery = Math.floor(
-    (MAX_D1_BINDINGS - fixedBindingCount) / 2,
+    (D1_MAX_BOUND_PARAMETERS - fixedBindingCount) / 2,
   );
   if (maxSitesPerQuery < 1) {
     throw new Error("team_dashboard_filter_binding_limit");
@@ -92,7 +90,7 @@ function scopedDatasetsForSites(
       siteIds: chunk,
       window,
     });
-    if (dataset.bindings.length > MAX_D1_BINDINGS) {
+    if (dataset.bindings.length > D1_MAX_BOUND_PARAMETERS) {
       throw new Error("team_dashboard_filter_binding_limit");
     }
     datasets.push({ siteIds: chunk, dataset });

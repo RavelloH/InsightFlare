@@ -3,6 +3,7 @@ import {
   startOfZonedDay,
 } from "@/lib/analytics/time-zone";
 import { REQUEST_ANALYTICS_DATASET } from "@/lib/analytics-engine-config";
+import { D1_MAX_BOUND_PARAMETERS } from "@/lib/db/d1-budget";
 import type { requireActor } from "@/lib/edge/admin/auth";
 import type {
   RequestAnalyticsCategory,
@@ -19,7 +20,7 @@ import { clampString, ONE_HOUR_MS } from "@/lib/edge/utils";
 import { hasExactKeys, paginationBinding } from "@/lib/pagination";
 export const DETAIL_PAGE_SIZE = 100;
 const MAX_DETAIL_PAGE_SIZE = DETAIL_PAGE_SIZE;
-export const MAX_SITE_IDS_PER_D1_QUERY = 100;
+export const MAX_SITE_IDS_PER_D1_QUERY = D1_MAX_BOUND_PARAMETERS;
 export const NETWORK_DIMENSION_LIMIT = 30;
 const WINDOW_OPTIONS_MINUTES = new Set([60, 1440, 10080, 43200]);
 const MAX_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;

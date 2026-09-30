@@ -488,7 +488,7 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
       expect(trace.bindings[0]).toHaveLength(
         lowered.query.bindings?.length ?? 0,
       );
-      expect(lowered.query.bindings).toHaveLength(13);
+      expect(lowered.query.bindings).toHaveLength(11);
       expect(lowered.query.sql).toContain("UNION");
       expect(lowered.query.sql).toContain("TRIM(");
       expect(lowered.query.sql).toContain("EXISTS (");
@@ -1018,19 +1018,19 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
       expect(costs).toMatchObject({
         and: {
           statements: 1,
-          bindings: 26,
-          sqlLength: 32834,
+          bindings: 15,
+          sqlLength: 21386,
           explain: {
-            candidatePageCoveringScans: 2,
-            candidateEventCoveringScans: 2,
+            candidatePageCoveringScans: 1,
+            candidateEventCoveringScans: 1,
             historicalKeyRangeSearches: 2,
-            visitPrimaryKeyLookups: 6,
+            visitPrimaryKeyLookups: 4,
           },
         },
         or: {
           statements: 1,
-          bindings: 14,
-          sqlLength: 16161,
+          bindings: 12,
+          sqlLength: 16071,
           explain: {
             candidatePageCoveringScans: 1,
             candidateEventCoveringScans: 1,
@@ -1040,35 +1040,35 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
         },
         not: {
           statements: 1,
-          bindings: 21,
-          sqlLength: 27698,
+          bindings: 11,
+          sqlLength: 16475,
           explain: {
-            candidatePageCoveringScans: 2,
-            candidateEventCoveringScans: 2,
+            candidatePageCoveringScans: 1,
+            candidateEventCoveringScans: 1,
             historicalKeyRangeSearches: 1,
-            visitPrimaryKeyLookups: 5,
+            visitPrimaryKeyLookups: 3,
           },
         },
         "nested-and-not": {
           statements: 1,
-          bindings: 34,
-          sqlLength: 44610,
+          bindings: 15,
+          sqlLength: 21635,
           explain: {
-            candidatePageCoveringScans: 3,
-            candidateEventCoveringScans: 3,
+            candidatePageCoveringScans: 1,
+            candidateEventCoveringScans: 1,
             historicalKeyRangeSearches: 2,
-            visitPrimaryKeyLookups: 8,
+            visitPrimaryKeyLookups: 4,
           },
         },
         "or-set-operation": {
           statements: 1,
-          bindings: 34,
-          sqlLength: 44574,
+          bindings: 15,
+          sqlLength: 21601,
           explain: {
-            candidatePageCoveringScans: 3,
-            candidateEventCoveringScans: 3,
+            candidatePageCoveringScans: 1,
+            candidateEventCoveringScans: 1,
             historicalKeyRangeSearches: 2,
-            visitPrimaryKeyLookups: 8,
+            visitPrimaryKeyLookups: 4,
           },
         },
       });
@@ -1539,8 +1539,8 @@ describe("Analytics page.path/event.name → Session D1 lowering", () => {
 
       expect(observedCosts["event-only"]).toMatchObject({
         statements: 1,
-        bindings: 13,
-        sqlLength: 19095,
+        bindings: 11,
+        sqlLength: 19081,
         explain: {
           candidatePageCoveringScans: 1,
           candidateEventCoveringScans: 1,

@@ -1,6 +1,8 @@
+import { assertD1StatementBudget } from "./d1-budget";
 import type { DatabaseRuntime, DatabaseStatement } from "./types";
 
 function prepare(database: D1Database, statement: DatabaseStatement) {
+  assertD1StatementBudget(statement);
   const prepared = database.prepare(statement.sql);
   return statement.bindings === undefined
     ? prepared
@@ -27,11 +29,14 @@ export function createDatabaseRuntime(database: D1Database): DatabaseRuntime {
     batch(
       statements: readonly DatabaseStatement[],
     ): Promise<readonly D1Result[]> {
+      statements.forEach(assertD1StatementBudget);
       return database.batch(
         statements.map((statement) => prepare(database, statement)),
       );
     },
     exec(sql: string): Promise<D1ExecResult> {
+      // D1 exec accepts multi-statement scripts; statement limits are checked
+      // on the prepared-statement path and SQL is intentionally not split here.
       return database.exec(sql);
     },
   };

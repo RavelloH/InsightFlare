@@ -178,6 +178,41 @@ describe("D1 database runtime", () => {
     expect(database.batch).toHaveBeenCalledExactlyOnceWith(preparedStatements);
   });
 
+  it("rejects over-budget statements before prepare, bind, or batch", () => {
+    const { database, prepared } = createDatabase();
+    const runtime = createDatabaseRuntime(database);
+    const tooManyBindings = {
+      sql: "SELECT ?",
+      bindings: Array.from({ length: 101 }, () => null),
+      tag: "budget.test",
+    };
+
+    expect(() => runtime.all(tooManyBindings)).toThrowError(
+      expect.objectContaining({
+        code: "d1_statement_budget_exceeded",
+        item: "bindings",
+        actual: 101,
+        limit: 100,
+        tag: "budget.test",
+      }),
+    );
+    expect(() => runtime.first(tooManyBindings)).toThrowError(
+      expect.objectContaining({ code: "d1_statement_budget_exceeded" }),
+    );
+    expect(() => runtime.run(tooManyBindings)).toThrowError(
+      expect.objectContaining({ code: "d1_statement_budget_exceeded" }),
+    );
+    expect(() =>
+      runtime.batch([{ sql: "SELECT 1" }, tooManyBindings]),
+    ).toThrowError(
+      expect.objectContaining({ code: "d1_statement_budget_exceeded" }),
+    );
+
+    expect(database.prepare).not.toHaveBeenCalled();
+    expect(prepared.bind).not.toHaveBeenCalled();
+    expect(database.batch).not.toHaveBeenCalled();
+  });
+
   it("keeps tags out of SQL and bindings", async () => {
     const { database, prepared } = createDatabase();
 

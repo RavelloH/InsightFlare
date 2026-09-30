@@ -88,51 +88,45 @@ export async function queryGoalTimeseriesFromD1(
     "goal",
   );
   const buckets = buildTimeBuckets(window, interval);
-  const visitBucket = timeBucketCase(buckets, "started_at");
-  const eventBucket = timeBucketCase(buckets, "occurred_at");
+  const observationBucket = timeBucketCase(buckets, "observations.observed_at");
 
   const rows = await queryD1All<Record<string, unknown>>(
     env,
     `WITH
 ${dataset.ctes.trim()},
 ${goal.ctes.trim()},
-base_bucket_observations AS MATERIALIZED (
-  SELECT
-    ${visitBucket.sql} AS bucket,
-    site_pk,
-    session_id,
-    visitor_id
+source_observations AS MATERIALIZED (
+  SELECT 0 AS is_goal, site_pk, started_at AS observed_at, session_id, visitor_id
   FROM ${dataset.visitRelation}
-  WHERE site_pk IS NOT NULL
-    AND ${visitBucket.sql} IS NOT NULL
-  UNION
+  UNION ALL
+  SELECT 0 AS is_goal, site_pk, occurred_at AS observed_at, session_id, visitor_id
+  FROM ${dataset.eventRelation}
+  UNION ALL
+  SELECT 1 AS is_goal, site_pk, started_at AS observed_at, session_id, visitor_id
+  FROM ${goal.matchedVisitRelation}
+  UNION ALL
+  SELECT 1 AS is_goal, site_pk, occurred_at AS observed_at, session_id, visitor_id
+  FROM ${goal.matchedEventRelation}
+),
+bucketed_observations AS MATERIALIZED (
   SELECT
-    ${eventBucket.sql} AS bucket,
+    ${observationBucket.sql} AS bucket,
+    is_goal,
     site_pk,
     session_id,
     visitor_id
-  FROM ${dataset.eventRelation}
+  FROM source_observations AS observations
   WHERE site_pk IS NOT NULL
-    AND ${eventBucket.sql} IS NOT NULL
+),
+base_bucket_observations AS MATERIALIZED (
+  SELECT DISTINCT bucket, site_pk, session_id, visitor_id
+  FROM bucketed_observations
+  WHERE is_goal = 0 AND bucket IS NOT NULL
 ),
 goal_bucket_observations AS MATERIALIZED (
-  SELECT
-    ${visitBucket.sql} AS bucket,
-    site_pk,
-    session_id,
-    visitor_id
-  FROM ${goal.matchedVisitRelation}
-  WHERE site_pk IS NOT NULL
-    AND ${visitBucket.sql} IS NOT NULL
-  UNION
-  SELECT
-    ${eventBucket.sql} AS bucket,
-    site_pk,
-    session_id,
-    visitor_id
-  FROM ${goal.matchedEventRelation}
-  WHERE site_pk IS NOT NULL
-    AND ${eventBucket.sql} IS NOT NULL
+  SELECT DISTINCT bucket, site_pk, session_id, visitor_id
+  FROM bucketed_observations
+  WHERE is_goal = 1 AND bucket IS NOT NULL
 ),
 base_bucket_sessions AS (
   SELECT DISTINCT bucket, site_pk, session_id
@@ -213,10 +207,6 @@ ORDER BY base.bucket ASC
     [
       ...dataset.bindings.map((binding) => binding.value),
       ...goal.bindings.map((binding) => binding.value),
-      ...visitBucket.bindings,
-      ...eventBucket.bindings,
-      ...visitBucket.bindings,
-      ...eventBucket.bindings,
     ],
   );
 

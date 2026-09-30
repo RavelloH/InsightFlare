@@ -11,6 +11,7 @@ import {
   type FilterFieldId,
   normalizeFilterDocument,
 } from "@/lib/edge/analytics/contract";
+import { buildTimeBuckets } from "@/lib/edge/analytics/providers/d1/internal/core-time";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
 import {
@@ -497,6 +498,47 @@ describe("Goal D1 analytics", () => {
     expect(result[2]?.totalSessions).toBe(2);
   });
 
+  it("includes exact bucket starts and the final in-window instant, but excludes the window end", async () => {
+    const boundaryWindow: QueryWindow = {
+      ...window,
+      endExclusiveMs: 180_000,
+      nowMs: 180_000,
+    };
+    const result = await queryGoalTimeseriesFromD1(
+      { DB: new SqliteD1Database() } as never,
+      "site-1",
+      boundaryWindow,
+      "minute",
+      emptyFilter,
+      dsl('event.name eq "purchase"'),
+      boundaryDataset(),
+    );
+
+    expect(result).toEqual([
+      {
+        bucket: 0,
+        totalSessions: 1,
+        convertedSessions: 1,
+        totalVisitors: 1,
+        convertedVisitors: 1,
+      },
+      {
+        bucket: 1,
+        totalSessions: 1,
+        convertedSessions: 1,
+        totalVisitors: 1,
+        convertedVisitors: 1,
+      },
+      {
+        bucket: 2,
+        totalSessions: 1,
+        convertedSessions: 1,
+        totalVisitors: 1,
+        convertedVisitors: 1,
+      },
+    ]);
+  });
+
   it("supports calendar buckets in a reporting timezone across the DST spring transition", async () => {
     const dstWindow: QueryWindow = {
       startMs: Date.parse("2026-03-08T00:00:00-05:00"),
@@ -504,6 +546,10 @@ describe("Goal D1 analytics", () => {
       nowMs: Date.parse("2026-03-10T00:00:00-04:00"),
       timeZone: "America/New_York",
     };
+    const calendarBuckets = buildTimeBuckets(dstWindow, "day");
+    expect(
+      calendarBuckets.map((bucket) => bucket.endExclusiveMs - bucket.startMs),
+    ).toEqual([23 * 60 * 60 * 1000, 24 * 60 * 60 * 1000]);
     const result = await queryGoalTimeseriesFromD1(
       { DB: new SqliteD1Database() } as never,
       "site-1",
@@ -513,13 +559,65 @@ describe("Goal D1 analytics", () => {
       dsl('event.name eq "purchase"'),
       dstDataset(),
     );
-    expect(result).toHaveLength(2);
-    expect(result.map((row) => row.bucket)).toEqual([0, 1]);
-    expect(
-      result.every((row) => row.convertedVisitors <= row.totalVisitors),
-    ).toBe(true);
+    expect(result).toEqual([
+      {
+        bucket: 0,
+        totalSessions: 1,
+        convertedSessions: 1,
+        totalVisitors: 1,
+        convertedVisitors: 1,
+      },
+      {
+        bucket: 1,
+        totalSessions: 1,
+        convertedSessions: 1,
+        totalVisitors: 1,
+        convertedVisitors: 1,
+      },
+    ]);
   });
 });
+
+function boundaryDataset(): ScopedDatasetSql {
+  return {
+    ctes: `
+base_visits AS (
+  SELECT 1 AS site_pk, 'edge-visit' AS visit_id, 'edge-session-0' AS session_id,
+    'edge-visitor-0' AS visitor_id, 0 AS started_at, '/' AS pathname,
+    '' AS event_name, '{}' AS event_data_json
+),
+base_events AS (
+  SELECT 1 AS site_pk, 1 AS event_pk, 'edge-event-0' AS event_id,
+    'edge-session-0' AS session_id, 'edge-visitor-0' AS visitor_id, 59999 AS occurred_at,
+    1 AS sequence, '/' AS pathname, 'purchase' AS event_name, '{}' AS event_data_json
+  UNION ALL SELECT 1, 2, 'edge-event-1', 'edge-session-1', 'edge-visitor-1', 60000,
+    1, '/', 'purchase', '{}'
+  UNION ALL SELECT 1, 3, 'edge-event-last', 'edge-session-last', 'edge-visitor-last', 179999,
+    1, '/', 'purchase', '{}'
+  UNION ALL SELECT 1, 4, 'edge-event-outside', 'edge-session-outside', 'edge-visitor-outside', 180000,
+    1, '/', 'purchase', '{}'
+),
+custom_event_json_paths AS (SELECT 1 AS id, 1 AS site_pk, '/plan' AS path),
+custom_event_json_values AS (
+  SELECT event_pk, 1 AS site_pk, 1 AS path_id, 1 AS value_type, '' AS string_value
+  FROM base_events
+),
+base_sessions AS (
+  SELECT DISTINCT site_pk, session_id FROM base_visits
+  UNION SELECT DISTINCT site_pk, session_id FROM base_events
+),
+base_visitors AS (
+  SELECT DISTINCT site_pk, visitor_id FROM base_visits
+  UNION SELECT DISTINCT site_pk, visitor_id FROM base_events
+)`,
+    bindings: [],
+    visitRelation: "base_visits",
+    eventRelation: "base_events",
+    sessionRelation: "base_sessions",
+    visitorRelation: "base_visitors",
+    scope: "event",
+  };
+}
 
 function truthDataset(): ScopedDatasetSql {
   return {

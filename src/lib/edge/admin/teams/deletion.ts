@@ -1,6 +1,7 @@
 import {
   compileD1Mutation,
   type CompiledMutation,
+  D1_MAX_BOUND_PARAMETERS,
   deleteFrom,
   filter,
   inList,
@@ -11,7 +12,7 @@ import {
 } from "@/lib/db";
 import { sitePksForSiteIds } from "@/lib/edge/sites/identity-query";
 
-export const MAX_SITE_IDS_PER_D1_QUERY = 100;
+export const MAX_SITE_IDS_PER_D1_QUERY = D1_MAX_BOUND_PARAMETERS;
 
 function eventPksForSiteIds(siteIds: readonly string[]) {
   const sitePks = sitePksForSiteIds(siteIds);

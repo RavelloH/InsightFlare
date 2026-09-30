@@ -1,3 +1,10 @@
+export type { D1StatementBudgetItem } from "./d1-budget";
+export {
+  assertD1StatementBudget,
+  D1_MAX_BOUND_PARAMETERS,
+  D1_MAX_SQL_UTF8_BYTES,
+  D1StatementBudgetError,
+} from "./d1-budget";
 export { createDatabaseRuntime } from "./d1-runtime";
 export { compileD1Mutation } from "./mutation/compiler";
 export type { CompiledMutation, MutationNode } from "./mutation/plan";

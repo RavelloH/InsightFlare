@@ -478,9 +478,8 @@ describe("semantic sessions aggregate → filtered Session D1 count", () => {
       const andQuery = await assertCount(AND_FILTER, andExpected);
       expect(andQuery.tag).toBe("analytics.filtered-session-count.wave-3");
       expect(andQuery.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
-      // Two-leaf baseline: one statement, 26 bindings, 35,885 SQL characters.
-      expect(andQuery.bindings).toHaveLength(26);
-      expect(andQuery.sql).toHaveLength(35_885);
+      // Shared candidate Session relations keep the two-leaf shape compact.
+      expect(andQuery.bindings).toHaveLength(15);
       const andExplain = explainQueryPlan(db, andQuery);
       expect(
         andExplain.filter((line) =>
@@ -488,14 +487,14 @@ describe("semantic sessions aggregate → filtered Session D1 count", () => {
             line,
           ),
         ),
-      ).toHaveLength(2);
+      ).toHaveLength(1);
       expect(
         andExplain.filter((line) =>
           /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u.test(
             line,
           ),
         ),
-      ).toHaveLength(2);
+      ).toHaveLength(1);
 
       const notExpected = candidateRestrictedEvaluatorSet(
         NOT_EVENT_FILTER,

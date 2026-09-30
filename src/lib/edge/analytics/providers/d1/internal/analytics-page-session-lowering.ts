@@ -21,6 +21,7 @@ import {
   semiJoin,
   union,
 } from "@/lib/db";
+import { D1StatementBudgetError } from "@/lib/db/d1-budget";
 import type { AnyExpression } from "@/lib/db/query/expression";
 import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
@@ -62,9 +63,6 @@ import {
   analyzeFilterDocument,
 } from "@/lib/filter-contract/filter-semantics";
 import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
-
-const D1_MAX_SQL_UTF8_BYTES = 100_000;
-const D1_MAX_BOUND_PARAMETERS = 100;
 
 export interface AnalyticsPageSessionLoweringInput {
   readonly document: unknown;
@@ -2513,24 +2511,19 @@ export function lowerAnalyticsFilteredSessionOverviewPairPlan(
 
   try {
     const query = compileSessionOverviewPairQuery(semantics);
-    const sqlBytes = new TextEncoder().encode(query.sql).byteLength;
-    const bindingCount = query.bindings?.length ?? 0;
-    if (
-      sqlBytes > D1_MAX_SQL_UTF8_BYTES ||
-      bindingCount > D1_MAX_BOUND_PARAMETERS
-    ) {
-      return unsupported(
-        "d1-query-budget-exceeded",
-        "compiled-query",
-        `The compiled pair query uses ${sqlBytes} UTF-8 SQL bytes (limit ${D1_MAX_SQL_UTF8_BYTES}) and ${bindingCount} bound parameters (limit ${D1_MAX_BOUND_PARAMETERS}); it cannot be submitted to D1.`,
-      );
-    }
     return {
       kind: "supported",
       logicalPlan,
       query,
     };
   } catch (error) {
+    if (error instanceof D1StatementBudgetError) {
+      return unsupported(
+        "d1-query-budget-exceeded",
+        "compiled-query",
+        `${error.item === "sql_bytes" ? "SQL UTF-8 bytes" : "bound parameters"}: ${error.actual} (limit ${error.limit}); the compiled query cannot be submitted to D1.`,
+      );
+    }
     return unsupported(
       "generic-db-ir-lowering-failed",
       "generic-db-ir",
