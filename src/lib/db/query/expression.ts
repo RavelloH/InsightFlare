@@ -214,6 +214,7 @@ export type SqlExpression<
   | InSubqueryExpression<T, Result>;
 
 export type AnyExpression = SqlExpression<unknown, ExpressionResultType>;
+export type AnyInListExpression = Extract<AnyExpression, { kind: "in-list" }>;
 export type Predicate<Nullable extends boolean = boolean> = SqlExpression<
   Nullable extends true ? boolean | null : boolean,
   ExpressionResultType<"integer", Nullable>

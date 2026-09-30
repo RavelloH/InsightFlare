@@ -1,4 +1,7 @@
-import { assertD1StatementBudget } from "@/lib/db/d1-budget";
+import {
+  assertD1StatementBudget,
+  D1_MAX_BOUND_PARAMETERS,
+} from "@/lib/db/d1-budget";
 import {
   concat,
   join,
@@ -12,9 +15,17 @@ import type { DatabaseStatement } from "@/lib/db/types";
 
 import type { CompiledQuery } from "./compiled";
 import { DatabaseCompilerError } from "./errors";
-import type { AnyExpression, RelationScope, SqlExpression } from "./expression";
+import type {
+  AnyExpression,
+  AnyInListExpression,
+  RelationScope,
+  SqlExpression,
+} from "./expression";
 import {
+  hasSamePhysicalMembershipOptimization,
   lowerLogicalPlan,
+  optimizePhysicalMembershipBudget,
+  type PhysicalMembershipUsage,
   type PhysicalQueryPlan,
   validatePhysicalQueryPlan,
 } from "./physical-plan";
@@ -31,6 +42,11 @@ interface RenderContext {
   leftAlias: number;
   rightAlias: number;
   readonly sharedRelations: ReadonlyMap<LogicalQueryNode, string>;
+  readonly membershipStrategies?: ReadonlyMap<
+    AnyInListExpression,
+    { readonly strategy: "native" | "json-text"; readonly jsonText?: string }
+  >;
+  readonly membershipUsage?: Map<AnyInListExpression, number>;
   bypassSharedNode?: LogicalQueryNode;
 }
 
@@ -131,14 +147,39 @@ export function compileD1Expression(
         compileD1Expression(expression.expression, scopes, context),
         text(expression.not ? " IS NOT NULL" : " IS NULL"),
       );
-    case "in-list":
+    case "in-list": {
       if (expression.values.length === 0) return text("(0)");
+      const operand = compileD1Expression(
+        expression.expression,
+        scopes,
+        context,
+      );
+      if (context.membershipUsage)
+        context.membershipUsage.set(
+          expression,
+          (context.membershipUsage.get(expression) ?? 0) + 1,
+        );
+      const strategy = context.membershipStrategies?.get(expression);
+      if (strategy?.strategy === "json-text") {
+        if (typeof strategy.jsonText !== "string")
+          throw new DatabaseCompilerError(
+            "invalid_plan",
+            "JSON membership strategy is missing its encoded values",
+          );
+        return concat(
+          operand,
+          text(" IN (SELECT value FROM json_each("),
+          parameter(strategy.jsonText),
+          text("))"),
+        );
+      }
       return concat(
-        compileD1Expression(expression.expression, scopes, context),
+        operand,
         text(" IN ("),
         join(expression.values.map((value) => parameter(value))),
         text(")"),
       );
+    }
     case "in-subquery":
       return concat(
         compileD1Expression(expression.expression, scopes, context),
@@ -489,6 +530,8 @@ function compileQuerySource(
 
 function renderContext(
   sharedRelations: ReadonlyMap<LogicalQueryNode, string>,
+  membershipStrategies?: RenderContext["membershipStrategies"],
+  membershipUsage?: RenderContext["membershipUsage"],
 ): RenderContext {
   return {
     scanAlias: 0,
@@ -496,6 +539,8 @@ function renderContext(
     leftAlias: 0,
     rightAlias: 0,
     sharedRelations,
+    ...(membershipStrategies ? { membershipStrategies } : {}),
+    ...(membershipUsage ? { membershipUsage } : {}),
   };
 }
 
@@ -545,18 +590,53 @@ function compileD1QueryInternal(
       ? plan
       : lowerLogicalPlan(plan);
   validatePhysicalQueryPlan(physical);
+  const { physical: canonicalPhysical, nativeQuery } =
+    optimizeForFinalShape(physical);
+  if (
+    physical.membershipOptimization !== undefined &&
+    !hasSamePhysicalMembershipOptimization(
+      physical.membershipOptimization,
+      canonicalPhysical.membershipOptimization!,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical query membership strategy does not match its measured budget",
+    );
+
+  if (includeSharedRelations) {
+    const membershipOptimization = canonicalPhysical.membershipOptimization!;
+    const hasJsonStrategy = membershipOptimization.strategies.some(
+      (strategy) => strategy.strategy === "json-text",
+    );
+    if (!hasJsonStrategy) return compileAndBudget(nativeQuery, options);
+    return renderAndBudget(
+      canonicalPhysical,
+      options,
+      true,
+      membershipOptimization.strategies,
+      membershipOptimization.selectedBindingCount,
+    );
+  }
+
+  return renderAndBudget(physical, options, false);
+}
+
+function optimizeForFinalShape(physical: PhysicalQueryPlan<object>): {
+  readonly physical: PhysicalQueryPlan<object>;
+  readonly nativeQuery: SqlFragment;
+} {
   const source: QuerySource = {
     node: physical.root,
     scope: physical.scope,
     fields: physical.fields,
   };
-  const sharedRelations = includeSharedRelations
-    ? physical.sharedRelations
-    : [];
+  const sharedRelations = physical.sharedRelations;
   const sharedNames = new Map(
     sharedRelations.map(({ node, name }) => [node, name] as const),
   );
-  const context = renderContext(sharedNames);
+  const membershipUsage = new Map<AnyInListExpression, number>();
+  const context = renderContext(sharedNames, undefined, membershipUsage);
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;
     const body = compileNode(shared.node, context, new Map());
@@ -568,6 +648,89 @@ function compileD1QueryInternal(
     definitions.length === 0
       ? main
       : concat(text("WITH "), join(definitions, text(", ")), text(" "), main);
+  return {
+    physical: optimizePhysicalMembershipBudget(
+      physical,
+      {
+        nativeBindingCount: query.bindings.length,
+        usage: [...membershipUsage].map(
+          ([expression, occurrences]) =>
+            ({
+              expression,
+              occurrences,
+            }) satisfies PhysicalMembershipUsage,
+        ),
+      },
+      D1_MAX_BOUND_PARAMETERS,
+    ),
+    nativeQuery: query,
+  };
+}
+
+function renderAndBudget(
+  physical: PhysicalQueryPlan<object>,
+  options: D1CompileOptions,
+  includeSharedRelations: boolean,
+  strategies?: NonNullable<
+    PhysicalQueryPlan<object>["membershipOptimization"]
+  >["strategies"],
+  expectedBindingCount?: number,
+): CompiledQuery<object> {
+  const source: QuerySource = {
+    node: physical.root,
+    scope: physical.scope,
+    fields: physical.fields,
+  };
+  const sharedRelations = includeSharedRelations
+    ? physical.sharedRelations
+    : [];
+  const sharedNames = new Map(
+    sharedRelations.map(({ node, name }) => [node, name] as const),
+  );
+  const membershipStrategies = strategies
+    ? new Map(
+        strategies.map(
+          (item) =>
+            [
+              item.expression,
+              {
+                strategy: item.strategy,
+                ...(item.jsonText === undefined
+                  ? {}
+                  : { jsonText: item.jsonText }),
+              },
+            ] as const,
+        ),
+      )
+    : undefined;
+  const context = renderContext(sharedNames, membershipStrategies);
+  const definitions = sharedRelations.map((shared) => {
+    context.bypassSharedNode = shared.node;
+    const body = compileNode(shared.node, context, new Map());
+    context.bypassSharedNode = undefined;
+    return concat(identifier(shared.name), text(" AS ("), body, text(")"));
+  });
+  const main = compileQuerySource(source, context, new Map());
+  const query =
+    definitions.length === 0
+      ? main
+      : concat(text("WITH "), join(definitions, text(", ")), text(" "), main);
+  return compileAndBudget(query, options, expectedBindingCount);
+}
+
+function compileAndBudget(
+  query: SqlFragment,
+  options: D1CompileOptions,
+  expectedBindingCount?: number,
+): CompiledQuery<object> {
+  if (
+    expectedBindingCount !== undefined &&
+    query.bindings.length !== expectedBindingCount
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical membership strategy binding cost does not match its SQL",
+    );
   const statement: DatabaseStatement = {
     sql: query.text,
     bindings: query.bindings,

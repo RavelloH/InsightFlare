@@ -35,6 +35,7 @@ import {
   limit,
   lowerLogicalPlan,
   max,
+  not,
   onConflictDoNothing,
   onConflictDoUpdate,
   param,
@@ -447,7 +448,10 @@ describe("typed D1 query compiler", () => {
       sourceSites,
       inList(
         sourceSites.columns.site_id,
-        Array.from({ length: 101 }, (_, index) => `site-${index}`),
+        Array.from(
+          { length: 101 },
+          (_, index) => `site-${index}-${"x".repeat(10_000)}`,
+        ),
       ),
     );
     const source = project(filteredSourceSites, {
@@ -467,6 +471,453 @@ describe("typed D1 query compiler", () => {
         limit: 100,
         tag: "mutation.query.budget",
       });
+    }
+  });
+
+  it("packs safe text membership from final query binding costs", () => {
+    const db = createMigratedDatabase();
+    try {
+      const specialValues = [
+        "match",
+        "",
+        'quote"value',
+        "back\\slash",
+        "nul\u0000value",
+        "中文🙂",
+        "01",
+        "1",
+        "1.0",
+        "1e0",
+      ];
+      const values = [
+        ...specialValues,
+        ...Array.from({ length: 118 }, (_, index) => `distractor-${index}`),
+      ];
+      values[73] = "match";
+      expect(values).toHaveLength(128);
+      for (const value of specialValues)
+        db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+          value,
+        );
+
+      const sites = scan(schema.site_identities);
+      const nativeSql = `SELECT site_id FROM site_identities WHERE site_id IN (${values.map(() => "?").join(",")})`;
+      const matchedRows = filter(sites, inList(sites.columns.site_id, values));
+      const matched = project(matchedRows, {
+        site_id: matchedRows.columns.site_id,
+      });
+      const packed = compileD1Query(matched);
+      expect(packed.bindings).toEqual([JSON.stringify(values)]);
+      expect(packed.sql).toContain("json_each(?)");
+      expect(new TextEncoder().encode(packed.sql).byteLength).toBeLessThan(
+        100_000,
+      );
+      const packedExplain = executeAll(db, {
+        sql: `EXPLAIN QUERY PLAN ${packed.sql}`,
+        bindings: packed.bindings,
+      });
+      const nativeExplain = executeAll(db, {
+        sql: `EXPLAIN QUERY PLAN ${nativeSql}`,
+        bindings: values,
+      });
+      const usesSiteIdentityIndex = (plan: Array<Record<string, unknown>>) =>
+        plan.some(
+          (row) =>
+            typeof row.detail === "string" &&
+            row.detail.includes("sqlite_autoindex_site_identities_1"),
+        );
+      expect(usesSiteIdentityIndex(nativeExplain)).toBe(true);
+      expect(usesSiteIdentityIndex(packedExplain)).toBe(true);
+
+      const nativeOracle = db
+        .prepare(nativeSql)
+        .all(...(values as SQLInputValue[])) as Array<{ site_id: string }>;
+      const actual = executeAll(db, packed).map((row) => row.site_id);
+      expect(actual.sort()).toEqual(
+        nativeOracle.map((row) => row.site_id).sort(),
+      );
+      expect(actual).toHaveLength(specialValues.length);
+
+      const exactOneValues = [
+        "1",
+        ...Array.from({ length: 127 }, (_, index) => `one-miss-${index}`),
+      ];
+      const exactOneQuery = compileD1Query(
+        filter(sites, inList(sites.columns.site_id, exactOneValues)),
+      );
+      const exactOneNativeOracle = db
+        .prepare(
+          `SELECT site_id FROM site_identities WHERE site_id IN (${exactOneValues.map(() => "?").join(",")})`,
+        )
+        .all(...(exactOneValues as SQLInputValue[])) as Array<{
+        site_id: string;
+      }>;
+      const exactOnePackedRows = executeAll(db, exactOneQuery).map(
+        (row) => row.site_id,
+      );
+      expect(exactOneQuery.sql).toContain("json_each(?)");
+      expect(exactOnePackedRows).toEqual(
+        exactOneNativeOracle.map((row) => row.site_id),
+      );
+      expect(exactOnePackedRows).toEqual(["1"]);
+      expect(exactOnePackedRows).not.toContain("01");
+      expect(exactOnePackedRows).not.toContain("1.0");
+      expect(exactOnePackedRows).not.toContain("1e0");
+
+      const insertFromQueryStatement = compileD1Mutation(
+        insertFromQuery(schema.site_identities, ["site_id"], matched),
+      );
+      expect(insertFromQueryStatement.sql).toContain("json_each(?)");
+      expect(insertFromQueryStatement.bindings).toEqual(packed.bindings);
+
+      const small = compileD1Query(
+        filter(sites, inList(sites.columns.site_id, ["match", "missing"])),
+      );
+      expect(small.sql).not.toContain("json_each");
+      expect(small.bindings).toEqual(["match", "missing"]);
+      const emptyMembership = compileD1Query(
+        filter(sites, inList(sites.columns.site_id, [])),
+      );
+      expect(emptyMembership.sql).toContain("(0)");
+      expect(emptyMembership.bindings).toEqual([]);
+
+      const nullableTable = schema.account_action_tokens;
+      for (const [id, email] of [
+        ["null-email", null],
+        ["outside-email", "outside"],
+        ["inside-email", "inside"],
+      ] as const)
+        db.prepare(
+          "INSERT INTO account_action_tokens (id, type, token_hash, email, expires_at) VALUES (?, 'team_invite', ?, ?, 2000000000)",
+        ).run(id, `hash-${id}`, email);
+      const nullableTokens = scan(nullableTable);
+      const nullableValues = [
+        "inside",
+        ...Array.from({ length: 127 }, (_, index) => `email-${index}`),
+      ];
+      const nullableOutside = filter(
+        nullableTokens,
+        not(inList(nullableTokens.columns.email, nullableValues)),
+      );
+      const notIn = compileD1Query(
+        project(nullableOutside, { id: nullableOutside.columns.id }),
+      );
+      expect(notIn.sql).toContain("NOT (");
+      expect(notIn.sql).toContain("json_each(?)");
+      expect(notIn.bindings).toEqual([JSON.stringify(nullableValues)]);
+      expect(executeAll(db, notIn)).toEqual([{ id: "outside-email" }]);
+
+      const listA = values.slice(0, 40);
+      const listB = values.slice(40, 70);
+      const listBHit = values[45]!;
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        listBHit,
+      );
+      const repeatedMembership = inList(sites.columns.site_id, listA);
+      const multiList = compileD1Query(
+        project(sites, {
+          site_id: sites.columns.site_id,
+          first: not(repeatedMembership),
+          repeated: not(repeatedMembership),
+          distinct: not(inList(sites.columns.site_id, listB)),
+        }),
+      );
+      const multiListBindings = multiList.bindings ?? [];
+      expect(multiListBindings).toHaveLength(32);
+      expect(multiListBindings.slice(0, 2)).toEqual([
+        JSON.stringify(listA),
+        JSON.stringify(listA),
+      ]);
+      expect(multiListBindings.slice(2)).toEqual(listB);
+      const multiListRows = executeAll(db, multiList);
+      expect(multiListRows).toHaveLength(specialValues.length + 1);
+      const nativeMultiListSql = `SELECT site_id, NOT (site_id IN (${listA.map(() => "?").join(",")})) AS first, NOT (site_id IN (${listA.map(() => "?").join(",")})) AS repeated, NOT (site_id IN (${listB.map(() => "?").join(",")})) AS "distinct" FROM site_identities`;
+      const nativeMultiListRows = db
+        .prepare(nativeMultiListSql)
+        .all(...([...listA, ...listA, ...listB] as SQLInputValue[])) as Array<{
+        site_id: string;
+        first: number;
+        repeated: number;
+        distinct: number;
+      }>;
+      const normalizedMultiListRows = (rows: Array<Record<string, unknown>>) =>
+        rows
+          .map((row) => ({
+            site_id: String(row.site_id),
+            first: Number(row.first),
+            repeated: Number(row.repeated),
+            distinct: Number(row.distinct),
+          }))
+          .sort((left, right) => left.site_id.localeCompare(right.site_id));
+      expect(normalizedMultiListRows(multiListRows)).toEqual(
+        normalizedMultiListRows(nativeMultiListRows),
+      );
+      expect(
+        multiListRows.find((row) => row.site_id === listBHit)?.distinct,
+      ).toBe(0);
+
+      const hundredNative = compileD1Query(
+        filter(
+          sites,
+          inList(
+            sites.columns.site_id,
+            Array.from({ length: 100 }, (_, index) => `native-${index}`),
+          ),
+        ),
+      );
+      expect(hundredNative.bindings).toHaveLength(100);
+      expect(hundredNative.sql).not.toContain("json_each");
+
+      const numericSites = scan(schema.visits);
+      expect(() =>
+        compileD1Query(
+          filter(
+            numericSites,
+            inList(
+              numericSites.columns.started_at,
+              Array.from({ length: 101 }, (_, index) => index),
+            ),
+          ),
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          code: "d1_statement_budget_exceeded",
+          item: "bindings",
+          actual: 101,
+        }),
+      );
+
+      const mixedList = compileD1Query(
+        filter(sites, inList(sites.columns.site_id, ["text", 1] as never)),
+      );
+      expect(mixedList.sql).not.toContain("json_each");
+      expect(mixedList.bindings).toEqual(["text", 1]);
+
+      const unsafeMembershipLists: readonly {
+        readonly name: string;
+        readonly values: readonly unknown[];
+      }[] = [
+        {
+          name: "mixed text and number",
+          values: [
+            ...Array.from({ length: 100 }, (_, index) => `mixed-${index}`),
+            1,
+          ],
+        },
+        {
+          name: "NULL member",
+          values: [
+            ...Array.from({ length: 100 }, (_, index) => `null-${index}`),
+            null,
+          ],
+        },
+        {
+          name: "ill-formed surrogate",
+          values: [
+            String.fromCharCode(0xd800),
+            ...Array.from({ length: 100 }, (_, index) => `surrogate-${index}`),
+          ],
+        },
+      ];
+      for (const unsafe of unsafeMembershipLists) {
+        expect(
+          () =>
+            compileD1Query(
+              filter(
+                sites,
+                inList(sites.columns.site_id, unsafe.values as never),
+              ),
+            ),
+          unsafe.name,
+        ).toThrowError(
+          expect.objectContaining({
+            code: "d1_statement_budget_exceeded",
+            item: "bindings",
+            actual: 101,
+          }),
+        );
+      }
+
+      const malformedLowSurrogate = String.fromCharCode(0xdc00);
+      const unsafeHighSavingValues = [
+        malformedLowSurrogate,
+        ...Array.from({ length: 98 }, (_, index) => `low-surrogate-${index}`),
+      ];
+      const safeFollowupValues = [
+        "safe-followup-a",
+        "safe-followup-b",
+        "safe-followup-c",
+      ];
+      const skipsUnsafeMembership = compileD1Query(
+        filter(
+          sites,
+          and(
+            inList(sites.columns.site_id, unsafeHighSavingValues),
+            inList(sites.columns.site_id, safeFollowupValues),
+          ),
+        ),
+      );
+      expect(skipsUnsafeMembership.bindings).toHaveLength(100);
+      expect(skipsUnsafeMembership.bindings).toContain(malformedLowSurrogate);
+      expect(skipsUnsafeMembership.bindings).toContain(
+        JSON.stringify(safeFollowupValues),
+      );
+      expect(skipsUnsafeMembership.sql.match(/json_each\(\?\)/gu)).toHaveLength(
+        1,
+      );
+
+      const selected = filter(sites, inList(sites.columns.site_id, values));
+      const repeated = union(selected, selected, true);
+      const withTailParameter = project(repeated, {
+        site_id: repeated.columns.site_id,
+        marker: param("tail"),
+      });
+      const cteQuery = compileD1Query(withTailParameter);
+      expect(cteQuery.sql.match(/_d1_shared_\d+/g)).not.toBeNull();
+      expect(cteQuery.bindings).toEqual([JSON.stringify(values), "tail"]);
+      expect(executeAll(db, cteQuery)).toHaveLength(
+        (specialValues.length + 1) * 2,
+      );
+
+      const nested = compileD1Query(
+        filter(
+          sites,
+          and(
+            inList(sites.columns.site_id, values),
+            eq(sites.columns.site_id, param("match")),
+          ),
+        ),
+      );
+      expect(nested.bindings).toEqual([JSON.stringify(values), "match"]);
+      const nestedNativeSql = `SELECT site_id FROM site_identities WHERE site_id IN (${values.map(() => "?").join(",")}) AND site_id = ?`;
+      const nestedNativeOracle = db
+        .prepare(nestedNativeSql)
+        .all(...([...values, "match"] as SQLInputValue[])) as Array<{
+        site_id: string;
+      }>;
+      const nestedActual = executeAll(db, nested).map((row) => row.site_id);
+      expect(nestedActual).toEqual(
+        nestedNativeOracle.map((row) => row.site_id),
+      );
+      expect(nestedActual).toEqual(["match"]);
+
+      const malformedSurrogate = String.fromCharCode(0xd800);
+      const unchangedMalformed = compileD1Query(
+        filter(
+          sites,
+          inList(sites.columns.site_id, [malformedSurrogate, "ordinary"]),
+        ),
+      );
+      expect(unchangedMalformed.sql).not.toContain("json_each");
+      expect(unchangedMalformed.bindings).toEqual([
+        malformedSurrogate,
+        "ordinary",
+      ]);
+
+      const forgedRelation = filter(
+        sites,
+        inList(sites.columns.site_id, values),
+      );
+      const physical = lowerLogicalPlan(forgedRelation);
+      if (physical.root.kind !== "filter")
+        throw new Error("expected a filter physical root");
+      const jsonText = JSON.stringify(values);
+      const jsonUtf8Bytes = new TextEncoder().encode(jsonText).byteLength;
+      const validPhysicalWithMetadata = {
+        ...physical,
+        membershipOptimization: {
+          nativeBindingCount: 128,
+          selectedBindingCount: 1,
+          strategies: [
+            {
+              expression: physical.root.predicate as Extract<
+                typeof physical.root.predicate,
+                { kind: "in-list" }
+              >,
+              occurrences: 1,
+              strategy: "json-text" as const,
+              jsonText,
+              jsonUtf8Bytes,
+              nativeBindingsSaved: 127,
+            },
+          ],
+        },
+      };
+      expect(compileD1Query(validPhysicalWithMetadata)).toEqual(
+        compileD1Query(forgedRelation),
+      );
+      const forged = {
+        ...physical,
+        membershipOptimization: {
+          nativeBindingCount: 128,
+          selectedBindingCount: 1,
+          strategies: [
+            {
+              expression: physical.root.predicate as Extract<
+                typeof physical.root.predicate,
+                { kind: "in-list" }
+              >,
+              occurrences: 1,
+              strategy: "json-text" as const,
+              jsonText: '["forged"]',
+              jsonUtf8Bytes: 10,
+              nativeBindingsSaved: 127,
+            },
+          ],
+        },
+      };
+      expect(() => compileD1Query(forged)).toThrowError(
+        expect.objectContaining({ code: "invalid_plan" }),
+      );
+
+      const forgedCost = {
+        ...forged,
+        membershipOptimization: {
+          ...forged.membershipOptimization,
+          nativeBindingCount: 129,
+          strategies: [
+            {
+              ...forged.membershipOptimization.strategies[0]!,
+              jsonText,
+              jsonUtf8Bytes,
+            },
+          ],
+        },
+      };
+      expect(() => compileD1Query(forgedCost)).toThrowError(
+        expect.objectContaining({ code: "invalid_plan" }),
+      );
+
+      const oversizedPayloadValues = [
+        "x".repeat(999_696),
+        ...Array.from({ length: 100 }, () => ""),
+      ];
+      const boundaryQuery = compileD1Query(
+        filter(sites, inList(sites.columns.site_id, oversizedPayloadValues)),
+      );
+      expect(boundaryQuery.bindings ?? []).toHaveLength(1);
+      expect(
+        new TextEncoder().encode((boundaryQuery.bindings ?? [])[0] as string)
+          .byteLength,
+      ).toBe(1_000_000);
+
+      const overBoundaryValues = [
+        "x".repeat(999_697),
+        ...Array.from({ length: 100 }, () => ""),
+      ];
+      expect(() =>
+        compileD1Query(
+          filter(sites, inList(sites.columns.site_id, overBoundaryValues)),
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          code: "d1_statement_budget_exceeded",
+          item: "bindings",
+          actual: 101,
+        }),
+      );
+    } finally {
+      db.close();
     }
   });
 

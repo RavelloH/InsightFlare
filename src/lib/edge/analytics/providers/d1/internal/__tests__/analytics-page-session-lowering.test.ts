@@ -1893,46 +1893,88 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           maxUnionTempTrees,
         );
       }
-      const budgetRejected = lower(
-        filterDocument(
-          inCondition(
-            "page.path",
-            Array.from({ length: 128 }, (_, index) => `/budget-${index}`),
-          ),
-        ),
+      const packedMembershipFilter = filterDocument(
+        inCondition("page.path", [
+          "/a",
+          ...Array.from({ length: 127 }, (_, index) => `/budget-${index}`),
+        ]),
       );
-      expect(budgetRejected).toMatchObject({
-        kind: "unsupported",
-        capability: "d1-query-budget-exceeded",
-        node: "compiled-query",
-        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
-      });
-      if (budgetRejected.kind === "unsupported") {
-        console.info("Wave 7 Session budget refusal", budgetRejected.reason);
-      }
-      expect("query" in budgetRejected).toBe(false);
-      const directPlanBudgetRejected = lowerAnalyticsPagePathSessionPlan(
-        buildDirectSessionPlan(
-          filterDocument(
-            inCondition(
-              "page.path",
-              Array.from({ length: 128 }, (_, index) => `/budget-${index}`),
-            ),
-          ),
-        ),
-      );
-      expect(directPlanBudgetRejected).toMatchObject({
-        kind: "unsupported",
-        capability: "d1-query-budget-exceeded",
-        node: "compiled-query",
-        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
-      });
-      if (directPlanBudgetRejected.kind === "unsupported") {
-        console.info(
-          "Wave 7 direct Session plan budget refusal",
-          directPlanBudgetRejected.reason,
+      const packedMembership = lower(packedMembershipFilter);
+      expect(packedMembership.kind).toBe("supported");
+      if (packedMembership.kind !== "supported")
+        throw new Error(
+          `Unexpected membership refusal: ${packedMembership.reason}`,
         );
-      }
+      expect(packedMembership.query.sql).toContain("json_each(?)");
+      expect(packedMembership.query.bindings?.length ?? 0).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      const directPlanMembership = lowerAnalyticsPagePathSessionPlan(
+        buildDirectSessionPlan(packedMembershipFilter),
+      );
+      expect(directPlanMembership.kind).toBe("supported");
+      if (directPlanMembership.kind !== "supported")
+        throw new Error(
+          `Unexpected direct membership refusal: ${directPlanMembership.reason}`,
+        );
+      expect(directPlanMembership.query.sql).toBe(packedMembership.query.sql);
+      expect(directPlanMembership.query.bindings).toEqual(
+        packedMembership.query.bindings,
+      );
+
+      const membershipTrace: SqliteD1Trace = {
+        preparedSql: [],
+        bindings: [],
+      };
+      const membershipClient = createD1DatabaseClient(
+        createSqliteD1Database(db, membershipTrace),
+      );
+      const membershipResult = await membershipClient.all(
+        packedMembership.query,
+      );
+      const actualMembershipRows = membershipResult.results as Array<{
+        readonly site_pk: number;
+        readonly session_id: string;
+      }>;
+      const membershipCandidateIds = new Set(
+        [
+          ...evaluatorPages
+            .filter(
+              (entity) =>
+                entity.time !== undefined &&
+                entity.time >= CANDIDATE_RANGE.startMs &&
+                entity.time < CANDIDATE_RANGE.endExclusiveMs,
+            )
+            .map((entity) => entity.sessionId),
+          ...evaluatorEvents
+            .filter(
+              (entity) =>
+                entity.time !== undefined &&
+                entity.time >= CANDIDATE_RANGE.startMs &&
+                entity.time < CANDIDATE_RANGE.endExclusiveMs,
+            )
+            .map((entity) => entity.sessionId),
+        ].filter((sessionId): sessionId is string => Boolean(sessionId)),
+      );
+      const expectedMembership = evaluateCandidateRestrictedSets(
+        packedMembershipFilter.root,
+        {
+          pages: evaluatorPages,
+          events: evaluatorEvents,
+          coverageRange: { startMs: 0, endExclusiveMs: 250 },
+        },
+        membershipCandidateIds,
+      );
+      expect(
+        new Set(actualMembershipRows.map((row) => row.session_id)),
+      ).toEqual(expectedMembership);
+      expect(
+        actualMembershipRows.every((row) => row.site_pk === siteA.key),
+      ).toBe(true);
+      expect(membershipTrace.preparedSql).toHaveLength(1);
+      expect(membershipTrace.bindings[0]).toHaveLength(
+        packedMembership.query.bindings?.length ?? 0,
+      );
     } finally {
       db.close();
     }
@@ -2591,6 +2633,13 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           .map((entity) => entity.sessionId)
           .filter((sessionId): sessionId is string => Boolean(sessionId)),
       );
+      const largeTitleMembership = [
+        "Checkout",
+        ...Array.from(
+          { length: 127 },
+          (_, index) => `title-distractor-${index}`,
+        ),
+      ];
       const pageEq = fieldCondition("page.title", "eq", "Checkout");
       const eventEq = eventNameCondition("purchase");
       const cases = [
@@ -2645,6 +2694,20 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           ],
         },
         {
+          name: "title-not-in-128-preserves-read-page-guard",
+          document: filterDocument(
+            fieldCondition("page.title", "notIn", largeTitleMembership),
+          ),
+          expected: [
+            "s-title-conflict",
+            "s-title-negative",
+            "s-title-empty",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+          ],
+        },
+        {
           name: "title-is-null-on-non-null-storage",
           document: filterDocument(fieldCondition("page.title", "isNull")),
           expected: [],
@@ -2667,6 +2730,22 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         {
           name: "root-not-title-eq-includes-no-read-candidates",
           document: filterDocument({ kind: "not", child: pageEq }),
+          expected: [
+            "s-title-negative",
+            "s-title-empty",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+            "s-no-read",
+            "s-event-only",
+          ],
+        },
+        {
+          name: "root-not-title-includes-no-read-candidates",
+          document: filterDocument({
+            kind: "not",
+            child: inCondition("page.title", largeTitleMembership),
+          }),
           expected: [
             "s-title-negative",
             "s-title-empty",
@@ -2772,6 +2851,18 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           expected: ["s-mixed"],
         },
       ] as const;
+
+      const primitiveNotInExpected = cases.find(
+        (item) => item.name === "title-not-in-128-preserves-read-page-guard",
+      )!.expected;
+      const rootNotExpected = cases.find(
+        (item) => item.name === "root-not-title-includes-no-read-candidates",
+      )!.expected;
+      expect(primitiveNotInExpected).not.toContain("s-no-read");
+      expect(primitiveNotInExpected).not.toContain("s-event-only");
+      expect(rootNotExpected).toContain("s-no-read");
+      expect(rootNotExpected).toContain("s-event-only");
+      expect(rootNotExpected).not.toEqual(primitiveNotInExpected);
 
       const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
       const client = createD1DatabaseClient(createSqliteD1Database(db, trace));

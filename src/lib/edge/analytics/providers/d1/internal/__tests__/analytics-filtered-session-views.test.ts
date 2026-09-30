@@ -974,31 +974,43 @@ describe("semantic Session-filtered views plan", () => {
         expectedViews(mixedMembership, evaluation),
       );
 
-      const overBudgetFilter = document(
-        inCondition(
-          "page.path",
-          Array.from({ length: 128 }, (_, index) => `/over-budget-${index}`),
-        ),
+      const packedMembershipFilter = document(
+        inCondition("page.path", [
+          "/match",
+          ...Array.from({ length: 127 }, (_, index) => `/distractor-${index}`),
+        ]),
       );
-      const beforeBudgetRejection = trace.preparedSql.length;
-      const overBudget = lowerAnalyticsFilteredSessionViewsPlan(
-        buildSemanticViewsPlan(overBudgetFilter),
-        {
-          siteId: SITE_A,
-          candidateRange: CANDIDATE_RANGE as never,
-          readRange: READ_RANGE as never,
-        },
+      const packedMembership = await executeViewsQuery(
+        db,
+        client,
+        trace,
+        packedMembershipFilter,
+        expectedViews(packedMembershipFilter, evaluation),
       );
-      expect(overBudget).toMatchObject({
-        kind: "unsupported",
-        capability: "d1-query-budget-exceeded",
-        node: "compiled-query",
-        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
-      });
-      if (overBudget.kind === "unsupported") {
-        console.info("Wave 7 views budget refusal", overBudget.reason);
+      expect(packedMembership.query.sql).toContain("json_each(?)");
+      expect(packedMembership.query.bindings?.length ?? 0).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      for (const field of ["page.path", "event.name"] as const) {
+        const notInMembershipFilter = document({
+          kind: "not",
+          child: inCondition(field, [
+            field === "page.path" ? "/match" : "signup",
+            ...Array.from(
+              { length: 127 },
+              (_, index) => `/distractor-${index}`,
+            ),
+          ]),
+        });
+        const notInMembership = await executeViewsQuery(
+          db,
+          client,
+          trace,
+          notInMembershipFilter,
+          expectedViews(notInMembershipFilter, evaluation),
+        );
+        expect(notInMembership.query.sql).toContain("json_each(?)");
       }
-      expect(trace.preparedSql).toHaveLength(beforeBudgetRejection);
     } finally {
       db.close();
     }
@@ -1403,31 +1415,46 @@ describe("formal sessions + views overview pair plan", () => {
         expectedBudgetRejectedLabels.sort(),
       );
 
-      const overBudgetFilter = document(
-        inCondition(
-          "page.path",
-          Array.from({ length: 128 }, (_, index) => `/over-budget-${index}`),
-        ),
+      const packedMembershipFilter = document(
+        inCondition("page.path", [
+          "/match",
+          ...Array.from({ length: 127 }, (_, index) => `/distractor-${index}`),
+        ]),
       );
-      const beforeBudgetRejection = trace.preparedSql.length;
-      const overBudget = lowerAnalyticsFilteredSessionOverviewPairPlan(
-        buildSemanticOverviewPairPlan(overBudgetFilter),
-        {
-          siteId: SITE_A,
-          candidateRange: CANDIDATE_RANGE,
-          readRange: READ_RANGE,
-        } as never,
+      const packedMembership = await executeOverviewPairQuery(
+        db,
+        client,
+        trace,
+        packedMembershipFilter,
+        expectedOverviewPair(packedMembershipFilter, evaluation),
       );
-      expect(overBudget).toMatchObject({
-        kind: "unsupported",
-        capability: "d1-query-budget-exceeded",
-        node: "compiled-query",
-        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
-      });
-      if (overBudget.kind === "unsupported") {
-        console.info("Wave 7 overview pair budget refusal", overBudget.reason);
-      }
-      expect(trace.preparedSql).toHaveLength(beforeBudgetRejection);
+      expect(packedMembership.query.sql).toContain("json_each(?)");
+      expect(packedMembership.query.bindings?.length ?? 0).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      const packedSqlBytes = new TextEncoder().encode(
+        packedMembership.query.sql,
+      ).length;
+      const packedJsonBytes = new TextEncoder().encode(
+        JSON.stringify([
+          "/match",
+          ...Array.from({ length: 127 }, (_, index) => `/distractor-${index}`),
+        ]),
+      ).length;
+      const packedCteCount =
+        packedMembership.query.sql.match(
+          /(?:\bWITH|,)\s*(?:"[^"]+"|[A-Za-z_]\w*)\s+AS\s*\(/giu,
+        )?.length ?? 0;
+      console.info(
+        "Wave 9 128-value overview membership cost",
+        JSON.stringify({
+          statements: 1,
+          sqlBytes: packedSqlBytes,
+          bindings: packedMembership.query.bindings?.length ?? 0,
+          jsonBytes: packedJsonBytes,
+          cteCount: packedCteCount,
+        }),
+      );
       const maxSqlCost = measuredCosts.reduce((maximum, cost) =>
         cost.sqlBytes > maximum.sqlBytes ? cost : maximum,
       );
@@ -1530,7 +1557,7 @@ describe("formal sessions + views overview pair plan", () => {
           }),
         );
       }
-      expect(trace.preparedSql).toHaveLength(measuredCosts.length);
+      expect(trace.preparedSql).toHaveLength(measuredCosts.length + 1);
     } finally {
       db.close();
     }

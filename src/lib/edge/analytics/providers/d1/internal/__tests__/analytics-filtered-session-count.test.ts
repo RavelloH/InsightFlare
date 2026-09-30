@@ -575,26 +575,59 @@ describe("semantic sessions aggregate → filtered Session D1 count", () => {
         candidateRestrictedEvaluatorSet(mixedFilter, evaluatorDataset),
       );
 
-      const overBudgetFilter = document(
-        inCondition(
-          "page.path",
-          Array.from({ length: 128 }, (_, index) => `/over-budget-${index}`),
+      const packedMembershipFilter = document(
+        inCondition("page.path", [
+          "/match",
+          ...Array.from({ length: 127 }, (_, index) => `/distractor-${index}`),
+        ]),
+      );
+      const packedMembershipExpected = candidateRestrictedEvaluatorSet(
+        packedMembershipFilter,
+        evaluatorDataset,
+      );
+      const packedMembershipQuery = await assertCount(
+        packedMembershipFilter,
+        packedMembershipExpected,
+      );
+      expect(packedMembershipQuery.sql).toContain("json_each(?)");
+      expect(packedMembershipQuery.bindings?.length ?? 0).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      const notInMembershipFilter = document({
+        kind: "not",
+        child: inCondition("page.path", [
+          "/match",
+          ...Array.from({ length: 127 }, (_, index) => `/distractor-${index}`),
+        ]),
+      });
+      const notInMembershipQuery = await assertCount(
+        notInMembershipFilter,
+        candidateRestrictedEvaluatorSet(
+          notInMembershipFilter,
+          evaluatorDataset,
         ),
       );
-      const beforeBudgetRejection = trace.preparedSql.length;
-      const overBudget = lowerAnalyticsFilteredSessionCountPlan(
-        buildSemanticSessionsPlan(overBudgetFilter),
+      expect(notInMembershipQuery.sql).toContain("json_each(?)");
+
+      const validButUnoptimizableFilter = document({
+        kind: "and",
+        children: Array.from({ length: 101 }, (_, index) =>
+          condition("page.path", `/native-budget-${index}`),
+        ),
+      });
+      const beforeUnoptimizableBudget = trace.preparedSql.length;
+      const unoptimizableBudget = lowerAnalyticsFilteredSessionCountPlan(
+        buildSemanticSessionsPlan(validButUnoptimizableFilter),
       );
-      expect(overBudget).toMatchObject({
+      expect(unoptimizableBudget).toMatchObject({
         kind: "unsupported",
         capability: "d1-query-budget-exceeded",
         node: "compiled-query",
-        reason: expect.stringMatching(/^bound parameters: \d+ \(limit 100\);/u),
+        reason: expect.stringMatching(
+          /^(?:SQL UTF-8 bytes|bound parameters): \d+ \(limit \d+\);/u,
+        ),
       });
-      if (overBudget.kind === "unsupported") {
-        console.info("Wave 7 session count budget refusal", overBudget.reason);
-      }
-      expect(trace.preparedSql).toHaveLength(beforeBudgetRejection);
+      expect(trace.preparedSql).toHaveLength(beforeUnoptimizableBudget);
     } finally {
       db.close();
     }

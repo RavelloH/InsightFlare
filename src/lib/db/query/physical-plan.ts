@@ -1,5 +1,10 @@
 import { DatabaseCompilerError } from "./errors";
-import type { AnyExpression, RelationScope, SqlExpression } from "./expression";
+import type {
+  AnyExpression,
+  AnyInListExpression,
+  RelationScope,
+  SqlExpression,
+} from "./expression";
 import type {
   LogicalQueryNode,
   OutputField,
@@ -9,6 +14,33 @@ import type {
 import { validateLogicalQueryPlan } from "./validator";
 
 const MAX_SHARED_RELATION_FIELDS = 4;
+
+export const MAX_D1_JSON_MEMBERSHIP_BYTES = 1_000_000;
+
+export interface PhysicalMembershipUsage {
+  readonly expression: AnyInListExpression;
+  readonly occurrences: number;
+}
+
+export interface PhysicalMembershipStrategy {
+  readonly expression: AnyInListExpression;
+  readonly occurrences: number;
+  readonly strategy: "native" | "json-text";
+  readonly jsonText?: string;
+  readonly jsonUtf8Bytes?: number;
+  readonly nativeBindingsSaved: number;
+}
+
+export interface PhysicalMembershipOptimization {
+  readonly nativeBindingCount: number;
+  readonly selectedBindingCount: number;
+  readonly strategies: readonly PhysicalMembershipStrategy[];
+}
+
+export interface PhysicalMembershipOptimizationFacts {
+  readonly nativeBindingCount: number;
+  readonly usage: readonly PhysicalMembershipUsage[];
+}
 
 export interface SharedRelationDefinition {
   readonly name: string;
@@ -27,7 +59,166 @@ export interface PhysicalQueryPlan<
   readonly scope: QuerySource["scope"];
   readonly fields: QuerySource["fields"];
   readonly sharedRelations: readonly SharedRelationDefinition[];
+  /** Backend physical choice, populated after final-shape cost analysis. */
+  readonly membershipOptimization?: PhysicalMembershipOptimization;
   readonly __rowType?: Row;
+}
+
+function hasWellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index++;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function encodedTextValues(
+  expression: AnyInListExpression,
+): { jsonText: string; jsonUtf8Bytes: number } | undefined {
+  if (
+    expression.values.length < 2 ||
+    expression.expression.resultType.affinity !== "text" ||
+    !expression.values.every(
+      (value): value is string =>
+        typeof value === "string" && hasWellFormedUtf16(value),
+    )
+  )
+    return undefined;
+  const jsonText = JSON.stringify(expression.values);
+  const jsonUtf8Bytes = new TextEncoder().encode(jsonText).byteLength;
+  return jsonUtf8Bytes <= MAX_D1_JSON_MEMBERSHIP_BYTES
+    ? { jsonText, jsonUtf8Bytes }
+    : undefined;
+}
+
+/** Select the generic D1 physical representation from measured final-shape costs. */
+export function optimizePhysicalMembershipBudget<Row extends object>(
+  plan: PhysicalQueryPlan<Row>,
+  facts: PhysicalMembershipOptimizationFacts,
+  bindingLimit: number,
+): PhysicalQueryPlan<Row> {
+  if (
+    !Number.isInteger(facts.nativeBindingCount) ||
+    facts.nativeBindingCount < 0 ||
+    !Number.isInteger(bindingLimit) ||
+    bindingLimit < 0
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Invalid physical membership budget facts",
+    );
+
+  const usage = facts.usage.map((item) => {
+    if (!item || !item.expression || item.expression.kind !== "in-list")
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Invalid physical membership expression facts",
+      );
+    if (!Number.isInteger(item.occurrences) || item.occurrences < 1)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Invalid physical membership occurrence count",
+      );
+    return item;
+  });
+
+  const savingsByExpression = new Map<AnyInListExpression, number>();
+  const encodingByExpression = new Map<
+    AnyInListExpression,
+    { readonly jsonText: string; readonly jsonUtf8Bytes: number } | undefined
+  >();
+  let remaining = facts.nativeBindingCount;
+  if (remaining > bindingLimit) {
+    const candidates = usage
+      .map((item, order) => ({
+        ...item,
+        order,
+        saving: item.occurrences * (item.expression.values.length - 1),
+      }))
+      .filter((item) => item.saving > 0)
+      .sort(
+        (left, right) => right.saving - left.saving || left.order - right.order,
+      );
+    for (const candidate of candidates) {
+      if (remaining <= bindingLimit) break;
+      let encoding = encodingByExpression.get(candidate.expression);
+      if (!encoding && !encodingByExpression.has(candidate.expression)) {
+        encoding = encodedTextValues(candidate.expression);
+        encodingByExpression.set(candidate.expression, encoding);
+      }
+      if (!encoding) continue;
+      savingsByExpression.set(candidate.expression, candidate.saving);
+      remaining -= candidate.saving;
+    }
+  }
+
+  const strategies: PhysicalMembershipStrategy[] = usage.map((item) => {
+    const nativeBindingsSaved = savingsByExpression.get(item.expression) ?? 0;
+    if (nativeBindingsSaved === 0)
+      return {
+        expression: item.expression,
+        occurrences: item.occurrences,
+        strategy: "native",
+        nativeBindingsSaved: 0,
+      };
+    const encoding = encodingByExpression.get(item.expression);
+    if (!encoding)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Selected physical membership has no safe JSON encoding",
+      );
+    return {
+      expression: item.expression,
+      occurrences: item.occurrences,
+      strategy: "json-text",
+      jsonText: encoding.jsonText,
+      jsonUtf8Bytes: encoding.jsonUtf8Bytes,
+      nativeBindingsSaved,
+    };
+  });
+
+  return {
+    ...plan,
+    membershipOptimization: {
+      nativeBindingCount: facts.nativeBindingCount,
+      selectedBindingCount: remaining,
+      strategies,
+    },
+  };
+}
+
+export function hasSamePhysicalMembershipOptimization(
+  actual: PhysicalMembershipOptimization | undefined,
+  expected: PhysicalMembershipOptimization,
+): boolean {
+  if (
+    !actual ||
+    actual.nativeBindingCount !== expected.nativeBindingCount ||
+    actual.selectedBindingCount !== expected.selectedBindingCount ||
+    !Array.isArray(actual.strategies) ||
+    actual.strategies.length !== expected.strategies.length
+  )
+    return false;
+  return actual.strategies.every((item, index) => {
+    const canonical = expected.strategies[index];
+    return (
+      !!item &&
+      typeof item === "object" &&
+      !!canonical &&
+      item.expression === canonical.expression &&
+      item.occurrences === canonical.occurrences &&
+      item.strategy === canonical.strategy &&
+      item.jsonText === canonical.jsonText &&
+      item.jsonUtf8Bytes === canonical.jsonUtf8Bytes &&
+      item.nativeBindingsSaved === canonical.nativeBindingsSaved
+    );
+  });
 }
 
 function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
