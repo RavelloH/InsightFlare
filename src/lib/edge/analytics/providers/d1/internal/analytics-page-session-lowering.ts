@@ -39,6 +39,7 @@ import type {
   SlotId,
 } from "@/lib/edge/analytics/engine/logical/ids";
 import type {
+  AggregateNode,
   DistinctNode,
   FilterNode,
   LogicalNode,
@@ -62,6 +63,9 @@ import {
 } from "@/lib/filter-contract/filter-semantics";
 import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
 
+const D1_MAX_SQL_UTF8_BYTES = 100_000;
+const D1_MAX_BOUND_PARAMETERS = 100;
+
 export interface AnalyticsPageSessionLoweringInput {
   readonly document: unknown;
   readonly siteIds: readonly SiteId[];
@@ -81,6 +85,11 @@ export interface AnalyticsSessionCountRow {
 }
 
 export interface AnalyticsSessionViewsRow {
+  readonly views: number;
+}
+
+export interface AnalyticsSessionOverviewPairRow {
+  readonly sessions: number;
   readonly views: number;
 }
 
@@ -110,6 +119,14 @@ export type AnalyticsSessionViewsLoweringResult =
       readonly kind: "supported";
       readonly logicalPlan: ValidatedLogicalPlan;
       readonly query: CompiledQuery<AnalyticsSessionViewsRow>;
+    }
+  | UnsupportedResult;
+
+export type AnalyticsSessionOverviewPairLoweringResult =
+  | {
+      readonly kind: "supported";
+      readonly logicalPlan: ValidatedLogicalPlan;
+      readonly query: CompiledQuery<AnalyticsSessionOverviewPairRow>;
     }
   | UnsupportedResult;
 
@@ -1483,6 +1500,268 @@ function matchSessionViewsPlan(
   return { ...context, set: sessionSet };
 }
 
+function matchCountRowsAggregate(
+  plan: ValidatedLogicalPlan,
+  relationId: RelationId,
+  metric: "sessions" | "views",
+  visited: Set<RelationId>,
+): { readonly node: AggregateNode; readonly output: SlotId } {
+  const path = planNodePath(relationId);
+  const aggregateNode = nodeAt(plan, relationId, "aggregate", path, visited);
+  requirePlan(
+    aggregateNode.groups.length === 0 &&
+      aggregateNode.measures.length === 1 &&
+      aggregateNode.measures[0]!.kind === "count-rows" &&
+      aggregateNode.output.length === 1 &&
+      aggregateNode.output[0] === aggregateNode.measures[0]!.output &&
+      aggregateNode.grain.kind === "scalar",
+    path,
+    `The ${metric} branch must be an ungrouped COUNT_ROWS Aggregate.`,
+  );
+  const output = slotAt(plan, aggregateNode.output[0]!, `${path}.output[0]`);
+  requirePlan(
+    output.type.kind === "scalar" &&
+      output.type.scalar === "number" &&
+      !output.nullable &&
+      output.lineage.kind === "derived" &&
+      output.lineage.operation === "aggregate:count-rows",
+    `${path}.output[0]`,
+    `The ${metric} Aggregate must produce a non-null count-rows number.`,
+  );
+  return { node: aggregateNode, output: output.id };
+}
+
+function validatePairProject(
+  plan: ValidatedLogicalPlan,
+  node: ProjectNode,
+  input: RelationId,
+  inputSlots: readonly [SlotId, SlotId],
+  path: string,
+  visited: Set<RelationId>,
+): readonly [SlotId, SlotId] {
+  visited.add(node.id);
+  requirePlan(
+    node.input === input &&
+      node.projections.length === 2 &&
+      node.projections.every(
+        (projection, index) =>
+          projection.expression.kind === "slot" &&
+          projection.expression.slot === inputSlots[index],
+      ) &&
+      node.output.length === 2 &&
+      node.output.every(
+        (slot, index) => slot === node.projections[index]!.slot,
+      ) &&
+      node.grain.kind === "scalar",
+    path,
+    "The pair Project must preserve the sessions and views scalar slots in order.",
+  );
+  const slots = node.output as readonly [SlotId, SlotId];
+  for (const [index, slotId] of slots.entries()) {
+    const slot = slotAt(plan, slotId, `${path}.output[${index}]`);
+    requirePlan(
+      slot.type.kind === "scalar" &&
+        slot.type.scalar === "number" &&
+        !slot.nullable &&
+        slot.lineage.kind === "alias" &&
+        slot.lineage.source === inputSlots[index],
+      `${path}.output[${index}]`,
+      "Each pair Project output must remain its non-null numeric metric alias.",
+    );
+  }
+  return slots;
+}
+
+function matchSessionOverviewPairPlan(
+  plan: ValidatedLogicalPlan,
+): SessionPlanSemantics {
+  const context = matchSessionPlanContext(plan);
+  requirePlan(
+    plan.outputs.length === 1 &&
+      plan.outputs[0]!.id === "semantic-aggregate" &&
+      plan.outputs[0]!.fields.length === 2 &&
+      plan.outputs[0]!.fields[0]!.name === "sessions" &&
+      plan.outputs[0]!.fields[0]!.semantic?.kind === "metric" &&
+      plan.outputs[0]!.fields[0]!.semantic?.id === "sessions" &&
+      plan.outputs[0]!.fields[1]!.name === "views" &&
+      plan.outputs[0]!.fields[1]!.semantic?.kind === "metric" &&
+      plan.outputs[0]!.fields[1]!.semantic?.id === "views",
+    "outputs",
+    "Expected semantic-aggregate.sessions and semantic-aggregate.views outputs in order.",
+  );
+
+  const output = plan.outputs[0]!;
+  const visited = new Set<RelationId>();
+  const finalProject = nodeAt(
+    plan,
+    output.relation,
+    "project",
+    "outputs[0].relation",
+    visited,
+  );
+  const normalizedProject = nodeAt(
+    plan,
+    finalProject.input,
+    "project",
+    `${planNodePath(finalProject.id)}.input`,
+    visited,
+  );
+  const branchJoin = nodeAt(
+    plan,
+    normalizedProject.input,
+    "join",
+    `${planNodePath(normalizedProject.id)}.input`,
+    visited,
+  );
+  const sessions = matchCountRowsAggregate(
+    plan,
+    branchJoin.left,
+    "sessions",
+    visited,
+  );
+  const views = matchCountRowsAggregate(
+    plan,
+    branchJoin.right,
+    "views",
+    visited,
+  );
+  requirePlan(
+    branchJoin.joinType === "inner" &&
+      branchJoin.keys.length === 0 &&
+      branchJoin.grain.kind === "scalar" &&
+      branchJoin.output.length === 2 &&
+      branchJoin.output[0] === sessions.output &&
+      branchJoin.output[1] === views.output &&
+      branchJoin.rightAliases.length === 0,
+    planNodePath(branchJoin.id),
+    "The scalar branch Join must be inner, keyless, and preserve both one-row count branches.",
+  );
+  const normalizedSlots = validatePairProject(
+    plan,
+    normalizedProject,
+    branchJoin.id,
+    [sessions.output, branchJoin.output[1]!],
+    planNodePath(normalizedProject.id),
+    visited,
+  );
+  const finalSlots = validatePairProject(
+    plan,
+    finalProject,
+    normalizedProject.id,
+    normalizedSlots,
+    planNodePath(finalProject.id),
+    visited,
+  );
+  requirePlan(
+    finalProject.output[0] === output.fields[0]!.slot &&
+      finalProject.output[1] === output.fields[1]!.slot &&
+      finalSlots[0] === output.fields[0]!.slot &&
+      finalSlots[1] === output.fields[1]!.slot,
+    "outputs[0].fields",
+    "The semantic output must reference both projected metric counts in order.",
+  );
+
+  const pageMembership = nodeAt(
+    plan,
+    views.node.input,
+    "semi-join",
+    `${planNodePath(views.node.id)}.input`,
+    visited,
+  );
+  const candidatePages = nodeAt(
+    plan,
+    pageMembership.left,
+    "source",
+    `${planNodePath(pageMembership.id)}.left`,
+    visited,
+  );
+  requirePlan(
+    candidatePages.entity === "page" &&
+      candidatePages.temporalDomain === "candidate" &&
+      candidatePages.values.length === 2 &&
+      candidatePages.output.length === 2 &&
+      candidatePages.values[0]!.kind === "self" &&
+      candidatePages.values[1]!.kind === "related-entity" &&
+      candidatePages.values[1]!.relationship === "page.session" &&
+      candidatePages.values[0]!.slot === candidatePages.output[0] &&
+      candidatePages.values[1]!.slot === candidatePages.output[1] &&
+      candidatePages.grain.kind === "entity" &&
+      candidatePages.grain.entity === "page" &&
+      candidatePages.grain.key === candidatePages.values[0]!.slot,
+    planNodePath(candidatePages.id),
+    "The views branch must start from the unique candidate Page Source and page.session relationship.",
+  );
+  const pageIdentity = candidatePages.values[0]!.slot;
+  const pageSession = candidatePages.values[1]!.slot;
+  entitySlotAt(
+    plan,
+    pageIdentity,
+    "page",
+    false,
+    `${planNodePath(candidatePages.id)}.self`,
+  );
+  const pageSessionSlot = slotAt(
+    plan,
+    pageSession,
+    `${planNodePath(candidatePages.id)}.page.session`,
+  );
+  requirePlan(
+    pageSessionSlot.type.kind === "entity" &&
+      pageSessionSlot.type.entity === "session" &&
+      pageSessionSlot.nullable &&
+      pageSessionSlot.lineage.kind === "relationship" &&
+      pageSessionSlot.lineage.relationship === "page.session",
+    `${planNodePath(candidatePages.id)}.page.session`,
+    "The Page membership key must preserve its nullable Session relationship.",
+  );
+  requirePlan(
+    pageMembership.output.length === candidatePages.output.length &&
+      sameSlots(pageMembership.output, candidatePages.output) &&
+      pageMembership.grain.kind === "entity" &&
+      pageMembership.grain.entity === "page" &&
+      pageMembership.grain.key === pageIdentity &&
+      pageMembership.keys.length === 1 &&
+      pageMembership.keys[0]!.left === pageSession,
+    planNodePath(pageMembership.id),
+    "The Session semi-join must preserve candidate Page grain and use page.session.",
+  );
+  requirePlan(
+    sessions.node.input === pageMembership.right,
+    `${planNodePath(sessions.node.id)}.input`,
+    "Both metric branches must consume the exact same formal Session relation.",
+  );
+  const sessionSet = matchCandidateBoundedSessionSet(
+    plan,
+    sessions.node.input,
+    `${planNodePath(sessions.node.id)}.input`,
+    visited,
+  );
+  const sessionSetRoot = nodeAt(
+    plan,
+    pageMembership.right,
+    "set-operation",
+    `${planNodePath(pageMembership.id)}.right`,
+  );
+  requirePlan(
+    sessionSetRoot.output.length === 1 &&
+      sessionSetRoot.grain.kind === "entity" &&
+      sessionSetRoot.grain.entity === "session" &&
+      sessionSetRoot.grain.key === sessionSetRoot.output[0] &&
+      pageMembership.keys[0]!.right === sessionSetRoot.output[0],
+    `${planNodePath(pageMembership.id)}.keys[0].right`,
+    "The Page branch must use the proven Session entity key for membership.",
+  );
+  entitySlotAt(
+    plan,
+    sessionSetRoot.output[0]!,
+    "session",
+    false,
+    `${planNodePath(sessionSetRoot.id)}.output[0]`,
+  );
+  requireAllPlanNodesVisited(plan, visited);
+  return { ...context, set: sessionSet };
+}
+
 function requireExpectedSessionViewsContext(
   semantics: SessionPlanSemantics,
   expected: AnalyticsSessionViewsExpectedContext,
@@ -1984,6 +2263,60 @@ function compileSessionViewsQuery(
   }) as CompiledQuery<AnalyticsSessionViewsRow>;
 }
 
+function compileSessionOverviewPairQuery(
+  semantics: SessionPlanSemantics,
+): CompiledQuery<AnalyticsSessionOverviewPairRow> {
+  const selectedSite = buildSelectedSiteRelation(semantics.siteId);
+  const matchingSessions = compileSessionKeyRelation(semantics, selectedSite);
+  const sessions = aggregate(matchingSessions, {
+    groupBy: {},
+    aggregates: { sessions: count() },
+  });
+
+  const candidatePagesSource = scan(schema.visits);
+  const candidatePagesScoped = semiJoin(
+    candidatePagesSource,
+    selectedSite,
+    eq(candidatePagesSource.columns.site_pk, selectedSite.columns.site_pk),
+  );
+  const candidatePagesInRange = filter(
+    candidatePagesScoped,
+    and(
+      gte(
+        candidatePagesScoped.columns.started_at,
+        param(semantics.candidateRange.startMs),
+      ),
+      lt(
+        candidatePagesScoped.columns.started_at,
+        param(semantics.candidateRange.endExclusiveMs),
+      ),
+      isNotNull(candidatePagesScoped.columns.session_id),
+      neq(candidatePagesScoped.columns.session_id, param("")),
+    ),
+  );
+  const eligiblePages = semiJoin(
+    candidatePagesInRange,
+    matchingSessions,
+    compositeSessionKeyMatch(candidatePagesInRange, matchingSessions),
+  );
+  const views = aggregate(eligiblePages, {
+    groupBy: {},
+    aggregates: { views: count() },
+  });
+
+  // Both inputs are ungrouped COUNT(*) aggregates, so each produces exactly
+  // one row, including when its input relation is empty. The typed predicate
+  // expresses their scalar combination in Generic DB IR.
+  const combined = join(sessions, views, eq(param(1), param(1)));
+  const output = project(combined, {
+    sessions: combined.columns.left_sessions,
+    views: combined.columns.right_views,
+  });
+  return compileD1Query(lowerLogicalPlan(output), {
+    tag: "analytics.filtered-session-overview-pair.wave-5",
+  }) as CompiledQuery<AnalyticsSessionOverviewPairRow>;
+}
+
 /**
  * Lowers supported Session sets by following the validated Analytics plan
  * from its output relation. Unknown nodes, expressions, or disconnected
@@ -2130,6 +2463,72 @@ export function lowerAnalyticsFilteredSessionViewsPlan(
       kind: "supported",
       logicalPlan,
       query: compileSessionViewsQuery(semantics),
+    };
+  } catch (error) {
+    return unsupported(
+      "generic-db-ir-lowering-failed",
+      "generic-db-ir",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+/**
+ * Lowers the exact formal sessions + views aggregate over one shared,
+ * candidate-bounded Session set into a single Generic DB IR query.
+ */
+export function lowerAnalyticsFilteredSessionOverviewPairPlan(
+  input: LogicalPlan,
+  expected: AnalyticsSessionViewsExpectedContext,
+): AnalyticsSessionOverviewPairLoweringResult {
+  let logicalPlan: ValidatedLogicalPlan;
+  try {
+    logicalPlan = validateLogicalPlan(input);
+  } catch (error) {
+    return unsupported(
+      "valid-analytics-plan-required",
+      "plan",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  let semantics: SessionPlanSemantics;
+  try {
+    semantics = matchSessionOverviewPairPlan(logicalPlan);
+    requireExpectedSessionViewsContext(semantics, expected);
+  } catch (error) {
+    if (error instanceof PlanShapeMismatch) {
+      return unsupported(
+        "filtered-session-overview-pair-plan-shape",
+        error.node,
+        error.message,
+      );
+    }
+    return unsupported(
+      "filtered-session-overview-pair-plan-shape",
+      "plan",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  try {
+    const query = compileSessionOverviewPairQuery(semantics);
+    const sqlBytes = new TextEncoder().encode(query.sql).byteLength;
+    const bindingCount = query.bindings?.length ?? 0;
+    if (
+      sqlBytes > D1_MAX_SQL_UTF8_BYTES ||
+      bindingCount > D1_MAX_BOUND_PARAMETERS
+    ) {
+      return unsupported(
+        "d1-query-budget-exceeded",
+        "compiled-query",
+        `The compiled pair query uses ${sqlBytes} UTF-8 SQL bytes (limit ${D1_MAX_SQL_UTF8_BYTES}) and ${bindingCount} bound parameters (limit ${D1_MAX_BOUND_PARAMETERS}); it cannot be submitted to D1.`,
+      );
+    }
+    return {
+      kind: "supported",
+      logicalPlan,
+      query,
     };
   } catch (error) {
     return unsupported(
