@@ -1,29 +1,5 @@
-import {
-  aggregate,
-  and,
-  antiJoin,
-  compileD1Query,
-  type CompiledQuery,
-  count,
-  distinct,
-  eq,
-  filter,
-  gte,
-  isNotNull,
-  join,
-  lowerLogicalPlan,
-  lt,
-  neq,
-  param,
-  project,
-  scan,
-  semiJoin,
-  union,
-} from "@/lib/db";
+import { compileD1Query, type CompiledQuery, lowerLogicalPlan } from "@/lib/db";
 import { D1StatementBudgetError } from "@/lib/db/d1-budget";
-import type { AnyExpression } from "@/lib/db/query/expression";
-import type { Relation } from "@/lib/db/query/plan";
-import { schema } from "@/lib/db/schema";
 import type {
   EpochMs,
   ReportingTimeZone,
@@ -40,15 +16,10 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/ids";
 import type {
   AggregateNode,
-  DistinctNode,
-  FilterNode,
   LogicalNode,
-  ProjectNode,
-  RelationshipLookupNode,
-  SetOperationNode,
-  SourceNode,
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import type {
+  LogicalOutput,
   LogicalPlan,
   ValidatedLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/plan";
@@ -63,14 +34,15 @@ import {
 } from "@/lib/filter-contract/filter-semantics";
 import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
 
+import { nativePrimitiveFieldContract } from "./analytics-primitive-predicate-lowering";
+import type {
+  AnalyticsDbOutputColumn,
+  AnalyticsLogicalToDbLowerer,
+} from "./analytics-relational-lowering";
 import {
-  lowerNativePrimitivePredicate,
-  type NativePagePrimitiveFieldId,
-  nativePrimitiveFieldContract,
-  type NativePrimitiveFieldId,
-  type NativePrimitivePredicate,
-  readNativePrimitivePredicate,
-} from "./analytics-primitive-predicate-lowering";
+  AnalyticsLogicalToDbLowerer as createAnalyticsLowerer,
+  AnalyticsRelationalLoweringError,
+} from "./analytics-relational-lowering";
 
 export interface AnalyticsPageSessionLoweringInput {
   readonly document: unknown;
@@ -147,29 +119,7 @@ type UnsupportedResult = Extract<
   { readonly kind: "unsupported" }
 >;
 
-type SessionSetPlan =
-  | { readonly kind: "candidate"; readonly relationId: RelationId }
-  | {
-      readonly kind: "native-predicate";
-      readonly relationId: RelationId;
-      readonly fieldId: NativePrimitiveFieldId;
-      readonly predicate: NativePrimitivePredicate;
-    }
-  | {
-      readonly kind: "set-operation";
-      readonly relationId: RelationId;
-      readonly operation: SetOperationNode["operation"];
-      readonly inputs: readonly SessionSetPlan[];
-    };
-
-interface SessionPlanSemantics {
-  readonly siteId: SiteId;
-  readonly candidateRange: TimeRange;
-  readonly readRange: TimeRange;
-  readonly set: SessionSetPlan;
-}
-
-interface SessionPlanContextSemantics {
+interface SessionPlanContext {
   readonly siteId: SiteId;
   readonly candidateRange: TimeRange;
   readonly readRange: TimeRange;
@@ -198,7 +148,12 @@ function compilationFailure(error: unknown): UnsupportedResult {
     return unsupported(
       "d1-query-budget-exceeded",
       "compiled-query",
-      `${error.item === "sql_bytes" ? "SQL UTF-8 bytes" : "bound parameters"}: ${error.actual} (limit ${error.limit}); the compiled query cannot be submitted to D1.`,
+      (error.item === "sql_bytes" ? "SQL UTF-8 bytes" : "bound parameters") +
+        ": " +
+        error.actual +
+        " (limit " +
+        error.limit +
+        "); the compiled query cannot be submitted to D1.",
     );
   }
   return unsupported(
@@ -220,61 +175,8 @@ function requirePlan(
   if (!condition) mismatch(node, reason);
 }
 
-function nodeAt<Kind extends LogicalNode["kind"]>(
-  plan: ValidatedLogicalPlan,
-  id: RelationId,
-  kind: Kind,
-  path: string,
-  visited?: Set<RelationId>,
-): Extract<LogicalNode, { readonly kind: Kind }> {
-  const node = plan.nodes.find((candidate) => candidate.id === id);
-  if (!node || node.kind !== kind) {
-    mismatch(path, `Expected a ${kind} node for relation ${String(id)}.`);
-  }
-  visited?.add(node.id);
-  return node as Extract<LogicalNode, { readonly kind: Kind }>;
-}
-
-function relationNodeAt(
-  plan: ValidatedLogicalPlan,
-  id: RelationId,
-  path: string,
-  visited: Set<RelationId>,
-): LogicalNode {
-  const node = plan.nodes.find((candidate) => candidate.id === id);
-  if (!node) mismatch(path, `Relation ${String(id)} is missing.`);
-  visited.add(node.id);
-  return node;
-}
-
-function slotAt(plan: ValidatedLogicalPlan, id: SlotId, path: string) {
-  const slot = plan.slots.find((candidate) => candidate.id === id);
-  if (!slot) mismatch(path, `Slot ${String(id)} is missing.`);
-  return slot;
-}
-
-function entitySlotAt(
-  plan: ValidatedLogicalPlan,
-  id: SlotId,
-  entity: "observation" | "event" | "page" | "session",
-  nullable: boolean,
-  path: string,
-): void {
-  const slot = slotAt(plan, id, path);
-  requirePlan(
-    slot.type.kind === "entity" &&
-      slot.type.entity === entity &&
-      slot.nullable === nullable,
-    path,
-    `Expected ${nullable ? "nullable" : "non-null"} ${entity} identity slot.`,
-  );
-}
-
-function sameSlots(left: readonly SlotId[], right: readonly SlotId[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every((slot, index) => slot === right[index])
-  );
+function planNodePath(id: RelationId): string {
+  return "nodes[" + String(id) + "]";
 }
 
 function rangeIsSafe(range: TimeRange): boolean {
@@ -285,788 +187,7 @@ function rangeIsSafe(range: TimeRange): boolean {
   );
 }
 
-function planNodePath(id: RelationId): string {
-  return `nodes[${String(id)}]`;
-}
-
-function requireObservationGrain(
-  node: LogicalNode,
-  key: SlotId,
-  path: string,
-): void {
-  requirePlan(
-    node.grain.kind === "entity" &&
-      node.grain.entity === "observation" &&
-      node.grain.key === key,
-    path,
-    "Expected the Observation identity as the relation grain.",
-  );
-}
-
-function requireSessionGrain(
-  node: LogicalNode,
-  plan: ValidatedLogicalPlan,
-  path: string,
-): void {
-  requirePlan(
-    node.output.length === 1 &&
-      node.grain.kind === "entity" &&
-      node.grain.entity === "session" &&
-      node.grain.key === node.output[0],
-    path,
-    "Expected a unary Session identity relation.",
-  );
-  entitySlotAt(plan, node.output[0]!, "session", false, `${path}.output[0]`);
-}
-
-function readPageSourceBindings(
-  plan: ValidatedLogicalPlan,
-  source: SourceNode,
-  fieldId: NativePagePrimitiveFieldId,
-  visited: Set<RelationId>,
-  path: string,
-): {
-  readonly observation: SlotId;
-  readonly fieldId: NativePagePrimitiveFieldId;
-  readonly valueSlot: SlotId;
-} {
-  visited.add(source.id);
-  const contract = nativePrimitiveFieldContract(fieldId);
-  requirePlan(
-    contract?.activity === "page" &&
-      contract.storageSource === "visit" &&
-      source.entity === "observation" &&
-      source.temporalDomain === "read",
-    `${path}.temporalDomain`,
-    "Native Page evidence must come from a registered Page field on Source<observation>[read].",
-  );
-  requirePlan(
-    source.values.length === 2,
-    path,
-    "Unexpected read Source bindings.",
-  );
-  const self = source.values.filter((binding) => binding.kind === "self");
-  const attributes = source.values.filter(
-    (binding) => binding.kind === "attribute",
-  );
-  requirePlan(
-    self.length === 1 &&
-      attributes.length === 1 &&
-      attributes[0]!.attribute === fieldId,
-    path,
-    `The read Source must expose Observation identity and ${fieldId} only.`,
-  );
-  const observation = self[0]!.slot;
-  const valueSlot = attributes[0]!.slot;
-  entitySlotAt(plan, observation, "observation", false, `${path}.self`);
-  const attributeSlot = slotAt(plan, valueSlot, `${path}.${fieldId}`);
-  requirePlan(
-    attributeSlot.type.kind === "scalar" &&
-      attributeSlot.type.scalar === "string" &&
-      attributeSlot.nullable === contract.nullable &&
-      attributeSlot.lineage.kind === "attribute" &&
-      attributeSlot.lineage.attribute === fieldId,
-    `${path}.${fieldId}`,
-    `The ${fieldId} slot must preserve its registered string type, nullability, and attribute lineage.`,
-  );
-  requirePlan(
-    sameSlots(source.output, [observation, valueSlot]) &&
-      source.grain.kind === "entity" &&
-      source.grain.entity === "observation" &&
-      source.grain.key === observation,
-    path,
-    "The read Page Source output and grain must preserve Observation identity.",
-  );
-  return { observation, fieldId, valueSlot };
-}
-
-function readEventSourceBindings(
-  plan: ValidatedLogicalPlan,
-  source: SourceNode,
-  visited: Set<RelationId>,
-  path: string,
-): {
-  readonly event: SlotId;
-  readonly observation: SlotId;
-  readonly eventName: SlotId;
-} {
-  visited.add(source.id);
-  const contract = nativePrimitiveFieldContract("event.name");
-  requirePlan(
-    contract?.activity === "event" &&
-      contract.storageSource === "event" &&
-      source.entity === "event" &&
-      source.temporalDomain === "read",
-    `${path}.temporalDomain`,
-    "event.name evidence must come from Source<event>[read].",
-  );
-  requirePlan(
-    source.values.length === 3,
-    path,
-    "Unexpected read Event Source bindings.",
-  );
-  const self = source.values.filter((binding) => binding.kind === "self");
-  const relationships = source.values.filter(
-    (binding) => binding.kind === "related-entity",
-  );
-  const attributes = source.values.filter(
-    (binding) => binding.kind === "attribute",
-  );
-  requirePlan(
-    self.length === 1 &&
-      relationships.length === 1 &&
-      relationships[0]!.relationship === "event.observation" &&
-      attributes.length === 1 &&
-      attributes[0]!.attribute === "event.name",
-    path,
-    "The read Event Source must expose Event identity, event.observation, and event.name only.",
-  );
-  const event = self[0]!.slot;
-  const observation = relationships[0]!.slot;
-  const eventName = attributes[0]!.slot;
-  entitySlotAt(plan, event, "event", false, `${path}.self`);
-  const observationSlot = slotAt(
-    plan,
-    observation,
-    `${path}.event.observation`,
-  );
-  requirePlan(
-    observationSlot.type.kind === "entity" &&
-      observationSlot.type.entity === "observation" &&
-      !observationSlot.nullable &&
-      observationSlot.lineage.kind === "relationship" &&
-      observationSlot.lineage.relationship === "event.observation",
-    `${path}.event.observation`,
-    "event.observation must preserve a non-null Observation identity.",
-  );
-  const eventNameSlot = slotAt(plan, eventName, `${path}.event.name`);
-  requirePlan(
-    eventNameSlot.type.kind === "scalar" &&
-      eventNameSlot.type.scalar === "string" &&
-      !eventNameSlot.nullable &&
-      eventNameSlot.lineage.kind === "attribute" &&
-      eventNameSlot.lineage.attribute === "event.name",
-    `${path}.event.name`,
-    "The event.name slot must be a non-null string attribute.",
-  );
-  requirePlan(
-    eventNameSlot.nullable === contract.nullable,
-    `${path}.event.name`,
-    "The event.name slot nullability must match its registered primitive contract.",
-  );
-  requirePlan(
-    sameSlots(source.output, [event, observation, eventName]) &&
-      source.grain.kind === "entity" &&
-      source.grain.entity === "event" &&
-      source.grain.key === event,
-    path,
-    "The read Source output and grain must preserve Event identity.",
-  );
-  return { event, observation, eventName };
-}
-
-function nativePrimitivePredicate(
-  filterNode: FilterNode,
-  valueSlot: SlotId,
-  fieldId: NativePrimitiveFieldId,
-): NativePrimitivePredicate {
-  const path = `${planNodePath(filterNode.id)}.predicate`;
-  const predicate = readNativePrimitivePredicate(
-    filterNode.predicate,
-    valueSlot,
-    fieldId,
-  );
-  if (!predicate) {
-    mismatch(
-      path,
-      `Only registered ${fieldId} eq/neq, in/notIn, isNull/notNull primitives with matching slots, literal types, and normalization are supported.`,
-    );
-  }
-  return predicate;
-}
-
-function validateReadPageFilter(
-  node: FilterNode,
-  source: SourceNode,
-  sourceBindings: {
-    readonly observation: SlotId;
-    readonly fieldId: NativePagePrimitiveFieldId;
-    readonly valueSlot: SlotId;
-  },
-  visited: Set<RelationId>,
-): NativePrimitivePredicate {
-  visited.add(node.id);
-  requirePlan(
-    node.input === source.id &&
-      sameSlots(node.output, source.output) &&
-      node.grain.kind === "entity" &&
-      node.grain.entity === "observation" &&
-      node.grain.key === sourceBindings.observation,
-    `${planNodePath(node.id)}.input/output`,
-    "The native Page Filter must preserve its read Observation bindings.",
-  );
-  return nativePrimitivePredicate(
-    node,
-    sourceBindings.valueSlot,
-    sourceBindings.fieldId,
-  );
-}
-
-function validateReadEventFilter(
-  node: FilterNode,
-  source: SourceNode,
-  sourceBindings: { readonly event: SlotId; readonly eventName: SlotId },
-  visited: Set<RelationId>,
-): NativePrimitivePredicate {
-  visited.add(node.id);
-  requirePlan(
-    node.input === source.id &&
-      sameSlots(node.output, source.output) &&
-      node.grain.kind === "entity" &&
-      node.grain.entity === "event" &&
-      node.grain.key === sourceBindings.event,
-    `${planNodePath(node.id)}.input/output`,
-    "The event.name Filter must preserve its read Event bindings.",
-  );
-  return nativePrimitivePredicate(node, sourceBindings.eventName, "event.name");
-}
-
-function validateReadPageProjection(
-  node: ProjectNode,
-  input: RelationId,
-  observation: SlotId,
-  visited: Set<RelationId>,
-): SlotId {
-  visited.add(node.id);
-  requirePlan(
-    node.input === input &&
-      node.projections.length === 1 &&
-      node.projections[0]!.expression.kind === "slot" &&
-      node.projections[0]!.expression.slot === observation &&
-      node.output.length === 1 &&
-      node.output[0] === node.projections[0]!.slot &&
-      node.grain.kind === "entity" &&
-      node.grain.entity === "observation" &&
-      node.grain.key === node.output[0],
-    planNodePath(node.id),
-    "The native Page match must project its Page Observation identity.",
-  );
-  return node.output[0]!;
-}
-
-function validateReadEventProjection(
-  node: ProjectNode,
-  input: RelationId,
-  sourceBindings: {
-    readonly event: SlotId;
-    readonly observation: SlotId;
-  },
-  plan: ValidatedLogicalPlan,
-  visited: Set<RelationId>,
-): SlotId {
-  visited.add(node.id);
-  requirePlan(
-    node.input === input &&
-      node.projections.length === 2 &&
-      node.projections[0]!.expression.kind === "slot" &&
-      node.projections[0]!.expression.slot === sourceBindings.observation &&
-      node.projections[1]!.expression.kind === "slot" &&
-      node.projections[1]!.expression.slot === sourceBindings.event &&
-      node.output.length === 2 &&
-      node.output[0] === node.projections[0]!.slot &&
-      node.output[1] === node.projections[1]!.slot &&
-      node.grain.kind === "entity" &&
-      node.grain.entity === "event" &&
-      node.grain.key === node.output[1],
-    planNodePath(node.id),
-    "The event.name match must project event.observation and preserve Event identity.",
-  );
-  entitySlotAt(
-    plan,
-    node.output[0]!,
-    "observation",
-    false,
-    `${planNodePath(node.id)}.output[0]`,
-  );
-  entitySlotAt(
-    plan,
-    node.output[1]!,
-    "event",
-    false,
-    `${planNodePath(node.id)}.output[1]`,
-  );
-  return node.output[0]!;
-}
-
-function validateObservationDistinct(
-  node: DistinctNode,
-  input: ProjectNode,
-  inputKey: SlotId,
-  plan: ValidatedLogicalPlan,
-  visited: Set<RelationId>,
-): SlotId {
-  visited.add(node.id);
-  requirePlan(
-    node.input === input.id &&
-      node.excludeNull &&
-      node.keys.length === 1 &&
-      node.keys[0]!.input === inputKey &&
-      node.keys[0]!.output === node.output[0] &&
-      node.output.length === 1,
-    planNodePath(node.id),
-    "Matched observations must be non-null and distinct by the projected identity.",
-  );
-  requireObservationGrain(node, node.output[0]!, planNodePath(node.id));
-  entitySlotAt(
-    plan,
-    node.output[0]!,
-    "observation",
-    false,
-    `${planNodePath(node.id)}.output`,
-  );
-  return node.output[0]!;
-}
-
-function validateSessionRelationship(
-  node: RelationshipLookupNode,
-  input: RelationId,
-  inputKey: SlotId,
-  visited: Set<RelationId>,
-): SlotId {
-  visited.add(node.id);
-  requirePlan(
-    node.input === input &&
-      node.relationship === "observation.session" &&
-      node.inputKey === inputKey &&
-      node.timeSemantics === "identity-no-activity-filter" &&
-      node.output.includes(inputKey) &&
-      node.output.includes(node.relatedSlot) &&
-      node.grain.kind === "entity" &&
-      node.grain.entity === "observation" &&
-      node.grain.key === inputKey,
-    planNodePath(node.id),
-    "Historical identity lookup must attach observation.session without another activity-time filter.",
-  );
-  return node.relatedSlot;
-}
-
-function validateSessionProjection(
-  node: ProjectNode,
-  input: RelationId,
-  relationship: RelationshipLookupNode,
-  visited: Set<RelationId>,
-): { readonly session: SlotId; readonly observation: SlotId } {
-  visited.add(node.id);
-  requirePlan(
-    node.input === input &&
-      node.projections.length === 2 &&
-      node.projections[0]!.expression.kind === "slot" &&
-      node.projections[0]!.expression.slot === relationship.relatedSlot &&
-      node.projections[1]!.expression.kind === "slot" &&
-      node.projections[1]!.expression.slot === relationship.inputKey &&
-      node.output.length === 2 &&
-      node.output[0] === node.projections[0]!.slot &&
-      node.output[1] === node.projections[1]!.slot &&
-      node.grain.kind === "entity" &&
-      node.grain.entity === "observation" &&
-      node.grain.key === node.output[1],
-    planNodePath(node.id),
-    "The relationship projection must preserve Session and Observation identity slots.",
-  );
-  return { session: node.output[0]!, observation: node.output[1]! };
-}
-
-function validateSessionDistinct(
-  node: DistinctNode,
-  input: ProjectNode,
-  inputKey: SlotId,
-  plan: ValidatedLogicalPlan,
-  visited: Set<RelationId>,
-): void {
-  visited.add(node.id);
-  requirePlan(
-    node.input === input.id &&
-      node.excludeNull &&
-      node.keys.length === 1 &&
-      node.keys[0]!.input === inputKey &&
-      node.keys[0]!.output === node.output[0],
-    planNodePath(node.id),
-    "Session identity must be null-excluding and distinct by the mapped Session slot.",
-  );
-  requireSessionGrain(node, plan, planNodePath(node.id));
-}
-
-function parseHistoricalSessionSet(
-  plan: ValidatedLogicalPlan,
-  sessionDistinct: DistinctNode,
-  sessionProjection: ProjectNode,
-  visited: Set<RelationId>,
-): {
-  readonly fieldId: NativePrimitiveFieldId;
-  readonly predicate: NativePrimitivePredicate;
-} {
-  const relationship = nodeAt(
-    plan,
-    sessionProjection.input,
-    "relationship-lookup",
-    `${planNodePath(sessionProjection.id)}.input`,
-    visited,
-  );
-  const observationDistinct = nodeAt(
-    plan,
-    relationship.input,
-    "distinct",
-    `${planNodePath(relationship.id)}.input`,
-    visited,
-  );
-  const observationProjection = nodeAt(
-    plan,
-    observationDistinct.input,
-    "project",
-    `${planNodePath(observationDistinct.id)}.input`,
-    visited,
-  );
-  const nativeInput = relationNodeAt(
-    plan,
-    observationProjection.input,
-    `${planNodePath(observationProjection.id)}.input`,
-    visited,
-  );
-  let evidence:
-    | {
-        readonly fieldId: NativePagePrimitiveFieldId;
-        readonly predicate: NativePrimitivePredicate;
-      }
-    | {
-        readonly fieldId: "event.name";
-        readonly predicate: NativePrimitivePredicate;
-      };
-
-  if (nativeInput.kind === "filter") {
-    const readSource = nodeAt(
-      plan,
-      nativeInput.input,
-      "source",
-      `${planNodePath(nativeInput.id)}.input`,
-      visited,
-    );
-    const pageAttributes = readSource.values.filter(
-      (binding) => binding.kind === "attribute",
-    );
-    const fieldId = pageAttributes[0]?.attribute;
-    const contract = nativePrimitiveFieldContract(fieldId ?? "");
-    requirePlan(
-      pageAttributes.length === 1 && contract?.activity === "page",
-      `${planNodePath(readSource.id)}.values`,
-      "The read Observation Source must bind one registered native Page condition field.",
-    );
-    const readBindings = readPageSourceBindings(
-      plan,
-      readSource,
-      fieldId as NativePagePrimitiveFieldId,
-      visited,
-      planNodePath(readSource.id),
-    );
-    const predicate = validateReadPageFilter(
-      nativeInput,
-      readSource,
-      readBindings,
-      visited,
-    );
-    const matchedObservationSlot = validateReadPageProjection(
-      observationProjection,
-      nativeInput.id,
-      readBindings.observation,
-      visited,
-    );
-    validateObservationDistinct(
-      observationDistinct,
-      observationProjection,
-      matchedObservationSlot,
-      plan,
-      visited,
-    );
-    evidence = { fieldId: readBindings.fieldId, predicate };
-  } else if (nativeInput.kind === "distinct") {
-    const nativeObservationDistinct = nativeInput;
-    const eventProjection = nodeAt(
-      plan,
-      nativeObservationDistinct.input,
-      "project",
-      `${planNodePath(nativeObservationDistinct.id)}.input`,
-      visited,
-    );
-    const eventFilter = nodeAt(
-      plan,
-      eventProjection.input,
-      "filter",
-      `${planNodePath(eventProjection.id)}.input`,
-      visited,
-    );
-    const readSource = nodeAt(
-      plan,
-      eventFilter.input,
-      "source",
-      `${planNodePath(eventFilter.id)}.input`,
-      visited,
-    );
-    const readBindings = readEventSourceBindings(
-      plan,
-      readSource,
-      visited,
-      planNodePath(readSource.id),
-    );
-    const predicate = validateReadEventFilter(
-      eventFilter,
-      readSource,
-      readBindings,
-      visited,
-    );
-    const matchedObservationSlot = validateReadEventProjection(
-      eventProjection,
-      eventFilter.id,
-      readBindings,
-      plan,
-      visited,
-    );
-    validateObservationDistinct(
-      nativeObservationDistinct,
-      eventProjection,
-      matchedObservationSlot,
-      plan,
-      visited,
-    );
-    requirePlan(
-      observationProjection.input === nativeObservationDistinct.id &&
-        observationProjection.projections.length === 1 &&
-        observationProjection.projections[0]!.expression.kind === "slot" &&
-        observationProjection.projections[0]!.expression.slot ===
-          nativeObservationDistinct.output[0] &&
-        observationProjection.output.length === 1 &&
-        observationProjection.output[0] ===
-          observationProjection.projections[0]!.slot &&
-        observationProjection.grain.kind === "entity" &&
-        observationProjection.grain.entity === "observation" &&
-        observationProjection.grain.key === observationProjection.output[0],
-      planNodePath(observationProjection.id),
-      "The Event observation set must preserve its native Observation identity before Session lookup.",
-    );
-    entitySlotAt(
-      plan,
-      observationProjection.output[0]!,
-      "observation",
-      false,
-      `${planNodePath(observationProjection.id)}.output[0]`,
-    );
-    validateObservationDistinct(
-      observationDistinct,
-      observationProjection,
-      observationProjection.output[0]!,
-      plan,
-      visited,
-    );
-    evidence = { fieldId: "event.name", predicate };
-  } else {
-    mismatch(
-      `${planNodePath(observationProjection.id)}.input`,
-      "Historical Session evidence must lower through a read native Page Filter or Event Filter.",
-    );
-  }
-  validateSessionRelationship(
-    relationship,
-    observationDistinct.id,
-    observationDistinct.output[0]!,
-    visited,
-  );
-  const sessionSlots = validateSessionProjection(
-    sessionProjection,
-    relationship.id,
-    relationship,
-    visited,
-  );
-  requirePlan(
-    sessionSlots.session === sessionDistinct.keys[0]!.input &&
-      sessionSlots.observation === sessionProjection.output[1],
-    `${planNodePath(sessionDistinct.id)}.input`,
-    "The historical Session set must use the looked-up Session relationship.",
-  );
-  validateSessionDistinct(
-    sessionDistinct,
-    sessionProjection,
-    sessionSlots.session,
-    plan,
-    visited,
-  );
-  return evidence;
-}
-
-function parseCandidateSessionSet(
-  plan: ValidatedLogicalPlan,
-  sessionDistinct: DistinctNode,
-  source: SourceNode,
-  visited: Set<RelationId>,
-): void {
-  visited.add(sessionDistinct.id);
-  visited.add(source.id);
-  requirePlan(
-    source.entity === "observation" &&
-      source.temporalDomain === "candidate" &&
-      source.values.length === 2,
-    `${planNodePath(source.id)}.temporalDomain`,
-    "The candidate universe must be Source<observation>[candidate].",
-  );
-  const self = source.values.filter((binding) => binding.kind === "self");
-  const relationships = source.values.filter(
-    (binding) => binding.kind === "related-entity",
-  );
-  requirePlan(
-    self.length === 1 &&
-      relationships.length === 1 &&
-      relationships[0]!.relationship === "observation.session",
-    `${planNodePath(source.id)}.values`,
-    "The candidate Source must expose Observation identity and observation.session only.",
-  );
-  const observation = self[0]!.slot;
-  const session = relationships[0]!.slot;
-  entitySlotAt(
-    plan,
-    observation,
-    "observation",
-    false,
-    `${planNodePath(source.id)}.self`,
-  );
-  entitySlotAt(
-    plan,
-    session,
-    "session",
-    true,
-    `${planNodePath(source.id)}.observation.session`,
-  );
-  requirePlan(
-    sameSlots(source.output, [observation, session]) &&
-      source.grain.kind === "entity" &&
-      source.grain.entity === "observation" &&
-      source.grain.key === observation,
-    planNodePath(source.id),
-    "Candidate Observation identity and Session relationship slots must be preserved.",
-  );
-  requirePlan(
-    sessionDistinct.input === source.id &&
-      sessionDistinct.excludeNull &&
-      sessionDistinct.keys.length === 1 &&
-      sessionDistinct.keys[0]!.input === session &&
-      sessionDistinct.keys[0]!.output === sessionDistinct.output[0],
-    planNodePath(sessionDistinct.id),
-    "Candidate Session identities must be null-excluding and distinct by observation.session.",
-  );
-  requireSessionGrain(sessionDistinct, plan, planNodePath(sessionDistinct.id));
-}
-
-function parseSessionSetPlan(
-  plan: ValidatedLogicalPlan,
-  relationId: RelationId,
-  path: string,
-  visited: Set<RelationId>,
-  memo: Map<RelationId, SessionSetPlan>,
-): SessionSetPlan {
-  const existing = memo.get(relationId);
-  if (existing) return existing;
-  const node = relationNodeAt(plan, relationId, path, visited);
-  let lowered: SessionSetPlan;
-  if (node.kind === "set-operation") {
-    if (node.operation === "difference") {
-      requirePlan(
-        node.inputs.length === 2,
-        `${planNodePath(node.id)}.inputs`,
-        "Session difference requires exactly two ordered inputs.",
-      );
-    } else {
-      requirePlan(
-        node.inputs.length >= 2,
-        `${planNodePath(node.id)}.inputs`,
-        "Session union and intersection require at least two inputs.",
-      );
-    }
-    requireSessionGrain(node, plan, planNodePath(node.id));
-    const inputs = node.inputs.map((input, index) =>
-      parseSessionSetPlan(
-        plan,
-        input,
-        `${planNodePath(node.id)}.inputs[${index}]`,
-        visited,
-        memo,
-      ),
-    );
-    lowered = {
-      kind: "set-operation",
-      relationId: node.id,
-      operation: node.operation,
-      inputs,
-    };
-  } else if (node.kind === "distinct") {
-    requirePlan(
-      node.excludeNull && node.keys.length === 1 && node.output.length === 1,
-      planNodePath(node.id),
-      "Session sources must be null-excluding distinct relations.",
-    );
-    requireSessionGrain(node, plan, planNodePath(node.id));
-    const input = relationNodeAt(
-      plan,
-      node.input,
-      `${planNodePath(node.id)}.input`,
-      visited,
-    );
-    if (input.kind === "source") {
-      parseCandidateSessionSet(plan, node, input, visited);
-      lowered = { kind: "candidate", relationId: node.id };
-    } else if (input.kind === "project") {
-      const evidence = parseHistoricalSessionSet(plan, node, input, visited);
-      lowered = {
-        kind: "native-predicate",
-        relationId: node.id,
-        fieldId: evidence.fieldId,
-        predicate: evidence.predicate,
-      };
-    } else {
-      mismatch(
-        `${planNodePath(node.id)}.input`,
-        "Only candidate Observation sets and historical native Page/Event predicate Session sets are supported.",
-      );
-    }
-  } else {
-    mismatch(
-      planNodePath(node.id),
-      "Only Session set-operation roots, candidate Session sets, and native Page/Event primitive Session sets are supported.",
-    );
-  }
-  memo.set(relationId, lowered);
-  return lowered;
-}
-
-function candidateSubsetViolation(set: SessionSetPlan): RelationId | undefined {
-  if (set.kind === "candidate") return undefined;
-  if (set.kind === "native-predicate") {
-    return set.relationId;
-  }
-
-  const violations = set.inputs.map(candidateSubsetViolation);
-  switch (set.operation) {
-    case "union":
-      return violations.every((violation) => violation === undefined)
-        ? undefined
-        : set.relationId;
-    case "intersect":
-      return violations.some((violation) => violation === undefined)
-        ? undefined
-        : set.relationId;
-    case "difference":
-      return violations[0] === undefined ? undefined : set.relationId;
-  }
-}
-
-function matchSessionPlanContext(
-  plan: ValidatedLogicalPlan,
-): SessionPlanContextSemantics {
+function matchPlanContext(plan: ValidatedLogicalPlan): SessionPlanContext {
   const context = plan.context;
   requirePlan(
     context.scope.requested === "session" &&
@@ -1098,704 +219,502 @@ function matchSessionPlanContext(
   };
 }
 
-function matchCandidateBoundedSessionSet(
-  plan: ValidatedLogicalPlan,
-  relationId: RelationId,
-  path: string,
-  visited: Set<RelationId>,
-): SessionSetPlan {
-  const outputRelation = relationNodeAt(plan, relationId, path, visited);
-  requirePlan(
-    outputRelation.kind === "set-operation",
-    path,
-    "The Session set must remain a candidate-scoped set operation.",
-  );
-  const set = parseSessionSetPlan(plan, relationId, path, visited, new Map());
-  const candidateSubsetIssue = candidateSubsetViolation(set);
-  if (candidateSubsetIssue !== undefined) {
-    mismatch(
-      planNodePath(candidateSubsetIssue),
-      "The Session set is not proven to be a subset of the candidate Session universe.",
-    );
-  }
-  return set;
-}
-
-function requireAllPlanNodesVisited(
-  plan: ValidatedLogicalPlan,
-  visited: ReadonlySet<RelationId>,
-): void {
-  if (visited.size !== plan.nodes.length) {
-    const unreachable = plan.nodes.find((node) => !visited.has(node.id));
-    mismatch(
-      unreachable ? planNodePath(unreachable.id) : "nodes",
-      "The output cannot leave any Boolean or relational subtree unreachable.",
-    );
-  }
-}
-
-function matchSessionPlan(plan: ValidatedLogicalPlan): SessionPlanSemantics {
-  const context = matchSessionPlanContext(plan);
-  requirePlan(
-    plan.outputs.length === 1 &&
-      plan.outputs[0]!.id === "matches" &&
-      plan.outputs[0]!.fields.length === 1 &&
-      plan.outputs[0]!.fields[0]!.name === "entity" &&
-      plan.outputs[0]!.fields[0]!.semantic === undefined,
-    "outputs",
-    "Expected one matches.entity Session key output.",
-  );
-
-  const output = plan.outputs[0]!;
-  const visited = new Set<RelationId>();
-  const outputRelation = relationNodeAt(
-    plan,
-    output.relation,
-    "outputs[0].relation",
-    visited,
-  );
-  const set = matchCandidateBoundedSessionSet(
-    plan,
-    outputRelation.id,
-    "outputs[0].relation",
-    visited,
-  );
-  const outputSlot = output.fields[0]!.slot;
-  requirePlan(
-    outputRelation.output.length === 1 &&
-      outputRelation.output[0] === outputSlot,
-    "outputs[0].fields[0].slot",
-    "The output field must reference the output relation's Session key.",
-  );
-  entitySlotAt(plan, outputSlot, "session", false, "outputs[0].fields[0].slot");
-  requireAllPlanNodesVisited(plan, visited);
-  return {
-    ...context,
-    set,
-  };
-}
-
-function validateScalarMetricProjection(
-  plan: ValidatedLogicalPlan,
-  node: ProjectNode,
-  input: RelationId,
-  inputSlot: SlotId,
-  path: string,
-  visited: Set<RelationId>,
-): SlotId {
-  visited.add(node.id);
-  requirePlan(
-    node.input === input &&
-      node.projections.length === 1 &&
-      node.projections[0]!.expression.kind === "slot" &&
-      node.projections[0]!.expression.slot === inputSlot &&
-      node.output.length === 1 &&
-      node.output[0] === node.projections[0]!.slot &&
-      node.grain.kind === "scalar",
-    path,
-    "A scalar metric Project must preserve the aggregate slot exactly.",
-  );
-  const outputSlot = slotAt(plan, node.output[0]!, `${path}.output[0]`);
-  requirePlan(
-    outputSlot.type.kind === "scalar" &&
-      outputSlot.type.scalar === "number" &&
-      !outputSlot.nullable &&
-      outputSlot.lineage.kind === "alias" &&
-      outputSlot.lineage.source === inputSlot,
-    `${path}.output[0]`,
-    "The scalar metric Project output must remain a non-null numeric alias.",
-  );
-  return outputSlot.id;
-}
-
-function matchSessionCountPlan(
-  plan: ValidatedLogicalPlan,
-): SessionPlanSemantics {
-  const context = matchSessionPlanContext(plan);
-  requirePlan(
-    plan.outputs.length === 1 &&
-      plan.outputs[0]!.id === "semantic-aggregate" &&
-      plan.outputs[0]!.fields.length === 1 &&
-      plan.outputs[0]!.fields[0]!.name === "sessions" &&
-      plan.outputs[0]!.fields[0]!.semantic?.kind === "metric" &&
-      plan.outputs[0]!.fields[0]!.semantic?.id === "sessions",
-    "outputs",
-    "Expected the semantic-aggregate.sessions metric output only.",
-  );
-
-  const output = plan.outputs[0]!;
-  const visited = new Set<RelationId>();
-  const finalProject = nodeAt(
-    plan,
-    output.relation,
-    "project",
-    "outputs[0].relation",
-    visited,
-  );
-  const metricProject = nodeAt(
-    plan,
-    finalProject.input,
-    "project",
-    `${planNodePath(finalProject.id)}.input`,
-    visited,
-  );
-  const aggregateNode = nodeAt(
-    plan,
-    metricProject.input,
-    "aggregate",
-    `${planNodePath(metricProject.id)}.input`,
-    visited,
-  );
-  requirePlan(
-    aggregateNode.groups.length === 0 &&
-      aggregateNode.measures.length === 1 &&
-      aggregateNode.measures[0]!.kind === "count-rows" &&
-      aggregateNode.output.length === 1 &&
-      aggregateNode.output[0] === aggregateNode.measures[0]!.output &&
-      aggregateNode.grain.kind === "scalar",
-    planNodePath(aggregateNode.id),
-    "Only an ungrouped single COUNT_ROWS Aggregate is supported for sessions.",
-  );
-  const aggregateOutput = slotAt(
-    plan,
-    aggregateNode.output[0]!,
-    `${planNodePath(aggregateNode.id)}.output[0]`,
-  );
-  requirePlan(
-    aggregateOutput.type.kind === "scalar" &&
-      aggregateOutput.type.scalar === "number" &&
-      !aggregateOutput.nullable &&
-      aggregateOutput.lineage.kind === "derived" &&
-      aggregateOutput.lineage.operation === "aggregate:count-rows",
-    `${planNodePath(aggregateNode.id)}.output[0]`,
-    "The sessions Aggregate must produce a non-null count-rows number.",
-  );
-
-  const metricProjectOutput = validateScalarMetricProjection(
-    plan,
-    metricProject,
-    aggregateNode.id,
-    aggregateOutput.id,
-    planNodePath(metricProject.id),
-    visited,
-  );
-  const finalProjectOutput = validateScalarMetricProjection(
-    plan,
-    finalProject,
-    metricProject.id,
-    metricProjectOutput,
-    planNodePath(finalProject.id),
-    visited,
-  );
-  requirePlan(
-    finalProject.output.length === 1 &&
-      finalProject.output[0] === output.fields[0]!.slot,
-    "outputs[0].fields[0].slot",
-    "The semantic output must reference the projected sessions count.",
-  );
-  const outputSlot = slotAt(
-    plan,
-    finalProjectOutput,
-    "outputs[0].fields[0].slot",
-  );
-  requirePlan(
-    finalProjectOutput === output.fields[0]!.slot &&
-      outputSlot.type.kind === "scalar" &&
-      outputSlot.type.scalar === "number" &&
-      !outputSlot.nullable,
-    "outputs[0].fields[0].slot",
-    "The sessions output must be a non-null numeric value.",
-  );
-  const set = matchCandidateBoundedSessionSet(
-    plan,
-    aggregateNode.input,
-    `${planNodePath(aggregateNode.id)}.input`,
-    visited,
-  );
-  requireAllPlanNodesVisited(plan, visited);
-  return { ...context, set };
-}
-
-function matchSessionViewsPlan(
-  plan: ValidatedLogicalPlan,
-): SessionPlanSemantics {
-  const context = matchSessionPlanContext(plan);
-  requirePlan(
-    plan.outputs.length === 1 &&
-      plan.outputs[0]!.id === "semantic-aggregate" &&
-      plan.outputs[0]!.fields.length === 1 &&
-      plan.outputs[0]!.fields[0]!.name === "views" &&
-      plan.outputs[0]!.fields[0]!.semantic?.kind === "metric" &&
-      plan.outputs[0]!.fields[0]!.semantic?.id === "views",
-    "outputs",
-    "Expected the semantic-aggregate.views metric output only.",
-  );
-
-  const output = plan.outputs[0]!;
-  const visited = new Set<RelationId>();
-  const finalProject = nodeAt(
-    plan,
-    output.relation,
-    "project",
-    "outputs[0].relation",
-    visited,
-  );
-  const metricProject = nodeAt(
-    plan,
-    finalProject.input,
-    "project",
-    `${planNodePath(finalProject.id)}.input`,
-    visited,
-  );
-  const aggregateNode = nodeAt(
-    plan,
-    metricProject.input,
-    "aggregate",
-    `${planNodePath(metricProject.id)}.input`,
-    visited,
-  );
-  requirePlan(
-    aggregateNode.groups.length === 0 &&
-      aggregateNode.measures.length === 1 &&
-      aggregateNode.measures[0]!.kind === "count-rows" &&
-      aggregateNode.output.length === 1 &&
-      aggregateNode.output[0] === aggregateNode.measures[0]!.output &&
-      aggregateNode.grain.kind === "scalar",
-    planNodePath(aggregateNode.id),
-    "Only an ungrouped single COUNT_ROWS Aggregate is supported for views.",
-  );
-  const aggregateOutput = slotAt(
-    plan,
-    aggregateNode.output[0]!,
-    `${planNodePath(aggregateNode.id)}.output[0]`,
-  );
-  requirePlan(
-    aggregateOutput.type.kind === "scalar" &&
-      aggregateOutput.type.scalar === "number" &&
-      !aggregateOutput.nullable &&
-      aggregateOutput.lineage.kind === "derived" &&
-      aggregateOutput.lineage.operation === "aggregate:count-rows",
-    `${planNodePath(aggregateNode.id)}.output[0]`,
-    "The views Aggregate must produce a non-null count-rows number.",
-  );
-  const metricProjectOutput = validateScalarMetricProjection(
-    plan,
-    metricProject,
-    aggregateNode.id,
-    aggregateOutput.id,
-    planNodePath(metricProject.id),
-    visited,
-  );
-  const finalProjectOutput = validateScalarMetricProjection(
-    plan,
-    finalProject,
-    metricProject.id,
-    metricProjectOutput,
-    planNodePath(finalProject.id),
-    visited,
-  );
-  requirePlan(
-    finalProject.output.length === 1 &&
-      finalProject.output[0] === output.fields[0]!.slot,
-    "outputs[0].fields[0].slot",
-    "The semantic output must reference the projected views count.",
-  );
-  const outputSlot = slotAt(
-    plan,
-    finalProjectOutput,
-    "outputs[0].fields[0].slot",
-  );
-  requirePlan(
-    finalProjectOutput === output.fields[0]!.slot &&
-      outputSlot.type.kind === "scalar" &&
-      outputSlot.type.scalar === "number" &&
-      !outputSlot.nullable,
-    "outputs[0].fields[0].slot",
-    "The views output must be a non-null numeric value.",
-  );
-
-  const pageMembership = nodeAt(
-    plan,
-    aggregateNode.input,
-    "semi-join",
-    `${planNodePath(aggregateNode.id)}.input`,
-    visited,
-  );
-  // A Page Source has one entity-key row per Page; the SEMI JOIN preserves
-  // those rows and cannot multiply them when the Session set has extra facts.
-  const candidatePages = nodeAt(
-    plan,
-    pageMembership.left,
-    "source",
-    `${planNodePath(pageMembership.id)}.left`,
-    visited,
-  );
-  requirePlan(
-    candidatePages.entity === "page" &&
-      candidatePages.temporalDomain === "candidate" &&
-      candidatePages.values.length === 2 &&
-      candidatePages.output.length === 2 &&
-      candidatePages.values[0]!.kind === "self" &&
-      candidatePages.values[1]!.kind === "related-entity" &&
-      candidatePages.values[1]!.relationship === "page.session" &&
-      candidatePages.values[0]!.slot === candidatePages.output[0] &&
-      candidatePages.values[1]!.slot === candidatePages.output[1] &&
-      candidatePages.grain.kind === "entity" &&
-      candidatePages.grain.entity === "page" &&
-      candidatePages.grain.key === candidatePages.values[0]!.slot,
-    planNodePath(candidatePages.id),
-    "The left input must be the unique candidate Page Source with its page.session relationship.",
-  );
-  const pageIdentitySlot = candidatePages.values[0]!.slot;
-  const pageSessionSlot = candidatePages.values[1]!.slot;
-  entitySlotAt(
-    plan,
-    pageIdentitySlot,
-    "page",
-    false,
-    `${planNodePath(candidatePages.id)}.self`,
-  );
-  const pageSessionOutput = slotAt(
-    plan,
-    pageSessionSlot,
-    `${planNodePath(candidatePages.id)}.page.session`,
-  );
-  requirePlan(
-    pageSessionOutput.type.kind === "entity" &&
-      pageSessionOutput.type.entity === "session" &&
-      pageSessionOutput.nullable &&
-      pageSessionOutput.lineage.kind === "relationship" &&
-      pageSessionOutput.lineage.relationship === "page.session",
-    `${planNodePath(candidatePages.id)}.page.session`,
-    "The Page membership key must be the nullable page.session relation.",
-  );
-  requirePlan(
-    pageMembership.output.length === candidatePages.output.length &&
-      sameSlots(pageMembership.output, candidatePages.output) &&
-      pageMembership.grain.kind === "entity" &&
-      pageMembership.grain.entity === "page" &&
-      pageMembership.grain.key === pageIdentitySlot &&
-      pageMembership.keys.length === 1 &&
-      pageMembership.keys[0]!.left === pageSessionSlot,
-    planNodePath(pageMembership.id),
-    "The Session membership semi-join must preserve candidate Page identity and use page.session.",
-  );
-
-  const sessionSet = matchCandidateBoundedSessionSet(
-    plan,
-    pageMembership.right,
-    `${planNodePath(pageMembership.id)}.right`,
-    visited,
-  );
-  const sessionSetRoot = nodeAt(
-    plan,
-    pageMembership.right,
-    "set-operation",
-    `${planNodePath(pageMembership.id)}.right`,
-  );
-  requirePlan(
-    sessionSetRoot.output.length === 1 &&
-      sessionSetRoot.grain.kind === "entity" &&
-      sessionSetRoot.grain.entity === "session" &&
-      sessionSetRoot.grain.key === sessionSetRoot.output[0] &&
-      pageMembership.keys[0]!.right === sessionSetRoot.output[0],
-    `${planNodePath(pageMembership.id)}.keys[0].right`,
-    "The Page relation must semi-join against the proven Session entity key.",
-  );
-  entitySlotAt(
-    plan,
-    sessionSetRoot.output[0]!,
-    "session",
-    false,
-    `${planNodePath(sessionSetRoot.id)}.output[0]`,
-  );
-  requireAllPlanNodesVisited(plan, visited);
-  return { ...context, set: sessionSet };
-}
-
-function matchCountRowsAggregate(
-  plan: ValidatedLogicalPlan,
-  relationId: RelationId,
-  metric: "sessions" | "views",
-  visited: Set<RelationId>,
-): { readonly node: AggregateNode; readonly output: SlotId } {
-  const path = planNodePath(relationId);
-  const aggregateNode = nodeAt(plan, relationId, "aggregate", path, visited);
-  requirePlan(
-    aggregateNode.groups.length === 0 &&
-      aggregateNode.measures.length === 1 &&
-      aggregateNode.measures[0]!.kind === "count-rows" &&
-      aggregateNode.output.length === 1 &&
-      aggregateNode.output[0] === aggregateNode.measures[0]!.output &&
-      aggregateNode.grain.kind === "scalar",
-    path,
-    `The ${metric} branch must be an ungrouped COUNT_ROWS Aggregate.`,
-  );
-  const output = slotAt(plan, aggregateNode.output[0]!, `${path}.output[0]`);
-  requirePlan(
-    output.type.kind === "scalar" &&
-      output.type.scalar === "number" &&
-      !output.nullable &&
-      output.lineage.kind === "derived" &&
-      output.lineage.operation === "aggregate:count-rows",
-    `${path}.output[0]`,
-    `The ${metric} Aggregate must produce a non-null count-rows number.`,
-  );
-  return { node: aggregateNode, output: output.id };
-}
-
-function validatePairProject(
-  plan: ValidatedLogicalPlan,
-  node: ProjectNode,
-  input: RelationId,
-  inputSlots: readonly [SlotId, SlotId],
-  path: string,
-  visited: Set<RelationId>,
-): readonly [SlotId, SlotId] {
-  visited.add(node.id);
-  requirePlan(
-    node.input === input &&
-      node.projections.length === 2 &&
-      node.projections.every(
-        (projection, index) =>
-          projection.expression.kind === "slot" &&
-          projection.expression.slot === inputSlots[index],
-      ) &&
-      node.output.length === 2 &&
-      node.output.every(
-        (slot, index) => slot === node.projections[index]!.slot,
-      ) &&
-      node.grain.kind === "scalar",
-    path,
-    "The pair Project must preserve the sessions and views scalar slots in order.",
-  );
-  const slots = node.output as readonly [SlotId, SlotId];
-  for (const [index, slotId] of slots.entries()) {
-    const slot = slotAt(plan, slotId, `${path}.output[${index}]`);
-    requirePlan(
-      slot.type.kind === "scalar" &&
-        slot.type.scalar === "number" &&
-        !slot.nullable &&
-        slot.lineage.kind === "alias" &&
-        slot.lineage.source === inputSlots[index],
-      `${path}.output[${index}]`,
-      "Each pair Project output must remain its non-null numeric metric alias.",
-    );
-  }
-  return slots;
-}
-
-function matchSessionOverviewPairPlan(
-  plan: ValidatedLogicalPlan,
-): SessionPlanSemantics {
-  const context = matchSessionPlanContext(plan);
-  requirePlan(
-    plan.outputs.length === 1 &&
-      plan.outputs[0]!.id === "semantic-aggregate" &&
-      plan.outputs[0]!.fields.length === 2 &&
-      plan.outputs[0]!.fields[0]!.name === "sessions" &&
-      plan.outputs[0]!.fields[0]!.semantic?.kind === "metric" &&
-      plan.outputs[0]!.fields[0]!.semantic?.id === "sessions" &&
-      plan.outputs[0]!.fields[1]!.name === "views" &&
-      plan.outputs[0]!.fields[1]!.semantic?.kind === "metric" &&
-      plan.outputs[0]!.fields[1]!.semantic?.id === "views",
-    "outputs",
-    "Expected semantic-aggregate.sessions and semantic-aggregate.views outputs in order.",
-  );
-
-  const output = plan.outputs[0]!;
-  const visited = new Set<RelationId>();
-  const finalProject = nodeAt(
-    plan,
-    output.relation,
-    "project",
-    "outputs[0].relation",
-    visited,
-  );
-  const normalizedProject = nodeAt(
-    plan,
-    finalProject.input,
-    "project",
-    `${planNodePath(finalProject.id)}.input`,
-    visited,
-  );
-  const branchJoin = nodeAt(
-    plan,
-    normalizedProject.input,
-    "join",
-    `${planNodePath(normalizedProject.id)}.input`,
-    visited,
-  );
-  const sessions = matchCountRowsAggregate(
-    plan,
-    branchJoin.left,
-    "sessions",
-    visited,
-  );
-  const views = matchCountRowsAggregate(
-    plan,
-    branchJoin.right,
-    "views",
-    visited,
-  );
-  requirePlan(
-    branchJoin.joinType === "inner" &&
-      branchJoin.keys.length === 0 &&
-      branchJoin.grain.kind === "scalar" &&
-      branchJoin.output.length === 2 &&
-      branchJoin.output[0] === sessions.output &&
-      branchJoin.output[1] === views.output &&
-      branchJoin.rightAliases.length === 0,
-    planNodePath(branchJoin.id),
-    "The scalar branch Join must be inner, keyless, and preserve both one-row count branches.",
-  );
-  const normalizedSlots = validatePairProject(
-    plan,
-    normalizedProject,
-    branchJoin.id,
-    [sessions.output, branchJoin.output[1]!],
-    planNodePath(normalizedProject.id),
-    visited,
-  );
-  const finalSlots = validatePairProject(
-    plan,
-    finalProject,
-    normalizedProject.id,
-    normalizedSlots,
-    planNodePath(finalProject.id),
-    visited,
-  );
-  requirePlan(
-    finalProject.output[0] === output.fields[0]!.slot &&
-      finalProject.output[1] === output.fields[1]!.slot &&
-      finalSlots[0] === output.fields[0]!.slot &&
-      finalSlots[1] === output.fields[1]!.slot,
-    "outputs[0].fields",
-    "The semantic output must reference both projected metric counts in order.",
-  );
-
-  const pageMembership = nodeAt(
-    plan,
-    views.node.input,
-    "semi-join",
-    `${planNodePath(views.node.id)}.input`,
-    visited,
-  );
-  const candidatePages = nodeAt(
-    plan,
-    pageMembership.left,
-    "source",
-    `${planNodePath(pageMembership.id)}.left`,
-    visited,
-  );
-  requirePlan(
-    candidatePages.entity === "page" &&
-      candidatePages.temporalDomain === "candidate" &&
-      candidatePages.values.length === 2 &&
-      candidatePages.output.length === 2 &&
-      candidatePages.values[0]!.kind === "self" &&
-      candidatePages.values[1]!.kind === "related-entity" &&
-      candidatePages.values[1]!.relationship === "page.session" &&
-      candidatePages.values[0]!.slot === candidatePages.output[0] &&
-      candidatePages.values[1]!.slot === candidatePages.output[1] &&
-      candidatePages.grain.kind === "entity" &&
-      candidatePages.grain.entity === "page" &&
-      candidatePages.grain.key === candidatePages.values[0]!.slot,
-    planNodePath(candidatePages.id),
-    "The views branch must start from the unique candidate Page Source and page.session relationship.",
-  );
-  const pageIdentity = candidatePages.values[0]!.slot;
-  const pageSession = candidatePages.values[1]!.slot;
-  entitySlotAt(
-    plan,
-    pageIdentity,
-    "page",
-    false,
-    `${planNodePath(candidatePages.id)}.self`,
-  );
-  const pageSessionSlot = slotAt(
-    plan,
-    pageSession,
-    `${planNodePath(candidatePages.id)}.page.session`,
-  );
-  requirePlan(
-    pageSessionSlot.type.kind === "entity" &&
-      pageSessionSlot.type.entity === "session" &&
-      pageSessionSlot.nullable &&
-      pageSessionSlot.lineage.kind === "relationship" &&
-      pageSessionSlot.lineage.relationship === "page.session",
-    `${planNodePath(candidatePages.id)}.page.session`,
-    "The Page membership key must preserve its nullable Session relationship.",
-  );
-  requirePlan(
-    pageMembership.output.length === candidatePages.output.length &&
-      sameSlots(pageMembership.output, candidatePages.output) &&
-      pageMembership.grain.kind === "entity" &&
-      pageMembership.grain.entity === "page" &&
-      pageMembership.grain.key === pageIdentity &&
-      pageMembership.keys.length === 1 &&
-      pageMembership.keys[0]!.left === pageSession,
-    planNodePath(pageMembership.id),
-    "The Session semi-join must preserve candidate Page grain and use page.session.",
-  );
-  requirePlan(
-    sessions.node.input === pageMembership.right,
-    `${planNodePath(sessions.node.id)}.input`,
-    "Both metric branches must consume the exact same formal Session relation.",
-  );
-  const sessionSet = matchCandidateBoundedSessionSet(
-    plan,
-    sessions.node.input,
-    `${planNodePath(sessions.node.id)}.input`,
-    visited,
-  );
-  const sessionSetRoot = nodeAt(
-    plan,
-    pageMembership.right,
-    "set-operation",
-    `${planNodePath(pageMembership.id)}.right`,
-  );
-  requirePlan(
-    sessionSetRoot.output.length === 1 &&
-      sessionSetRoot.grain.kind === "entity" &&
-      sessionSetRoot.grain.entity === "session" &&
-      sessionSetRoot.grain.key === sessionSetRoot.output[0] &&
-      pageMembership.keys[0]!.right === sessionSetRoot.output[0],
-    `${planNodePath(pageMembership.id)}.keys[0].right`,
-    "The Page branch must use the proven Session entity key for membership.",
-  );
-  entitySlotAt(
-    plan,
-    sessionSetRoot.output[0]!,
-    "session",
-    false,
-    `${planNodePath(sessionSetRoot.id)}.output[0]`,
-  );
-  requireAllPlanNodesVisited(plan, visited);
-  return { ...context, set: sessionSet };
-}
-
-function requireExpectedSessionViewsContext(
-  semantics: SessionPlanSemantics,
+function requireExpectedContext(
+  context: SessionPlanContext,
   expected: AnalyticsSessionViewsExpectedContext,
 ): void {
   requirePlan(
-    semantics.siteId === expected.siteId,
+    context.siteId === expected.siteId,
     "context.subject.siteIds[0]",
     "The plan site must match the caller-authorized site.",
   );
   requirePlan(
-    semantics.candidateRange.startMs === expected.candidateRange.startMs &&
-      semantics.candidateRange.endExclusiveMs ===
+    context.candidateRange.startMs === expected.candidateRange.startMs &&
+      context.candidateRange.endExclusiveMs ===
         expected.candidateRange.endExclusiveMs,
     "context.time.candidate",
     "The plan candidate range must match the caller-authorized range.",
   );
   requirePlan(
-    semantics.readRange.startMs === expected.readRange.startMs &&
-      semantics.readRange.endExclusiveMs === expected.readRange.endExclusiveMs,
+    context.readRange.startMs === expected.readRange.startMs &&
+      context.readRange.endExclusiveMs === expected.readRange.endExclusiveMs,
     "context.time.read.range",
     "The plan read range must match the caller-authorized range.",
+  );
+}
+
+function slotAt(plan: ValidatedLogicalPlan, slotId: SlotId, path: string) {
+  const slot = plan.slots.find((candidate) => candidate.id === slotId);
+  if (!slot) mismatch(path, "Slot " + String(slotId) + " is missing.");
+  return slot;
+}
+
+function nodeAt(
+  plan: ValidatedLogicalPlan,
+  relationId: RelationId,
+  path: string,
+): LogicalNode {
+  const node = plan.nodes.find((candidate) => candidate.id === relationId);
+  if (!node) mismatch(path, "Relation " + String(relationId) + " is missing.");
+  return node;
+}
+
+function validateProjectLineage(plan: ValidatedLogicalPlan): void {
+  for (const node of plan.nodes) {
+    if (node.kind !== "project") continue;
+    requirePlan(
+      node.output.length === node.projections.length &&
+        node.projections.every(
+          (projection, index) => node.output[index] === projection.slot,
+        ),
+      planNodePath(node.id),
+      "Project outputs must match their projection slots in order.",
+    );
+    for (const [index, projection] of node.projections.entries()) {
+      const outputSlot = slotAt(
+        plan,
+        projection.slot,
+        planNodePath(node.id) + ".projections[" + index + "].slot",
+      );
+      if (projection.expression.kind === "slot") {
+        requirePlan(
+          outputSlot.lineage.kind === "alias" &&
+            outputSlot.lineage.source === projection.expression.slot,
+          planNodePath(node.id) + ".projections[" + index + "]",
+          "A passthrough Project must preserve its declared source slot lineage.",
+        );
+      } else {
+        requirePlan(
+          outputSlot.lineage.kind === "derived" &&
+            outputSlot.lineage.operation === projection.expression.kind,
+          planNodePath(node.id) + ".projections[" + index + "]",
+          "A computed Project must preserve its declared expression lineage.",
+        );
+      }
+    }
+  }
+}
+
+function requireMetricField(
+  plan: ValidatedLogicalPlan,
+  output: LogicalOutput,
+  index: number,
+  name: "sessions" | "views",
+): SlotId {
+  const field = output.fields[index];
+  requirePlan(
+    field !== undefined &&
+      field.name === name &&
+      field.semantic?.kind === "metric" &&
+      field.semantic.id === name,
+    "outputs.fields[" + index + "]",
+    "Expected the " + name + " semantic metric output.",
+  );
+  const slot = slotAt(plan, field.slot, "outputs.fields[" + index + "].slot");
+  requirePlan(
+    slot.type.kind === "scalar" &&
+      slot.type.scalar === "number" &&
+      !slot.nullable,
+    "outputs.fields[" + index + "].slot",
+    "The " + name + " output must be a non-null numeric scalar.",
+  );
+  return field.slot;
+}
+
+function countRowsAggregateForOutput(
+  plan: ValidatedLogicalPlan,
+  outputSlot: SlotId,
+  metric: "sessions" | "views",
+): AggregateNode {
+  const seen = new Set<SlotId>();
+  let current: SlotId | undefined = outputSlot;
+  while (current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const slot = slotAt(plan, current, "outputs." + metric);
+    if (
+      slot.lineage.kind === "derived" &&
+      slot.lineage.operation === "aggregate:count-rows"
+    ) {
+      const node = plan.nodes.find(
+        (candidate) =>
+          candidate.kind === "aggregate" && candidate.output.includes(current!),
+      );
+      if (!node || node.kind !== "aggregate")
+        mismatch("outputs." + metric, "COUNT_ROWS aggregate node is missing.");
+      requirePlan(
+        node.groups.length === 0 &&
+          node.measures.length === 1 &&
+          node.measures[0]!.kind === "count-rows" &&
+          node.measures[0]!.output === current &&
+          node.output.length === 1 &&
+          node.output[0] === current &&
+          node.grain.kind === "scalar",
+        planNodePath(node.id),
+        "The " +
+          metric +
+          " output must trace to one ungrouped COUNT_ROWS aggregate.",
+      );
+      return node;
+    }
+    if (slot.lineage.kind === "alias") {
+      current = slot.lineage.source;
+      continue;
+    }
+    break;
+  }
+  mismatch(
+    "outputs." + metric,
+    "The " +
+      metric +
+      " output has no COUNT_ROWS aggregate in its alias lineage.",
+  );
+}
+
+function requireCandidateSessionAggregateInput(
+  plan: ValidatedLogicalPlan,
+  lowerer: AnalyticsLogicalToDbLowerer,
+  aggregateNode: AggregateNode,
+  path: string,
+): SlotId {
+  const input = nodeAt(
+    plan,
+    aggregateNode.input,
+    planNodePath(aggregateNode.id) + ".input",
+  );
+  requirePlan(
+    input.output.length === 1 &&
+      input.grain.kind === "entity" &&
+      input.grain.entity === "session" &&
+      input.grain.key === input.output[0],
+    planNodePath(input.id),
+    "The sessions aggregate must count one Session identity per input row.",
+  );
+  const sessionSlot = slotAt(
+    plan,
+    input.output[0]!,
+    planNodePath(input.id) + ".output[0]",
+  );
+  requirePlan(
+    sessionSlot.type.kind === "entity" &&
+      sessionSlot.type.entity === "session" &&
+      !sessionSlot.nullable &&
+      lowerer.isCandidateBoundedSlot(input.id, sessionSlot.id),
+    path,
+    "The Session aggregate input must be a non-null candidate-bounded Session identity.",
+  );
+  return sessionSlot.id;
+}
+
+function hasRelationshipLineage(
+  plan: ValidatedLogicalPlan,
+  id: SlotId,
+  relationship: "page.session",
+): boolean {
+  const seen = new Set<SlotId>();
+  let current: SlotId | undefined = id;
+  while (current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const slot = plan.slots.find((candidate) => candidate.id === current);
+    if (!slot) return false;
+    if (
+      slot.lineage.kind === "relationship" &&
+      slot.lineage.relationship === relationship
+    )
+      return true;
+    current = slot.lineage.kind === "alias" ? slot.lineage.source : undefined;
+  }
+  return false;
+}
+
+function requireCandidateViewsAggregateInput(
+  plan: ValidatedLogicalPlan,
+  lowerer: AnalyticsLogicalToDbLowerer,
+  aggregateNode: AggregateNode,
+): RelationId {
+  const input = nodeAt(
+    plan,
+    aggregateNode.input,
+    planNodePath(aggregateNode.id) + ".input",
+  );
+  requirePlan(
+    input.grain.kind === "entity" &&
+      input.grain.entity === "page" &&
+      input.output.includes(input.grain.key),
+    planNodePath(input.id),
+    "The views aggregate must count candidate Page rows.",
+  );
+  const pageKey = slotAt(
+    plan,
+    input.grain.key,
+    planNodePath(input.id) + ".grain.key",
+  );
+  requirePlan(
+    pageKey.type.kind === "entity" &&
+      pageKey.type.entity === "page" &&
+      !pageKey.nullable,
+    planNodePath(input.id),
+    "The views aggregate must preserve a non-null Page identity.",
+  );
+  const sessionRelation = lowerer.candidateActivitySessionRelation(input.id);
+  requirePlan(
+    lowerer.candidateActivity(input.id) === "page" &&
+      sessionRelation !== undefined &&
+      lowerer.isCandidateActivitySessionRestricted(input.id) &&
+      input.output.some((slot) =>
+        hasRelationshipLineage(plan, slot, "page.session"),
+      ),
+    planNodePath(input.id),
+    "Candidate Page rows must be restricted by a candidate-bounded page.session membership proof.",
+  );
+  return sessionRelation;
+}
+
+function lowerPlan<Row extends object>(
+  input: LogicalPlan,
+  capability: string,
+  tag: string,
+  expected: AnalyticsSessionViewsExpectedContext | undefined,
+  selectColumns: (
+    plan: ValidatedLogicalPlan,
+    output: LogicalOutput,
+    lowerer: AnalyticsLogicalToDbLowerer,
+    lowered: ReturnType<AnalyticsLogicalToDbLowerer["lower"]>,
+  ) => readonly AnalyticsDbOutputColumn[],
+):
+  | {
+      readonly kind: "supported";
+      readonly logicalPlan: ValidatedLogicalPlan;
+      readonly query: CompiledQuery<Row>;
+    }
+  | UnsupportedResult {
+  let logicalPlan: ValidatedLogicalPlan;
+  try {
+    logicalPlan = validateLogicalPlan(input);
+  } catch (error) {
+    return unsupported(
+      "valid-analytics-plan-required",
+      "plan",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  let context: SessionPlanContext;
+  let output: LogicalOutput;
+  try {
+    validateProjectLineage(logicalPlan);
+    context = matchPlanContext(logicalPlan);
+    if (expected) requireExpectedContext(context, expected);
+    output = logicalPlan.outputs[0]!;
+    requirePlan(output !== undefined, "outputs", "The output is missing.");
+  } catch (error) {
+    return unsupported(
+      capability,
+      error instanceof PlanShapeMismatch ? error.node : "context",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  const lowerer = new createAnalyticsLowerer(logicalPlan, {
+    siteId: context.siteId,
+    time: logicalPlan.context.time,
+  });
+  let lowered: ReturnType<AnalyticsLogicalToDbLowerer["lower"]>;
+  try {
+    lowered = lowerer.lower(output);
+  } catch (error) {
+    return unsupported(
+      capability,
+      error instanceof AnalyticsRelationalLoweringError ? error.node : "plan",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  let columns: readonly AnalyticsDbOutputColumn[];
+  let relation;
+  try {
+    columns = selectColumns(logicalPlan, output, lowerer, lowered);
+    relation = lowerer.projectOutput(lowered, columns);
+  } catch (error) {
+    if (error instanceof PlanShapeMismatch) {
+      return unsupported(capability, error.node, error.message);
+    }
+    return unsupported(
+      capability,
+      error instanceof AnalyticsRelationalLoweringError
+        ? error.node
+        : "outputs",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  try {
+    const query = compileD1Query(lowerLogicalPlan(relation), {
+      tag,
+    }) as CompiledQuery<Row>;
+    return { kind: "supported", logicalPlan, query };
+  } catch (error) {
+    return compilationFailure(error);
+  }
+}
+
+/** Lowers a validated candidate-bounded Session identity output. */
+export function lowerAnalyticsPagePathSessionPlan(
+  input: LogicalPlan,
+): AnalyticsPageSessionLoweringResult {
+  return lowerPlan<AnalyticsSessionIdentityRow>(
+    input,
+    "session-boolean-plan-shape",
+    "analytics.session-filter.wave-2",
+    undefined,
+    (plan, output, lowerer, lowered) => {
+      requirePlan(
+        output.id === "matches" &&
+          output.fields.length === 1 &&
+          output.fields[0]!.name === "entity" &&
+          output.fields[0]!.semantic === undefined,
+        "outputs",
+        "Expected one matches.entity Session key output.",
+      );
+      const field = output.fields[0]!;
+      const slot = slotAt(plan, field.slot, "outputs.fields[0].slot");
+      requirePlan(
+        slot.type.kind === "entity" &&
+          slot.type.entity === "session" &&
+          !slot.nullable,
+        "outputs.fields[0].slot",
+        "The output must be a non-null Session identity.",
+      );
+      if (
+        !lowerer.isCandidateBoundedSlot(output.relation, slot.id) ||
+        !lowered.candidateBounded
+      ) {
+        const relation = nodeAt(plan, output.relation, "outputs.relation");
+        mismatch(
+          relation.kind === "set-operation"
+            ? planNodePath(relation.id)
+            : "outputs.fields[0].slot",
+          relation.kind === "set-operation"
+            ? "The Session set is not proven to be a subset of the candidate Session universe."
+            : "The output must be a candidate-bounded Session identity.",
+        );
+      }
+      return [
+        { name: "site_pk", slot: slot.id, component: 0 },
+        { name: "session_id", slot: slot.id, component: 1 },
+      ];
+    },
+  );
+}
+
+/** Lowers a COUNT_ROWS over a candidate-bounded Session relation. */
+export function lowerAnalyticsFilteredSessionCountPlan(
+  input: LogicalPlan,
+): AnalyticsSessionCountLoweringResult {
+  return lowerPlan<AnalyticsSessionCountRow>(
+    input,
+    "filtered-session-count-plan-shape",
+    "analytics.filtered-session-count.wave-3",
+    undefined,
+    (plan, output, lowerer) => {
+      requirePlan(
+        output.id === "semantic-aggregate" && output.fields.length === 1,
+        "outputs",
+        "Expected the semantic-aggregate.sessions metric output only.",
+      );
+      const outputSlot = requireMetricField(plan, output, 0, "sessions");
+      const aggregateNode = countRowsAggregateForOutput(
+        plan,
+        outputSlot,
+        "sessions",
+      );
+      requireCandidateSessionAggregateInput(
+        plan,
+        lowerer,
+        aggregateNode,
+        planNodePath(aggregateNode.id) + ".input",
+      );
+      return [{ name: "sessions", slot: outputSlot }];
+    },
+  );
+}
+
+/** Counts candidate Pages whose page.session has candidate Session evidence. */
+export function lowerAnalyticsFilteredSessionViewsPlan(
+  input: LogicalPlan,
+  expected: AnalyticsSessionViewsExpectedContext,
+): AnalyticsSessionViewsLoweringResult {
+  return lowerPlan<AnalyticsSessionViewsRow>(
+    input,
+    "filtered-session-views-plan-shape",
+    "analytics.filtered-session-views.wave-4",
+    expected,
+    (plan, output, lowerer) => {
+      requirePlan(
+        output.id === "semantic-aggregate" && output.fields.length === 1,
+        "outputs",
+        "Expected the semantic-aggregate.views metric output only.",
+      );
+      const outputSlot = requireMetricField(plan, output, 0, "views");
+      const aggregateNode = countRowsAggregateForOutput(
+        plan,
+        outputSlot,
+        "views",
+      );
+      requireCandidateViewsAggregateInput(plan, lowerer, aggregateNode);
+      return [{ name: "views", slot: outputSlot }];
+    },
+  );
+}
+
+/** Lowers sessions and views metrics over the same candidate Session relation. */
+export function lowerAnalyticsFilteredSessionOverviewPairPlan(
+  input: LogicalPlan,
+  expected: AnalyticsSessionViewsExpectedContext,
+): AnalyticsSessionOverviewPairLoweringResult {
+  return lowerPlan<AnalyticsSessionOverviewPairRow>(
+    input,
+    "filtered-session-overview-pair-plan-shape",
+    "analytics.filtered-session-overview-pair.wave-5",
+    expected,
+    (plan, output, lowerer) => {
+      requirePlan(
+        output.id === "semantic-aggregate" && output.fields.length === 2,
+        "outputs",
+        "Expected semantic-aggregate.sessions and semantic-aggregate.views outputs in order.",
+      );
+      const sessionsSlot = requireMetricField(plan, output, 0, "sessions");
+      const viewsSlot = requireMetricField(plan, output, 1, "views");
+      const sessionsAggregate = countRowsAggregateForOutput(
+        plan,
+        sessionsSlot,
+        "sessions",
+      );
+      const viewsAggregate = countRowsAggregateForOutput(
+        plan,
+        viewsSlot,
+        "views",
+      );
+      const sessionRelation = requireCandidateViewsAggregateInput(
+        plan,
+        lowerer,
+        viewsAggregate,
+      );
+      requirePlan(
+        sessionsAggregate.input === sessionRelation,
+        planNodePath(sessionsAggregate.id) + ".input",
+        "The sessions aggregate must consume the exact candidate Session relation that restricts the views Page rows.",
+      );
+      requireCandidateSessionAggregateInput(
+        plan,
+        lowerer,
+        sessionsAggregate,
+        planNodePath(sessionsAggregate.id) + ".input",
+      );
+      return [
+        { name: "sessions", slot: sessionsSlot },
+        { name: "views", slot: viewsSlot },
+      ];
+    },
   );
 }
 
@@ -1916,678 +835,6 @@ function analyzeSessionFilterDocument(
       "root",
       error instanceof Error ? error.message : String(error),
     );
-  }
-}
-
-type SessionSetColumns = Readonly<{
-  site_pk: AnyExpression;
-  session_id: AnyExpression;
-}>;
-type SessionSetRelation = Relation<object, SessionSetColumns>;
-
-function asSessionSetRelation<
-  Row extends object,
-  Columns extends SessionSetColumns,
->(relation: Relation<Row, Columns>): SessionSetRelation {
-  return relation as unknown as SessionSetRelation;
-}
-
-function compositeSessionKeyMatch(
-  left: SessionSetRelation,
-  right: SessionSetRelation,
-) {
-  return and(
-    eq(left.columns.site_pk, right.columns.site_pk),
-    eq(left.columns.session_id, right.columns.session_id),
-  );
-}
-
-function compileCandidateSessionSet(
-  site: ReturnType<typeof filter>,
-  candidateRange: TimeRange,
-): SessionSetRelation {
-  const candidatePagesSource = scan(schema.visits);
-  const candidatePagesScoped = semiJoin(
-    candidatePagesSource,
-    site,
-    eq(candidatePagesSource.columns.site_pk, site.columns.site_pk),
-  );
-  const candidatePagesInRange = filter(
-    candidatePagesScoped,
-    and(
-      gte(
-        candidatePagesScoped.columns.started_at,
-        param(candidateRange.startMs),
-      ),
-      lt(
-        candidatePagesScoped.columns.started_at,
-        param(candidateRange.endExclusiveMs),
-      ),
-      isNotNull(candidatePagesScoped.columns.session_id),
-      neq(candidatePagesScoped.columns.session_id, param("")),
-    ),
-  );
-  const candidatePageSessions = project(candidatePagesInRange, {
-    site_pk: candidatePagesInRange.columns.site_pk,
-    session_id: candidatePagesInRange.columns.session_id,
-  });
-
-  const candidateEventsSource = scan(schema.custom_events);
-  const candidateEventsScoped = semiJoin(
-    candidateEventsSource,
-    site,
-    eq(candidateEventsSource.columns.site_pk, site.columns.site_pk),
-  );
-  const candidateEventsInRange = filter(
-    candidateEventsScoped,
-    and(
-      gte(
-        candidateEventsScoped.columns.occurred_at,
-        param(candidateRange.startMs),
-      ),
-      lt(
-        candidateEventsScoped.columns.occurred_at,
-        param(candidateRange.endExclusiveMs),
-      ),
-    ),
-  );
-  const eventOwnerPages = scan(schema.visits);
-  const candidateEventsWithOwner = join(
-    candidateEventsInRange,
-    eventOwnerPages,
-    and(
-      eq(
-        candidateEventsInRange.columns.visit_id,
-        eventOwnerPages.columns.visit_id,
-      ),
-      eq(
-        candidateEventsInRange.columns.site_pk,
-        eventOwnerPages.columns.site_pk,
-      ),
-    ),
-  );
-  const candidateEventsWithSession = filter(
-    candidateEventsWithOwner,
-    and(
-      isNotNull(candidateEventsWithOwner.columns.right_session_id),
-      neq(candidateEventsWithOwner.columns.right_session_id, param("")),
-    ),
-  );
-  const candidateEventSessions = project(candidateEventsWithSession, {
-    site_pk: candidateEventsWithSession.columns.left_site_pk,
-    session_id: candidateEventsWithSession.columns.right_session_id,
-  });
-
-  return asSessionSetRelation(
-    union(candidatePageSessions, candidateEventSessions),
-  );
-}
-
-function compilePagePredicateSessionSet(
-  site: ReturnType<typeof filter>,
-  readRange: TimeRange,
-  fieldId: NativePagePrimitiveFieldId,
-  predicate: NativePrimitivePredicate,
-): SessionSetRelation {
-  const readPagesSource = scan(schema.visits);
-  const readPagesScoped = semiJoin(
-    readPagesSource,
-    site,
-    eq(readPagesSource.columns.site_pk, site.columns.site_pk),
-  );
-  const fieldContract = nativePrimitiveFieldContract(fieldId);
-  requirePlan(
-    fieldContract?.activity === "page" &&
-      fieldContract.storageSource === "visit",
-    `native-predicate.${fieldId}`,
-    `The native Page field ${fieldId} has no verified visit storage contract.`,
-  );
-  type NativePageColumn =
-    | typeof readPagesScoped.columns.pathname
-    | typeof readPagesScoped.columns.title
-    | typeof readPagesScoped.columns.query_string
-    | typeof readPagesScoped.columns.hash_fragment;
-  let fieldColumn: NativePageColumn;
-  switch (fieldContract.compilerStrategy) {
-    case "column.pathname":
-      fieldColumn = readPagesScoped.columns.pathname;
-      break;
-    case "column.title":
-      fieldColumn = readPagesScoped.columns.title;
-      break;
-    case "column.query_string":
-      fieldColumn = readPagesScoped.columns.query_string;
-      break;
-    case "column.hash_fragment":
-      fieldColumn = readPagesScoped.columns.hash_fragment;
-      break;
-    default:
-      mismatch(
-        `native-predicate.${fieldId}`,
-        `The native Page field ${fieldId} has no verified visits column mapping.`,
-      );
-  }
-  requirePlan(
-    fieldColumn.resultType.affinity === "text" &&
-      fieldColumn.resultType.nullable === fieldContract.storageNullable,
-    `native-predicate.${fieldId}.column`,
-    `The typed storage column for ${fieldId} no longer matches its registered TEXT/nullability contract.`,
-  );
-  const pagePredicate = lowerNativePrimitivePredicate(fieldColumn, predicate);
-  const readPagesMatching = filter(
-    readPagesScoped,
-    and(
-      gte(readPagesScoped.columns.started_at, param(readRange.startMs)),
-      lt(readPagesScoped.columns.started_at, param(readRange.endExclusiveMs)),
-      isNotNull(readPagesScoped.columns.session_id),
-      neq(readPagesScoped.columns.session_id, param("")),
-      pagePredicate,
-    ),
-  );
-  // Evidence may retain duplicates here. Set-operation lowering restores
-  // uniqueness after semi/anti joins when this relation is a left input.
-  return asSessionSetRelation(
-    project(readPagesMatching, {
-      site_pk: readPagesMatching.columns.site_pk,
-      session_id: readPagesMatching.columns.session_id,
-    }),
-  );
-}
-
-function compileEventNameSessionSet(
-  site: ReturnType<typeof filter>,
-  readRange: TimeRange,
-  predicate: NativePrimitivePredicate,
-): SessionSetRelation {
-  const readEventsSource = scan(schema.custom_events);
-  const readEventsScoped = semiJoin(
-    readEventsSource,
-    site,
-    eq(readEventsSource.columns.site_pk, site.columns.site_pk),
-  );
-  const eventNamesSource = scan(schema.custom_event_names);
-  const readEventsWithName = join(
-    readEventsScoped,
-    eventNamesSource,
-    and(
-      eq(readEventsScoped.columns.event_name_id, eventNamesSource.columns.id),
-      eq(readEventsScoped.columns.site_pk, eventNamesSource.columns.site_pk),
-    ),
-  );
-  const fieldContract = nativePrimitiveFieldContract("event.name");
-  requirePlan(
-    fieldContract?.activity === "event" &&
-      fieldContract.storageSource === "event" &&
-      fieldContract.compilerStrategy === "event.name",
-    "native-predicate.event.name",
-    "The event.name field no longer matches its registered Event storage contract.",
-  );
-  const eventNameColumn = readEventsWithName.columns.right_name;
-  requirePlan(
-    eventNameColumn.resultType.affinity === "text" &&
-      eventNameColumn.resultType.nullable === fieldContract.storageNullable,
-    "native-predicate.event.name.column",
-    "The typed event dictionary name column no longer matches its TEXT/nullability contract.",
-  );
-  const eventNamePredicate = lowerNativePrimitivePredicate(
-    eventNameColumn,
-    predicate,
-  );
-  const readEventsMatching = filter(
-    readEventsWithName,
-    and(
-      gte(
-        readEventsWithName.columns.left_occurred_at,
-        param(readRange.startMs),
-      ),
-      lt(
-        readEventsWithName.columns.left_occurred_at,
-        param(readRange.endExclusiveMs),
-      ),
-      eventNamePredicate,
-    ),
-  );
-
-  const ownerPagesSource = scan(schema.visits);
-  const readEventsWithOwner = join(
-    readEventsMatching,
-    ownerPagesSource,
-    and(
-      eq(
-        readEventsMatching.columns.left_visit_id,
-        ownerPagesSource.columns.visit_id,
-      ),
-      eq(
-        readEventsMatching.columns.left_site_pk,
-        ownerPagesSource.columns.site_pk,
-      ),
-    ),
-  );
-  const readEventsWithSession = filter(
-    readEventsWithOwner,
-    and(
-      isNotNull(readEventsWithOwner.columns.right_session_id),
-      neq(readEventsWithOwner.columns.right_session_id, param("")),
-    ),
-  );
-  return asSessionSetRelation(
-    project(readEventsWithSession, {
-      site_pk: readEventsWithSession.columns.left_left_site_pk,
-      session_id: readEventsWithSession.columns.right_session_id,
-    }),
-  );
-}
-
-function compileSessionSetPlan(
-  set: SessionSetPlan,
-  site: ReturnType<typeof filter>,
-  semantics: SessionPlanSemantics,
-  memo: Map<RelationId, SessionSetRelation>,
-): SessionSetRelation {
-  const existing = memo.get(set.relationId);
-  if (existing) return existing;
-
-  let relation: SessionSetRelation;
-  switch (set.kind) {
-    case "candidate":
-      relation = compileCandidateSessionSet(site, semantics.candidateRange);
-      break;
-    case "native-predicate": {
-      const fieldContract = nativePrimitiveFieldContract(set.fieldId);
-      requirePlan(
-        fieldContract !== undefined,
-        `${planNodePath(set.relationId)}.field`,
-        `The native field ${set.fieldId} no longer matches its registered primitive contract.`,
-      );
-      relation =
-        fieldContract.activity === "page"
-          ? compilePagePredicateSessionSet(
-              site,
-              semantics.readRange,
-              set.fieldId as NativePagePrimitiveFieldId,
-              set.predicate,
-            )
-          : compileEventNameSessionSet(
-              site,
-              semantics.readRange,
-              set.predicate,
-            );
-      break;
-    }
-    case "set-operation": {
-      const inputs = set.inputs.map((input) =>
-        compileSessionSetPlan(input, site, semantics, memo),
-      );
-      if (set.operation === "difference") {
-        const left = inputs[0]!;
-        const right = inputs[1]!;
-        relation = asSessionSetRelation(
-          distinct(
-            antiJoin(left, right, compositeSessionKeyMatch(left, right)),
-          ),
-        );
-      } else {
-        relation = inputs
-          .slice(1)
-          .reduce<SessionSetRelation>(
-            (left, right) =>
-              set.operation === "union"
-                ? asSessionSetRelation(union(left, right))
-                : asSessionSetRelation(
-                    distinct(
-                      semiJoin(
-                        left,
-                        right,
-                        compositeSessionKeyMatch(left, right),
-                      ),
-                    ),
-                  ),
-            inputs[0]!,
-          );
-      }
-      break;
-    }
-  }
-  memo.set(set.relationId, relation);
-  return relation;
-}
-
-function buildSelectedSiteRelation(siteId: SiteId) {
-  const siteIdentitySource = scan(schema.site_identities);
-  return filter(
-    siteIdentitySource,
-    eq(siteIdentitySource.columns.site_id, param(siteId)),
-  );
-}
-
-function compileSessionKeyRelation(
-  semantics: SessionPlanSemantics,
-  selectedSite: ReturnType<typeof buildSelectedSiteRelation>,
-): SessionSetRelation {
-  return compileSessionSetPlan(
-    semantics.set,
-    selectedSite,
-    semantics,
-    new Map(),
-  );
-}
-
-function buildSessionKeyRelation(
-  semantics: SessionPlanSemantics,
-): SessionSetRelation {
-  return compileSessionKeyRelation(
-    semantics,
-    buildSelectedSiteRelation(semantics.siteId),
-  );
-}
-
-function compileSessionPlanQuery(
-  semantics: SessionPlanSemantics,
-): CompiledQuery<AnalyticsSessionIdentityRow> {
-  const matchingSessions = buildSessionKeyRelation(semantics);
-  return compileD1Query(lowerLogicalPlan(matchingSessions), {
-    tag: "analytics.session-filter.wave-2",
-  }) as CompiledQuery<AnalyticsSessionIdentityRow>;
-}
-
-function compileSessionCountQuery(
-  semantics: SessionPlanSemantics,
-): CompiledQuery<AnalyticsSessionCountRow> {
-  const matchingSessions = buildSessionKeyRelation(semantics);
-  const sessionCount = aggregate(matchingSessions, {
-    groupBy: {},
-    aggregates: { sessions: count() },
-  });
-  return compileD1Query(lowerLogicalPlan(sessionCount), {
-    tag: "analytics.filtered-session-count.wave-3",
-  }) as CompiledQuery<AnalyticsSessionCountRow>;
-}
-
-function compileSessionViewsQuery(
-  semantics: SessionPlanSemantics,
-): CompiledQuery<AnalyticsSessionViewsRow> {
-  const selectedSite = buildSelectedSiteRelation(semantics.siteId);
-  const matchingSessions = compileSessionKeyRelation(semantics, selectedSite);
-  const candidatePagesSource = scan(schema.visits);
-  const candidatePagesScoped = semiJoin(
-    candidatePagesSource,
-    selectedSite,
-    eq(candidatePagesSource.columns.site_pk, selectedSite.columns.site_pk),
-  );
-  const candidatePagesInRange = filter(
-    candidatePagesScoped,
-    and(
-      gte(
-        candidatePagesScoped.columns.started_at,
-        param(semantics.candidateRange.startMs),
-      ),
-      lt(
-        candidatePagesScoped.columns.started_at,
-        param(semantics.candidateRange.endExclusiveMs),
-      ),
-      isNotNull(candidatePagesScoped.columns.session_id),
-      neq(candidatePagesScoped.columns.session_id, param("")),
-    ),
-  );
-  const eligiblePages = semiJoin(
-    candidatePagesInRange,
-    matchingSessions,
-    compositeSessionKeyMatch(candidatePagesInRange, matchingSessions),
-  );
-  const views = aggregate(eligiblePages, {
-    groupBy: {},
-    aggregates: { views: count() },
-  });
-  return compileD1Query(lowerLogicalPlan(views), {
-    tag: "analytics.filtered-session-views.wave-4",
-  }) as CompiledQuery<AnalyticsSessionViewsRow>;
-}
-
-function compileSessionOverviewPairQuery(
-  semantics: SessionPlanSemantics,
-): CompiledQuery<AnalyticsSessionOverviewPairRow> {
-  const selectedSite = buildSelectedSiteRelation(semantics.siteId);
-  const matchingSessions = compileSessionKeyRelation(semantics, selectedSite);
-  const sessions = aggregate(matchingSessions, {
-    groupBy: {},
-    aggregates: { sessions: count() },
-  });
-
-  const candidatePagesSource = scan(schema.visits);
-  const candidatePagesScoped = semiJoin(
-    candidatePagesSource,
-    selectedSite,
-    eq(candidatePagesSource.columns.site_pk, selectedSite.columns.site_pk),
-  );
-  const candidatePagesInRange = filter(
-    candidatePagesScoped,
-    and(
-      gte(
-        candidatePagesScoped.columns.started_at,
-        param(semantics.candidateRange.startMs),
-      ),
-      lt(
-        candidatePagesScoped.columns.started_at,
-        param(semantics.candidateRange.endExclusiveMs),
-      ),
-      isNotNull(candidatePagesScoped.columns.session_id),
-      neq(candidatePagesScoped.columns.session_id, param("")),
-    ),
-  );
-  const eligiblePages = semiJoin(
-    candidatePagesInRange,
-    matchingSessions,
-    compositeSessionKeyMatch(candidatePagesInRange, matchingSessions),
-  );
-  const views = aggregate(eligiblePages, {
-    groupBy: {},
-    aggregates: { views: count() },
-  });
-
-  // Both inputs are ungrouped COUNT(*) aggregates, so each produces exactly
-  // one row, including when its input relation is empty. The typed predicate
-  // expresses their scalar combination in Generic DB IR.
-  const combined = join(sessions, views, eq(param(1), param(1)));
-  const output = project(combined, {
-    sessions: combined.columns.left_sessions,
-    views: combined.columns.right_views,
-  });
-  return compileD1Query(lowerLogicalPlan(output), {
-    tag: "analytics.filtered-session-overview-pair.wave-5",
-  }) as CompiledQuery<AnalyticsSessionOverviewPairRow>;
-}
-
-/**
- * Lowers supported Session sets by following the validated Analytics plan
- * from its output relation. Unknown nodes, expressions, or disconnected
- * subtrees are rejected before Generic DB IR is constructed.
- */
-export function lowerAnalyticsPagePathSessionPlan(
-  input: LogicalPlan,
-): AnalyticsPageSessionLoweringResult {
-  let logicalPlan: ValidatedLogicalPlan;
-  try {
-    logicalPlan = validateLogicalPlan(input);
-  } catch (error) {
-    return unsupported(
-      "valid-analytics-plan-required",
-      "plan",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  let semantics: SessionPlanSemantics;
-  try {
-    semantics = matchSessionPlan(logicalPlan);
-  } catch (error) {
-    if (error instanceof PlanShapeMismatch) {
-      return unsupported(
-        "session-boolean-plan-shape",
-        error.node,
-        error.message,
-      );
-    }
-    return unsupported(
-      "session-boolean-plan-shape",
-      "plan",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  try {
-    return {
-      kind: "supported",
-      logicalPlan,
-      query: compileSessionPlanQuery(semantics),
-    };
-  } catch (error) {
-    return compilationFailure(error);
-  }
-}
-
-/**
- * Lowers the exact validated sessions metric plan over a bounded filtered
- * Session set, then counts that set inside the Generic DB IR query.
- */
-export function lowerAnalyticsFilteredSessionCountPlan(
-  input: LogicalPlan,
-): AnalyticsSessionCountLoweringResult {
-  let logicalPlan: ValidatedLogicalPlan;
-  try {
-    logicalPlan = validateLogicalPlan(input);
-  } catch (error) {
-    return unsupported(
-      "valid-analytics-plan-required",
-      "plan",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  let semantics: SessionPlanSemantics;
-  try {
-    semantics = matchSessionCountPlan(logicalPlan);
-  } catch (error) {
-    if (error instanceof PlanShapeMismatch) {
-      return unsupported(
-        "filtered-session-count-plan-shape",
-        error.node,
-        error.message,
-      );
-    }
-    return unsupported(
-      "filtered-session-count-plan-shape",
-      "plan",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  try {
-    return {
-      kind: "supported",
-      logicalPlan,
-      query: compileSessionCountQuery(semantics),
-    };
-  } catch (error) {
-    return compilationFailure(error);
-  }
-}
-
-/**
- * Lowers the exact validated views metric plan over candidate Pages whose
- * page.session is in the candidate-bounded matching Session set.
- */
-export function lowerAnalyticsFilteredSessionViewsPlan(
-  input: LogicalPlan,
-  expected: AnalyticsSessionViewsExpectedContext,
-): AnalyticsSessionViewsLoweringResult {
-  let logicalPlan: ValidatedLogicalPlan;
-  try {
-    logicalPlan = validateLogicalPlan(input);
-  } catch (error) {
-    return unsupported(
-      "valid-analytics-plan-required",
-      "plan",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  let semantics: SessionPlanSemantics;
-  try {
-    semantics = matchSessionViewsPlan(logicalPlan);
-    requireExpectedSessionViewsContext(semantics, expected);
-  } catch (error) {
-    if (error instanceof PlanShapeMismatch) {
-      return unsupported(
-        "filtered-session-views-plan-shape",
-        error.node,
-        error.message,
-      );
-    }
-    return unsupported(
-      "filtered-session-views-plan-shape",
-      "plan",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  try {
-    return {
-      kind: "supported",
-      logicalPlan,
-      query: compileSessionViewsQuery(semantics),
-    };
-  } catch (error) {
-    return compilationFailure(error);
-  }
-}
-
-/**
- * Lowers the exact formal sessions + views aggregate over one shared,
- * candidate-bounded Session set into a single Generic DB IR query.
- */
-export function lowerAnalyticsFilteredSessionOverviewPairPlan(
-  input: LogicalPlan,
-  expected: AnalyticsSessionViewsExpectedContext,
-): AnalyticsSessionOverviewPairLoweringResult {
-  let logicalPlan: ValidatedLogicalPlan;
-  try {
-    logicalPlan = validateLogicalPlan(input);
-  } catch (error) {
-    return unsupported(
-      "valid-analytics-plan-required",
-      "plan",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  let semantics: SessionPlanSemantics;
-  try {
-    semantics = matchSessionOverviewPairPlan(logicalPlan);
-    requireExpectedSessionViewsContext(semantics, expected);
-  } catch (error) {
-    if (error instanceof PlanShapeMismatch) {
-      return unsupported(
-        "filtered-session-overview-pair-plan-shape",
-        error.node,
-        error.message,
-      );
-    }
-    return unsupported(
-      "filtered-session-overview-pair-plan-shape",
-      "plan",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  try {
-    const query = compileSessionOverviewPairQuery(semantics);
-    return {
-      kind: "supported",
-      logicalPlan,
-      query,
-    };
-  } catch (error) {
-    return compilationFailure(error);
   }
 }
 

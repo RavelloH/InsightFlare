@@ -483,7 +483,7 @@ describe("semantic sessions aggregate → filtered Session D1 count", () => {
           D1_MAX_BOUND_PARAMETERS,
         );
         const explain = explainQueryPlan(db, lowered.query).join("\n");
-        expect(explain).toContain("idx_visits_site_pk_session_started_at");
+        expect(explain).toContain("idx_visits_site_pk_started_at");
         return lowered.query;
       };
 
@@ -496,22 +496,22 @@ describe("semantic sessions aggregate → filtered Session D1 count", () => {
       expect(andQuery.tag).toBe("analytics.filtered-session-count.wave-3");
       expect(andQuery.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
       // Shared candidate Session relations keep the two-leaf shape compact.
-      expect(andQuery.bindings).toHaveLength(15);
+      expect(andQuery.bindings).toHaveLength(24);
       const andExplain = explainQueryPlan(db, andQuery);
       expect(
-        andExplain.filter((line) =>
-          /SCAN \w+ USING COVERING INDEX idx_visits_site_pk_session_started_at/u.test(
+        andExplain.some((line) =>
+          /SEARCH \w+ USING INDEX idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u.test(
             line,
           ),
         ),
-      ).toHaveLength(1);
+      ).toBe(true);
       expect(
-        andExplain.filter((line) =>
-          /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u.test(
+        andExplain.some((line) =>
+          /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u.test(
             line,
           ),
         ),
-      ).toHaveLength(1);
+      ).toBe(true);
 
       const notExpected = candidateRestrictedEvaluatorSet(
         NOT_EVENT_FILTER,

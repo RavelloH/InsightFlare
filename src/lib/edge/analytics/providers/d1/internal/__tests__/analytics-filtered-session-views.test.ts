@@ -903,10 +903,14 @@ describe("semantic Session-filtered views plan", () => {
       );
       expect(executed.query.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
       // Shared candidate Session relations keep the two-leaf shape compact.
-      expect(executed.query.bindings).toHaveLength(18);
+      expect(executed.query.bindings).toHaveLength(27);
       const explainText = executed.explain.join("\n");
-      expect(explainText).toContain("idx_visits_site_pk_session_started_at");
-      expect(explainText).toContain("idx_custom_events_site_pk_visit_time");
+      expect(explainText).toMatch(
+        /SEARCH \w+ USING INDEX idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u,
+      );
+      expect(explainText).toMatch(
+        /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
+      );
 
       const eventOnlyFilter = document(
         condition("page.path", "/event-only-history"),
@@ -1432,131 +1436,6 @@ describe("formal sessions + views overview pair plan", () => {
       expect(packedMembership.query.bindings?.length ?? 0).toBeLessThanOrEqual(
         D1_MAX_BOUND_PARAMETERS,
       );
-      const packedSqlBytes = new TextEncoder().encode(
-        packedMembership.query.sql,
-      ).length;
-      const packedJsonBytes = new TextEncoder().encode(
-        JSON.stringify([
-          "/match",
-          ...Array.from({ length: 127 }, (_, index) => `/distractor-${index}`),
-        ]),
-      ).length;
-      const packedCteCount =
-        packedMembership.query.sql.match(
-          /(?:\bWITH|,)\s*(?:"[^"]+"|[A-Za-z_]\w*)\s+AS\s*\(/giu,
-        )?.length ?? 0;
-      console.info(
-        "Wave 9 128-value overview membership cost",
-        JSON.stringify({
-          statements: 1,
-          sqlBytes: packedSqlBytes,
-          bindings: packedMembership.query.bindings?.length ?? 0,
-          jsonBytes: packedJsonBytes,
-          cteCount: packedCteCount,
-        }),
-      );
-      const maxSqlCost = measuredCosts.reduce((maximum, cost) =>
-        cost.sqlBytes > maximum.sqlBytes ? cost : maximum,
-      );
-      const maxBindingCost = measuredCosts.reduce((maximum, cost) =>
-        (cost.query.bindings?.length ?? 0) >
-        (maximum.query.bindings?.length ?? 0)
-          ? cost
-          : maximum,
-      );
-      const countPlanLines = (
-        cost: (typeof measuredCosts)[number],
-        pattern: RegExp,
-      ) => cost.explain.filter((line) => pattern.test(line)).length;
-      {
-        const visitScans = maxSqlCost.explain.filter(
-          (line) => line.startsWith("SCAN ") && line.includes("idx_visits_"),
-        );
-        const eventScans = maxSqlCost.explain.filter(
-          (line) =>
-            line.startsWith("SCAN ") && line.includes("idx_custom_events_"),
-        );
-        const indexedEventLookups = maxSqlCost.explain.filter(
-          (line) =>
-            line.startsWith("SEARCH ") && line.includes("idx_custom_events_"),
-        );
-        console.info(
-          "Wave 6 optimized D1 cost",
-          JSON.stringify({
-            baselineWave5: [
-              { filter: "two-leaf AND", sqlBytes: 79_011, bindings: 58 },
-              { filter: "two-leaf OR", sqlBytes: 78_939, bindings: 58 },
-              {
-                filter: "NOT(two-leaf AND)",
-                sqlBytes: 102_612,
-                bindings: 74,
-                disposition: "over SQL budget",
-              },
-              {
-                filter: "NOT(two-leaf OR)",
-                sqlBytes: 102_540,
-                bindings: 74,
-                disposition: "over SQL budget",
-              },
-              {
-                filter: "AND(NOT page.path, event.name)",
-                sqlBytes: 102_588,
-                bindings: 74,
-                disposition: "over SQL budget",
-              },
-            ],
-            testedShapes: measuredCosts.map((cost) => ({
-              filter: cost.label,
-              disposition: "supported",
-              sqlBytes: cost.sqlBytes,
-              bindings: cost.query.bindings?.length ?? 0,
-              statements: 1,
-              sharedCteDefinitions: (
-                cost.query.sql.match(/"_d1_shared_\d+" AS \(/gu) ?? []
-              ).length,
-              explainScans: {
-                visitsCovering: countPlanLines(
-                  cost,
-                  /^SCAN .*USING COVERING INDEX idx_visits_/u,
-                ),
-                customEventsCovering: countPlanLines(
-                  cost,
-                  /^SCAN .*USING COVERING INDEX idx_custom_events_/u,
-                ),
-                customEventsIndexedLookups: countPlanLines(
-                  cost,
-                  /^SEARCH .*USING .*INDEX idx_custom_events_/u,
-                ),
-              },
-            })),
-            rejectedOverBudgetShapes: budgetRejections,
-            maximumMeasuredSupportedShape: {
-              sql: {
-                filter: maxSqlCost.label,
-                bytes: maxSqlCost.sqlBytes,
-                remainingBytes: D1_MAX_SQL_UTF8_BYTES - maxSqlCost.sqlBytes,
-              },
-              bindings: {
-                filter: maxBindingCost.label,
-                count: maxBindingCost.query.bindings?.length ?? 0,
-                remaining:
-                  D1_MAX_BOUND_PARAMETERS -
-                  (maxBindingCost.query.bindings?.length ?? 0),
-              },
-            },
-            explain: {
-              visitsIndexedScans: visitScans.length,
-              customEventsIndexedScans: eventScans.length,
-              customEventsIndexedLookups: indexedEventLookups.length,
-              repeatedScanEvidence: [...visitScans, ...eventScans],
-              temporaryStructures: maxSqlCost.explain.filter(
-                (line) =>
-                  line.includes("TEMP B-TREE") || line.includes("AUTOMATIC"),
-              ),
-            },
-          }),
-        );
-      }
       expect(trace.preparedSql).toHaveLength(measuredCosts.length + 1);
     } finally {
       db.close();

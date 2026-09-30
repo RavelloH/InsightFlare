@@ -8,8 +8,10 @@ import type {
 import type {
   LogicalQueryNode,
   OutputField,
+  ProjectNode,
   QuerySource,
   Relation,
+  ScanNode,
 } from "./plan";
 import { validateLogicalQueryPlan } from "./validator";
 
@@ -51,6 +53,13 @@ export interface SharedRelationDefinition {
   readonly dependencies: readonly string[];
 }
 
+export interface DirectScanProjectionChoice {
+  readonly project: ProjectNode;
+  readonly scan: ScanNode;
+  /** Actual schema SQL column names in the Project output order. */
+  readonly sqlColumnNames: readonly string[];
+}
+
 export interface PhysicalQueryPlan<
   Row extends object = Record<string, unknown>,
 > {
@@ -59,6 +68,8 @@ export interface PhysicalQueryPlan<
   readonly scope: QuerySource["scope"];
   readonly fields: QuerySource["fields"];
   readonly sharedRelations: readonly SharedRelationDefinition[];
+  /** Safe Project(Scan) column selections chosen by the physical planner. */
+  readonly directScanProjections: readonly DirectScanProjectionChoice[];
   /** Backend physical choice, populated after final-shape cost analysis. */
   readonly membershipOptimization?: PhysicalMembershipOptimization;
   readonly __rowType?: Row;
@@ -319,6 +330,68 @@ function nodeSources(node: LogicalQueryNode): QuerySource[] {
   ];
 }
 
+function directScanProjectionChoices(
+  root: LogicalQueryNode,
+): readonly DirectScanProjectionChoice[] {
+  const postorder: LogicalQueryNode[] = [];
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const source of nodeSources(node)) visit(source.node);
+    postorder.push(node);
+  };
+  visit(root);
+
+  const choices: DirectScanProjectionChoice[] = [];
+  for (const node of postorder) {
+    if (node.kind !== "project" || node.input.node.kind !== "scan") continue;
+    const scan = node.input.node;
+    const columns = Object.values(scan.table.columns);
+    const sqlColumnNames: string[] = [];
+    let eligible = true;
+    for (const projection of node.projections) {
+      const expression = projection.expression;
+      if (
+        expression.kind !== "column" ||
+        expression.scope !== node.input.scope ||
+        !Number.isInteger(expression.index) ||
+        expression.index < 0
+      ) {
+        eligible = false;
+        break;
+      }
+      // Callers validate the logical plan first, which guarantees that this
+      // column scope and index belong to the generated Scan input.
+      sqlColumnNames.push(columns[expression.index]!.sqlName);
+    }
+    if (eligible) choices.push({ project: node, scan, sqlColumnNames });
+  }
+  return choices;
+}
+
+function sameDirectScanProjectionChoices(
+  actual: readonly DirectScanProjectionChoice[],
+  expected: readonly DirectScanProjectionChoice[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((choice, index) => {
+      const canonical = expected[index];
+      return (
+        !!canonical &&
+        choice.project === canonical.project &&
+        choice.scan === canonical.scan &&
+        Array.isArray(choice.sqlColumnNames) &&
+        choice.sqlColumnNames.length === canonical.sqlColumnNames.length &&
+        choice.sqlColumnNames.every(
+          (name, columnIndex) => name === canonical.sqlColumnNames[columnIndex],
+        )
+      );
+    })
+  );
+}
+
 /** Mark every node reached through scope/selection-sensitive query context. */
 function hoistForbiddenNodes(root: LogicalQueryNode): Set<LogicalQueryNode> {
   const forbidden = new Set<LogicalQueryNode>();
@@ -560,6 +633,18 @@ export function validatePhysicalQueryPlan<Row extends object>(
       "Physical query root metadata does not match its logical node",
     );
   const expected = sharedRelationDefinitions(plan.root);
+  const expectedDirectScanProjections = directScanProjectionChoices(plan.root);
+  if (
+    !Array.isArray(plan.directScanProjections) ||
+    !sameDirectScanProjectionChoices(
+      plan.directScanProjections,
+      expectedDirectScanProjections,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical direct scan projection choices are inconsistent",
+    );
   const actualDefinitions = plan.sharedRelations;
   let inconsistent =
     !Array.isArray(actualDefinitions) ||
@@ -613,6 +698,7 @@ export function lowerLogicalQuerySource<Row extends object>(
     scope: source.scope,
     fields: source.fields,
     sharedRelations: sharedRelationDefinitions(source.node),
+    directScanProjections: directScanProjectionChoices(source.node),
   };
 }
 

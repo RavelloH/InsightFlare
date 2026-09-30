@@ -394,6 +394,322 @@ describe("typed D1 query compiler", () => {
     }
   });
 
+  it("selects direct Scan projection columns without changing DAL row semantics", () => {
+    const db = createMigratedDatabase();
+    try {
+      for (const [id, email] of [
+        ["projection-match-1", "shared-site"],
+        ["projection-match-2", "shared-site"],
+        ["projection-unmatched", "missing-site"],
+        ["projection-null", null],
+      ] as const)
+        db.prepare(
+          "INSERT INTO account_action_tokens (id, type, token_hash, email, expires_at) VALUES (?, 'team_invite', ?, ?, 2000000000)",
+        ).run(id, `hash-${id}`, email);
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "shared-site",
+      );
+
+      const tokenRows = scan(schema.account_action_tokens);
+      const namedTokens = project(tokenRows, {
+        tokenKey: tokenRows.columns.email,
+        tokenId: tokenRows.columns.id,
+        repeatedTokenKey: tokenRows.columns.email,
+        kind: tokenRows.columns.type,
+      });
+      const filteredTokens = filter(
+        namedTokens,
+        eq(namedTokens.columns.kind, param("team_invite")),
+      );
+      const siteRows = scan(schema.site_identities);
+      const namedSites = project(siteRows, {
+        lookupKey: siteRows.columns.site_id,
+      });
+      const joined = join(
+        filteredTokens,
+        namedSites,
+        eq(filteredTokens.columns.tokenKey, namedSites.columns.lookupKey),
+        "left",
+      );
+      const relation = project(joined, {
+        matchedSite: joined.columns.right_lookupKey,
+        email: joined.columns.left_tokenKey,
+        tokenId: joined.columns.left_tokenId,
+        duplicateEmail: joined.columns.left_repeatedTokenKey,
+      });
+
+      const physical = lowerLogicalPlan(relation);
+      expect(
+        physical.directScanProjections.map(({ sqlColumnNames }) => [
+          ...sqlColumnNames,
+        ]),
+      ).toEqual([["email", "id", "email", "type"], ["site_id"]]);
+      const optimized = compileD1Query(physical);
+      const mechanical = compileD1QueryUnoptimizedForTest(relation);
+      expect(optimized.sql).not.toBe(mechanical.sql);
+      expect(optimized.sql).not.toContain('"token_hash"');
+      expect(optimized.sql).not.toContain('"payload_json"');
+      expect(mechanical.sql).toContain('"token_hash"');
+      expect(optimized.bindings).toEqual(mechanical.bindings);
+
+      const run = (query: { sql: string; bindings?: readonly unknown[] }) =>
+        db
+          .prepare(query.sql)
+          .all(...((query.bindings ?? []) as SQLInputValue[]));
+      const optimizedRows = run(optimized).sort((left, right) =>
+        String(left.tokenId).localeCompare(String(right.tokenId)),
+      );
+      const mechanicalRows = run(mechanical).sort((left, right) =>
+        String(left.tokenId).localeCompare(String(right.tokenId)),
+      );
+      expect(optimizedRows).toEqual(mechanicalRows);
+      expect(optimizedRows).toEqual([
+        {
+          matchedSite: "shared-site",
+          email: "shared-site",
+          tokenId: "projection-match-1",
+          duplicateEmail: "shared-site",
+        },
+        {
+          matchedSite: "shared-site",
+          email: "shared-site",
+          tokenId: "projection-match-2",
+          duplicateEmail: "shared-site",
+        },
+        {
+          matchedSite: null,
+          email: null,
+          tokenId: "projection-null",
+          duplicateEmail: null,
+        },
+        {
+          matchedSite: null,
+          email: "missing-site",
+          tokenId: "projection-unmatched",
+          duplicateEmail: "missing-site",
+        },
+      ]);
+
+      const duplicateProjection = project(tokenRows, {
+        onlyEmail: tokenRows.columns.email,
+      });
+      const duplicateOptimizedRows = run(
+        compileD1Query(duplicateProjection),
+      ).sort((left, right) =>
+        String(left.onlyEmail).localeCompare(String(right.onlyEmail)),
+      );
+      const duplicateMechanicalRows = run(
+        compileD1QueryUnoptimizedForTest(duplicateProjection),
+      ).sort((left, right) =>
+        String(left.onlyEmail).localeCompare(String(right.onlyEmail)),
+      );
+      expect(duplicateOptimizedRows).toEqual(duplicateMechanicalRows);
+      expect(duplicateOptimizedRows).toHaveLength(4);
+      expect(
+        duplicateOptimizedRows.filter((row) => row.onlyEmail === "shared-site"),
+      ).toHaveLength(2);
+
+      const forged = {
+        ...physical,
+        directScanProjections: physical.directScanProjections.map(
+          (choice, index) =>
+            index === 0
+              ? {
+                  ...choice,
+                  sqlColumnNames: [
+                    "token_hash",
+                    ...choice.sqlColumnNames.slice(1),
+                  ],
+                }
+              : choice,
+        ),
+      };
+      expect(() => compileD1Query(forged)).toThrowError(
+        expect.objectContaining({ code: "invalid_plan" }),
+      );
+
+      const computedRows = scan(schema.site_identities);
+      const computedProjection = project(computedRows, {
+        normalized: callFunction("lower", computedRows.columns.site_id),
+      });
+      expect(
+        lowerLogicalPlan(computedProjection).directScanProjections,
+      ).toEqual([]);
+      expect(compileD1Query(computedProjection)).toEqual(
+        compileD1QueryUnoptimizedForTest(computedProjection),
+      );
+
+      const outerSites = scan(schema.site_identities);
+      const correlatedSites = scan(schema.site_identities);
+      const correlatedProjection = project(correlatedSites, {
+        outerValue: outerSites.columns.site_id,
+      });
+      const correlatedMembership = project(outerSites, {
+        siteId: outerSites.columns.site_id,
+        matched: inSubquery(outerSites.columns.site_id, correlatedProjection),
+      });
+      expect(
+        lowerLogicalPlan(correlatedMembership).directScanProjections,
+      ).toEqual([]);
+      expect(compileD1Query(correlatedMembership)).toEqual(
+        compileD1QueryUnoptimizedForTest(correlatedMembership),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("hoists shared filtered expression plans and keeps subquery or volatile plans inline", () => {
+    const db = createMigratedDatabase();
+    try {
+      for (const siteId of ["facts-a", "facts-b"])
+        executeRun(db, {
+          sql: "INSERT INTO site_identities (site_id) VALUES (?)",
+          bindings: [siteId],
+        });
+
+      const sites = scan(schema.site_identities);
+      const siteId = sites.columns.site_id;
+      const filtered = filter(
+        sites,
+        and(
+          eq(siteId, param("facts-a")),
+          not(eq(siteId, param("not-present"))),
+          isNotNull(siteId),
+          inList(siteId, ["facts-a", "facts-b"]),
+        ),
+      );
+      const labels = project(filtered, {
+        siteId: filtered.columns.site_id,
+        normalized: callFunction("lower", filtered.columns.site_id),
+        fallback: coalesce(filtered.columns.site_id, param("fallback")),
+        label: caseWhen(
+          [
+            {
+              when: eq(filtered.columns.site_id, param("facts-a")),
+              then: param("A"),
+            },
+          ],
+          param("other"),
+        ),
+      });
+      const totals = aggregate(filtered, {
+        groupBy: { siteId: filtered.columns.site_id },
+        aggregates: { total: sum(filtered.columns.site_pk) },
+      });
+      const joined = join(
+        labels,
+        totals,
+        eq(labels.columns.siteId, totals.columns.siteId),
+      );
+      const shared = project(joined, {
+        siteId: joined.columns.left_siteId,
+        fallback: joined.columns.left_fallback,
+        label: joined.columns.left_label,
+        total: joined.columns.right_total,
+      });
+      const repeated = union(shared, shared);
+      const physical = lowerLogicalPlan(repeated);
+      expect(physical.sharedRelations.map(({ node }) => node)).toContain(
+        shared.node,
+      );
+      expect(() =>
+        compileD1Query({ ...physical, sharedRelations: [] }),
+      ).toThrowError(expect.objectContaining({ code: "invalid_plan" }));
+      const optimized = compileD1Query(physical);
+      const mechanical = compileD1QueryUnoptimizedForTest(repeated);
+      expect(optimized.sql).toContain('"_d1_shared_0"');
+      expect(optimized.bindings).not.toEqual(mechanical.bindings);
+      expect(executeAll(db, optimized)).toEqual([
+        {
+          siteId: "facts-a",
+          fallback: "facts-a",
+          label: "A",
+          total: 1,
+        },
+      ]);
+      expect(executeAll(db, optimized)).toEqual(executeAll(db, mechanical));
+
+      const outerSites = scan(schema.site_identities);
+      const selected = filter(
+        outerSites,
+        eq(outerSites.columns.site_id, param("facts-a")),
+      );
+      const innerSites = scan(schema.site_identities);
+      const innerIds = project(innerSites, {
+        candidate: innerSites.columns.site_id,
+      });
+      const totalSites = aggregate(innerSites, {
+        groupBy: {},
+        aggregates: { rows: count() },
+      });
+      const guarded = project(selected, {
+        siteId: selected.columns.site_id,
+        included: inSubquery(selected.columns.site_id, innerIds),
+        total: scalar(totalSites),
+        evaluatedAt: unixepoch(),
+      });
+      const repeatedGuarded = union(guarded, guarded, true);
+      const guardedPhysical = lowerLogicalPlan(repeatedGuarded);
+      expect(guardedPhysical.sharedRelations).toEqual([]);
+      const guardedQuery = compileD1Query(guardedPhysical);
+      expect(guardedQuery.sql).not.toContain("_d1_shared_");
+      const guardedRows = executeAll(db, guardedQuery);
+      expect(guardedRows).toHaveLength(2);
+      for (const row of guardedRows)
+        expect(row).toMatchObject({ siteId: "facts-a", included: 1, total: 2 });
+      expect(
+        guardedRows.every((row) => Number.isInteger(row.evaluatedAt)),
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("packs the highest saving text membership before lower saving lists", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "membership-target",
+      );
+      const largestList = Array.from(
+        { length: 70 },
+        (_, index) => `largest-miss-${index}`,
+      );
+      largestList[17] = "membership-target";
+      const smallerList = Array.from(
+        { length: 40 },
+        (_, index) => `smaller-miss-${index}`,
+      );
+      smallerList[5] = "membership-target";
+      const sites = scan(schema.site_identities);
+      const matches = filter(
+        sites,
+        and(
+          inList(sites.columns.site_id, largestList),
+          inList(sites.columns.site_id, smallerList),
+        ),
+      );
+      const query = compileD1Query(
+        project(matches, { site_id: matches.columns.site_id }),
+      );
+      expect(query.bindings).toEqual([
+        JSON.stringify(largestList),
+        ...smallerList,
+      ]);
+      expect(query.sql.match(/json_each\(\?\)/gu)).toHaveLength(1);
+
+      const nativeSql = `SELECT site_id FROM site_identities WHERE site_id IN (${largestList.map(() => "?").join(",")}) AND site_id IN (${smallerList.map(() => "?").join(",")})`;
+      const nativeRows = db
+        .prepare(nativeSql)
+        .all(...([...largestList, ...smallerList] as SQLInputValue[]));
+      expect(executeAll(db, query)).toEqual(nativeRows);
+      expect(executeAll(db, query)).toEqual([{ site_id: "membership-target" }]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("enforces the common binding budget for query and mutation compilation", () => {
     const sites = scan(schema.site_identities);
     const projections = Object.fromEntries(
@@ -957,6 +1273,9 @@ describe("typed D1 query compiler", () => {
         first_match: scalar(firstScalarSource),
         second_match: scalar(secondScalarSource),
       });
+      expect(lowerLogicalPlan(repeatedScalars).directScanProjections).toEqual(
+        [],
+      );
       assertNoHoistAndCompare(repeatedScalars);
       expect(executeAll(db, compileD1Query(firstScalarSource))).toHaveLength(2);
 
@@ -971,6 +1290,9 @@ describe("typed D1 query compiler", () => {
         first_contains: inSubquery(sites.columns.site_id, firstInSource),
         second_contains: inSubquery(sites.columns.site_id, secondInSource),
       });
+      expect(
+        lowerLogicalPlan(repeatedInSubqueries).directScanProjections,
+      ).toEqual([]);
       assertNoHoistAndCompare(repeatedInSubqueries);
 
       const limited = union(limit(selected, 1), selected, true);

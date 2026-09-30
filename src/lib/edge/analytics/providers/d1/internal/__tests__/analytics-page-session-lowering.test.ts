@@ -43,6 +43,7 @@ import {
   lowerNativePrimitivePredicate,
   type NativePrimitiveFieldId,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-primitive-predicate-lowering";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import {
   evaluateFilterDocument,
   type FilterEvaluationEntity,
@@ -573,6 +574,1389 @@ function evaluateCandidateRestrictedSets(
 }
 
 describe("Analytics native Page/Event primitive → Session D1 lowering", () => {
+  it("preserves NULL, membership, coalesce, and entity-presence semantics in Project", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA } = setupSites(db);
+      const first = withPageAttributes(
+        db,
+        addPage(db, siteA, "expression-a", "s-a", 10, "/a"),
+        { title: "A", query: "q-a", hash: "#a" },
+      );
+      const emptySession = withPageAttributes(
+        db,
+        addPage(db, siteA, "expression-empty-session", "", 11, "/b"),
+        { title: "B", query: "q-b", hash: "#b" },
+      );
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+      const builder = new LogicalPlanBuilder(context);
+      const pages = builder.source("page", {
+        temporalDomain: "read",
+        relationships: ["page.session"],
+        attributes: ["page.path", "page.title", "page.query", "page.hash"],
+      });
+      const path = builder.slot(pages, "attribute:page.path");
+      const session = builder.slot(pages, "relationship:page.session");
+      const title = builder.slot(pages, "attribute:page.title");
+      const text = (value: string | null) =>
+        builder.literal(value, { kind: "scalar", scalar: "string" });
+      const nullComparison = builder.compare("eq", path, text(null));
+      const pathMembership = builder.in(path, [text(" /a ")], true, "trim");
+      const nullableMembership = builder.in(path, [text(null), text("/a")]);
+      const comparisons = {
+        eq: builder.compare("eq", path, text("/a")),
+        neq: builder.compare("neq", path, text("/a")),
+        gt: builder.compare("gt", path, text("/a")),
+        gte: builder.compare("gte", path, text("/a")),
+        lt: builder.compare("lt", path, text("/a")),
+        lte: builder.compare("lte", path, text("/a")),
+      };
+      const projected = builder.project(pages, {
+        path,
+        title,
+        query: builder.slot(pages, "attribute:page.query"),
+        hash: builder.slot(pages, "attribute:page.hash"),
+        trimmedColumnComparison: builder.compare("eq", path, title, "trim"),
+        nullComparison,
+        negatedNullComparison: builder.not(nullComparison),
+        pathMembership,
+        nullableMembership,
+        emptyMembership: builder.in(path, []),
+        emptyNotMembership: builder.in(path, [], true),
+        nullPath: builder.isNull(path),
+        nullLiteral: builder.isNull(text(null)),
+        ...comparisons,
+        fallback: builder.coalesce(text(null), text(null), text("fallback")),
+        emptySession: builder.isNull(session),
+        nonEmptySession: builder.isNull(session, true),
+      });
+      builder.output("expressions", projected, [
+        { name: "path", slot: "path" },
+        { name: "title", slot: "title" },
+        { name: "query", slot: "query" },
+        { name: "hash", slot: "hash" },
+        { name: "trimmedColumnComparison", slot: "trimmedColumnComparison" },
+        { name: "nullComparison", slot: "nullComparison" },
+        { name: "negatedNullComparison", slot: "negatedNullComparison" },
+        { name: "pathMembership", slot: "pathMembership" },
+        { name: "nullableMembership", slot: "nullableMembership" },
+        { name: "emptyMembership", slot: "emptyMembership" },
+        { name: "emptyNotMembership", slot: "emptyNotMembership" },
+        { name: "nullPath", slot: "nullPath" },
+        { name: "nullLiteral", slot: "nullLiteral" },
+        ...Object.keys(comparisons).map((name) => ({ name, slot: name })),
+        { name: "fallback", slot: "fallback" },
+        { name: "emptySession", slot: "emptySession" },
+        { name: "nonEmptySession", slot: "nonEmptySession" },
+      ]);
+      const plan = builder.finish();
+      const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+        siteId: SITE_A,
+        time: plan.context.time,
+      });
+      const lowered = lowerer.lower(plan.outputs[0]!);
+      const query = compileD1Query(
+        lowerer.projectOutput(
+          lowered,
+          plan.outputs[0]!.fields.map(({ name, slot }) => ({ name, slot })),
+        ),
+      );
+      const rows = (
+        await createD1DatabaseClient(createSqliteD1Database(db)).all(query)
+      ).results as Array<{
+        readonly path: string;
+        readonly title: string;
+        readonly query: string;
+        readonly hash: string;
+        readonly trimmedColumnComparison: number;
+        readonly nullComparison: number | null;
+        readonly negatedNullComparison: number | null;
+        readonly pathMembership: number | null;
+        readonly nullableMembership: number | null;
+        readonly emptyMembership: number;
+        readonly emptyNotMembership: number;
+        readonly nullPath: number;
+        readonly nullLiteral: number;
+        readonly eq: number;
+        readonly neq: number;
+        readonly gt: number;
+        readonly gte: number;
+        readonly lt: number;
+        readonly lte: number;
+        readonly fallback: string | null;
+        readonly emptySession: number;
+        readonly nonEmptySession: number;
+      }>;
+      rows.sort((left, right) => left.path.localeCompare(right.path));
+      expect(rows).toEqual([
+        {
+          path: "/a",
+          title: first.title,
+          query: first.query,
+          hash: first.hash,
+          trimmedColumnComparison: 0,
+          nullComparison: null,
+          negatedNullComparison: null,
+          pathMembership: 0,
+          nullableMembership: 1,
+          emptyMembership: 0,
+          emptyNotMembership: 1,
+          nullPath: 0,
+          nullLiteral: 1,
+          eq: 1,
+          neq: 0,
+          gt: 0,
+          gte: 1,
+          lt: 0,
+          lte: 1,
+          fallback: "fallback",
+          emptySession: 0,
+          nonEmptySession: 1,
+        },
+        {
+          path: "/b",
+          title: emptySession.title,
+          query: emptySession.query,
+          hash: emptySession.hash,
+          trimmedColumnComparison: 0,
+          nullComparison: null,
+          negatedNullComparison: null,
+          pathMembership: 1,
+          nullableMembership: null,
+          emptyMembership: 0,
+          emptyNotMembership: 1,
+          nullPath: 0,
+          nullLiteral: 1,
+          eq: 0,
+          neq: 1,
+          gt: 1,
+          gte: 1,
+          lt: 0,
+          lte: 0,
+          fallback: "fallback",
+          emptySession: 1,
+          nonEmptySession: 0,
+        },
+      ]);
+      const pathSlot = plan.outputs[0]!.fields[0]!.slot;
+      expect(() =>
+        lowerer.projectOutput(lowered, [
+          { name: "duplicate", slot: pathSlot },
+          { name: "duplicate", slot: pathSlot },
+        ]),
+      ).toThrow(/Output column "duplicate" is duplicated/u);
+      expect(() =>
+        lowerer.projectOutput(lowered, [
+          { name: "scalarComponent", slot: pathSlot, component: 0 },
+        ]),
+      ).toThrow(/has no key component/u);
+
+      const caseBuilder = new LogicalPlanBuilder(context);
+      const casePages = caseBuilder.source("page", {
+        temporalDomain: "read",
+        attributes: ["page.path"],
+      });
+      const caseProjection = caseBuilder.project(casePages, {
+        label: caseBuilder.caseWhen(
+          [
+            {
+              when: caseBuilder.compare(
+                "eq",
+                caseBuilder.slot(casePages, "attribute:page.path"),
+                caseBuilder.literal("/a", {
+                  kind: "scalar",
+                  scalar: "string",
+                }),
+              ),
+              then: caseBuilder.literal("A", {
+                kind: "scalar",
+                scalar: "string",
+              }),
+            },
+          ],
+          caseBuilder.literal("other", {
+            kind: "scalar",
+            scalar: "string",
+          }),
+        ),
+      });
+      caseBuilder.output("case", caseProjection, [
+        { name: "label", slot: "label" },
+      ]);
+      const casePlan = caseBuilder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(casePlan, {
+          siteId: SITE_A,
+          time: casePlan.context.time,
+        }).lower(casePlan.outputs[0]!),
+      ).toThrow(
+        /Expression kind case is outside the current D1 capability set/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps candidate Observation identity bags and never bounds an AntiJoin by its right side", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA } = setupSites(db);
+      const pageA = addPage(
+        db,
+        siteA,
+        "candidate-page-a",
+        "s-shared",
+        110,
+        "/a",
+      );
+      addPage(db, siteA, "candidate-page-b", "s-shared", 120, "/b");
+      insertEvent(db, {
+        eventId: "candidate-event",
+        site: siteA,
+        visit: pageA,
+        occurredAt: 130,
+      });
+      addPage(db, siteA, "candidate-empty-session", "", 140, "/empty");
+      addPage(db, siteA, "historical-page", "s-historical", 10, "/old");
+      addPage(db, siteA, "current-page", "s-current", 110, "/current");
+
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+
+      const observationBuilder = new LogicalPlanBuilder(context);
+      const observations = observationBuilder.source("observation", {
+        temporalDomain: "candidate",
+        relationships: ["observation.session"],
+      });
+      const projectedObservations = observationBuilder.project(observations, {
+        observation: observationBuilder.slot(observations, "entity"),
+        session: observationBuilder.slot(
+          observations,
+          "relationship:observation.session",
+        ),
+      });
+      observationBuilder.output("observations", projectedObservations, [
+        { name: "observation", slot: "observation" },
+        { name: "session", slot: "session" },
+      ]);
+      const observationPlan = observationBuilder.finish();
+      const observationLowerer = new AnalyticsLogicalToDbLowerer(
+        observationPlan,
+        { siteId: SITE_A, time: observationPlan.context.time },
+      );
+      const observationOutput = observationPlan.outputs[0]!;
+      const loweredObservations = observationLowerer.lower(observationOutput);
+      expect(() =>
+        observationLowerer.projectOutput(loweredObservations, [
+          {
+            name: "invalidObservationKey",
+            slot: observationOutput.fields[0]!.slot,
+            component: 3,
+          },
+        ]),
+      ).toThrow(/requires a valid key component/u);
+      const observationQuery = compileD1Query(
+        observationLowerer.projectOutput(loweredObservations, [
+          {
+            name: "kind",
+            slot: observationOutput.fields[0]!.slot,
+            component: 1,
+          },
+          {
+            name: "activityId",
+            slot: observationOutput.fields[0]!.slot,
+            component: 2,
+          },
+          {
+            name: "sessionId",
+            slot: observationOutput.fields[1]!.slot,
+            component: 1,
+          },
+        ]),
+      );
+      const activityRows = (
+        await createD1DatabaseClient(createSqliteD1Database(db)).all(
+          observationQuery,
+        )
+      ).results as Array<{
+        readonly kind: string;
+        readonly activityId: string;
+        readonly sessionId: string;
+      }>;
+      activityRows.sort((left, right) =>
+        left.activityId.localeCompare(right.activityId),
+      );
+      expect(activityRows).toEqual([
+        { kind: "page", activityId: "candidate-empty-session", sessionId: "" },
+        { kind: "event", activityId: "candidate-event", sessionId: "s-shared" },
+        { kind: "page", activityId: "candidate-page-a", sessionId: "s-shared" },
+        { kind: "page", activityId: "candidate-page-b", sessionId: "s-shared" },
+        { kind: "page", activityId: "current-page", sessionId: "s-current" },
+      ]);
+      expect(observationLowerer.candidateActivity(observations.id)).toBe(
+        "observation",
+      );
+
+      const antiBuilder = new LogicalPlanBuilder(context);
+      const historicalPages = antiBuilder.source("page", {
+        temporalDomain: "read",
+        relationships: ["page.session"],
+      });
+      const candidatePages = antiBuilder.source("page", {
+        temporalDomain: "candidate",
+        relationships: ["page.session"],
+      });
+      const candidateSessions = antiBuilder.distinctEntity(
+        candidatePages,
+        "relationship:page.session",
+        "session",
+      );
+      const historicalOnly = antiBuilder.antiJoin(
+        historicalPages,
+        candidateSessions,
+        [{ left: "relationship:page.session", right: "session" }],
+      );
+      antiBuilder.output("historicalOnly", historicalOnly, [
+        { name: "session", slot: "relationship:page.session" },
+      ]);
+      const antiPlan = antiBuilder.finish();
+      const antiLowerer = new AnalyticsLogicalToDbLowerer(antiPlan, {
+        siteId: SITE_A,
+        time: antiPlan.context.time,
+      });
+      const antiOutput = antiPlan.outputs[0]!;
+      const loweredAnti = antiLowerer.lower(antiOutput);
+      expect(
+        antiLowerer.isCandidateBoundedSlot(
+          historicalOnly.id,
+          historicalOnly.slots["relationship:page.session"]!,
+        ),
+      ).toBe(false);
+      expect(
+        antiLowerer.candidateActivitySessionRelation(historicalOnly.id),
+      ).toBeUndefined();
+      expect(
+        antiLowerer.isCandidateActivitySessionRestricted(historicalOnly.id),
+      ).toBe(false);
+      const antiQuery = compileD1Query(
+        antiLowerer.projectOutput(loweredAnti, [
+          { name: "sessionId", slot: antiOutput.fields[0]!.slot, component: 1 },
+        ]),
+      );
+      expect(
+        (
+          await createD1DatabaseClient(createSqliteD1Database(db)).all(
+            antiQuery,
+          )
+        ).results,
+      ).toEqual([{ sessionId: "s-historical" }]);
+
+      const membershipBuilder = new LogicalPlanBuilder(context);
+      const membershipLeft = membershipBuilder.source("page", {
+        temporalDomain: "candidate",
+        relationships: ["page.session"],
+        attributes: ["page.path"],
+      });
+      const membershipRight = membershipBuilder.source("page", {
+        temporalDomain: "candidate",
+        relationships: ["page.session"],
+      });
+      const matchedPages = membershipBuilder.semiJoin(
+        membershipLeft,
+        membershipRight,
+        [
+          {
+            left: "relationship:page.session",
+            right: "relationship:page.session",
+          },
+        ],
+      );
+      membershipBuilder.output("matchedPages", matchedPages, [
+        { name: "path", slot: "attribute:page.path" },
+        { name: "session", slot: "relationship:page.session" },
+      ]);
+      const membershipPlan = membershipBuilder.finish();
+      const membershipLowerer = new AnalyticsLogicalToDbLowerer(
+        membershipPlan,
+        { siteId: SITE_A, time: membershipPlan.context.time },
+      );
+      const membershipOutput = membershipPlan.outputs[0]!;
+      const membershipQuery = compileD1Query(
+        membershipLowerer.projectOutput(
+          membershipLowerer.lower(membershipOutput),
+          [
+            { name: "path", slot: membershipOutput.fields[0]!.slot },
+            {
+              name: "sessionId",
+              slot: membershipOutput.fields[1]!.slot,
+              component: 1,
+            },
+          ],
+        ),
+      );
+      const matchingRows = (
+        await createD1DatabaseClient(createSqliteD1Database(db)).all(
+          membershipQuery,
+        )
+      ).results as Array<{ readonly path: string; readonly sessionId: string }>;
+      expect(
+        membershipLowerer.isCandidateBoundedSlot(
+          matchedPages.id,
+          membershipOutput.fields[1]!.slot,
+        ),
+      ).toBe(true);
+      expect(
+        membershipLowerer.candidateActivitySessionRelation(matchedPages.id),
+      ).toBe(membershipRight.id);
+      expect(
+        membershipLowerer.isCandidateActivitySessionRestricted(matchedPages.id),
+      ).toBe(true);
+      matchingRows.sort((left, right) =>
+        String(left.path).localeCompare(String(right.path)),
+      );
+      expect(matchingRows).toEqual([
+        { path: "/a", sessionId: "s-shared" },
+        { path: "/b", sessionId: "s-shared" },
+        { path: "/current", sessionId: "s-current" },
+      ]);
+
+      const scalarMembershipBuilder = new LogicalPlanBuilder(context);
+      const scalarLeft = scalarMembershipBuilder.source("page", {
+        temporalDomain: "candidate",
+        attributes: ["page.path"],
+      });
+      const scalarRight = scalarMembershipBuilder.source("page", {
+        temporalDomain: "candidate",
+        attributes: ["page.path"],
+      });
+      const matchingPaths = scalarMembershipBuilder.semiJoin(
+        scalarLeft,
+        scalarRight,
+        [{ left: "attribute:page.path", right: "attribute:page.path" }],
+      );
+      scalarMembershipBuilder.output("matchingPaths", matchingPaths, [
+        { name: "path", slot: "attribute:page.path" },
+      ]);
+      const scalarMembershipPlan = scalarMembershipBuilder.finish();
+      const scalarMembershipLowerer = new AnalyticsLogicalToDbLowerer(
+        scalarMembershipPlan,
+        { siteId: SITE_A, time: scalarMembershipPlan.context.time },
+      );
+      const scalarMembershipOutput = scalarMembershipPlan.outputs[0]!;
+      const scalarMembershipQuery = compileD1Query(
+        scalarMembershipLowerer.projectOutput(
+          scalarMembershipLowerer.lower(scalarMembershipOutput),
+          [{ name: "path", slot: scalarMembershipOutput.fields[0]!.slot }],
+        ),
+      );
+      const matchedPaths = (
+        await createD1DatabaseClient(createSqliteD1Database(db)).all(
+          scalarMembershipQuery,
+        )
+      ).results as Array<{ readonly path: string }>;
+      matchedPaths.sort((left, right) => left.path.localeCompare(right.path));
+      expect(matchedPaths).toEqual([
+        { path: "/a" },
+        { path: "/b" },
+        { path: "/current" },
+        { path: "/empty" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lowers registered Page and Event Observation carriers and proves identity through AntiJoin", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA } = setupSites(db);
+      const pageOwner = addPage(
+        db,
+        siteA,
+        "observation-carrier-page",
+        "s-page",
+        10,
+        "/carrier-page",
+      );
+      const oldOwner = addPage(
+        db,
+        siteA,
+        "observation-carrier-old-owner",
+        "s-old",
+        20,
+        "/old-owner",
+      );
+      const newOwner = addPage(
+        db,
+        siteA,
+        "observation-carrier-new-owner",
+        "s-new",
+        110,
+        "/new-owner",
+      );
+      insertEvent(db, {
+        eventId: "observation-carrier-event",
+        site: siteA,
+        visit: pageOwner,
+        occurredAt: 30,
+      });
+      insertEvent(db, {
+        eventId: "observation-carrier-old-event",
+        site: siteA,
+        visit: oldOwner,
+        occurredAt: 40,
+      });
+      insertEvent(db, {
+        eventId: "observation-carrier-new-event",
+        site: siteA,
+        visit: newOwner,
+        occurredAt: 120,
+      });
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+
+      const pageBuilder = new LogicalPlanBuilder(context);
+      const pageObservation = pageBuilder.source("observation", {
+        temporalDomain: "read",
+        relationships: ["observation.session"],
+        attributes: ["page.path"],
+      });
+      pageBuilder.output("pageObservation", pageObservation, [
+        { name: "observation", slot: "entity" },
+        { name: "path", slot: "attribute:page.path" },
+        { name: "session", slot: "relationship:observation.session" },
+      ]);
+      const pagePlan = pageBuilder.finish();
+      const pageLowerer = new AnalyticsLogicalToDbLowerer(pagePlan, {
+        siteId: SITE_A,
+        time: pagePlan.context.time,
+      });
+      const pageOutput = pagePlan.outputs[0]!;
+      const pageQuery = compileD1Query(
+        pageLowerer.projectOutput(pageLowerer.lower(pageOutput), [
+          {
+            name: "activityId",
+            slot: pageOutput.fields[0]!.slot,
+            component: 2,
+          },
+          { name: "path", slot: pageOutput.fields[1]!.slot },
+          {
+            name: "sessionId",
+            slot: pageOutput.fields[2]!.slot,
+            component: 1,
+          },
+        ]),
+      );
+      expect(
+        (
+          await createD1DatabaseClient(createSqliteD1Database(db)).all(
+            pageQuery,
+          )
+        ).results,
+      ).toEqual([
+        {
+          activityId: "observation-carrier-page",
+          path: "/carrier-page",
+          sessionId: "s-page",
+        },
+        {
+          activityId: "observation-carrier-old-owner",
+          path: "/old-owner",
+          sessionId: "s-old",
+        },
+      ]);
+
+      const eventBuilder = new LogicalPlanBuilder(context);
+      const eventObservation = eventBuilder.source("observation", {
+        temporalDomain: "read",
+        relationships: ["observation.session"],
+        attributes: ["event.name"],
+      });
+      eventBuilder.output("eventObservation", eventObservation, [
+        { name: "observation", slot: "entity" },
+        { name: "name", slot: "attribute:event.name" },
+        { name: "session", slot: "relationship:observation.session" },
+      ]);
+      const eventPlan = eventBuilder.finish();
+      const eventLowerer = new AnalyticsLogicalToDbLowerer(eventPlan, {
+        siteId: SITE_A,
+        time: eventPlan.context.time,
+      });
+      const eventOutput = eventPlan.outputs[0]!;
+      const eventQuery = compileD1Query(
+        eventLowerer.projectOutput(eventLowerer.lower(eventOutput), [
+          {
+            name: "activityId",
+            slot: eventOutput.fields[0]!.slot,
+            component: 2,
+          },
+          { name: "name", slot: eventOutput.fields[1]!.slot },
+          {
+            name: "sessionId",
+            slot: eventOutput.fields[2]!.slot,
+            component: 1,
+          },
+        ]),
+      );
+      expect(
+        (
+          await createD1DatabaseClient(createSqliteD1Database(db)).all(
+            eventQuery,
+          )
+        ).results,
+      ).toEqual([
+        {
+          activityId: "observation-carrier-event",
+          name: "activity",
+          sessionId: "s-page",
+        },
+        {
+          activityId: "observation-carrier-old-event",
+          name: "activity",
+          sessionId: "s-old",
+        },
+      ]);
+
+      const forwardingBuilder = new LogicalPlanBuilder(context);
+      const forwardingEvents = forwardingBuilder.source("event", {
+        temporalDomain: "read",
+        relationships: ["event.observation"],
+      });
+      const forwardingObservations = forwardingBuilder.distinctEntity(
+        forwardingEvents,
+        "relationship:event.observation",
+        "observation",
+      );
+      const forwardedLookup = forwardingBuilder.relationshipLookup(
+        forwardingObservations,
+        "observation.session",
+      );
+      forwardingBuilder.output("forwarded", forwardedLookup, [
+        { name: "observation", slot: "observation" },
+      ]);
+      const forwardingPlan = forwardingBuilder.finish();
+      const forwardingLowerer = new AnalyticsLogicalToDbLowerer(
+        forwardingPlan,
+        { siteId: SITE_A, time: forwardingPlan.context.time },
+      );
+      const forwardingOutput = forwardingPlan.outputs[0]!;
+      const forwardingQuery = compileD1Query(
+        forwardingLowerer.projectOutput(
+          forwardingLowerer.lower(forwardingOutput),
+          [
+            {
+              name: "eventId",
+              slot: forwardingOutput.fields[0]!.slot,
+              component: 2,
+            },
+          ],
+        ),
+      );
+      const forwardedRows = (
+        await createD1DatabaseClient(createSqliteD1Database(db)).all(
+          forwardingQuery,
+        )
+      ).results as Array<{ readonly eventId: string }>;
+      expect(forwardedRows.map((row) => row.eventId).sort()).toEqual([
+        "observation-carrier-event",
+        "observation-carrier-old-event",
+      ]);
+
+      const identityBuilder = new LogicalPlanBuilder(context);
+      const historicalEvents = identityBuilder.source("event", {
+        temporalDomain: "read",
+        relationships: ["event.observation"],
+      });
+      const historicalObservations = identityBuilder.distinctEntity(
+        historicalEvents,
+        "relationship:event.observation",
+        "observation",
+      );
+      const candidateEvents = identityBuilder.source("event", {
+        temporalDomain: "candidate",
+        relationships: ["event.observation"],
+      });
+      const candidateObservations = identityBuilder.distinctEntity(
+        candidateEvents,
+        "relationship:event.observation",
+        "observation",
+      );
+      const remainingObservations = identityBuilder.antiJoin(
+        historicalObservations,
+        candidateObservations,
+        [{ left: "observation", right: "observation" }],
+      );
+      const lookedUp = identityBuilder.relationshipLookup(
+        remainingObservations,
+        "observation.session",
+      );
+      identityBuilder.output("remaining", lookedUp, [
+        { name: "observation", slot: "observation" },
+        { name: "session", slot: "relationship:observation.session" },
+      ]);
+      const identityPlan = identityBuilder.finish();
+      const identityLowerer = new AnalyticsLogicalToDbLowerer(identityPlan, {
+        siteId: SITE_A,
+        time: identityPlan.context.time,
+      });
+      const identityOutput = identityPlan.outputs[0]!;
+      const identityQuery = compileD1Query(
+        identityLowerer.projectOutput(identityLowerer.lower(identityOutput), [
+          {
+            name: "eventId",
+            slot: identityOutput.fields[0]!.slot,
+            component: 2,
+          },
+          {
+            name: "sessionId",
+            slot: identityOutput.fields[1]!.slot,
+            component: 1,
+          },
+        ]),
+      );
+      expect(
+        (
+          await createD1DatabaseClient(createSqliteD1Database(db)).all(
+            identityQuery,
+          )
+        ).results,
+      ).toEqual([
+        { eventId: "observation-carrier-event", sessionId: "s-page" },
+        { eventId: "observation-carrier-old-event", sessionId: "s-old" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects nullable or scalar set inputs and refuses unbounded D1 source ranges", () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA } = setupSites(db);
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+
+      const nullableBuilder = new LogicalPlanBuilder(context);
+      const nullablePages = nullableBuilder.source("page", {
+        temporalDomain: "candidate",
+        relationships: ["page.session"],
+      });
+      const nullableLeft = nullableBuilder.distinct(nullablePages, [
+        { input: "relationship:page.session" },
+      ]);
+      const nullableRight = nullableBuilder.distinct(nullablePages, [
+        { input: "relationship:page.session" },
+      ]);
+      const nullableUnion = nullableBuilder.setOperation("union", [
+        nullableLeft,
+        nullableRight,
+      ]);
+      nullableBuilder.output("nullableUnion", nullableUnion, [
+        { name: "session", slot: "relationship:page.session" },
+      ]);
+      const nullablePlan = nullableBuilder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(nullablePlan, {
+          siteId: SITE_A,
+          time: nullablePlan.context.time,
+        }).lower(nullablePlan.outputs[0]!),
+      ).toThrow(/Set operations require a non-null composite Session key/u);
+
+      const scalarBuilder = new LogicalPlanBuilder(context);
+      const scalarPages = scalarBuilder.source("page", {
+        temporalDomain: "candidate",
+      });
+      const counts = [0, 1].map(() =>
+        scalarBuilder.aggregate(scalarPages, {}, [
+          { name: "rows", kind: "count-rows" },
+        ]),
+      );
+      const scalarUnion = scalarBuilder.setOperation("union", counts);
+      scalarBuilder.output("scalarUnion", scalarUnion, [
+        { name: "rows", slot: "rows" },
+      ]);
+      const scalarPlan = scalarBuilder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(scalarPlan, {
+          siteId: SITE_A,
+          time: scalarPlan.context.time,
+        }).lower(scalarPlan.outputs[0]!),
+      ).toThrow(/Set operations require a non-null composite Session key/u);
+
+      const unboundedContext = {
+        ...context,
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "retained-history" },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+      };
+      const unboundedBuilder = new LogicalPlanBuilder(unboundedContext);
+      const unboundedPages = unboundedBuilder.source("page", {
+        temporalDomain: "read",
+      });
+      unboundedBuilder.output("unbounded", unboundedPages, [
+        { name: "page", slot: "entity" },
+      ]);
+      const unboundedPlan = unboundedBuilder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(unboundedPlan, {
+          siteId: SITE_A,
+          time: unboundedPlan.context.time,
+        }).lower(unboundedPlan.outputs[0]!),
+      ).toThrow(/not a safe bounded D1 range/u);
+
+      const observationBuilder = new LogicalPlanBuilder(context);
+      const historicalObservations = observationBuilder.source("observation", {
+        temporalDomain: "read",
+        relationships: ["observation.session"],
+      });
+      observationBuilder.output(
+        "historicalObservations",
+        historicalObservations,
+        [{ name: "session", slot: "relationship:observation.session" }],
+      );
+      const observationPlan = observationBuilder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(observationPlan, {
+          siteId: SITE_A,
+          time: observationPlan.context.time,
+        }).lower(observationPlan.outputs[0]!),
+      ).toThrow(
+        /unqualified Observation source is supported only for the candidate Page\/Event union/u,
+      );
+
+      expect(siteA.id).toBe(SITE_A);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lowers keyless scalar COUNT_ROWS joins and rejects keyed entity joins", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA } = setupSites(db);
+      addPage(db, siteA, "scalar-join-a", "s-a", 110, "/a");
+      addPage(db, siteA, "scalar-join-b", "s-b", 120, "/b");
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+      const builder = new LogicalPlanBuilder(context);
+      const pages = builder.source("page", { temporalDomain: "candidate" });
+      const counts = ["leftRows", "rightRows"].map((name) =>
+        builder.aggregate(pages, {}, [{ name, kind: "count-rows" }]),
+      );
+      const joinedCounts = builder.join(counts[0]!, counts[1]!, []);
+      builder.output("counts", joinedCounts, [
+        { name: "leftRows", slot: "leftRows" },
+        { name: "rightRows", slot: "right.rightRows" },
+      ]);
+      const plan = builder.finish();
+      const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+        siteId: SITE_A,
+        time: plan.context.time,
+      });
+      const output = plan.outputs[0]!;
+      const query = compileD1Query(
+        lowerer.projectOutput(lowerer.lower(output), [
+          { name: "leftRows", slot: output.fields[0]!.slot },
+          { name: "rightRows", slot: output.fields[1]!.slot },
+        ]),
+      );
+      expect(
+        (await createD1DatabaseClient(createSqliteD1Database(db)).all(query))
+          .results,
+      ).toEqual([{ leftRows: 2, rightRows: 2 }]);
+
+      const keyedBuilder = new LogicalPlanBuilder(context);
+      const leftPages = keyedBuilder.source("page", {
+        temporalDomain: "candidate",
+      });
+      const rightPages = keyedBuilder.source("page", {
+        temporalDomain: "candidate",
+      });
+      const keyedJoin = keyedBuilder.join(leftPages, rightPages, [
+        { left: "entity", right: "entity" },
+      ]);
+      keyedBuilder.output("keyedJoin", keyedJoin, [
+        { name: "page", slot: "entity" },
+      ]);
+      const keyedPlan = keyedBuilder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(keyedPlan, {
+          siteId: SITE_A,
+          time: keyedPlan.context.time,
+        }).lower(keyedPlan.outputs[0]!),
+      ).toThrow(/Only a keyless inner join of scalar relations is supported/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects unsupported entity, payload, and mixed-activity Source contracts", () => {
+    const context = {
+      subject: createSemanticSubjectDomain({
+        origin: "site",
+        siteIds: [SITE_A as never],
+      }),
+      time: createSemanticTemporalDomains({
+        candidate: CANDIDATE_RANGE as never,
+        read: { kind: "bounded", range: READ_RANGE as never },
+        reportingTimeZone: "UTC" as never,
+        capturedAtMs: 200 as never,
+      }),
+      scope: resolveAnalyticsScope("session"),
+    };
+
+    const sessionBuilder = new LogicalPlanBuilder(context);
+    const sessions = sessionBuilder.source("session");
+    sessionBuilder.output("session", sessions, [
+      { name: "session", slot: "entity" },
+    ]);
+    const sessionPlan = sessionBuilder.finish();
+    expect(() =>
+      new AnalyticsLogicalToDbLowerer(sessionPlan, {
+        siteId: SITE_A,
+        time: sessionPlan.context.time,
+      }).lower(sessionPlan.outputs[0]!),
+    ).toThrow(/supports Page, Event, and Observation carriers only/u);
+
+    const payloadBuilder = new LogicalPlanBuilder(context);
+    const payloadEvents = payloadBuilder.source("event", {
+      temporalDomain: "read",
+      attributes: ["event.payload"],
+    });
+    payloadBuilder.output("payload", payloadEvents, [
+      { name: "payload", slot: "attribute:event.payload" },
+    ]);
+    const payloadPlan = payloadBuilder.finish();
+    expect(() =>
+      new AnalyticsLogicalToDbLowerer(payloadPlan, {
+        siteId: SITE_A,
+        time: payloadPlan.context.time,
+      }).lower(payloadPlan.outputs[0]!),
+    ).toThrow(
+      /No registered D1 primitive storage mapping exists for event\.payload/u,
+    );
+
+    const mixedBuilder = new LogicalPlanBuilder(context);
+    const mixedObservations = mixedBuilder.source("observation", {
+      temporalDomain: "candidate",
+      relationships: ["observation.session"],
+      attributes: ["page.path", "event.name"],
+    });
+    mixedBuilder.output("mixed", mixedObservations, [
+      { name: "pagePath", slot: "attribute:page.path" },
+      { name: "eventName", slot: "attribute:event.name" },
+    ]);
+    const mixedPlan = mixedBuilder.finish();
+    expect(() =>
+      new AnalyticsLogicalToDbLowerer(mixedPlan, {
+        siteId: SITE_A,
+        time: mixedPlan.context.time,
+      }).lower(mixedPlan.outputs[0]!),
+    ).toThrow(
+      /Mixed Page\/Event bindings do not define one native Observation carrier/u,
+    );
+  });
+
+  it("preserves observation bag rows and declared Event carrier row domains through Project", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA, siteB } = setupSites(db);
+      const ownerA = addPage(
+        db,
+        siteA,
+        "project-owner-a",
+        "s-shared",
+        110,
+        "/a",
+      );
+      addPage(db, siteA, "project-owner-b", "s-shared", 120, "/b");
+      insertEvent(db, {
+        eventId: "project-shared-event",
+        site: siteA,
+        visit: ownerA,
+        occurredAt: 130,
+      });
+
+      // The event table has a valid foreign key to the other site's name, but
+      // the D1 native Event carrier is site scoped and requires a same-site
+      // dictionary match. Projecting away event.name must keep that source
+      // row domain instead of dropping the join with the dead value slot.
+      const dictionaryOwner = addPage(
+        db,
+        siteA,
+        "project-dictionary-owner",
+        "s-dictionary",
+        30,
+        "/dictionary",
+      );
+      insertEvent(db, {
+        eventId: "project-cross-site-name",
+        site: siteA,
+        visit: dictionaryOwner,
+        occurredAt: 30,
+        eventNameId: siteB.eventNameId,
+      });
+
+      // The event is site A data whose FK points at a site B visit. Projecting
+      // away observation.session must not remove the declared owner carrier
+      // join and silently widen this source's row domain.
+      const ownerB = addPage(
+        db,
+        siteB,
+        "project-cross-site-owner",
+        "s-owner-b",
+        31,
+        "/owner",
+      );
+      insertEvent(db, {
+        eventId: "project-cross-site-owner-event",
+        site: siteA,
+        visit: ownerB,
+        occurredAt: 31,
+      });
+
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+      const lowerProjection = async (
+        attributes: readonly string[],
+        projectedSlot:
+          "relationship:observation.session" | "attribute:event.name",
+        outputComponent?: number,
+      ) => {
+        const builder = new LogicalPlanBuilder(context);
+        const observations = builder.source("observation", {
+          temporalDomain: attributes.length === 0 ? "candidate" : "read",
+          relationships: ["observation.session"],
+          attributes,
+        });
+        const projected = builder.project(observations, {
+          value: builder.slot(observations, projectedSlot),
+        });
+        builder.output("projected", projected, [
+          { name: "value", slot: "value" },
+        ]);
+        const plan = builder.finish();
+        const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+          siteId: SITE_A,
+          time: plan.context.time,
+        });
+        const lowered = lowerer.lower(plan.outputs[0]!);
+        const slot = plan.outputs[0]!.fields[0]!.slot;
+        const relation = lowerer.projectOutput(lowered, [
+          {
+            name: "value",
+            slot,
+            ...(outputComponent === undefined
+              ? {}
+              : { component: outputComponent }),
+          },
+        ]);
+        const result = await createD1DatabaseClient(
+          createSqliteD1Database(db),
+        ).all(compileD1Query(relation));
+        return result.results;
+      };
+
+      const projectedSessions = (await lowerProjection(
+        [],
+        "relationship:observation.session",
+        1,
+      )) as Array<{ readonly value: string | null }>;
+      expect(projectedSessions.map(({ value }) => value)).toEqual([
+        "s-shared",
+        "s-shared",
+        "s-shared",
+      ]);
+
+      const projectedSessionAfterDeadName = await lowerProjection(
+        ["event.name"],
+        "relationship:observation.session",
+        1,
+      );
+      expect(projectedSessionAfterDeadName).toEqual([]);
+
+      const projectedNameAfterDeadOwner = await lowerProjection(
+        ["event.name"],
+        "attribute:event.name",
+      );
+      expect(projectedNameAfterDeadOwner).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps Event identity rows when the same-site Session owner is absent", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA, siteB } = setupSites(db);
+      // This Page and Event deliberately share a local ID, while the Event
+      // belongs to a different Page. Event identity lookup must use the
+      // Observation kind instead of treating the shared ID as a Page key.
+      addPage(db, siteA, "shared-page-event-id", "s-page-owner", 10, "/page");
+      const eventOwner = addPage(
+        db,
+        siteA,
+        "event-owner",
+        "s-event-owner",
+        11,
+        "/event-owner",
+      );
+      const emptyOwner = addPage(
+        db,
+        siteA,
+        "empty-owner",
+        "",
+        12,
+        "/empty-owner",
+      );
+      // visits.session_id is NOT NULL in the persisted schema, so exercise
+      // the absent/null key through the cross-site owner below and use an
+      // empty same-site Session ID for the stored-but-not-present case.
+      const crossSiteOwner = addPage(
+        db,
+        siteB,
+        "cross-site-owner",
+        "s-cross-site",
+        14,
+        "/cross-site-owner",
+      );
+      for (const row of [
+        {
+          eventId: "shared-page-event-id",
+          visit: eventOwner,
+          occurredAt: 20,
+        },
+        { eventId: "second-event", visit: eventOwner, occurredAt: 21 },
+        { eventId: "empty-event", visit: emptyOwner, occurredAt: 22 },
+        {
+          eventId: "cross-site-event",
+          visit: crossSiteOwner,
+          occurredAt: 23,
+        },
+      ]) {
+        insertEvent(db, { ...row, site: siteA });
+      }
+
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+      const buildPlan = (output: "lookup" | "count") => {
+        const builder = new LogicalPlanBuilder(context);
+        const events = builder.source("event", {
+          temporalDomain: "read",
+          relationships: ["event.observation"],
+        });
+        const observations = builder.distinctEntity(
+          events,
+          "relationship:event.observation",
+          "observation",
+        );
+        const lookedUp = builder.relationshipLookup(
+          observations,
+          "observation.session",
+        );
+        if (output === "lookup") {
+          const projected = builder.project(lookedUp, {
+            observation: builder.slot(lookedUp, "observation"),
+            session: builder.slot(lookedUp, "relationship:observation.session"),
+          });
+          builder.output("lookup", projected, [
+            { name: "observation", slot: "observation" },
+            { name: "session", slot: "session" },
+          ]);
+        } else {
+          // Two Events share one Session. Projecting only that Session key
+          // must retain both Observation rows for COUNT_ROWS.
+          const sessionRows = builder.project(lookedUp, {
+            session: builder.slot(lookedUp, "relationship:observation.session"),
+          });
+          const counted = builder.aggregate(sessionRows, {}, [
+            { name: "rows", kind: "count-rows" },
+          ]);
+          builder.output("count", counted, [{ name: "rows", slot: "rows" }]);
+        }
+        return builder.finish();
+      };
+      const lookupPlan = buildPlan("lookup");
+      const lookupLowerer = new AnalyticsLogicalToDbLowerer(lookupPlan, {
+        siteId: SITE_A,
+        time: lookupPlan.context.time,
+      });
+      const lookupOutput = lookupPlan.outputs[0]!;
+      const loweredLookup = lookupLowerer.lower(lookupOutput);
+      const observation = lookupLowerer.lowerSourceValue(
+        loweredLookup,
+        lookupOutput.fields.find((field) => field.name === "observation")!.slot,
+        "test.observation",
+      );
+      const session = lookupLowerer.lowerSourceValue(
+        loweredLookup,
+        lookupOutput.fields.find((field) => field.name === "session")!.slot,
+        "test.session",
+      );
+      if (observation.kind !== "entity" || session.kind !== "entity") {
+        throw new Error("Expected Observation and Session entity outputs.");
+      }
+      const rows = await createD1DatabaseClient(createSqliteD1Database(db)).all(
+        compileD1Query(
+          project(loweredLookup.relation, {
+            eventId: observation.keys[2]!,
+            sessionSitePk: session.keys[0]!,
+            sessionId: session.keys[1]!,
+            present: session.present,
+          }),
+        ),
+      );
+      const actualRows = rows.results.map((row) => ({
+        ...row,
+        present: Number(row.present),
+      })) as unknown as Array<{
+        readonly eventId: string;
+        readonly sessionSitePk: number | null;
+        readonly sessionId: string | null;
+        readonly present: number;
+      }>;
+      actualRows.sort((a, b) => a.eventId.localeCompare(b.eventId));
+      const expectedByEvent: Record<
+        string,
+        {
+          readonly sessionSitePk: number | null;
+          readonly sessionId: string | null;
+          readonly present: number;
+        }
+      > = {
+        "shared-page-event-id": {
+          sessionSitePk: siteA.key,
+          sessionId: "s-event-owner",
+          present: 1,
+        },
+        "second-event": {
+          sessionSitePk: siteA.key,
+          sessionId: "s-event-owner",
+          present: 1,
+        },
+        "empty-event": {
+          sessionSitePk: siteA.key,
+          sessionId: "",
+          present: 0,
+        },
+        "cross-site-event": {
+          sessionSitePk: null,
+          sessionId: null,
+          present: 0,
+        },
+      };
+      expect(actualRows).toHaveLength(4);
+      for (const [eventId, expected] of Object.entries(expectedByEvent)) {
+        expect(actualRows.filter((row) => row.eventId === eventId)).toEqual([
+          { eventId, ...expected },
+        ]);
+      }
+
+      const countPlan = buildPlan("count");
+      const countLowerer = new AnalyticsLogicalToDbLowerer(countPlan, {
+        siteId: SITE_A,
+        time: countPlan.context.time,
+      });
+      const countOutput = countPlan.outputs[0]!;
+      const loweredCount = countLowerer.lower(countOutput);
+      const countQuery = compileD1Query(
+        countLowerer.projectOutput(loweredCount, [
+          { name: "rows", slot: countOutput.fields[0]!.slot },
+        ]),
+      );
+      expect(
+        (
+          await createD1DatabaseClient(createSqliteD1Database(db)).all(
+            countQuery,
+          )
+        ).results,
+      ).toEqual([{ rows: 4 }]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps nullable SQL expression truth distinct inside native primitive lowering", async () => {
     const db = createMigratedDatabase();
     try {
@@ -875,23 +2259,20 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       expect(trace.bindings[0]).toHaveLength(
         lowered.query.bindings?.length ?? 0,
       );
-      expect(lowered.query.bindings).toHaveLength(11);
+      expect(lowered.query.bindings).toHaveLength(16);
       expect(lowered.query.sql).toContain("UNION");
       expect(lowered.query.sql).toContain("TRIM(");
       expect(lowered.query.sql).toContain("EXISTS (");
-      expect(lowered.query.sql).not.toMatch(/\bIN\s*\(/u);
+      expect(lowered.query.bindings).toContain(SITE_A);
 
       const plan = explainQueryPlan(db, lowered.query);
       expect(plan.length).toBeGreaterThan(0);
       const explain = plan.join("\n");
       expect(explain).toMatch(
-        /SCAN \w+ USING COVERING INDEX idx_visits_site_pk_session_started_at/u,
+        /SEARCH \w+ USING INDEX idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u,
       );
       expect(explain).toMatch(
-        /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u,
-      );
-      expect(explain).toMatch(
-        /SEARCH \w+ USING INDEX idx_visits_site_pk_session_started_at \(site_pk=\? AND session_id=\? AND started_at>\? AND started_at<\?\)/u,
+        /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
       );
       expect(explain).toMatch(
         /SEARCH \w+ USING INDEX sqlite_autoindex_visits_1 \(visit_id=\?\)/u,
@@ -1243,15 +2624,14 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       operator: "and",
       terms: [changedFilter.predicate],
     };
-    const unsupportedExpression = lowerAnalyticsPagePathSessionPlan(
+    const redundantBoolean = lowerAnalyticsPagePathSessionPlan(
       asLogicalPlan(changedExpression),
     );
-    expect(unsupportedExpression).toMatchObject({
-      kind: "unsupported",
-      capability: "session-boolean-plan-shape",
-      node: expect.stringContaining("predicate"),
-    });
-    expect("query" in unsupportedExpression).toBe(false);
+    expect(redundantBoolean.kind).toBe("supported");
+    if (redundantBoolean.kind !== "supported")
+      throw new Error("Expected the one-term Boolean AND to be supported.");
+    expect(redundantBoolean.query.sql).toBe(base.query.sql);
+    expect(redundantBoolean.query.bindings).toEqual(base.query.bindings);
 
     const wrongSlot = mutablePlan(base.logicalPlan);
     const wrongSlotFilter = wrongSlot.nodes.find(
@@ -1311,7 +2691,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
     expect(unsupportedWrongTitleLineage).toMatchObject({
       kind: "unsupported",
       capability: "session-boolean-plan-shape",
-      node: expect.stringContaining("page.title"),
+      reason: expect.stringContaining("page.title"),
     });
     expect("query" in unsupportedWrongTitleLineage).toBe(false);
 
@@ -1680,9 +3060,8 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           readonly conditionLeaves: number;
           readonly explain: {
             readonly operations: number;
-            readonly candidatePageCoveringScans: number;
-            readonly candidateEventCoveringScans: number;
-            readonly historicalKeyRangeSearches: number;
+            readonly pageRangeIndexSearches: number;
+            readonly eventRangeIndexSearches: number;
             readonly visitPrimaryKeyLookups: number;
             readonly unionTempTrees: number;
           };
@@ -1774,11 +3153,12 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
 
         const explain = explainQueryPlan(db, lowered.query);
         const explainText = explain.join("\n");
+        expect(explain.some((line) => /^SCAN t\d+\b/u.test(line))).toBe(false);
         expect(explainText).toMatch(
-          /SCAN \w+ USING COVERING INDEX idx_visits_site_pk_session_started_at/u,
+          /SEARCH \w+ USING INDEX idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u,
         );
         expect(explainText).toMatch(
-          /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u,
+          /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
         );
         const countExplain = (pattern: RegExp) =>
           explain.filter((line) => pattern.test(line)).length;
@@ -1790,14 +3170,11 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           conditionLeaves: countConditionLeaves(item.document.root),
           explain: {
             operations: explain.length,
-            candidatePageCoveringScans: countExplain(
-              /SCAN \w+ USING COVERING INDEX idx_visits_site_pk_session_started_at/u,
+            pageRangeIndexSearches: countExplain(
+              /SEARCH \w+ USING INDEX idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u,
             ),
-            candidateEventCoveringScans: countExplain(
-              /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u,
-            ),
-            historicalKeyRangeSearches: countExplain(
-              /SEARCH \w+ USING INDEX idx_visits_site_pk_session_started_at \(site_pk=\? AND session_id=\? AND started_at>\? AND started_at<\?\)/u,
+            eventRangeIndexSearches: countExplain(
+              /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
             ),
             visitPrimaryKeyLookups: countExplain(
               /SEARCH \w+ USING INTEGER PRIMARY KEY \(rowid=\?\)/u,
@@ -1806,85 +3183,203 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           },
         };
       }
+      const boundaryCosts = [];
+      const boundaryClient = createD1DatabaseClient(createSqliteD1Database(db));
+      for (const leafCount of [8, 12] as const) {
+        const document = filterDocument({
+          kind: "and",
+          children: Array.from({ length: leafCount }, (_, index) =>
+            index % 2 === 0
+              ? pathCondition(`/boundary-page-${leafCount}-${index}`)
+              : eventNameCondition(`boundary-event-${leafCount}-${index}`),
+          ),
+        });
+        const normalized = normalizeFilterDocument(
+          document,
+          analyticsFilterRegistry,
+        );
+        expect(countConditionLeaves(normalized.root)).toBe(leafCount);
+        const lowered = lower(document);
+        if (lowered.kind === "unsupported") {
+          expect(lowered).toMatchObject({
+            capability: "d1-query-budget-exceeded",
+            node: "compiled-query",
+          });
+          boundaryCosts.push({
+            leafCount,
+            kind: lowered.kind,
+            reason: lowered.reason,
+          });
+          continue;
+        }
+        const sqlBytes = new TextEncoder().encode(lowered.query.sql).length;
+        const bindings = lowered.query.bindings?.length ?? 0;
+        expect(sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(bindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+        const explain = explainQueryPlan(db, lowered.query);
+        const count = (pattern: RegExp) =>
+          explain.filter((line) => pattern.test(line)).length;
+        expect(count(/^SCAN t\d+\b/u)).toBe(0);
+        const boundaryRows = (await boundaryClient.all(lowered.query))
+          .results as Array<{
+          readonly site_pk: number;
+          readonly session_id: string;
+        }>;
+        const candidateSessionIds = new Set(
+          [
+            ...evaluatorPages
+              .filter(
+                (entity) =>
+                  entity.time !== undefined &&
+                  entity.time >= CANDIDATE_RANGE.startMs &&
+                  entity.time < CANDIDATE_RANGE.endExclusiveMs,
+              )
+              .map((entity) => entity.sessionId),
+            ...evaluatorEvents
+              .filter(
+                (entity) =>
+                  entity.time !== undefined &&
+                  entity.time >= CANDIDATE_RANGE.startMs &&
+                  entity.time < CANDIDATE_RANGE.endExclusiveMs,
+              )
+              .map((entity) => entity.sessionId),
+          ].filter((sessionId): sessionId is string => Boolean(sessionId)),
+        );
+        const expectedBoundarySessions = evaluateCandidateRestrictedSets(
+          document.root,
+          {
+            pages: evaluatorPages,
+            events: evaluatorEvents,
+            coverageRange: { startMs: 0, endExclusiveMs: 250 },
+          },
+          candidateSessionIds,
+        );
+        expect(new Set(boundaryRows.map((row) => row.session_id))).toEqual(
+          expectedBoundarySessions,
+        );
+        expect(boundaryRows.every((row) => row.site_pk === siteA.key)).toBe(
+          true,
+        );
+        boundaryCosts.push({
+          leafCount,
+          kind: lowered.kind,
+          sqlBytes,
+          bindings,
+          cteCount: cteDefinitionCount(lowered.query.sql),
+          explain: {
+            operations: explain.length,
+            pageRangeIndexSearches: count(
+              /idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u,
+            ),
+            eventRangeIndexSearches: count(
+              /idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
+            ),
+            visitIdUniqueIndexSearches: count(
+              /sqlite_autoindex_visits_1 \(visit_id=\?\)/u,
+            ),
+            eventIdUniqueIndexSearches: count(
+              /sqlite_autoindex_custom_events_1 \(event_id=\?\)/u,
+            ),
+          },
+        });
+      }
       // SQLite versions can represent the same UNION plan with different
-      // EXPLAIN rows. Keep the stable access-path counts exact and bound the
-      // version-dependent operation and temporary-tree counts separately.
+      // EXPLAIN rows. Require bounded Page/Event source searches, then keep
+      // statement, binding, SQL size, and owner lookup costs visible below.
+      for (const cost of Object.values(costs)) {
+        expect(cost.explain.pageRangeIndexSearches).toBeGreaterThan(0);
+        expect(cost.explain.eventRangeIndexSearches).toBeGreaterThan(0);
+      }
+      expect(
+        boundaryCosts.map(({ leafCount, kind }) => ({ leafCount, kind })),
+      ).toEqual([
+        { leafCount: 8, kind: "supported" },
+        { leafCount: 12, kind: "supported" },
+      ]);
+      expect(boundaryCosts[0]).toMatchObject({
+        sqlBytes: 49_629,
+        bindings: 54,
+        cteCount: 12,
+        explain: {
+          pageRangeIndexSearches: 5,
+          eventRangeIndexSearches: 5,
+          visitIdUniqueIndexSearches: 17,
+          eventIdUniqueIndexSearches: 8,
+        },
+      });
+      expect(boundaryCosts[1]).toMatchObject({
+        sqlBytes: 67_403,
+        bindings: 74,
+        cteCount: 16,
+        explain: {
+          pageRangeIndexSearches: 7,
+          eventRangeIndexSearches: 7,
+          visitIdUniqueIndexSearches: 25,
+          eventIdUniqueIndexSearches: 12,
+        },
+      });
+      expect(boundaryCosts[0]!.explain!.operations).toBeLessThanOrEqual(260);
+      expect(boundaryCosts[1]!.explain!.operations).toBeLessThanOrEqual(380);
       expect(costs).toMatchObject({
         and: {
           statements: 1,
-          bindings: 15,
-          sqlBytes: 21611,
+          bindings: 21,
+          sqlBytes: 20_574,
           explain: {
-            candidatePageCoveringScans: 1,
-            candidateEventCoveringScans: 1,
-            historicalKeyRangeSearches: 2,
-            visitPrimaryKeyLookups: 4,
+            visitPrimaryKeyLookups: 1,
           },
         },
         or: {
           statements: 1,
-          bindings: 12,
-          sqlBytes: 16146,
+          bindings: 17,
+          sqlBytes: 16_145,
           explain: {
-            candidatePageCoveringScans: 1,
-            candidateEventCoveringScans: 1,
-            historicalKeyRangeSearches: 1,
-            visitPrimaryKeyLookups: 3,
+            visitPrimaryKeyLookups: 1,
           },
         },
         not: {
           statements: 1,
-          bindings: 11,
-          sqlBytes: 16625,
+          bindings: 16,
+          sqlBytes: 16_765,
           explain: {
-            candidatePageCoveringScans: 1,
-            candidateEventCoveringScans: 1,
-            historicalKeyRangeSearches: 1,
-            visitPrimaryKeyLookups: 3,
+            visitPrimaryKeyLookups: 1,
           },
         },
         "nested-and-not": {
           statements: 1,
-          bindings: 15,
-          sqlBytes: 21935,
+          bindings: 21,
+          sqlBytes: 21_104,
           explain: {
-            candidatePageCoveringScans: 1,
-            candidateEventCoveringScans: 1,
-            historicalKeyRangeSearches: 2,
-            visitPrimaryKeyLookups: 4,
+            visitPrimaryKeyLookups: 1,
           },
         },
         "or-set-operation": {
           statements: 1,
-          bindings: 15,
-          sqlBytes: 21826,
+          bindings: 21,
+          sqlBytes: 20_927,
           explain: {
-            candidatePageCoveringScans: 1,
-            candidateEventCoveringScans: 1,
-            historicalKeyRangeSearches: 2,
-            visitPrimaryKeyLookups: 4,
+            visitPrimaryKeyLookups: 1,
           },
         },
       });
-      console.info(
-        "Wave 7 Analytics Session filter costs",
-        JSON.stringify(
-          Object.fromEntries(
-            [2, 3, 6].map((leafCount) => [
-              `${leafCount}-condition`,
-              Object.entries(costs)
-                .filter(([, cost]) => cost.conditionLeaves === leafCount)
-                .map(([name, cost]) => ({ name, ...cost })),
-            ]),
-          ),
-        ),
-      );
+      expect(costs["six-leaf-mixed"]).toMatchObject({
+        statements: 1,
+        bindings: 44,
+        sqlBytes: 41_187,
+        cteCount: 10,
+        explain: {
+          operations: 196,
+          pageRangeIndexSearches: 4,
+          eventRangeIndexSearches: 4,
+          visitPrimaryKeyLookups: 7,
+        },
+      });
       for (const [name, maxOperations, maxUnionTempTrees] of [
-        ["and", 36, 2],
-        ["or", 20, 1],
-        ["not", 40, 2],
-        ["nested-and-not", 51, 3],
-        ["or-set-operation", 56, 4],
+        ["and", 70, 2],
+        ["or", 40, 1],
+        ["not", 50, 2],
+        ["nested-and-not", 80, 3],
+        ["or-set-operation", 80, 4],
       ] as const) {
         expect(costs[name].explain.operations, name).toBeLessThanOrEqual(
           maxOperations,
@@ -2339,9 +3834,9 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           sqlLength: number;
           explain: {
             operations: number;
-            candidatePageCoveringScans: number;
-            candidateEventCoveringScans: number;
-            readEventTimeRangeSearches: number;
+            pageRangeIndexSearches: number;
+            eventRangeIndexSearches: number;
+            eventTimeRangeSearches: number;
             integerPrimaryKeyLookups: number;
             ownerVisitIndexLookups: number;
             unionTempTrees: number;
@@ -2391,13 +3886,13 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
             sqlLength: lowered.query.sql.length,
             explain: {
               operations: explainLines.length,
-              candidatePageCoveringScans: countExplain(
-                /SCAN \w+ USING COVERING INDEX idx_visits_site_pk_session_started_at/u,
+              pageRangeIndexSearches: countExplain(
+                /SEARCH \w+ USING INDEX idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u,
               ),
-              candidateEventCoveringScans: countExplain(
-                /SCAN \w+ USING COVERING INDEX idx_custom_events_site_pk_visit_time/u,
+              eventRangeIndexSearches: countExplain(
+                /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
               ),
-              readEventTimeRangeSearches: countExplain(
+              eventTimeRangeSearches: countExplain(
                 /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\? AND occurred_at>\? AND occurred_at<\?\)/u,
               ),
               integerPrimaryKeyLookups: countExplain(
@@ -2422,25 +3917,23 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           expect(explain).toMatch(/sqlite_autoindex_visits_1/u);
           expect(
             countExplain(/sqlite_autoindex_visits_1 \(visit_id=\?\)/u),
-          ).toBe(2);
+          ).toBe(3);
         }
       }
 
       expect(observedCosts["event-only"]).toMatchObject({
         statements: 1,
-        bindings: 11,
-        sqlLength: 19156,
+        bindings: 16,
+        sqlLength: 13_940,
         explain: {
-          candidatePageCoveringScans: 1,
-          candidateEventCoveringScans: 1,
-          readEventTimeRangeSearches: 1,
-          integerPrimaryKeyLookups: 4,
-          ownerVisitIndexLookups: 2,
+          eventTimeRangeSearches: 2,
+          integerPrimaryKeyLookups: 3,
+          ownerVisitIndexLookups: 3,
         },
       });
       expect(
         observedCosts["event-only"].explain.operations,
-      ).toBeLessThanOrEqual(21);
+      ).toBeLessThanOrEqual(45);
       expect(
         observedCosts["event-only"].explain.unionTempTrees,
       ).toBeLessThanOrEqual(1);
@@ -2495,15 +3988,15 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       if (!eventDomainSource)
         throw new Error("Expected the read Event Source node.");
       eventDomainSource.temporalDomain = "candidate";
-      const unsupportedEventDomain = lowerAnalyticsPagePathSessionPlan(
+      const candidateEventDomain = lowerAnalyticsPagePathSessionPlan(
         asLogicalPlan(eventDomain),
       );
-      expect(unsupportedEventDomain).toMatchObject({
-        kind: "unsupported",
-        capability: "session-boolean-plan-shape",
-        node: expect.stringContaining("temporalDomain"),
-      });
-      expect("query" in unsupportedEventDomain).toBe(false);
+      expect(candidateEventDomain.kind).toBe("supported");
+      if (candidateEventDomain.kind !== "supported")
+        throw new Error("Expected a candidate-domain Event plan to lower.");
+      expect(candidateEventDomain.query.bindings).not.toEqual(
+        eventLowering.query.bindings,
+      );
     } finally {
       db.close();
     }
@@ -2994,7 +4487,6 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         }),
       );
       expect(trace.preparedSql).toHaveLength(cases.length + 4);
-      console.info("Wave 8 native predicate costs", JSON.stringify(costs));
     } finally {
       db.close();
     }

@@ -30,6 +30,7 @@ import {
   validatePhysicalQueryPlan,
 } from "./physical-plan";
 import type { LogicalQueryNode, QuerySource, Relation } from "./plan";
+import type { ProjectNode } from "./plan";
 
 export interface ScopeBinding {
   readonly alias: string;
@@ -42,6 +43,10 @@ interface RenderContext {
   leftAlias: number;
   rightAlias: number;
   readonly sharedRelations: ReadonlyMap<LogicalQueryNode, string>;
+  readonly directScanProjections: ReadonlyMap<
+    ProjectNode,
+    PhysicalQueryPlan<object>["directScanProjections"][number]
+  >;
   readonly membershipStrategies?: ReadonlyMap<
     AnyInListExpression,
     { readonly strategy: "native" | "json-text"; readonly jsonText?: string }
@@ -320,6 +325,27 @@ function compileNode(
       );
     }
     case "project": {
+      const directScanProjection = context.directScanProjections.get(node);
+      if (directScanProjection) {
+        const alias = nextAlias(context, "t");
+        const selections = directScanProjection.sqlColumnNames.map(
+          (sqlColumnName, index) =>
+            concat(
+              identifier(alias),
+              text("."),
+              identifier(sqlColumnName),
+              text(` AS "_c${index}"`),
+            ),
+        );
+        return concat(
+          text("SELECT "),
+          join(selections),
+          text(" FROM "),
+          identifier(directScanProjection.scan.table.name),
+          text(" AS "),
+          identifier(alias),
+        );
+      }
       const source = compileNode(node.input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
       const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
@@ -532,6 +558,7 @@ function renderContext(
   sharedRelations: ReadonlyMap<LogicalQueryNode, string>,
   membershipStrategies?: RenderContext["membershipStrategies"],
   membershipUsage?: RenderContext["membershipUsage"],
+  directScanProjections: RenderContext["directScanProjections"] = new Map(),
 ): RenderContext {
   return {
     scanAlias: 0,
@@ -539,6 +566,7 @@ function renderContext(
     leftAlias: 0,
     rightAlias: 0,
     sharedRelations,
+    directScanProjections,
     ...(membershipStrategies ? { membershipStrategies } : {}),
     ...(membershipUsage ? { membershipUsage } : {}),
   };
@@ -635,8 +663,18 @@ function optimizeForFinalShape(physical: PhysicalQueryPlan<object>): {
   const sharedNames = new Map(
     sharedRelations.map(({ node, name }) => [node, name] as const),
   );
+  const directScanProjections = new Map(
+    physical.directScanProjections.map(
+      (choice) => [choice.project, choice] as const,
+    ),
+  );
   const membershipUsage = new Map<AnyInListExpression, number>();
-  const context = renderContext(sharedNames, undefined, membershipUsage);
+  const context = renderContext(
+    sharedNames,
+    undefined,
+    membershipUsage,
+    directScanProjections,
+  );
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;
     const body = compileNode(shared.node, context, new Map());
@@ -687,6 +725,11 @@ function renderAndBudget(
   const sharedNames = new Map(
     sharedRelations.map(({ node, name }) => [node, name] as const),
   );
+  const directScanProjections = new Map(
+    physical.directScanProjections.map(
+      (choice) => [choice.project, choice] as const,
+    ),
+  );
   const membershipStrategies = strategies
     ? new Map(
         strategies.map(
@@ -703,7 +746,14 @@ function renderAndBudget(
         ),
       )
     : undefined;
-  const context = renderContext(sharedNames, membershipStrategies);
+  const context = includeSharedRelations
+    ? renderContext(
+        sharedNames,
+        membershipStrategies,
+        undefined,
+        directScanProjections,
+      )
+    : renderContext(sharedNames, membershipStrategies);
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;
     const body = compileNode(shared.node, context, new Map());
