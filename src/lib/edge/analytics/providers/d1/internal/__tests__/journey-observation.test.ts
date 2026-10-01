@@ -338,6 +338,24 @@ function testEnv(database: DatabaseSync, trace?: SqliteD1Trace): Env {
   } as unknown as Env;
 }
 
+function legacySourceEnv(
+  database: DatabaseSync,
+  source: {
+    readonly sql: string;
+    readonly bindings: readonly (string | number)[];
+  },
+): Env {
+  const backing = createSqliteD1Database(database);
+  const prepared = backing
+    .prepare(source.sql)
+    .bind(...(source.bindings as SQLInputValue[]));
+  return {
+    DB: {
+      prepare: () => ({ bind: () => prepared }),
+    },
+  } as unknown as Env;
+}
+
 function compileTypedObservationQuery(
   siteId: string,
   target: { readonly type: "visitor" | "session"; readonly value: string },
@@ -688,24 +706,37 @@ describe("Journey report Observation D1 lowering", () => {
   });
 
   it("matches legacy detail-source bags and filters windows by owner start only", async () => {
-    const target = { type: "visitor", value: TARGET_VISITOR } as const;
-    for (const window of [undefined, WINDOW]) {
-      const expected = legacyDetailSourceRows(db, SITE_A, target, window);
-      const query = compileTypedObservationQuery(
-        SITE_A,
-        target,
-        "detail-source",
-        window,
-      );
-      const actual = (
-        await createD1DatabaseClient(createSqliteD1Database(db)).all(query)
-      ).results as Record<string, unknown>[];
-      expect(rowBag(actual)).toEqual(rowBag(expected));
+    const targets = [
+      { type: "visitor", value: TARGET_VISITOR },
+      { type: "session", value: TARGET_SESSION },
+    ] as const;
+    for (const target of targets) {
+      for (const window of [undefined, WINDOW]) {
+        const expected = legacyDetailSourceRows(db, SITE_A, target, window);
+        const query = compileTypedObservationQuery(
+          SITE_A,
+          target,
+          "detail-source",
+          window,
+        );
+        const actual = (
+          await createD1DatabaseClient(createSqliteD1Database(db)).all(query)
+        ).results as Record<string, unknown>[];
+        expect(
+          rowBag(actual),
+          `${target.type}:${String(window !== undefined)}`,
+        ).toEqual(rowBag(expected));
+      }
     }
 
     const windowRows = (
       await createD1DatabaseClient(createSqliteD1Database(db)).all(
-        compileTypedObservationQuery(SITE_A, target, "detail-source", WINDOW),
+        compileTypedObservationQuery(
+          SITE_A,
+          { type: "visitor", value: TARGET_VISITOR },
+          "detail-source",
+          WINDOW,
+        ),
       )
     ).results as Record<string, unknown>[];
     const customIds = windowRows
@@ -739,10 +770,55 @@ describe("Journey report Observation D1 lowering", () => {
     });
   });
 
-  it("keeps the production Visitor and Session detail DTOs on the shared source", async () => {
-    const env = testEnv(db);
+  it("matches complete production Visitor and Session DTOs to legacy source SQL", async () => {
+    for (const window of [undefined, WINDOW]) {
+      const typedVisitor = await queryVisitorDetailFromD1(
+        testEnv(db),
+        SITE_A,
+        TARGET_VISITOR,
+        "UTC",
+        window,
+      );
+      const legacyVisitor = await queryVisitorDetailFromD1(
+        legacySourceEnv(
+          db,
+          legacyDetailSourceQuery(
+            SITE_A,
+            { type: "visitor", value: TARGET_VISITOR },
+            window,
+          ),
+        ),
+        SITE_A,
+        TARGET_VISITOR,
+        "UTC",
+        window,
+      );
+      expect(typedVisitor).toEqual(legacyVisitor);
+
+      const typedSession = await querySessionDetailFromD1(
+        testEnv(db),
+        SITE_A,
+        TARGET_SESSION,
+        window,
+      );
+      const legacySession = await querySessionDetailFromD1(
+        legacySourceEnv(
+          db,
+          legacyDetailSourceQuery(
+            SITE_A,
+            { type: "session", value: TARGET_SESSION },
+            window,
+          ),
+        ),
+        SITE_A,
+        TARGET_SESSION,
+        window,
+      );
+      expect(typedSession).toEqual(legacySession);
+    }
+
     const visitor = await queryVisitorDetailFromD1(
-      env,
+      testEnv(db),
       SITE_A,
       TARGET_VISITOR,
       "UTC",
@@ -758,29 +834,6 @@ describe("Journey report Observation D1 lowering", () => {
     });
     expect(
       visitor?.events
-        .filter((event) => event.kind === "custom")
-        .map((event) => event.id)
-        .sort(),
-    ).toEqual([
-      "event-after-owner-time",
-      "event-before-owner-time",
-      "event-foreign-dictionary-site",
-    ]);
-
-    const session = await querySessionDetailFromD1(
-      env,
-      SITE_A,
-      TARGET_SESSION,
-      WINDOW,
-    );
-    expect(session?.session).toMatchObject({
-      sessionId: TARGET_SESSION,
-      views: 1,
-      events: 3,
-      startedAt: 100,
-    });
-    expect(
-      session?.events
         .filter((event) => event.kind === "custom")
         .map((event) => event.id)
         .sort(),
@@ -954,6 +1007,207 @@ describe("Journey report Observation D1 lowering", () => {
       expect(statement.bindings.length, statement.name).toBeLessThanOrEqual(
         D1_MAX_BOUND_PARAMETERS,
       );
+    }
+  });
+
+  it("keeps identity and owner-window reads selective with deep history and fan-out", async () => {
+    const historicalPages = 512;
+    const eventsPerHistoricalPage = 4;
+    for (let pageIndex = 0; pageIndex < historicalPages; pageIndex += 1) {
+      const visitId = `history-${pageIndex}`;
+      insertVisit(db, siteA, {
+        visitId,
+        visitorId: TARGET_VISITOR,
+        sessionId: TARGET_SESSION,
+        startedAt: -10_000 - pageIndex,
+      });
+      for (
+        let eventIndex = 0;
+        eventIndex < eventsPerHistoricalPage;
+        eventIndex += 1
+      )
+        insertEvent(db, {
+          eventId: `${visitId}-event-${eventIndex}`,
+          site: siteA,
+          visitId,
+          eventNameId: siteA.purchaseNameId,
+          occurredAt: 150 + eventIndex,
+        });
+    }
+    db.exec("ANALYZE");
+
+    const targets = [
+      { type: "visitor", value: TARGET_VISITOR },
+      { type: "session", value: TARGET_SESSION },
+    ] as const;
+    for (const target of targets) {
+      const indexName =
+        target.type === "visitor"
+          ? "idx_visits_site_pk_visitor_started_at"
+          : "idx_visits_site_pk_session_started_at";
+      const identityColumn =
+        target.type === "visitor" ? "visitor_id" : "session_id";
+      const identityPages = Number(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM visits WHERE site_pk = ? AND ${identityColumn} = ?`,
+          )
+          .get(siteA.sitePk, target.value)?.count,
+      );
+      const identityEvents = Number(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM custom_events AS events
+             INNER JOIN visits AS owner
+               ON owner.site_pk = events.site_pk
+              AND owner.visit_id = events.visit_id
+             WHERE events.site_pk = ? AND owner.${identityColumn} = ?`,
+          )
+          .get(siteA.sitePk, target.value)?.count,
+      );
+      const windowPages = Number(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM visits
+             WHERE site_pk = ? AND ${identityColumn} = ?
+               AND started_at >= ? AND started_at < ?`,
+          )
+          .get(
+            siteA.sitePk,
+            target.value,
+            WINDOW.startMs,
+            WINDOW.endExclusiveMs,
+          )?.count,
+      );
+      const windowEvents = Number(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM custom_events AS events
+             INNER JOIN visits AS owner
+               ON owner.site_pk = events.site_pk
+              AND owner.visit_id = events.visit_id
+             WHERE events.site_pk = ? AND owner.${identityColumn} = ?
+               AND owner.started_at >= ? AND owner.started_at < ?`,
+          )
+          .get(
+            siteA.sitePk,
+            target.value,
+            WINDOW.startMs,
+            WINDOW.endExclusiveMs,
+          )?.count,
+      );
+      expect(identityPages).toBe(516);
+      expect(identityEvents).toBe(2_054);
+      expect(windowPages).toBe(1);
+      expect(windowEvents).toBe(4);
+
+      const client = createD1DatabaseClient(createSqliteD1Database(db));
+      const timeline = compileTypedObservationQuery(SITE_A, target, "timeline");
+      const legacyTimeline = legacyTimelineQuery(SITE_A, target);
+      const timelineRows = (await client.all(timeline)).results as Record<
+        string,
+        unknown
+      >[];
+      expect(timelineRows.map(mapJourneyEventRow)).toEqual(
+        legacyTimelineRows(db, SITE_A, target).map(mapJourneyEventRow),
+      );
+      expect(timelineRows).toHaveLength(2_569);
+      const timelineExplain = explainQueryPlan(db, {
+        sql: timeline.sql,
+        bindings: timeline.bindings as readonly SQLInputValue[],
+      });
+      const legacyTimelineExplain = explainQueryPlan(db, legacyTimeline);
+      for (const explain of [timelineExplain, legacyTimelineExplain]) {
+        const pageSearches = explain.filter((line) => line.includes(indexName));
+        expect(pageSearches).toHaveLength(2);
+        for (const search of pageSearches)
+          expect(search).toContain(`site_pk=? AND ${identityColumn}=?`);
+        expect(
+          explain.find((line) =>
+            line.includes("idx_custom_events_site_pk_visit_time"),
+          ),
+        ).toContain("site_pk=? AND visit_id=?");
+      }
+      for (const statement of [
+        { sql: timeline.sql, bindings: timeline.bindings ?? [] },
+        legacyTimeline,
+      ]) {
+        expect(
+          new TextEncoder().encode(statement.sql).byteLength,
+        ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(statement.bindings.length).toBeLessThanOrEqual(
+          D1_MAX_BOUND_PARAMETERS,
+        );
+      }
+
+      for (const window of [undefined, WINDOW]) {
+        const typedQuery = compileTypedObservationQuery(
+          SITE_A,
+          target,
+          "detail-source",
+          window,
+        );
+        const legacyQuery = legacyDetailSourceQuery(SITE_A, target, window);
+        const typedRows = (await client.all(typedQuery)).results as Record<
+          string,
+          unknown
+        >[];
+        expect(rowBag(typedRows)).toEqual(
+          rowBag(legacyDetailSourceRows(db, SITE_A, target, window)),
+        );
+        expect(
+          typedRows.filter((row) => row.sourceType === "visit"),
+        ).toHaveLength(window ? 1 : 516);
+        expect(
+          typedRows.filter((row) => row.sourceType === "custom"),
+        ).toHaveLength(window ? 3 : 2_053);
+
+        const detailExplain = explainQueryPlan(db, {
+          sql: typedQuery.sql,
+          bindings: typedQuery.bindings as readonly SQLInputValue[],
+        });
+        const legacyDetailExplain = explainQueryPlan(db, legacyQuery);
+        const pageSearches = detailExplain.filter((line) =>
+          line.includes(indexName),
+        );
+        const legacyPageSearches = legacyDetailExplain.filter((line) =>
+          line.includes(indexName),
+        );
+        expect(pageSearches).toHaveLength(2);
+        expect(legacyPageSearches).toHaveLength(1);
+        for (const search of pageSearches) {
+          expect(search).toContain(`site_pk=? AND ${identityColumn}=?`);
+          if (window) expect(search).toContain("started_at>? AND started_at<?");
+          else expect(search).not.toContain("AND started_at>");
+        }
+        const eventSearch = detailExplain.find((line) =>
+          line.includes("idx_custom_events_site_pk_visit_time"),
+        );
+        expect(eventSearch).toContain("site_pk=? AND visit_id=?");
+        expect(
+          detailExplain.findIndex((line) =>
+            line.includes("idx_custom_events_site_pk_visit_time"),
+          ),
+        ).toBeGreaterThan(
+          Math.max(
+            ...pageSearches.map((search) => detailExplain.indexOf(search)),
+          ),
+        );
+
+        for (const statement of [
+          { sql: typedQuery.sql, bindings: typedQuery.bindings ?? [] },
+          legacyQuery,
+        ]) {
+          expect(
+            new TextEncoder().encode(statement.sql).byteLength,
+          ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+          expect(statement.bindings.length).toBeLessThanOrEqual(
+            D1_MAX_BOUND_PARAMETERS,
+          );
+        }
+      }
     }
   });
 });

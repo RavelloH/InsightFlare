@@ -408,6 +408,79 @@ describe("architecture checker", () => {
     );
   });
 
+  it("keeps Observation predicate placement in the generic DB optimizer", () => {
+    const root = fixture();
+    const lowererPath =
+      "src/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering.ts";
+    const storagePath =
+      "src/lib/edge/analytics/providers/d1/internal/analytics-relational-storage.ts";
+    const writeSource = (relativePath: string, source: string) => {
+      const absolutePath = path.join(root, relativePath);
+      mkdirSync(path.dirname(absolutePath), { recursive: true });
+      writeFileSync(absolutePath, `${source}\n`);
+    };
+    writeSource(
+      lowererPath,
+      "export const filterRelation = filter(input, predicate);",
+    );
+    writeSource(
+      storagePath,
+      [
+        'export const visitorColumn = "observation.visitorId";',
+        "class Storage {",
+        "  #attachOwner(events, pages) {",
+        "    const joined = join(events, pages, predicate);",
+        "    if (joined.columns.left_event_name) projections.event_name = joined.columns.left_event_name;",
+        "    return project(joined, projections);",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+    expect(
+      collectArchitectureViolations(root).filter(
+        ({ rule }) => rule === "analytics-physical-predicate-placement",
+      ),
+    ).toEqual([]);
+
+    writeSource(
+      lowererPath,
+      [
+        'if (attribute === "observation.visitorId") {',
+        "  return observationIdentityConstraint();",
+        "}",
+      ].join("\n"),
+    );
+    writeSource(
+      storagePath,
+      [
+        "class Storage {",
+        "  #attachOwner(events, pages, sourceConstraint) {",
+        "    if (sourceConstraint) return join(pages, events, predicate);",
+        "    return join(events, pages, predicate);",
+        "  }",
+        "  identityConstraint() {}",
+        "}",
+      ].join("\n"),
+    );
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ rule }) => rule === "analytics-physical-predicate-placement")
+        .map(({ source, specifier }) => ({ source, specifier })),
+    ).toEqual(
+      expect.arrayContaining([
+        { source: lowererPath, specifier: '"observation.visitorId"' },
+        { source: lowererPath, specifier: "observationIdentityConstraint" },
+        { source: storagePath, specifier: "sourceConstraint" },
+        { source: storagePath, specifier: "identityConstraint" },
+        { source: storagePath, specifier: "conditional #attachOwner" },
+        {
+          source: storagePath,
+          specifier: "non-generic #attachOwner join order",
+        },
+      ]),
+    );
+  });
+
   it("keeps the typed query guard scoped to migrated funnel definitions", () => {
     const root = fixture();
     const sourcePath = path.join(

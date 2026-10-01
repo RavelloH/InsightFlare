@@ -68,11 +68,6 @@ export interface AnalyticsRelationalStorageContext {
   readonly time: SemanticTemporalDomains;
 }
 
-export interface AnalyticsObservationIdentityConstraint {
-  readonly attribute: ObservationIdentityAttribute;
-  readonly value: string;
-}
-
 type ObservationIdentityAttribute =
   "observation.sessionId" | "observation.visitorId";
 
@@ -221,7 +216,6 @@ export class AnalyticsRelationalStorage {
     node: SourceNode,
     path: string,
     requiredSlots: ReadonlySet<SlotId> = new Set(node.output),
-    sourceConstraint?: AnalyticsObservationIdentityConstraint,
   ): LoweredAnalyticsSource {
     const relationships = node.values.filter(
       (binding) => binding.kind === "related-entity",
@@ -348,7 +342,6 @@ export class AnalyticsRelationalStorage {
           includeIdentity: selfRequired,
           includeSession: needsSessionRelation,
           includeOccurrenceTime: includesOccurrenceTime,
-          sourceConstraint,
         });
       } else if (fieldActivity === undefined) {
         if (node.temporalDomain !== "candidate")
@@ -657,48 +650,9 @@ export class AnalyticsRelationalStorage {
   #attachOwner(
     events: AnalyticsDbRelation,
     ownerColumns: readonly string[],
-    identityConstraint?: AnalyticsObservationIdentityConstraint,
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
-    const ownerPages = this.#sitePages(canonicalColumns);
-    const pages = identityConstraint
-      ? filter(
-          ownerPages,
-          eq(
-            requireStorageTextColumn(
-              column(
-                ownerPages,
-                identityConstraint.attribute === "observation.sessionId"
-                  ? "session_id"
-                  : "visitor_id",
-              ),
-              identityConstraint.attribute,
-            ),
-            param(identityConstraint.value),
-          ),
-        )
-      : ownerPages;
-    if (identityConstraint) {
-      const joined = join(
-        pages,
-        events,
-        and(
-          eq(pages.columns.site_pk, events.columns.site_pk),
-          eq(pages.columns.visit_id, events.columns.visit_id),
-        ),
-      );
-      const projections: Record<string, AnyExpression> = {
-        site_pk: joined.columns.left_site_pk,
-        site_id: joined.columns.right_site_id,
-        event_id: joined.columns.right_event_id,
-        visit_id: joined.columns.right_visit_id,
-        event_name_id: joined.columns.right_event_name_id,
-        occurred_at: joined.columns.right_occurred_at,
-      };
-      for (const name of canonicalColumns)
-        projections[`owner_${name}`] = joined.columns[`left_${name}`]!;
-      return project(joined, projections);
-    }
+    const pages = this.#sitePages(canonicalColumns);
     const joined = join(
       events,
       pages,
@@ -911,21 +865,18 @@ export class AnalyticsRelationalStorage {
     domain: SourceNode["temporalDomain"],
     ownerColumns: readonly string[],
     allowRetainedHistory = false,
-    identityConstraint?: AnalyticsObservationIdentityConstraint,
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
     const cacheKey = JSON.stringify([
       domain,
       allowRetainedHistory,
       canonicalColumns,
-      identityConstraint ?? null,
     ]);
     const existing = this.#ownedEventCarriers.get(cacheKey);
     if (existing) return existing;
     const carrier = this.#attachOwner(
       this.#events(domain, allowRetainedHistory),
       canonicalColumns,
-      identityConstraint,
     );
     this.#ownedEventCarriers.set(cacheKey, carrier);
     return carrier;
@@ -1038,7 +989,6 @@ export class AnalyticsRelationalStorage {
     readonly includeIdentity: boolean;
     readonly includeSession: boolean;
     readonly includeOccurrenceTime: boolean;
-    readonly sourceConstraint?: AnalyticsObservationIdentityConstraint;
   }): AnalyticsDbRelation {
     const attributes = [...new Set(input.attributes)].sort();
     const cacheKey = JSON.stringify([
@@ -1047,7 +997,6 @@ export class AnalyticsRelationalStorage {
       input.includeIdentity,
       input.includeSession,
       input.includeOccurrenceTime,
-      input.sourceConstraint ?? null,
     ]);
     const existing = this.#reportObservationCarriers.get(cacheKey);
     if (existing) return existing;
@@ -1069,24 +1018,7 @@ export class AnalyticsRelationalStorage {
       if (physical) pageColumns.add(physical);
     }
 
-    const basePages = this.#pages(input.domain, [...pageColumns], true);
-    const pages = input.sourceConstraint
-      ? filter(
-          basePages,
-          eq(
-            requireStorageTextColumn(
-              column(
-                basePages,
-                input.sourceConstraint.attribute === "observation.sessionId"
-                  ? "session_id"
-                  : "visitor_id",
-              ),
-              input.sourceConstraint.attribute,
-            ),
-            param(input.sourceConstraint.value),
-          ),
-        )
-      : basePages;
+    const pages = this.#pages(input.domain, [...pageColumns], true);
     const pageProjections: Record<string, AnyExpression> = {
       site_pk: pages.columns.site_pk,
     };
@@ -1116,12 +1048,7 @@ export class AnalyticsRelationalStorage {
       attributes,
       input.includeSession,
     );
-    let events = this.#eventsWithOwner(
-      input.domain,
-      ownerColumns,
-      true,
-      input.sourceConstraint,
-    );
+    let events = this.#eventsWithOwner(input.domain, ownerColumns, true);
     if (attributes.includes("observation.eventName"))
       events = this.#attachReportName(events);
     const eventProjections: Record<string, AnyExpression> = {

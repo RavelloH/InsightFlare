@@ -366,6 +366,124 @@ function analyticsSemanticPlanStorageViolations(
   ];
 }
 
+function analyticsPhysicalPredicatePlacementViolations(
+  relativePath: string,
+  sourceText: string,
+): ArchitectureViolation[] {
+  const rules: Readonly<Record<string, readonly RegExp[]>> = {
+    "src/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering.ts":
+      [
+        /\bAnalyticsObservationIdentityConstraint\b/u,
+        /#?observationIdentityConstraint\b/u,
+        /#?sourceHasOnlyFilterConsumer\b/u,
+        /["']observation\.(?:sessionId|visitorId)["']/u,
+      ],
+    "src/lib/edge/analytics/providers/d1/internal/analytics-relational-storage.ts":
+      [
+        /\bAnalyticsObservationIdentityConstraint\b/u,
+        /\b(?:sourceConstraint|identityConstraint)\b/u,
+      ],
+  };
+  const patterns = rules[relativePath];
+  if (!patterns) return [];
+  const violations: ArchitectureViolation[] = [];
+  const addViolation = (specifier: string, index: number) => {
+    violations.push({
+      rule: "analytics-physical-predicate-placement",
+      source: relativePath,
+      specifier,
+      target: relativePath,
+      line: sourceText.slice(0, index).split(/\r?\n/u).length,
+      message:
+        "Analytics logical lowering and source storage must not recognize filter predicates or select owner join order; physical predicate optimization belongs in the generic DB layer.",
+    });
+  };
+  for (const pattern of patterns) {
+    const globalPattern = new RegExp(pattern.source, `${pattern.flags}g`);
+    for (const match of sourceText.matchAll(globalPattern)) {
+      if (match.index === undefined) continue;
+      addViolation(match[0], match.index);
+    }
+  }
+  if (
+    relativePath ===
+    "src/lib/edge/analytics/providers/d1/internal/analytics-relational-storage.ts"
+  ) {
+    const source = ts.createSourceFile(
+      relativePath,
+      sourceText,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    let ownerJoin: ts.MethodDeclaration | undefined;
+    const findOwnerJoin = (node: ts.Node) => {
+      if (
+        ts.isMethodDeclaration(node) &&
+        node.name.getText(source) === "#attachOwner"
+      )
+        ownerJoin = node;
+      ts.forEachChild(node, findOwnerJoin);
+    };
+    findOwnerJoin(source);
+    if (!ownerJoin?.body) {
+      addViolation("missing #attachOwner", 0);
+      return violations;
+    }
+    let conditional: ts.Node | undefined;
+    const joins: ts.CallExpression[] = [];
+    const containsJoinCall = (node: ts.Node): boolean => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "join"
+      )
+        return true;
+      return node.getChildren(source).some(containsJoinCall);
+    };
+    const inspectOwnerJoin = (node: ts.Node) => {
+      if (
+        ts.isIfStatement(node) ||
+        ts.isConditionalExpression(node) ||
+        ts.isSwitchStatement(node)
+      ) {
+        const branches = ts.isIfStatement(node)
+          ? [node.thenStatement, node.elseStatement].filter(
+              (branch): branch is ts.Statement => branch !== undefined,
+            )
+          : ts.isConditionalExpression(node)
+            ? [node.whenTrue, node.whenFalse]
+            : [...node.caseBlock.clauses];
+        if (branches.some(containsJoinCall)) conditional ??= node;
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "join"
+      )
+        joins.push(node);
+      ts.forEachChild(node, inspectOwnerJoin);
+    };
+    inspectOwnerJoin(ownerJoin.body);
+    if (conditional)
+      addViolation("conditional #attachOwner", conditional.getStart(source));
+    const join = joins[0];
+    const hasEventFirstJoin =
+      joins.length === 1 &&
+      join !== undefined &&
+      ts.isIdentifier(join.arguments[0]) &&
+      join.arguments[0].text === "events" &&
+      ts.isIdentifier(join.arguments[1]) &&
+      join.arguments[1].text === "pages";
+    if (!hasEventFirstJoin)
+      addViolation(
+        "non-generic #attachOwner join order",
+        ownerJoin.getStart(source),
+      );
+  }
+  return violations;
+}
+
 const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
   "src/lib/edge/analytics/providers/d1/internal/core-sources.ts": [
     "queryD1CompiledAll",
@@ -1133,6 +1251,9 @@ export function collectArchitectureViolations(
     violations.push(...typedDalConvergenceViolations(relative, sourceText));
     violations.push(
       ...analyticsSemanticPlanStorageViolations(relative, sourceText),
+    );
+    violations.push(
+      ...analyticsPhysicalPredicatePlacementViolations(relative, sourceText),
     );
     violations.push(...ingestTypedBatchViolations(relative, sourceText));
     violations.push(...typedQueryFunctionViolations(relative, sourceText));
