@@ -525,15 +525,8 @@ function compileNode(
       const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
       const selections = node.windows.map(({ specification }, index) => {
         const partitions = specification.partitionBy;
-        const ordering = specification.orderBy.map((key) =>
-          concat(
-            compileD1Expression(key.expression, scopes, context),
-            text(` ${key.direction}`),
-          ),
-        );
-        return concat(
-          text("ROW_NUMBER() OVER ("),
-          ...(partitions.length === 0
+        const partition =
+          partitions.length === 0
             ? []
             : [
                 text("PARTITION BY "),
@@ -542,11 +535,29 @@ function compileNode(
                     compileD1Expression(expression, scopes, context),
                   ),
                 ),
-                text(" "),
-              ]),
-          text("ORDER BY "),
-          join(ordering),
-          text(`) AS "_c${node.input.fields.length + index}"`),
+              ];
+        const functionSql =
+          specification.kind === "row-number"
+            ? concat(
+                text("ROW_NUMBER()"),
+                text(" OVER ("),
+                ...partition,
+                ...(partitions.length > 0 ? [text(" ")] : []),
+                text("ORDER BY "),
+                join(
+                  specification.orderBy.map((key) =>
+                    concat(
+                      compileD1Expression(key.expression, scopes, context),
+                      text(` ${key.direction}`),
+                    ),
+                  ),
+                ),
+                text(")"),
+              )
+            : concat(text("COUNT(*) OVER ("), ...partition, text(")"));
+        return concat(
+          functionSql,
+          text(` AS "_c${node.input.fields.length + index}"`),
         );
       });
       return concat(

@@ -22,6 +22,7 @@ import {
   unixepoch,
   update,
   window,
+  windowCountRows,
 } from "@/lib/db";
 import * as databaseFacade from "@/lib/db";
 import type { CompiledQuery } from "@/lib/db/query/compiled";
@@ -99,6 +100,10 @@ export function compileTimeDatabaseTypeAssertions(): void {
   concatText(param("prefix"), param(new Uint8Array([1])));
 
   const scheduledRuns = scan(schema.scheduled_task_runs);
+  const scheduledRunRows = project(scheduledRuns, {
+    taskKey: scheduledRuns.columns.task_key,
+    startedAt: scheduledRuns.columns.started_at_ms,
+  });
   const rankedRuns = window(scheduledRuns, {
     latestRank: rowNumber({
       partitionBy: [scheduledRuns.columns.task_key],
@@ -108,6 +113,26 @@ export function compileTimeDatabaseTypeAssertions(): void {
     }),
   });
   filter(rankedRuns, eq(rankedRuns.columns.latestRank, param(1)));
+  const countedRuns = window(scheduledRunRows, {
+    count: windowCountRows(),
+    partitionCount: windowCountRows({
+      partitionBy: [scheduledRunRows.columns.taskKey],
+    }),
+  });
+  type CountWindowReturnsNumber = Assert<
+    Equal<ExpressionValue<typeof countedRuns.columns.count>, number>
+  >;
+  type PartitionCountWindowReturnsNumber = Assert<
+    Equal<ExpressionValue<typeof countedRuns.columns.partitionCount>, number>
+  >;
+  const countWindowChecks: [
+    CountWindowReturnsNumber,
+    PartitionCountWindowReturnsNumber,
+  ] = [true, true];
+  void countWindowChecks;
+  filter(countedRuns, eq(countedRuns.columns.partitionCount, param(1)));
+  // @ts-expect-error A window count descriptor is not a SQL expression.
+  project(scheduledRunRows, { count: windowCountRows() });
   const unconsumedRank = rowNumber({
     orderBy: [
       { expression: scheduledRuns.columns.started_at_ms, direction: "DESC" },

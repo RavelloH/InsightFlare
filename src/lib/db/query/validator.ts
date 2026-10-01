@@ -20,6 +20,7 @@ import type {
   UnionNode,
   WindowNode,
   WindowOrderKey,
+  WindowSpecification,
 } from "./plan";
 
 export type ExpressionScopeMetadata = ReadonlyMap<
@@ -29,6 +30,11 @@ export type ExpressionScopeMetadata = ReadonlyMap<
 
 function invalid(message: string): never {
   throw new DatabaseCompilerError("invalid_plan", message);
+}
+
+function hasOnlyKeys(value: object, keys: readonly string[]): boolean {
+  const allowed = new Set(keys);
+  return Object.keys(value).every((key) => allowed.has(key));
 }
 
 function validateIdentifier(value: string): void {
@@ -677,7 +683,7 @@ function validateSource(
           !Array.isArray(windowNode.windows) ||
           windowNode.windows.length === 0
         )
-          invalid("Window requires at least one rank output");
+          invalid("Window requires at least one window output");
         const names = new Set(
           windowNode.input.fields.map((field) => field.name),
         );
@@ -697,32 +703,49 @@ function validateSource(
           if (
             !specification ||
             typeof specification !== "object" ||
-            specification.kind !== "row-number"
+            !["row-number", "count-rows"].includes(specification.kind)
           )
-            invalid("Window supports only the row-number specification");
+            invalid("Window contains an unsupported specification");
+          const spec = specification as WindowSpecification;
           if (
-            !Array.isArray(specification.partitionBy) ||
-            !Array.isArray(specification.orderBy) ||
-            specification.orderBy.length === 0
+            spec.kind === "row-number" &&
+            !hasOnlyKeys(spec, ["kind", "partitionBy", "orderBy"])
           )
-            invalid("row-number requires at least one ordering key");
+            invalid("row-number specification contains unsupported options");
+          if (
+            spec.kind === "count-rows" &&
+            !hasOnlyKeys(spec, ["kind", "partitionBy"])
+          )
+            invalid("count-rows specification contains unsupported options");
+          if (
+            !Array.isArray(spec.partitionBy) ||
+            (spec.kind === "row-number" &&
+              (!Array.isArray(spec.orderBy) || spec.orderBy.length === 0))
+          )
+            invalid(
+              spec.kind === "row-number"
+                ? "row-number requires at least one ordering key"
+                : "count-rows partition keys must be an array",
+            );
           const scopes = visibleScopes(windowNode.input);
-          specification.partitionBy.forEach((expression: SqlExpression) => {
+          spec.partitionBy.forEach((expression: SqlExpression) => {
             if (!expression || typeof expression !== "object")
-              invalid("row-number contains an invalid partition expression");
+              invalid("window contains an invalid partition expression");
             validateExpression(expression, scopes, activeSources);
           });
-          specification.orderBy.forEach((key: WindowOrderKey) => {
-            if (
-              !key ||
-              typeof key !== "object" ||
-              (key.direction !== "ASC" && key.direction !== "DESC")
-            )
-              invalid("row-number ordering direction is invalid");
-            if (!key.expression || typeof key.expression !== "object")
-              invalid("row-number contains an invalid ordering expression");
-            validateExpression(key.expression, scopes, activeSources);
-          });
+          if (spec.kind === "row-number")
+            spec.orderBy.forEach((key: WindowOrderKey) => {
+              if (
+                !key ||
+                typeof key !== "object" ||
+                !hasOnlyKeys(key, ["expression", "direction"]) ||
+                (key.direction !== "ASC" && key.direction !== "DESC")
+              )
+                invalid("row-number ordering direction is invalid");
+              if (!key.expression || typeof key.expression !== "object")
+                invalid("row-number contains an invalid ordering expression");
+              validateExpression(key.expression, scopes, activeSources);
+            });
           expected.push({
             name: item.name,
             affinity: "integer",

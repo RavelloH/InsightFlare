@@ -329,9 +329,7 @@ describe("admin system handlers coverage", () => {
     expect(data.topSites[0].siteId).toHaveLength(120);
     expect(data.topSites[0].siteDomain).toHaveLength(255);
     expect(data.slowEvents[0].siteName).toHaveLength(120);
-    expect(trendStatement.bindings?.slice(0, 6)).toEqual([
-      1_799_999_100, 1_800_000_000, 1_799_999_100, 1_800_000_000, 60, 60,
-    ]);
+    expect(trendStatement.bindings?.slice(0, 2)).toEqual(["visit", 1000]);
   });
 
   it("propagates system performance database failures", async () => {

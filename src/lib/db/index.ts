@@ -75,7 +75,12 @@ export {
   unixepoch,
 } from "./query/expression";
 export { lowerLogicalPlan } from "./query/physical-plan";
-export type { RowNumberWindowSpec, WindowOrderKey } from "./query/plan";
+export type {
+  RowNumberWindowSpec,
+  WindowCountRowsSpec,
+  WindowOrderKey,
+  WindowSpecification,
+} from "./query/plan";
 export {
   aggregate,
   antiJoin,
@@ -90,6 +95,7 @@ export {
   sort,
   union,
   window,
+  windowCountRows,
 } from "./query/plan";
 export type { GeneratedSchemaObject, GeneratedSchemaTable } from "./schema";
 export { schema } from "./schema";

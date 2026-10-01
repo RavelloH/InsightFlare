@@ -255,7 +255,9 @@ function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
     case "window":
       return node.windows.flatMap(({ specification }) => [
         ...specification.partitionBy,
-        ...specification.orderBy.map(({ expression }) => expression),
+        ...(specification.kind === "row-number"
+          ? specification.orderBy.map(({ expression }) => expression)
+          : []),
       ]);
     case "limit":
       return [node.count, ...(node.offset ? [node.offset] : [])];
@@ -403,33 +405,49 @@ function sameDirectScanProjectionChoices(
   );
 }
 
-/** Mark every node reached through scope/selection-sensitive query context. */
-function hoistForbiddenNodes(root: LogicalQueryNode): Set<LogicalQueryNode> {
+interface HoistEligibility {
+  readonly forbidden: Set<LogicalQueryNode>;
+  readonly windowInput: Set<LogicalQueryNode>;
+}
+
+/** Keep selection-sensitive barriers while permitting safe inputs below Window. */
+function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
   const forbidden = new Set<LogicalQueryNode>();
-  const visited = new Map<LogicalQueryNode, Set<boolean>>();
-  const visit = (node: LogicalQueryNode, inheritedForbidden: boolean): void => {
+  const windowInput = new Set<LogicalQueryNode>();
+  const visited = new Map<LogicalQueryNode, Set<string>>();
+  const visit = (
+    node: LogicalQueryNode,
+    inheritedForbidden: boolean,
+    underWindow: boolean,
+  ): void => {
     let contexts = visited.get(node);
     if (!contexts) {
       contexts = new Set();
       visited.set(node, contexts);
     }
-    if (contexts.has(inheritedForbidden)) return;
-    contexts.add(inheritedForbidden);
+    const context = `${inheritedForbidden}:${underWindow}`;
+    if (contexts.has(context)) return;
+    contexts.add(context);
     if (inheritedForbidden || node.kind === "window") forbidden.add(node);
+    if (underWindow && !inheritedForbidden && node.kind !== "window")
+      windowInput.add(node);
 
     const terminalRootSort = node === root && node.kind === "sort";
     const selectionBoundary =
       inheritedForbidden ||
-      node.kind === "window" ||
       (node.kind === "sort" && !terminalRootSort) ||
       node.kind === "limit";
     for (const child of nodeChildren(node))
-      visit(child.node, selectionBoundary);
+      visit(
+        child.node,
+        selectionBoundary,
+        underWindow || node.kind === "window",
+      );
     for (const query of nodeExpressions(node).flatMap(expressionSources))
-      visit(query.node, true);
+      visit(query.node, true, false);
   };
-  visit(root, false);
-  return forbidden;
+  visit(root, false, false);
+  return { forbidden, windowInput };
 }
 
 interface CandidateFacts {
@@ -560,7 +578,7 @@ function sharedRelationDefinitions(
     postorder.push(node);
   };
   visit(root);
-  const forbiddenToHoist = hoistForbiddenNodes(root);
+  const hoist = hoistEligibility(root);
 
   const sharedMaterializations = new Map<
     LogicalQueryNode,
@@ -571,7 +589,7 @@ function sharedRelationDefinitions(
     if (
       incomingCount < 2 ||
       node.kind === "scan" ||
-      forbiddenToHoist.has(node) ||
+      hoist.forbidden.has(node) ||
       node.fields.length === 0 ||
       node.fields.length > MAX_MATERIALIZED_SHARED_RELATION_FIELDS
     )
@@ -584,7 +602,10 @@ function sharedRelationDefinitions(
     if (!isSafe) continue;
 
     if (node.fields.length <= MAX_SHARED_RELATION_FIELDS) {
-      sharedMaterializations.set(node, "auto");
+      sharedMaterializations.set(
+        node,
+        hoist.windowInput.has(node) ? "materialized" : "auto",
+      );
       continue;
     }
     if (node.kind === "project" && incomingCount >= 3)

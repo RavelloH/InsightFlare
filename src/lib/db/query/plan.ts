@@ -132,12 +132,19 @@ export interface RowNumberWindowSpec {
   readonly orderBy: readonly [WindowOrderKey, ...WindowOrderKey[]];
 }
 
+export interface WindowCountRowsSpec {
+  readonly kind: "count-rows";
+  readonly partitionBy: readonly SqlExpression[];
+}
+
+export type WindowSpecification = RowNumberWindowSpec | WindowCountRowsSpec;
+
 export interface WindowNode extends QuerySourceBase {
   readonly kind: "window";
   readonly input: QuerySource;
   readonly windows: readonly {
     readonly name: string;
-    readonly specification: RowNumberWindowSpec;
+    readonly specification: WindowSpecification;
   }[];
 }
 
@@ -330,6 +337,18 @@ export function rowNumber(spec: {
       "invalid_plan",
       "rowNumber() requires at least one ordering key",
     );
+  if (
+    Object.keys(spec).some((key) => key !== "partitionBy" && key !== "orderBy")
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "rowNumber() does not support frame or other options",
+    );
+  if (spec.partitionBy !== undefined && !Array.isArray(spec.partitionBy))
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "rowNumber() partitionBy must be an array",
+    );
   return {
     kind: "row-number",
     partitionBy: [...(spec.partitionBy ?? [])],
@@ -340,7 +359,32 @@ export function rowNumber(spec: {
   };
 }
 
-type WindowSpecMap = Readonly<Record<string, RowNumberWindowSpec>>;
+export function windowCountRows(
+  spec: {
+    readonly partitionBy?: readonly SqlExpression[];
+  } = {},
+): WindowCountRowsSpec {
+  if (
+    !spec ||
+    typeof spec !== "object" ||
+    Object.keys(spec).some((key) => key !== "partitionBy")
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "windowCountRows() only supports partitionBy",
+    );
+  if (spec.partitionBy !== undefined && !Array.isArray(spec.partitionBy))
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "windowCountRows() partitionBy must be an array",
+    );
+  return {
+    kind: "count-rows",
+    partitionBy: [...(spec.partitionBy ?? [])],
+  };
+}
+
+type WindowSpecMap = Readonly<Record<string, WindowSpecification>>;
 type WindowNameConflict<
   Columns extends Readonly<Record<string, AnyExpression>>,
   Windows extends WindowSpecMap,
@@ -367,12 +411,12 @@ export function window<
   windows: Windows & WindowNameConflict<Columns, Windows>,
 ): Relation<WindowRow<Row, Windows>, WindowColumns<Columns, Windows>> {
   const entries = Object.entries(windows) as Array<
-    [string, RowNumberWindowSpec]
+    [string, WindowSpecification]
   >;
   if (entries.length === 0)
     throw new DatabaseCompilerError(
       "invalid_plan",
-      "window() requires at least one output",
+      "window() requires at least one window output",
     );
   const fields = [
     ...input.fields,

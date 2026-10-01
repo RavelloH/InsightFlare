@@ -11,10 +11,12 @@ import {
   limit,
   param,
   project,
+  rowNumber,
   scan,
   sort,
   union,
   unixepoch,
+  window,
 } from "@/lib/db";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression } from "@/lib/db/query/expression";
@@ -136,6 +138,148 @@ describe("shared relation physical selection", () => {
     ]);
     const mixedSorted = union(union(branchSorted, safe, true), safe, true);
     expect(lowerLogicalPlan(mixedSorted).sharedRelations).toEqual([]);
+  });
+
+  it("materializes safe narrow inputs reused below independent windows", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)")
+      .run("window-site-b", "window-site-a");
+
+    const identities = scan(schema.site_identities);
+    const identityColumns = project(identities, {
+      siteId: identities.columns.site_id,
+      sitePk: identities.columns.site_pk,
+    });
+    const selectiveIdentities = filter(
+      identityColumns,
+      gt(identityColumns.columns.sitePk, param(0)),
+    );
+    const byKey = window(selectiveIdentities, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: selectiveIdentities.columns.sitePk, direction: "ASC" },
+        ],
+      }),
+    });
+    const bySite = window(selectiveIdentities, {
+      rank: rowNumber({
+        partitionBy: [selectiveIdentities.columns.siteId],
+        orderBy: [
+          { expression: selectiveIdentities.columns.sitePk, direction: "ASC" },
+        ],
+      }),
+    });
+    const twoRanks = union(byKey, bySite, true);
+    const physical = lowerLogicalPlan(twoRanks);
+    expect(
+      physical.sharedRelations.find(
+        ({ node }) => node === selectiveIdentities.node,
+      ),
+    ).toMatchObject({ materialization: "materialized", fields: [{}, {}] });
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(twoRanks);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(optimized.sql).toContain("AS MATERIALIZED (");
+    expect(optimizedRows).toEqual(mechanicalRows);
+    expect(optimizedRows.map((row) => row.rank)).toEqual([1, 2, 1, 1]);
+
+    const visits = scan(schema.visits);
+    const visitColumns = project(visits, {
+      visitId: visits.columns.visit_id,
+      startedAt: visits.columns.started_at,
+    });
+    const selectiveVisits = filter(
+      visitColumns,
+      gt(visitColumns.columns.startedAt, param(0)),
+    );
+    const byStartedAt = window(selectiveVisits, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: selectiveVisits.columns.startedAt, direction: "ASC" },
+        ],
+      }),
+    });
+    const byVisitId = window(selectiveVisits, {
+      rank: rowNumber({
+        partitionBy: [selectiveVisits.columns.visitId],
+        orderBy: [
+          { expression: selectiveVisits.columns.startedAt, direction: "DESC" },
+        ],
+      }),
+    });
+    const visitPlan = lowerLogicalPlan(union(byStartedAt, byVisitId, true));
+    expect(
+      visitPlan.sharedRelations.find(
+        ({ node }) => node === selectiveVisits.node,
+      ),
+    ).toMatchObject({ materialization: "materialized", fields: [{}, {}] });
+  });
+
+  it("does not share a window candidate or inputs behind inherited barriers", () => {
+    const base = selectedProjection(2);
+    const ranked = window(base, {
+      rank: rowNumber({
+        orderBy: [{ expression: base.columns.field0, direction: "ASC" }],
+      }),
+    });
+    expect(
+      lowerLogicalPlan(union(ranked, ranked, true)).sharedRelations,
+    ).toEqual([]);
+
+    const filtered = selectedProjection(2);
+    const firstRank = window(filtered, {
+      rank: rowNumber({
+        orderBy: [{ expression: filtered.columns.field0, direction: "ASC" }],
+      }),
+    });
+    const secondRank = window(filtered, {
+      rank: rowNumber({
+        partitionBy: [filtered.columns.field1],
+        orderBy: [{ expression: filtered.columns.field0, direction: "DESC" }],
+      }),
+    });
+    expect(
+      lowerLogicalPlan(limit(union(firstRank, secondRank, true), 10))
+        .sharedRelations,
+    ).toEqual([]);
+
+    const windowSource = scan(schema.site_identities);
+    const windowInput = project(windowSource, {
+      sitePk: windowSource.columns.site_pk,
+      siteId: windowSource.columns.site_id,
+    });
+    const safeWindowInput = filter(
+      windowInput,
+      gt(windowInput.columns.sitePk, param(0)),
+    );
+    const rankOne = window(safeWindowInput, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: safeWindowInput.columns.sitePk, direction: "ASC" },
+        ],
+      }),
+    });
+    const rankTwo = window(safeWindowInput, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: safeWindowInput.columns.siteId, direction: "ASC" },
+        ],
+      }),
+    });
+    const sortedBranch = sort(rankTwo, [
+      { expression: rankTwo.columns.rank, direction: "ASC" },
+    ]);
+    expect(
+      lowerLogicalPlan(union(rankOne, sortedBranch, true)).sharedRelations,
+    ).toEqual([]);
   });
 
   it("allows a terminal root sort and preserves UNION ALL order and multiplicity", () => {

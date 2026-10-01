@@ -54,6 +54,7 @@ import {
   unixepoch,
   update,
   window,
+  windowCountRows,
 } from "@/lib/db";
 import {
   compileD1Expression,
@@ -376,6 +377,90 @@ describe("typed D1 query compiler", () => {
     }
   });
 
+  it("counts every row in independent whole and partition windows", () => {
+    const db = createMigratedDatabase();
+    try {
+      const insert = db.prepare(
+        `INSERT INTO scheduled_task_runs
+          (id, invocation_id, task_key, task_name, trigger_type, status,
+           started_at_ms, finished_at_ms, scope_type, summary_json, expires_at)
+         VALUES (?, ?, ?, ?, 'manual', 'success', ?, ?, 'system', '{}', 9999999999)`,
+      );
+      insert.run("null-a", "group-null", "task-a", "Task A", 10, null);
+      insert.run("null-b", "group-null", "task-b", "Task B", 20, null);
+      insert.run("seven-a", "group-seven", "task-c", "Task C", 30, 7);
+      insert.run("seven-b", "group-seven", "task-d", "Task D", 30, 7);
+      insert.run("eight-a", "group-eight", "task-e", "Task E", 40, 8);
+
+      const runs = scan(schema.scheduled_task_runs);
+      const base = project(runs, {
+        id: runs.columns.id,
+        finishedAt: runs.columns.finished_at_ms,
+        startedAt: runs.columns.started_at_ms,
+      });
+      const counted = window(base, {
+        rank: rowNumber({
+          partitionBy: [base.columns.finishedAt],
+          orderBy: [{ expression: base.columns.startedAt, direction: "ASC" }],
+        }),
+        partitionCount: windowCountRows({
+          partitionBy: [base.columns.finishedAt],
+        }),
+        totalCount: windowCountRows(),
+      });
+      const compiled = compileD1Query(counted);
+      expect(compiled.sql).toContain("ROW_NUMBER() OVER (");
+      expect(compiled.sql).toContain("COUNT(*) OVER (");
+      expect(compiled.sql).toContain("COUNT(*) OVER ()");
+      expect(compiled.sql).not.toMatch(/COUNT\(\*\) OVER \([^)]*ORDER BY/u);
+
+      const rows = executeAll(db, compiled);
+      expect(rows).toHaveLength(5);
+      expect(rows.every((row) => row.totalCount === 5)).toBe(true);
+      expect(
+        rows.filter((row) => row.finishedAt === null).map((row) => row.rank),
+      ).toEqual([1, 2]);
+      expect(
+        rows
+          .filter((row) => row.finishedAt === null)
+          .map((row) => row.partitionCount),
+      ).toEqual([2, 2]);
+      expect(
+        rows
+          .filter((row) => row.finishedAt === 7)
+          .map((row) => row.partitionCount),
+      ).toEqual([2, 2]);
+      expect(
+        rows
+          .filter((row) => row.finishedAt === 8)
+          .map((row) => row.partitionCount),
+      ).toEqual([1]);
+      expect(
+        rows
+          .filter((row) => row.finishedAt === 7)
+          .map((row) => row.rank)
+          .sort(),
+      ).toEqual([1, 2]);
+
+      const empty = filter(base, eq(base.columns.id, param("missing")));
+      expect(
+        executeAll(
+          db,
+          compileD1Query(window(empty, { totalCount: windowCountRows() })),
+        ),
+      ).toEqual([]);
+      const single = filter(base, eq(base.columns.id, param("seven-a")));
+      expect(
+        executeAll(
+          db,
+          compileD1Query(window(single, { totalCount: windowCountRows() })),
+        ),
+      ).toMatchObject([{ totalCount: 1 }]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("rejects malformed rank descriptors, output collisions, and out-of-scope keys", () => {
     const runs = scan(schema.scheduled_task_runs);
     const otherRuns = scan(schema.scheduled_task_runs);
@@ -414,6 +499,41 @@ describe("typed D1 query compiler", () => {
     forgedSpecification.orderBy = [];
     expect(() => compileD1Query(forged)).toThrow(
       /row-number requires at least one ordering key/u,
+    );
+
+    const countWindow = window(base, { count: windowCountRows() });
+    const countNode = countWindow.node as unknown as {
+      readonly windows: {
+        readonly specification: Record<string, unknown>;
+      }[];
+    };
+    Object.assign(countNode.windows[0]!.specification, { orderBy: [] });
+    expect(() => compileD1Query(countWindow)).toThrow(
+      /count-rows specification contains unsupported options/u,
+    );
+
+    const unknownWindow = window(base, { count: windowCountRows() });
+    const unknownNode = unknownWindow.node as unknown as {
+      readonly windows: {
+        readonly specification: { kind: string };
+      }[];
+    };
+    unknownNode.windows[0]!.specification.kind = "count-rows-frame";
+    expect(() => compileD1Query(unknownWindow)).toThrow(
+      /unsupported specification/u,
+    );
+
+    expect(() =>
+      compileD1Query(
+        window(base, {
+          invalidCountScope: windowCountRows({
+            partitionBy: [otherRuns.columns.task_key],
+          }),
+        }),
+      ),
+    ).toThrow(/outside the visible relation scope/u);
+    expect(() => windowCountRows({ orderBy: [] } as never)).toThrow(
+      /only supports partitionBy/u,
     );
   });
 

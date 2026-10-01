@@ -1,5 +1,15 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import { compileD1Query, createD1DatabaseClient } from "@/lib/db";
 import { parseJson } from "@/lib/edge/admin/response";
+import {
+  buildDoDiagnosticSitesQuery,
+  buildE2eFlushSiteQuery,
+  buildSystemPerformanceOpenVisitsQuery,
+  buildSystemPerformancePercentileQuery,
+  buildSystemPerformanceSlowEventsQuery,
+  buildSystemPerformanceSummaryQuery,
+  buildSystemPerformanceTopSitesQuery,
+  buildSystemPerformanceTrendQuery,
+} from "@/lib/edge/admin/system/query-plan";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 import { bad, forb, jsonResponseFor, na, nf } from "@/lib/response";
@@ -21,41 +31,6 @@ const SYSTEM_FUTURE_SKEW_MS = 30 * 1000;
 const SYSTEM_TRUSTED_LATENCY_MAX_MS = 24 * 60 * 60 * 1000;
 const SYSTEM_STALE_OPEN_VISIT_MS = 30 * 60 * 1000;
 const SYSTEM_TIMED_OUT_OPEN_VISIT_MS = 12 * 60 * 60 * 1000;
-const SYSTEM_EVENTS_CTE = `
-  WITH raw_events AS (
-    SELECT
-      'visit' AS kind,
-      site_id AS siteId,
-      started_at AS eventAtMs,
-      created_at * 1000 AS serverAtMs,
-      created_at AS createdAtSec
-    FROM visits
-    WHERE created_at >= ? AND created_at <= ?
-    UNION ALL
-    SELECT
-      'custom_event' AS kind,
-      site_id AS siteId,
-      occurred_at AS eventAtMs,
-      created_at * 1000 AS serverAtMs,
-      created_at AS createdAtSec
-    FROM custom_events
-    WHERE created_at >= ? AND created_at <= ?
-  ),
-  events AS (
-    SELECT
-      kind,
-      siteId,
-      eventAtMs,
-      serverAtMs,
-      createdAtSec,
-      serverAtMs - eventAtMs AS latencyMs
-    FROM raw_events
-  )
-`;
-const SYSTEM_EVENTS_MATERIALIZED_CTE = SYSTEM_EVENTS_CTE.replace(
-  "events AS (",
-  "events AS MATERIALIZED (",
-);
 function toFiniteNumber(value: unknown, fallback = 0): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -82,9 +57,6 @@ function systemPerformanceBucketSizeSeconds(
   if (minutes <= 360) return 30 * 60;
   return 60 * 60;
 }
-function systemWindowBindings(fromSec: number, toSec: number): number[] {
-  return [fromSec, toSec, fromSec, toSec];
-}
 export async function handleSystemPerformanceAdmin(
   req: Request,
   env: Env,
@@ -107,7 +79,12 @@ export async function handleSystemPerformanceAdmin(
   const fromSec = Math.max(0, Math.floor(from / 1000));
   const toSec = Math.ceil(generatedAt / 1000);
   const bucketSizeSec = systemPerformanceBucketSizeSeconds(minutes);
-  const eventBindings = systemWindowBindings(fromSec, toSec);
+  const database = createD1DatabaseClient(env.DB);
+  const queryThresholds = {
+    trustedLatencyMaxMs: SYSTEM_TRUSTED_LATENCY_MAX_MS,
+    delayedEventMs: SYSTEM_DELAYED_EVENT_MS,
+    futureSkewMs: SYSTEM_FUTURE_SKEW_MS,
+  };
 
   const [
     summaryRow,
@@ -117,187 +94,53 @@ export async function handleSystemPerformanceAdmin(
     slowEventRows,
     openVisitRow,
   ] = await Promise.all([
-    createDatabaseRuntime(env.DB).first<Record<string, unknown>>({
-      sql: `
-        ${SYSTEM_EVENTS_CTE}
-        SELECT
-          COUNT(*) AS totalEvents,
-          SUM(CASE WHEN kind = 'visit' THEN 1 ELSE 0 END) AS visits,
-          SUM(CASE WHEN kind = 'custom_event' THEN 1 ELSE 0 END) AS customEvents,
-          COUNT(DISTINCT siteId) AS activeSites,
-          AVG(CASE WHEN latencyMs >= 0 AND latencyMs <= ? THEN latencyMs END) AS avgLatencyMs,
-          SUM(CASE WHEN latencyMs >= 0 AND latencyMs <= ? THEN 1 ELSE 0 END) AS trustedLatencySamples,
-          SUM(CASE WHEN latencyMs > ? THEN 1 ELSE 0 END) AS delayedEvents,
-          SUM(CASE WHEN latencyMs < -? THEN 1 ELSE 0 END) AS futureSkewedEvents,
-          MAX(createdAtSec) AS latestCreatedAtSec
-        FROM events
-      `,
-      bindings: [
-        ...eventBindings,
-        SYSTEM_TRUSTED_LATENCY_MAX_MS,
-        SYSTEM_TRUSTED_LATENCY_MAX_MS,
-        SYSTEM_DELAYED_EVENT_MS,
-        SYSTEM_FUTURE_SKEW_MS,
-      ],
-      tag: "admin.events.first",
-    }),
-    createDatabaseRuntime(env.DB).first<Record<string, unknown>>({
-      sql: `
-        ${SYSTEM_EVENTS_CTE},
-        valid_latency AS (
-          SELECT latencyMs
-          FROM events
-          WHERE latencyMs >= 0 AND latencyMs <= ?
+    database.first(
+      compileD1Query(
+        buildSystemPerformanceSummaryQuery(fromSec, toSec, queryThresholds),
+        { tag: "admin.events.first" },
+      ),
+    ),
+    database.first(
+      compileD1Query(
+        buildSystemPerformancePercentileQuery(
+          fromSec,
+          toSec,
+          SYSTEM_TRUSTED_LATENCY_MAX_MS,
         ),
-        ranked_latency AS (
-          SELECT
-            latencyMs,
-            ROW_NUMBER() OVER (ORDER BY latencyMs) AS rn,
-            COUNT(*) OVER () AS total
-          FROM valid_latency
-        )
-        SELECT
-          MIN(CASE WHEN rn >= total * 0.5 THEN latencyMs END) AS p50LatencyMs,
-          MIN(CASE WHEN rn >= total * 0.75 THEN latencyMs END) AS p75LatencyMs,
-          MIN(CASE WHEN rn >= total * 0.95 THEN latencyMs END) AS p95LatencyMs
-        FROM ranked_latency
-      `,
-      bindings: [...eventBindings, SYSTEM_TRUSTED_LATENCY_MAX_MS],
-      tag: "admin.events.first",
-    }),
-    createDatabaseRuntime(env.DB).all<Record<string, unknown>>({
-      sql: `
-        ${SYSTEM_EVENTS_MATERIALIZED_CTE},
-        trend_aggregate AS (
-          SELECT
-            CAST(createdAtSec / ? AS INTEGER) * ? AS bucketSec,
-            SUM(CASE WHEN kind = 'visit' THEN 1 ELSE 0 END) AS visits,
-            SUM(CASE WHEN kind = 'custom_event' THEN 1 ELSE 0 END) AS customEvents,
-            COUNT(*) AS totalEvents,
-            AVG(CASE WHEN latencyMs >= 0 AND latencyMs <= ? THEN latencyMs END) AS avgLatencyMs,
-            SUM(CASE WHEN latencyMs > ? THEN 1 ELSE 0 END) AS delayedEvents,
-            SUM(CASE WHEN latencyMs < -? THEN 1 ELSE 0 END) AS futureSkewedEvents
-          FROM events
-          GROUP BY bucketSec
+        { tag: "admin.events.first" },
+      ),
+    ),
+    database.all(
+      compileD1Query(
+        buildSystemPerformanceTrendQuery(
+          fromSec,
+          toSec,
+          bucketSizeSec,
+          queryThresholds,
         ),
-        valid_bucket_latency AS (
-          SELECT
-            CAST(createdAtSec / ? AS INTEGER) * ? AS bucketSec,
-            latencyMs
-          FROM events
-          WHERE latencyMs >= 0 AND latencyMs <= ?
-        ),
-        ranked_bucket_latency AS (
-          SELECT
-            bucketSec,
-            latencyMs,
-            ROW_NUMBER() OVER (PARTITION BY bucketSec ORDER BY latencyMs) AS rn,
-            COUNT(*) OVER (PARTITION BY bucketSec) AS total
-          FROM valid_bucket_latency
-        ),
-        bucket_percentiles AS (
-          SELECT
-            bucketSec,
-            MIN(CASE WHEN rn >= total * 0.5 THEN latencyMs END) AS p50LatencyMs,
-            MIN(CASE WHEN rn >= total * 0.75 THEN latencyMs END) AS p75LatencyMs,
-            MIN(CASE WHEN rn >= total * 0.95 THEN latencyMs END) AS p95LatencyMs
-          FROM ranked_bucket_latency
-          GROUP BY bucketSec
-        )
-        SELECT
-          a.bucketSec,
-          a.visits,
-          a.customEvents,
-          a.totalEvents,
-          a.avgLatencyMs,
-          p.p50LatencyMs,
-          p.p75LatencyMs,
-          p.p95LatencyMs,
-          a.delayedEvents,
-          a.futureSkewedEvents
-        FROM trend_aggregate a
-        LEFT JOIN bucket_percentiles p ON p.bucketSec = a.bucketSec
-        ORDER BY a.bucketSec ASC
-      `,
-      bindings: [
-        ...eventBindings,
-        bucketSizeSec,
-        bucketSizeSec,
-        SYSTEM_TRUSTED_LATENCY_MAX_MS,
-        SYSTEM_DELAYED_EVENT_MS,
-        SYSTEM_FUTURE_SKEW_MS,
-        bucketSizeSec,
-        bucketSizeSec,
-        SYSTEM_TRUSTED_LATENCY_MAX_MS,
-      ],
-      tag: "admin.events.all",
-    }),
-    createDatabaseRuntime(env.DB).all<Record<string, unknown>>({
-      sql: `
-        ${SYSTEM_EVENTS_CTE}
-        SELECT
-          e.siteId,
-          COALESCE(s.name, e.siteId) AS siteName,
-          COALESCE(s.domain, '') AS siteDomain,
-          COUNT(*) AS totalEvents,
-          SUM(CASE WHEN e.kind = 'visit' THEN 1 ELSE 0 END) AS visits,
-          SUM(CASE WHEN e.kind = 'custom_event' THEN 1 ELSE 0 END) AS customEvents,
-          AVG(CASE WHEN e.latencyMs >= 0 AND e.latencyMs <= ? THEN e.latencyMs END) AS avgLatencyMs,
-          SUM(CASE WHEN e.latencyMs > ? THEN 1 ELSE 0 END) AS delayedEvents,
-          SUM(CASE WHEN e.latencyMs < -? THEN 1 ELSE 0 END) AS futureSkewedEvents
-        FROM events e
-        LEFT JOIN sites s ON s.id = e.siteId
-        GROUP BY e.siteId
-        ORDER BY totalEvents DESC, delayedEvents DESC
-        LIMIT 8
-      `,
-      bindings: [
-        ...eventBindings,
-        SYSTEM_TRUSTED_LATENCY_MAX_MS,
-        SYSTEM_DELAYED_EVENT_MS,
-        SYSTEM_FUTURE_SKEW_MS,
-      ],
-      tag: "admin.events.all",
-    }),
-    createDatabaseRuntime(env.DB).all<Record<string, unknown>>({
-      sql: `
-        ${SYSTEM_EVENTS_CTE}
-        SELECT
-          e.kind,
-          e.siteId,
-          COALESCE(s.name, e.siteId) AS siteName,
-          COALESCE(s.domain, '') AS siteDomain,
-          e.eventAtMs,
-          e.serverAtMs,
-          e.latencyMs
-        FROM events e
-        LEFT JOIN sites s ON s.id = e.siteId
-        WHERE e.latencyMs > 0
-        ORDER BY e.latencyMs DESC
-        LIMIT 10
-      `,
-      bindings: [...eventBindings],
-      tag: "admin.events.all",
-    }),
-    createDatabaseRuntime(env.DB).first<Record<string, unknown>>({
-      sql: `
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN ? - last_activity_at > ? THEN 1 ELSE 0 END) AS stale,
-          SUM(CASE WHEN ? - last_activity_at > ? THEN 1 ELSE 0 END) AS timedOut,
-          MIN(started_at) AS oldestStartedAt,
-          MAX(last_activity_at) AS newestActivityAt
-        FROM visits
-        WHERE status = 'open'
-      `,
-      bindings: [
-        generatedAt,
-        SYSTEM_STALE_OPEN_VISIT_MS,
-        generatedAt,
-        SYSTEM_TIMED_OUT_OPEN_VISIT_MS,
-      ],
-      tag: "admin.visits.first",
-    }),
+        { tag: "admin.events.all" },
+      ),
+    ),
+    database.all(
+      compileD1Query(
+        buildSystemPerformanceTopSitesQuery(fromSec, toSec, queryThresholds),
+        { tag: "admin.events.all" },
+      ),
+    ),
+    database.all(
+      compileD1Query(buildSystemPerformanceSlowEventsQuery(fromSec, toSec), {
+        tag: "admin.events.all",
+      }),
+    ),
+    database.first(
+      compileD1Query(
+        buildSystemPerformanceOpenVisitsQuery(generatedAt, {
+          staleMs: SYSTEM_STALE_OPEN_VISIT_MS,
+          timedOutMs: SYSTEM_TIMED_OUT_OPEN_VISIT_MS,
+        }),
+        { tag: "admin.visits.first" },
+      ),
+    ),
   ]);
 
   const totalEvents = toFiniteNumber(summaryRow?.totalEvents);
@@ -515,14 +358,10 @@ export async function handleDoDiagnosticAdmin(
   if (req.method !== "GET") return na(req);
 
   const generatedAt = Date.now();
-  const sitesResult = await createDatabaseRuntime(env.DB).all<{
-    id: string;
-    name: string;
-    domain: string;
-  }>({
-    sql: "SELECT id, name, domain FROM sites ORDER BY created_at ASC",
-    tag: "admin.sites.all",
-  });
+  const database = createD1DatabaseClient(env.DB);
+  const sitesResult = await database.all(
+    compileD1Query(buildDoDiagnosticSitesQuery(), { tag: "admin.sites.all" }),
+  );
   const sites = sitesResult.results.map((row) => ({
     id: String(row.id || ""),
     name: String(row.name || ""),
@@ -634,11 +473,11 @@ export async function handleE2eFlushAdmin(
   const body = await parseJson(req);
   const siteId = clampString(String(body.siteId || ""), 120);
   if (!siteId) return bad("siteId is required", undefined, req);
-  const site = await createDatabaseRuntime(env.DB).first<{ id: string }>({
-    sql: "SELECT id FROM sites WHERE id=? LIMIT 1",
-    bindings: [siteId],
-    tag: "admin.sites.first",
-  });
+  const site = await createD1DatabaseClient(env.DB).first(
+    compileD1Query(buildE2eFlushSiteQuery(siteId), {
+      tag: "admin.sites.first",
+    }),
+  );
   if (!site) return nf("Site not found", undefined, req);
   const stub = env.INGEST_DO.get(env.INGEST_DO.idFromName(siteId));
   const response = await stub.fetch("https://ingest.internal/flush?force=1", {

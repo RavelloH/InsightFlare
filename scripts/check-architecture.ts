@@ -174,6 +174,7 @@ function typedDalConvergenceViolations(
     "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-persistence.ts",
     "src/lib/edge/admin/scheduled-tasks/query-plan.ts",
+    "src/lib/edge/admin/system/query-plan.ts",
   ]);
   const isTypedQueryPureModule = typedQueryPureModules.has(relativePath);
   const ingestRuntimeModules = new Set([
@@ -400,6 +401,11 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
     "countRunLogs",
     "loadRunLogsPage",
     "handleScheduledTasksAdmin",
+  ],
+  "src/lib/edge/admin/system/handler.ts": [
+    "handleSystemPerformanceAdmin",
+    "handleDoDiagnosticAdmin",
+    "handleE2eFlushAdmin",
   ],
 };
 

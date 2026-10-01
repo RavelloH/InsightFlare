@@ -417,6 +417,69 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("keeps system admin query plans pure and all migrated handlers typed", () => {
+    const root = fixture();
+    const planPath = path.join(root, "src/lib/edge/admin/system/query-plan.ts");
+    mkdirSync(path.dirname(planPath), { recursive: true });
+    writeFileSync(
+      planPath,
+      [
+        "export const execute = createD1DatabaseClient(database);",
+        'export const statement = "SELECT * FROM visits";',
+        'export function direct(database) { return database.prepare("SELECT 1"); }',
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ source }) => source.endsWith("system/query-plan.ts"))
+        .map(({ specifier }) => specifier),
+    ).toEqual(
+      expect.arrayContaining([
+        "createD1DatabaseClient",
+        "<raw SQL literal>",
+        "<direct D1 operation>",
+      ]),
+    );
+
+    const handlerPath = path.join(root, "src/lib/edge/admin/system/handler.ts");
+    mkdirSync(path.dirname(handlerPath), { recursive: true });
+    writeFileSync(
+      handlerPath,
+      [
+        'import { createDatabaseRuntime as runtime } from "legacy-module";',
+        "export async function handleSystemPerformanceAdmin(env) {",
+        '  return runtime(env.DB).all("SELECT 1");',
+        "}",
+        "export async function handleDoDiagnosticAdmin(env) {",
+        '  return env.DB.prepare("SELECT 1");',
+        "}",
+        "export async function handleE2eFlushAdmin(env) {",
+        '  return queryD1All("SELECT 1");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root)
+        .filter(
+          ({ rule, source }) =>
+            rule === "typed-query-function-forbidden" &&
+            source.endsWith("system/handler.ts"),
+        )
+        .map(({ specifier }) => specifier),
+    ).toEqual(
+      expect.arrayContaining([
+        "runtime",
+        "raw-sql",
+        "<direct D1 operation>",
+        "queryD1All",
+      ]),
+    );
+  });
+
   it("requires typed plans in every hourly rollup function", () => {
     const root = fixture();
     const sourcePath = path.join(
