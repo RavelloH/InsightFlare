@@ -121,6 +121,7 @@ const observationReportColumnByAttribute: Readonly<Record<string, string>> = {
   "observation.sessionId": "session_id",
   "observation.visitorId": "visitor_id",
   "observation.visitId": "visit_id",
+  "observation.rawSiteId": "site_id",
   "observation.userId": "user_id",
   "observation.userName": "user_name",
   "observation.status": "status",
@@ -208,6 +209,17 @@ const pageReportColumnByAttribute: Readonly<Record<string, string>> = {
   "page.report.perfCls": "perf_cls",
   "page.report.perfInpMs": "perf_inp_ms",
 };
+
+function observationReportColumn(attributeId: string): string | undefined {
+  const direct = observationReportColumnByAttribute[attributeId];
+  if (direct) return direct;
+  const prefix = "observation.contextPage";
+  if (!attributeId.startsWith(prefix)) return undefined;
+  const suffix = attributeId.slice(prefix.length);
+  if (!suffix) return undefined;
+  const pageAttributeId = `page.report.${suffix[0]!.toLowerCase()}${suffix.slice(1)}`;
+  return pageReportColumnByAttribute[pageAttributeId];
+}
 
 function requirePageReportValue(
   expression: AnyExpression,
@@ -1009,6 +1021,30 @@ export class AnalyticsRelationalStorage {
     return project(joined, projections);
   }
 
+  #attachSameSiteReportName(events: AnalyticsDbRelation): AnalyticsDbRelation {
+    const names = scan(schema.custom_event_names);
+    const joined = join(
+      events,
+      names,
+      and(
+        eq(
+          events.columns.site_pk as AnyExpression,
+          names.columns.site_pk as AnyExpression,
+        ),
+        eq(
+          events.columns.event_name_id as AnyExpression,
+          names.columns.id as AnyExpression,
+        ),
+      ),
+      "left",
+    );
+    const projections: Record<string, AnyExpression> = {};
+    for (const name of Object.keys(events.columns))
+      projections[name] = joined.columns[`left_${name}`]!;
+    projections.activity_event_name = joined.columns.right_name;
+    return project(joined, projections);
+  }
+
   #attachReportOwner(
     events: AnalyticsDbRelation,
     ownerColumns: readonly string[],
@@ -1511,7 +1547,7 @@ export class AnalyticsRelationalStorage {
     if (attributes.includes("observation.visitorId"))
       pageColumns.add("visitor_id");
     for (const attribute of attributes) {
-      const physical = observationReportColumnByAttribute[attribute];
+      const physical = observationReportColumn(attribute);
       if (physical) pageColumns.add(physical);
     }
 
@@ -1548,6 +1584,8 @@ export class AnalyticsRelationalStorage {
     let events = this.#eventsWithOwner(input.domain, ownerColumns, true);
     if (attributes.includes("observation.eventName"))
       events = this.#attachReportName(events);
+    if (attributes.includes("observation.sameSiteEventName"))
+      events = this.#attachSameSiteReportName(events);
     const eventProjections: Record<string, AnyExpression> = {
       site_pk: events.columns.site_pk,
     };
@@ -1589,11 +1627,13 @@ export class AnalyticsRelationalStorage {
         attribute === "observation.kind" ||
         attribute === "observation.eventId" ||
         attribute === "observation.eventName" ||
+        attribute === "observation.sameSiteEventName" ||
+        attribute === "observation.rawSiteId" ||
         attribute === "observation.visitId" ||
         this.#eventReportValueIsNull(attribute)
       )
         continue;
-      const physical = observationReportColumnByAttribute[attribute];
+      const physical = observationReportColumn(attribute);
       if (physical) columns.add(physical);
     }
     return [...columns];
@@ -1619,10 +1659,11 @@ export class AnalyticsRelationalStorage {
     if (attribute === "observation.id") return column(pages, "visit_id");
     if (
       attribute === "observation.eventId" ||
-      attribute === "observation.eventName"
+      attribute === "observation.eventName" ||
+      attribute === "observation.sameSiteEventName"
     )
       return param(null);
-    const physical = observationReportColumnByAttribute[attribute];
+    const physical = observationReportColumn(attribute);
     if (!physical)
       throw new Error(
         `No D1 report Observation mapping exists for ${attribute}.`,
@@ -1637,11 +1678,14 @@ export class AnalyticsRelationalStorage {
     if (attribute === "observation.kind") return param("event");
     if (attribute === "observation.id" || attribute === "observation.eventId")
       return column(events, "event_id");
+    if (attribute === "observation.sameSiteEventName")
+      return column(events, "activity_event_name");
     if (attribute === "observation.eventName")
       return column(events, "event_name");
     if (attribute === "observation.visitId") return column(events, "visit_id");
+    if (attribute === "observation.rawSiteId") return column(events, "site_id");
     if (this.#eventReportValueIsNull(attribute)) return param(null);
-    const physical = observationReportColumnByAttribute[attribute];
+    const physical = observationReportColumn(attribute);
     if (!physical)
       throw new Error(
         `No D1 report Observation mapping exists for ${attribute}.`,

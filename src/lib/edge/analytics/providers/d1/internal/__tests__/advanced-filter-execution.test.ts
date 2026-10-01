@@ -157,7 +157,10 @@ const RAW_COLUMNS = [
   "perf_inp_ms",
 ] as const;
 
-function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
+function sqliteEnv(
+  activities: readonly SharedActivity[] = SHARED_ACTIVITIES,
+  onQueryComplete?: (sql: string) => void,
+): {
   readonly env: Env;
   readonly database: DatabaseSync;
   readonly queries: string[];
@@ -183,11 +186,17 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
       visitor_id TEXT,
       session_id TEXT,
       ${RAW_COLUMNS.map((column) => `${column} ${column === "started_at" || column.endsWith("_ms") || column === "is_eu" ? "INTEGER" : "TEXT"}`).join(",\n      ")}
+      ,ae_synced_at INTEGER,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE custom_event_names (
       id INTEGER PRIMARY KEY,
       site_pk INTEGER NOT NULL,
-      name TEXT NOT NULL
+      site_id TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      last_seen_at INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE custom_event_json_paths (
       id INTEGER PRIMARY KEY,
@@ -206,7 +215,14 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
       site_pk INTEGER NOT NULL,
       visit_id TEXT NOT NULL,
       event_name_id INTEGER NOT NULL,
-      occurred_at INTEGER NOT NULL
+      occurred_at INTEGER NOT NULL,
+      received_at INTEGER NOT NULL DEFAULT 0,
+      sequence INTEGER NOT NULL DEFAULT 0,
+      node_count INTEGER NOT NULL DEFAULT 0,
+      value_count INTEGER NOT NULL DEFAULT 0,
+      ae_synced_at INTEGER,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      user_id TEXT
     );
     CREATE TABLE custom_event_json_nodes (
       event_pk INTEGER NOT NULL,
@@ -363,8 +379,10 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
         bind: (...bindings: Array<string | number | null>) => ({
           all: async <T extends object>() => {
             queries.push(sql);
+            const results = database.prepare(sql).all(...bindings) as T[];
+            onQueryComplete?.(sql);
             return {
-              results: database.prepare(sql).all(...bindings) as T[],
+              results,
             };
           },
         }),
@@ -374,6 +392,26 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
     INGEST_DO: {},
   } as unknown as Env;
   return { env, database, queries };
+}
+
+function advancedFilterInput(time: QueryTime, siteIds = [SITE_ID]) {
+  const document = parseFilterDsl("count(page) gte 1", analyticsFilterRegistry);
+  const plan = createScopedFilterPlan("overview", document, "session");
+  if (!plan) throw new Error("expected_scoped_filter_plan");
+  const filters = attachScopedFilterMetadata(document, {
+    requestedScope: "session",
+    resolvedScope: "session",
+    plan,
+    time,
+    siteIds,
+  });
+  return {
+    context: siteQueryContext(SITE_ID, "private-dashboard"),
+    filters,
+    scopePreference: "session" as const,
+    scopePlan: plan,
+    time,
+  };
 }
 
 function demoVisit(activity: SharedActivity): DemoVisitFact {
@@ -540,6 +578,151 @@ async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
 }
 
 describe("D1 advanced filter execution", () => {
+  it("rejects scoped-filter site ids outside the actual query subject", async () => {
+    const { env, database, queries } = sqliteEnv();
+    try {
+      const time = createQueryTime(0, 2_000, "UTC", 2_000);
+      await expect(
+        d1AdvancedFilterMiddleware(env)(
+          "overview",
+          advancedFilterInput(time, [SITE_ID, "unauthorized-site"]),
+          async (prepared) => prepared,
+        ),
+      ).rejects.toMatchObject({
+        domainError: {
+          kind: "invalid-input",
+          issues: [
+            {
+              path: "filters",
+              code: "advanced_filter_execution_site_context_mismatch",
+            },
+          ],
+        },
+      });
+      expect(queries).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("stops before the next typed range read when execution is aborted", async () => {
+    const controller = new AbortController();
+    const { env, database, queries } = sqliteEnv(SHARED_ACTIVITIES, (sql) => {
+      if (/custom_event_names/iu.test(sql)) controller.abort();
+    });
+    try {
+      const time = {
+        ...createQueryTime(1_000, 1_100, "UTC", 2_000),
+        readRange: createTimeRange(0, 100),
+      };
+      await expect(
+        d1AdvancedFilterMiddleware(env)(
+          "overview",
+          advancedFilterInput(time),
+          async (prepared) => prepared,
+          { signal: controller.signal },
+        ),
+      ).rejects.toMatchObject({ name: "AbortError" });
+      expect(
+        queries.filter((sql) => /custom_event_names/iu.test(sql)),
+      ).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("propagates typed activity database failures without falling back", async () => {
+    const { env, database, queries } = sqliteEnv();
+    try {
+      database.exec("DROP TABLE custom_event_names");
+      const time = createQueryTime(0, 2_000, "UTC", 2_000);
+      await expect(
+        d1AdvancedFilterMiddleware(env)(
+          "overview",
+          advancedFilterInput(time),
+          async (prepared) => prepared,
+        ),
+      ).rejects.toThrow(/no such table: custom_event_names/iu);
+      expect(queries.some((sql) => /custom_event_names/iu.test(sql))).toBe(
+        true,
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps the 20,000 activity budget across separate range reads", async () => {
+    const pageCountPerRange = 10_000;
+    const activities = Array.from(
+      { length: pageCountPerRange * 2 },
+      (_, index): SharedActivity => ({
+        visitId: `limit-${index}`,
+        sessionId: "session-limit",
+        visitorId: "visitor-limit",
+        pageTimeMs:
+          index < pageCountPerRange
+            ? index
+            : 20_000 + index - pageCountPerRange,
+        pathname: "/limit",
+      }),
+    );
+    const { env, database, queries } = sqliteEnv(activities);
+    try {
+      const time = {
+        ...createQueryTime(20_000, 30_000, "UTC", 31_000),
+        readRange: createTimeRange(0, 10_000),
+      };
+      const input = advancedFilterInput(time);
+      const output = (await d1AdvancedFilterMiddleware(env)(
+        "overview",
+        input,
+        async (prepared) => prepared,
+      )) as typeof input;
+      expect(output.scopePlan.advancedMatches?.entityIds).toEqual([
+        { siteId: SITE_ID, id: "session-limit" },
+      ]);
+      expect(
+        queries.filter((sql) => /custom_event_names/iu.test(sql)),
+      ).toHaveLength(2);
+
+      database
+        .prepare(
+          `INSERT INTO visits (
+            visit_id, site_id, site_pk, visitor_id, session_id, started_at,
+            pathname, title, duration_ms, hostname
+          ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, 5, ?)`,
+        )
+        .run(
+          "limit-extra",
+          SITE_ID,
+          "visitor-limit",
+          "session-limit",
+          pageCountPerRange - 1,
+          "/limit",
+          "/limit",
+          "example.test",
+        );
+
+      await expect(
+        d1AdvancedFilterMiddleware(env)(
+          "overview",
+          input,
+          async (prepared) => prepared,
+        ),
+      ).rejects.toMatchObject({
+        domainError: {
+          kind: "invalid-input",
+          issues: [{ path: "filters", code: "filter_activity_limit_exceeded" }],
+        },
+      });
+      expect(
+        queries.filter((sql) => /custom_event_names/iu.test(sql)),
+      ).toHaveLength(4);
+    } finally {
+      database.close();
+    }
+  });
+
   it("uses evaluation history for Core and Relation while legacy fields stay in the candidate range", async () => {
     const { env, database } = sqliteEnv();
     try {

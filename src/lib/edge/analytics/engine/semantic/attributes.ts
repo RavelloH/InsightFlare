@@ -216,7 +216,7 @@ function observationAttribute(
 }
 
 /** Internal report reads for Observation plans; these are not Filter fields. */
-export const semanticObservationAttributeCatalog: readonly SemanticAttributeDefinition[] =
+const semanticObservationBaseAttributeCatalog: readonly SemanticAttributeDefinition[] =
   Object.freeze([
     { name: "sessionId", scalar: "string", nullable: false },
     { name: "visitorId", scalar: "string", nullable: false },
@@ -224,6 +224,8 @@ export const semanticObservationAttributeCatalog: readonly SemanticAttributeDefi
     { name: "id", scalar: "string", nullable: true },
     { name: "eventId", scalar: "string", nullable: true },
     { name: "eventName", scalar: "string", nullable: true },
+    { name: "sameSiteEventName", scalar: "string", nullable: true },
+    { name: "rawSiteId", scalar: "string", nullable: false },
     { name: "visitId", scalar: "string", nullable: true },
     { name: "userId", scalar: "string", nullable: true },
     { name: "userName", scalar: "string", nullable: true },
@@ -492,6 +494,85 @@ export function assertSemanticPageReportAttributeContracts(
       throw new Error(`invalid_page_report_attribute_contract:${attribute.id}`);
   }
 }
+
+const ACTIVITY_CONTEXT_PAGE_ATTRIBUTE_NAMES = [
+  "startedAt",
+  "status",
+  "lastActivityAt",
+  "endedAt",
+  "finalizedAt",
+  "durationMs",
+  "durationSource",
+  "exitReason",
+  "pathname",
+  "queryString",
+  "hash",
+  "hostname",
+  "title",
+  "referrerUrl",
+  "referrerHost",
+  "utmSource",
+  "utmMedium",
+  "utmCampaign",
+  "utmTerm",
+  "utmContent",
+  "isEU",
+  "country",
+  "region",
+  "regionCode",
+  "city",
+  "continent",
+  "latitude",
+  "longitude",
+  "postalCode",
+  "metroCode",
+  "timezone",
+  "organization",
+  "userAgent",
+  "browser",
+  "browserVersion",
+  "os",
+  "osVersion",
+  "deviceType",
+  "screenWidth",
+  "screenHeight",
+  "language",
+  "userId",
+  "userName",
+  "perfTtfbMs",
+  "perfFcpMs",
+  "perfLcpMs",
+  "perfCls",
+  "perfInpMs",
+] as const;
+
+function contextPageAttributeName(pageAttributeName: string): string {
+  return `contextPage${pageAttributeName[0]?.toUpperCase() ?? ""}${pageAttributeName.slice(1)}`;
+}
+
+const semanticObservationContextPageAttributes =
+  ACTIVITY_CONTEXT_PAGE_ATTRIBUTE_NAMES.map((name) => {
+    const pageAttribute = semanticPageReportAttributeCatalog.find(
+      (attribute) => attribute.id === `page.report.${name}`,
+    );
+    if (!pageAttribute || pageAttribute.valueType.kind !== "scalar")
+      throw new Error(`missing_activity_context_page_attribute:${name}`);
+    return observationAttribute({
+      name: contextPageAttributeName(name),
+      scalar: pageAttribute.valueType.scalar,
+      nullable: pageAttribute.nullable,
+      ...(pageAttribute.valueType.unit
+        ? { unit: pageAttribute.valueType.unit }
+        : {}),
+    });
+  });
+
+/** Internal activity context: Page fields on Page rows and their owner Page on Event rows. */
+export const semanticObservationAttributeCatalog: readonly SemanticAttributeDefinition[] =
+  Object.freeze([
+    ...semanticObservationBaseAttributeCatalog,
+    ...semanticObservationContextPageAttributes,
+  ]);
 
 interface EventReportAttributeInput {
   readonly name: string;

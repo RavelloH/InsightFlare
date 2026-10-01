@@ -14,6 +14,8 @@ import {
   scopedFilterMetadata,
   type ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { SemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import { semanticSubjectFromQuerySubject } from "@/lib/edge/analytics/engine/semantic/subject";
 import type { Env } from "@/lib/edge/types";
 import type {
   FilterEvaluationDataset,
@@ -28,6 +30,8 @@ import type {
   FilterTargetExpression,
 } from "@/lib/filter-contract/filters";
 
+import type { AdvancedFilterActivityRow } from "./advanced-filter-activity-query";
+import { queryAdvancedFilterActivityRange } from "./advanced-filter-activity-query";
 import { siteCoverage } from "./advanced-filter-site-coverage";
 import { queryD1All } from "./core-sources";
 import type { D1ReadDiagnostics } from "./diagnostics";
@@ -36,68 +40,7 @@ const MAX_ADVANCED_ACTIVITIES = 20_000;
 const MAX_ADVANCED_PAYLOAD_NODES = 50_000;
 const SITE_CHUNK_SIZE = 90;
 
-const DATA_COLUMNS = [
-  "started_at",
-  "status",
-  "last_activity_at",
-  "ended_at",
-  "finalized_at",
-  "duration_ms",
-  "duration_source",
-  "exit_reason",
-  "pathname",
-  "query_string",
-  "hash_fragment",
-  "hostname",
-  "title",
-  "referrer_url",
-  "referrer_host",
-  "utm_source",
-  "utm_medium",
-  "utm_campaign",
-  "utm_term",
-  "utm_content",
-  "is_eu",
-  "country",
-  "region",
-  "region_code",
-  "city",
-  "continent",
-  "latitude",
-  "longitude",
-  "postal_code",
-  "metro_code",
-  "timezone",
-  "as_organization",
-  "ua_raw",
-  "browser",
-  "browser_version",
-  "os",
-  "os_version",
-  "device_type",
-  "screen_width",
-  "screen_height",
-  "language",
-  "user_id",
-  "user_name",
-  "perf_ttfb_ms",
-  "perf_fcp_ms",
-  "perf_lcp_ms",
-  "perf_cls",
-  "perf_inp_ms",
-] as const;
-
-interface RawEvaluationRow extends Record<string, unknown> {
-  kind: "page" | "event";
-  id: string;
-  site_id: string;
-  visit_id: string;
-  session_id: string | null;
-  visitor_id: string | null;
-  time: number;
-  event_pk: number | null;
-  event_name: string | null;
-}
+type RawEvaluationRow = AdvancedFilterActivityRow;
 
 interface RawPayloadNode extends Record<string, unknown> {
   event_id: string;
@@ -148,58 +91,11 @@ function evaluationReadRanges(
   return merged;
 }
 
-function sourceProjection(alias: "v" | "p"): string {
-  return DATA_COLUMNS.map((column) => `${alias}.${column} AS ${column}`).join(
-    ",\n",
-  );
-}
-
 function sourceIdentityPredicate(
   alias: "v" | "ce" | "seed_event",
   count: number,
 ): string {
   return `${alias}.site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${Array.from({ length: count }, () => "?").join(", ")}))`;
-}
-
-function activitySql(siteCount: number): string {
-  const visitPredicate = sourceIdentityPredicate("v", siteCount);
-  const eventPredicate = sourceIdentityPredicate("ce", siteCount);
-  return `
-SELECT * FROM (
-  SELECT
-    'page' AS kind,
-    v.visit_id AS id,
-    v.visit_id,
-    v.site_id,
-    v.site_pk,
-    v.visitor_id,
-    v.session_id,
-    v.started_at AS time,
-    CAST(NULL AS INTEGER) AS event_pk,
-    CAST(NULL AS TEXT) AS event_name,
-    ${sourceProjection("v")}
-  FROM visits v
-  WHERE ${visitPredicate} AND v.started_at >= ? AND v.started_at < ?
-  UNION ALL
-  SELECT
-    'event' AS kind,
-    ce.event_id AS id,
-    ce.visit_id,
-    ce.site_id,
-    ce.site_pk,
-    v.visitor_id,
-    v.session_id,
-    ce.occurred_at AS time,
-    ce.event_pk,
-    cen.name AS event_name,
-    ${DATA_COLUMNS.map((column) => `v.${column} AS ${column}`).join(",\n")}
-  FROM custom_events ce
-  INNER JOIN custom_event_names cen ON cen.id = ce.event_name_id AND cen.site_pk = ce.site_pk
-  INNER JOIN visits v ON v.site_pk = ce.site_pk AND v.visit_id = ce.visit_id
-  WHERE ${eventPredicate} AND ce.occurred_at >= ? AND ce.occurred_at < ?
-)
-ORDER BY time ASC, CASE kind WHEN 'page' THEN 0 ELSE 1 END ASC, id ASC
-LIMIT ?`;
 }
 
 function payloadPaths(expression: FilterDocument["root"]): {
@@ -262,6 +158,7 @@ function payloadPaths(expression: FilterDocument["root"]): {
 
 async function loadActivities(
   env: Env,
+  subject: SemanticSubjectDomain,
   siteIds: readonly string[],
   ranges: readonly {
     readonly startMs: number;
@@ -274,20 +171,14 @@ async function loadActivities(
   for (const chunk of siteChunks(siteIds)) {
     for (const range of ranges) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const rows = await queryD1All<RawEvaluationRow>(
+      const rows = await queryAdvancedFilterActivityRange({
         env,
-        activitySql(chunk.length),
-        [
-          ...chunk,
-          range.startMs,
-          range.endExclusiveMs,
-          ...chunk,
-          range.startMs,
-          range.endExclusiveMs,
-          MAX_ADVANCED_ACTIVITIES + 1,
-        ],
+        subject,
+        siteIds: chunk,
+        range,
         diagnostics,
-      );
+        signal,
+      });
       activities.push(...rows);
       if (activities.length > MAX_ADVANCED_ACTIVITIES) {
         throw invalidInput("filters", "filter_activity_limit_exceeded");
@@ -516,14 +407,20 @@ function entitiesForRows(
 ): FilterEvaluationDataset {
   const initial = rows.map((row): FilterEvaluationEntity => ({
     kind: row.kind,
-    id: row.id,
+    // The legacy evaluator's public type is narrower than its SQL row contract.
+    // Keep nullable database values intact at runtime; this only bridges TS types.
+    id: row.id as string,
     time: row.time,
-    visitId: row.visit_id,
+    visitId: row.visit_id as string,
     sessionId: row.session_id ?? undefined,
     visitorId: row.visitor_id ?? undefined,
     fields: fieldsFor(row),
     ...(row.kind === "event"
-      ? { payload: payloads.has(row.id) ? payloads.get(row.id) : {} }
+      ? {
+          payload: payloads.has(row.id as string)
+            ? payloads.get(row.id as string)
+            : {},
+        }
       : {}),
   }));
   const candidate = initial.filter(
@@ -579,6 +476,7 @@ function entitiesForRows(
 
 async function evaluateForSites(input: {
   readonly env: Env;
+  readonly subject: SemanticSubjectDomain;
   readonly siteIds: readonly string[];
   readonly filters: FilterDocument;
   readonly plan: ScopedFilterPlan;
@@ -590,6 +488,12 @@ async function evaluateForSites(input: {
     return input.plan.scope === "event"
       ? { visitIds: [], eventIds: [] }
       : { entityIds: [] };
+  const authorizedSiteIds = new Set<string>(input.subject.siteIds);
+  if (input.siteIds.some((siteId) => !authorizedSiteIds.has(siteId)))
+    throw invalidInput(
+      "filters",
+      "advanced_filter_execution_site_context_mismatch",
+    );
   const fullHistory = input.time.fullHistory === true;
   const coverage = await siteCoverage(
     input.env,
@@ -624,6 +528,7 @@ async function evaluateForSites(input: {
   const [rows, payloads] = await Promise.all([
     loadActivities(
       input.env,
+      input.subject,
       input.siteIds,
       readRanges,
       input.diagnostics,
@@ -643,7 +548,7 @@ async function evaluateForSites(input: {
   const entityIds: AdvancedFilterIdentity[] = [];
   const visitIds: AdvancedFilterIdentity[] = [];
   const eventIds: AdvancedFilterIdentity[] = [];
-  const rowsBySite = new Map<string, RawEvaluationRow[]>();
+  const rowsBySite = new Map<unknown, RawEvaluationRow[]>();
   for (const row of rows) {
     const siteRows = rowsBySite.get(row.site_id) ?? [];
     siteRows.push(row);
@@ -746,6 +651,7 @@ interface PreparedFilterSide {
 
 function prepareSide(
   env: Env,
+  subject: SemanticSubjectDomain,
   siteIds: readonly string[],
   side: FilterSide,
   diagnostics?: D1ReadDiagnostics,
@@ -762,6 +668,7 @@ function prepareSide(
     throw invalidInput("time", "advanced_filter_execution_context_required");
   return evaluateForSites({
     env,
+    subject,
     siteIds: metadata.siteIds.length ? metadata.siteIds : siteIds,
     filters,
     plan: metadata.plan,
@@ -794,11 +701,12 @@ export function d1AdvancedFilterMiddleware(
     execution,
   ) => {
     const query = input as QueryInput & Record<string, unknown>;
-    const subject = query.context.subject;
+    const querySubject = query.context.subject;
+    const subject = semanticSubjectFromQuerySubject(querySubject);
     const siteIds =
-      subject.kind === "site"
-        ? [subject.siteId]
-        : [...subject.authorizedSiteIds];
+      querySubject.kind === "site"
+        ? [querySubject.siteId]
+        : [...querySubject.authorizedSiteIds];
     const output = { ...query } as Record<string, unknown>;
     let preparedPrimaryPlan: ScopedFilterPlan | undefined;
     if (query.current && query.reference) {
@@ -806,6 +714,7 @@ export function d1AdvancedFilterMiddleware(
         const side = query[sideName] as FilterSide;
         const pending = prepareSide(
           env,
+          subject,
           siteIds,
           side,
           diagnostics,
@@ -823,6 +732,7 @@ export function d1AdvancedFilterMiddleware(
       };
       const pending = prepareSide(
         env,
+        subject,
         siteIds,
         side,
         diagnostics,
