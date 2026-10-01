@@ -31,8 +31,10 @@ import type {
   SourceValueBinding,
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import {
+  isSemanticEventReportAttribute,
   isSemanticPageReportAttribute,
   semanticAttribute,
+  semanticEventReportAttributeCatalog,
   semanticObservationAttributeCatalog,
 } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
@@ -257,6 +259,58 @@ function requireObservationReportValue(
     );
 }
 
+const eventReportAttributeIds = new Set(
+  semanticEventReportAttributeCatalog.map((attribute) => attribute.id),
+);
+
+function requireEventReportValue(
+  expression: AnyExpression,
+  attributeId: string,
+  path: string,
+): void {
+  const attribute = semanticAttribute(attributeId);
+  if (
+    !attribute ||
+    !eventReportAttributeIds.has(attributeId) ||
+    attribute.nativeEntity !== "event" ||
+    attribute.valueType.kind !== "scalar"
+  )
+    throw new Error(
+      `${path}.values: ${attributeId} is not an internal Event report attribute.`,
+    );
+  const scalar = attribute.valueType.scalar;
+  const affinityMatches =
+    scalar === "string"
+      ? expression.resultType.affinity === "text"
+      : scalar === "datetime" || scalar === "date"
+        ? expression.resultType.affinity === "integer"
+        : scalar === "number"
+          ? expression.resultType.affinity === "integer" ||
+            expression.resultType.affinity === "real"
+          : scalar === "boolean"
+            ? expression.resultType.affinity === "integer"
+            : false;
+  if (
+    !affinityMatches ||
+    (expression.resultType.nullable && !attribute.nullable)
+  )
+    throw new Error(
+      `${path}.values: ${attributeId} no longer maps to its registered D1 scalar contract.`,
+    );
+}
+
+const eventReportColumnByAttribute: Readonly<Record<string, string>> = {
+  "event.report.localId": "event_id",
+  "event.report.ownerVisitId": "visit_id",
+  "event.report.nameId": "event_name_id",
+  "event.report.occurredAt": "occurred_at",
+  "event.report.receivedAt": "received_at",
+  "event.report.sequence": "sequence",
+  "event.report.nodeCount": "node_count",
+  "event.report.valueCount": "value_count",
+  "event.report.userId": "user_id",
+};
+
 function column(relation: AnalyticsDbRelation, name: string): AnyExpression {
   const expression = relation.columns[name];
   if (!expression)
@@ -293,6 +347,7 @@ export class AnalyticsRelationalStorage {
   readonly #namedEventCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #ownedEventCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #namedOwnedEventCarriers = new Map<string, AnalyticsDbRelation>();
+  readonly #eventReportCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #candidateObservationCarriers = new Map<
     string,
     AnalyticsDbRelation
@@ -318,11 +373,21 @@ export class AnalyticsRelationalStorage {
     const declaredPageReportAttributes = attributes
       .map((binding) => binding.attribute)
       .filter(isSemanticPageReportAttribute);
+    const declaredEventReportAttributes = attributes
+      .map((binding) => binding.attribute)
+      .filter(isSemanticEventReportAttribute);
     for (const binding of attributes) {
       if (isSemanticPageReportAttribute(binding.attribute)) {
         if (node.entity !== "page")
           throw new Error(
             `${path}.values: Internal Page report attributes are available only on Page.`,
+          );
+        continue;
+      }
+      if (isSemanticEventReportAttribute(binding.attribute)) {
+        if (node.entity !== "event")
+          throw new Error(
+            `${path}.values: Internal Event report attributes are available only on Event.`,
           );
         continue;
       }
@@ -352,6 +417,9 @@ export class AnalyticsRelationalStorage {
     const requiredReportAttributes = requiredAttributes
       .map((binding) => binding.attribute)
       .filter(isObservationReportAttribute);
+    const requiredEventReportAttributes = requiredAttributes
+      .map((binding) => binding.attribute)
+      .filter(isSemanticEventReportAttribute);
     const identityAttributes = requiredAttributes
       .map((binding) => binding.attribute)
       .filter(isObservationIdentityAttribute);
@@ -362,7 +430,8 @@ export class AnalyticsRelationalStorage {
     const declaredContracts = attributes.flatMap((binding) => {
       if (
         isObservationReportAttribute(binding.attribute) ||
-        isSemanticPageReportAttribute(binding.attribute)
+        isSemanticPageReportAttribute(binding.attribute) ||
+        isSemanticEventReportAttribute(binding.attribute)
       )
         return [];
       const contract = nativePrimitiveFieldContract(binding.attribute);
@@ -447,10 +516,58 @@ export class AnalyticsRelationalStorage {
         );
       this.#requireRelationships(relationships, ["event.observation"], path);
       activity = "event";
-      carrier =
-        contracts.length > 0
-          ? this.#eventsWithName(node.temporalDomain)
-          : this.#events(node.temporalDomain);
+      if (
+        declaredEventReportAttributes.length > 0 &&
+        declaredContracts.length > 0
+      )
+        throw new Error(
+          `${path}.values: Internal Event report attributes cannot be mixed with native primitive fields.`,
+        );
+      if (declaredEventReportAttributes.length > 0) {
+        const ownerPageAttributes = [
+          ...new Set(
+            requiredEventReportAttributes.flatMap((attributeId) => {
+              const derivation = semanticAttribute(attributeId)?.derivation;
+              return derivation?.kind === "report-relationship" &&
+                derivation.relationship === "event.ownerPage" &&
+                derivation.sourceAttribute
+                ? [derivation.sourceAttribute]
+                : [];
+            }),
+          ),
+        ];
+        const needsOwner = requiredEventReportAttributes.some((attributeId) => {
+          const derivation = semanticAttribute(attributeId)?.derivation;
+          return (
+            derivation?.kind === "report-relationship" &&
+            derivation.relationship === "event.ownerPage"
+          );
+        });
+        carrier = this.#eventReport({
+          domain: node.temporalDomain,
+          attributes: requiredEventReportAttributes,
+          ownerPageAttributes,
+          includeName: requiredEventReportAttributes.includes(
+            "event.report.eventName",
+          ),
+          includeOwner: needsOwner,
+          includeIdentity:
+            selfRequired ||
+            relationships.some(
+              (binding) =>
+                binding.relationship === "event.observation" &&
+                requiredSlots.has(binding.slot),
+            ),
+          allowRetainedHistory:
+            node.temporalDomain === "read" &&
+            this.#time.read.kind === "retained-history",
+        });
+      } else {
+        carrier =
+          contracts.length > 0
+            ? this.#eventsWithName(node.temporalDomain)
+            : this.#events(node.temporalDomain);
+      }
     } else if (node.entity === "observation") {
       this.#requireRelationships(relationships, ["observation.session"], path);
       const fieldActivity = declaredContracts[0]?.contract.activity;
@@ -609,6 +726,23 @@ export class AnalyticsRelationalStorage {
             );
         }
       } else if (binding.kind === "attribute") {
+        if (isSemanticEventReportAttribute(binding.attribute)) {
+          if (node.entity !== "event")
+            throw new Error(
+              `${path}.values: Internal Event report attributes are available only on Event.`,
+            );
+          const reportValue = this.#eventDetailReportValue(
+            carrier,
+            binding.attribute,
+          );
+          requireEventReportValue(reportValue, binding.attribute, path);
+          values.set(binding.slot, {
+            kind: "scalar",
+            value: reportValue,
+            candidateBounded: false,
+          });
+          continue;
+        }
         if (isSemanticPageReportAttribute(binding.attribute)) {
           if (node.entity !== "page")
             throw new Error(
@@ -849,6 +983,37 @@ export class AnalyticsRelationalStorage {
     return project(joined, projections);
   }
 
+  #attachReportOwner(
+    events: AnalyticsDbRelation,
+    ownerColumns: readonly string[],
+  ): AnalyticsDbRelation {
+    const canonicalColumns = [...new Set(ownerColumns)].sort();
+    const source = scan(schema.visits);
+    const ownerProjections: Record<string, AnyExpression> = {
+      site_pk: source.columns.site_pk,
+      visit_id: source.columns.visit_id,
+    };
+    for (const name of canonicalColumns)
+      ownerProjections[name] = column(source, name);
+    const pages = project(source, ownerProjections);
+    const joined = join(
+      events,
+      pages,
+      and(
+        eq(events.columns.site_pk, pages.columns.site_pk),
+        eq(events.columns.visit_id, pages.columns.visit_id),
+      ),
+      "left",
+    );
+    const projections: Record<string, AnyExpression> = {};
+    for (const name of Object.keys(events.columns))
+      projections[name] = joined.columns[`left_${name}`]!;
+    projections.owner_site_pk = joined.columns.right_site_pk;
+    for (const name of canonicalColumns)
+      projections[`owner_${name}`] = joined.columns[`right_${name}`]!;
+    return project(joined, projections);
+  }
+
   #pages(
     domain: SourceNode["temporalDomain"],
     requiredColumns: readonly string[] = [
@@ -891,19 +1056,27 @@ export class AnalyticsRelationalStorage {
   #previousPageValue(
     currentPages: AnalyticsDbRelation,
     outputColumn: "visit_id" | "started_at",
+    currentColumns: {
+      readonly sitePk: string;
+      readonly sessionId: string;
+      readonly startedAt: string;
+    } = { sitePk: "site_pk", sessionId: "session_id", startedAt: "started_at" },
   ): AnyExpression {
     const previousPages = scan(schema.visits);
     const sameSession = filter(
       previousPages,
       and(
-        eq(previousPages.columns.site_pk, column(currentPages, "site_pk")),
+        eq(
+          previousPages.columns.site_pk,
+          column(currentPages, currentColumns.sitePk),
+        ),
         eq(
           previousPages.columns.session_id,
-          column(currentPages, "session_id"),
+          column(currentPages, currentColumns.sessionId),
         ),
         lt(
           previousPages.columns.started_at,
-          column(currentPages, "started_at"),
+          column(currentPages, currentColumns.startedAt),
         ),
       ),
     );
@@ -915,6 +1088,120 @@ export class AnalyticsRelationalStorage {
       1,
     );
     return scalar(project(selected, { value: selected.columns[outputColumn] }));
+  }
+
+  #eventReport(input: {
+    readonly domain: SourceNode["temporalDomain"];
+    readonly attributes: readonly string[];
+    readonly ownerPageAttributes: readonly string[];
+    readonly includeName: boolean;
+    readonly includeOwner: boolean;
+    readonly includeIdentity: boolean;
+    readonly allowRetainedHistory: boolean;
+  }): AnalyticsDbRelation {
+    const attributes = [...new Set(input.attributes)].sort();
+    const ownerPageAttributes = [...new Set(input.ownerPageAttributes)].sort();
+    const cacheKey = JSON.stringify([
+      input.domain,
+      attributes,
+      ownerPageAttributes,
+      input.includeName,
+      input.includeOwner,
+      input.includeIdentity,
+      input.allowRetainedHistory,
+    ]);
+    const existing = this.#eventReportCarriers.get(cacheKey);
+    if (existing) return existing;
+
+    const eventColumns = new Set<string>(["occurred_at"]);
+    if (input.includeIdentity) eventColumns.add("event_id");
+    for (const attribute of attributes) {
+      const physical = eventReportColumnByAttribute[attribute];
+      if (physical) eventColumns.add(physical);
+    }
+    if (input.includeName) eventColumns.add("event_name_id");
+    if (input.includeOwner) eventColumns.add("visit_id");
+    const source = scan(schema.custom_events);
+    const sourceProjections: Record<string, AnyExpression> = {
+      site_pk: source.columns.site_pk,
+    };
+    for (const name of eventColumns)
+      sourceProjections[name] = column(source, name);
+    const events = project(source, sourceProjections);
+    const scoped = join(
+      events,
+      this.#sites(),
+      eq(events.columns.site_pk, this.#sites().columns.site_pk),
+    );
+    const ranged = this.#inRange(
+      scoped,
+      input.domain,
+      scoped.columns.left_occurred_at,
+      input.allowRetainedHistory,
+    );
+    const baseProjections: Record<string, AnyExpression> = {
+      site_pk: ranged.columns.left_site_pk,
+    };
+    for (const name of eventColumns)
+      baseProjections[name] = ranged.columns[`left_${name}`]!;
+    let carrier: AnalyticsDbRelation = project(ranged, baseProjections);
+    if (input.includeName) carrier = this.#attachReportName(carrier);
+
+    if (input.includeOwner) {
+      const ownerColumns = new Set<string>();
+      for (const attributeId of ownerPageAttributes) {
+        const physical = pageReportColumnByAttribute[attributeId];
+        if (physical) ownerColumns.add(physical);
+        if (
+          attributeId === "page.report.previousVisitId" ||
+          attributeId === "page.report.previousVisitStartedAt"
+        ) {
+          ownerColumns.add("session_id");
+          ownerColumns.add("started_at");
+        }
+      }
+      carrier = this.#attachReportOwner(carrier, [...ownerColumns]);
+    }
+    this.#eventReportCarriers.set(cacheKey, carrier);
+    return carrier;
+  }
+
+  #eventDetailReportValue(
+    events: AnalyticsDbRelation,
+    attributeId: string,
+  ): AnyExpression {
+    if (attributeId === "event.report.eventName")
+      return column(events, "event_name");
+    if (attributeId === "event.report.ownerPresent")
+      return isNotNull(column(events, "owner_site_pk"));
+    const attribute = semanticAttribute(attributeId);
+    const derivation = attribute?.derivation;
+    if (
+      derivation?.kind === "report-relationship" &&
+      derivation.relationship === "event.ownerPage" &&
+      derivation.sourceAttribute
+    ) {
+      if (
+        derivation.sourceAttribute === "page.report.previousVisitId" ||
+        derivation.sourceAttribute === "page.report.previousVisitStartedAt"
+      )
+        return this.#previousPageValue(
+          events,
+          derivation.sourceAttribute === "page.report.previousVisitId"
+            ? "visit_id"
+            : "started_at",
+          {
+            sitePk: "site_pk",
+            sessionId: "owner_session_id",
+            startedAt: "owner_started_at",
+          },
+        );
+      const physical = pageReportColumnByAttribute[derivation.sourceAttribute];
+      if (physical) return column(events, `owner_${physical}`);
+    }
+    const physical = eventReportColumnByAttribute[attributeId];
+    if (physical) return column(events, physical);
+    throw new Error(`No D1 Event report mapping exists for ${attributeId}.`);
   }
 
   #requiredPageColumns(

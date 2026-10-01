@@ -1,10 +1,8 @@
-import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
 import { buildJourneyObservationPlan } from "@/lib/edge/analytics/engine/journey-observation-plan";
 import { buildJourneyPageviewDetailPlan } from "@/lib/edge/analytics/engine/journey-page-report-plan";
-import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
-import { currentD1Operation } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   GeoPointRow,
   JourneyEventRow,
@@ -17,7 +15,6 @@ import {
   buildTargetVisitSourceCte,
   detailCustomEventSourceBindings,
   queryD1All,
-  queryD1CompiledAll,
   targetVisitSourceBindings,
 } from "./core";
 import {
@@ -110,28 +107,16 @@ async function queryJourneyObservationRows(
     shape,
     ...(window ? { window } : {}),
   });
-  const output = plan.outputs.find(
-    (candidate) =>
-      candidate.id ===
-      (shape === "timeline"
-        ? "journey-observation-timeline"
-        : "journey-observation-detail-source"),
+  const outputId =
+    shape === "timeline"
+      ? "journey-observation-timeline"
+      : "journey-observation-detail-source";
+  return queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    outputId,
+    "journey_observation_output_missing",
   );
-  if (!output) throw new Error("journey_observation_output_missing");
-  const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
-    siteId,
-    time: plan.context.time,
-  });
-  const lowered = lowerer.lower(output);
-  const relation = lowerer.projectOutput(
-    lowered,
-    output.fields.map((field) => ({ name: field.name, slot: field.slot })),
-  );
-  const query = compileD1Query(lowerLogicalPlan(relation), {
-    tag: currentD1Operation() ?? "analytics.query.all",
-  });
-  const rows = await queryD1CompiledAll<object>(env, query);
-  return rows.map((row) => Object.fromEntries(Object.entries(row)));
 }
 type JourneyEventDetailKind = Exclude<JourneyEventRow["kind"], "custom">;
 function nullableDetailNumber(

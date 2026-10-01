@@ -1,8 +1,9 @@
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { buildEventRecordDetailPlan } from "@/lib/edge/analytics/engine/event-record-detail-plan";
 import { readCustomEventDetail } from "@/lib/edge/analytics/providers/d1/internal/custom-event-read";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   EventRecordRow,
   EventRecordSortKey,
@@ -350,171 +351,15 @@ export async function queryEventRecordDetailFromD1(
   eventId: string,
   window?: QueryWindow,
 ) {
-  const rows = await queryD1All<EventRecordDetailRow>(
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    `
-WITH
-    event_source AS (
-  SELECT
-    ce.event_id,
-    ce.site_id,
-    ce.visit_id,
-    cen.name AS event_name,
-    ce.occurred_at,
-    ce.received_at,
-    ce.sequence,
-    ce.node_count,
-    ce.value_count,
-    v.visitor_id,
-    v.session_id,
-    COALESCE(ce.user_id, v.user_id, '') AS user_id,
-    COALESCE(v.user_name, '') AS user_name,
-    v.status,
-    v.started_at,
-    COALESCE(
-      (
-        SELECT pv.visit_id
-        FROM visits pv
-        WHERE pv.site_pk = v.site_pk
-          AND pv.session_id = v.session_id
-          AND pv.started_at < v.started_at
-        ORDER BY pv.started_at DESC, pv.visit_id DESC
-        LIMIT 1
-      ),
-      ''
-    ) AS previous_visit_id,
-    (
-      SELECT pv.started_at
-      FROM visits pv
-      WHERE pv.site_pk = v.site_pk
-        AND pv.session_id = v.session_id
-        AND pv.started_at < v.started_at
-      ORDER BY pv.started_at DESC, pv.visit_id DESC
-      LIMIT 1
-    ) AS previous_visit_started_at,
-    v.last_activity_at,
-    v.ended_at,
-    v.finalized_at,
-    v.duration_ms,
-    COALESCE(v.duration_source, '') AS duration_source,
-    COALESCE(v.exit_reason, '') AS exit_reason,
-    v.pathname,
-    v.query_string,
-    v.hash_fragment AS hash,
-    v.hostname,
-    v.title,
-    v.referrer_url,
-    v.referrer_host,
-    v.utm_source,
-    v.utm_medium,
-    v.utm_campaign,
-    v.utm_term,
-    v.utm_content,
-    v.is_eu,
-    v.country,
-    v.region,
-    v.region_code,
-    v.city,
-    v.continent,
-    v.latitude,
-    v.longitude,
-    v.postal_code,
-    v.metro_code,
-    v.timezone,
-    v.as_organization,
-    v.browser,
-    v.browser_version,
-    v.os,
-    v.os_version,
-    v.device_type,
-    v.ua_raw AS user_agent,
-    v.language,
-    v.screen_width,
-    v.screen_height,
-    v.perf_ttfb_ms,
-    v.perf_fcp_ms,
-    v.perf_lcp_ms,
-    v.perf_cls,
-    v.perf_inp_ms
-  FROM custom_events ce
-  INNER JOIN custom_event_names cen
-    ON cen.id = ce.event_name_id
-  INNER JOIN visits v
-    ON v.site_pk = ce.site_pk
-   AND v.visit_id = ce.visit_id
-  WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND ce.event_id = ?
-  ${window ? "AND ce.occurred_at >= ? AND ce.occurred_at < ?" : ""}
-)
-SELECT
-  event_id AS eventId,
-  event_name AS eventName,
-  occurred_at AS occurredAt,
-  received_at AS receivedAt,
-  sequence,
-  visit_id AS visitId,
-  session_id AS sessionId,
-  visitor_id AS visitorId,
-  user_id AS userId,
-  user_name AS userName,
-  status,
-  started_at AS startedAt,
-  previous_visit_id AS previousVisitId,
-  previous_visit_started_at AS previousVisitStartedAt,
-  last_activity_at AS lastActivityAt,
-  ended_at AS endedAt,
-  finalized_at AS finalizedAt,
-  duration_ms AS durationMs,
-  duration_source AS durationSource,
-  exit_reason AS exitReason,
-  pathname,
-  query_string AS queryString,
-  hash,
-  title,
-  hostname,
-  referrer_url AS referrerUrl,
-  referrer_host AS referrerHost,
-  utm_source AS utmSource,
-  utm_medium AS utmMedium,
-  utm_campaign AS utmCampaign,
-  utm_term AS utmTerm,
-  utm_content AS utmContent,
-  is_eu AS isEU,
-  country,
-  region,
-  region_code AS regionCode,
-  city,
-  continent,
-  latitude,
-  longitude,
-  postal_code AS postalCode,
-  metro_code AS metroCode,
-  timezone,
-  as_organization AS organization,
-  browser,
-  browser_version AS browserVersion,
-  os,
-  os_version AS osVersion,
-  device_type AS deviceType,
-  user_agent AS userAgent,
-  language,
-  screen_width AS screenWidth,
-  screen_height AS screenHeight,
-  perf_ttfb_ms AS perfTtfbMs,
-  perf_fcp_ms AS perfFcpMs,
-  perf_lcp_ms AS perfLcpMs,
-  perf_cls AS perfCls,
-  perf_inp_ms AS perfInpMs,
-  node_count AS nodeCount,
-  value_count AS valueCount
-FROM event_source
-LIMIT 1
-`,
-    window
-      ? [siteId, eventId, window.startMs, window.endExclusiveMs]
-      : [siteId, eventId],
+    buildEventRecordDetailPlan({ siteId, eventId, window }),
+    "event-record-detail",
+    "event_record_detail_output_missing",
   );
-  const record = rows[0];
-  if (!record) return null;
+  const rawRecord = rows[0];
+  if (!rawRecord) return null;
+  const record = decodeEventRecordDetailRow(rawRecord);
   const detail = await readCustomEventDetail(env, siteId, eventId);
   return {
     event: { ...mapEventRecord(record), eventKind: "custom_event" as const },
@@ -576,5 +421,81 @@ LIMIT 1
       }),
     },
     eventData: detail?.eventData ?? {},
+  };
+}
+
+function eventDetailColumn<K extends keyof EventRecordDetailRow>(
+  row: Record<string, unknown>,
+  key: K,
+): EventRecordDetailRow[K] {
+  // Preserve the value D1 returned, including unusual SQLite storage classes;
+  // this is a type bridge only and performs no parsing, defaulting, or coercion.
+  return row[key] as EventRecordDetailRow[K];
+}
+
+function decodeEventRecordDetailRow(
+  row: Record<string, unknown>,
+): EventRecordDetailRow {
+  return {
+    eventId: eventDetailColumn(row, "eventId"),
+    eventName: eventDetailColumn(row, "eventName"),
+    occurredAt: eventDetailColumn(row, "occurredAt"),
+    receivedAt: eventDetailColumn(row, "receivedAt"),
+    sequence: eventDetailColumn(row, "sequence"),
+    visitId: eventDetailColumn(row, "visitId"),
+    sessionId: eventDetailColumn(row, "sessionId"),
+    visitorId: eventDetailColumn(row, "visitorId"),
+    userId: eventDetailColumn(row, "userId"),
+    userName: eventDetailColumn(row, "userName"),
+    status: eventDetailColumn(row, "status"),
+    startedAt: eventDetailColumn(row, "startedAt"),
+    previousVisitId: eventDetailColumn(row, "previousVisitId"),
+    previousVisitStartedAt: eventDetailColumn(row, "previousVisitStartedAt"),
+    lastActivityAt: eventDetailColumn(row, "lastActivityAt"),
+    endedAt: eventDetailColumn(row, "endedAt"),
+    finalizedAt: eventDetailColumn(row, "finalizedAt"),
+    durationMs: eventDetailColumn(row, "durationMs"),
+    durationSource: eventDetailColumn(row, "durationSource"),
+    exitReason: eventDetailColumn(row, "exitReason"),
+    pathname: eventDetailColumn(row, "pathname"),
+    queryString: eventDetailColumn(row, "queryString"),
+    hash: eventDetailColumn(row, "hash"),
+    title: eventDetailColumn(row, "title"),
+    hostname: eventDetailColumn(row, "hostname"),
+    referrerUrl: eventDetailColumn(row, "referrerUrl"),
+    referrerHost: eventDetailColumn(row, "referrerHost"),
+    utmSource: eventDetailColumn(row, "utmSource"),
+    utmMedium: eventDetailColumn(row, "utmMedium"),
+    utmCampaign: eventDetailColumn(row, "utmCampaign"),
+    utmTerm: eventDetailColumn(row, "utmTerm"),
+    utmContent: eventDetailColumn(row, "utmContent"),
+    isEU: eventDetailColumn(row, "isEU"),
+    country: eventDetailColumn(row, "country"),
+    region: eventDetailColumn(row, "region"),
+    regionCode: eventDetailColumn(row, "regionCode"),
+    city: eventDetailColumn(row, "city"),
+    continent: eventDetailColumn(row, "continent"),
+    latitude: eventDetailColumn(row, "latitude"),
+    longitude: eventDetailColumn(row, "longitude"),
+    postalCode: eventDetailColumn(row, "postalCode"),
+    metroCode: eventDetailColumn(row, "metroCode"),
+    timezone: eventDetailColumn(row, "timezone"),
+    organization: eventDetailColumn(row, "organization"),
+    browser: eventDetailColumn(row, "browser"),
+    browserVersion: eventDetailColumn(row, "browserVersion"),
+    os: eventDetailColumn(row, "os"),
+    osVersion: eventDetailColumn(row, "osVersion"),
+    deviceType: eventDetailColumn(row, "deviceType"),
+    userAgent: eventDetailColumn(row, "userAgent"),
+    language: eventDetailColumn(row, "language"),
+    screenWidth: eventDetailColumn(row, "screenWidth"),
+    screenHeight: eventDetailColumn(row, "screenHeight"),
+    perfTtfbMs: eventDetailColumn(row, "perfTtfbMs"),
+    perfFcpMs: eventDetailColumn(row, "perfFcpMs"),
+    perfLcpMs: eventDetailColumn(row, "perfLcpMs"),
+    perfCls: eventDetailColumn(row, "perfCls"),
+    perfInpMs: eventDetailColumn(row, "perfInpMs"),
+    nodeCount: eventDetailColumn(row, "nodeCount"),
+    valueCount: eventDetailColumn(row, "valueCount"),
   };
 }

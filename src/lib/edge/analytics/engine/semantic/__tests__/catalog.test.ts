@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
 import {
+  assertSemanticEventReportAttributeContracts,
   assertSemanticObservationAttributeContracts,
   assertSemanticPageReportAttributeContracts,
   isObservationKind,
+  isSemanticEventReportAttribute,
   isSemanticPageReportAttribute,
   semanticAttribute,
   semanticAttributeCatalog,
+  semanticEventReportAttributeCatalog,
   semanticObservationAttributeCatalog,
   semanticPageReportAttributeCatalog,
 } from "@/lib/edge/analytics/engine/semantic/attributes";
@@ -193,6 +196,47 @@ describe("semantic attribute and dimension catalogs", () => {
       ),
     ).toThrow(
       `duplicate_semantic_attribute:${semanticPageReportAttributeCatalog[0]!.id}`,
+    );
+  });
+
+  it("keeps optional Event report relationships internal and contract-checked", () => {
+    expect(semanticEventReportAttributeCatalog.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([
+        "event.report.localId",
+        "event.report.ownerPresent",
+        "event.report.eventName",
+        "event.report.ownerPreviousVisitId",
+        "event.report.ownerPreviousVisitStartedAt",
+      ]),
+    );
+    expect(isSemanticEventReportAttribute("event.report.eventName")).toBe(true);
+    expect(analyticsFilterRegistry.has("event.report.eventName")).toBe(false);
+    expect(
+      semanticAttribute("event.report.eventName")?.derivation,
+    ).toMatchObject({
+      kind: "report-relationship",
+      relationship: "event.name",
+      cardinality: "zero-or-one",
+      sourceAttribute: "event.report.nameId",
+    });
+    expect(
+      semanticAttribute("event.report.ownerPreviousVisitId")?.derivation,
+    ).toMatchObject({
+      kind: "report-relationship",
+      relationship: "event.ownerPage",
+      sourceAttribute: "page.report.previousVisitId",
+      dependencies: ["page.report.previousVisitId"],
+    });
+    const ownerPresent = semanticEventReportAttributeCatalog.find(
+      ({ id }) => id === "event.report.ownerPresent",
+    )!;
+    expect(() =>
+      assertSemanticEventReportAttributeContracts(
+        [{ ...ownerPresent, nullable: true }],
+        new Set(),
+      ),
+    ).toThrow(
+      "invalid_event_report_attribute_contract:event.report.ownerPresent",
     );
   });
 });

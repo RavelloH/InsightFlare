@@ -42,6 +42,7 @@ import {
   validateLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/validator";
 import {
+  isSemanticEventReportAttribute,
   isSemanticPageReportAttribute,
   semanticAttribute,
   type SemanticAttributeId,
@@ -175,6 +176,7 @@ export class LogicalPlanBuilder {
         entity === "observation" &&
         !!attribute &&
         !isSemanticPageReportAttribute(attributeId) &&
+        !isSemanticEventReportAttribute(attributeId) &&
         (attribute.nativeEntity === "page" ||
           attribute.nativeEntity === "event") &&
         attribute.observationKinds.includes(attribute.nativeEntity);

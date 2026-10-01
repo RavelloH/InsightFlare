@@ -518,6 +518,9 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
   "src/lib/edge/analytics/providers/d1/internal/journey-geo-queries.ts": [
     "querySessionLocationPointsFromD1",
   ],
+  "src/lib/edge/analytics/providers/d1/internal/events-records.ts": [
+    "queryEventRecordDetailFromD1",
+  ],
   "src/lib/edge/ingest/alarm-sweep.ts": ["sweepIngestAlarms"],
   "src/lib/edge/ingest/flush-types.ts": ["resolveSitePk"],
   "src/lib/edge/admin/observability/request-observation-query.ts": [

@@ -601,7 +601,14 @@ function commonQueryMatches(): SqlMatch[] {
         },
       ],
     ),
-    allMatch(["LIMIT 1", "event_id AS eventId"], [eventRecordRow]),
+    {
+      match: (sql, bindings) =>
+        sql.includes('"custom_events"') &&
+        sql.includes('"custom_event_names"') &&
+        sql.includes("LEFT JOIN") &&
+        bindings.includes("evt-1"),
+      all: [eventRecordRow],
+    },
     {
       match: (sql) =>
         sql.includes("visitor_metrics AS") &&
