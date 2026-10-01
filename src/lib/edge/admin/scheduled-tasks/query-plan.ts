@@ -438,7 +438,7 @@ export function buildRunGroupsPageQuery(options: {
       skippedCount: max(runLogs.columns.left_left_skippedCount),
       runningCount: max(runLogs.columns.left_left_runningCount),
       status: max(runLogs.columns.left_left_status),
-      logsCount: count(runLogs.columns.right_id),
+      logsCount: count(runLogs.columns.right_run_id),
     },
   });
   return sort(selected, [

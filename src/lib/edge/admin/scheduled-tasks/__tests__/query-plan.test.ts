@@ -626,4 +626,64 @@ describe("scheduled task typed query plans", () => {
       db.close();
     }
   });
+
+  it("counts matched logs with NULL text primary keys and keeps empty groups at zero", () => {
+    const db = createMigratedDatabase();
+    const now = 1_800_000_300_000;
+    const since30d =
+      Math.floor(now / 60_000) * 60_000 - 30 * 24 * 60 * 60 * 1000;
+    try {
+      seedRun(db, {
+        id: "null-log-id-run",
+        invocationId: "null-log-id-group",
+        taskKey: "null-log-id-task",
+        triggerType: "manual",
+        status: "success",
+        scheduledAt: null,
+        startedAt: now - 1_000,
+        finishedAt: now - 500,
+        durationMs: 500,
+      });
+      seedRun(db, {
+        id: "empty-log-group-run",
+        invocationId: "empty-log-group",
+        taskKey: "empty-log-task",
+        triggerType: "manual",
+        status: "success",
+        scheduledAt: null,
+        startedAt: now - 2_000,
+        finishedAt: now - 1_500,
+        durationMs: 500,
+      });
+      db.prepare(
+        `INSERT INTO scheduled_task_run_logs
+          (id, run_id, task_key, sequence, level, event, message,
+           data_json, created_at_ms, expires_at)
+         VALUES (NULL, 'null-log-id-run', 'null-log-id-task', 1,
+           'info', 'event', 'message', '{}', ?, 9999999999)`,
+      ).run(now);
+
+      const typed = all<Record<string, unknown>>(
+        db,
+        compileD1Query(
+          buildRunGroupsPageQuery({
+            since30d,
+            status: "",
+            cursor: null,
+            limit: 10,
+          }),
+        ),
+      );
+      const legacy = legacyRunGroupPage(since30d, "", null, 10);
+      expect(typed).toEqual(db.prepare(legacy.sql).all(...legacy.bindings));
+      expect(typed).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "null-log-id-group", logsCount: 1 }),
+          expect.objectContaining({ id: "empty-log-group", logsCount: 0 }),
+        ]),
+      );
+    } finally {
+      db.close();
+    }
+  });
 });
