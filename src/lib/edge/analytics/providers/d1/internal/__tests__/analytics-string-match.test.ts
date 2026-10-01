@@ -745,4 +745,57 @@ describe("Analytics shared exact string matching", () => {
       });
     },
   );
+
+  it("keeps unpaired-surrogate pattern errors at the Filter value path", () => {
+    const builder = new LogicalPlanBuilder(makeContext());
+    const pages = builder.source("page", {
+      temporalDomain: "read",
+      attributes: ["page.path"],
+    });
+    const predicate = builder.stringMatch(
+      "contains",
+      builder.slot(pages, "attribute:page.path"),
+      "\ud800",
+      true,
+    );
+    const filtered = builder.filter(pages, predicate);
+    builder.output("invalid-string-pattern", filtered, [
+      { name: "page", slot: "entity" },
+    ]);
+    const plan = builder.finish();
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_ID as never,
+      time: plan.context.time,
+    });
+    let thrown: unknown;
+    try {
+      lowerer.lower(plan.outputs[0]!);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      node: expect.stringMatching(/^nodes\[\d+\]\.predicate\.value$/u),
+      message: expect.stringMatching(
+        /textContains\(\).*unpaired UTF-16 surrogate at index 0/u,
+      ),
+    });
+
+    const wrapped = lowerAnalyticsPagePathToSessionQuery({
+      document: filterDocument(
+        fieldCondition("page.path", "contains", "\ud800"),
+      ),
+      siteIds: [SITE_ID as never],
+      candidateRange: CANDIDATE_RANGE as never,
+      readRange: READ_RANGE as never,
+      reportingTimeZone: "UTC" as never,
+      capturedAtMs: 200 as never,
+    });
+    expect(wrapped).toMatchObject({
+      kind: "unsupported",
+      node: expect.stringMatching(/^nodes\[\d+\]\.predicate\.value$/u),
+      reason: expect.stringMatching(
+        /textContains\(\).*unpaired UTF-16 surrogate at index 0/u,
+      ),
+    });
+  });
 });

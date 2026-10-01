@@ -645,7 +645,7 @@ describe("Event record detail report D1 lowering", () => {
     expect(firstLocal.relation).not.toBe(eventName.relation);
   });
 
-  it("rejects a multi-site subject before compiling a report query", async () => {
+  it("executes report outputs across the authorized multi-site subject", async () => {
     const plan = sourceProbePlan(SITE_A, ["event.report.localId"]);
     const multiSitePlan = {
       ...plan,
@@ -657,13 +657,19 @@ describe("Event record detail report D1 lowering", () => {
         },
       },
     } as ValidatedLogicalPlan;
-    await expect(
-      queryAnalyticsReportOutputRowsFromD1(
-        sqliteEnv(db),
-        multiSitePlan,
-        "event-source-probe",
-      ),
-    ).rejects.toThrow("analytics_report_site_subject_unsupported:2");
+    const rows = await queryAnalyticsReportOutputRowsFromD1(
+      sqliteEnv(db),
+      multiSitePlan,
+      "event-source-probe",
+    );
+    const expected = db
+      .prepare(
+        "SELECT event_id AS eventId FROM custom_events WHERE site_pk IN (?, ?) ORDER BY event_id",
+      )
+      .all(siteA.pk, siteB.pk) as { readonly eventId: string }[];
+    expect(
+      rows.map((row) => row["event.report.localId"] as string).sort(),
+    ).toEqual(expected.map((row) => row.eventId).sort());
   });
 
   it("rejects malformed detail output contracts before database execution", async () => {

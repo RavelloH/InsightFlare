@@ -28,6 +28,7 @@ import type {
   FilterTargetExpression,
 } from "@/lib/filter-contract/filters";
 
+import { siteCoverage } from "./advanced-filter-site-coverage";
 import { queryD1All } from "./core-sources";
 import type { D1ReadDiagnostics } from "./diagnostics";
 
@@ -257,33 +258,6 @@ function payloadPaths(expression: FilterDocument["root"]): {
   };
   visit(expression);
   return { paths: [...paths].sort(), wholePayload };
-}
-
-async function siteCoverage(
-  env: Env,
-  siteIds: readonly string[],
-  diagnostics?: D1ReadDiagnostics,
-  signal?: AbortSignal,
-): Promise<Map<string, number>> {
-  const coverage = new Map<string, number>();
-  for (const chunk of siteChunks(siteIds)) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const rows = await queryD1All<{
-      siteId: string;
-      createdAtSeconds: number | null;
-    }>(
-      env,
-      `SELECT id AS siteId, created_at AS createdAtSeconds FROM sites WHERE id IN (${chunk.map(() => "?").join(", ")})`,
-      chunk,
-      diagnostics,
-    );
-    for (const row of rows) {
-      if (typeof row.createdAtSeconds === "number") {
-        coverage.set(row.siteId, Math.trunc(row.createdAtSeconds * 1_000));
-      }
-    }
-  }
-  return coverage;
 }
 
 async function loadActivities(

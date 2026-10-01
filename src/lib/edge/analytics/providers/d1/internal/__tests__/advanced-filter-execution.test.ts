@@ -165,7 +165,16 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
   const database = new DatabaseSync(":memory:");
   const queries: string[] = [];
   database.exec(`
-    CREATE TABLE sites (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+    CREATE TABLE sites (
+      id TEXT PRIMARY KEY,
+      team_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      public_enabled INTEGER NOT NULL DEFAULT 0,
+      public_slug TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    );
     CREATE TABLE site_identities (site_pk INTEGER PRIMARY KEY, site_id TEXT NOT NULL UNIQUE);
     CREATE TABLE visits (
       visit_id TEXT NOT NULL,
@@ -219,8 +228,10 @@ function sqliteEnv(activities: readonly SharedActivity[] = SHARED_ACTIVITIES): {
     );
   `);
   database
-    .prepare("INSERT INTO sites (id, created_at) VALUES (?, ?)")
-    .run(SITE_ID, 0);
+    .prepare(
+      "INSERT INTO sites (id, team_id, name, domain, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run(SITE_ID, "team-1", "Test Site", "example.test", 0);
   database
     .prepare("INSERT INTO site_identities (site_pk, site_id) VALUES (?, ?)")
     .run(1, SITE_ID);

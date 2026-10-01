@@ -8,6 +8,7 @@ import {
   coalesce,
   count,
   countDistinct,
+  DatabaseCompilerError,
   distinct,
   eq,
   filter,
@@ -74,6 +75,7 @@ import {
   type AnalyticsDbRelation,
   AnalyticsRelationalStorage,
   type AnalyticsRelationalStorageContext,
+  normalizeAnalyticsRelationalSiteIds,
 } from "./analytics-relational-storage";
 
 type SlotLayout =
@@ -728,12 +730,23 @@ function lowerExpression(
         reject(path, "This adapter does not support case-fold normalization.");
       }
 
-      const predicate =
-        expression.operator === "starts-with"
-          ? textStartsWith(stringInput, value)
-          : expression.operator === "ends-with"
-            ? textEndsWith(stringInput, value)
-            : textContains(stringInput, value);
+      let predicate: AnyExpression;
+      try {
+        predicate =
+          expression.operator === "starts-with"
+            ? textStartsWith(stringInput, value)
+            : expression.operator === "ends-with"
+              ? textEndsWith(stringInput, value)
+              : textContains(stringInput, value);
+      } catch (error) {
+        if (
+          error instanceof DatabaseCompilerError &&
+          error.code === "invalid_plan" &&
+          error.message.includes("unpaired UTF-16 surrogate")
+        )
+          reject(`${path}.value`, error.message);
+        throw error;
+      }
       return {
         kind: "scalar",
         expression: predicate,
@@ -887,6 +900,28 @@ export class AnalyticsLogicalToDbLowerer {
     storageContext: AnalyticsRelationalStorageContext,
   ) {
     this.#plan = plan;
+    let subjectSiteIds: readonly string[];
+    let storageSiteIds: readonly string[];
+    try {
+      subjectSiteIds = normalizeAnalyticsRelationalSiteIds({
+        siteIds: plan.context.subject.siteIds,
+        time: plan.context.time,
+      });
+      storageSiteIds = normalizeAnalyticsRelationalSiteIds(storageContext);
+    } catch (error) {
+      reject(
+        "context.subject",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    if (
+      subjectSiteIds.length !== storageSiteIds.length ||
+      subjectSiteIds.some((siteId, index) => siteId !== storageSiteIds[index])
+    )
+      reject(
+        "context.subject",
+        "Storage site IDs must exactly match the authorized Semantic subject.",
+      );
     this.#nodes = new Map(plan.nodes.map((node) => [node.id, node] as const));
     this.#logicalSlots = new Map(
       plan.slots.map((slot) => [slot.id, slot] as const),

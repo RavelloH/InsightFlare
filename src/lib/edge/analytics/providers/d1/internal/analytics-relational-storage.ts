@@ -69,9 +69,35 @@ export interface LoweredAnalyticsSource {
   readonly values: ReadonlyMap<SlotId, AnalyticsSourceValue>;
 }
 
-export interface AnalyticsRelationalStorageContext {
-  readonly siteId: string;
-  readonly time: SemanticTemporalDomains;
+export type AnalyticsRelationalStorageContext =
+  | {
+      readonly siteId: string;
+      readonly siteIds?: never;
+      readonly time: SemanticTemporalDomains;
+    }
+  | {
+      readonly siteId?: never;
+      readonly siteIds: readonly string[];
+      readonly time: SemanticTemporalDomains;
+    };
+
+export function normalizeAnalyticsRelationalSiteIds(
+  context: AnalyticsRelationalStorageContext,
+): readonly string[] {
+  const hasSiteId = context.siteId !== undefined;
+  const hasSiteIds = context.siteIds !== undefined;
+  if (hasSiteId === hasSiteIds)
+    throw new Error(
+      "analytics_relational_site_context_requires_siteId_or_siteIds",
+    );
+  const siteIds = hasSiteIds ? context.siteIds : [context.siteId];
+  if (
+    !Array.isArray(siteIds) ||
+    siteIds.length === 0 ||
+    siteIds.some((siteId) => typeof siteId !== "string" || siteId.length === 0)
+  )
+    throw new Error("analytics_relational_site_context_requires_non_empty_ids");
+  return [...new Set(siteIds)].sort();
 }
 
 type ObservationIdentityAttribute =
@@ -338,7 +364,7 @@ function requireStorageTextColumn(
 
 /** D1-only physical carrier catalog for the currently proven Page/Event subset. */
 export class AnalyticsRelationalStorage {
-  readonly #siteId: string;
+  readonly #siteIds: readonly string[];
   readonly #time: SemanticTemporalDomains;
   #sitesCache?: AnalyticsDbRelation;
   readonly #sitePageCarriers = new Map<string, AnalyticsDbRelation>();
@@ -355,7 +381,7 @@ export class AnalyticsRelationalStorage {
   readonly #reportObservationCarriers = new Map<string, AnalyticsDbRelation>();
 
   constructor(context: AnalyticsRelationalStorageContext) {
-    this.#siteId = context.siteId;
+    this.#siteIds = normalizeAnalyticsRelationalSiteIds(context);
     this.#time = context.time;
   }
 
@@ -861,7 +887,7 @@ export class AnalyticsRelationalStorage {
     const identities = scan(schema.site_identities);
     const selected = filter(
       identities,
-      inList(identities.columns.site_id, [this.#siteId]),
+      inList(identities.columns.site_id, this.#siteIds),
     );
     this.#sitesCache = project(selected, {
       site_pk: selected.columns.site_pk,

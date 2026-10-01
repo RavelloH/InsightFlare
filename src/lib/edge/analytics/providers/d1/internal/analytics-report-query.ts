@@ -16,14 +16,19 @@ export async function queryAnalyticsReportOutputRowsFromD1(
   const output = plan.outputs.find((candidate) => candidate.id === outputId);
   if (!output) throw new Error(outputMissingMessage);
   const siteIds = plan.context.subject.siteIds;
-  if (siteIds.length !== 1 || !siteIds[0])
-    throw new Error(
-      `analytics_report_site_subject_unsupported:${siteIds.length}`,
-    );
-  const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
-    siteId: siteIds[0],
-    time: plan.context.time,
-  });
+  const siteCount = Array.isArray(siteIds) ? siteIds.length : "invalid";
+  if (
+    !Array.isArray(siteIds) ||
+    siteIds.length === 0 ||
+    siteIds.some((siteId) => typeof siteId !== "string" || siteId.length === 0)
+  )
+    throw new Error(`analytics_report_site_subject_unsupported:${siteCount}`);
+  const lowerer = new AnalyticsLogicalToDbLowerer(
+    plan,
+    siteIds.length === 1
+      ? { siteId: siteIds[0]!, time: plan.context.time }
+      : { siteIds, time: plan.context.time },
+  );
   const lowered = lowerer.lower(output);
   const relation = lowerer.projectOutput(
     lowered,
