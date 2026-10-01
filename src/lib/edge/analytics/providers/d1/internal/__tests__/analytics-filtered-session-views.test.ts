@@ -902,8 +902,8 @@ describe("semantic Session-filtered views plan", () => {
         "analytics.filtered-session-views.wave-4",
       );
       expect(executed.query.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
-      // Shared candidate Session relations keep the two-leaf shape compact.
-      expect(executed.query.bindings).toHaveLength(27);
+      // Output-specific aggregate demand keeps the two-leaf shape compact.
+      expect(executed.query.bindings).toHaveLength(26);
       const explainText = executed.explain.join("\n");
       expect(explainText).toMatch(
         /SEARCH \w+ USING INDEX idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u,

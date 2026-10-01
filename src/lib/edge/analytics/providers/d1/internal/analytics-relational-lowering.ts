@@ -2,10 +2,12 @@ import {
   aggregate,
   and,
   antiJoin,
+  avg,
   callFunction,
   caseWhen,
   coalesce,
   count,
+  countDistinct,
   distinct,
   eq,
   filter,
@@ -18,6 +20,8 @@ import {
   limit as limitRelation,
   lt,
   lte,
+  max,
+  min,
   neq,
   not,
   or,
@@ -25,6 +29,7 @@ import {
   project,
   semiJoin,
   sort as sortRelation,
+  sum,
   union,
 } from "@/lib/db";
 import type {
@@ -58,6 +63,7 @@ import type {
   LogicalSlot,
   LogicalValueType,
 } from "@/lib/edge/analytics/engine/logical/slots";
+import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
 
 import {
@@ -304,6 +310,43 @@ function scalarValue(value: LoweredValue, path: string): AnyExpression {
   if (value.kind !== "scalar")
     reject(path, "This expression requires a scalar Logical value.");
   return value.expression;
+}
+
+function scalarAggregateValue(
+  value: LoweredValue,
+  path: string,
+): Extract<LoweredValue, { readonly kind: "scalar" }> & {
+  readonly type: Extract<LogicalValueType, { readonly kind: "scalar" }>;
+} {
+  if (value.kind !== "scalar" || value.type.kind !== "scalar")
+    reject(path, "Scalar aggregation requires a scalar Logical value.");
+  return { ...value, type: value.type };
+}
+
+function numericAggregateExpression(
+  value: LoweredValue,
+  path: string,
+): SqlExpression<number | null> {
+  const scalar = scalarAggregateValue(value, path);
+  if (scalar.type.scalar !== "number")
+    reject(path, "SUM and AVG require numeric scalar values.");
+  return scalar.expression as SqlExpression<number | null>;
+}
+
+function comparableAggregateValue(
+  value: LoweredValue,
+  path: string,
+): Extract<LoweredValue, { readonly kind: "scalar" }> & {
+  readonly type: Extract<LogicalValueType, { readonly kind: "scalar" }>;
+} {
+  const scalar = scalarAggregateValue(value, path);
+  if (
+    !["string", "number", "boolean", "date", "datetime"].includes(
+      scalar.type.scalar,
+    )
+  )
+    reject(path, "MIN and MAX require a comparable scalar value.");
+  return scalar;
 }
 
 function applyTrim(
@@ -780,6 +823,9 @@ export class AnalyticsLogicalToDbLowerer {
   }
 
   lower(output: LogicalOutput): LoweredAnalyticsLogicalOutput {
+    // Required slots are output-specific. Reusing a previous result after
+    // lowering another output could omit fields required by this output.
+    this.#memo.clear();
     this.#prepareRequiredSlots(output);
     const root = this.#lowerNode(output.relation);
     if (this.#memo.size !== this.#plan.nodes.length) {
@@ -1794,41 +1840,132 @@ export class AnalyticsLogicalToDbLowerer {
   }
 
   #lowerAggregate(node: AggregateNode, path: string): LoweredRelation {
-    if (
-      node.groups.length !== 0 ||
-      node.measures.length !== 1 ||
-      node.measures[0]?.kind !== "count-rows"
-    )
-      reject(
-        path,
-        "Only ungrouped COUNT_ROWS aggregates are currently supported.",
-      );
     const input = this.#lowerNode(node.input);
-    const output = node.measures[0].output;
-    const valueColumn = slotColumn(0, "v");
-    const relation: AnalyticsDbRelation = aggregate(input.relation, {
-      groupBy: {},
-      aggregates: { [valueColumn]: count() },
+    const required = this.#requiredOutput(node);
+    const groupBy: Record<string, AnyExpression> = {};
+    const aggregates: Record<string, AnyExpression> = {};
+    const slots = new Map<SlotId, SlotLayout>();
+    const visible = new Map(input.slots);
+
+    node.groups.forEach((group, index) => {
+      const groupPath = `${path}.groups[${index}].expression`;
+      const value = scalarAggregateValue(
+        lowerExpression(
+          group.expression,
+          input.relation,
+          this.#logicalSlots,
+          visible,
+          groupPath,
+        ),
+        groupPath,
+      );
+      const outputSlot = logicalSlot(
+        this.#logicalSlots,
+        group.slot,
+        `${path}.groups[${index}].slot`,
+      );
+      if (
+        outputSlot.type.kind !== "scalar" ||
+        !isSameLogicalValueType(outputSlot.type, value.type) ||
+        outputSlot.nullable !== value.nullable
+      )
+        reject(
+          `${path}.groups[${index}]`,
+          "Group output metadata must match its scalar expression.",
+        );
+
+      const valueColumn = slotColumn(index, "g");
+      groupBy[valueColumn] = value.expression;
+      slots.set(group.slot, {
+        kind: "scalar",
+        type: outputSlot.type,
+        nullable: outputSlot.nullable,
+        valueColumn,
+        candidateBounded: false,
+      });
     });
-    const slot = logicalSlot(this.#logicalSlots, output, `${path}.output`);
-    if (
-      slot.type.kind !== "scalar" ||
-      slot.type.scalar !== "number" ||
-      slot.nullable
-    )
-      reject(path, "COUNT_ROWS output must be a non-null numeric scalar.");
-    const slots = new Map<SlotId, SlotLayout>([
-      [
-        output,
-        {
-          kind: "scalar",
-          type: slot.type,
-          nullable: false,
-          valueColumn,
-          candidateBounded: false,
-        },
-      ],
-    ]);
+
+    let selectedMeasureCount = 0;
+    node.measures.forEach((measure, index) => {
+      if (!required.has(measure.output)) return;
+      selectedMeasureCount += 1;
+      const outputSlot = logicalSlot(
+        this.#logicalSlots,
+        measure.output,
+        `${path}.measures[${index}].output`,
+      );
+      const valueColumn = slotColumn(node.groups.length + index, "a");
+      let expression: AnyExpression;
+      let expectedType: LogicalValueType;
+      let expectedNullable: boolean;
+
+      if (measure.kind === "count-rows") {
+        expression = count();
+        expectedType = { kind: "scalar", scalar: "number" };
+        expectedNullable = false;
+      } else {
+        const measurePath = `${path}.measures[${index}].input`;
+        const value = lowerExpression(
+          measure.input,
+          input.relation,
+          this.#logicalSlots,
+          visible,
+          measurePath,
+        );
+        if (measure.kind === "count-distinct") {
+          const scalar = scalarAggregateValue(value, measurePath);
+          expression = countDistinct(scalar.expression);
+          expectedType = { kind: "scalar", scalar: "number" };
+          expectedNullable = false;
+        } else if (measure.kind === "sum") {
+          const scalar = scalarAggregateValue(value, measurePath);
+          expression = sum(numericAggregateExpression(scalar, measurePath));
+          expectedType = scalar.type;
+          expectedNullable = true;
+        } else if (measure.kind === "avg") {
+          const scalar = scalarAggregateValue(value, measurePath);
+          expression = avg(numericAggregateExpression(scalar, measurePath));
+          expectedType = scalar.type;
+          expectedNullable = true;
+        } else if (measure.kind === "min") {
+          const scalar = comparableAggregateValue(value, measurePath);
+          expression = min(scalar.expression);
+          expectedType = scalar.type;
+          expectedNullable = true;
+        } else {
+          const scalar = comparableAggregateValue(value, measurePath);
+          expression = max(scalar.expression);
+          expectedType = scalar.type;
+          expectedNullable = true;
+        }
+      }
+
+      if (
+        outputSlot.type.kind !== "scalar" ||
+        !isSameLogicalValueType(outputSlot.type, expectedType) ||
+        outputSlot.nullable !== expectedNullable
+      )
+        reject(
+          `${path}.measures[${index}].output`,
+          "Aggregate output metadata must match its Logical measure.",
+        );
+      aggregates[valueColumn] = expression;
+      slots.set(measure.output, {
+        kind: "scalar",
+        type: outputSlot.type,
+        nullable: outputSlot.nullable,
+        valueColumn,
+        candidateBounded: false,
+      });
+    });
+
+    if (node.groups.length === 0 && selectedMeasureCount === 0)
+      reject(path, "An ungrouped aggregate requires a selected measure.");
+
+    const relation: AnalyticsDbRelation = aggregate(input.relation, {
+      groupBy,
+      aggregates,
+    });
     return { relation, slots, candidateActivitySessionRestricted: false };
   }
 
@@ -1844,17 +1981,7 @@ export class AnalyticsLogicalToDbLowerer {
       );
     const left = this.#lowerNode(node.left);
     const right = this.#lowerNode(node.right);
-    const leftCount = left.relation.fields[0];
-    if (!leftCount)
-      reject(
-        path,
-        "A scalar aggregate input must expose its COUNT_ROWS value.",
-      );
-    const joined = join(
-      left.relation,
-      right.relation,
-      isNotNull(relationColumn(left.relation, leftCount.name, path)),
-    );
+    const joined = join(left.relation, right.relation, eq(param(1), param(1)));
     const leftNode = this.#logicalNode(node.left)!;
     const rightNode = this.#logicalNode(node.right)!;
     const required = this.#requiredOutput(node);
@@ -1992,8 +2119,16 @@ export class AnalyticsLogicalToDbLowerer {
             break;
           }
           case "aggregate": {
-            const source = this.#nodes.get(node.input);
-            if (source) add(node.input, source.output);
+            add(node.input, [
+              ...node.groups.flatMap((group) =>
+                this.#expressionSlots(group.expression),
+              ),
+              ...node.measures.flatMap((measure) =>
+                !needed.has(measure.output) || measure.kind === "count-rows"
+                  ? []
+                  : this.#expressionSlots(measure.input),
+              ),
+            ]);
             break;
           }
           case "join": {
