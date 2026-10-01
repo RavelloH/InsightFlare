@@ -73,6 +73,25 @@ async function verifySkillsManifest(options: CommonOptions): Promise<void> {
   );
 }
 
+async function buildPackages(options: CommonOptions): Promise<void> {
+  const packageRoot = path.join(ROOT_DIR, "packages");
+
+  await runtime.runCommand(
+    process.execPath,
+    ["build.mjs"],
+    targetEnv(options.target),
+    path.join(packageRoot, "ui"),
+    "node packages/ui/build.mjs",
+  );
+  await runtime.runCommand(
+    process.execPath,
+    ["build.mjs"],
+    targetEnv(options.target),
+    path.join(packageRoot, "product-ui"),
+    "node packages/product-ui/build.mjs",
+  );
+}
+
 async function runPrebuild(options: CommonOptions): Promise<void> {
   if (options.skipPrebuild) {
     runtime.rlog.info("Prebuild skipped.");
@@ -130,17 +149,22 @@ async function main(): Promise<void> {
   runtime.assertEnvironment(options);
 
   stages.push(
-    await runtime.runStage(1, 3, "Verifying skills manifest", () =>
+    await runtime.runStage(1, 4, "Verifying skills manifest", () =>
       verifySkillsManifest(options),
     ),
   );
   stages.push(
-    await runtime.runStage(2, 3, "Preparing build inputs", () =>
+    await runtime.runStage(2, 4, "Building UI packages", () =>
+      buildPackages(options),
+    ),
+  );
+  stages.push(
+    await runtime.runStage(3, 4, "Preparing build inputs", () =>
       runPrebuild(options),
     ),
   );
   stages.push(
-    await runtime.runStage(3, 3, "Building Cloudflare worker", () =>
+    await runtime.runStage(4, 4, "Building Cloudflare worker", () =>
       runViteBuild(options),
     ),
   );
