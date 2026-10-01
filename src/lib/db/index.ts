@@ -17,6 +17,7 @@ export {
   insert,
   insertFromQuery,
   insertOrIgnore,
+  insertOrIgnoreFromQuery,
   onConflictDoNothing,
   onConflictDoUpdate,
   update,
@@ -29,6 +30,7 @@ export { DatabaseCompilerError } from "./query/errors";
 export type {
   CaseExpression,
   CaseWhenBranch,
+  DistinctFromExpression,
   SqlExpression,
 } from "./query/expression";
 export {
@@ -47,6 +49,7 @@ export {
   gte,
   inList,
   inSubquery,
+  isDistinctFrom,
   isNotNull,
   isNull,
   lt,

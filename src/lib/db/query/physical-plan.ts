@@ -263,6 +263,7 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
   const visit = (current: SqlExpression): void => {
     switch (current.kind) {
       case "binary":
+      case "distinct-from":
         visit(current.left);
         visit(current.right);
         break;
@@ -455,6 +456,7 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
           facts.forbidden = true;
         switch (current.kind) {
           case "binary":
+          case "distinct-from":
             inspect(current.left);
             inspect(current.right);
             break;

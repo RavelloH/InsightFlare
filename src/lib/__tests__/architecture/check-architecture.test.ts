@@ -179,6 +179,52 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("keeps ingest write modules on typed D1 mutations", () => {
+    const root = fixture();
+    const files: Record<string, string> = {
+      "src/lib/edge/ingest/flush.ts":
+        "export const runtime = createDatabaseRuntime;\nexport async function flushPendingToD1(context: any) { return context.env.DB.batch([]); }\n",
+      "src/lib/edge/ingest/custom-event-flush.ts":
+        "type Statement = DatabaseStatement;\n",
+      "src/lib/edge/ingest/visit-write-mutations.ts":
+        'export const sql = "INSERT INTO visits VALUES (?)";\n',
+      "src/lib/edge/ingest/custom-event-write-mutations.ts":
+        "export const execute = unsafeRawMutation;\n",
+    };
+    for (const [relativePath, content] of Object.entries(files)) {
+      const absolutePath = path.join(root, relativePath);
+      mkdirSync(path.dirname(absolutePath), { recursive: true });
+      writeFileSync(absolutePath, content);
+    }
+
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ rule }) => rule === "typed-dal-runtime-forbidden")
+        .map(({ source, specifier }) => ({ source, specifier })),
+    ).toEqual([
+      {
+        source: "src/lib/edge/ingest/custom-event-flush.ts",
+        specifier: "DatabaseStatement",
+      },
+      {
+        source: "src/lib/edge/ingest/custom-event-write-mutations.ts",
+        specifier: "unsafeRawMutation",
+      },
+      {
+        source: "src/lib/edge/ingest/flush.ts",
+        specifier: "createDatabaseRuntime",
+      },
+      {
+        source: "src/lib/edge/ingest/flush.ts",
+        specifier: "<direct D1 operation>",
+      },
+      {
+        source: "src/lib/edge/ingest/visit-write-mutations.ts",
+        specifier: "<raw SQL literal>",
+      },
+    ]);
+  });
+
   it("guards only the migrated query function bodies against legacy access", () => {
     const root = fixture();
     const sourcePath = path.join(

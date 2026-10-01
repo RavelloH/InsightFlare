@@ -71,6 +71,15 @@ export interface BinaryExpression<
   readonly right: SqlExpression;
 }
 
+export interface DistinctFromExpression<
+  T = boolean,
+  Result extends ExpressionResultType = ExpressionResultType<"integer", false>,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "distinct-from";
+  readonly left: SqlExpression;
+  readonly right: SqlExpression;
+}
+
 export interface BooleanExpression<
   T = boolean | null,
   Result extends ExpressionResultType = ExpressionResultType<
@@ -201,6 +210,7 @@ export type SqlExpression<
   | ParameterExpression<T extends SqlBinding ? T : SqlBinding, Result>
   | ExcludedExpression<T, Result>
   | BinaryExpression<T, Result>
+  | DistinctFromExpression<T, Result>
   | BooleanExpression<T, Result>
   | NotExpression<T, Result>
   | NullCheckExpression<T, Result>
@@ -242,14 +252,15 @@ type ComparisonNullable<
   Right extends AnyExpression,
 > = OrNullable<NullableOf<Left>, NullableOf<Right>>;
 type NumericAffinity = "integer" | "real" | "numeric";
+type NumericAffinityWithoutUnknown<Affinity> = Exclude<Affinity, "unknown">;
 type AffinitiesComparable<Left, Right> = [Left] extends ["unknown"]
   ? true
   : [Right] extends ["unknown"]
     ? true
     : [Left] extends [Right]
       ? true
-      : [Left] extends [NumericAffinity]
-        ? [Right] extends [NumericAffinity]
+      : [NumericAffinityWithoutUnknown<Left>] extends [NumericAffinity]
+        ? [NumericAffinityWithoutUnknown<Right>] extends [NumericAffinity]
           ? true
           : false
         : false;
@@ -492,6 +503,18 @@ export function neq<Left extends AnyExpression, Right extends AnyExpression>(
   right: Right & RequireComparable<Left, Right>,
 ): Predicate<ComparisonNullable<Left, Right>> {
   return comparison("<>", left, right);
+}
+
+export function isDistinctFrom<
+  Left extends AnyExpression,
+  Right extends AnyExpression,
+>(left: Left, right: Right & RequireComparable<Left, Right>): Predicate<false> {
+  return {
+    kind: "distinct-from",
+    left,
+    right,
+    resultType: { affinity: "integer", nullable: false },
+  };
 }
 
 function orderedComparison<

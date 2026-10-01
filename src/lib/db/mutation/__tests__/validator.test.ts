@@ -6,6 +6,7 @@ import {
   excluded,
   insert,
   insertFromQuery,
+  onConflictDoNothing,
   onConflictDoUpdate,
   param,
   scan,
@@ -114,6 +115,32 @@ describe("mutation plan validation", () => {
       site_id: excluded(schema.site_identities.columns.site_id),
     });
     expect(() => validateMutationPlan(validConflict)).not.toThrow();
+  });
+
+  it("validates conflict guards against only the insert target scope", () => {
+    const valid = insert(schema.site_identities, { site_id: "site-a" });
+    const external = scan(schema.site_identities);
+    const guarded = onConflictDoUpdate(valid, ["site_id"], (columns) => ({
+      set: { site_id: excluded(schema.site_identities.columns.site_id) },
+      where: eq(columns.site_pk, param(1)),
+    }));
+    expect(() => validateMutationPlan(guarded)).not.toThrow();
+
+    const externalScope = onConflictDoUpdate(valid, ["site_id"], () => ({
+      set: { site_id: excluded(schema.site_identities.columns.site_id) },
+      where: eq(external.columns.site_pk, param(1)),
+    }));
+    expectInvalid(externalScope);
+
+    const doNothing = onConflictDoNothing(valid, ["site_id"]);
+    expectInvalid({
+      ...doNothing,
+      conflict: {
+        ...doNothing.conflict!,
+        where: eq(external.columns.site_pk, param(1)),
+        scope: external.scope,
+      },
+    });
   });
 
   it("checks update assignments and visible target scopes", () => {

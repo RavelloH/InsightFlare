@@ -1,4 +1,5 @@
 import { DatabaseCompilerError } from "@/lib/db/query/errors";
+import type { RelationScope, SqlExpression } from "@/lib/db/query/expression";
 import {
   type ExpressionScopeMetadata,
   validateMutationExpression,
@@ -37,6 +38,47 @@ function mutationScopeFields(
       })),
     ],
   ]);
+}
+
+function conflictScopeFields(
+  table: Extract<MutationNode, { kind: "insert" }>["table"],
+  scope: RelationScope,
+): ExpressionScopeMetadata {
+  return new Map([
+    [
+      scope,
+      Object.entries(table.columns).map(([name, column]) => ({
+        name,
+        affinity: column.affinity,
+        nullable: column.nullable,
+      })),
+    ],
+  ]);
+}
+
+function isPredicateExpression(expression: SqlExpression): boolean {
+  switch (expression.kind) {
+    case "binary":
+      return ["=", "<>", ">", ">=", "<", "<="].includes(expression.operator);
+    case "distinct-from":
+    case "boolean":
+    case "not":
+    case "null-check":
+    case "in-list":
+    case "in-subquery":
+      return true;
+    case "case":
+      return expression.resultType.affinity === "integer";
+    case "column":
+    case "parameter":
+    case "excluded":
+    case "function":
+    case "aggregate":
+    case "coalesce":
+    case "unixepoch":
+    case "scalar-subquery":
+      return false;
+  }
 }
 
 export function validateMutationPlan(plan: MutationNode): void {
@@ -89,13 +131,38 @@ export function validateMutationPlan(plan: MutationNode): void {
       if (plan.conflict.action === "update") {
         if (!plan.conflict.set?.length)
           fail("DO UPDATE requires at least one assignment");
+        const scopeFields = plan.conflict.scope
+          ? conflictScopeFields(plan.table, plan.conflict.scope)
+          : undefined;
         for (const assignment of plan.conflict.set ?? []) {
           if (!columns.includes(assignment.propertyName))
             fail(
               `Conflict update column "${assignment.propertyName}" is not in the target table`,
             );
-          validateMutationExpression(assignment.expression, [], true);
+          validateMutationExpression(
+            assignment.expression,
+            plan.conflict.scope ? [plan.conflict.scope] : [],
+            true,
+            scopeFields,
+          );
         }
+        if (plan.conflict.where !== undefined) {
+          const scope = plan.conflict.scope;
+          if (
+            !scope ||
+            !isPredicateExpression(plan.conflict.where) ||
+            plan.conflict.where.resultType.affinity !== "integer"
+          )
+            fail("Conflict update WHERE requires a scoped predicate");
+          validateMutationExpression(
+            plan.conflict.where,
+            [scope],
+            true,
+            conflictScopeFields(plan.table, scope),
+          );
+        }
+      } else if (plan.conflict.where !== undefined) {
+        fail("Conflict update WHERE is only valid for DO UPDATE");
       }
     }
     return;

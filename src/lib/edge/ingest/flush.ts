@@ -1,4 +1,4 @@
-import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
+import { createD1DatabaseClient } from "@/lib/db";
 import type { TrafficVisitSnapshot } from "@/lib/edge/analytics-engine/traffic-writer";
 import { clampString } from "@/lib/edge/utils";
 
@@ -23,14 +23,9 @@ import {
   deleteAnalyticsSession,
   readDueAnalyticsSessions,
 } from "./session-state";
-import {
-  visitBindings,
-  visitDetailBindings,
-  visitDetailsUpdateSql,
-  visitStateUpsertSql,
-} from "./sql";
 import { toUnixSeconds } from "./time";
 import type { BufferedCustomEventRow, BufferedVisitRow } from "./types";
+import { prepareVisitMutations } from "./visit-write-mutations";
 interface FlushBufferFields {
   bufferRevision: number;
   flushDueAt: number | null;
@@ -354,10 +349,10 @@ export async function flushPendingToD1(
           if (sitePk === undefined) {
             throw new Error(`Missing site identity for ${row.siteId}`);
           }
-          return prepareVisitStatements(row, sitePk);
+          return prepareVisitMutations(row, sitePk);
         });
         const preparedVisits = preparedVisitGroups.flat();
-        await createDatabaseRuntime(context.env.DB).batch(preparedVisits);
+        await createD1DatabaseClient(context.env.DB).batch(preparedVisits);
         recordFlushCounter(context, "flushedVisits", visitRows.length);
         markVisitRowsFlushed(context, visitRows);
       } catch (error) {
@@ -987,23 +982,6 @@ function nextDueAtAfterRetry(
   }
   return Math.min(row.nextDueAt, retryAt);
 }
-function prepareVisitStatements(
-  row: BufferedVisitRow,
-  sitePk: number,
-): DatabaseStatement[] {
-  return [
-    {
-      sql: visitStateUpsertSql(row.status),
-      bindings: visitBindings(row, sitePk),
-      tag: "ingest.visits.upsert_state",
-    },
-    {
-      sql: visitDetailsUpdateSql(row.status),
-      bindings: visitDetailBindings(row),
-      tag: "ingest.visits.update_details",
-    },
-  ];
-}
 async function flushRowsIndividually(
   context: IngestFlushContext,
   visitRows: BufferedVisitRow[],
@@ -1022,8 +1000,8 @@ async function flushVisitRowIndividually(
 ): Promise<void> {
   try {
     const sitePk = await resolveSitePk(context, row.siteId);
-    await createDatabaseRuntime(context.env.DB).batch(
-      prepareVisitStatements(row, sitePk),
+    await createD1DatabaseClient(context.env.DB).batch(
+      prepareVisitMutations(row, sitePk),
     );
     recordFlushCounter(context, "flushedVisits");
     markVisitRowsFlushed(context, [row]);

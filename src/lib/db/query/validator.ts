@@ -152,6 +152,23 @@ function validateExpression(
         );
       }
       return;
+    case "distinct-from":
+      validateExpression(expression.left, scopes, activeSources, allowExcluded);
+      validateExpression(
+        expression.right,
+        scopes,
+        activeSources,
+        allowExcluded,
+      );
+      if (
+        !comparableAffinities(
+          expression.left.resultType.affinity,
+          expression.right.resultType.affinity,
+        )
+      )
+        invalid("Comparison operands have incompatible SQL affinities");
+      validateResultType(expression, "integer", false);
+      return;
     case "boolean":
       if (expression.operator !== "AND" && expression.operator !== "OR")
         invalid(`Unsupported boolean operator: ${String(expression.operator)}`);

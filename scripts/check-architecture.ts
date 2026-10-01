@@ -169,10 +169,20 @@ function typedDalConvergenceViolations(
   relativePath: string,
   sourceText: string,
 ): ArchitectureViolation[] {
+  const ingestRuntimeModules = new Set([
+    "src/lib/edge/ingest/flush.ts",
+    "src/lib/edge/ingest/custom-event-flush.ts",
+  ]);
+  const ingestMutationHelpers = new Set([
+    "src/lib/edge/ingest/visit-write-mutations.ts",
+    "src/lib/edge/ingest/custom-event-write-mutations.ts",
+  ]);
   if (
     !isWithin(relativePath, "src/lib/notifications/edge") &&
     relativePath !==
-      "src/lib/edge/analytics/interfaces/dashboard/saved-filters.ts"
+      "src/lib/edge/analytics/interfaces/dashboard/saved-filters.ts" &&
+    !ingestRuntimeModules.has(relativePath) &&
+    !ingestMutationHelpers.has(relativePath)
   )
     return [];
 
@@ -184,24 +194,122 @@ function typedDalConvergenceViolations(
     relativePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
   const violations: ArchitectureViolation[] = [];
-  const forbidden = new Set(["createDatabaseRuntime", "DatabaseStatement"]);
+  const forbidden = new Set([
+    "createDatabaseRuntime",
+    "DatabaseStatement",
+    ...(ingestMutationHelpers.has(relativePath)
+      ? ["createD1DatabaseClient", "unsafeRawMutation", "unsafeRawSql"]
+      : []),
+  ]);
+  const addViolation = (node: ts.Node, specifier: string) => {
+    const line =
+      source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+    violations.push({
+      rule: "typed-dal-runtime-forbidden",
+      source: relativePath,
+      specifier,
+      target: relativePath,
+      line,
+      message: ingestMutationHelpers.has(relativePath)
+        ? "Ingest mutation helpers must only build generic typed mutations and must not execute D1 or embed raw SQL."
+        : "This module must use the typed D1 client and must not reference createDatabaseRuntime or DatabaseStatement.",
+    });
+  };
   const visit = (node: ts.Node) => {
-    if (ts.isIdentifier(node) && forbidden.has(node.text)) {
-      const line =
-        source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-      violations.push({
-        rule: "typed-dal-runtime-forbidden",
-        source: relativePath,
-        specifier: node.text,
-        target: relativePath,
-        line,
-        message:
-          "This module must use the typed D1 client and must not reference createDatabaseRuntime or DatabaseStatement.",
-      });
-    }
+    if (ts.isIdentifier(node) && forbidden.has(node.text))
+      addViolation(node, node.text);
+    if (
+      ingestMutationHelpers.has(relativePath) &&
+      ((ts.isStringLiteralLike(node) &&
+        /^(?:SELECT|INSERT|UPDATE|DELETE|PRAGMA)\b/iu.test(
+          node.text.trimStart(),
+        )) ||
+        (ts.isTemplateExpression(node) &&
+          /^(?:SELECT|INSERT|UPDATE|DELETE|PRAGMA)\b/iu.test(
+            node.head.text.trimStart(),
+          )))
+    )
+      addViolation(node, "<raw SQL literal>");
     ts.forEachChild(node, visit);
   };
   visit(source);
+  return violations;
+}
+
+const INGEST_TYPED_BATCH_FUNCTIONS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  "src/lib/edge/ingest/flush.ts": [
+    "flushPendingToD1",
+    "flushVisitRowIndividually",
+  ],
+  "src/lib/edge/ingest/custom-event-flush.ts": [
+    "flushCustomEventRowIndividually",
+  ],
+};
+
+function ingestTypedBatchViolations(
+  relativePath: string,
+  sourceText: string,
+): ArchitectureViolation[] {
+  const targets = INGEST_TYPED_BATCH_FUNCTIONS[relativePath];
+  if (!targets) return [];
+
+  const source = ts.createSourceFile(
+    relativePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const violations: ArchitectureViolation[] = [];
+  const targetNames = new Set(targets);
+  const isD1Binding = (expression: ts.Expression): boolean =>
+    ts.isPropertyAccessExpression(expression) && expression.name.text === "DB";
+  const visitFunction = (body: ts.ConciseBody | undefined) => {
+    if (!body) return;
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["prepare", "batch", "exec"].includes(node.expression.name.text) &&
+        isD1Binding(node.expression.expression)
+      ) {
+        const line =
+          source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+        violations.push({
+          rule: "typed-dal-runtime-forbidden",
+          source: relativePath,
+          specifier: "<direct D1 operation>",
+          target: relativePath,
+          line,
+          message:
+            "Ingest write functions must send compiled mutations through createD1DatabaseClient.",
+        });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(body);
+  };
+  const inspect = (node: ts.Node) => {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name &&
+      targetNames.has(node.name.text)
+    )
+      visitFunction(node.body);
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      targetNames.has(node.name.text) &&
+      node.initializer &&
+      (ts.isArrowFunction(node.initializer) ||
+        ts.isFunctionExpression(node.initializer))
+    )
+      visitFunction(node.initializer.body);
+    ts.forEachChild(node, inspect);
+  };
+  inspect(source);
   return violations;
 }
 
@@ -815,6 +923,7 @@ export function collectArchitectureViolations(
     if (isGeneratedFile(relative, sourceText)) continue;
 
     violations.push(...typedDalConvergenceViolations(relative, sourceText));
+    violations.push(...ingestTypedBatchViolations(relative, sourceText));
     violations.push(...typedQueryFunctionViolations(relative, sourceText));
 
     const addSourceRuleViolation = (

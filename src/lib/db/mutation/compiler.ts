@@ -110,19 +110,42 @@ function compileInsert(
       conflictTarget,
       text(") DO NOTHING"),
     );
+  const conflictScopes = new Map<RelationScope, ScopeBinding>(
+    plan.conflict.scope
+      ? [
+          [
+            plan.conflict.scope,
+            {
+              alias: plan.table.name,
+              fieldNames: Object.values(plan.table.columns).map(
+                (column) => column.sqlName,
+              ),
+            },
+          ],
+        ]
+      : [],
+  );
   const assignments = (plan.conflict.set ?? []).map((assignment) =>
     concat(
       identifier(plan.table.columns[assignment.propertyName]!.sqlName),
       text(" = "),
-      compileD1Expression(assignment.expression, new Map()),
+      compileD1Expression(assignment.expression, conflictScopes),
     ),
   );
+  const where =
+    plan.conflict.where && plan.conflict.scope
+      ? concat(
+          text(" WHERE "),
+          compileD1Expression(plan.conflict.where, conflictScopes),
+        )
+      : text("");
   return concat(
     statement,
     text(" ON CONFLICT ("),
     conflictTarget,
     text(") DO UPDATE SET "),
     join(assignments),
+    where,
   );
 }
 

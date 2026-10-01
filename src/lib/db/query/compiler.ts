@@ -134,6 +134,14 @@ export function compileD1Expression(
           compileD1Expression(expression.right, scopes, context),
         ),
       );
+    case "distinct-from":
+      return parenthesize(
+        concat(
+          compileD1Expression(expression.left, scopes, context),
+          text(" IS NOT "),
+          compileD1Expression(expression.right, scopes, context),
+        ),
+      );
     case "boolean":
       return parenthesize(
         join(

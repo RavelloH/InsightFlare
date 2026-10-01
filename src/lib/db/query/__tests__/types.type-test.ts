@@ -4,9 +4,12 @@ import {
   coalesce,
   compileD1Query,
   eq,
+  excluded,
   insert,
   inSubquery,
+  isDistinctFrom,
   join,
+  onConflictDoUpdate,
   param,
   project,
   scan,
@@ -39,6 +42,39 @@ export function compileTimeDatabaseTypeAssertions(): void {
   eq(users.columns.id, param("user-1"));
   // @ts-expect-error A TEXT id cannot be compared with a number.
   eq(users.columns.id, param(42));
+
+  const visits = scan(schema.visits);
+  const nullableDistinct = isDistinctFrom(visits.columns.ended_at, param(null));
+  const nullableMetric: number | null = 1;
+  isDistinctFrom(visits.columns.perf_ttfb_ms, param(nullableMetric));
+  type DistinctResultIsNonNullableInteger = Assert<
+    Equal<
+      ExpressionResultOf<typeof nullableDistinct>,
+      ExpressionResultType<"integer", false>
+    >
+  >;
+  type DistinctValueIsBoolean = Assert<
+    Equal<ExpressionValue<typeof nullableDistinct>, boolean>
+  >;
+  const distinctChecks: [
+    DistinctResultIsNonNullableInteger,
+    DistinctValueIsBoolean,
+  ] = [true, true];
+  void distinctChecks;
+  // @ts-expect-error A TEXT column cannot be compared with a numeric parameter.
+  isDistinctFrom(users.columns.id, param(42));
+
+  const guardedConfigUpsert = onConflictDoUpdate(
+    insert(schema.configs, { config_key: "typed", value_json: "{}" }),
+    ["config_key"],
+    (columns) => ({
+      set: {
+        value_json: excluded(schema.configs.columns.value_json),
+      },
+      where: isDistinctFrom(columns.updated_at, param(0)),
+    }),
+  );
+  void guardedConfigUpsert;
 
   const selected = project(users, { email: users.columns.email });
   const compiled = compileD1Query(selected);

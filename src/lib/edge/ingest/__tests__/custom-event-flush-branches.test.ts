@@ -168,7 +168,7 @@ describe("custom event individual flush branch coverage", () => {
     const batchCalls = context.calls.slice(-5, -1);
     expect(
       batchCalls.map(
-        (call) => call.sql.match(/INSERT OR IGNORE INTO ([a-z_]+)/u)?.[1],
+        (call) => call.sql.match(/INSERT OR IGNORE INTO "?([a-z_]+)"?/u)?.[1],
       ),
     ).toEqual([
       "custom_events",
@@ -190,9 +190,11 @@ describe("custom event individual flush branch coverage", () => {
         2,
         1,
         "user-1",
+        null,
         createdAt,
         1,
         "visit-1",
+        1,
       ],
       [1, null, null, 30, 4, null, null, 0, "event-1"],
       [2, 1, 20, 31, 1, 0, null, 1, "event-1"],

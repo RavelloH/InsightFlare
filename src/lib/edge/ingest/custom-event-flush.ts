@@ -2,8 +2,6 @@ import {
   and,
   compileD1Query,
   createD1DatabaseClient,
-  createDatabaseRuntime,
-  type DatabaseStatement,
   eq,
   filter,
   limit,
@@ -23,6 +21,7 @@ import {
   expandCustomEventDataJson,
   type ExpandedCustomEventData,
 } from "./custom-event-json";
+import { prepareCustomEventMutations } from "./custom-event-write-mutations";
 import {
   type IngestFlushContext,
   recordFlushCounter,
@@ -64,13 +63,13 @@ export async function flushCustomEventRowIndividually(
       expanded.data,
       sitePk,
     );
-    const statements = prepareCustomEventStatements(
+    const statements = prepareCustomEventMutations(
       row,
       expanded.data,
       ids,
       sitePk,
     );
-    await createDatabaseRuntime(context.env.DB).batch(statements);
+    await createD1DatabaseClient(context.env.DB).batch(statements);
     if (!(await hasPersistedCustomEvent(context, row.eventId))) {
       context.observability?.warn("do.flush.custom_event_insert_not_confirmed");
       markCustomEventRowsFailed(context, [row], "insert_did_not_create_event");
@@ -294,117 +293,6 @@ async function hasPersistedCustomEvent(
     ),
   );
   return persisted !== null;
-}
-function prepareCustomEventStatements(
-  row: BufferedCustomEventRow,
-  expanded: ExpandedCustomEventData,
-  ids: {
-    eventNameId: number;
-    keyIds: Map<string, number>;
-    pathIds: Map<string, number>;
-  },
-  sitePk: number,
-): DatabaseStatement[] {
-  const eventStatement: DatabaseStatement = {
-    sql: `
-      INSERT OR IGNORE INTO custom_events (
-        event_id, site_id, site_pk, visit_id, event_name_id, occurred_at, received_at,
-        sequence, node_count, value_count, user_id, ae_synced_at, created_at
-      )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?
-      FROM visits
-      WHERE site_pk = ? AND visit_id = ?
-      LIMIT 1
-    `,
-    bindings: [
-      row.eventId,
-      row.siteId,
-      sitePk,
-      row.visitId,
-      ids.eventNameId,
-      row.occurredAt,
-      row.receivedAt,
-      row.sequence,
-      expanded.nodes.length,
-      expanded.values.length,
-      row.userId || null,
-      row.createdAt,
-      sitePk,
-      row.visitId,
-    ],
-    tag: "ingest.custom_events.insert",
-  };
-
-  const nodeStatements = expanded.nodes.map((node) => {
-    const pathId = ids.pathIds.get(node.path);
-    if (pathId === undefined) {
-      throw new Error(`Missing custom event path id for ${node.path}`);
-    }
-    const keyId = node.key === null ? null : ids.keyIds.get(node.key);
-    if (node.key !== null && keyId === undefined) {
-      throw new Error(`Missing custom event key id for ${node.key}`);
-    }
-    return {
-      sql: `
-        INSERT OR IGNORE INTO custom_event_json_nodes (
-          event_pk, node_id, parent_node_id, key_id, path_id, value_type,
-          member_order, array_index, depth
-        )
-        SELECT event_pk, ?, ?, ?, ?, ?, ?, ?, ?
-        FROM custom_events
-        WHERE event_id = ?
-      `,
-      bindings: [
-        node.nodeId,
-        node.parentNodeId,
-        keyId ?? null,
-        pathId,
-        node.valueType,
-        node.memberOrder,
-        node.arrayIndex,
-        node.depth,
-        row.eventId,
-      ],
-      tag: "ingest.custom_event_json_nodes.insert",
-    };
-  });
-
-  const valueStatements = expanded.values.map((value) => {
-    const pathId = ids.pathIds.get(value.path);
-    if (pathId === undefined) {
-      throw new Error(`Missing custom event value path id for ${value.path}`);
-    }
-    return {
-      sql: `
-        INSERT OR IGNORE INTO custom_event_json_values (
-          event_pk, node_id, site_id, site_pk, event_name_id, path_id, occurred_at,
-          scope_node_id, value_type, string_value, string_hash, number_value,
-          boolean_value
-        )
-        SELECT event_pk, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        FROM custom_events
-        WHERE event_id = ?
-      `,
-      bindings: [
-        value.nodeId,
-        row.siteId,
-        sitePk,
-        ids.eventNameId,
-        pathId,
-        row.occurredAt,
-        value.scopeNodeId,
-        value.valueType,
-        value.stringValue,
-        value.stringHash,
-        value.numberValue,
-        value.booleanValue,
-        row.eventId,
-      ],
-      tag: "ingest.custom_event_json_values.insert",
-    };
-  });
-
-  return [eventStatement, ...nodeStatements, ...valueStatements];
 }
 function deleteFlushedCustomEventRows(
   context: IngestFlushContext,

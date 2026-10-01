@@ -33,6 +33,8 @@ export interface InsertConflict {
     readonly propertyName: string;
     readonly expression: SqlExpression;
   }[];
+  readonly scope?: RelationScope;
+  readonly where?: Predicate;
 }
 
 export interface InsertMutation<
@@ -157,10 +159,36 @@ type ConflictSet<T extends SchemaTableReference> = Partial<{
   >;
 }>;
 
+export interface ConflictUpdateDraft<T extends SchemaTableReference> {
+  readonly set: ConflictSet<T>;
+  readonly where?: Predicate;
+}
+
+type ConflictUpdateBuilder<T extends SchemaTableReference> = (
+  columns: ScopedColumns<T>,
+) => ConflictUpdateDraft<T>;
+
 export function onConflictDoUpdate<T extends GeneratedSchemaTable>(
+  mutation: InsertMutation<T>,
+  conflictTarget: readonly (keyof T["columns"] & string)[],
+  setOrBuild: ConflictSet<T> | ConflictUpdateBuilder<T>,
+): InsertMutation<T> {
+  if (typeof setOrBuild === "function") {
+    const target = targetColumns(mutation.table);
+    const draft = setOrBuild(target.columns);
+    return buildConflictUpdate(mutation, conflictTarget, draft.set, {
+      scope: target.scope,
+      where: draft.where,
+    });
+  }
+  return buildConflictUpdate(mutation, conflictTarget, setOrBuild);
+}
+
+function buildConflictUpdate<T extends GeneratedSchemaTable>(
   mutation: InsertMutation<T>,
   target: readonly (keyof T["columns"] & string)[],
   set: ConflictSet<T>,
+  guard?: { readonly scope: RelationScope; readonly where?: Predicate },
 ): InsertMutation<T> {
   const fields = Object.entries(set) as Array<[string, unknown]>;
   return {
@@ -168,6 +196,8 @@ export function onConflictDoUpdate<T extends GeneratedSchemaTable>(
     conflict: {
       target,
       action: "update",
+      ...(guard === undefined ? {} : { scope: guard.scope }),
+      ...(guard?.where === undefined ? {} : { where: guard.where }),
       set: fields.map(([propertyName, value]) => ({
         propertyName,
         expression: expression(value),
@@ -182,6 +212,14 @@ export function insertFromQuery<T extends GeneratedSchemaTable>(
   query: QuerySource,
 ): InsertMutation<T> {
   return { kind: "insert", table, columns, source: query, orIgnore: false };
+}
+
+export function insertOrIgnoreFromQuery<T extends GeneratedSchemaTable>(
+  table: T,
+  columns: readonly (keyof T["columns"] & string)[],
+  query: QuerySource,
+): InsertMutation<T> {
+  return { ...insertFromQuery(table, columns, query), orIgnore: true };
 }
 
 export type UpdateSet<T extends SchemaTableReference> = Partial<{
