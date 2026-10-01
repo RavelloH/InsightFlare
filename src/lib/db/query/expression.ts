@@ -133,7 +133,14 @@ export interface InListExpression<
 }
 
 export type SqlFunctionName =
-  "lower" | "upper" | "trim" | "trim-spaces" | "length" | "abs" | "round";
+  | "lower"
+  | "upper"
+  | "trim"
+  | "trim-spaces"
+  | "concat-text"
+  | "length"
+  | "abs"
+  | "round";
 
 export interface FunctionExpression<
   T = unknown,
@@ -834,6 +841,7 @@ export function callFunction(
     case "upper":
     case "trim":
     case "trim-spaces":
+    case "concat-text":
       affinity = "text";
       break;
     case "length":
@@ -869,6 +877,57 @@ export function trimSpaces<E extends SqlExpression<string | null>>(
       affinity: "text",
       nullable: expression.resultType.nullable,
     },
+  };
+}
+
+type TextConcatAffinity = "text" | "integer" | "real" | "numeric" | "unknown";
+type TextConcatOperand<E extends AnyExpression> =
+  ExpressionResultOf<E>["affinity"] extends TextConcatAffinity
+    ? unknown
+    : never;
+type TextConcatOperands<Expressions extends readonly AnyExpression[]> = {
+  readonly [Index in keyof Expressions]: Expressions[Index] &
+    TextConcatOperand<Expressions[Index]>;
+};
+type TextConcatNullable<Expressions extends readonly AnyExpression[]> =
+  AnyNullable<Expressions>;
+type TextConcatValue<Expressions extends readonly AnyExpression[]> =
+  true extends TextConcatNullable<Expressions> ? string | null : string;
+
+/**
+ * SQLite text concatenation with the engine's normal value coercion and NULL
+ * propagation. Operands with blob affinity are rejected because their string
+ * representation is not portable across D1 and SQLite runtimes.
+ */
+export function concatText<
+  const First extends AnyExpression,
+  const Second extends AnyExpression,
+  const Rest extends readonly AnyExpression[],
+>(
+  first: First & TextConcatOperand<First>,
+  second: Second & TextConcatOperand<Second>,
+  ...rest: TextConcatOperands<Rest>
+): FunctionExpression<
+  TextConcatValue<readonly [First, Second, ...Rest]>,
+  ExpressionResultType<
+    "text",
+    TextConcatNullable<readonly [First, Second, ...Rest]>
+  >
+> {
+  const expressions = [first, second, ...rest];
+  return {
+    kind: "function",
+    name: "concat-text",
+    arguments: expressions,
+    resultType: {
+      affinity: "text",
+      nullable: expressions.some(
+        (expression) => expression.resultType.nullable,
+      ),
+    } as ExpressionResultType<
+      "text",
+      TextConcatNullable<readonly [First, Second, ...Rest]>
+    >,
   };
 }
 

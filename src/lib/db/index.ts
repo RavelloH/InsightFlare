@@ -32,6 +32,10 @@ export type {
   CaseWhenBranch,
   CastIntegerExpression,
   DistinctFromExpression,
+  ExpressionResultOf,
+  ExpressionResultType,
+  ExpressionValue,
+  FunctionExpression,
   SqlExpression,
 } from "./query/expression";
 export {
@@ -42,6 +46,7 @@ export {
   caseWhen,
   castInteger,
   coalesce,
+  concatText,
   count,
   countDistinct,
   div,
@@ -70,6 +75,7 @@ export {
   unixepoch,
 } from "./query/expression";
 export { lowerLogicalPlan } from "./query/physical-plan";
+export type { RowNumberWindowSpec, WindowOrderKey } from "./query/plan";
 export {
   aggregate,
   antiJoin,
@@ -78,10 +84,12 @@ export {
   join,
   limit,
   project,
+  rowNumber,
   scan,
   semiJoin,
   sort,
   union,
+  window,
 } from "./query/plan";
 export type { GeneratedSchemaObject, GeneratedSchemaTable } from "./schema";
 export { schema } from "./schema";

@@ -120,6 +120,27 @@ export interface DistinctNode extends QuerySourceBase {
   readonly input: QuerySource;
 }
 
+export interface WindowOrderKey {
+  readonly expression: SqlExpression;
+  readonly direction: "ASC" | "DESC";
+}
+
+/** Rank-only window descriptor. It is intentionally not a SQL expression. */
+export interface RowNumberWindowSpec {
+  readonly kind: "row-number";
+  readonly partitionBy: readonly SqlExpression[];
+  readonly orderBy: readonly [WindowOrderKey, ...WindowOrderKey[]];
+}
+
+export interface WindowNode extends QuerySourceBase {
+  readonly kind: "window";
+  readonly input: QuerySource;
+  readonly windows: readonly {
+    readonly name: string;
+    readonly specification: RowNumberWindowSpec;
+  }[];
+}
+
 export interface SortNode extends QuerySourceBase {
   readonly kind: "sort";
   readonly input: QuerySource;
@@ -151,6 +172,7 @@ export type LogicalQueryNode =
   | SemiJoinNode
   | AggregateNode
   | DistinctNode
+  | WindowNode
   | SortNode
   | LimitNode
   | UnionNode;
@@ -296,6 +318,82 @@ export function project<
     fields,
   };
   const columns = outputColumns(fields, scope) as ProjectionColumns<P>;
+  return relation(node, scope, fields, columns);
+}
+
+export function rowNumber(spec: {
+  readonly partitionBy?: readonly SqlExpression[];
+  readonly orderBy: readonly [WindowOrderKey, ...WindowOrderKey[]];
+}): RowNumberWindowSpec {
+  if (!spec || !Array.isArray(spec.orderBy) || spec.orderBy.length === 0)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "rowNumber() requires at least one ordering key",
+    );
+  return {
+    kind: "row-number",
+    partitionBy: [...(spec.partitionBy ?? [])],
+    orderBy: spec.orderBy.map((key) => ({ ...key })) as [
+      WindowOrderKey,
+      ...WindowOrderKey[],
+    ],
+  };
+}
+
+type WindowSpecMap = Readonly<Record<string, RowNumberWindowSpec>>;
+type WindowNameConflict<
+  Columns extends Readonly<Record<string, AnyExpression>>,
+  Windows extends WindowSpecMap,
+> = Extract<keyof Columns, keyof Windows> extends never ? unknown : never;
+type WindowRow<Row extends object, Windows extends WindowSpecMap> = Row & {
+  readonly [K in keyof Windows]: number;
+};
+type WindowColumns<
+  Columns extends Readonly<Record<string, AnyExpression>>,
+  Windows extends WindowSpecMap,
+> = Columns & {
+  readonly [K in keyof Windows]: ColumnExpression<
+    number,
+    ExpressionResultType<"integer", false>
+  >;
+};
+
+export function window<
+  Row extends object,
+  Columns extends Readonly<Record<string, AnyExpression>>,
+  Windows extends WindowSpecMap,
+>(
+  input: Relation<Row, Columns>,
+  windows: Windows & WindowNameConflict<Columns, Windows>,
+): Relation<WindowRow<Row, Windows>, WindowColumns<Columns, Windows>> {
+  const entries = Object.entries(windows) as Array<
+    [string, RowNumberWindowSpec]
+  >;
+  if (entries.length === 0)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "window() requires at least one output",
+    );
+  const fields = [
+    ...input.fields,
+    ...entries.map(([name]) => outputField(name, "integer", false)),
+  ];
+  assertFields(fields);
+  const scope = createRelationScope();
+  const node: WindowNode = {
+    kind: "window",
+    input: sourceOf(input),
+    windows: entries.map(([name, specification]) => ({
+      name,
+      specification,
+    })),
+    scope,
+    fields,
+  };
+  const columns = outputColumns(fields, scope) as WindowColumns<
+    Columns,
+    Windows
+  >;
   return relation(node, scope, fields, columns);
 }
 

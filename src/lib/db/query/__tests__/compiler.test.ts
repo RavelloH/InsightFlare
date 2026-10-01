@@ -17,6 +17,7 @@ import {
   coalesce,
   compileD1Mutation,
   compileD1Query,
+  concatText,
   count,
   countDistinct,
   D1StatementBudgetError,
@@ -42,6 +43,7 @@ import {
   onConflictDoUpdate,
   param,
   project,
+  rowNumber,
   scalar,
   scan,
   semiJoin,
@@ -51,6 +53,7 @@ import {
   union,
   unixepoch,
   update,
+  window,
 } from "@/lib/db";
 import {
   compileD1Expression,
@@ -237,6 +240,181 @@ describe("typed D1 query compiler", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("concatenates typed text operands with SQLite coercion and NULL semantics", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "concat-text-test",
+      );
+      const identities = scan(schema.site_identities);
+      const compiled = compileD1Query(
+        project(identities, {
+          numeric: concatText(param("job:'"), param(-3.75), param("雪")),
+          nullValue: concatText(param("prefix"), param(null)),
+        }),
+      );
+      expect(compiled.sql).toContain(" || ");
+      expect(compiled.sql).not.toContain("CONCAT(");
+      expect(compiled.bindings).toEqual(["job:'", -3.75, "雪", "prefix", null]);
+      expect(executeAll(db, compiled)).toEqual([
+        { numeric: "job:'-3.75雪", nullValue: null },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("ranks rows with a rank-only window and filters the appended rank afterward", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare(
+        `INSERT INTO scheduled_task_runs
+          (id, invocation_id, task_key, task_name, trigger_type, status,
+           started_at_ms, scope_type, summary_json, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'system', '{}', 9999999999)`,
+      ).run("a-old", "ia", "task-a", "Task A", "manual", "success", 10);
+      db.prepare(
+        `INSERT INTO scheduled_task_runs
+          (id, invocation_id, task_key, task_name, trigger_type, status,
+           started_at_ms, scope_type, summary_json, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'system', '{}', 9999999999)`,
+      ).run("a-new", "ib", "task-a", "Task A", "manual", "success", 20);
+      db.prepare(
+        `INSERT INTO scheduled_task_runs
+          (id, invocation_id, task_key, task_name, trigger_type, status,
+           started_at_ms, scope_type, summary_json, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'system', '{}', 9999999999)`,
+      ).run("b-only", "ic", "task-b", "Task B", "manual", "running", 5);
+      db.prepare(
+        `INSERT INTO scheduled_task_runs
+          (id, invocation_id, task_key, task_name, trigger_type, status,
+           started_at_ms, finished_at_ms, scope_type, summary_json, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', '{}', 9999999999)`,
+      ).run("b-finished", "id", "task-b", "Task B", "manual", "success", 6, 7);
+
+      const runs = scan(schema.scheduled_task_runs);
+      const base = project(runs, {
+        id: runs.columns.id,
+        taskKey: runs.columns.task_key,
+        startedAt: runs.columns.started_at_ms,
+        finishedAt: runs.columns.finished_at_ms,
+      });
+      const repeatedRows = union(base, base, true);
+      const ranked = window(repeatedRows, {
+        row: rowNumber({
+          partitionBy: [repeatedRows.columns.taskKey],
+          orderBy: [
+            { expression: repeatedRows.columns.startedAt, direction: "DESC" },
+          ],
+        }),
+      });
+      const all = compileD1Query(ranked);
+      expect(all.sql).toContain("ROW_NUMBER() OVER (PARTITION BY");
+      expect(all.sql).toContain('ORDER BY "q');
+      expect(all.sql).not.toMatch(/OVER \([^)]*id.*(?:ASC|DESC)/iu);
+      expect(executeAll(db, all)).toHaveLength(8);
+
+      const latest = filter(ranked, eq(ranked.columns.row, param(1)));
+      const latestRows = executeAll(db, compileD1Query(latest));
+      expect(latestRows).toHaveLength(2);
+      expect(latestRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "a-new", taskKey: "task-a", row: 1 }),
+          expect.objectContaining({
+            id: "b-finished",
+            taskKey: "task-b",
+            row: 1,
+          }),
+        ]),
+      );
+      expect(lowerLogicalPlan(ranked).sharedRelations).toEqual([]);
+
+      const nullOrdered = window(base, {
+        finishRank: rowNumber({
+          partitionBy: [base.columns.taskKey],
+          orderBy: [{ expression: base.columns.finishedAt, direction: "ASC" }],
+        }),
+      });
+      const nullFirst = filter(
+        nullOrdered,
+        and(
+          eq(nullOrdered.columns.taskKey, param("task-b")),
+          eq(nullOrdered.columns.finishRank, param(1)),
+        ),
+      );
+      expect(executeAll(db, compileD1Query(nullFirst))).toEqual([
+        expect.objectContaining({ id: "b-only", finishRank: 1 }),
+      ]);
+
+      const narrow = project(runs, {
+        id: runs.columns.id,
+        taskKey: runs.columns.task_key,
+        startedAt: runs.columns.started_at_ms,
+      });
+      const selected = filter(
+        narrow,
+        inList(narrow.columns.taskKey, ["task-a", "task-b"]),
+      );
+      const selectedRanked = window(selected, {
+        row: rowNumber({
+          partitionBy: [selected.columns.taskKey],
+          orderBy: [
+            { expression: selected.columns.startedAt, direction: "DESC" },
+          ],
+        }),
+      });
+      const scalarSource = project(selected, { id: selected.columns.id });
+      const rankAndSharedInput = project(selectedRanked, {
+        id: selectedRanked.columns.id,
+        selectedId: scalar(scalarSource),
+      });
+      expect(lowerLogicalPlan(rankAndSharedInput).sharedRelations).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects malformed rank descriptors, output collisions, and out-of-scope keys", () => {
+    const runs = scan(schema.scheduled_task_runs);
+    const otherRuns = scan(schema.scheduled_task_runs);
+    const base = project(runs, {
+      id: runs.columns.id,
+      taskKey: runs.columns.task_key,
+      startedAt: runs.columns.started_at_ms,
+    });
+    const valid = rowNumber({
+      orderBy: [{ expression: base.columns.startedAt, direction: "DESC" }],
+    });
+    expect(() => window(base, { id: valid } as never)).toThrow(
+      /Duplicate output field/u,
+    );
+    expect(() =>
+      compileD1Query(
+        window(base, {
+          invalidScope: rowNumber({
+            partitionBy: [otherRuns.columns.task_key],
+            orderBy: [
+              { expression: base.columns.startedAt, direction: "DESC" },
+            ],
+          }),
+        }),
+      ),
+    ).toThrow(/outside the visible relation scope/u);
+
+    const forged = window(base, { rank: valid });
+    const forgedNode = forged.node as unknown as {
+      readonly windows: {
+        readonly specification: { readonly orderBy: readonly unknown[] };
+      }[];
+    };
+    const forgedSpecification = forgedNode.windows[0]!
+      .specification as unknown as { orderBy: readonly unknown[] };
+    forgedSpecification.orderBy = [];
+    expect(() => compileD1Query(forged)).toThrow(
+      /row-number requires at least one ordering key/u,
+    );
   });
 
   it("compiles excluded values and rejects columns without a SQL scope", () => {

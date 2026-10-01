@@ -4,8 +4,10 @@ import {
   castInteger,
   coalesce,
   compileD1Query,
+  concatText,
   eq,
   excluded,
+  filter,
   insert,
   inSubquery,
   isDistinctFrom,
@@ -13,11 +15,13 @@ import {
   onConflictDoUpdate,
   param,
   project,
+  rowNumber,
   scan,
   trimSpaces,
   union,
   unixepoch,
   update,
+  window,
 } from "@/lib/db";
 import * as databaseFacade from "@/lib/db";
 import type { CompiledQuery } from "@/lib/db/query/compiled";
@@ -69,6 +73,57 @@ export function compileTimeDatabaseTypeAssertions(): void {
     NullableTrimSpacesValue,
   ] = [true, true, true];
   void trimSpacesChecks;
+  const requiredConcat = concatText(param("task:"), param(-7));
+  const nullableConcat = concatText(param("task:"), param(null), param("雪"));
+  type ConcatValueIsString = Assert<
+    Equal<ExpressionValue<typeof requiredConcat>, string>
+  >;
+  type ConcatMetadataIsRequiredText = Assert<
+    Equal<
+      ExpressionResultOf<typeof requiredConcat>,
+      ExpressionResultType<"text", false>
+    >
+  >;
+  type NullableConcatValueIncludesNull = Assert<
+    Equal<ExpressionValue<typeof nullableConcat>, string | null>
+  >;
+  const concatChecks: [
+    ConcatValueIsString,
+    ConcatMetadataIsRequiredText,
+    NullableConcatValueIncludesNull,
+  ] = [true, true, true];
+  void concatChecks;
+  // @ts-expect-error Text concatenation requires at least two operands.
+  concatText(param("only-one"));
+  // @ts-expect-error BLOB operands have no portable SQLite text coercion contract.
+  concatText(param("prefix"), param(new Uint8Array([1])));
+
+  const scheduledRuns = scan(schema.scheduled_task_runs);
+  const rankedRuns = window(scheduledRuns, {
+    latestRank: rowNumber({
+      partitionBy: [scheduledRuns.columns.task_key],
+      orderBy: [
+        { expression: scheduledRuns.columns.started_at_ms, direction: "DESC" },
+      ],
+    }),
+  });
+  filter(rankedRuns, eq(rankedRuns.columns.latestRank, param(1)));
+  const unconsumedRank = rowNumber({
+    orderBy: [
+      { expression: scheduledRuns.columns.started_at_ms, direction: "DESC" },
+    ],
+  });
+  // @ts-expect-error A window descriptor is not a SQL expression.
+  project(scheduledRuns, { rank: unconsumedRank });
+  const replacementRank = rowNumber({
+    orderBy: [
+      { expression: rankedRuns.columns.started_at_ms, direction: "DESC" },
+    ],
+  });
+  // @ts-expect-error Window output names cannot replace input fields.
+  window(rankedRuns, { latestRank: replacementRank });
+  // @ts-expect-error rowNumber requires at least one ordering key.
+  rowNumber({ partitionBy: [scheduledRuns.columns.task_key], orderBy: [] });
   // @ts-expect-error SQLite TRIM accepts text and unknown-affinity expressions only.
   trimSpaces(visits.columns.started_at);
   const castNonNullable = castInteger(visits.columns.started_at);

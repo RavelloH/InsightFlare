@@ -227,6 +227,16 @@ export function compileD1Expression(
         text(")"),
       );
     case "function":
+      if (expression.name === "concat-text") {
+        return parenthesize(
+          join(
+            expression.arguments.map((item) =>
+              compileD1Expression(item, scopes, context),
+            ),
+            text(" || "),
+          ),
+        );
+      }
       if (expression.name === "trim-spaces") {
         return concat(
           text("TRIM("),
@@ -503,6 +513,45 @@ function compileNode(
       return concat(
         text("SELECT DISTINCT "),
         join(outputList(node.fields.length, alias)),
+        text(" FROM "),
+        parenthesize(source),
+        text(" AS "),
+        identifier(alias),
+      );
+    }
+    case "window": {
+      const source = compileNode(node.input.node, context, outerScopes);
+      const alias = nextAlias(context, "q");
+      const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
+      const selections = node.windows.map(({ specification }, index) => {
+        const partitions = specification.partitionBy;
+        const ordering = specification.orderBy.map((key) =>
+          concat(
+            compileD1Expression(key.expression, scopes, context),
+            text(` ${key.direction}`),
+          ),
+        );
+        return concat(
+          text("ROW_NUMBER() OVER ("),
+          ...(partitions.length === 0
+            ? []
+            : [
+                text("PARTITION BY "),
+                join(
+                  partitions.map((expression) =>
+                    compileD1Expression(expression, scopes, context),
+                  ),
+                ),
+                text(" "),
+              ]),
+          text("ORDER BY "),
+          join(ordering),
+          text(`) AS "_c${node.input.fields.length + index}"`),
+        );
+      });
+      return concat(
+        text("SELECT "),
+        join([...outputList(node.input.fields.length, alias), ...selections]),
         text(" FROM "),
         parenthesize(source),
         text(" AS "),

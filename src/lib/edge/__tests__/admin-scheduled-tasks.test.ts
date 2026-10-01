@@ -1,5 +1,9 @@
+import type { SQLInputValue } from "node:sqlite";
+
 import { describe, expect, it, vi } from "vitest";
 
+import { createMigratedDatabase } from "@/../scripts/schema/database";
+import { createSqliteD1Database } from "@/lib/db/__tests__/sqlite-d1";
 import type { Env } from "@/lib/edge/types";
 vi.mock("@/lib/scheduled-tasks", () => ({
   SCHEDULED_TASK_LOG_RETENTION_DAYS: 30,
@@ -624,5 +628,143 @@ describe("handleScheduledTasksAdmin", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as any;
     expect(body.ok).toBe(true);
+  });
+
+  it("resolves a selected run id through the typed group fallback on SQLite", async () => {
+    const database = createMigratedDatabase();
+    const now = 1_800_000_300_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    const trace = {
+      preparedSql: [] as string[],
+      bindings: [] as SQLInputValue[][],
+    };
+    try {
+      database
+        .prepare(
+          `INSERT INTO scheduled_task_runs
+            (id, invocation_id, task_key, task_name, trigger_type, status,
+             scheduled_at_ms, started_at_ms, finished_at_ms, duration_ms,
+             scope_type, scope_id, summary_json, expires_at)
+           VALUES ('selected-run-id', 'selected-group-id', 'hourly-rollup',
+             'Hourly Rollup', 'manual', 'success', NULL, ?, ?, 25,
+             'system', NULL, '{}', 9999999999)`,
+        )
+        .run(now - 50, now - 25);
+      database
+        .prepare(
+          `INSERT INTO scheduled_task_run_logs
+            (id, run_id, task_key, sequence, level, event, message,
+             data_json, created_at_ms, expires_at)
+           VALUES ('selected-log', 'selected-run-id', 'hourly-rollup', 1,
+             'info', 'completed', 'done', '{}', ?, 9999999999)`,
+        )
+        .run(now - 20);
+      const env = {
+        DB: createSqliteD1Database(database, trace),
+        DAILY_SALT_SECRET: "test-pagination-secret",
+      } as unknown as Env;
+      const request = new Request(
+        "https://app.test/api/private/admin/scheduled-tasks?runId=selected-run-id",
+      );
+      const response = await handleScheduledTasksAdmin(
+        request,
+        env,
+        new URL(request.url),
+        resolveAdmin,
+      );
+      const body = (await response.json()) as any;
+
+      expect(response.status).toBe(200);
+      expect(body.selectedRun).toMatchObject({
+        id: "selected-group-id",
+        taskCount: 1,
+        logsCount: 1,
+        runs: [{ id: "selected-run-id" }],
+      });
+      expect(body.logs.items).toMatchObject([{ id: "selected-log" }]);
+      expect(trace.preparedSql).toHaveLength(13);
+    } finally {
+      nowSpy.mockRestore();
+      database.close();
+    }
+  });
+
+  it("keeps scheduled log count and page reads on 100-id chunks", async () => {
+    const database = createMigratedDatabase();
+    const now = 1_800_000_300_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    const trace = {
+      preparedSql: [] as string[],
+      bindings: [] as SQLInputValue[][],
+    };
+    try {
+      const insertRun = database.prepare(
+        `INSERT INTO scheduled_task_runs
+          (id, invocation_id, task_key, task_name, trigger_type, status,
+           scheduled_at_ms, started_at_ms, finished_at_ms, duration_ms,
+           scope_type, summary_json, expires_at)
+         VALUES (?, 'hundred-run-group', 'hourly-rollup', 'Hourly Rollup',
+           'manual', 'success', NULL, ?, ?, 1, 'system', '{}', 9999999999)`,
+      );
+      const insertLog = database.prepare(
+        `INSERT INTO scheduled_task_run_logs
+          (id, run_id, task_key, sequence, level, event, message, data_json,
+           created_at_ms, expires_at)
+         VALUES (?, ?, 'hourly-rollup', 1, 'info', 'completed', 'done',
+           '{}', ?, 9999999999)`,
+      );
+      for (let index = 0; index < 101; index++) {
+        const runId = `hundred-run-${String(index).padStart(3, "0")}`;
+        insertRun.run(runId, now - index - 1, now - index);
+        insertLog.run(`hundred-log-${index}`, runId, now + index);
+      }
+
+      const env = {
+        DB: createSqliteD1Database(database, trace),
+        DAILY_SALT_SECRET: "test-pagination-secret",
+      } as unknown as Env;
+      const request = new Request(
+        "https://app.test/api/private/admin/scheduled-tasks?runGroupId=hundred-run-group",
+      );
+      const response = await handleScheduledTasksAdmin(
+        request,
+        env,
+        new URL(request.url),
+        resolveAdmin,
+      );
+      const body = (await response.json()) as any;
+
+      expect(response.status).toBe(200);
+      expect(body.selectedRun.logsCount).toBe(101);
+      expect(body.logs.items).toHaveLength(101);
+      const queries = trace.preparedSql.map((sql, index) => ({
+        sql,
+        bindings: trace.bindings[index] ?? [],
+      }));
+      const countChunks = queries
+        .filter(
+          ({ sql }) =>
+            sql.includes("COUNT(*)") &&
+            sql.includes('"scheduled_task_run_logs"') &&
+            sql.includes(" IN ("),
+        )
+        .map(({ bindings }) => bindings.length);
+      const logPageQueries = queries.filter(
+        ({ sql }) =>
+          sql.includes('"runStartedAt"') &&
+          sql.includes('"scheduled_task_run_logs"') &&
+          sql.includes('"scheduled_task_runs"') &&
+          sql.includes(" ORDER BY "),
+      );
+      expect(countChunks).toEqual([100, 1]);
+      expect(logPageQueries.map(({ bindings }) => bindings.length)).toEqual([
+        2, 2,
+      ]);
+      expect(logPageQueries[0]?.sql).toContain("json_each(?)");
+      expect(logPageQueries[1]?.sql).not.toContain("json_each(?)");
+    } finally {
+      nowSpy.mockRestore();
+      database.close();
+    }
   });
 });

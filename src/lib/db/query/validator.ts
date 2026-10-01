@@ -18,6 +18,8 @@ import type {
   Relation,
   SortNode,
   UnionNode,
+  WindowNode,
+  WindowOrderKey,
 } from "./plan";
 
 export type ExpressionScopeMetadata = ReadonlyMap<
@@ -261,6 +263,34 @@ function validateExpression(
       return;
     }
     case "function":
+      if (expression.name === "concat-text") {
+        if (expression.arguments.length < 2)
+          invalid("concatText() requires at least two arguments");
+        expression.arguments.forEach((child) => {
+          if (!child || typeof child !== "object")
+            invalid("concatText() contains an invalid operand");
+          validateExpression(child, scopes, activeSources, allowExcluded);
+        });
+        const accepted = new Set([
+          "text",
+          "integer",
+          "real",
+          "numeric",
+          "unknown",
+        ]);
+        if (
+          expression.arguments.some(
+            (argument) => !accepted.has(argument.resultType.affinity),
+          )
+        )
+          invalid("concatText() received an incompatible argument affinity");
+        validateResultType(
+          expression,
+          "text",
+          expression.arguments.some((argument) => argument.resultType.nullable),
+        );
+        return;
+      }
       if (
         ![
           "lower",
@@ -640,6 +670,74 @@ function validateSource(
         )
           invalid("Distinct must preserve its input row shape");
         return;
+      case "window": {
+        const windowNode = node as WindowNode;
+        validateChild(windowNode.input);
+        if (
+          !Array.isArray(windowNode.windows) ||
+          windowNode.windows.length === 0
+        )
+          invalid("Window requires at least one rank output");
+        const names = new Set(
+          windowNode.input.fields.map((field) => field.name),
+        );
+        const expected = [...windowNode.input.fields];
+        for (const item of windowNode.windows) {
+          if (!item || typeof item !== "object")
+            invalid("Window output descriptor is invalid");
+          if (typeof item.name !== "string")
+            invalid("Window output name must be a string");
+          validateIdentifier(item.name);
+          if (names.has(item.name))
+            invalid(
+              `Window output collides with an existing field: ${item.name}`,
+            );
+          names.add(item.name);
+          const specification = item.specification;
+          if (
+            !specification ||
+            typeof specification !== "object" ||
+            specification.kind !== "row-number"
+          )
+            invalid("Window supports only the row-number specification");
+          if (
+            !Array.isArray(specification.partitionBy) ||
+            !Array.isArray(specification.orderBy) ||
+            specification.orderBy.length === 0
+          )
+            invalid("row-number requires at least one ordering key");
+          const scopes = visibleScopes(windowNode.input);
+          specification.partitionBy.forEach((expression: SqlExpression) => {
+            if (!expression || typeof expression !== "object")
+              invalid("row-number contains an invalid partition expression");
+            validateExpression(expression, scopes, activeSources);
+          });
+          specification.orderBy.forEach((key: WindowOrderKey) => {
+            if (
+              !key ||
+              typeof key !== "object" ||
+              (key.direction !== "ASC" && key.direction !== "DESC")
+            )
+              invalid("row-number ordering direction is invalid");
+            if (!key.expression || typeof key.expression !== "object")
+              invalid("row-number contains an invalid ordering expression");
+            validateExpression(key.expression, scopes, activeSources);
+          });
+          expected.push({
+            name: item.name,
+            affinity: "integer",
+            nullable: false,
+          });
+        }
+        if (
+          node.fields.length !== expected.length ||
+          node.fields.some(
+            (field, index) => !sameFieldMetadata(field, expected[index]!),
+          )
+        )
+          invalid("Window output must append non-null integer rank fields");
+        return;
+      }
       case "sort": {
         const sort = node as SortNode;
         validateChild(sort.input);

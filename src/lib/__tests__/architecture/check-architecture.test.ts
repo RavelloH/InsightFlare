@@ -361,6 +361,62 @@ describe("architecture checker", () => {
     );
   });
 
+  it("keeps scheduled task query plans pure and the admin handler on typed queries", () => {
+    const root = fixture();
+    const planPath = path.join(
+      root,
+      "src/lib/edge/admin/scheduled-tasks/query-plan.ts",
+    );
+    mkdirSync(path.dirname(planPath), { recursive: true });
+    writeFileSync(
+      planPath,
+      [
+        "export const execute = createD1DatabaseClient(database);",
+        'export const statement = "SELECT * FROM scheduled_task_runs";',
+        'export function direct(database) { return database.prepare("SELECT 1"); }',
+        "",
+      ].join("\n"),
+    );
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ source }) =>
+          source.endsWith("scheduled-tasks/query-plan.ts"),
+        )
+        .map(({ specifier }) => specifier),
+    ).toEqual(
+      expect.arrayContaining([
+        "createD1DatabaseClient",
+        "<raw SQL literal>",
+        "<direct D1 operation>",
+      ]),
+    );
+
+    const handlerPath = path.join(
+      root,
+      "src/lib/edge/admin/scheduled-tasks/handler.ts",
+    );
+    mkdirSync(path.dirname(handlerPath), { recursive: true });
+    writeFileSync(
+      handlerPath,
+      [
+        "export async function handleScheduledTasksAdmin(env) {",
+        '  return createDatabaseRuntime(env.DB).all("SELECT 1");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    expect(
+      collectArchitectureViolations(root).filter(
+        ({ rule, source }) =>
+          rule === "typed-query-function-forbidden" &&
+          source.endsWith("scheduled-tasks/handler.ts"),
+      ),
+    ).toMatchObject([
+      { specifier: "createDatabaseRuntime" },
+      { specifier: "raw-sql" },
+    ]);
+  });
+
   it("requires typed plans in every hourly rollup function", () => {
     const root = fixture();
     const sourcePath = path.join(

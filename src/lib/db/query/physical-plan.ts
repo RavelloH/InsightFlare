@@ -252,6 +252,11 @@ function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
       ];
     case "sort":
       return node.keys.map(({ expression }) => expression);
+    case "window":
+      return node.windows.flatMap(({ specification }) => [
+        ...specification.partitionBy,
+        ...specification.orderBy.map(({ expression }) => expression),
+      ]);
     case "limit":
       return [node.count, ...(node.offset ? [node.offset] : [])];
     case "scan":
@@ -322,6 +327,7 @@ function nodeChildren(node: LogicalQueryNode): QuerySource[] {
         node.kind === "project" ||
         node.kind === "aggregate" ||
         node.kind === "distinct" ||
+        node.kind === "window" ||
         node.kind === "sort" ||
         node.kind === "limit"
       ? [node.input]
@@ -409,11 +415,12 @@ function hoistForbiddenNodes(root: LogicalQueryNode): Set<LogicalQueryNode> {
     }
     if (contexts.has(inheritedForbidden)) return;
     contexts.add(inheritedForbidden);
-    if (inheritedForbidden) forbidden.add(node);
+    if (inheritedForbidden || node.kind === "window") forbidden.add(node);
 
     const terminalRootSort = node === root && node.kind === "sort";
     const selectionBoundary =
       inheritedForbidden ||
+      node.kind === "window" ||
       (node.kind === "sort" && !terminalRootSort) ||
       node.kind === "limit";
     for (const child of nodeChildren(node))
@@ -450,7 +457,8 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
       node.kind === "anti-join"
     )
       facts.selective = true;
-    if (node.kind === "sort" || node.kind === "limit") facts.forbidden = true;
+    if (node.kind === "sort" || node.kind === "limit" || node.kind === "window")
+      facts.forbidden = true;
     for (const expression of nodeExpressions(node)) {
       const inspect = (current: SqlExpression): void => {
         if (current.kind === "column")

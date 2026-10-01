@@ -169,12 +169,13 @@ function typedDalConvergenceViolations(
   relativePath: string,
   sourceText: string,
 ): ArchitectureViolation[] {
-  const hourlyRollupPureModules = new Set([
+  const typedQueryPureModules = new Set([
     "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-read-plans.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-persistence.ts",
+    "src/lib/edge/admin/scheduled-tasks/query-plan.ts",
   ]);
-  const isHourlyRollupPureModule = hourlyRollupPureModules.has(relativePath);
+  const isTypedQueryPureModule = typedQueryPureModules.has(relativePath);
   const ingestRuntimeModules = new Set([
     "src/lib/edge/ingest/flush.ts",
     "src/lib/edge/ingest/custom-event-flush.ts",
@@ -189,7 +190,7 @@ function typedDalConvergenceViolations(
       "src/lib/edge/analytics/interfaces/dashboard/saved-filters.ts" &&
     !ingestRuntimeModules.has(relativePath) &&
     !ingestMutationHelpers.has(relativePath) &&
-    !isHourlyRollupPureModule
+    !isTypedQueryPureModule
   )
     return [];
 
@@ -204,7 +205,7 @@ function typedDalConvergenceViolations(
   const forbidden = new Set([
     "createDatabaseRuntime",
     "DatabaseStatement",
-    ...(isHourlyRollupPureModule
+    ...(isTypedQueryPureModule
       ? [
           "createD1DatabaseClient",
           "unsafeRawMutation",
@@ -234,7 +235,7 @@ function typedDalConvergenceViolations(
     if (ts.isIdentifier(node) && forbidden.has(node.text))
       addViolation(node, node.text);
     if (
-      (ingestMutationHelpers.has(relativePath) || isHourlyRollupPureModule) &&
+      (ingestMutationHelpers.has(relativePath) || isTypedQueryPureModule) &&
       ((ts.isStringLiteralLike(node) &&
         /^(?:SELECT|INSERT|UPDATE|DELETE|PRAGMA)\b/iu.test(
           node.text.trimStart(),
@@ -246,7 +247,7 @@ function typedDalConvergenceViolations(
     )
       addViolation(node, "<raw SQL literal>");
     if (
-      isHourlyRollupPureModule &&
+      isTypedQueryPureModule &&
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       ["prepare", "batch", "exec"].includes(node.expression.name.text)
@@ -393,6 +394,12 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
     "queryDetailAccumulatorsForSites",
     "queryStoredRollupsForSites",
     "queryDetailVisitsForSites",
+  ],
+  "src/lib/edge/admin/scheduled-tasks/handler.ts": [
+    "loadScheduleStates",
+    "countRunLogs",
+    "loadRunLogsPage",
+    "handleScheduledTasksAdmin",
   ],
 };
 
