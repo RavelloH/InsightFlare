@@ -670,6 +670,155 @@ function buildTextSumPlan(): ValidatedLogicalPlan {
   return builder.finish();
 }
 
+function buildHiddenAggregateOutputs(range: {
+  readonly startMs: number;
+  readonly endExclusiveMs: number;
+}): ValidatedLogicalPlan {
+  const builder = createBuilder(SITE_A, range);
+  const pages = builder.source("page", {
+    temporalDomain: "candidate",
+    attributes: ["page.report.pathname", "page.report.durationMs"],
+  });
+  const pathname = pageReportAttribute(builder, pages, "pathname");
+  const duration = pageReportAttribute(builder, pages, "durationMs");
+  const scalarAggregate = builder.aggregate(pages, {}, [
+    { name: "unusedSum", kind: "sum", expression: duration },
+    { name: "unusedDistinct", kind: "count-distinct", expression: pathname },
+  ]);
+  const scalarProjection = builder.project(scalarAggregate, {
+    marker: builder.literal("scalar", STRING),
+  });
+  builder.output("scalar-cardinality", scalarProjection, [
+    { name: "marker", slot: "marker" },
+  ]);
+
+  const groupedAggregate = builder.aggregate(
+    pages,
+    { path: pageReportAttribute(builder, pages, "pathname") },
+    [
+      { name: "unusedRows", kind: "count-rows" },
+      { name: "unusedSum", kind: "sum", expression: duration },
+    ],
+  );
+  const groupedProjection = builder.project(groupedAggregate, {
+    marker: builder.literal("group", STRING),
+  });
+  builder.output("group-cardinality", groupedProjection, [
+    { name: "marker", slot: "marker" },
+  ]);
+  return builder.finish();
+}
+
+function buildScalarJoinCardinalityOutputs(range: {
+  readonly startMs: number;
+  readonly endExclusiveMs: number;
+}): ValidatedLogicalPlan {
+  const builder = createBuilder(SITE_A, range);
+  const pages = builder.source("page", {
+    temporalDomain: "candidate",
+    attributes: ["page.report.durationMs"],
+  });
+  const duration = pageReportAttribute(builder, pages, "durationMs");
+  const leftAggregate = builder.aggregate(pages, {}, [
+    { name: "sumDuration", kind: "sum", expression: duration },
+    { name: "leftRows", kind: "count-rows" },
+  ]);
+  const rightAggregate = builder.aggregate(pages, {}, [
+    { name: "avgDuration", kind: "avg", expression: duration },
+    { name: "rightRows", kind: "count-rows" },
+  ]);
+  const joined = builder.join(leftAggregate, rightAggregate, []);
+  builder.output("left-only", joined, [{ name: "rows", slot: "leftRows" }]);
+  builder.output("right-only", joined, [
+    { name: "average", slot: "right.avgDuration" },
+  ]);
+  const constant = builder.project(joined, {
+    marker: builder.literal("joined", STRING),
+  });
+  builder.output("join-constant", constant, [
+    { name: "marker", slot: "marker" },
+  ]);
+  return builder.finish();
+}
+
+function buildIndependentOutputBranches(): ValidatedLogicalPlan {
+  const builder = createBuilder(SITE_A, PAGE_WINDOW);
+  const pages = builder.source("page", {
+    temporalDomain: "candidate",
+    attributes: ["page.report.pathname", "page.report.durationMs"],
+  });
+  const pathname = pageReportAttribute(builder, pages, "pathname");
+  const duration = pageReportAttribute(builder, pages, "durationMs");
+
+  const groupedInput = builder.filter(
+    pages,
+    builder.compare("neq", pathname, builder.literal("/numeric/b", STRING)),
+  );
+  const grouped = builder.aggregate(
+    groupedInput,
+    { path: pageReportAttribute(builder, groupedInput, "pathname") },
+    [{ name: "views", kind: "count-rows" }],
+  );
+  const groupedProjection = builder.project(grouped, {
+    route: builder.slot(grouped, "path"),
+    pageViews: builder.slot(grouped, "views"),
+  });
+  const groupedSort = builder.sort(groupedProjection, [
+    { slot: "route", direction: "asc", nulls: "first" },
+  ]);
+  const groupedLimit = builder.limit(groupedSort, 2);
+  builder.output("independent-grouped", groupedLimit, [
+    { name: "route", slot: "route" },
+    { name: "pageViews", slot: "pageViews" },
+  ]);
+
+  const summaryInput = builder.filter(
+    pages,
+    builder.compare("gt", duration, builder.literal(0, NUMBER_MS)),
+  );
+  const summary = builder.aggregate(summaryInput, {}, [
+    { name: "pageCount", kind: "count-rows" },
+    {
+      name: "totalDuration",
+      kind: "sum",
+      expression: pageReportAttribute(builder, summaryInput, "durationMs"),
+    },
+  ]);
+  const summaryProjection = builder.project(summary, {
+    selectedPages: builder.slot(summary, "pageCount"),
+    totalMs: builder.slot(summary, "totalDuration"),
+  });
+  const summarySort = builder.sort(summaryProjection, [
+    { slot: "totalMs", direction: "desc", nulls: "last" },
+  ]);
+  const summaryLimit = builder.limit(summarySort, 1);
+  builder.output("independent-summary", summaryLimit, [
+    { name: "selectedPages", slot: "selectedPages" },
+    { name: "totalMs", slot: "totalMs" },
+  ]);
+  return builder.finish();
+}
+
+function buildSupportedOutputWithUnsupportedSibling(): ValidatedLogicalPlan {
+  const builder = createBuilder(SITE_A, PAGE_WINDOW);
+  const pages = builder.source("page", { temporalDomain: "candidate" });
+  const supported = builder.aggregate(pages, {}, [
+    { name: "pages", kind: "count-rows" },
+  ]);
+  builder.output("supported-summary", supported, [
+    { name: "pages", slot: "pages" },
+  ]);
+
+  const entity = builder.slot(pages, "entity");
+  const unsupported = builder.aggregate(pages, { page: entity }, [
+    { name: "pages", kind: "count-rows" },
+  ]);
+  builder.output("unsupported-entity-group", unsupported, [
+    { name: "page", slot: "page" },
+  ]);
+  return builder.finish();
+}
+
 function outputById(
   plan: ValidatedLogicalPlan,
   outputId: string,
@@ -698,9 +847,10 @@ function compileOutput(
 async function executeCompiled(
   database: DatabaseSync,
   query: ReturnType<typeof compileOutput>,
+  trace?: SqliteD1Trace,
 ): Promise<Record<string, unknown>[]> {
   const result = await createD1DatabaseClient(
-    createSqliteD1Database(database),
+    createSqliteD1Database(database, trace),
   ).all(query);
   return result.results.map((row) => Object.fromEntries(Object.entries(row)));
 }
@@ -739,6 +889,29 @@ async function measureOutput(
   );
   if (!entry?.data) throw new Error(`test_observation_missing:${operation}`);
   return { rows, trace, observation: entry.data as Record<string, unknown> };
+}
+
+function expectMeasuredOutput(
+  measured: Awaited<ReturnType<typeof measureOutput>>,
+  tag: string,
+): void {
+  expect(measured.trace.preparedSql).toHaveLength(1);
+  expect(measured.trace.bindings).toHaveLength(1);
+  expect(measured.observation).toMatchObject({
+    tag,
+    operation: "all",
+    status: "success",
+    sqlBytes: new TextEncoder().encode(measured.trace.preparedSql[0]!)
+      .byteLength,
+    bindings: measured.trace.bindings[0]!.length,
+    physicalPlanHash: expect.stringMatching(/^v1:/u),
+  });
+  expect(measured.observation.sqlBytes as number).toBeLessThanOrEqual(
+    D1_MAX_SQL_UTF8_BYTES,
+  );
+  expect(measured.observation.bindings as number).toBeLessThanOrEqual(
+    D1_MAX_BOUND_PARAMETERS,
+  );
 }
 
 function legacyPageNumericRows(
@@ -1086,6 +1259,258 @@ describe("shared scalar aggregate lowering", () => {
     expect(
       new TextEncoder().encode(secondQuery.sql).byteLength,
     ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+  });
+
+  it("preserves aggregate row cardinality when outputs consume no measures", async () => {
+    for (const [range, expectedGroups] of [
+      [PAGE_WINDOW, 4],
+      [{ startMs: 1000, endExclusiveMs: 1100 }, 0],
+    ] as const) {
+      const plan = buildHiddenAggregateOutputs(range);
+      const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+        siteId: SITE_A,
+        time: plan.context.time,
+      });
+      const scalarOutput = outputById(plan, "scalar-cardinality");
+      const scalarQuery = compileOutput(plan, scalarOutput.id, lowerer);
+      const scalarTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      expect(await executeCompiled(db, scalarQuery, scalarTrace)).toEqual([
+        { marker: "scalar" },
+      ]);
+      expect(scalarTrace.preparedSql).toHaveLength(1);
+      expect(scalarQuery.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
+      expect(scalarQuery.sql).not.toMatch(/SUM\s*\(|COUNT\s*\(\s*DISTINCT/iu);
+      if (range.startMs === PAGE_WINDOW.startMs) {
+        const measured = await measureOutput(
+          plan,
+          "scalar-cardinality",
+          "analytics.wave23a.scalar-cardinality",
+        );
+        expect(measured.rows).toEqual([{ marker: "scalar" }]);
+        expectMeasuredOutput(measured, "analytics.wave23a.scalar-cardinality");
+      }
+
+      const groupedOutput = outputById(plan, "group-cardinality");
+      const groupedQuery = compileOutput(plan, groupedOutput.id, lowerer);
+      const groupedTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const groupedRows = await executeCompiled(db, groupedQuery, groupedTrace);
+      expect(groupedRows).toEqual(
+        Array.from({ length: expectedGroups }, () => ({ marker: "group" })),
+      );
+      expect(groupedTrace.preparedSql).toHaveLength(1);
+      expect(groupedQuery.sql).toMatch(/GROUP BY/iu);
+      expect(groupedQuery.sql).not.toMatch(/SELECT\s+DISTINCT/iu);
+      expect(groupedQuery.sql).not.toMatch(/COUNT\s*\(|SUM\s*\(/iu);
+      if (range.startMs === PAGE_WINDOW.startMs) {
+        const measured = await measureOutput(
+          plan,
+          "group-cardinality",
+          "analytics.wave23a.group-cardinality",
+        );
+        expect(measured.rows).toHaveLength(expectedGroups);
+        expectMeasuredOutput(measured, "analytics.wave23a.group-cardinality");
+      }
+
+      const scalarAgain = compileOutput(plan, scalarOutput.id, lowerer);
+      expect(scalarAgain.sql).toBe(scalarQuery.sql);
+      expect(await executeCompiled(db, scalarAgain)).toEqual([
+        { marker: "scalar" },
+      ]);
+    }
+  });
+
+  it("keeps unconsumed scalar join sides as one-row relations", async () => {
+    for (const [range, expectedRows, expectedAverage] of [
+      [PAGE_WINDOW, 6, 12.5],
+      [{ startMs: 1000, endExclusiveMs: 1100 }, 0, null],
+    ] as const) {
+      const plan = buildScalarJoinCardinalityOutputs(range);
+      const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+        siteId: SITE_A,
+        time: plan.context.time,
+      });
+
+      const leftOutput = outputById(plan, "left-only");
+      const leftQuery = compileOutput(plan, leftOutput.id, lowerer);
+      const leftTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      expect(await executeCompiled(db, leftQuery, leftTrace)).toEqual([
+        { rows: expectedRows },
+      ]);
+      expect(leftTrace.preparedSql).toHaveLength(1);
+      expect(leftQuery.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
+      expect(leftQuery.sql).not.toMatch(/SUM\s*\(|AVG\s*\(/iu);
+      if (range.startMs === PAGE_WINDOW.startMs) {
+        const measured = await measureOutput(
+          plan,
+          "left-only",
+          "analytics.wave23a.join-left-only",
+        );
+        expect(measured.rows).toEqual([{ rows: expectedRows }]);
+        expectMeasuredOutput(measured, "analytics.wave23a.join-left-only");
+      }
+
+      const rightOutput = outputById(plan, "right-only");
+      const rightQuery = compileOutput(plan, rightOutput.id, lowerer);
+      const rightTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      expect(await executeCompiled(db, rightQuery, rightTrace)).toEqual([
+        { average: expectedAverage },
+      ]);
+      expect(rightTrace.preparedSql).toHaveLength(1);
+      expect(rightQuery.sql).toMatch(/AVG\s*\(/iu);
+      expect(rightQuery.sql).not.toMatch(/SUM\s*\(/iu);
+      if (range.startMs === PAGE_WINDOW.startMs) {
+        const measured = await measureOutput(
+          plan,
+          "right-only",
+          "analytics.wave23a.join-right-only",
+        );
+        expect(measured.rows).toEqual([{ average: expectedAverage }]);
+        expectMeasuredOutput(measured, "analytics.wave23a.join-right-only");
+      }
+
+      const constantOutput = outputById(plan, "join-constant");
+      const constantQuery = compileOutput(plan, constantOutput.id, lowerer);
+      const constantTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      expect(await executeCompiled(db, constantQuery, constantTrace)).toEqual([
+        { marker: "joined" },
+      ]);
+      expect(constantTrace.preparedSql).toHaveLength(1);
+      expect(constantQuery.sql).toMatch(/COUNT\s*\(\s*\*\s*\)/iu);
+      expect(constantQuery.sql).not.toMatch(/SUM\s*\(|AVG\s*\(/iu);
+      if (range.startMs === PAGE_WINDOW.startMs) {
+        const measured = await measureOutput(
+          plan,
+          "join-constant",
+          "analytics.wave23a.join-constant",
+        );
+        expect(measured.rows).toEqual([{ marker: "joined" }]);
+        expectMeasuredOutput(measured, "analytics.wave23a.join-constant");
+      }
+    }
+  });
+
+  it("lowers only each selected output branch and preserves A/B/A demand", async () => {
+    const plan = buildIndependentOutputBranches();
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_A,
+      time: plan.context.time,
+    });
+    const groupedOutput = outputById(plan, "independent-grouped");
+    const groupedFirst = compileOutput(plan, groupedOutput.id, lowerer);
+    const groupedFirstTrace: SqliteD1Trace = {
+      preparedSql: [],
+      bindings: [],
+    };
+    const groupedFirstRows = await executeCompiled(
+      db,
+      groupedFirst,
+      groupedFirstTrace,
+    );
+    const legacyGroupedRows = db
+      .prepare(
+        `SELECT pathname AS route, count(*) AS pageViews
+         FROM visits
+         WHERE site_pk = ? AND started_at >= ? AND started_at < ?
+           AND pathname != ?
+         GROUP BY pathname
+         ORDER BY route ASC
+         LIMIT 2`,
+      )
+      .all(
+        siteA.pk,
+        PAGE_WINDOW.startMs,
+        PAGE_WINDOW.endExclusiveMs,
+        "/numeric/b",
+      ) as Record<string, unknown>[];
+    expect(groupedFirstRows).toEqual(legacyGroupedRows);
+    expect(groupedFirstTrace.preparedSql).toHaveLength(1);
+    expect(groupedFirst.sql).toMatch(/GROUP BY/iu);
+    expect(groupedFirst.sql).toMatch(/ORDER BY/iu);
+    expect(groupedFirst.sql).toMatch(/LIMIT\s+\?/iu);
+    expect(groupedFirst.bindings).toContain("/numeric/b");
+    const measuredGroup = await measureOutput(
+      plan,
+      "independent-grouped",
+      "analytics.wave23a.independent-grouped",
+    );
+    expect(measuredGroup.rows).toEqual(legacyGroupedRows);
+    expectMeasuredOutput(
+      measuredGroup,
+      "analytics.wave23a.independent-grouped",
+    );
+
+    const summaryOutput = outputById(plan, "independent-summary");
+    const summaryQuery = compileOutput(plan, summaryOutput.id, lowerer);
+    const summaryTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const summaryRows = await executeCompiled(db, summaryQuery, summaryTrace);
+    const legacySummaryRows = db
+      .prepare(
+        `SELECT count(*) AS selectedPages, sum(duration_ms) AS totalMs
+         FROM visits
+         WHERE site_pk = ? AND started_at >= ? AND started_at < ?
+           AND duration_ms > ?
+         ORDER BY totalMs DESC
+         LIMIT 1`,
+      )
+      .all(
+        siteA.pk,
+        PAGE_WINDOW.startMs,
+        PAGE_WINDOW.endExclusiveMs,
+        0,
+      ) as Record<string, unknown>[];
+    expect(summaryRows).toEqual(legacySummaryRows);
+    expect(summaryTrace.preparedSql).toHaveLength(1);
+    expect(summaryQuery.sql).toMatch(/SUM\s*\(/iu);
+    expect(summaryQuery.sql).toMatch(/ORDER BY/iu);
+    expect(summaryQuery.sql).toMatch(/LIMIT\s+\?/iu);
+    expect(summaryQuery.bindings).toContain(0);
+    const measuredSummary = await measureOutput(
+      plan,
+      "independent-summary",
+      "analytics.wave23a.independent-summary",
+    );
+    expect(measuredSummary.rows).toEqual(legacySummaryRows);
+    expectMeasuredOutput(
+      measuredSummary,
+      "analytics.wave23a.independent-summary",
+    );
+
+    const groupedAgain = compileOutput(plan, groupedOutput.id, lowerer);
+    const groupedAgainTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    expect(await executeCompiled(db, groupedAgain, groupedAgainTrace)).toEqual(
+      legacyGroupedRows,
+    );
+    expect(groupedAgainTrace.preparedSql).toHaveLength(1);
+    expect(groupedAgain.sql).toBe(groupedFirst.sql);
+  });
+
+  it("does not lower an unsupported sibling until that output is selected", async () => {
+    const plan = buildSupportedOutputWithUnsupportedSibling();
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_A,
+      time: plan.context.time,
+    });
+    const supported = outputById(plan, "supported-summary");
+    const query = compileOutput(plan, supported.id, lowerer);
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    expect(await executeCompiled(db, query, trace)).toEqual([{ pages: 6 }]);
+    expect(trace.preparedSql).toHaveLength(1);
+
+    const unsupported = outputById(plan, "unsupported-entity-group");
+    let error: unknown;
+    try {
+      lowerer.lower(unsupported);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(AnalyticsRelationalLoweringError);
+    if (error instanceof AnalyticsRelationalLoweringError) {
+      expect(error.message).toContain(
+        "Scalar aggregation requires a scalar Logical value.",
+      );
+      expect(error.node).toContain(".groups[0].expression");
+    }
+    expect(trace.preparedSql).toHaveLength(1);
   });
 
   it("matches Page SUM/AVG/MIN/MAX, nullable groups, zero/negative values and empty inputs", async () => {

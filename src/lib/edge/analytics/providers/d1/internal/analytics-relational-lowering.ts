@@ -59,6 +59,7 @@ import type {
   LogicalOutput,
   ValidatedLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/plan";
+import { assertNever } from "@/lib/edge/analytics/engine/logical/plan";
 import type {
   LogicalSlot,
   LogicalValueType,
@@ -776,6 +777,28 @@ function assertNonNullableSessionSet(
     reject(path, "Set operations require a non-null composite Session key.");
 }
 
+function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
+  switch (node.kind) {
+    case "source":
+      return [];
+    case "relationship-lookup":
+    case "filter":
+    case "project":
+    case "aggregate":
+    case "distinct":
+    case "sort":
+    case "limit":
+      return [node.input];
+    case "set-operation":
+      return node.inputs;
+    case "semi-join":
+    case "anti-join":
+    case "join":
+      return [node.left, node.right];
+  }
+  return assertNever(node);
+}
+
 export interface LoweredAnalyticsLogicalOutput {
   readonly relation: AnalyticsDbRelation;
   readonly slots: ReadonlyMap<SlotId, SlotLayout>;
@@ -823,18 +846,31 @@ export class AnalyticsLogicalToDbLowerer {
   }
 
   lower(output: LogicalOutput): LoweredAnalyticsLogicalOutput {
+    const selectedNodes = this.#reachableNodeIds([output.relation]);
+    const declaredOutputNodes = this.#reachableNodeIds(
+      this.#plan.outputs.map((candidate) => candidate.relation),
+    );
+    const orphan = this.#plan.nodes.find(
+      (node) => !declaredOutputNodes.has(node.id),
+    );
+    if (orphan)
+      reject(
+        nodePath(orphan.id),
+        "Every relational and Boolean node must be reachable from a declared output.",
+      );
+
     // Required slots are output-specific. Reusing a previous result after
     // lowering another output could omit fields required by this output.
     this.#memo.clear();
-    this.#prepareRequiredSlots(output);
+    this.#prepareRequiredSlots(output, selectedNodes);
     const root = this.#lowerNode(output.relation);
-    if (this.#memo.size !== this.#plan.nodes.length) {
+    if (this.#memo.size !== selectedNodes.size) {
       const unreachable = this.#plan.nodes.find(
-        (node) => !this.#memo.has(node.id),
+        (node) => selectedNodes.has(node.id) && !this.#memo.has(node.id),
       );
       reject(
         unreachable ? nodePath(unreachable.id) : "nodes",
-        "Every relational and Boolean node must contribute to the selected output.",
+        "Every relation in the selected output dependency graph must be lowered.",
       );
     }
     const outputNode = this.#nodes.get(output.relation);
@@ -856,6 +892,21 @@ export class AnalyticsLogicalToDbLowerer {
         root.candidateActivitySessionRestricted,
       relationId: outputNode?.id ?? output.relation,
     };
+  }
+
+  #reachableNodeIds(roots: readonly RelationId[]): Set<RelationId> {
+    const reachable = new Set<RelationId>();
+    const pending = [...roots];
+    while (pending.length > 0) {
+      const id = pending.pop()!;
+      if (reachable.has(id)) continue;
+      const node = this.#nodes.get(id);
+      if (!node)
+        reject(nodePath(id), "The relation references a missing node.");
+      reachable.add(id);
+      pending.push(...logicalNodeInputs(node));
+    }
+    return reachable;
   }
 
   lowerSourceValue(
@@ -1959,8 +2010,12 @@ export class AnalyticsLogicalToDbLowerer {
       });
     });
 
-    if (node.groups.length === 0 && selectedMeasureCount === 0)
-      reject(path, "An ungrouped aggregate requires a selected measure.");
+    if (node.groups.length === 0 && selectedMeasureCount === 0) {
+      // An ungrouped aggregate still emits exactly one row for an empty bag.
+      // Keep that cardinality with a hidden COUNT(*) instead of lowering
+      // measure expressions that no selected output consumes.
+      aggregates[slotColumn(node.measures.length, "h")] = count();
+    }
 
     const relation: AnalyticsDbRelation = aggregate(input.relation, {
       groupBy,
@@ -2046,7 +2101,10 @@ export class AnalyticsLogicalToDbLowerer {
     };
   }
 
-  #prepareRequiredSlots(output: LogicalOutput): void {
+  #prepareRequiredSlots(
+    output: LogicalOutput,
+    reachable: ReadonlySet<RelationId>,
+  ): void {
     this.#requiredSlots.clear();
     this.#addRequiredSlots(
       output.relation,
@@ -2056,6 +2114,7 @@ export class AnalyticsLogicalToDbLowerer {
     while (changed) {
       changed = false;
       for (const node of this.#plan.nodes) {
+        if (!reachable.has(node.id)) continue;
         const needed = this.#requiredSlots.get(node.id);
         if (!needed) continue;
         const add = (relation: RelationId, slots: readonly SlotId[]) => {
