@@ -42,6 +42,7 @@ import {
   validateLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/validator";
 import {
+  isSemanticPageReportAttribute,
   semanticAttribute,
   type SemanticAttributeId,
 } from "@/lib/edge/analytics/engine/semantic/attributes";
@@ -173,6 +174,7 @@ export class LogicalPlanBuilder {
       const observationFallback =
         entity === "observation" &&
         !!attribute &&
+        !isSemanticPageReportAttribute(attributeId) &&
         (attribute.nativeEntity === "page" ||
           attribute.nativeEntity === "event") &&
         attribute.observationKinds.includes(attribute.nativeEntity);
@@ -412,6 +414,10 @@ export class LogicalPlanBuilder {
 
   round(input: LogicalExpressionHandle): LogicalExpressionHandle {
     return this.#expression({ kind: "round", input: input.expression });
+  }
+
+  absolute(input: LogicalExpressionHandle): LogicalExpressionHandle {
+    return this.#expression({ kind: "absolute", input: input.expression });
   }
 
   coalesce(
@@ -1081,6 +1087,7 @@ export class LogicalPlanBuilder {
         case "not":
         case "null-test":
         case "string-match":
+        case "absolute":
         case "round":
         case "time-bucket":
           visit(value.input);

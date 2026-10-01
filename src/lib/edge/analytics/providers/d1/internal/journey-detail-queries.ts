@@ -1,8 +1,8 @@
 import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
 import { buildJourneyObservationPlan } from "@/lib/edge/analytics/engine/journey-observation-plan";
+import { buildJourneyPageviewDetailPlan } from "@/lib/edge/analytics/engine/journey-page-report-plan";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { currentD1Operation } from "@/lib/edge/observability/logger";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -41,6 +41,7 @@ import {
   summarizeJourneyPerformance,
   summarizeVisitedPages,
 } from "./journey-helpers";
+import { queryJourneyPageReportRowsFromD1 } from "./journey-page-report-query";
 export async function queryVisitorForDetailFromD1(
   env: Env,
   siteId: string,
@@ -243,7 +244,7 @@ function journeyEventDetailRecord(event: JourneyEventRow) {
     valueCount: 0,
   };
 }
-function mapJourneyPageviewDetail(row: Record<string, unknown>): {
+export function mapJourneyPageviewDetail(row: Record<string, unknown>): {
   event: ReturnType<typeof journeyEventDetailRecord>;
   context: ReturnType<typeof journeyEventDetailContext>;
 } {
@@ -296,90 +297,10 @@ export async function queryJourneyEventDetailFromD1(
   eventKind?: JourneyEventDetailKind,
 ) {
   if (!eventKind || eventKind === "pageview") {
-    const rows = await queryD1All<Record<string, unknown>>(
+    const rows = await queryJourneyPageReportRowsFromD1(
       env,
-      `
-SELECT
-  v.visit_id AS visitId,
-  v.session_id AS sessionId,
-  v.visitor_id AS visitorId,
-  COALESCE(v.user_id, '') AS userId,
-  COALESCE(v.user_name, '') AS userName,
-  COALESCE(
-    (
-      SELECT pv.visit_id
-      FROM visits pv
-      WHERE pv.site_pk = v.site_pk
-        AND pv.session_id = v.session_id
-        AND pv.started_at < v.started_at
-      ORDER BY pv.started_at DESC, pv.visit_id DESC
-      LIMIT 1
-    ),
-    ''
-  ) AS previousVisitId,
-  (
-    SELECT pv.started_at
-    FROM visits pv
-    WHERE pv.site_pk = v.site_pk
-      AND pv.session_id = v.session_id
-      AND pv.started_at < v.started_at
-    ORDER BY pv.started_at DESC, pv.visit_id DESC
-    LIMIT 1
-  ) AS previousVisitStartedAt,
-  v.started_at AS startedAt,
-  v.last_activity_at AS lastActivityAt,
-  v.ended_at AS endedAt,
-  v.finalized_at AS finalizedAt,
-  v.duration_ms AS durationMs,
-  COALESCE(v.duration_source, '') AS durationSource,
-  COALESCE(v.exit_reason, '') AS exitReason,
-  v.pathname,
-  v.query_string AS queryString,
-  v.hash_fragment AS hash,
-  v.title,
-  v.hostname,
-  v.referrer_url AS referrerUrl,
-  v.referrer_host AS referrerHost,
-  v.utm_source AS utmSource,
-  v.utm_medium AS utmMedium,
-  v.utm_campaign AS utmCampaign,
-  v.utm_term AS utmTerm,
-  v.utm_content AS utmContent,
-  v.is_eu AS isEU,
-  v.country,
-  v.region,
-  v.region_code AS regionCode,
-  v.city,
-  v.continent,
-  v.latitude,
-  v.longitude,
-  v.postal_code AS postalCode,
-  v.metro_code AS metroCode,
-  v.timezone,
-  v.as_organization AS organization,
-  v.browser,
-  v.browser_version AS browserVersion,
-  v.os,
-  v.os_version AS osVersion,
-  v.device_type AS deviceType,
-  v.ua_raw AS userAgent,
-  v.language,
-  v.screen_width AS screenWidth,
-  v.screen_height AS screenHeight,
-  v.status,
-  v.perf_ttfb_ms AS perfTtfbMs,
-  v.perf_fcp_ms AS perfFcpMs,
-  v.perf_lcp_ms AS perfLcpMs,
-  v.perf_cls AS perfCls,
-  v.perf_inp_ms AS perfInpMs
-FROM visits v
-WHERE v.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-  AND v.visit_id = ?
-  AND v.started_at >= ?
-  AND v.started_at < ?
-LIMIT 1
-`,
-      [siteId, eventId, window.startMs, window.endExclusiveMs],
+      buildJourneyPageviewDetailPlan({ siteId, eventId, window }),
+      "journey-pageview-detail",
     );
     const pageview = rows[0];
     if (pageview) return mapJourneyPageviewDetail(pageview);

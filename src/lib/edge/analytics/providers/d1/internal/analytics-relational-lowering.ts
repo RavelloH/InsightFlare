@@ -648,6 +648,31 @@ function lowerExpression(
         candidateBounded: false,
       };
     }
+    case "absolute": {
+      const input = lowerExpression(
+        expression.input,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.input`,
+      );
+      if (
+        input.kind !== "scalar" ||
+        input.type.kind !== "scalar" ||
+        input.type.scalar !== "number"
+      )
+        reject(path, "ABS requires a numeric scalar expression.");
+      return {
+        kind: "scalar",
+        expression: callFunction(
+          "abs",
+          input.expression as SqlExpression<number | null>,
+        ),
+        type: input.type,
+        nullable: input.nullable,
+        candidateBounded: input.candidateBounded,
+      };
+    }
     case "elapsed-duration-literal":
     case "calendar-period-literal":
     case "string-match":
@@ -2043,6 +2068,7 @@ export class AnalyticsLogicalToDbLowerer {
       case "not":
       case "null-test":
       case "string-match":
+      case "absolute":
       case "round":
       case "time-bucket":
         return this.#expressionSlots(expression.input);

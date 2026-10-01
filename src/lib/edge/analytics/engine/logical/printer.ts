@@ -98,6 +98,8 @@ function expression(value: LogicalExpr): string {
       return `(${expression(value.left)} ${value.operator}${value.operator === "divide" ? " NULL_ON_ZERO" : ""} ${expression(value.right)})`;
     case "round":
       return `ROUND(${expression(value.input)})`;
+    case "absolute":
+      return `ABS(${expression(value.input)})`;
     case "coalesce":
       return `COALESCE(${value.values.map(expression).join(", ")})`;
     case "case":

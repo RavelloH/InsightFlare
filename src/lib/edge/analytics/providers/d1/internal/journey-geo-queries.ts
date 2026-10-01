@@ -2,6 +2,7 @@ import {
   buildLocalityLocationValue,
   buildRegionLocationValue,
 } from "@/lib/analytics/geo-location";
+import { buildJourneySessionLocationPlan } from "@/lib/edge/analytics/engine/journey-page-report-plan";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -13,48 +14,26 @@ import type {
   QueryWindow,
 } from "./core";
 import {
-  buildTargetVisitSourceCte,
   buildVisitFilterSql,
   buildVisitSourceCte,
   queryD1All,
-  targetVisitSourceBindings,
   visitSourceBindings,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { mapGeoPointRow } from "./journey-helpers";
+import { queryJourneyPageReportRowsFromD1 } from "./journey-page-report-query";
 import { scopedDatasetFor } from "./scoped-dataset";
 export async function querySessionLocationPointsFromD1(
   env: Env,
   siteId: string,
   sessionId: string,
 ): Promise<GeoPointRow[]> {
-  const sql = `
-WITH
-${buildTargetVisitSourceCte("session_id")},
-filtered_visits AS (
-  SELECT *
-  FROM visit_source
-)
-SELECT
-  latitude,
-  longitude,
-  started_at AS timestampMs,
-  country,
-  region,
-  region_code AS regionCode,
-  city
-FROM filtered_visits
-WHERE
-  latitude IS NOT NULL
-  AND longitude IS NOT NULL
-  AND ABS(latitude) <= 90
-  AND ABS(longitude) <= 180
-ORDER BY timestampMs ASC, visit_id ASC
-`;
   return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...targetVisitSourceBindings(siteId, sessionId),
-    ])
+    await queryJourneyPageReportRowsFromD1(
+      env,
+      buildJourneySessionLocationPlan({ siteId, sessionId }),
+      "journey-session-location-points",
+    )
   ).map(mapGeoPointRow);
 }
 export async function queryGeoPointsFromD1(

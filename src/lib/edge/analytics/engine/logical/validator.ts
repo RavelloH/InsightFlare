@@ -492,6 +492,19 @@ function infer(
         nullable,
       };
     }
+    case "absolute": {
+      const input = infer(expression.input, resolveSlot, `${path}.input`);
+      if (input.type.kind !== "scalar" || input.type.scalar !== "number") {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message: "ABS requires a numeric scalar expression.",
+          },
+        ]);
+      }
+      return input;
+    }
     case "round": {
       const input = infer(expression.input, resolveSlot, `${path}.input`);
       if (input.type.kind !== "scalar" || input.type.scalar !== "number") {

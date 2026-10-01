@@ -512,12 +512,11 @@ describe("edge journey detail D1 queries", () => {
       },
     });
     expect(detail).not.toHaveProperty("eventData");
-    expect(calls[0]?.bindings).toEqual([
-      siteId,
-      "visit-detail",
-      baseMs,
-      baseMs + 2 * 60 * 60 * 1000,
-    ]);
+    expect(calls[0]?.bindings).toContain(siteId);
+    expect(calls[0]?.bindings).toContain("visit-detail");
+    expect(calls[0]?.bindings).toContain(baseMs);
+    expect(calls[0]?.bindings).toContain(baseMs + 2 * 60 * 60 * 1000);
+    expect(calls[0]?.sql).not.toMatch(/custom_events|custom_event_names/u);
   });
 
   it("resolves session boundary details and rejects mismatched boundary ids", async () => {
@@ -1499,7 +1498,10 @@ describe("edge journey detail D1 queries", () => {
 
     expect(calls[0].sql).toContain("session_id = ?");
     expect(calls[1].sql).toContain("UNION ALL");
-    expect(calls[2].bindings).toEqual([siteId, "session-2"]);
+    expect(calls[2].bindings).toContain(siteId);
+    expect(calls[2].bindings).toContain("session-2");
+    expect(calls[2].sql).toContain("ABS(");
+    expect(calls[2].sql).not.toMatch(/custom_events|custom_event_names/u);
   });
 });
 describe("edge journey list D1 queries", () => {

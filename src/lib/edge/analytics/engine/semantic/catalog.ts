@@ -8,6 +8,7 @@ import {
   semanticAttributeCatalog,
   type SemanticAttributeDefinition,
   semanticObservationAttributeCatalog,
+  semanticPageReportAttributeCatalog,
 } from "./attributes";
 import {
   semanticDimensionCatalog,
@@ -44,6 +45,7 @@ export function validateSemanticCatalog(input?: {
   const attributes = input?.attributes ?? [
     ...semanticAttributeCatalog,
     ...semanticObservationAttributeCatalog,
+    ...semanticPageReportAttributeCatalog,
   ];
   const dimensions = input?.dimensions ?? semanticDimensionCatalog;
   const issues: SemanticCatalogIssue[] = [];

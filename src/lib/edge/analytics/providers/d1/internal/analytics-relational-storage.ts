@@ -6,12 +6,15 @@ import {
   inList,
   isNotNull,
   join,
+  limit,
   lt,
   neq,
   param,
   project,
+  scalar,
   scan,
   semiJoin,
+  sort,
   union,
 } from "@/lib/db";
 import type {
@@ -28,6 +31,7 @@ import type {
   SourceValueBinding,
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import {
+  isSemanticPageReportAttribute,
   semanticAttribute,
   semanticObservationAttributeCatalog,
 } from "@/lib/edge/analytics/engine/semantic/attributes";
@@ -122,6 +126,94 @@ const observationReportColumnByAttribute: Readonly<Record<string, string>> = {
   "observation.perfCls": "perf_cls",
   "observation.perfInpMs": "perf_inp_ms",
 };
+
+const pageReportColumnByAttribute: Readonly<Record<string, string>> = {
+  "page.report.localId": "visit_id",
+  "page.report.sessionId": "session_id",
+  "page.report.visitorId": "visitor_id",
+  "page.report.userId": "user_id",
+  "page.report.userName": "user_name",
+  "page.report.status": "status",
+  "page.report.startedAt": "started_at",
+  "page.report.lastActivityAt": "last_activity_at",
+  "page.report.endedAt": "ended_at",
+  "page.report.finalizedAt": "finalized_at",
+  "page.report.durationMs": "duration_ms",
+  "page.report.durationSource": "duration_source",
+  "page.report.exitReason": "exit_reason",
+  "page.report.pathname": "pathname",
+  "page.report.queryString": "query_string",
+  "page.report.hash": "hash_fragment",
+  "page.report.title": "title",
+  "page.report.hostname": "hostname",
+  "page.report.referrerUrl": "referrer_url",
+  "page.report.referrerHost": "referrer_host",
+  "page.report.utmSource": "utm_source",
+  "page.report.utmMedium": "utm_medium",
+  "page.report.utmCampaign": "utm_campaign",
+  "page.report.utmTerm": "utm_term",
+  "page.report.utmContent": "utm_content",
+  "page.report.isEU": "is_eu",
+  "page.report.country": "country",
+  "page.report.region": "region",
+  "page.report.regionCode": "region_code",
+  "page.report.city": "city",
+  "page.report.continent": "continent",
+  "page.report.latitude": "latitude",
+  "page.report.longitude": "longitude",
+  "page.report.postalCode": "postal_code",
+  "page.report.metroCode": "metro_code",
+  "page.report.timezone": "timezone",
+  "page.report.organization": "as_organization",
+  "page.report.browser": "browser",
+  "page.report.browserVersion": "browser_version",
+  "page.report.os": "os",
+  "page.report.osVersion": "os_version",
+  "page.report.deviceType": "device_type",
+  "page.report.userAgent": "ua_raw",
+  "page.report.language": "language",
+  "page.report.screenWidth": "screen_width",
+  "page.report.screenHeight": "screen_height",
+  "page.report.perfTtfbMs": "perf_ttfb_ms",
+  "page.report.perfFcpMs": "perf_fcp_ms",
+  "page.report.perfLcpMs": "perf_lcp_ms",
+  "page.report.perfCls": "perf_cls",
+  "page.report.perfInpMs": "perf_inp_ms",
+};
+
+function requirePageReportValue(
+  expression: AnyExpression,
+  attributeId: string,
+  path: string,
+): void {
+  const attribute = semanticAttribute(attributeId);
+  if (
+    !attribute ||
+    !isSemanticPageReportAttribute(attributeId) ||
+    attribute.nativeEntity !== "page" ||
+    attribute.valueType.kind !== "scalar"
+  )
+    throw new Error(
+      `${path}.values: ${attributeId} is not an internal Page report attribute.`,
+    );
+  const scalar = attribute.valueType.scalar;
+  const affinityMatches =
+    scalar === "string"
+      ? expression.resultType.affinity === "text"
+      : scalar === "datetime" || scalar === "date"
+        ? expression.resultType.affinity === "integer"
+        : scalar === "number"
+          ? expression.resultType.affinity === "integer" ||
+            expression.resultType.affinity === "real"
+          : false;
+  if (
+    !affinityMatches ||
+    (expression.resultType.nullable && !attribute.nullable)
+  )
+    throw new Error(
+      `${path}.values: ${attributeId} no longer matches its registered D1 scalar contract.`,
+    );
+}
 
 function observationReportOutputColumn(attributeId: string): string {
   const suffix = attributeId.slice("observation.".length);
@@ -223,7 +315,17 @@ export class AnalyticsRelationalStorage {
     const attributes = node.values.filter(
       (binding) => binding.kind === "attribute",
     );
+    const declaredPageReportAttributes = attributes
+      .map((binding) => binding.attribute)
+      .filter(isSemanticPageReportAttribute);
     for (const binding of attributes) {
+      if (isSemanticPageReportAttribute(binding.attribute)) {
+        if (node.entity !== "page")
+          throw new Error(
+            `${path}.values: Internal Page report attributes are available only on Page.`,
+          );
+        continue;
+      }
       if (isObservationReportAttribute(binding.attribute)) {
         if (node.entity !== "observation")
           throw new Error(
@@ -258,7 +360,11 @@ export class AnalyticsRelationalStorage {
         `${path}.values: Raw identity attributes are available only on Observation.`,
       );
     const declaredContracts = attributes.flatMap((binding) => {
-      if (isObservationReportAttribute(binding.attribute)) return [];
+      if (
+        isObservationReportAttribute(binding.attribute) ||
+        isSemanticPageReportAttribute(binding.attribute)
+      )
+        return [];
       const contract = nativePrimitiveFieldContract(binding.attribute);
       if (!contract)
         throw new Error(
@@ -269,12 +375,26 @@ export class AnalyticsRelationalStorage {
     const contracts = declaredContracts.filter(({ binding }) =>
       requiredSlots.has(binding.slot),
     );
-    const pageColumns = this.#requiredPageColumns(
-      node,
-      contracts,
-      requiredSlots,
-      identityAttributes,
+    const pageColumns = new Set(
+      this.#requiredPageColumns(
+        node,
+        contracts,
+        requiredSlots,
+        identityAttributes,
+      ),
     );
+    for (const binding of requiredAttributes) {
+      if (!isSemanticPageReportAttribute(binding.attribute)) continue;
+      const physical = pageReportColumnByAttribute[binding.attribute];
+      if (physical) pageColumns.add(physical);
+      if (
+        binding.attribute === "page.report.previousVisitId" ||
+        binding.attribute === "page.report.previousVisitStartedAt"
+      ) {
+        pageColumns.add("session_id");
+        pageColumns.add("started_at");
+      }
+    }
     const selfRequired = node.values.some(
       (binding) => binding.kind === "self" && requiredSlots.has(binding.slot),
     );
@@ -297,6 +417,13 @@ export class AnalyticsRelationalStorage {
     let activity: "page" | "event" | "observation";
     if (node.entity === "page") {
       if (
+        declaredPageReportAttributes.length > 0 &&
+        declaredContracts.length > 0
+      )
+        throw new Error(
+          `${path}.values: Internal Page report attributes cannot be mixed with native primitive fields.`,
+        );
+      if (
         declaredContracts.some(({ contract }) => contract.activity !== "page")
       )
         throw new Error(
@@ -304,7 +431,13 @@ export class AnalyticsRelationalStorage {
         );
       this.#requireRelationships(relationships, ["page.session"], path);
       activity = "page";
-      carrier = this.#pages(node.temporalDomain, pageColumns);
+      carrier = this.#pages(
+        node.temporalDomain,
+        [...pageColumns],
+        node.temporalDomain === "read" &&
+          declaredPageReportAttributes.length > 0 &&
+          this.#time.read.kind === "retained-history",
+      );
     } else if (node.entity === "event") {
       if (
         declaredContracts.some(({ contract }) => contract.activity !== "event")
@@ -358,7 +491,7 @@ export class AnalyticsRelationalStorage {
         // Source bindings and the registered native field contract, rather
         // than a parent Filter or metric shape, select native Page evidence.
         activity = "page";
-        carrier = this.#pages(node.temporalDomain, pageColumns);
+        carrier = this.#pages(node.temporalDomain, [...pageColumns]);
       } else {
         activity = "event";
         const ownerIdentityColumns = this.#ownerIdentityColumns(
@@ -476,6 +609,28 @@ export class AnalyticsRelationalStorage {
             );
         }
       } else if (binding.kind === "attribute") {
+        if (isSemanticPageReportAttribute(binding.attribute)) {
+          if (node.entity !== "page")
+            throw new Error(
+              `${path}.values: Internal Page report attributes are available only on Page.`,
+            );
+          const reportValue =
+            binding.attribute === "page.report.previousVisitId"
+              ? this.#previousPageValue(carrier, "visit_id")
+              : binding.attribute === "page.report.previousVisitStartedAt"
+                ? this.#previousPageValue(carrier, "started_at")
+                : column(
+                    carrier,
+                    pageReportColumnByAttribute[binding.attribute]!,
+                  );
+          requirePageReportValue(reportValue, binding.attribute, path);
+          values.set(binding.slot, {
+            kind: "scalar",
+            value: reportValue,
+            candidateBounded: false,
+          });
+          continue;
+        }
         if (isObservationIdentityAttribute(binding.attribute)) {
           if (node.entity !== "observation")
             throw new Error(
@@ -731,6 +886,35 @@ export class AnalyticsRelationalStorage {
     const carrier = project(ranged, carrierColumns);
     this.#pageCarriers.set(cacheKey, carrier);
     return carrier;
+  }
+
+  #previousPageValue(
+    currentPages: AnalyticsDbRelation,
+    outputColumn: "visit_id" | "started_at",
+  ): AnyExpression {
+    const previousPages = scan(schema.visits);
+    const sameSession = filter(
+      previousPages,
+      and(
+        eq(previousPages.columns.site_pk, column(currentPages, "site_pk")),
+        eq(
+          previousPages.columns.session_id,
+          column(currentPages, "session_id"),
+        ),
+        lt(
+          previousPages.columns.started_at,
+          column(currentPages, "started_at"),
+        ),
+      ),
+    );
+    const selected = limit(
+      sort(sameSession, [
+        { expression: sameSession.columns.started_at, direction: "DESC" },
+        { expression: sameSession.columns.visit_id, direction: "DESC" },
+      ]),
+      1,
+    );
+    return scalar(project(selected, { value: selected.columns[outputColumn] }));
   }
 
   #requiredPageColumns(

@@ -14,12 +14,33 @@ import type {
 
 export type SemanticAttributeId = string;
 
-export type SemanticDerivation = {
+export interface SemanticFunctionDerivation {
   readonly kind: "semantic-function";
   readonly function:
     "traffic-channel" | "browser-engine" | "os-version" | "screen-size";
   readonly dependencies: readonly SemanticAttributeId[];
-};
+}
+
+export interface SemanticReportRelationshipDerivation {
+  readonly kind: "report-relationship";
+  readonly relationship: "page.previous";
+  readonly selection: "latest-strictly-earlier-same-session-page";
+  readonly dependencies: readonly SemanticAttributeId[];
+  readonly orderBy: readonly [
+    {
+      readonly attribute: "page.report.startedAt";
+      readonly direction: "desc";
+    },
+    {
+      readonly attribute: "page.report.localId";
+      readonly direction: "desc";
+    },
+  ];
+  readonly output: "localId" | "startedAt";
+}
+
+export type SemanticDerivation =
+  SemanticFunctionDerivation | SemanticReportRelationshipDerivation;
 
 export interface SemanticAttributeDefinition {
   readonly id: SemanticAttributeId;
@@ -29,6 +50,7 @@ export interface SemanticAttributeDefinition {
   readonly nullable: boolean;
   readonly evaluation:
     | "observation"
+    | "page-report"
     | "session-fact"
     | "visitor-fact"
     | "event-payload"
@@ -264,6 +286,200 @@ export const semanticObservationAttributeCatalog: readonly SemanticAttributeDefi
     },
   ] satisfies readonly ObservationAttributeInput[]).map(observationAttribute);
 
+interface PageReportAttributeInput {
+  readonly name: string;
+  readonly scalar: SemanticScalarType;
+  readonly nullable: boolean;
+  readonly unit?: SemanticUnit;
+  readonly presence?: "non-null" | "derived-value";
+  readonly derivation?: SemanticReportRelationshipDerivation;
+}
+
+function pageReportAttribute(
+  input: PageReportAttributeInput,
+): SemanticAttributeDefinition {
+  const isText = input.scalar === "string";
+  return Object.freeze({
+    id: `page.report.${input.name}`,
+    valueType: Object.freeze({
+      kind: "scalar",
+      scalar: input.scalar,
+      ...(input.unit ? { unit: input.unit } : {}),
+    }),
+    nativeEntity: "page",
+    observationKinds: Object.freeze(["page"] as const),
+    nullable: input.nullable,
+    evaluation: "page-report",
+    presence: input.presence ?? "non-null",
+    empty: isText ? "empty-string-is-value" : "unsupported",
+    comparison: "case-sensitive",
+    ...(input.derivation
+      ? {
+          derivation: Object.freeze({
+            ...input.derivation,
+            dependencies: Object.freeze([...input.derivation.dependencies]),
+            orderBy: Object.freeze(
+              input.derivation.orderBy.map((key) => Object.freeze({ ...key })),
+            ) as SemanticReportRelationshipDerivation["orderBy"],
+          }),
+        }
+      : {}),
+  });
+}
+
+function previousPageDerivation(
+  output: SemanticReportRelationshipDerivation["output"],
+): SemanticReportRelationshipDerivation {
+  return {
+    kind: "report-relationship",
+    relationship: "page.previous",
+    selection: "latest-strictly-earlier-same-session-page",
+    dependencies: [
+      "page.report.sessionId",
+      "page.report.startedAt",
+      "page.report.localId",
+    ],
+    orderBy: [
+      { attribute: "page.report.startedAt", direction: "desc" },
+      { attribute: "page.report.localId", direction: "desc" },
+    ],
+    output,
+  };
+}
+
+const NUMBER_MS = { scalar: "number", unit: "ms" } as const;
+const NUMBER_PX = { scalar: "number", unit: "px" } as const;
+const NUMBER_RATIO = { scalar: "number", unit: "ratio" } as const;
+
+/** Internal native Page report fields; these are not Filter Registry capabilities. */
+export const semanticPageReportAttributeCatalog: readonly SemanticAttributeDefinition[] =
+  Object.freeze(
+    (
+      [
+        { name: "localId", scalar: "string", nullable: true },
+        { name: "sessionId", scalar: "string", nullable: false },
+        { name: "visitorId", scalar: "string", nullable: false },
+        { name: "userId", scalar: "string", nullable: true },
+        { name: "userName", scalar: "string", nullable: true },
+        { name: "status", scalar: "string", nullable: false },
+        {
+          name: "previousVisitId",
+          scalar: "string",
+          nullable: true,
+          presence: "derived-value",
+        },
+        {
+          name: "previousVisitStartedAt",
+          scalar: "datetime",
+          nullable: true,
+          presence: "derived-value",
+        },
+        { name: "startedAt", scalar: "datetime", nullable: false },
+        { name: "lastActivityAt", scalar: "datetime", nullable: false },
+        { name: "endedAt", scalar: "datetime", nullable: true },
+        { name: "finalizedAt", scalar: "datetime", nullable: true },
+        { name: "durationMs", ...NUMBER_MS, nullable: true },
+        { name: "durationSource", scalar: "string", nullable: true },
+        { name: "exitReason", scalar: "string", nullable: true },
+        { name: "pathname", scalar: "string", nullable: false },
+        { name: "queryString", scalar: "string", nullable: false },
+        { name: "hash", scalar: "string", nullable: false },
+        { name: "title", scalar: "string", nullable: false },
+        { name: "hostname", scalar: "string", nullable: false },
+        { name: "referrerUrl", scalar: "string", nullable: false },
+        { name: "referrerHost", scalar: "string", nullable: false },
+        { name: "utmSource", scalar: "string", nullable: false },
+        { name: "utmMedium", scalar: "string", nullable: false },
+        { name: "utmCampaign", scalar: "string", nullable: false },
+        { name: "utmTerm", scalar: "string", nullable: false },
+        { name: "utmContent", scalar: "string", nullable: false },
+        { name: "isEU", scalar: "number", nullable: false },
+        { name: "country", scalar: "string", nullable: false },
+        { name: "region", scalar: "string", nullable: false },
+        { name: "regionCode", scalar: "string", nullable: false },
+        { name: "city", scalar: "string", nullable: false },
+        { name: "continent", scalar: "string", nullable: false },
+        { name: "latitude", scalar: "number", nullable: true },
+        { name: "longitude", scalar: "number", nullable: true },
+        { name: "postalCode", scalar: "string", nullable: false },
+        { name: "metroCode", scalar: "string", nullable: false },
+        { name: "timezone", scalar: "string", nullable: false },
+        { name: "organization", scalar: "string", nullable: false },
+        { name: "browser", scalar: "string", nullable: false },
+        { name: "browserVersion", scalar: "string", nullable: false },
+        { name: "os", scalar: "string", nullable: false },
+        { name: "osVersion", scalar: "string", nullable: false },
+        { name: "deviceType", scalar: "string", nullable: false },
+        { name: "userAgent", scalar: "string", nullable: false },
+        { name: "language", scalar: "string", nullable: false },
+        { name: "screenWidth", ...NUMBER_PX, nullable: true },
+        { name: "screenHeight", ...NUMBER_PX, nullable: true },
+        { name: "perfTtfbMs", ...NUMBER_MS, nullable: true },
+        { name: "perfFcpMs", ...NUMBER_MS, nullable: true },
+        { name: "perfLcpMs", ...NUMBER_MS, nullable: true },
+        { name: "perfCls", ...NUMBER_RATIO, nullable: true },
+        { name: "perfInpMs", ...NUMBER_MS, nullable: true },
+      ] satisfies readonly PageReportAttributeInput[]
+    ).map((attribute) => {
+      if (attribute.name === "previousVisitId")
+        return pageReportAttribute({
+          ...attribute,
+          derivation: previousPageDerivation("localId"),
+        });
+      if (attribute.name === "previousVisitStartedAt")
+        return pageReportAttribute({
+          ...attribute,
+          derivation: previousPageDerivation("startedAt"),
+        });
+      return pageReportAttribute(attribute);
+    }),
+  );
+
+const pageReportAttributeIds = new Set(
+  semanticPageReportAttributeCatalog.map((attribute) => attribute.id),
+);
+
+export function isSemanticPageReportAttribute(value: string): boolean {
+  return pageReportAttributeIds.has(value);
+}
+
+export function assertSemanticPageReportAttributeContracts(
+  attributes: readonly SemanticAttributeDefinition[],
+  registeredSemanticAttributeIds: Set<string>,
+): void {
+  for (const attribute of attributes) {
+    if (registeredSemanticAttributeIds.has(attribute.id))
+      throw new Error(`duplicate_semantic_attribute:${attribute.id}`);
+    registeredSemanticAttributeIds.add(attribute.id);
+    const isPreviousValue =
+      attribute.id === "page.report.previousVisitId" ||
+      attribute.id === "page.report.previousVisitStartedAt";
+    if (
+      !attribute.id.startsWith("page.report.") ||
+      attribute.nativeEntity !== "page" ||
+      attribute.observationKinds.length !== 1 ||
+      attribute.observationKinds[0] !== "page" ||
+      attribute.evaluation !== "page-report" ||
+      attribute.comparison !== "case-sensitive" ||
+      attribute.valueType.kind !== "scalar" ||
+      !["string", "number", "datetime"].includes(attribute.valueType.scalar) ||
+      attribute.empty !==
+        (attribute.valueType.scalar === "string"
+          ? "empty-string-is-value"
+          : "unsupported") ||
+      (isPreviousValue
+        ? attribute.presence !== "derived-value" ||
+          !attribute.nullable ||
+          attribute.derivation?.kind !== "report-relationship" ||
+          attribute.derivation.relationship !== "page.previous" ||
+          attribute.derivation.selection !==
+            "latest-strictly-earlier-same-session-page"
+        : attribute.presence !== "non-null")
+    )
+      throw new Error(`invalid_page_report_attribute_contract:${attribute.id}`);
+  }
+}
+
 export function assertSemanticObservationAttributeContracts(
   attributes: readonly SemanticAttributeDefinition[],
   registeredSemanticAttributeIds: Set<string>,
@@ -296,12 +512,23 @@ assertSemanticObservationAttributeContracts(
   new Set(semanticAttributeCatalog.map((attribute) => attribute.id)),
 );
 
+assertSemanticPageReportAttributeContracts(
+  semanticPageReportAttributeCatalog,
+  new Set([
+    ...semanticAttributeCatalog.map((attribute) => attribute.id),
+    ...semanticObservationAttributeCatalog.map((attribute) => attribute.id),
+  ]),
+);
+
 export function semanticAttribute(
   id: SemanticAttributeId,
 ): SemanticAttributeDefinition | undefined {
   return (
     semanticAttributeCatalog.find((attribute) => attribute.id === id) ??
-    semanticObservationAttributeCatalog.find((attribute) => attribute.id === id)
+    semanticObservationAttributeCatalog.find(
+      (attribute) => attribute.id === id,
+    ) ??
+    semanticPageReportAttributeCatalog.find((attribute) => attribute.id === id)
   );
 }
 

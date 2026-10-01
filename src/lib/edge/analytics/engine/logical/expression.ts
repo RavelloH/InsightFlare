@@ -95,6 +95,11 @@ export interface LogicalRoundExpression {
   readonly input: LogicalExpr;
 }
 
+export interface LogicalAbsoluteExpression {
+  readonly kind: "absolute";
+  readonly input: LogicalExpr;
+}
+
 export interface LogicalCoalesceExpression {
   readonly kind: "coalesce";
   readonly values: readonly LogicalExpr[];
@@ -128,6 +133,7 @@ export type LogicalExpr =
   | LogicalSetMembershipExpression
   | LogicalStringMatchExpression
   | LogicalArithmeticExpression
+  | LogicalAbsoluteExpression
   | LogicalRoundExpression
   | LogicalCoalesceExpression
   | LogicalCaseExpression

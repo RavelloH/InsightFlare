@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
 import {
   assertSemanticObservationAttributeContracts,
+  assertSemanticPageReportAttributeContracts,
   isObservationKind,
+  isSemanticPageReportAttribute,
   semanticAttribute,
   semanticAttributeCatalog,
   semanticObservationAttributeCatalog,
+  semanticPageReportAttributeCatalog,
 } from "@/lib/edge/analytics/engine/semantic/attributes";
 import { validateSemanticCatalog } from "@/lib/edge/analytics/engine/semantic/catalog";
 import {
@@ -140,5 +143,56 @@ describe("semantic attribute and dimension catalogs", () => {
       valueType: { kind: "scalar", scalar: "number", unit: "ratio" },
       nullable: true,
     });
+  });
+
+  it("keeps Page report fields outside the public Filter Registry", () => {
+    expect(semanticAttributeCatalog).toHaveLength(analyticsFilterRegistry.size);
+    expect(semanticPageReportAttributeCatalog.map(({ id }) => id)).toContain(
+      "page.report.previousVisitStartedAt",
+    );
+    expect(semanticAttribute("page.report.latitude")).toMatchObject({
+      nativeEntity: "page",
+      evaluation: "page-report",
+      valueType: { kind: "scalar", scalar: "number" },
+      nullable: true,
+    });
+    expect(
+      semanticAttribute("page.report.previousVisitId")?.derivation,
+    ).toMatchObject({
+      kind: "report-relationship",
+      relationship: "page.previous",
+      selection: "latest-strictly-earlier-same-session-page",
+      dependencies: [
+        "page.report.sessionId",
+        "page.report.startedAt",
+        "page.report.localId",
+      ],
+      orderBy: [
+        { attribute: "page.report.startedAt", direction: "desc" },
+        { attribute: "page.report.localId", direction: "desc" },
+      ],
+    });
+    expect(isSemanticPageReportAttribute("page.report.latitude")).toBe(true);
+    expect(analyticsFilterRegistry.has("page.report.latitude")).toBe(false);
+    expect(isSemanticPageReportAttribute("page.latitude")).toBe(false);
+    const previousId = semanticPageReportAttributeCatalog.find(
+      ({ id }) => id === "page.report.previousVisitId",
+    )!;
+    expect(() =>
+      assertSemanticPageReportAttributeContracts(
+        [{ ...previousId, nullable: false }],
+        new Set(),
+      ),
+    ).toThrow(
+      "invalid_page_report_attribute_contract:page.report.previousVisitId",
+    );
+    expect(() =>
+      assertSemanticPageReportAttributeContracts(
+        [semanticPageReportAttributeCatalog[0]!],
+        new Set([semanticPageReportAttributeCatalog[0]!.id]),
+      ),
+    ).toThrow(
+      `duplicate_semantic_attribute:${semanticPageReportAttributeCatalog[0]!.id}`,
+    );
   });
 });

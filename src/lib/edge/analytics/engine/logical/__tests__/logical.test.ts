@@ -484,6 +484,50 @@ describe("logical relational IR", () => {
     expect(printed).toContain("CalendarPeriod");
   });
 
+  it("validates absolute value as a numeric scalar and preserves its unit", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: ["page.durationMs"],
+    });
+    const duration = builder.slot(pages, "attribute:page.durationMs");
+    const absolute = builder.absolute(duration);
+    expect(absolute.type).toEqual({
+      kind: "scalar",
+      scalar: "number",
+      unit: "ms",
+    });
+    expect(absolute.nullable).toBe(true);
+    const projected = builder.project(pages, { absolute });
+    builder.output("absolute-duration", projected, [
+      { name: "absolute", slot: "absolute" },
+    ]);
+    expect(printLogicalPlan(builder.finish())).toContain("ABS(");
+
+    const invalid = createBuilder();
+    expect(() =>
+      invalid.absolute(
+        invalid.literal("not numeric", {
+          kind: "scalar",
+          scalar: "string",
+        }),
+      ),
+    ).toThrow("ABS requires a numeric scalar expression.");
+  });
+
+  it("keeps Page report attributes out of Observation and unknown capabilities", () => {
+    const builder = createBuilder();
+    expect(() =>
+      builder.source("observation", {
+        attributes: ["page.report.latitude"],
+      }),
+    ).toThrow("logical_source_invalid_attribute:page.report.latitude");
+    expect(() =>
+      builder.source("page", {
+        attributes: ["page.report.unregistered"],
+      }),
+    ).toThrow("logical_source_invalid_attribute:page.report.unregistered");
+  });
+
   it("independently rejects forged expressions with invalid scalar semantics", () => {
     const builder = createBuilder();
     const pages = builder.source("page", {
