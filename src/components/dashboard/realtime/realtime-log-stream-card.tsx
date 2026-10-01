@@ -1,4 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Spinner } from "@insightflare/ui/spinner";
 import { RiPulseLine } from "@remixicon/react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
@@ -6,10 +15,6 @@ import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboar
 import { DetailDrawer } from "@/components/dashboard/site-pages/common/detail-drawer";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
 import type { RealtimeEvent } from "@/lib/realtime/types";
 
 import {

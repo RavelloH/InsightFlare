@@ -1,11 +1,10 @@
-import {
-  memo,
-  type ReactNode,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, type ReactNode, useMemo, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Card } from "@insightflare/ui/card";
+import { Clickable } from "@insightflare/ui/clickable";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 import {
   RiArrowDownSLine,
   RiArrowLeftLine,
@@ -13,23 +12,12 @@ import {
   RiExternalLinkLine,
   RiInformationLine,
 } from "@remixicon/react";
-import type { PartialOptions } from "overlayscrollbars";
-import { OverlayScrollbars } from "overlayscrollbars";
 
 import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import {
   ComparisonMetricToggle,
   type ComparisonTableMetric,
 } from "@/components/dashboard/comparison/comparison-table";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card } from "@/components/ui/card";
-import { Clickable } from "@/components/ui/clickable";
-import {
-  prepareNativeScrollbarHost,
-  useNativeScrollbars,
-} from "@/components/ui/overlay-scrollbar";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -81,16 +69,6 @@ type GeoComparisonChange = {
   sessions: { absolute: number; relative: number | null };
   visitors: { absolute: number; relative: number | null };
 };
-const PANEL_SCROLLBAR_OPTIONS = {
-  overflow: {
-    x: "hidden",
-    y: "scroll",
-  },
-  scrollbars: {
-    theme: "os-theme-insightflare",
-    autoHide: "move",
-  },
-} satisfies PartialOptions;
 export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
   locale,
   messages,
@@ -125,39 +103,6 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
     : sort.key === "visitors" || sort.key === "views"
       ? sort.key
       : "views";
-  const scrollHostRef = useRef<HTMLDivElement | null>(null);
-  const scrollbarsRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
-    null,
-  );
-  const nativeScrollbars = useNativeScrollbars();
-
-  useEffect(() => {
-    if (stacked) {
-      scrollbarsRef.current?.destroy();
-      scrollbarsRef.current = null;
-      return;
-    }
-
-    const host = scrollHostRef.current;
-    if (!host) return;
-    if (prepareNativeScrollbarHost(host)) return;
-
-    const existing = OverlayScrollbars(host);
-    const instance =
-      existing ?? OverlayScrollbars(host, PANEL_SCROLLBAR_OPTIONS);
-    scrollbarsRef.current = instance;
-
-    instance.options(PANEL_SCROLLBAR_OPTIONS);
-
-    return () => {
-      if (scrollbarsRef.current === instance) {
-        scrollbarsRef.current = null;
-      }
-      if (!existing) {
-        instance.destroy();
-      }
-    };
-  }, [stacked]);
 
   const toggleSort = (key: SortKey) => {
     setSort((previous) =>
@@ -258,21 +203,6 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
       .join("|");
     return `${onBack ? "back" : "root"}::${linesKey}::${rowsKey}::${wikiKey}`;
   }, [currentLocationInfo?.lines, investigationRows, onBack, wikiSummary]);
-
-  useEffect(() => {
-    if (stacked) return;
-    scrollbarsRef.current?.update();
-  }, [
-    hasTopSectionContent,
-    investigationRows,
-    loading,
-    onBack,
-    sortedEntries.length,
-    stacked,
-    wikiSummary?.description,
-    wikiSummary?.extract,
-    wikiSummary?.pageUrl,
-  ]);
 
   const comparisonMetricLabel =
     comparisonMetric === "views"
@@ -545,21 +475,13 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
   const cardClassName = stacked
     ? "pointer-events-auto border border-border/70 bg-background/90 py-0 shadow-sm"
     : "pointer-events-auto h-full overflow-hidden border-x-0 border-y border-border/70 bg-background/75 py-0 ring-0 backdrop-blur-xl";
-  const scrollHostClassName = stacked
-    ? "overflow-visible"
-    : nativeScrollbars
-      ? "h-full overflow-y-auto"
-      : "h-full overflow-hidden";
-
   return (
     <aside className={wrapperClassName}>
       <Card className={cardClassName}>
-        <div
-          ref={scrollHostRef}
-          className={scrollHostClassName}
-          data-overlayscrollbars-initialize={
-            stacked || nativeScrollbars ? undefined : ""
-          }
+        <VerticalScrollMask
+          enabled={!stacked}
+          className={stacked ? "overflow-visible" : "h-full"}
+          contentClassName="min-h-full"
         >
           <div className="min-h-full">
             <AutoResizer initial className="shrink-0">
@@ -679,7 +601,7 @@ export const GeoCountryStatsPanel = memo(function GeoCountryStatsPanel({
               </div>
             </AutoResizer>
           </div>
-        </div>
+        </VerticalScrollMask>
       </Card>
     </aside>
   );

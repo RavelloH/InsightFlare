@@ -1,4 +1,9 @@
 import { memo } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Card, CardContent } from "@insightflare/ui/card";
+import { Clickable } from "@insightflare/ui/clickable";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { RiSpeedUpLine } from "@remixicon/react";
 
 import {
@@ -21,11 +26,6 @@ import {
   statusColor,
   statusLabel,
 } from "@/components/dashboard/site-pages/performance/model";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent } from "@/components/ui/card";
-import { Clickable } from "@/components/ui/clickable";
-import { Skeleton } from "@/components/ui/skeleton";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { PerformanceSummary } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";

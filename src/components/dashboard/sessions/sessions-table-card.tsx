@@ -7,6 +7,8 @@ import {
   useMemo,
   useState,
 } from "react";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 
 import {
@@ -29,8 +31,6 @@ import {
   VisitorAvatar,
   visitorDisplayName,
 } from "@/components/dashboard/journeys/journey-display";
-import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { JourneySession } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";

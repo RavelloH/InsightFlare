@@ -1,4 +1,17 @@
 import { useEffect, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Slider } from "@insightflare/ui/slider";
+import { Switch } from "@insightflare/ui/switch";
 import {
   RiArrowRightLine,
   RiDeleteBinLine,
@@ -7,19 +20,6 @@ import {
 } from "@remixicon/react";
 
 import { AnalysisJourneyTable } from "@/components/dashboard/site-pages/journeys/analysis-journey-table";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
 import {
   intlLocale,
   numberFormat,
@@ -61,6 +61,7 @@ function updatedLabel(
   }).format(date)}`;
 }
 function FunnelMetric({
+  locale = "en-US",
   label,
   value,
   detail,
@@ -70,6 +71,7 @@ function FunnelMetric({
   comparisonLoading = false,
   loading = false,
 }: {
+  readonly locale?: string;
   readonly label: string;
   readonly value: string;
   readonly detail: string;
@@ -112,7 +114,10 @@ function FunnelMetric({
               {value}
             </span>
             {showComparison ? (
-              <FunnelChangeRateInline value={comparisonChange} />
+              <FunnelChangeRateInline
+                value={comparisonChange}
+                locale={locale}
+              />
             ) : null}
           </div>
         )}
@@ -157,12 +162,14 @@ function FunnelMetric({
   );
 }
 function FunnelStepValue({
+  locale,
   value,
   comparisonChange,
   loading,
   comparisonLoading,
   hasComparison,
 }: {
+  readonly locale: Locale;
   readonly value: string;
   readonly comparisonChange: number | null;
   readonly loading: boolean;
@@ -210,6 +217,7 @@ function FunnelStepValue({
               <FunnelChangeRateInline
                 key="comparison-ready"
                 value={comparisonChange}
+                locale={locale}
               />
             )}
           </AutoTransition>
@@ -367,6 +375,7 @@ function FunnelStepRow({
                 {funnelMetricLabel(labels, metric)}
               </p>
               <FunnelStepValue
+                locale={locale}
                 value={numberFormat(locale, primaryCount)}
                 comparisonChange={funnelComparisonChange(
                   primaryCount,
@@ -382,6 +391,7 @@ function FunnelStepRow({
                 {funnelMetricLabel(labels, secondaryMetric)}
               </p>
               <FunnelStepValue
+                locale={locale}
                 value={numberFormat(locale, secondaryCount)}
                 comparisonChange={funnelComparisonChange(
                   secondaryCount,
@@ -397,6 +407,7 @@ function FunnelStepRow({
             <div>
               <p className="text-muted-foreground">{labels.stepConversion}</p>
               <FunnelStepValue
+                locale={locale}
                 value={percentFormat(locale, stepRate)}
                 comparisonChange={funnelComparisonChange(
                   stepRate,
@@ -410,6 +421,7 @@ function FunnelStepRow({
             <div>
               <p className="text-muted-foreground">{labels.dropOff}</p>
               <FunnelStepValue
+                locale={locale}
                 value={numberFormat(locale, dropOffCount)}
                 comparisonChange={funnelComparisonChange(
                   dropOffCount,
@@ -596,6 +608,7 @@ function FunnelDetailContent({
         <CardContent className="p-0">
           <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
             <FunnelMetric
+              locale={locale}
               label={labels.overallConversion}
               value={percentFormat(locale, overallConversionRate)}
               detail={`${numberFormat(locale, convertedCount)} / ${numberFormat(locale, startingCount)} ${funnelMetricLabel(labels, metric)}`}
@@ -616,6 +629,7 @@ function FunnelDetailContent({
               loading={loading}
             />
             <FunnelMetric
+              locale={locale}
               label={funnelStartingLabel(labels, metric)}
               value={numberFormat(locale, startingCount)}
               detail={
@@ -637,6 +651,7 @@ function FunnelDetailContent({
               loading={loading}
             />
             <FunnelMetric
+              locale={locale}
               label={funnelConvertedLabel(labels, metric)}
               value={numberFormat(locale, convertedCount)}
               detail={
@@ -658,6 +673,7 @@ function FunnelDetailContent({
               loading={loading}
             />
             <FunnelMetric
+              locale={locale}
               label={labels.largestDropOff}
               value={
                 largestDropOffStep

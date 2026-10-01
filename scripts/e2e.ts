@@ -29,7 +29,9 @@ interface Options {
   keep: boolean;
   serve: boolean;
   ui: boolean;
+  updateSnapshots: boolean;
   workers: number | undefined;
+  grep: string | undefined;
 }
 
 interface Environment {
@@ -132,7 +134,9 @@ function parseOptions(argv: string[]): Options {
     keep: argv.includes("--keep"),
     serve: argv.includes("--serve"),
     ui: argv.includes("--ui"),
+    updateSnapshots: argv.includes("--update-snapshots"),
     workers: parseWorkers(argv),
+    grep: optionValue(argv, "grep"),
   };
 }
 
@@ -1133,7 +1137,9 @@ async function runPlaywright(
   if (options.debug) args.push("--debug");
   if (options.headed) args.push("--headed");
   if (options.ui) args.push("--ui");
-  if (options.workers) args.push(`--workers=${options.workers}`);
+  if (options.updateSnapshots) args.push("--update-snapshots=all");
+  if (options.workers) args.push("--workers=" + options.workers);
+  if (options.grep) args.push("--grep=" + options.grep);
 
   await runCommand({
     args,

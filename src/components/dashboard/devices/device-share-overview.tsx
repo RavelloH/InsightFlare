@@ -1,10 +1,10 @@
 import { memo, useMemo } from "react";
+import { ShareBreakdownView } from "@insightflare/product-ui/sharing";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Spinner } from "@insightflare/ui/spinner";
 import { useQuery } from "@tanstack/react-query";
 
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
-import { ShareRadialCard } from "@/components/dashboard/sharing/share-radial-card";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Spinner } from "@/components/ui/spinner";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
@@ -184,7 +184,7 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
   return (
     <div className="relative">
       <div className="grid gap-4">
-        <ShareRadialCard
+        <ShareBreakdownView
           title={messages.devices.deviceShareTitle}
           items={deviceItems}
           comparisonItems={comparisonDeviceItems}
@@ -195,7 +195,7 @@ export const DeviceShareOverview = memo(function DeviceShareOverview({
           loading={showInitialLoading}
           emptyLabel={messages.common.noData}
         />
-        <ShareRadialCard
+        <ShareBreakdownView
           title={messages.devices.osShareTitle}
           items={osItems}
           comparisonItems={comparisonOsItems}

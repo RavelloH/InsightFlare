@@ -1,0 +1,167 @@
+import type { ReactNode } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@insightflare/ui/dropdown-menu";
+import {
+  RiCheckLine,
+  RiComputerLine,
+  RiGlobalLine,
+  RiMoonLine,
+  RiSunLine,
+} from "@remixicon/react";
+
+import { useTheme } from "@/components/theme-provider";
+import type { Locale } from "@/lib/i18n/config";
+import type { AppMessages } from "@/lib/i18n/messages";
+import Link from "@/lib/router";
+import { cn } from "@/lib/utils";
+
+interface SidebarAppearanceMenusProps {
+  locale: Locale;
+  switchToEn: string;
+  switchToZh: string;
+  switchToJa: string;
+  messages: AppMessages;
+  children?: ReactNode;
+}
+
+export const SIDEBAR_FOOTER_TRIGGER_BASE_CLASS =
+  "absolute top-0 flex h-10 w-1/3 items-center justify-center bg-transparent text-sidebar-foreground outline-hidden transition-[left,top,width,background-color,color,border-color] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[collapsible=icon]:w-full motion-reduce:transition-none hover:bg-sidebar-accent/60 focus-visible:ring-1 focus-visible:ring-sidebar-ring";
+
+const footerGridClass =
+  "relative m-0 h-10 w-full p-0 transition-[height] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none";
+
+function pickThemeIcon(theme: string) {
+  if (theme === "dark") return RiMoonLine;
+  if (theme === "light") return RiSunLine;
+  return RiComputerLine;
+}
+
+export function SidebarAppearanceMenus({
+  locale,
+  switchToEn,
+  switchToZh,
+  switchToJa,
+  messages,
+  children,
+}: SidebarAppearanceMenusProps) {
+  const hasAccountControl = children !== undefined && children !== null;
+  const { theme, resolvedTheme, setTheme } = useTheme();
+  const themeValue =
+    theme === "light" || theme === "dark" || theme === "system"
+      ? theme
+      : "system";
+  const currentTheme = resolvedTheme === "dark" ? "dark" : "light";
+  const ThemeIcon = pickThemeIcon(
+    themeValue === "system" ? currentTheme : themeValue,
+  );
+  const languageOptions: ReadonlyArray<{
+    locale: Locale;
+    href: string;
+    label: string;
+  }> = [
+    { locale: "en", href: switchToEn, label: messages.actions.switchToEnglish },
+    { locale: "zh", href: switchToZh, label: messages.actions.switchToChinese },
+    {
+      locale: "ja",
+      href: switchToJa,
+      label: messages.actions.switchToJapanese,
+    },
+  ];
+  const widthClass = hasAccountControl ? "w-1/3" : "w-1/2";
+
+  return (
+    <div
+      className={cn(
+        footerGridClass,
+        hasAccountControl
+          ? "group-data-[collapsible=icon]:h-[7.5rem]"
+          : "group-data-[collapsible=icon]:h-20",
+      )}
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            SIDEBAR_FOOTER_TRIGGER_BASE_CLASS,
+            widthClass,
+            "left-0 border-r border-sidebar-border group-data-[collapsible=icon]:border-r-0 group-data-[collapsible=icon]:border-b",
+          )}
+          aria-label={messages.common.theme}
+        >
+          <ThemeIcon className="size-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
+          <DropdownMenuLabel>{messages.common.theme}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuRadioGroup
+            value={themeValue}
+            onValueChange={(nextTheme) => {
+              if (
+                nextTheme === "light" ||
+                nextTheme === "dark" ||
+                nextTheme === "system"
+              ) {
+                setTheme(nextTheme);
+              }
+            }}
+          >
+            <DropdownMenuRadioItem value="light">
+              <RiSunLine />
+              <span>{messages.actions.switchToLight}</span>
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="dark">
+              <RiMoonLine />
+              <span>{messages.actions.switchToDark}</span>
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="system">
+              <RiComputerLine />
+              <span>{messages.common.system}</span>
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            SIDEBAR_FOOTER_TRIGGER_BASE_CLASS,
+            widthClass,
+            hasAccountControl ? "left-1/3" : "left-1/2",
+            hasAccountControl ? "border-r border-sidebar-border" : undefined,
+            "group-data-[collapsible=icon]:left-0 group-data-[collapsible=icon]:top-10 group-data-[collapsible=icon]:border-r-0",
+            hasAccountControl
+              ? "group-data-[collapsible=icon]:border-b"
+              : undefined,
+          )}
+          aria-label={messages.common.language}
+        >
+          <RiGlobalLine className="size-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
+          <DropdownMenuLabel>{messages.common.language}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {languageOptions.map((item) => (
+            <DropdownMenuItem key={item.locale} asChild>
+              <Link href={item.href}>
+                <span className="inline-flex w-4 justify-center">
+                  {locale === item.locale ? (
+                    <RiCheckLine className="size-4" />
+                  ) : null}
+                </span>
+                <span>{item.label}</span>
+              </Link>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {children}
+    </div>
+  );
+}

@@ -1,5 +1,6 @@
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+
 import { cn } from "@/lib/utils";
 
 export function FilterActiveCountBadge({

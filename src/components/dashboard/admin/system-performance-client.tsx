@@ -1,4 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import {
   type RemixiconComponentType,
   RiAlarmWarningLine,
@@ -19,26 +39,6 @@ import {
 import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import type { SystemPerformanceInitialData } from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";

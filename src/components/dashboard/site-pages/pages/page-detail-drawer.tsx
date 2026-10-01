@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Button } from "@insightflare/ui/button";
 import { RiCloseLine } from "@remixicon/react";
 
 import {
@@ -11,7 +12,6 @@ import {
   OverviewTrendSection,
 } from "@/components/dashboard/site-pages/overview/metrics";
 import type { PageDetailClientPageProps } from "@/components/dashboard/site-pages/pages/page-detail-client-page";
-import { Button } from "@/components/ui/button";
 import { setDashboardFilterValue } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";

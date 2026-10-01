@@ -1,4 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
+import { Card, CardContent } from "@insightflare/ui/card";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiExternalLinkLine,
   RiGitBranchLine,
@@ -11,12 +17,6 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 
 import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { VersionUpdateDetailsButton } from "@/components/dashboard/version-update-details-button";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
 import { intlLocale } from "@/lib/dashboard/format";
 import { type Locale, resolveLocale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";

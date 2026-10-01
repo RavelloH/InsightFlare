@@ -1,19 +1,19 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { RiAddLine, RiDeleteBinLine } from "@remixicon/react";
-
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { Checkbox } from "@insightflare/ui/checkbox";
+import { Field, FieldLabel } from "@insightflare/ui/field";
+import { Input } from "@insightflare/ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@insightflare/ui/select";
+import { RiAddLine, RiDeleteBinLine } from "@remixicon/react";
+
 import {
   buildTimeZoneOptions,
   supportedTimeZones,

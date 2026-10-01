@@ -1,13 +1,13 @@
 import { type MutableRefObject, useEffect, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
-
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbList,
   BreadcrumbPage,
-} from "@/components/ui/breadcrumb";
+} from "@insightflare/ui/breadcrumb";
+
 import {
   type GeoStateTranslationBundle,
   type GeoStateTranslationResolution,

@@ -1,4 +1,10 @@
 import { type MouseEvent, useCallback, useMemo, useState } from "react";
+import { Clickable } from "@insightflare/ui/clickable";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import { RiArrowRightUpLine, RiSearchLine } from "@remixicon/react";
 
 import {
@@ -19,12 +25,6 @@ import {
 } from "@/components/dashboard/journeys/journey-display";
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import { PageDetailDrawer } from "@/components/dashboard/site-pages/pages/page-detail-drawer";
-import { Clickable } from "@/components/ui/clickable";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   fetchOverviewClientDimensionTab,
   fetchOverviewGeoDimensionTabPage,

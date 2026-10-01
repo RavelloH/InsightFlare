@@ -1,10 +1,10 @@
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { Spinner } from "@insightflare/ui/spinner";
 import { RiAddLine, RiGlobalLine, RiGroupLine } from "@remixicon/react";
 
 import { PageHeading } from "@/components/dashboard/common/page-heading";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import Link from "@/lib/router";
 
 import { useTeamManagementContext } from "./context";

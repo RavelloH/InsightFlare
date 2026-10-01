@@ -1,10 +1,8 @@
 import { Fragment } from "react";
-import { RiUserLine } from "@remixicon/react";
-
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
 import {
   Select,
   SelectContent,
@@ -14,7 +12,9 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@insightflare/ui/select";
+import { RiUserLine } from "@remixicon/react";
+
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   SYSTEM_FILTER_PRESETS,

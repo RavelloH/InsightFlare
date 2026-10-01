@@ -6,6 +6,17 @@ import {
   useMemo,
   useRef,
 } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Clickable } from "@insightflare/ui/clickable";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import {
   RiCalendarEventLine,
   RiLogoutBoxRLine,
@@ -32,17 +43,6 @@ import {
 } from "@/components/dashboard/journeys/journey-display";
 import { OverviewPagesSection } from "@/components/dashboard/site-pages/overview/pages-section";
 import { type OverviewPagesSectionCardData } from "@/components/dashboard/site-pages/overview/types";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Clickable } from "@/components/ui/clickable";
-import { Skeleton } from "@/components/ui/skeleton";
 import { type OverviewTabRows } from "@/lib/dashboard/client/data/index";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import { numberFormat } from "@/lib/dashboard/format";

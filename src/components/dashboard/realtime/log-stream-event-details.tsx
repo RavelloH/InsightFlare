@@ -1,5 +1,18 @@
 import { type ReactNode, useMemo } from "react";
 import { Icon } from "@iconify/react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { Clickable } from "@insightflare/ui/clickable";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerScrollArea,
+  DrawerTitle,
+} from "@insightflare/ui/drawer";
+import { Separator } from "@insightflare/ui/separator";
 import {
   RiExternalLinkLine,
   RiGlobalLine,
@@ -16,19 +29,6 @@ import {
   formatPathWithHash,
   resolveDeviceTypeMeta,
 } from "@/components/dashboard/journeys/journey-display";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Clickable } from "@/components/ui/clickable";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerScrollArea,
-  DrawerTitle,
-} from "@/components/ui/drawer";
-import { Separator } from "@/components/ui/separator";
 import { shortDateTime } from "@/lib/dashboard/format";
 import {
   formatLocalizedGeoValue,

@@ -1,9 +1,9 @@
 import { memo, useMemo } from "react";
+import { ShareBreakdownView } from "@insightflare/product-ui/sharing";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Spinner } from "@insightflare/ui/spinner";
 import { useQuery } from "@tanstack/react-query";
 
-import { ShareRadialCard } from "@/components/dashboard/sharing/share-radial-card";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Spinner } from "@/components/ui/spinner";
 import {
   fetchBrowserEngineTrend,
   fetchBrowserTrend,
@@ -145,7 +145,7 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
   return (
     <div className="relative">
       <div className="grid gap-4">
-        <ShareRadialCard
+        <ShareBreakdownView
           title={messages.browsers.browserShareTitle}
           items={browserItems}
           comparisonItems={comparisonBrowserItems}
@@ -156,7 +156,7 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
           loading={showInitialLoading}
           emptyLabel={messages.common.noData}
         />
-        <ShareRadialCard
+        <ShareBreakdownView
           title={messages.browsers.engineShareTitle}
           items={engineItems}
           comparisonItems={comparisonEngineItems}

@@ -1,208 +1,31 @@
 @import "@fontsource-variable/jetbrains-mono/wght.css";
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "overlayscrollbars/styles/overlayscrollbars.css";
-
-@custom-variant dark (&:is(.dark *));
-
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.6 0.13 163);
-  --primary-foreground: oklch(0.98 0.02 166);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.85 0.13 165);
-  --chart-2: oklch(0.77 0.15 163);
-  --chart-3: oklch(0.7 0.15 162);
-  --chart-4: oklch(0.6 0.13 163);
-  --chart-5: oklch(0.51 0.1 166);
-  --compare-chart-1: oklch(0.85 0.15 82);
-  --compare-chart-2: oklch(0.77 0.16 78);
-  --compare-chart-3: oklch(0.7 0.16 75);
-  --compare-chart-4: oklch(0.6 0.14 70);
-  --compare-chart-5: oklch(0.51 0.11 66);
-  --compare-primary: oklch(0.6 0.14 70);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.6 0.13 163);
-  --sidebar-primary-foreground: oklch(0.98 0.02 166);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-  --scrollbar-thumb: oklch(0.78 0 0);
-  --scrollbar-thumb-hover: oklch(0.68 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.7 0.15 162);
-  --primary-foreground: oklch(0.26 0.05 173);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.85 0.13 165);
-  --chart-2: oklch(0.77 0.15 163);
-  --chart-3: oklch(0.7 0.15 162);
-  --chart-4: oklch(0.6 0.13 163);
-  --chart-5: oklch(0.51 0.1 166);
-  --compare-chart-1: oklch(0.85 0.15 82);
-  --compare-chart-2: oklch(0.77 0.16 78);
-  --compare-chart-3: oklch(0.7 0.16 75);
-  --compare-chart-4: oklch(0.6 0.14 70);
-  --compare-chart-5: oklch(0.51 0.11 66);
-  --compare-primary: oklch(0.7 0.16 75);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.77 0.15 163);
-  --sidebar-primary-foreground: oklch(0.26 0.05 173);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-  --scrollbar-thumb: oklch(0.44 0 0);
-  --scrollbar-thumb-hover: oklch(0.56 0 0);
-}
+@import "@insightflare/ui/styles.css";
+@import "@insightflare/product-ui/styles.css";
+@source "../";
 
 @theme inline {
-  --font-sans: var(--font-sans);
   --font-mono:
     "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Mono", Consolas,
     "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-monospace,
     monospace;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-compare-chart-5: var(--compare-chart-5);
-  --color-compare-chart-4: var(--compare-chart-4);
-  --color-compare-chart-3: var(--compare-chart-3);
-  --color-compare-chart-2: var(--compare-chart-2);
-  --color-compare-chart-1: var(--compare-chart-1);
-  --color-compare-primary: var(--compare-primary);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
-  --color-background: var(--background);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
+  :root:not([data-scrollbar-mode="native"]),
+  :root:not([data-scrollbar-mode="native"]) * {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  *::-webkit-scrollbar {
+
+  :root:not([data-scrollbar-mode="native"])::-webkit-scrollbar,
+  :root:not([data-scrollbar-mode="native"]) *::-webkit-scrollbar {
     display: none;
     width: 0;
     height: 0;
   }
+
   body {
-    @apply bg-background text-foreground;
     font-family: var(--font-mono);
-  }
-
-  ::selection {
-    background: color-mix(in oklch, var(--primary) 28%, transparent);
-    color: var(--foreground);
-  }
-}
-
-@supports (-webkit-touch-callout: none) {
-  * {
-    -ms-overflow-style: auto;
-    scrollbar-width: auto;
-  }
-
-  *::-webkit-scrollbar {
-    display: initial;
-    width: initial;
-    height: initial;
-  }
-}
-
-html[data-native-scrollbars="true"] *,
-html[data-native-scrollbars="true"] {
-  -ms-overflow-style: auto;
-  scrollbar-width: auto;
-}
-
-html[data-native-scrollbars="true"] *::-webkit-scrollbar,
-html[data-native-scrollbars="true"]::-webkit-scrollbar {
-  display: initial;
-  width: initial;
-  height: initial;
-}
-
-@media (hover: hover) and (-webkit-min-device-pixel-ratio: 0) {
-  @supports (font: -apple-system-body) {
-    * {
-      -ms-overflow-style: auto;
-      scrollbar-width: auto;
-    }
-
-    *::-webkit-scrollbar {
-      display: initial;
-      width: initial;
-      height: initial;
-    }
   }
 }
 
@@ -250,109 +73,6 @@ html[data-native-scrollbars="true"]::-webkit-scrollbar {
 [data-analytics-row-enter] > td {
   animation: analytics-data-row-fade-in 480ms ease-out both;
   animation-delay: var(--analytics-data-row-delay, 0ms);
-}
-
-.os-theme-insightflare {
-  --os-size: 8px;
-  --os-padding-perpendicular: 1px;
-  --os-padding-axis: 1px;
-  --os-track-border-radius: 999px;
-  --os-handle-border-radius: 999px;
-  --os-handle-bg: color-mix(in oklch, var(--scrollbar-thumb) 68%, transparent);
-  --os-handle-bg-hover: var(--scrollbar-thumb-hover);
-  --os-handle-bg-active: var(--scrollbar-thumb-hover);
-  --os-handle-perpendicular-size: 0.2rem;
-  --os-handle-perpendicular-size-hover: 0.45rem;
-  --os-handle-perpendicular-size-active: 0.45rem;
-  --os-handle-interactive-area-offset: 4px;
-  --os-track-bg: transparent;
-}
-
-.os-theme-insightflare.os-scrollbar {
-  transition:
-    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 220ms linear,
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    top 150ms,
-    right 150ms,
-    bottom 150ms,
-    left 150ms;
-}
-
-.os-theme-insightflare.os-scrollbar-horizontal {
-  transform-origin: center bottom;
-  transform: translateY(0) scaleY(1);
-}
-
-.os-theme-insightflare.os-scrollbar-vertical {
-  transform-origin: right center;
-  transform: translateX(0) scaleX(1);
-}
-
-.os-theme-insightflare.os-scrollbar-rtl.os-scrollbar-vertical {
-  transform-origin: left center;
-}
-
-.os-theme-insightflare.os-scrollbar-horizontal.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
-  transform: translateY(5px) scaleY(0.72);
-}
-
-.os-theme-insightflare.os-scrollbar-vertical.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
-  transform: translateX(5px) scaleX(0.72);
-}
-
-.os-theme-insightflare.os-scrollbar-rtl.os-scrollbar-vertical.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
-  transform: translateX(-5px) scaleX(0.72);
-}
-
-.os-theme-insightflare.os-scrollbar-horizontal .os-scrollbar-handle,
-.os-theme-insightflare.os-scrollbar-vertical .os-scrollbar-handle {
-  transition:
-    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 180ms ease,
-    border-color 180ms ease,
-    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    height 220ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .os-theme-insightflare.os-scrollbar,
-  .os-theme-insightflare .os-scrollbar-handle {
-    transition: none !important;
-  }
-}
-
-.skeleton-loading {
-  background-image: linear-gradient(
-    100deg,
-    transparent 0%,
-    color-mix(in oklch, var(--muted-foreground) 10%, transparent) 45%,
-    color-mix(in oklch, var(--muted-foreground) 10%, transparent) 55%,
-    transparent 100%
-  );
-  background-position: 100% 0;
-  background-size: 220% 100%;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .skeleton-loading {
-    animation: skeleton-loading 3.2s linear infinite;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .skeleton-loading {
-    background-image: none;
-  }
-}
-
-@keyframes skeleton-loading {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -120% 0;
-  }
 }
 
 @keyframes page-transition-enter {

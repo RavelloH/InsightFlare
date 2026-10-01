@@ -8,17 +8,15 @@ import {
   useRef,
   useState,
 } from "react";
-import type { PartialOptions } from "overlayscrollbars";
-import { OverlayScrollbars } from "overlayscrollbars";
-
-import { AppOverlay } from "@/components/ui/app-overlay";
+import { AppOverlay } from "@insightflare/ui/app-overlay";
 import {
   OverlayFrame,
   useOverlayStackState,
-} from "@/components/ui/layer/layer-manager";
-import { LayerPortal } from "@/components/ui/layer/layer-portal";
-import { shouldUseNativeScrollbars } from "@/components/ui/overlay-scrollbar";
-import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
+} from "@insightflare/ui/layer-manager";
+import { LayerPortal } from "@insightflare/ui/layer-portal";
+import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
+import type { PartialOptions } from "overlayscrollbars";
+
 import { cn } from "@/lib/utils";
 export const DETAIL_QUERY_PARAM = "detail";
 const CLOSE_TRANSLATE_Y_VH = 1.12;
@@ -125,13 +123,7 @@ export function DetailDrawer({
   }, []);
 
   const getScrollElement = useCallback(() => {
-    const scrollContainer = scrollContainerRef.current;
-    if (!scrollContainer) return null;
-    if (shouldUseNativeScrollbars()) return scrollContainer;
-
-    return (
-      OverlayScrollbars(scrollContainer)?.elements().viewport ?? scrollContainer
-    );
+    return scrollContainerRef.current;
   }, []);
 
   const resetScrollPosition = useCallback(() => {

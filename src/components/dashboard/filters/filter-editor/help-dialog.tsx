@@ -1,6 +1,5 @@
 import { useMemo } from "react";
-import { RiInformationLine } from "@remixicon/react";
-
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -8,8 +7,10 @@ import {
   ResponsiveDialogDescription,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
-import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
+} from "@insightflare/ui/responsive-dialog";
+import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
+import { RiInformationLine } from "@remixicon/react";
+
 import {
   type FilterOperator,
   type FilterValueKind,
@@ -99,9 +100,15 @@ export function FilterExpressionHelpDialog({
                 <p className="text-xs text-muted-foreground">
                   {messages.filterBuilder.expressionHelpContextDescription}
                 </p>
-                <pre className="overflow-x-auto whitespace-pre-wrap border-y border-border py-3 font-mono text-xs">
-                  {messages.filterBuilder.expressionHelpContextExamples}
-                </pre>
+                <OverlayScrollbar
+                  axis="horizontal"
+                  className="border-y border-border"
+                  contentClassName="w-max min-w-full"
+                >
+                  <pre className="whitespace-pre-wrap py-3 font-mono text-xs">
+                    {messages.filterBuilder.expressionHelpContextExamples}
+                  </pre>
+                </OverlayScrollbar>
               </section>
 
               <section className="space-y-3">

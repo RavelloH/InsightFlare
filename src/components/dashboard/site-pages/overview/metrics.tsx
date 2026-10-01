@@ -1,12 +1,17 @@
 import { useMemo } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Spinner } from "@insightflare/ui/spinner";
 import { RiLineChartLine } from "@remixicon/react";
 
 import { MetricAreaChart } from "@/components/dashboard/charts/metric-area-chart";
 import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
 import {
   durationFormat,
   intlLocale,

@@ -1,7 +1,7 @@
 import { memo } from "react";
+import { Spinner } from "@insightflare/ui/spinner";
 import { createIsomorphicFn } from "@tanstack/react-start";
 
-import { Spinner } from "@/components/ui/spinner";
 import dynamic from "@/lib/dynamic";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";

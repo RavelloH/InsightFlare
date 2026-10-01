@@ -1,4 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Card, CardContent, CardTitle } from "@insightflare/ui/card";
 import { RiShareForwardLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -11,8 +13,6 @@ import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { fetchReferrerRadar } from "@/lib/dashboard/client/data/index";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -27,7 +27,7 @@ const CHART_COLORS = [
   "var(--color-chart-3)",
   "var(--color-chart-4)",
 ] as const;
-const COMPARISON_CHART_COLOR = "var(--color-compare-primary)";
+const COMPARISON_CHART_COLOR = "var(--color-chart-secondary)";
 interface ReferrerMetadata {
   finalUrl?: string;
   canonicalUrl?: string;

@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from "react";
@@ -19,13 +20,8 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const STORAGE_KEY = "insightflare-theme";
-
-function systemTheme(): "light" | "dark" {
-  if (typeof window === "undefined") return "light";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
+const useIsomorphicLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function storedTheme(): Theme {
   if (typeof window === "undefined") return "system";
@@ -40,22 +36,26 @@ interface ThemeProviderProps {
 }
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
-  const [theme, setThemeState] = useState<Theme>(storedTheme);
-  const [system, setSystem] = useState<"light" | "dark">(systemTheme);
+  const [theme, setThemeState] = useState<Theme>("system");
+  const [system, setSystem] = useState<"light" | "dark">("light");
+  const [hydrated, setHydrated] = useState(false);
   const resolvedTheme = theme === "system" ? system : theme;
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const update = () => setSystem(media.matches ? "dark" : "light");
+    setThemeState(storedTheme());
     update();
     media.addEventListener("change", update);
+    setHydrated(true);
     return () => media.removeEventListener("change", update);
   }, []);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
+    if (!hydrated) return;
     document.documentElement.classList.toggle("dark", resolvedTheme === "dark");
     document.documentElement.style.colorScheme = resolvedTheme;
-  }, [resolvedTheme]);
+  }, [hydrated, resolvedTheme]);
 
   const setTheme = useCallback((nextTheme: Theme) => {
     window.localStorage.setItem(STORAGE_KEY, nextTheme);

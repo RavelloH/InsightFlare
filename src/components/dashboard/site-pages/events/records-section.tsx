@@ -8,6 +8,9 @@ import {
   useMemo,
   useState,
 } from "react";
+import { Input } from "@insightflare/ui/input";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import {
   RiArrowDownSLine,
   RiArrowUpSLine,
@@ -37,9 +40,6 @@ import {
   VisitorAvatar,
 } from "@/components/dashboard/journeys/journey-display";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import {
   fetchEventRecordDetail,
   fetchEventsRecords,

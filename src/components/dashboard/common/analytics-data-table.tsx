@@ -5,12 +5,12 @@ import {
   memo,
   type ReactNode,
 } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Table, TableCell, TableHeader } from "@insightflare/ui/table";
 
 import { AnalyticsTimeTooltipProvider } from "@/components/dashboard/analytics-time-tooltip";
 import { AnalyticsTableCard } from "@/components/dashboard/common/analytics-table-card";
 import { useInfiniteTableSentinel } from "@/components/dashboard/common/use-infinite-table-sentinel";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Table, TableCell, TableHeader } from "@/components/ui/table";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 type AnalyticsDataTableRowProps = Pick<

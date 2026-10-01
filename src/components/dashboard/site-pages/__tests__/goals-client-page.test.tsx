@@ -38,7 +38,7 @@ vi.mock("@/components/dashboard/site-pages/goals/goal-card", () => ({
 vi.mock("@/components/dashboard/site-pages/goals/goal-detail", () => ({
   GoalDetail: () => createElement("div", { "data-goal-detail": true }),
 }));
-vi.mock("@/components/ui/auto-transition", () => ({
+vi.mock("@insightflare/ui/auto-transition", () => ({
   AutoTransition: (props: { children: ReactNode }) =>
     createElement("div", null, props.children),
 }));
@@ -59,11 +59,12 @@ vi.mock("@/components/dashboard/site-pages/goals/goal-editor", () => ({
         )
       : null,
 }));
+import { LayerManagerProvider } from "@insightflare/ui/layer-manager";
+
 import {
   goalDefinitionQueryKey,
   GoalsClientPage,
 } from "@/components/dashboard/site-pages/goals/goals-client-page";
-import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import { fetchGoals, updateGoal } from "@/lib/dashboard/client/data";
 import type {
   GoalDefinition,

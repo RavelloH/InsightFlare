@@ -1,4 +1,18 @@
 import { useMemo, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { Button } from "@insightflare/ui/button";
+import { Checkbox } from "@insightflare/ui/checkbox";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { Popover } from "@insightflare/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@insightflare/ui/select";
 import {
   RiAddLine,
   RiArrowDownSLine,
@@ -8,20 +22,6 @@ import {
 } from "@remixicon/react";
 import { AnimatePresence, motion } from "motion/react";
 
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
-import { Popover } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
 import { filterPickerTargetForValue } from "@/lib/filter-contract/filter-picker-registry";
@@ -783,9 +783,6 @@ function ConditionEditor({
                 </div>
                 <OverlayScrollbar
                   axis="vertical"
-                  syncKey={`${normalizedFieldSearch}:${filteredFieldGroups
-                    .map((group) => group.fields.length)
-                    .join(",")}`}
                   className="max-h-72 border-t border-border"
                 >
                   <div>

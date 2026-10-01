@@ -5,10 +5,23 @@ import path from "node:path";
 import process from "node:process";
 
 const ROOT_DIR = process.cwd();
-const SRC_DIR = path.join(ROOT_DIR, "src");
-const LAYER_DIR = `${path.join("src", "components", "ui", "layer")}${path.sep}`;
+const SOURCE_DIRS = [
+  path.join(ROOT_DIR, "src"),
+  path.join(ROOT_DIR, "packages", "ui", "src"),
+  path.join(ROOT_DIR, "packages", "product-ui", "src"),
+];
+const LAYER_DIRS = [
+  path.join("packages", "ui", "src", "components", "ui", "layer"),
+].map((directory) => `${directory}${path.sep}`);
 const INFRASTRUCTURE_ALLOWLIST = new Set([
-  path.join("src", "components", "ui", "overlay-scrollbar.tsx"),
+  path.join(
+    "packages",
+    "ui",
+    "src",
+    "components",
+    "ui",
+    "overlay-scrollbar.tsx",
+  ),
 ]);
 
 const forbiddenPatterns: Array<{ label: string; pattern: RegExp }> = [
@@ -56,19 +69,22 @@ function lineNumber(source: string, offset: number): number {
 
 async function main() {
   const diagnostics: string[] = [];
-  for (const absolutePath of await sourceFiles(SRC_DIR)) {
-    const relativePath = path.relative(ROOT_DIR, absolutePath);
-    const normalizedPath = relativePath.split(path.sep).join(path.sep);
-    if (normalizedPath.startsWith(LAYER_DIR)) continue;
-    if (INFRASTRUCTURE_ALLOWLIST.has(normalizedPath)) continue;
+  for (const sourceDir of SOURCE_DIRS) {
+    for (const absolutePath of await sourceFiles(sourceDir)) {
+      const relativePath = path.relative(ROOT_DIR, absolutePath);
+      const normalizedPath = relativePath.split(path.sep).join(path.sep);
+      if (LAYER_DIRS.some((directory) => normalizedPath.startsWith(directory)))
+        continue;
+      if (INFRASTRUCTURE_ALLOWLIST.has(normalizedPath)) continue;
 
-    const source = await fs.readFile(absolutePath, "utf8");
-    for (const { label, pattern } of forbiddenPatterns) {
-      pattern.lastIndex = 0;
-      for (const match of source.matchAll(pattern)) {
-        diagnostics.push(
-          `${normalizedPath}:${lineNumber(source, match.index ?? 0)}: ${label}: ${match[0]}`,
-        );
+      const source = await fs.readFile(absolutePath, "utf8");
+      for (const { label, pattern } of forbiddenPatterns) {
+        pattern.lastIndex = 0;
+        for (const match of source.matchAll(pattern)) {
+          diagnostics.push(
+            `${normalizedPath}:${lineNumber(source, match.index ?? 0)}: ${label}: ${match[0]}`,
+          );
+        }
       }
     }
   }

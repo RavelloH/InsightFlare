@@ -16,11 +16,14 @@ import { Route as LocaleInviteRouteImport } from './routes/$locale.invite'
 import { Route as LocaleLoginRouteImport } from './routes/$locale.login'
 import { Route as LocaleResetPasswordRouteImport } from './routes/$locale.reset-password'
 import { Route as LocaleRuntimeConfigErrorRouteImport } from './routes/$locale.runtime-config-error'
+import { Route as LocaleUiRouteImport } from './routes/$locale.ui'
 import { Route as LocaleAppIndexRouteImport } from './routes/$locale.app.index'
 import { Route as LocaleAppTeamSlugRouteImport } from './routes/$locale.app.$teamSlug'
 import { Route as LocaleAppAccountRouteImport } from './routes/$locale.app.account'
 import { Route as LocaleAppInboxRouteImport } from './routes/$locale.app.inbox'
 import { Route as LocaleShareSlugRouteImport } from './routes/$locale.share.$slug'
+import { Route as LocaleUiIndexRouteImport } from './routes/$locale.ui.index'
+import { Route as LocaleUiComponentRouteImport } from './routes/$locale.ui.$component'
 import { Route as LocaleAppTeamSlugIndexRouteImport } from './routes/$locale.app.$teamSlug.index'
 import { Route as LocaleAppTeamSlugSiteSlugRouteImport } from './routes/$locale.app.$teamSlug.$siteSlug'
 import { Route as LocaleAppTeamSlugApiKeysRouteImport } from './routes/$locale.app.$teamSlug.api-keys'
@@ -105,6 +108,11 @@ const LocaleRuntimeConfigErrorRoute =
     path: '/runtime-config-error',
     getParentRoute: () => LocaleRoute,
   } as any)
+const LocaleUiRoute = LocaleUiRouteImport.update({
+  id: '/ui',
+  path: '/ui',
+  getParentRoute: () => LocaleRoute,
+} as any)
 const LocaleAppIndexRoute = LocaleAppIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -129,6 +137,16 @@ const LocaleShareSlugRoute = LocaleShareSlugRouteImport.update({
   id: '/share/$slug',
   path: '/share/$slug',
   getParentRoute: () => LocaleRoute,
+} as any)
+const LocaleUiIndexRoute = LocaleUiIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => LocaleUiRoute,
+} as any)
+const LocaleUiComponentRoute = LocaleUiComponentRouteImport.update({
+  id: '/$component',
+  path: '/$component',
+  getParentRoute: () => LocaleUiRoute,
 } as any)
 const LocaleAppTeamSlugIndexRoute = LocaleAppTeamSlugIndexRouteImport.update({
   id: '/',
@@ -412,11 +430,14 @@ export interface FileRoutesByFullPath {
   '/$locale/login': typeof LocaleLoginRoute
   '/$locale/reset-password': typeof LocaleResetPasswordRoute
   '/$locale/runtime-config-error': typeof LocaleRuntimeConfigErrorRoute
+  '/$locale/ui': typeof LocaleUiRouteWithChildren
   '/$locale/app/$teamSlug': typeof LocaleAppTeamSlugRouteWithChildren
   '/$locale/app/account': typeof LocaleAppAccountRoute
   '/$locale/app/inbox': typeof LocaleAppInboxRoute
   '/$locale/share/$slug': typeof LocaleShareSlugRouteWithChildren
+  '/$locale/ui/$component': typeof LocaleUiComponentRoute
   '/$locale/app/': typeof LocaleAppIndexRoute
+  '/$locale/ui/': typeof LocaleUiIndexRoute
   '/$locale/app/$teamSlug/$siteSlug': typeof LocaleAppTeamSlugSiteSlugRouteWithChildren
   '/$locale/app/$teamSlug/api-keys': typeof LocaleAppTeamSlugApiKeysRoute
   '/$locale/app/$teamSlug/members': typeof LocaleAppTeamSlugMembersRoute
@@ -474,7 +495,9 @@ export interface FileRoutesByTo {
   '/$locale/runtime-config-error': typeof LocaleRuntimeConfigErrorRoute
   '/$locale/app/account': typeof LocaleAppAccountRoute
   '/$locale/app/inbox': typeof LocaleAppInboxRoute
+  '/$locale/ui/$component': typeof LocaleUiComponentRoute
   '/$locale/app': typeof LocaleAppIndexRoute
+  '/$locale/ui': typeof LocaleUiIndexRoute
   '/$locale/app/$teamSlug/api-keys': typeof LocaleAppTeamSlugApiKeysRoute
   '/$locale/app/$teamSlug/members': typeof LocaleAppTeamSlugMembersRoute
   '/$locale/app/$teamSlug/notifications': typeof LocaleAppTeamSlugNotificationsRoute
@@ -531,11 +554,14 @@ export interface FileRoutesById {
   '/$locale/login': typeof LocaleLoginRoute
   '/$locale/reset-password': typeof LocaleResetPasswordRoute
   '/$locale/runtime-config-error': typeof LocaleRuntimeConfigErrorRoute
+  '/$locale/ui': typeof LocaleUiRouteWithChildren
   '/$locale/app/$teamSlug': typeof LocaleAppTeamSlugRouteWithChildren
   '/$locale/app/account': typeof LocaleAppAccountRoute
   '/$locale/app/inbox': typeof LocaleAppInboxRoute
   '/$locale/share/$slug': typeof LocaleShareSlugRouteWithChildren
+  '/$locale/ui/$component': typeof LocaleUiComponentRoute
   '/$locale/app/': typeof LocaleAppIndexRoute
+  '/$locale/ui/': typeof LocaleUiIndexRoute
   '/$locale/app/$teamSlug/$siteSlug': typeof LocaleAppTeamSlugSiteSlugRouteWithChildren
   '/$locale/app/$teamSlug/api-keys': typeof LocaleAppTeamSlugApiKeysRoute
   '/$locale/app/$teamSlug/members': typeof LocaleAppTeamSlugMembersRoute
@@ -594,11 +620,14 @@ export interface FileRouteTypes {
     | '/$locale/login'
     | '/$locale/reset-password'
     | '/$locale/runtime-config-error'
+    | '/$locale/ui'
     | '/$locale/app/$teamSlug'
     | '/$locale/app/account'
     | '/$locale/app/inbox'
     | '/$locale/share/$slug'
+    | '/$locale/ui/$component'
     | '/$locale/app/'
+    | '/$locale/ui/'
     | '/$locale/app/$teamSlug/$siteSlug'
     | '/$locale/app/$teamSlug/api-keys'
     | '/$locale/app/$teamSlug/members'
@@ -656,7 +685,9 @@ export interface FileRouteTypes {
     | '/$locale/runtime-config-error'
     | '/$locale/app/account'
     | '/$locale/app/inbox'
+    | '/$locale/ui/$component'
     | '/$locale/app'
+    | '/$locale/ui'
     | '/$locale/app/$teamSlug/api-keys'
     | '/$locale/app/$teamSlug/members'
     | '/$locale/app/$teamSlug/notifications'
@@ -712,11 +743,14 @@ export interface FileRouteTypes {
     | '/$locale/login'
     | '/$locale/reset-password'
     | '/$locale/runtime-config-error'
+    | '/$locale/ui'
     | '/$locale/app/$teamSlug'
     | '/$locale/app/account'
     | '/$locale/app/inbox'
     | '/$locale/share/$slug'
+    | '/$locale/ui/$component'
     | '/$locale/app/'
+    | '/$locale/ui/'
     | '/$locale/app/$teamSlug/$siteSlug'
     | '/$locale/app/$teamSlug/api-keys'
     | '/$locale/app/$teamSlug/members'
@@ -822,6 +856,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LocaleRuntimeConfigErrorRouteImport
       parentRoute: typeof LocaleRoute
     }
+    '/$locale/ui': {
+      id: '/$locale/ui'
+      path: '/ui'
+      fullPath: '/$locale/ui'
+      preLoaderRoute: typeof LocaleUiRouteImport
+      parentRoute: typeof LocaleRoute
+    }
     '/$locale/app/': {
       id: '/$locale/app/'
       path: '/'
@@ -856,6 +897,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/$locale/share/$slug'
       preLoaderRoute: typeof LocaleShareSlugRouteImport
       parentRoute: typeof LocaleRoute
+    }
+    '/$locale/ui/': {
+      id: '/$locale/ui/'
+      path: '/'
+      fullPath: '/$locale/ui/'
+      preLoaderRoute: typeof LocaleUiIndexRouteImport
+      parentRoute: typeof LocaleUiRoute
+    }
+    '/$locale/ui/$component': {
+      id: '/$locale/ui/$component'
+      path: '/$component'
+      fullPath: '/$locale/ui/$component'
+      preLoaderRoute: typeof LocaleUiComponentRouteImport
+      parentRoute: typeof LocaleUiRoute
     }
     '/$locale/app/$teamSlug/': {
       id: '/$locale/app/$teamSlug/'
@@ -1319,6 +1374,20 @@ const LocaleAppRouteWithChildren = LocaleAppRoute._addFileChildren(
   LocaleAppRouteChildren,
 )
 
+interface LocaleUiRouteChildren {
+  LocaleUiComponentRoute: typeof LocaleUiComponentRoute
+  LocaleUiIndexRoute: typeof LocaleUiIndexRoute
+}
+
+const LocaleUiRouteChildren: LocaleUiRouteChildren = {
+  LocaleUiComponentRoute: LocaleUiComponentRoute,
+  LocaleUiIndexRoute: LocaleUiIndexRoute,
+}
+
+const LocaleUiRouteWithChildren = LocaleUiRoute._addFileChildren(
+  LocaleUiRouteChildren,
+)
+
 interface LocaleShareSlugRouteChildren {
   LocaleShareSlugBrowsersRoute: typeof LocaleShareSlugBrowsersRoute
   LocaleShareSlugCampaignsRoute: typeof LocaleShareSlugCampaignsRoute
@@ -1353,6 +1422,7 @@ interface LocaleRouteChildren {
   LocaleLoginRoute: typeof LocaleLoginRoute
   LocaleResetPasswordRoute: typeof LocaleResetPasswordRoute
   LocaleRuntimeConfigErrorRoute: typeof LocaleRuntimeConfigErrorRoute
+  LocaleUiRoute: typeof LocaleUiRouteWithChildren
   LocaleShareSlugRoute: typeof LocaleShareSlugRouteWithChildren
   LocaleEmbedsLandingViewRoute: typeof LocaleEmbedsLandingViewRoute
 }
@@ -1363,6 +1433,7 @@ const LocaleRouteChildren: LocaleRouteChildren = {
   LocaleLoginRoute: LocaleLoginRoute,
   LocaleResetPasswordRoute: LocaleResetPasswordRoute,
   LocaleRuntimeConfigErrorRoute: LocaleRuntimeConfigErrorRoute,
+  LocaleUiRoute: LocaleUiRouteWithChildren,
   LocaleShareSlugRoute: LocaleShareSlugRouteWithChildren,
   LocaleEmbedsLandingViewRoute: LocaleEmbedsLandingViewRoute,
 }

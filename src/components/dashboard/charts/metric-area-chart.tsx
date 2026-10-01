@@ -1,15 +1,15 @@
 import { memo, useId, useMemo } from "react";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipIndicator,
+} from "@insightflare/ui/chart";
 import { Area, AreaChart, type TooltipProps } from "recharts";
 
 import {
   useAnimationOnChartSwitch,
   useChartVisibility,
 } from "@/components/dashboard/charts/use-chart-animation";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipIndicator,
-} from "@/components/ui/chart";
 import { createChartTooltipDateFormatter } from "@/lib/dashboard/chart-time";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";

@@ -1,12 +1,12 @@
 import { type ComponentType, memo, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
-
 import {
   calculateChartYAxisWidth,
   type ChartConfig,
   ChartContainer,
   ChartTooltip,
-} from "@/components/ui/chart";
+} from "@insightflare/ui/chart";
+import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
+
 import {
   numberFormat,
   percentFormat,
@@ -55,11 +55,11 @@ const CURRENT_DATA_PREFIX = "current:";
 const COMPARISON_DATA_PREFIX = "comparison:";
 const VALUE_SUFFIX = ":value";
 const COMPARISON_CHART_COLORS = [
-  "var(--color-compare-chart-1)",
-  "var(--color-compare-chart-2)",
-  "var(--color-compare-chart-3)",
-  "var(--color-compare-chart-4)",
-  "var(--color-compare-chart-5)",
+  "var(--color-chart-secondary-1)",
+  "var(--color-chart-secondary-2)",
+  "var(--color-chart-secondary-3)",
+  "var(--color-chart-secondary-4)",
+  "var(--color-chart-secondary-5)",
 ] as const;
 const CURRENT_CHART_COLORS = [
   "var(--color-chart-1)",

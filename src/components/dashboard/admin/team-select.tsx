@@ -1,10 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { RiAddLine, RiCloseLine } from "@remixicon/react";
-import { toast } from "sonner";
-
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -12,9 +9,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@insightflare/ui/dialog";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
 import {
   Select,
   SelectContent,
@@ -24,8 +21,11 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
+import { RiAddLine, RiCloseLine } from "@remixicon/react";
+import { toast } from "sonner";
+
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { TeamData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";

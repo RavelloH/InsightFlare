@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Input } from "@insightflare/ui/input";
 import { RiSearchLine } from "@remixicon/react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
@@ -21,7 +22,6 @@ import {
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
-import { Input } from "@/components/ui/input";
 import { fetchSessions } from "@/lib/dashboard/client/data/index";
 import {
   pushUrlWithoutNavigation,

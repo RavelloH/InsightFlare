@@ -1,10 +1,10 @@
 import { useState } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { Spinner } from "@insightflare/ui/spinner";
 import { RiLogoutBoxLine } from "@remixicon/react";
 import { toast } from "sonner";
 
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import type { Locale } from "@/lib/i18n/config";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { useRouter } from "@/lib/router";

@@ -1,5 +1,3 @@
-import { RiCloseLine, RiDeleteBinLine, RiSave3Line } from "@remixicon/react";
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,9 +7,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+} from "@insightflare/ui/alert-dialog";
+import { Button } from "@insightflare/ui/button";
+import { Field, FieldDescription, FieldLabel } from "@insightflare/ui/field";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -20,8 +18,10 @@ import {
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/responsive-dialog";
+import { Spinner } from "@insightflare/ui/spinner";
+import { RiCloseLine, RiDeleteBinLine, RiSave3Line } from "@remixicon/react";
+
 import { formatI18nTemplate } from "@/lib/i18n/template";
 
 import { useTeamManagementContext } from "./context";

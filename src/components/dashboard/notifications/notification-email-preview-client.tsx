@@ -1,22 +1,28 @@
 import { useEffect, useState } from "react";
-import { RiMailSendLine, RiRefreshLine } from "@remixicon/react";
-import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
-
-import { PageHeading } from "@/components/dashboard/common/page-heading";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Field, FieldLabel } from "@insightflare/ui/field";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
+import { RiMailSendLine, RiRefreshLine } from "@remixicon/react";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+
+import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import {
   isValidLocale,
@@ -241,9 +247,14 @@ export function NotificationEmailPreviewClient({
               className="h-[680px] w-full rounded-none border bg-white"
             />
           ) : (
-            <pre className="max-h-[680px] overflow-auto whitespace-pre-wrap rounded-md bg-muted p-4 text-xs leading-5">
-              {payload}
-            </pre>
+            <OverlayScrollbar
+              axis="vertical"
+              className="max-h-[680px] rounded-md bg-muted"
+            >
+              <pre className="whitespace-pre-wrap p-4 text-xs leading-5">
+                {payload}
+              </pre>
+            </OverlayScrollbar>
           )}
         </CardContent>
       </Card>

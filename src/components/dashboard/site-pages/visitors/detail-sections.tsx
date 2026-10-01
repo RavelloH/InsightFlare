@@ -1,4 +1,15 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Clickable } from "@insightflare/ui/clickable";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import {
   RiCalendarEventLine,
   RiLogoutBoxRLine,
@@ -39,17 +50,6 @@ import { useDetailDrawerClose } from "@/components/dashboard/site-pages/common/d
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import { OverviewPagesSection } from "@/components/dashboard/site-pages/overview/pages-section";
 import { type OverviewPagesSectionCardData } from "@/components/dashboard/site-pages/overview/types";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Clickable } from "@/components/ui/clickable";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   fetchEventRecordDetail,
   fetchJourneyEventDetail,

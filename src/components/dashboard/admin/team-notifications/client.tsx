@@ -1,4 +1,42 @@
 import { useEffect, useMemo, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@insightflare/ui/dialog";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@insightflare/ui/responsive-dialog";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@insightflare/ui/table";
 import {
   RiAddLine,
   RiCheckboxCircleLine,
@@ -18,43 +56,6 @@ import { toast } from "sonner";
 import { JsonTreePanel } from "@/components/dashboard/common/json-tree";
 import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { TableActionButton } from "@/components/dashboard/common/table-action-button";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-  ResponsiveDialogContent,
-  ResponsiveDialogDescription,
-  ResponsiveDialogFooter,
-  ResponsiveDialogHeader,
-  ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
-import { Spinner } from "@/components/ui/spinner";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import {
   type MemberData,
@@ -760,9 +761,14 @@ export function TeamNotificationsClient({
                           <p className="text-xs text-muted-foreground">
                             {copy.previewFields.bodyText}
                           </p>
-                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap bg-muted p-3 text-xs leading-5">
-                            {previewResult.message.bodyText}
-                          </pre>
+                          <OverlayScrollbar
+                            axis="vertical"
+                            className="max-h-64 bg-muted"
+                          >
+                            <pre className="whitespace-pre-wrap p-3 text-xs leading-5">
+                              {previewResult.message.bodyText}
+                            </pre>
+                          </OverlayScrollbar>
                         </div>
                       </div>
                     ) : null}

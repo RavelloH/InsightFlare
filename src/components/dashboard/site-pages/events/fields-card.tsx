@@ -8,6 +8,34 @@ import {
   useRef,
   useState,
 } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@insightflare/ui/responsive-dialog";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import {
   RiArrowDownSLine,
   RiCheckLine,
@@ -24,28 +52,6 @@ import { AnimatePresence, useReducedMotion } from "motion/react";
 import { AnimatedDataTableRow } from "@/components/dashboard/common/animated-data-table-row";
 import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import { useInfiniteTableSentinel } from "@/components/dashboard/common/use-infinite-table-sentinel";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-  ResponsiveDialogContent,
-  ResponsiveDialogDescription,
-  ResponsiveDialogFooter,
-  ResponsiveDialogHeader,
-  ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   fetchEventTypeFields,
   fetchEventTypeFieldValues,
@@ -736,7 +742,11 @@ export const EventFieldsCard = memo(function EventFieldsCard({
               </div>
             </CardHeader>
             <CardContent className="space-y-2 pb-5">
-              <div className="max-h-[38rem] overflow-auto pr-1 font-mono text-[13px] leading-6">
+              <OverlayScrollbar
+                axis="both"
+                className="max-h-[38rem] pr-1"
+                contentClassName="font-mono text-[13px] leading-6"
+              >
                 {fieldListLoading ? (
                   <EventFieldTreeSkeleton loadingLabel={labels.loading} />
                 ) : fieldListError ? (
@@ -758,7 +768,7 @@ export const EventFieldsCard = memo(function EventFieldsCard({
                     {renderFieldTreeNode(fieldTree, 0)}
                   </div>
                 )}
-              </div>
+              </OverlayScrollbar>
             </CardContent>
           </Card>
 

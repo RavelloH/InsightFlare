@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { Input } from "@insightflare/ui/input";
+import { TooltipProvider } from "@insightflare/ui/tooltip";
 import { RiSearchLine } from "@remixicon/react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
@@ -33,8 +35,6 @@ import {
   type VisitorSortKey,
   type VisitorSortState,
 } from "@/components/dashboard/site-pages/visitors/visitors-client-page";
-import { Input } from "@/components/ui/input";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   fetchSessions,
   fetchVisitors,

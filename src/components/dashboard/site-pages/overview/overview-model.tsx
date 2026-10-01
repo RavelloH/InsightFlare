@@ -44,7 +44,7 @@ export function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   return fallback();
 }
 export const METRIC_AREA_COLOR = "var(--color-chart-1)";
-export const COMPARISON_AREA_COLOR = "var(--color-compare-chart-1)";
+export const COMPARISON_AREA_COLOR = "var(--color-chart-secondary-1)";
 const MAX_TREND_PLACEHOLDER_POINTS = 120;
 function trendStepMs(interval: TimeWindow["interval"]): number {
   if (interval === "minute") return 60 * 1000;

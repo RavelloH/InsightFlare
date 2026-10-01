@@ -1,8 +1,13 @@
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
 import { RiNotification3Line } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { TeamNotificationsClient } from "@/components/dashboard/admin/team-notifications/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { loadTeamNotificationsInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";

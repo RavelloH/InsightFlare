@@ -4,6 +4,9 @@ import {
   useCallback,
   useMemo,
 } from "react";
+import { Input } from "@insightflare/ui/input";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import {
   RiArrowDownLine,
   RiArrowDownSLine,
@@ -20,9 +23,6 @@ import {
   AnalyticsTableColumnSettings,
   type AnalyticsTableColumnSettingsLabels,
 } from "@/components/dashboard/common/analytics-table-column-settings";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import type { PagesDashboardRow } from "@/lib/dashboard/client/data/types";
 import {
   durationFormat,

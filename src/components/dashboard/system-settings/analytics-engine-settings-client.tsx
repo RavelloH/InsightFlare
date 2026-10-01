@@ -1,15 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  RiCloseLine,
-  RiDeleteBinLine,
-  RiExternalLinkLine,
-  RiLineChartLine,
-  RiSave3Line,
-} from "@remixicon/react";
-import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
-
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -19,20 +9,30 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
+} from "@insightflare/ui/alert-dialog";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/card";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
+  RiCloseLine,
+  RiDeleteBinLine,
+  RiExternalLinkLine,
+  RiLineChartLine,
+  RiSave3Line,
+} from "@remixicon/react";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+
 import {
   EVENT_ANALYTICS_DATASET,
   type PublicAnalyticsEngineConfig,

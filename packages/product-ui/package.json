@@ -1,0 +1,64 @@
+{
+  "name": "@insightflare/product-ui",
+  "version": "0.7.1",
+  "type": "module",
+  "description": "Props-only InsightFlare product visualization components.",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src",
+    "styles.css",
+    "build.mjs",
+    "tsconfig.build.json"
+  ],
+  "exports": {
+    "./styles.css": "./styles.css",
+    "./goals": {
+      "types": "./dist/goals/index.d.ts",
+      "development": "./src/goals/index.ts",
+      "import": "./dist/goals/index.js"
+    },
+    "./realtime": {
+      "types": "./dist/realtime/index.d.ts",
+      "development": "./src/realtime/index.ts",
+      "import": "./dist/realtime/index.js"
+    },
+    "./funnel": {
+      "types": "./dist/funnel/index.d.ts",
+      "development": "./src/funnel/index.ts",
+      "import": "./dist/funnel/index.js"
+    },
+    "./sharing": {
+      "types": "./dist/sharing/index.d.ts",
+      "development": "./src/sharing/index.ts",
+      "import": "./dist/sharing/index.js"
+    },
+    "./tabbed-table": {
+      "types": "./dist/tabbed-table/index.d.ts",
+      "development": "./src/tabbed-table/index.ts",
+      "import": "./dist/tabbed-table/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json"
+  },
+  "peerDependencies": {
+    "@types/react": "^19.0.0",
+    "@insightflare/ui": "0.7.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "@remixicon/react": "^4.9.0",
+    "clsx": "^2.1.1",
+    "motion": "^12.43.0",
+    "overlayscrollbars": "^2.16.0",
+    "recharts": "^2.15.4",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,15 +1,15 @@
 import { memo } from "react";
-import { RiBarChartLine, RiUserLine } from "@remixicon/react";
-
-import { type TabbedDataTableColumn } from "@/components/dashboard/common/tabbed-data-table-card";
-import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Clickable } from "@/components/ui/clickable";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Clickable } from "@insightflare/ui/clickable";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@insightflare/ui/tooltip";
+import { RiBarChartLine, RiUserLine } from "@remixicon/react";
+
+import { type TabbedDataTableColumn } from "@/components/dashboard/common/tabbed-data-table-card";
+import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
 import {
   TRAFFIC_CHANNEL_IDS,
   type TrafficChannelId,

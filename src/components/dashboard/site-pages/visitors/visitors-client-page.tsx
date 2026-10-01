@@ -8,6 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { Input } from "@insightflare/ui/input";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import {
   RiArrowDownSLine,
   RiArrowUpSLine,
@@ -45,9 +48,6 @@ import {
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { fetchVisitors } from "@/lib/dashboard/client/data/index";
 import {
   pushUrlWithoutNavigation,

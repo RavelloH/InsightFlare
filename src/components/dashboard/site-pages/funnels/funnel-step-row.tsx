@@ -1,8 +1,8 @@
+import { Button } from "@insightflare/ui/button";
+import { Input } from "@insightflare/ui/input";
 import { RiDeleteBinLine, RiDraggable, RiFilter2Line } from "@remixicon/react";
 import { Reorder, useDragControls } from "motion/react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import type { FunnelStep } from "@/lib/dashboard-api/client/edge";
 import {
   analyticsFilterRegistry,

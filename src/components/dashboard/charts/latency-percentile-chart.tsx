@@ -1,8 +1,6 @@
 import { memo, useMemo } from "react";
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
-
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   type ChartConfig,
   ChartContainer,
@@ -10,7 +8,9 @@ import {
   ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
-} from "@/components/ui/chart";
+} from "@insightflare/ui/chart";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+
 import { intlLocale } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import { cn } from "@/lib/utils";

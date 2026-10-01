@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 
-import { AutoTransition } from "@/components/ui/auto-transition";
 import { cn } from "@/lib/utils";
 
 interface SiteBrandIconProps {

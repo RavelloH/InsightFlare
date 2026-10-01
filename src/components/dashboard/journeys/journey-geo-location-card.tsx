@@ -1,4 +1,14 @@
 import { memo, type ReactNode, useEffect, useMemo, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Clickable } from "@insightflare/ui/clickable";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import {
   RiExternalLinkLine,
   RiInformationLine,
@@ -6,11 +16,6 @@ import {
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clickable } from "@/components/ui/clickable";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   buildLocalityLocationValue,
   buildRegionLocationValue,

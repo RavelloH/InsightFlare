@@ -1,4 +1,13 @@
 import { memo, useMemo } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Clickable } from "@insightflare/ui/clickable";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { RiArrowLeftLine, RiPulseLine } from "@remixicon/react";
 
 import {
@@ -12,10 +21,6 @@ import type {
   SessionLocationPoint,
 } from "@/components/dashboard/site-pages/sessions/session-detail-map-stage";
 import { useTheme } from "@/components/theme-provider";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Clickable } from "@/components/ui/clickable";
-import { Skeleton } from "@/components/ui/skeleton";
 import type {
   JourneyPerformanceMetricSummary,
   JourneyPerformanceSummary,

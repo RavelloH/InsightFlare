@@ -1,12 +1,5 @@
 import { useState } from "react";
-import {
-  RiArrowRightSLine,
-  RiDeleteBinLine,
-  RiEditLine,
-  RiMoreLine,
-} from "@remixicon/react";
-
-import { Clickable } from "@/components/ui/clickable";
+import { Clickable } from "@insightflare/ui/clickable";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +7,14 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@insightflare/ui/dropdown-menu";
+import {
+  RiArrowRightSLine,
+  RiDeleteBinLine,
+  RiEditLine,
+  RiMoreLine,
+} from "@remixicon/react";
+
 import type { AppMessages } from "@/lib/i18n/messages";
 export function GoalActions({
   labels,

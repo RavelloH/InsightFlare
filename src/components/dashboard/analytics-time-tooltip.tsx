@@ -10,19 +10,19 @@ import {
   useRef,
   useState,
 } from "react";
-import { RiSearchLine } from "@remixicon/react";
-import { toast } from "sonner";
-
-import { useReportingTimeZone } from "@/components/time-zone-provider";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { Badge } from "@/components/ui/badge";
-import { Clickable } from "@/components/ui/clickable";
-import { LayerPortal } from "@/components/ui/layer/layer-portal";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { Badge } from "@insightflare/ui/badge";
+import { Clickable } from "@insightflare/ui/clickable";
+import { LayerPortal } from "@insightflare/ui/layer-portal";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@insightflare/ui/tooltip";
+import { RiSearchLine } from "@remixicon/react";
+import { toast } from "sonner";
+
+import { useReportingTimeZone } from "@/components/time-zone-provider";
 import { intlLocale, shortDateTimeWithSeconds } from "@/lib/dashboard/format";
 import { type Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";

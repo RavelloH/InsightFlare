@@ -1,13 +1,13 @@
-import { RiFilter2Line } from "@remixicon/react";
-
-import { FilterEditor } from "@/components/dashboard/filters/filter-editor";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
+} from "@insightflare/ui/responsive-dialog";
+import { RiFilter2Line } from "@remixicon/react";
+
+import { FilterEditor } from "@/components/dashboard/filters/filter-editor";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { AppMessages } from "@/lib/i18n/messages";
 export function GoalFilterDialog({

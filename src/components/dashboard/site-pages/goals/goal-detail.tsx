@@ -1,4 +1,16 @@
 import { type ReactNode, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@insightflare/ui/tabs";
 import {
   RiArrowDownLine,
   RiArrowUpLine,
@@ -10,18 +22,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { AnalysisJourneyTable } from "@/components/dashboard/site-pages/journeys/analysis-journey-table";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   fetchGoalSummary,
   fetchGoalTimeseries,

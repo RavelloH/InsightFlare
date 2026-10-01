@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import { RiFileList3Line } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -26,7 +27,6 @@ import {
   formatRelativeTime,
   VisitorAvatar,
 } from "@/components/dashboard/journeys/journey-display";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";

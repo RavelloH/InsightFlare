@@ -1,8 +1,8 @@
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
 import { RiFilter3Line } from "@remixicon/react";
 
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { type EventPageCopy } from "./types";

@@ -1,4 +1,16 @@
 import { memo } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   type RemixiconComponentType,
   RiArrowDownLine,
@@ -13,18 +25,6 @@ import {
   AnalyticsDetailsTooltipTarget,
   AnalyticsTimeTooltipProvider,
 } from "@/components/dashboard/analytics-time-tooltip";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -596,7 +596,7 @@ const RetentionComparisonCell = memo(function RetentionComparisonCell({
             {renderBand(currentCell, "var(--color-chart-4)", "current")}
             {renderBand(
               comparisonCell,
-              "var(--color-compare-chart-4)",
+              "var(--color-chart-secondary-4)",
               "comparison",
             )}
           </div>
@@ -662,7 +662,7 @@ export const RetentionMatrix = memo(function RetentionMatrix({
               </span>
               <span className="inline-flex items-center gap-1">
                 <span
-                  className="size-2 bg-compare-chart-4"
+                  className="size-2 bg-chart-secondary-4"
                   aria-hidden="true"
                 />
                 {resolvedComparisonLabel}

@@ -1,16 +1,16 @@
 import { type ReactNode, useState } from "react";
-import { RiArrowDownSLine, RiFileCopyLine } from "@remixicon/react";
-import { toast } from "sonner";
-
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Clickable } from "@/components/ui/clickable";
-import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Clickable } from "@insightflare/ui/clickable";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@insightflare/ui/tooltip";
+import { RiArrowDownSLine, RiFileCopyLine } from "@remixicon/react";
+import { toast } from "sonner";
+
 import { cn } from "@/lib/utils";
 export interface JsonTreeLabels {
   expandField: string;

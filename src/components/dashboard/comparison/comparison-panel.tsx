@@ -1,5 +1,26 @@
 "use client";
 import * as React from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldTitle,
+} from "@insightflare/ui/field";
+import { Label } from "@insightflare/ui/label";
+import { RadioGroup, RadioGroupItem } from "@insightflare/ui/radio-group";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@insightflare/ui/responsive-dialog";
+import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 import {
   RiBarChartGroupedLine,
   RiCheckLine,
@@ -10,26 +31,6 @@ import { useQuery } from "@tanstack/react-query";
 
 import { FilterEditor } from "@/components/dashboard/filters/filter-editor";
 import { SavedFilterSelect } from "@/components/dashboard/filters/filter-panel";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-  FieldTitle,
-} from "@/components/ui/field";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-  ResponsiveDialogContent,
-  ResponsiveDialogDescription,
-  ResponsiveDialogHeader,
-  ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
 import { fetchSavedFilters } from "@/lib/dashboard/client/data/index";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterScope } from "@/lib/filter-contract/index";
@@ -316,7 +317,9 @@ export function ComparisonPanel({
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4">
-        <div className="min-h-0 flex-1 overflow-y-auto">{options}</div>
+        <VerticalScrollMask className="min-h-0 flex-1">
+          {options}
+        </VerticalScrollMask>
         <div className="flex shrink-0 justify-end gap-2 border-t border-border bg-background pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <Button type="button" variant="outline" onClick={onCancel}>
             <RiCloseLine />

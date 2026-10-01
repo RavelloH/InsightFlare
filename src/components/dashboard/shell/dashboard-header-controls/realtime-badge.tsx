@@ -1,14 +1,15 @@
-import {
-  RealtimeStatusDot,
-  realtimeStatusText,
-} from "@/components/dashboard/realtime/realtime-status-indicator";
-import { AnimatedNumber } from "@/components/ui/animated-number";
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AnimatedNumber } from "@insightflare/ui/animated-number";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@insightflare/ui/tooltip";
+
+import {
+  RealtimeStatusDot,
+  realtimeStatusText,
+} from "@/components/dashboard/realtime/realtime-status-indicator";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type {
   RealtimeChannelState,

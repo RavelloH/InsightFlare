@@ -7,6 +7,19 @@ import {
   useRef,
   useState,
 } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Clickable } from "@insightflare/ui/clickable";
+import { Input } from "@insightflare/ui/input";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiArrowLeftLine,
   RiExternalLinkLine,
@@ -15,18 +28,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { ContentSwitch } from "@/components/dashboard/common/content-switch";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Clickable } from "@/components/ui/clickable";
-import { Input } from "@/components/ui/input";
-import { Spinner } from "@/components/ui/spinner";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client/data/index";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -452,7 +453,11 @@ export const CanIUseCompatCard = memo(function CanIUseCompatCard({
                 onKeyDown={handleKeyDown}
               />
               {dropdownOpen && query.length >= 1 && (
-                <div className="absolute top-full left-0 z-10 mt-1 max-h-60 w-full overflow-auto border border-border bg-background shadow-lg">
+                <OverlayScrollbar
+                  axis="vertical"
+                  className="absolute top-full left-0 z-10 mt-1 max-h-60 w-full border border-border bg-background shadow-lg"
+                  contentClassName="min-w-full"
+                >
                   {filteredSuggestions.length > 0 ? (
                     filteredSuggestions.map((item, i) => (
                       <button
@@ -472,7 +477,7 @@ export const CanIUseCompatCard = memo(function CanIUseCompatCard({
                       {m.caniuseNoMatch}
                     </div>
                   )}
-                </div>
+                </OverlayScrollbar>
               )}
             </div>
           </CardAction>

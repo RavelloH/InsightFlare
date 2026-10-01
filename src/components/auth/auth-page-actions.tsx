@@ -1,3 +1,14 @@
+import { Button } from "@insightflare/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@insightflare/ui/dropdown-menu";
 import {
   RiArrowDownSLine,
   RiCheckLine,
@@ -8,17 +19,6 @@ import {
 } from "@remixicon/react";
 
 import { useTheme } from "@/components/theme-provider";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { type Locale, SUPPORTED_LOCALES } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";

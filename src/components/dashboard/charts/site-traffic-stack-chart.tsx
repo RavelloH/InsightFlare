@@ -8,9 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   calculateChartYAxisWidth,
   type ChartConfig,
@@ -18,8 +16,10 @@ import {
   ChartTooltip,
   ChartTooltipIndicator,
   createChartNumberFormatter,
-} from "@/components/ui/chart";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/chart";
+import { Spinner } from "@insightflare/ui/spinner";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+
 import {
   addZonedInterval,
   startOfZonedInterval,

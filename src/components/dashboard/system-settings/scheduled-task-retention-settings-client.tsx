@@ -1,18 +1,18 @@
 import { useMemo, useState } from "react";
-import { RiDatabase2Line, RiSave3Line } from "@remixicon/react";
-import { toast } from "sonner";
-
-import { Button } from "@/components/ui/button";
+import { Button } from "@insightflare/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/card";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import { Spinner } from "@insightflare/ui/spinner";
+import { RiDatabase2Line, RiSave3Line } from "@remixicon/react";
+import { toast } from "sonner";
+
 import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { AppMessages } from "@/lib/i18n/messages";

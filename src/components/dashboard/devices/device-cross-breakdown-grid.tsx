@@ -1,4 +1,10 @@
 import { memo, useMemo } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
 import { RiBarChartBoxLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -9,7 +15,6 @@ import {
 } from "@/components/dashboard/charts/stacked-breakdown-bar-chart";
 import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchClientCrossBreakdown } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";

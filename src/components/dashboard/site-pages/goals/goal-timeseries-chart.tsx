@@ -1,5 +1,14 @@
 import { useId, useMemo } from "react";
 import {
+  calculateChartYAxisWidth,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipIndicator,
+} from "@insightflare/ui/chart";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
   Area,
   AreaChart,
   CartesianGrid,
@@ -8,15 +17,6 @@ import {
   YAxis,
 } from "recharts";
 
-import {
-  calculateChartYAxisWidth,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipIndicator,
-} from "@/components/ui/chart";
-import { Spinner } from "@/components/ui/spinner";
 import {
   addZonedInterval,
   startOfZonedInterval,
@@ -353,11 +353,11 @@ export function GoalTimeseriesChart({
               ? {
                   comparisonSessionsRate: {
                     label: `${comparisonLabel ?? "Comparison"} · ${labels.sessions}`,
-                    color: "var(--color-compare-chart-1)",
+                    color: "var(--color-chart-secondary-1)",
                   },
                   comparisonVisitorsRate: {
                     label: `${comparisonLabel ?? "Comparison"} · ${labels.visitors}`,
-                    color: "var(--color-compare-chart-3)",
+                    color: "var(--color-chart-secondary-3)",
                   },
                 }
               : {}),

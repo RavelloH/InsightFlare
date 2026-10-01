@@ -1,11 +1,11 @@
 import { memo, useMemo } from "react";
 import { Icon } from "@iconify/react";
+import { Card, CardContent } from "@insightflare/ui/card";
+import { Clickable } from "@insightflare/ui/clickable";
 import { RiGlobalLine } from "@remixicon/react";
 import Avatar from "boring-avatars";
 import { motion } from "motion/react";
 
-import { Card, CardContent } from "@/components/ui/card";
-import { Clickable } from "@/components/ui/clickable";
 import { shortDateTime } from "@/lib/dashboard/format";
 
 import {

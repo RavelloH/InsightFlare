@@ -1,9 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { RiCloseLine, RiFilter2Line, RiSave3Line } from "@remixicon/react";
-
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@insightflare/ui/button";
+import { Input } from "@insightflare/ui/input";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -12,8 +10,10 @@ import {
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/responsive-dialog";
+import { Spinner } from "@insightflare/ui/spinner";
+import { RiCloseLine, RiFilter2Line, RiSave3Line } from "@remixicon/react";
+
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { GoalDefinition } from "@/lib/dashboard-api/client/edge";
 import {

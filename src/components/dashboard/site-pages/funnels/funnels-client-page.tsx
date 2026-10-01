@@ -1,4 +1,18 @@
 import { useCallback, useMemo, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@insightflare/ui/alert-dialog";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { Card, CardContent } from "@insightflare/ui/card";
+import { Spinner } from "@insightflare/ui/spinner";
 import { RiAddLine, RiCloseLine, RiDeleteBinLine } from "@remixicon/react";
 import {
   useInfiniteQuery,
@@ -18,20 +32,6 @@ import {
   DetailDrawer,
 } from "@/components/dashboard/site-pages/common/detail-query-modal";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
 import {
   createFunnel,
   deleteFunnel,

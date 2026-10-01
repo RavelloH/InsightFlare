@@ -1,4 +1,12 @@
 import { memo, type ReactNode } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import {
   RiCheckboxCircleFill,
   RiCloseCircleFill,
@@ -14,9 +22,6 @@ import {
 import { type JourneyGeoLocationInput } from "@/components/dashboard/journeys/journey-geo-location-card";
 import { type SessionSortState } from "@/components/dashboard/sessions/sessions-table-card";
 import type { VisitorLocationPoint } from "@/components/dashboard/site-pages/visitors/visitor-detail-map-stage";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type {

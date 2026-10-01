@@ -1,17 +1,17 @@
 import { memo } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Clickable } from "@insightflare/ui/clickable";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import { RiBarChartLine, RiTimeLine, RiUserLine } from "@remixicon/react";
 
 import type {
   TabbedDataTableColumn,
   TabbedDataTableRowBase,
 } from "@/components/dashboard/common/tabbed-data-table-card";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Clickable } from "@/components/ui/clickable";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";

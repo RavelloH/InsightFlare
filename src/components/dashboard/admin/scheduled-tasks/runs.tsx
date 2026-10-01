@@ -1,14 +1,8 @@
 import { type KeyboardEvent, useCallback, useMemo } from "react";
-import type { RiTimeLine } from "@remixicon/react";
-import { RiCloseCircleLine, RiFileList3Line } from "@remixicon/react";
-
-import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
-import { JsonTreePanel } from "@/components/dashboard/common/json-tree";
-import { TableActionButton } from "@/components/dashboard/common/table-action-button";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
 import {
   Drawer,
   DrawerContent,
@@ -16,10 +10,16 @@ import {
   DrawerHeader,
   DrawerScrollArea,
   DrawerTitle,
-} from "@/components/ui/drawer";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+} from "@insightflare/ui/drawer";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import type { RiTimeLine } from "@remixicon/react";
+import { RiCloseCircleLine, RiFileList3Line } from "@remixicon/react";
+
+import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
+import { JsonTreePanel } from "@/components/dashboard/common/json-tree";
+import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import {
   durationFormat,
   numberFormat,

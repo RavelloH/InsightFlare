@@ -1,0 +1,3 @@
+@reference "@insightflare/ui/styles.css";
+@import "tailwindcss/utilities.css" layer(utilities);
+@source "./src";

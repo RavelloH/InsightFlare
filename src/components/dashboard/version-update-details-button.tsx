@@ -1,15 +1,9 @@
 import { useMemo, useState } from "react";
-import {
-  RiExternalLinkLine,
-  RiGitCommitLine,
-  RiListCheck2,
-} from "@remixicon/react";
-import { useQuery } from "@tanstack/react-query";
-
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -17,8 +11,15 @@ import {
   ResponsiveDialogDescription,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/responsive-dialog";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
+  RiExternalLinkLine,
+  RiGitCommitLine,
+  RiListCheck2,
+} from "@remixicon/react";
+import { useQuery } from "@tanstack/react-query";
+
 import Link from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -199,7 +200,10 @@ export function VersionUpdateDetailsButton({
                     </div>
 
                     {details.commits.length > 0 ? (
-                      <div className="max-h-[56svh] overflow-y-auto pr-2">
+                      <OverlayScrollbar
+                        axis="vertical"
+                        className="max-h-[56svh] pr-2"
+                      >
                         <div className="space-y-2">
                           {details.commits.map((commit) => {
                             const isCurrent = isCommitMatch(
@@ -255,7 +259,7 @@ export function VersionUpdateDetailsButton({
                             );
                           })}
                         </div>
-                      </div>
+                      </OverlayScrollbar>
                     ) : (
                       <div className="py-8 text-sm text-muted-foreground">
                         {labels.detailsEmpty}

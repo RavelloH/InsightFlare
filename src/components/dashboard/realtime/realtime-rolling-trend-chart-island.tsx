@@ -1,14 +1,11 @@
-import type { TrafficPairAreaChartProps } from "@/components/dashboard/charts/traffic-pair-area-chart";
+import type { RealtimeTrafficTrendViewProps } from "@insightflare/product-ui/realtime";
+
 import dynamic from "@/lib/dynamic";
 
-export type { TrafficPairDataPoint } from "../charts/traffic-pair-chart";
-
-type RealtimeRollingTrendChartIslandProps = TrafficPairAreaChartProps;
-
-const RealtimeRollingTrendChart = dynamic<RealtimeRollingTrendChartIslandProps>(
+const RealtimeRollingTrendChart = dynamic<RealtimeTrafficTrendViewProps>(
   () =>
-    import("@/components/dashboard/charts/traffic-pair-area-chart").then(
-      (module) => module.TrafficPairAreaChart,
+    import("@insightflare/product-ui/realtime").then(
+      (module) => module.RealtimeTrafficTrendView,
     ),
   {
     ssr: false,
@@ -17,7 +14,7 @@ const RealtimeRollingTrendChart = dynamic<RealtimeRollingTrendChartIslandProps>(
 );
 
 export function RealtimeRollingTrendChartIsland(
-  props: RealtimeRollingTrendChartIslandProps,
+  props: RealtimeTrafficTrendViewProps,
 ) {
   return <RealtimeRollingTrendChart {...props} />;
 }

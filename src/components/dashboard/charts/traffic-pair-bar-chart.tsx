@@ -1,11 +1,5 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-
-import {
-  useAnimationOnChartSwitch,
-  useChartVisibility,
-} from "@/components/dashboard/charts/use-chart-animation";
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   calculateChartYAxisWidth,
   ChartContainer,
@@ -13,8 +7,14 @@ import {
   ChartLegendContent,
   ChartTooltip,
   createChartNumberFormatter,
-} from "@/components/ui/chart";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/chart";
+import { Spinner } from "@insightflare/ui/spinner";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+
+import {
+  useAnimationOnChartSwitch,
+  useChartVisibility,
+} from "@/components/dashboard/charts/use-chart-animation";
 import {
   type ChartAxisDateFormat,
   createChartAxisDateFormatter,

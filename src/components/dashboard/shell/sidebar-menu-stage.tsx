@@ -1,9 +1,9 @@
 import { type ReactNode, useEffect, useRef } from "react";
-
 import {
   AutoTransition,
   type AutoTransitionProps,
-} from "@/components/ui/auto-transition";
+} from "@insightflare/ui/auto-transition";
+
 import { cn } from "@/lib/utils";
 type SidebarMenuMode = "root" | "team" | "site";
 const SIDEBAR_MODE_STORAGE_KEY = "insightflare-sidebar-mode";

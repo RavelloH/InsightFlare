@@ -1,13 +1,13 @@
 import { forwardRef, type ReactNode } from "react";
-import type { HTMLMotionProps } from "motion/react";
-
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Clickable } from "@/components/ui/clickable";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Clickable } from "@insightflare/ui/clickable";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@insightflare/ui/tooltip";
+import type { HTMLMotionProps } from "motion/react";
+
 import { cn } from "@/lib/utils";
 interface TableActionButtonProps extends Omit<
   HTMLMotionProps<"div">,

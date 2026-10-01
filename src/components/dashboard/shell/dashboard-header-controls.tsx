@@ -1,6 +1,53 @@
 import type { CSSProperties } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type DateRange } from "react-day-picker";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { ButtonGroup } from "@insightflare/ui/button-group";
+import { Calendar } from "@insightflare/ui/calendar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@insightflare/ui/dialog";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerScrollArea,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@insightflare/ui/drawer";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@insightflare/ui/dropdown-menu";
+import { Label } from "@insightflare/ui/label";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@insightflare/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import {
   RiArrowDownSLine,
   RiArrowLeftSLine,
@@ -21,53 +68,6 @@ import {
 import { FilterActiveCountBadge } from "@/components/dashboard/filters/filter-active-count-badge";
 import { FilterPanel } from "@/components/dashboard/filters/filter-panel";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerScrollArea,
-  DrawerTitle,
-  DrawerTrigger,
-} from "@/components/ui/drawer";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Label } from "@/components/ui/label";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useRealtimeChannelSelector } from "@/hooks/use-realtime-channel";
 import {
   replaceUrlWithoutNavigation,
@@ -333,7 +333,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   const comparisonTriggerClassName = cn(
     headerTriggerClassName,
     hasActiveComparison &&
-      "!border-compare-primary/60 !bg-compare-primary/10 !text-compare-primary hover:!bg-compare-primary/15 hover:!text-compare-primary aria-expanded:!bg-compare-primary/15 dark:!border-compare-primary/60 dark:!bg-compare-primary/20 dark:hover:!bg-compare-primary/25",
+      "!border-chart-secondary/60 !bg-chart-secondary/10 !text-chart-secondary hover:!bg-chart-secondary/15 hover:!text-chart-secondary aria-expanded:!bg-chart-secondary/15 dark:!border-chart-secondary/60 dark:!bg-chart-secondary/20 dark:hover:!bg-chart-secondary/25",
   );
   const filterTriggerStyle = hasActiveFilters
     ? {

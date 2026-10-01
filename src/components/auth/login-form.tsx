@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  RiLoginBoxLine,
-  RiRefreshLine,
-  RiShieldCrossLine,
-} from "@remixicon/react";
-import { toast } from "sonner";
-
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -15,10 +8,17 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/dialog";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
+  RiLoginBoxLine,
+  RiRefreshLine,
+  RiShieldCrossLine,
+} from "@remixicon/react";
+import { toast } from "sonner";
+
 import type { Locale } from "@/lib/i18n/config";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { useRouter } from "@/lib/router";
