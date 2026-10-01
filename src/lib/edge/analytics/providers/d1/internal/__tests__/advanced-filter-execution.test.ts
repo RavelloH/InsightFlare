@@ -200,13 +200,19 @@ function sqliteEnv(
     );
     CREATE TABLE custom_event_json_paths (
       id INTEGER PRIMARY KEY,
-      site_pk INTEGER NOT NULL,
-      path TEXT NOT NULL
+      site_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      last_seen_at INTEGER NOT NULL,
+      site_pk INTEGER NOT NULL
     );
     CREATE TABLE custom_event_json_keys (
       id INTEGER PRIMARY KEY,
-      site_pk INTEGER NOT NULL,
-      key TEXT NOT NULL
+      site_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      last_seen_at INTEGER NOT NULL,
+      site_pk INTEGER NOT NULL
     );
     CREATE TABLE custom_events (
       event_pk INTEGER PRIMARY KEY,
@@ -232,15 +238,25 @@ function sqliteEnv(
       path_id INTEGER NOT NULL,
       value_type INTEGER NOT NULL,
       array_index INTEGER,
-      depth INTEGER NOT NULL
+      depth INTEGER NOT NULL,
+      member_order INTEGER
     );
+    CREATE INDEX idx_fixture_custom_event_nodes_event_node
+      ON custom_event_json_nodes (event_pk, node_id);
     CREATE TABLE custom_event_json_values (
       event_pk INTEGER NOT NULL,
       node_id INTEGER NOT NULL,
+      site_id TEXT NOT NULL,
+      event_name_id INTEGER NOT NULL,
+      path_id INTEGER NOT NULL,
+      occurred_at INTEGER NOT NULL,
+      scope_node_id INTEGER,
       value_type INTEGER NOT NULL,
       string_value TEXT,
+      string_hash TEXT,
       number_value REAL,
-      boolean_value INTEGER
+      boolean_value INTEGER,
+      site_pk INTEGER NOT NULL
     );
   `);
   database
@@ -285,9 +301,9 @@ function sqliteEnv(
     const id = pathIds.size + 1;
     database
       .prepare(
-        "INSERT INTO custom_event_json_paths (id, site_pk, path) VALUES (?, 1, ?)",
+        "INSERT INTO custom_event_json_paths (id, site_id, site_pk, path, last_seen_at) VALUES (?, ?, 1, ?, 0)",
       )
-      .run(id, path);
+      .run(id, SITE_ID, path);
     pathIds.set(path, id);
     return id;
   };
@@ -297,9 +313,9 @@ function sqliteEnv(
     const id = keyIds.size + 1;
     database
       .prepare(
-        "INSERT INTO custom_event_json_keys (id, site_pk, key) VALUES (?, 1, ?)",
+        "INSERT INTO custom_event_json_keys (id, site_id, site_pk, key, last_seen_at) VALUES (?, ?, 1, ?, 0)",
       )
-      .run(id, key);
+      .run(id, SITE_ID, key);
     keyIds.set(key, id);
     return id;
   };
@@ -358,15 +374,22 @@ function sqliteEnv(
       database
         .prepare(
           `INSERT INTO custom_event_json_values (
-            event_pk, node_id, value_type, string_value, number_value,
-            boolean_value
-          ) VALUES (?, ?, ?, ?, ?, ?)`,
+            event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+            scope_node_id, value_type, string_value, string_hash, number_value,
+            boolean_value, site_pk
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .run(
           currentEventPk,
           value.nodeId,
+          SITE_ID,
+          eventNameIds[activity.event.name]!,
+          ensurePathId(value.path),
+          activity.event.timeMs,
+          value.scopeNodeId,
           value.valueType,
           value.stringValue,
+          value.stringHash,
           value.numberValue,
           value.booleanValue,
         );
@@ -394,8 +417,12 @@ function sqliteEnv(
   return { env, database, queries };
 }
 
-function advancedFilterInput(time: QueryTime, siteIds = [SITE_ID]) {
-  const document = parseFilterDsl("count(page) gte 1", analyticsFilterRegistry);
+function advancedFilterInput(
+  time: QueryTime,
+  siteIds = [SITE_ID],
+  filterDsl = "count(page) gte 1",
+) {
+  const document = parseFilterDsl(filterDsl, analyticsFilterRegistry);
   const plan = createScopedFilterPlan("overview", document, "session");
   if (!plan) throw new Error("expected_scoped_filter_plan");
   const filters = attachScopedFilterMetadata(document, {
@@ -631,6 +658,36 @@ describe("D1 advanced filter execution", () => {
     }
   });
 
+  it("stops before the next payload range read when execution is aborted", async () => {
+    const controller = new AbortController();
+    const { env, database, queries } = sqliteEnv(SHARED_ACTIVITIES, (sql) => {
+      if (/custom_event_json_nodes/iu.test(sql)) controller.abort();
+    });
+    try {
+      const time = {
+        ...createQueryTime(1_000, 1_100, "UTC", 2_000),
+        readRange: createTimeRange(0, 100),
+      };
+      await expect(
+        d1AdvancedFilterMiddleware(env)(
+          "overview",
+          advancedFilterInput(
+            time,
+            [SITE_ID],
+            'first(event.payload("/amount")) eq 1',
+          ),
+          async (prepared) => prepared,
+          { signal: controller.signal },
+        ),
+      ).rejects.toMatchObject({ name: "AbortError" });
+      expect(
+        queries.filter((sql) => /custom_event_json_nodes/iu.test(sql)),
+      ).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
   it("propagates typed activity database failures without falling back", async () => {
     const { env, database, queries } = sqliteEnv();
     try {
@@ -646,6 +703,102 @@ describe("D1 advanced filter execution", () => {
       expect(queries.some((sql) => /custom_event_names/iu.test(sql))).toBe(
         true,
       );
+    } finally {
+      database.close();
+    }
+  });
+
+  it("propagates typed payload database failures without falling back", async () => {
+    const { env, database, queries } = sqliteEnv();
+    try {
+      database.exec("DROP TABLE custom_event_json_nodes");
+      const time = createQueryTime(0, 2_000, "UTC", 2_000);
+      await expect(
+        d1AdvancedFilterMiddleware(env)(
+          "overview",
+          advancedFilterInput(
+            time,
+            [SITE_ID],
+            'first(event.payload("/amount")) eq 1',
+          ),
+          async (prepared) => prepared,
+        ),
+      ).rejects.toThrow(/no such table: custom_event_json_nodes/iu);
+      expect(queries.some((sql) => /custom_event_json_nodes/iu.test(sql))).toBe(
+        true,
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it("enforces the cumulative payload node budget with real SQLite rows", async () => {
+    const activities: readonly SharedActivity[] = [
+      {
+        visitId: "payload-limit-owner",
+        sessionId: "payload-limit-session",
+        visitorId: "payload-limit-visitor",
+        pageTimeMs: 10,
+        pathname: "/payload-limit",
+        event: {
+          id: "payload-limit-event",
+          name: "purchase",
+          timeMs: 1_010,
+          payload: { amount: 1 },
+        },
+      },
+    ];
+    const { env, database, queries } = sqliteEnv(activities);
+    try {
+      const eventPk = database
+        .prepare("SELECT event_pk FROM custom_events WHERE event_id = ?")
+        .get("payload-limit-event") as { event_pk: number };
+      const path = database
+        .prepare("SELECT id FROM custom_event_json_paths WHERE path = ?")
+        .get("/amount") as { id: number };
+      database
+        .prepare("DELETE FROM custom_event_json_values WHERE event_pk = ?")
+        .run(eventPk.event_pk);
+      database
+        .prepare("DELETE FROM custom_event_json_nodes WHERE event_pk = ?")
+        .run(eventPk.event_pk);
+      const insertNode = database.prepare(`
+        INSERT INTO custom_event_json_nodes (
+          event_pk, node_id, parent_node_id, key_id, path_id, value_type,
+          array_index, depth, member_order
+        ) VALUES (?, ?, NULL, NULL, ?, 0, NULL, 0, NULL)
+      `);
+      database.exec("BEGIN");
+      try {
+        for (let nodeId = 1; nodeId <= 50_001; nodeId++)
+          insertNode.run(eventPk.event_pk, nodeId, path.id);
+        database.exec("COMMIT");
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+
+      await expect(
+        d1AdvancedFilterMiddleware(env)(
+          "overview",
+          advancedFilterInput(
+            createQueryTime(0, 2_000, "UTC", 2_000),
+            [SITE_ID],
+            'first(event.payload("/amount")) eq 1',
+          ),
+          async (prepared) => prepared,
+        ),
+      ).rejects.toMatchObject({
+        domainError: {
+          kind: "invalid-input",
+          issues: [
+            { path: "filters", code: "filter_payload_node_limit_exceeded" },
+          ],
+        },
+      });
+      expect(
+        queries.filter((sql) => /custom_event_json_nodes/iu.test(sql)),
+      ).toHaveLength(1);
     } finally {
       database.close();
     }

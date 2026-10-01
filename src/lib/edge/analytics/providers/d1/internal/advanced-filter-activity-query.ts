@@ -5,8 +5,8 @@ import {
   buildAdvancedFilterActivityPlan,
 } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
 import type { SemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
-import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import { semanticSubjectForAuthorizedSubset } from "@/lib/edge/analytics/providers/d1/internal/authorized-site-subject";
 import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { currentD1Operation } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
@@ -33,25 +33,6 @@ export interface AdvancedFilterActivityRangeQuery {
   readonly signal?: AbortSignal;
 }
 
-function subjectForAuthorizedSubset(
-  subject: SemanticSubjectDomain,
-  siteIds: readonly string[],
-): SemanticSubjectDomain {
-  const authorizedSiteIds = new Set<string>(subject.siteIds);
-  if (
-    siteIds.length === 0 ||
-    siteIds.some((siteId) => !authorizedSiteIds.has(siteId))
-  )
-    throw new Error("advanced_filter_activity_site_subset_unauthorized");
-  if (subject.origin === "site" && siteIds.length !== 1)
-    throw new Error("advanced_filter_activity_site_subset_invalid");
-  return createSemanticSubjectDomain({
-    origin: subject.origin,
-    siteIds: siteIds as SemanticSubjectDomain["siteIds"],
-    ...(subject.teamId ? { teamId: subject.teamId } : {}),
-  });
-}
-
 function rowFromCompiledOutput(row: object): AdvancedFilterActivityRow {
   const values: Record<string, unknown> = Object.fromEntries(
     Object.entries(row),
@@ -73,7 +54,11 @@ function rowFromCompiledOutput(row: object): AdvancedFilterActivityRow {
 export async function queryAdvancedFilterActivityRange(
   input: AdvancedFilterActivityRangeQuery,
 ): Promise<AdvancedFilterActivityRow[]> {
-  const subject = subjectForAuthorizedSubset(input.subject, input.siteIds);
+  const subject = semanticSubjectForAuthorizedSubset(
+    input.subject,
+    input.siteIds,
+    "activity",
+  );
   const plan = buildAdvancedFilterActivityPlan({
     subject,
     range: input.range,

@@ -261,6 +261,8 @@ function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
       ]);
     case "limit":
       return [node.count, ...(node.offset ? [node.offset] : [])];
+    case "recursive-closure":
+      return [node.predicate];
     case "scan":
     case "distinct":
     case "union":
@@ -333,7 +335,9 @@ function nodeChildren(node: LogicalQueryNode): QuerySource[] {
         node.kind === "sort" ||
         node.kind === "limit"
       ? [node.input]
-      : [node.left, node.right];
+      : node.kind === "recursive-closure"
+        ? [node.seed, node.candidates]
+        : [node.left, node.right];
 }
 
 function nodeSources(node: LogicalQueryNode): QuerySource[] {
@@ -436,6 +440,7 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
     const selectionBoundary =
       inheritedForbidden ||
       (node.kind === "sort" && !terminalRootSort) ||
+      node.kind === "recursive-closure" ||
       node.kind === "limit";
     for (const child of nodeChildren(node))
       visit(
@@ -475,7 +480,12 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
       node.kind === "anti-join"
     )
       facts.selective = true;
-    if (node.kind === "sort" || node.kind === "limit" || node.kind === "window")
+    if (
+      node.kind === "sort" ||
+      node.kind === "limit" ||
+      node.kind === "window" ||
+      node.kind === "recursive-closure"
+    )
       facts.forbidden = true;
     for (const expression of nodeExpressions(node)) {
       const inspect = (current: SqlExpression): void => {
@@ -756,6 +766,20 @@ export function lowerLogicalQuerySource<Row extends object>(
     sharedRelations: sharedRelationDefinitions(source.node),
     directScanProjections: directScanProjectionChoices(source.node),
   };
+}
+
+/** Number of distinct recursive closure nodes rendered as local CTEs. */
+export function recursiveClosureCount(root: LogicalQueryNode): number {
+  const visited = new Set<LogicalQueryNode>();
+  let count = 0;
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    if (node.kind === "recursive-closure") count += 1;
+    for (const source of nodeSources(node)) visit(source.node);
+  };
+  visit(root);
+  return count;
 }
 
 export function lowerLogicalPlan<

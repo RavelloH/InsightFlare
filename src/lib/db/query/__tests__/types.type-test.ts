@@ -1,4 +1,5 @@
 import {
+  and,
   callFunction,
   caseWhen,
   castInteger,
@@ -15,6 +16,7 @@ import {
   onConflictDoUpdate,
   param,
   project,
+  recursiveClosure,
   rowNumber,
   scan,
   textContains,
@@ -427,6 +429,68 @@ export function compileTimeDatabaseTypeAssertions(): void {
     UnionValueWidensNullability,
   ] = [true, true];
   void unionChecks;
+
+  const jsonNodes = scan(schema.custom_event_json_nodes);
+  const closureTuples = project(jsonNodes, {
+    eventPk: jsonNodes.columns.event_pk,
+    nodeId: jsonNodes.columns.node_id,
+    parentNodeId: jsonNodes.columns.parent_node_id,
+  });
+  const selectedClosure = recursiveClosure(
+    closureTuples,
+    closureTuples,
+    (current, candidate) =>
+      and(
+        eq(current.eventPk, candidate.eventPk),
+        eq(current.parentNodeId, candidate.nodeId),
+      ),
+  );
+  const compiledClosure = compileD1Query(selectedClosure);
+  type ClosureRow =
+    typeof compiledClosure extends CompiledQuery<infer Row> ? Row : never;
+  type ClosurePreservesCompleteTuple = Assert<
+    Equal<keyof ClosureRow, "eventPk" | "nodeId" | "parentNodeId">
+  >;
+  type ClosureKeepsNamespace = Assert<Equal<ClosureRow["eventPk"], number>>;
+  type ClosureKeepsNullableParent = Assert<
+    Equal<
+      ExpressionResultOf<typeof selectedClosure.columns.parentNodeId>,
+      ExpressionResultType<"integer", true>
+    >
+  >;
+  const closureTypeChecks: [
+    ClosurePreservesCompleteTuple,
+    ClosureKeepsNamespace,
+    ClosureKeepsNullableParent,
+  ] = [true, true, true];
+  void closureTypeChecks;
+  const missingClosureField = project(jsonNodes, {
+    eventPk: jsonNodes.columns.event_pk,
+    node: jsonNodes.columns.node_id,
+  });
+  // @ts-expect-error Candidate closure tuples must have every seed field.
+  recursiveClosure(closureTuples, missingClosureField, () =>
+    eq(param(1), param(1)),
+  );
+  const incompatibleClosureField = project(jsonNodes, {
+    eventPk: param("wrong-affinity"),
+    nodeId: jsonNodes.columns.node_id,
+    parentNodeId: jsonNodes.columns.parent_node_id,
+  });
+  // @ts-expect-error Corresponding closure field affinities must be compatible.
+  recursiveClosure(closureTuples, incompatibleClosureField, () =>
+    eq(param(1), param(1)),
+  );
+  const extraClosureField = project(jsonNodes, {
+    eventPk: jsonNodes.columns.event_pk,
+    nodeId: jsonNodes.columns.node_id,
+    parentNodeId: jsonNodes.columns.parent_node_id,
+    extra: jsonNodes.columns.depth,
+  });
+  // @ts-expect-error Recursive closure tuples cannot add extra fields.
+  recursiveClosure(closureTuples, extraClosureField, () =>
+    eq(param(1), param(1)),
+  );
 
   // @ts-expect-error The non-null email column is required by the generated catalog.
   insert(schema.users, { name: "No email" });

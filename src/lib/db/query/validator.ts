@@ -16,6 +16,7 @@ import type {
   LogicalQueryNode,
   OutputField,
   QuerySource,
+  RecursiveClosureNode,
   Relation,
   SortNode,
   UnionNode,
@@ -23,6 +24,7 @@ import type {
   WindowOrderKey,
   WindowSpecification,
 } from "./plan";
+import { hasOwnedRecursiveClosureScopes } from "./plan";
 
 export type ExpressionScopeMetadata = ReadonlyMap<
   RelationScope,
@@ -516,6 +518,168 @@ function sourceOf(node: LogicalQueryNode): QuerySource {
   return { node, scope: node.scope, fields: node.fields };
 }
 
+function closureExpressionSources(expression: SqlExpression): QuerySource[] {
+  switch (expression.kind) {
+    case "binary":
+    case "distinct-from":
+      return [
+        ...closureExpressionSources(expression.left),
+        ...closureExpressionSources(expression.right),
+      ];
+    case "boolean":
+      return expression.expressions.flatMap(closureExpressionSources);
+    case "not":
+    case "null-check":
+    case "cast-integer":
+      return closureExpressionSources(expression.expression);
+    case "in-list":
+      return closureExpressionSources(expression.expression);
+    case "in-subquery":
+      return [
+        ...closureExpressionSources(expression.expression),
+        expression.query,
+      ];
+    case "function":
+      return expression.arguments.flatMap(closureExpressionSources);
+    case "aggregate":
+      return expression.expression
+        ? closureExpressionSources(expression.expression)
+        : [];
+    case "coalesce":
+      return expression.expressions.flatMap(closureExpressionSources);
+    case "case":
+      return [
+        ...expression.branches.flatMap((branch) => [
+          ...closureExpressionSources(branch.when),
+          ...closureExpressionSources(branch.then),
+        ]),
+        ...(expression.else ? closureExpressionSources(expression.else) : []),
+      ];
+    case "scalar-subquery":
+      return [expression.query];
+    case "column":
+    case "parameter":
+    case "excluded":
+    case "unixepoch":
+      return [];
+  }
+}
+
+function closureNodeSources(node: LogicalQueryNode): QuerySource[] {
+  const children =
+    node.kind === "scan"
+      ? []
+      : node.kind === "filter" ||
+          node.kind === "project" ||
+          node.kind === "aggregate" ||
+          node.kind === "distinct" ||
+          node.kind === "window" ||
+          node.kind === "sort" ||
+          node.kind === "limit"
+        ? [node.input]
+        : node.kind === "recursive-closure"
+          ? [node.seed, node.candidates]
+          : [node.left, node.right];
+  const expressions: readonly SqlExpression[] =
+    node.kind === "filter"
+      ? [node.predicate]
+      : node.kind === "project"
+        ? node.projections.map(({ expression }) => expression)
+        : node.kind === "join" ||
+            node.kind === "semi-join" ||
+            node.kind === "anti-join"
+          ? [node.condition]
+          : node.kind === "aggregate"
+            ? [
+                ...node.groups.map(({ expression }) => expression),
+                ...node.aggregates.map(({ expression }) => expression),
+              ]
+            : node.kind === "sort"
+              ? node.keys.map(({ expression }) => expression)
+              : node.kind === "window"
+                ? node.windows.flatMap(({ specification }) => [
+                    ...specification.partitionBy,
+                    ...(specification.kind === "row-number"
+                      ? specification.orderBy.map(
+                          ({ expression }) => expression,
+                        )
+                      : []),
+                  ])
+                : node.kind === "limit"
+                  ? [node.count, ...(node.offset ? [node.offset] : [])]
+                  : node.kind === "recursive-closure"
+                    ? [node.predicate]
+                    : [];
+  return [...children, ...expressions.flatMap(closureExpressionSources)];
+}
+
+function containsRecursiveClosure(source: QuerySource): boolean {
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): boolean => {
+    if (node.kind === "recursive-closure") return true;
+    if (visited.has(node)) return false;
+    visited.add(node);
+    return closureNodeSources(node).some((child) => visit(child.node));
+  };
+  return visit(source.node);
+}
+
+function validRelationScope(scope: RelationScope): boolean {
+  return (
+    !!scope &&
+    typeof scope === "object" &&
+    !Array.isArray(scope) &&
+    typeof scope.marker === "symbol" &&
+    hasOnlyKeys(scope, ["marker"])
+  );
+}
+
+function validateClosurePredicateShape(expression: SqlExpression): void {
+  if (expression.kind === "aggregate")
+    invalid(
+      "Recursive closure predicates cannot contain aggregate expressions",
+    );
+  if (
+    expression.kind === "scalar-subquery" ||
+    expression.kind === "in-subquery"
+  )
+    invalid("Recursive closure predicates cannot contain query expressions");
+  switch (expression.kind) {
+    case "binary":
+    case "distinct-from":
+      validateClosurePredicateShape(expression.left);
+      validateClosurePredicateShape(expression.right);
+      break;
+    case "boolean":
+      expression.expressions.forEach(validateClosurePredicateShape);
+      break;
+    case "not":
+    case "null-check":
+    case "cast-integer":
+    case "in-list":
+      validateClosurePredicateShape(expression.expression);
+      break;
+    case "function":
+      expression.arguments.forEach(validateClosurePredicateShape);
+      break;
+    case "column":
+    case "parameter":
+    case "excluded":
+    case "unixepoch":
+      break;
+    case "coalesce":
+      expression.expressions.forEach(validateClosurePredicateShape);
+      break;
+    case "case":
+      expression.branches.forEach((branch) => {
+        validateClosurePredicateShape(branch.when);
+        validateClosurePredicateShape(branch.then);
+      });
+      if (expression.else) validateClosurePredicateShape(expression.else);
+      break;
+  }
+}
+
 function sameFieldMetadata(
   left: {
     readonly name: string;
@@ -878,6 +1042,141 @@ function validateSource(
           )
             invalid("UNION output metadata is not compatible with its inputs");
         }
+        return;
+      }
+      case "recursive-closure": {
+        const closure = node as RecursiveClosureNode;
+        if (
+          !hasOnlyKeys(closure, [
+            "kind",
+            "seed",
+            "candidates",
+            "currentScope",
+            "candidateScope",
+            "predicate",
+            "scope",
+            "fields",
+          ])
+        )
+          invalid("Recursive closure contains unsupported node metadata");
+        if (
+          !hasOwnedRecursiveClosureScopes(closure) ||
+          !validRelationScope(closure.scope) ||
+          !validRelationScope(closure.currentScope) ||
+          !validRelationScope(closure.candidateScope) ||
+          closure.currentScope === closure.candidateScope ||
+          closure.currentScope === closure.scope ||
+          closure.candidateScope === closure.scope ||
+          closure.currentScope === closure.seed.scope ||
+          closure.currentScope === closure.candidates.scope ||
+          closure.candidateScope === closure.seed.scope ||
+          closure.candidateScope === closure.candidates.scope
+        )
+          invalid("Recursive closure has invalid or reused local scopes");
+        if (
+          containsRecursiveClosure(closure.seed) ||
+          containsRecursiveClosure(closure.candidates)
+        )
+          invalid("Nested recursive closures are not supported");
+
+        // Recursive inputs form an independent finite domain. They cannot
+        // capture an enclosing relation, much less the local current row.
+        validateSource(closure.seed, activeSources, new Map());
+        validateSource(closure.candidates, activeSources, new Map());
+
+        if (
+          closure.seed.fields.length === 0 ||
+          closure.seed.fields.length !== closure.candidates.fields.length ||
+          closure.fields.length !== closure.seed.fields.length
+        )
+          invalid("Recursive closure inputs must have matching row shapes");
+        const expectedFields = closure.seed.fields.map((field, index) => {
+          const candidateField = closure.candidates.fields[index];
+          if (!candidateField || field.name !== candidateField.name)
+            invalid(
+              "Recursive closure input fields must match in order and name",
+            );
+          const affinity = commonAffinity(
+            field.affinity,
+            candidateField.affinity,
+          );
+          if (!affinity)
+            invalid(
+              "Recursive closure input fields have incompatible affinities",
+            );
+          return {
+            name: field.name,
+            affinity,
+            nullable: field.nullable || candidateField.nullable,
+          };
+        });
+        if (
+          closure.fields.length !== expectedFields.length ||
+          closure.fields.some(
+            (field, index) => !sameFieldMetadata(field, expectedFields[index]!),
+          )
+        )
+          invalid(
+            "Recursive closure output metadata must match its input tuple",
+          );
+
+        validateClosurePredicateShape(closure.predicate);
+        const localScopes = new Map<RelationScope, readonly OutputField[]>([
+          [closure.currentScope, expectedFields],
+          [closure.candidateScope, expectedFields],
+        ]);
+        validateExpression(closure.predicate, localScopes, activeSources);
+        const validateLocalColumnNames = (expression: SqlExpression): void => {
+          if (expression.kind === "column") {
+            if (
+              expression.scope === closure.currentScope ||
+              expression.scope === closure.candidateScope
+            ) {
+              if (expectedFields[expression.index]?.name !== expression.name)
+                invalid(
+                  "Recursive closure predicate column name does not match its field",
+                );
+            }
+            return;
+          }
+          switch (expression.kind) {
+            case "binary":
+            case "distinct-from":
+              validateLocalColumnNames(expression.left);
+              validateLocalColumnNames(expression.right);
+              return;
+            case "boolean":
+              expression.expressions.forEach(validateLocalColumnNames);
+              return;
+            case "not":
+            case "null-check":
+            case "cast-integer":
+            case "in-list":
+              validateLocalColumnNames(expression.expression);
+              return;
+            case "function":
+              expression.arguments.forEach(validateLocalColumnNames);
+              return;
+            case "coalesce":
+              expression.expressions.forEach(validateLocalColumnNames);
+              return;
+            case "case":
+              expression.branches.forEach((branch) => {
+                validateLocalColumnNames(branch.when);
+                validateLocalColumnNames(branch.then);
+              });
+              if (expression.else) validateLocalColumnNames(expression.else);
+              return;
+            case "aggregate":
+            case "scalar-subquery":
+            case "in-subquery":
+            case "parameter":
+            case "excluded":
+            case "unixepoch":
+              return;
+          }
+        };
+        validateLocalColumnNames(closure.predicate);
         return;
       }
     }

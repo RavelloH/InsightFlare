@@ -92,6 +92,7 @@ export {
   join,
   limit,
   project,
+  recursiveClosure,
   rowNumber,
   scan,
   semiJoin,

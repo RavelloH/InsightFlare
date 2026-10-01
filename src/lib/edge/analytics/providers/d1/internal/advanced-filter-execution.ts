@@ -32,8 +32,9 @@ import type {
 
 import type { AdvancedFilterActivityRow } from "./advanced-filter-activity-query";
 import { queryAdvancedFilterActivityRange } from "./advanced-filter-activity-query";
+import type { AdvancedFilterPayloadNode } from "./advanced-filter-payload-query";
+import { queryAdvancedFilterPayloadNodes } from "./advanced-filter-payload-query";
 import { siteCoverage } from "./advanced-filter-site-coverage";
-import { queryD1All } from "./core-sources";
 import type { D1ReadDiagnostics } from "./diagnostics";
 
 const MAX_ADVANCED_ACTIVITIES = 20_000;
@@ -42,17 +43,7 @@ const SITE_CHUNK_SIZE = 90;
 
 type RawEvaluationRow = AdvancedFilterActivityRow;
 
-interface RawPayloadNode extends Record<string, unknown> {
-  event_id: string;
-  node_id: number;
-  parent_node_id: number | null;
-  key_name: string | null;
-  array_index: number | null;
-  value_type: number;
-  string_value: string | null;
-  number_value: number | null;
-  boolean_value: number | null;
-}
+type RawPayloadNode = AdvancedFilterPayloadNode;
 
 function invalidInput(
   path: string,
@@ -89,13 +80,6 @@ function evaluationReadRanges(
     }
   }
   return merged;
-}
-
-function sourceIdentityPredicate(
-  alias: "v" | "ce" | "seed_event",
-  count: number,
-): string {
-  return `${alias}.site_pk IN (SELECT site_pk FROM site_identities WHERE site_id IN (${Array.from({ length: count }, () => "?").join(", ")}))`;
 }
 
 function payloadPaths(expression: FilterDocument["root"]): {
@@ -188,54 +172,6 @@ async function loadActivities(
   return activities;
 }
 
-function payloadSql(
-  siteCount: number,
-  paths: readonly string[],
-  wholePayload: boolean,
-): string {
-  const selectedNodes =
-    !wholePayload && paths.length > 0
-      ? `WITH RECURSIVE selected_payload_nodes(event_pk, node_id, parent_node_id) AS (
-  SELECT n.event_pk, n.node_id, n.parent_node_id
-  FROM custom_event_json_nodes n
-  INNER JOIN custom_event_json_paths p ON p.id = n.path_id
-  INNER JOIN custom_events seed_event ON seed_event.event_pk = n.event_pk
-  WHERE ${sourceIdentityPredicate("seed_event", siteCount)}
-    AND seed_event.occurred_at >= ? AND seed_event.occurred_at < ?
-    AND p.path IN (${paths.map(() => "?").join(", ")})
-  UNION
-  SELECT parent.event_pk, parent.node_id, parent.parent_node_id
-  FROM custom_event_json_nodes parent
-  INNER JOIN selected_payload_nodes child
-    ON child.event_pk = parent.event_pk AND child.parent_node_id = parent.node_id
-)`
-      : "";
-  const nodeSource = selectedNodes
-    ? "(SELECT n.* FROM selected_payload_nodes selected INNER JOIN custom_event_json_nodes n ON n.event_pk = selected.event_pk AND n.node_id = selected.node_id) n"
-    : "custom_event_json_nodes n";
-  return `${selectedNodes}
-SELECT
-  ce.event_id,
-  n.node_id,
-  n.parent_node_id,
-  k.key AS key_name,
-  n.array_index,
-  n.value_type,
-  jv.string_value,
-  jv.number_value,
-  jv.boolean_value
-FROM custom_events ce
-INNER JOIN ${nodeSource} ON n.event_pk = ce.event_pk
-INNER JOIN custom_event_json_paths p ON p.id = n.path_id AND p.site_pk = ce.site_pk
-LEFT JOIN custom_event_json_keys k ON k.id = n.key_id AND k.site_pk = ce.site_pk
-LEFT JOIN custom_event_json_values jv ON jv.event_pk = n.event_pk AND jv.node_id = n.node_id
-INNER JOIN visits v ON v.site_pk = ce.site_pk AND v.visit_id = ce.visit_id
-WHERE ${sourceIdentityPredicate("ce", siteCount)}
-  AND ce.occurred_at >= ? AND ce.occurred_at < ?
-ORDER BY ce.event_id, n.node_id
-LIMIT ?`;
-}
-
 function nodeValue(node: RawPayloadNode): unknown {
   if (node.value_type === 0) return null;
   if (node.value_type === 1) return node.string_value;
@@ -281,6 +217,7 @@ function reconstructPayloads(
 
 async function loadPayloads(
   env: Env,
+  subject: SemanticSubjectDomain,
   siteIds: readonly string[],
   ranges: readonly {
     readonly startMs: number;
@@ -294,20 +231,16 @@ async function loadPayloads(
   for (const chunk of siteChunks(siteIds)) {
     for (const range of ranges) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const rows = await queryD1All<RawPayloadNode>(
+      const rows = await queryAdvancedFilterPayloadNodes({
         env,
-        payloadSql(chunk.length, paths.paths, paths.wholePayload),
-        [
-          ...(!paths.wholePayload && paths.paths.length > 0
-            ? [...chunk, range.startMs, range.endExclusiveMs, ...paths.paths]
-            : []),
-          ...chunk,
-          range.startMs,
-          range.endExclusiveMs,
-          MAX_ADVANCED_PAYLOAD_NODES + 1,
-        ],
+        subject,
+        siteIds: chunk,
+        range,
+        paths: paths.paths,
+        wholePayload: paths.wholePayload,
         diagnostics,
-      );
+        signal,
+      });
       payloadNodes.push(...rows);
       if (payloadNodes.length > MAX_ADVANCED_PAYLOAD_NODES) {
         throw invalidInput("filters", "filter_payload_node_limit_exceeded");
@@ -537,6 +470,7 @@ async function evaluateForSites(input: {
     paths.paths.length || paths.wholePayload
       ? loadPayloads(
           input.env,
+          input.subject,
           input.siteIds,
           readRanges,
           paths,

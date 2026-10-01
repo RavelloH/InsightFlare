@@ -171,6 +171,32 @@ export interface UnionNode extends QuerySourceBase {
   readonly right: QuerySource;
 }
 
+export interface RecursiveClosureNode extends QuerySourceBase {
+  readonly kind: "recursive-closure";
+  readonly seed: QuerySource;
+  readonly candidates: QuerySource;
+  readonly currentScope: RelationScope;
+  readonly candidateScope: RelationScope;
+  readonly predicate: Predicate;
+}
+
+const recursiveClosureScopeOwners = new WeakMap<
+  RecursiveClosureNode,
+  { readonly current: RelationScope; readonly candidate: RelationScope }
+>();
+
+/** Internal validator guard: local working scopes must come from this constructor. */
+export function hasOwnedRecursiveClosureScopes(
+  node: RecursiveClosureNode,
+): boolean {
+  const scopes = recursiveClosureScopeOwners.get(node);
+  return (
+    !!scopes &&
+    scopes.current === node.currentScope &&
+    scopes.candidate === node.candidateScope
+  );
+}
+
 export type LogicalQueryNode =
   | ScanNode
   | FilterNode
@@ -182,7 +208,8 @@ export type LogicalQueryNode =
   | WindowNode
   | SortNode
   | LimitNode
-  | UnionNode;
+  | UnionNode
+  | RecursiveClosureNode;
 
 function outputField(
   name: string,
@@ -735,6 +762,171 @@ type UnionColumns<
     >
   >;
 };
+
+type ClosureResultNullable<Left, Right> = true extends
+  ExpressionResultOf<Left>["nullable"] | ExpressionResultOf<Right>["nullable"]
+  ? true
+  : false;
+type ClosureResultAffinity<Left, Right> = CommonExpressionAffinity<
+  ExpressionResultOf<Left>["affinity"],
+  ExpressionResultOf<Right>["affinity"]
+>;
+type ClosureRow<
+  SeedColumns extends Readonly<Record<string, AnyExpression>>,
+  CandidateColumns extends Readonly<Record<keyof SeedColumns, AnyExpression>>,
+> = {
+  readonly [K in keyof SeedColumns]:
+    ExpressionValue<SeedColumns[K]> | ExpressionValue<CandidateColumns[K]>;
+};
+type ClosureColumns<
+  SeedColumns extends Readonly<Record<string, AnyExpression>>,
+  CandidateColumns extends Readonly<Record<keyof SeedColumns, AnyExpression>>,
+> = {
+  readonly [K in keyof SeedColumns]: ColumnExpression<
+    ExpressionValue<SeedColumns[K]> | ExpressionValue<CandidateColumns[K]>,
+    ExpressionResultType<
+      ClosureResultAffinity<SeedColumns[K], CandidateColumns[K]>,
+      ClosureResultNullable<SeedColumns[K], CandidateColumns[K]>
+    >
+  >;
+};
+type NoAdditionalClosureFields<
+  SeedColumns extends Readonly<Record<string, AnyExpression>>,
+  CandidateColumns extends Readonly<Record<string, AnyExpression>>,
+> =
+  Exclude<keyof CandidateColumns, keyof SeedColumns> extends never
+    ? unknown
+    : never;
+type ClosureAffinityCompatible<Left, Right> =
+  ExpressionResultOf<Left>["affinity"] extends "unknown"
+    ? true
+    : ExpressionResultOf<Right>["affinity"] extends "unknown"
+      ? true
+      : [ExpressionResultOf<Left>["affinity"]] extends [
+            ExpressionResultOf<Right>["affinity"],
+          ]
+        ? true
+        : [ExpressionResultOf<Left>["affinity"]] extends [
+              "integer" | "real" | "numeric",
+            ]
+          ? [ExpressionResultOf<Right>["affinity"]] extends [
+              "integer" | "real" | "numeric",
+            ]
+            ? true
+            : false
+          : false;
+type IncompatibleClosureFieldKeys<
+  SeedColumns extends Readonly<Record<string, AnyExpression>>,
+  CandidateColumns extends Readonly<Record<keyof SeedColumns, AnyExpression>>,
+> = {
+  readonly [K in keyof SeedColumns]: ClosureAffinityCompatible<
+    SeedColumns[K],
+    CandidateColumns[K]
+  > extends true
+    ? never
+    : K;
+}[keyof SeedColumns];
+type CompatibleClosureAffinities<
+  SeedColumns extends Readonly<Record<string, AnyExpression>>,
+  CandidateColumns extends Readonly<Record<keyof SeedColumns, AnyExpression>>,
+> =
+  IncompatibleClosureFieldKeys<SeedColumns, CandidateColumns> extends never
+    ? unknown
+    : never;
+
+/**
+ * Repeatedly adds matching candidates to a finite, set-valued relation until
+ * no new complete rows are produced. The callback sees only local typed
+ * current-work and candidate columns; it cannot refer to source SQL or CTEs.
+ */
+export function recursiveClosure<
+  SeedRow extends object,
+  SeedColumns extends Readonly<Record<string, AnyExpression>>,
+  CandidateRow extends object,
+  CandidateColumns extends Readonly<Record<keyof SeedColumns, AnyExpression>> &
+    Readonly<Record<string, AnyExpression>>,
+>(
+  seed: Relation<SeedRow, SeedColumns>,
+  candidates: Relation<CandidateRow, CandidateColumns> &
+    NoAdditionalClosureFields<SeedColumns, CandidateColumns> &
+    CompatibleClosureAffinities<SeedColumns, CandidateColumns>,
+  predicateBuilder: (
+    current: ClosureColumns<SeedColumns, CandidateColumns>,
+    candidate: ClosureColumns<SeedColumns, CandidateColumns>,
+  ) => Predicate,
+): Relation<
+  ClosureRow<SeedColumns, CandidateColumns>,
+  ClosureColumns<SeedColumns, CandidateColumns>
+> {
+  if (
+    !Array.isArray(seed.fields) ||
+    !Array.isArray(candidates.fields) ||
+    seed.fields.length === 0 ||
+    seed.fields.length !== candidates.fields.length ||
+    seed.fields.some(
+      (field, index) =>
+        field.name !== candidates.fields[index]?.name ||
+        commonAffinity(field.affinity, candidates.fields[index]!.affinity) ===
+          undefined,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Recursive closure inputs must have matching fields and compatible affinities",
+    );
+
+  const fields = seed.fields.map((field, index) => {
+    const candidateField = candidates.fields[index]!;
+    const affinity = commonAffinity(field.affinity, candidateField.affinity);
+    if (affinity === undefined)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        `Recursive closure field "${field.name}" has incompatible affinities ${field.affinity} and ${candidateField.affinity}`,
+      );
+    return outputField(
+      field.name,
+      affinity,
+      field.nullable || candidateField.nullable,
+    );
+  });
+  assertFields(fields);
+
+  const scope = createRelationScope();
+  const currentScope = createRelationScope();
+  const candidateScope = createRelationScope();
+  const current = outputColumns(fields, currentScope) as ClosureColumns<
+    SeedColumns,
+    CandidateColumns
+  >;
+  const candidate = outputColumns(fields, candidateScope) as ClosureColumns<
+    SeedColumns,
+    CandidateColumns
+  >;
+  const predicate = predicateBuilder(current, candidate);
+  const node: RecursiveClosureNode = {
+    kind: "recursive-closure",
+    seed: sourceOf(seed),
+    candidates: sourceOf(candidates),
+    currentScope,
+    candidateScope,
+    predicate,
+    scope,
+    fields,
+  };
+  recursiveClosureScopeOwners.set(node, {
+    current: currentScope,
+    candidate: candidateScope,
+  });
+  return relation(
+    node,
+    scope,
+    fields,
+    outputColumns(fields, scope) as ClosureColumns<
+      SeedColumns,
+      CandidateColumns
+    >,
+  );
+}
 
 export function union<
   LeftRow extends object,

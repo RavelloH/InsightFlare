@@ -30,6 +30,7 @@ import {
   optimizePhysicalMembershipBudget,
   type PhysicalMembershipUsage,
   type PhysicalQueryPlan,
+  recursiveClosureCount,
   type SharedRelationDefinition,
   validatePhysicalQueryPlan,
 } from "./physical-plan";
@@ -46,6 +47,8 @@ interface RenderContext {
   queryAlias: number;
   leftAlias: number;
   rightAlias: number;
+  recursiveCteAlias: number;
+  readonly reservedIdentifiers: Set<string>;
   readonly sharedRelations: ReadonlyMap<LogicalQueryNode, string>;
   readonly directScanProjections: ReadonlyMap<
     ProjectNode,
@@ -689,7 +692,69 @@ function compileNode(
         identifier(rightAlias),
       );
     }
+    case "recursive-closure":
+      return compileRecursiveClosure(node, context);
   }
+}
+
+function compileRecursiveClosure(
+  node: Extract<LogicalQueryNode, { kind: "recursive-closure" }>,
+  context: RenderContext,
+): SqlFragment {
+  const cteName = recursiveCteName(context);
+  const recursiveAlias = nextAlias(context, "r");
+  const candidateAlias = nextAlias(context, "l");
+  const outputAlias = nextAlias(context, "q");
+  const cteColumns = node.fields.map((_field, index) => `_c${index}`);
+  const anchor = compileQuerySource(node.seed, context, new Map());
+  const candidate = compileQuerySource(node.candidates, context, new Map());
+  const predicateScopes = extendScopes(new Map(), [
+    [node.currentScope, { alias: recursiveAlias, fieldNames: cteColumns }],
+    [
+      node.candidateScope,
+      {
+        alias: candidateAlias,
+        fieldNames: node.candidates.fields.map(({ name }) => name),
+      },
+    ],
+  ]);
+  const recursiveStep = concat(
+    text("SELECT "),
+    join(
+      node.candidates.fields.map((field, index) =>
+        concat(
+          column(index, candidateAlias, field.name),
+          text(` AS "_c${index}"`),
+        ),
+      ),
+    ),
+    text(" FROM "),
+    identifier(cteName),
+    text(" AS "),
+    identifier(recursiveAlias),
+    text(" INNER JOIN "),
+    parenthesize(candidate),
+    text(" AS "),
+    identifier(candidateAlias),
+    text(" ON "),
+    compileD1Expression(node.predicate, predicateScopes, context),
+  );
+  return concat(
+    text("WITH RECURSIVE "),
+    identifier(cteName),
+    text(" ("),
+    join(cteColumns.map(identifier)),
+    text(") AS ("),
+    anchor,
+    text(" UNION "),
+    recursiveStep,
+    text(") SELECT "),
+    join(outputList(node.fields.length, outputAlias)),
+    text(" FROM "),
+    identifier(cteName),
+    text(" AS "),
+    identifier(outputAlias),
+  );
 }
 
 function compileQuerySource(
@@ -717,17 +782,138 @@ function renderContext(
   membershipStrategies?: RenderContext["membershipStrategies"],
   membershipUsage?: RenderContext["membershipUsage"],
   directScanProjections: RenderContext["directScanProjections"] = new Map(),
+  reservedIdentifiers: ReadonlySet<string> = new Set(),
 ): RenderContext {
   return {
     scanAlias: 0,
     queryAlias: 0,
     leftAlias: 0,
     rightAlias: 0,
+    recursiveCteAlias: 0,
+    reservedIdentifiers: new Set(reservedIdentifiers),
     sharedRelations,
     directScanProjections,
     ...(membershipStrategies ? { membershipStrategies } : {}),
     ...(membershipUsage ? { membershipUsage } : {}),
   };
+}
+
+function recursiveCteName(context: RenderContext): string {
+  let name: string;
+  do {
+    name = `_d1_recursive_${context.recursiveCteAlias++}`;
+  } while (context.reservedIdentifiers.has(name));
+  context.reservedIdentifiers.add(name);
+  return name;
+}
+
+function reservePlanIdentifiers(
+  physical: PhysicalQueryPlan<object>,
+): Set<string> {
+  const identifiers = new Set(physical.sharedRelations.map(({ name }) => name));
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    if (node.kind === "scan") identifiers.add(node.table.name);
+    const children =
+      node.kind === "scan"
+        ? []
+        : node.kind === "filter" ||
+            node.kind === "project" ||
+            node.kind === "aggregate" ||
+            node.kind === "distinct" ||
+            node.kind === "window" ||
+            node.kind === "sort" ||
+            node.kind === "limit"
+          ? [node.input]
+          : node.kind === "recursive-closure"
+            ? [node.seed, node.candidates]
+            : [node.left, node.right];
+    for (const child of children) visit(child.node);
+    const expressions =
+      node.kind === "filter"
+        ? [node.predicate]
+        : node.kind === "project"
+          ? node.projections.map(({ expression }) => expression)
+          : node.kind === "join" ||
+              node.kind === "semi-join" ||
+              node.kind === "anti-join"
+            ? [node.condition]
+            : node.kind === "aggregate"
+              ? [
+                  ...node.groups.map(({ expression }) => expression),
+                  ...node.aggregates.map(({ expression }) => expression),
+                ]
+              : node.kind === "sort"
+                ? node.keys.map(({ expression }) => expression)
+                : node.kind === "window"
+                  ? node.windows.flatMap(({ specification }) => [
+                      ...specification.partitionBy,
+                      ...(specification.kind === "row-number"
+                        ? specification.orderBy.map(
+                            ({ expression }) => expression,
+                          )
+                        : []),
+                    ])
+                  : node.kind === "limit"
+                    ? [node.count, ...(node.offset ? [node.offset] : [])]
+                    : node.kind === "recursive-closure"
+                      ? [node.predicate]
+                      : [];
+    const visitExpressionQueries = (expression: SqlExpression): void => {
+      switch (expression.kind) {
+        case "binary":
+        case "distinct-from":
+          visitExpressionQueries(expression.left);
+          visitExpressionQueries(expression.right);
+          break;
+        case "boolean":
+          expression.expressions.forEach(visitExpressionQueries);
+          break;
+        case "not":
+        case "null-check":
+        case "cast-integer":
+          visitExpressionQueries(expression.expression);
+          break;
+        case "in-list":
+          visitExpressionQueries(expression.expression);
+          break;
+        case "in-subquery":
+          visitExpressionQueries(expression.expression);
+          visit(expression.query.node);
+          break;
+        case "function":
+          expression.arguments.forEach(visitExpressionQueries);
+          break;
+        case "aggregate":
+          if (expression.expression)
+            visitExpressionQueries(expression.expression);
+          break;
+        case "coalesce":
+          expression.expressions.forEach(visitExpressionQueries);
+          break;
+        case "case":
+          expression.branches.forEach((branch) => {
+            visitExpressionQueries(branch.when);
+            visitExpressionQueries(branch.then);
+          });
+          if (expression.else) visitExpressionQueries(expression.else);
+          break;
+        case "scalar-subquery":
+          visit(expression.query.node);
+          break;
+        case "column":
+        case "parameter":
+        case "excluded":
+        case "unixepoch":
+          break;
+      }
+    };
+    expressions.forEach(visitExpressionQueries);
+  };
+  visit(physical.root);
+  return identifiers;
 }
 
 export interface D1CompileOptions {
@@ -838,6 +1024,7 @@ function optimizeForFinalShape(physical: PhysicalQueryPlan<object>): {
     undefined,
     membershipUsage,
     directScanProjections,
+    reservePlanIdentifiers(physical),
   );
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;
@@ -916,8 +1103,15 @@ function renderAndBudget(
         membershipStrategies,
         undefined,
         directScanProjections,
+        reservePlanIdentifiers(physical),
       )
-    : renderContext(sharedNames, membershipStrategies);
+    : renderContext(
+        sharedNames,
+        membershipStrategies,
+        undefined,
+        new Map(),
+        reservePlanIdentifiers(physical),
+      );
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;
     const body = compileNode(shared.node, context, new Map());
@@ -952,7 +1146,9 @@ function physicalPlanShape(
   }
   return {
     version: 1,
-    cteCount: includeSharedRelations ? physical.sharedRelations.length : 0,
+    cteCount: includeSharedRelations
+      ? physical.sharedRelations.length + recursiveClosureCount(physical.root)
+      : recursiveClosureCount(physical.root),
     directScanProjectionCount: includeSharedRelations
       ? physical.directScanProjections.length
       : 0,

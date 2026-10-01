@@ -492,7 +492,10 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
     ["siteCoverage"],
   "src/lib/edge/analytics/providers/d1/internal/advanced-filter-execution.ts": [
     "loadActivities",
+    "loadPayloads",
   ],
+  "src/lib/edge/analytics/providers/d1/internal/advanced-filter-payload-query.ts":
+    ["queryAdvancedFilterPayloadNodes"],
   "src/lib/edge/analytics/providers/d1/internal/goals.ts": [
     "queryGoalDefinitionsPage",
     "queryGoalDefinition",
