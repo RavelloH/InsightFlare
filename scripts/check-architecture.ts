@@ -230,6 +230,41 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
   "src/lib/edge/admin/observability/request-observation-query.ts": [
     "siteLookupByIds",
   ],
+  "src/lib/edge/analytics/providers/d1/internal/team.ts": [
+    "listTeamSites",
+    "queryTeamSitesPageFromD1",
+  ],
+  "src/lib/edge/ingest/buffer-store.ts": [
+    "findRecentVisitorSession",
+    "readPersistedVisitRow",
+  ],
+  "src/lib/edge/ingest/custom-event-dictionary-queries.ts": [
+    "customEventDictionaryUpsert",
+    "customEventDictionaryIdQuery",
+  ],
+  "src/lib/edge/ingest/custom-event-flush.ts": [
+    "resolveDictionaryId",
+    "hasPersistedVisit",
+    "hasPersistedCustomEvent",
+  ],
+  "src/lib/edge/ingest/durable-object.ts": ["handleIdentify"],
+  "src/lib/edge/ingest/persisted-visit-queries.ts": [
+    "persistedRecentVisitorSessionQuery",
+    "persistedVisitRowQuery",
+    "persistedIdentifyVisitQuery",
+    "updatePersistedIdentifyMutation",
+  ],
+  "src/lib/edge/scheduled-tasks/database-maintenance.ts": [
+    "deleteExpiredInBatches",
+    "runDatabaseMaintenance",
+  ],
+};
+
+const TYPED_QUERY_DO_SQL_FORWARDING: Readonly<
+  Record<string, readonly string[]>
+> = {
+  "src/lib/edge/ingest/buffer-store.ts": ["findRecentVisitorSession"],
+  "src/lib/edge/ingest/durable-object.ts": ["handleIdentify"],
 };
 
 function typedQueryFunctionViolations(
@@ -247,6 +282,9 @@ function typedQueryFunctionViolations(
     relativePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
   const targets = new Set(targetNames);
+  const doSqlForwardingTargets = new Set(
+    TYPED_QUERY_DO_SQL_FORWARDING[relativePath] ?? [],
+  );
   const forbiddenNames = new Set([
     "createDatabaseRuntime",
     "DatabaseStatement",
@@ -282,7 +320,17 @@ function typedQueryFunctionViolations(
       message,
     });
   };
-  const inspectBody = (body: ts.Node) => {
+  const isDoSqlForwardingArgument = (node: ts.Node): boolean => {
+    const parent = node.parent;
+    if (!ts.isCallExpression(parent) || parent.arguments[0] !== node)
+      return false;
+    const callee = parent.expression;
+    return (
+      ts.isPropertyAccessExpression(callee) &&
+      ["sqlAll", "sqlOne", "sqlRun"].includes(callee.name.text)
+    );
+  };
+  const inspectBody = (body: ts.Node, allowDoSqlForwarding: boolean) => {
     const visit = (node: ts.Node) => {
       if (ts.isIdentifier(node) && forbiddenBindings.has(node.text))
         report(
@@ -291,6 +339,7 @@ function typedQueryFunctionViolations(
           "This migrated query function must use the typed query/mutation compiler, not DatabaseRuntime or queryD1All.",
         );
       if (
+        (!allowDoSqlForwarding || !isDoSqlForwardingArgument(node)) &&
         (ts.isStringLiteralLike(node) ||
           ts.isNoSubstitutionTemplateLiteral(node)) &&
         /^(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|PRAGMA)\b/iu.test(
@@ -303,6 +352,7 @@ function typedQueryFunctionViolations(
           "This migrated query function must express database work as a typed plan, not a raw SQL string.",
         );
       if (
+        (!allowDoSqlForwarding || !isDoSqlForwardingArgument(node)) &&
         ts.isTemplateExpression(node) &&
         /^(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|PRAGMA)\b/iu.test(
           node.head.text.trimStart(),
@@ -325,7 +375,14 @@ function typedQueryFunctionViolations(
       targets.has(node.name.text) &&
       node.body
     )
-      inspectBody(node.body);
+      inspectBody(node.body, doSqlForwardingTargets.has(node.name!.text));
+    if (
+      ts.isMethodDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      targets.has(node.name.text) &&
+      node.body
+    )
+      inspectBody(node.body, doSqlForwardingTargets.has(node.name.text));
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
@@ -334,7 +391,10 @@ function typedQueryFunctionViolations(
       (ts.isArrowFunction(node.initializer) ||
         ts.isFunctionExpression(node.initializer))
     )
-      inspectBody(node.initializer.body);
+      inspectBody(
+        node.initializer.body,
+        doSqlForwardingTargets.has(node.name.text),
+      );
     ts.forEachChild(node, visit);
   };
   visit(source);

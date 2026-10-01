@@ -68,15 +68,15 @@ function createFlushContext(options: {
       return {
         run: vi.fn(async () => ({})),
         first: vi.fn(async () => {
-          if (sql.includes("FROM visits")) {
+          if (sql.includes("visits")) {
             return options.visitExists === false ? null : { ok: 1 };
           }
-          if (sql.includes("FROM custom_events")) {
+          if (sql.includes("custom_events")) {
             return options.eventExists === false ? null : { ok: 1 };
           }
-          if (sql.includes("FROM custom_event_names")) return { id: 10 };
-          if (sql.includes("FROM custom_event_json_keys")) return { id: 20 };
-          if (sql.includes("FROM custom_event_json_paths")) {
+          if (sql.includes("custom_event_names")) return { id: 10 };
+          if (sql.includes("custom_event_json_keys")) return { id: 20 };
+          if (sql.includes("custom_event_json_paths")) {
             const path = String(bindings[1] ?? "");
             return { id: path === "/" ? 30 : 31 };
           }
@@ -223,21 +223,35 @@ describe("custom event individual flush branch coverage", () => {
     expect(
       context.calls.some((call) => call.sql.includes("event_name_id")),
     ).toBe(true);
-    expect(context.calls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ bindings: [1, "visit-1"] }),
-        expect.objectContaining({
-          bindings: ["site-1", 1, "Signup", createdAt, createdAt],
-        }),
-        expect.objectContaining({
-          bindings: ["site-1", 1, "plan", createdAt, createdAt],
-        }),
-        expect.objectContaining({
-          bindings: ["site-1", 1, "/", createdAt, createdAt],
-        }),
-        expect.objectContaining({ bindings: ["event-1"] }),
-      ]),
-    );
+    expect(
+      context.calls.some(
+        (call) =>
+          call.sql.includes('"visits"') &&
+          call.bindings.includes(1) &&
+          call.bindings.includes("visit-1"),
+      ),
+    ).toBe(true);
+    for (const [table, value] of [
+      ["custom_event_names", "Signup"],
+      ["custom_event_json_keys", "plan"],
+      ["custom_event_json_paths", "/"],
+    ]) {
+      expect(
+        context.calls.some(
+          (call) =>
+            call.sql.includes(`"${table}"`) &&
+            call.bindings.includes(value) &&
+            call.bindings.includes(createdAt),
+        ),
+      ).toBe(true);
+    }
+    expect(
+      context.calls.some(
+        (call) =>
+          call.sql.includes('"custom_events"') &&
+          call.bindings.includes("event-1"),
+      ),
+    ).toBe(true);
     expect(context.sqlRun).toHaveBeenNthCalledWith(
       1,
       "UPDATE buffered_custom_events SET dirty = 0, flush_attempts = 0, last_flush_error = NULL, flush_due_at = NULL, next_due_at = NULL WHERE (event_id = ? AND buffer_revision = ?)",

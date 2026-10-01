@@ -141,7 +141,8 @@ describe("edge team query low branch coverage", () => {
       kind: "all",
       bindings: ["team-1"],
     });
-    expect(calls[0].sql).toContain("ORDER BY created_at DESC");
+    expect(calls[0].sql).toContain('"created_at"');
+    expect(calls[0].sql).toContain("DESC");
   });
 
   it("rejects missing team ids after session validation without querying D1", async () => {

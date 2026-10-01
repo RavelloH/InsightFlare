@@ -5,6 +5,7 @@ export {
   D1_MAX_SQL_UTF8_BYTES,
   D1StatementBudgetError,
 } from "./d1-budget";
+export { optimizeD1Database } from "./d1-maintenance";
 export {
   createDatabaseRuntime,
   registerDatabaseQueryObserver,

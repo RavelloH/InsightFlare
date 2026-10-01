@@ -250,6 +250,41 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("guards D1 access in a mixed D1/DO function without banning its DO SQL", () => {
+    const root = fixture();
+    const sourcePath = path.join(root, "src/lib/edge/ingest/buffer-store.ts");
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(
+      sourcePath,
+      [
+        'import { createDatabaseRuntime as runtime } from "legacy-module";',
+        "export async function findRecentVisitorSession(context) {",
+        '  const buffered = context.sqlOne("SELECT 1 FROM buffered_visits");',
+        '  context.env.DB.prepare("SELECT 1 FROM visits").first();',
+        "  return buffered ?? runtime(context.env.DB).first({ sql: statement });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root).filter(
+        ({ rule }) => rule === "typed-query-function-forbidden",
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "src/lib/edge/ingest/buffer-store.ts",
+          specifier: "runtime",
+        }),
+        expect.objectContaining({
+          source: "src/lib/edge/ingest/buffer-store.ts",
+          specifier: "raw-sql",
+        }),
+      ]),
+    );
+  });
+
   it("keeps Analytics contracts and shared domains out of runtime modules", () => {
     const root = fixture();
     const files: Record<string, string> = {

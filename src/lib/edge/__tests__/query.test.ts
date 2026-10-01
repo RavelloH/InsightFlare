@@ -2246,7 +2246,7 @@ describe("edge query handlers", () => {
       matches: [
         firstMatch(['"teams"'], { id: "team-1" }),
         allMatch(
-          ["FROM sites", "WHERE team_id = ?"],
+          ['"sites"', '"team_id"', '"created_at"'],
           [
             {
               id: "site-1",
@@ -2313,7 +2313,7 @@ describe("edge query handlers", () => {
     const emptyEnv = createEnv({
       matches: [
         firstMatch(['"teams"'], { id: "team-1" }),
-        allMatch(["FROM sites", "WHERE team_id = ?"], []),
+        allMatch(['"sites"', '"team_id"', '"created_at"'], []),
       ],
     }).env;
     const emptyResponse = await privateQuery(
@@ -2335,7 +2335,7 @@ describe("edge query handlers", () => {
       matches: [
         firstMatch(['"teams"'], { id: "team-1" }),
         allMatch(
-          ["FROM sites", "WHERE team_id = ?"],
+          ['"sites"', '"team_id"', '"created_at"'],
           [
             {
               id: "site-1",

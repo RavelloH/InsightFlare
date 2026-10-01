@@ -1,7 +1,24 @@
-import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  createD1DatabaseClient,
+  createDatabaseRuntime,
+  type DatabaseStatement,
+  eq,
+  filter,
+  limit,
+  param,
+  project,
+  scan,
+  schema,
+} from "@/lib/db";
 import { clampString } from "@/lib/edge/utils";
 
 import { FLUSHED_BUFFER_RETENTION_MS } from "./constants";
+import {
+  customEventDictionaryIdQuery,
+  customEventDictionaryUpsert,
+} from "./custom-event-dictionary-queries";
 import {
   expandCustomEventDataJson,
   type ExpandedCustomEventData,
@@ -159,18 +176,6 @@ function nextDueAtAfterRetry(
   }
   return Math.min(row.nextDueAt, retryAt);
 }
-function dictionarySql(kind: DictionaryKind): {
-  table: string;
-  column: string;
-} {
-  if (kind === "name") {
-    return { table: "custom_event_names", column: "name" };
-  }
-  if (kind === "key") {
-    return { table: "custom_event_json_keys", column: '"key"' };
-  }
-  return { table: "custom_event_json_paths", column: "path" };
-}
 async function resolveDictionaryId(
   context: IngestFlushContext,
   kind: DictionaryKind,
@@ -183,29 +188,12 @@ async function resolveDictionaryId(
   const cached = context.dictionaryIds.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const spec = dictionarySql(kind);
-  await createDatabaseRuntime(context.env.DB).run({
-    sql: `
-      INSERT INTO ${spec.table} (site_id, site_pk, ${spec.column}, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(site_pk, ${spec.column}) DO UPDATE SET
-        last_seen_at = excluded.last_seen_at
-    `,
-    bindings: [siteId, sitePk, value, seenAt, seenAt],
-    tag: `ingest.dictionary.${kind}.upsert`,
-  });
-
-  const row = await createDatabaseRuntime(context.env.DB).first<{ id: number }>(
-    {
-      sql: `
-      SELECT id
-      FROM ${spec.table}
-      WHERE site_pk = ? AND ${spec.column} = ?
-      LIMIT 1
-    `,
-      bindings: [sitePk, value],
-      tag: `ingest.dictionary.${kind}.first`,
-    },
+  const client = createD1DatabaseClient(context.env.DB);
+  await client.run(
+    customEventDictionaryUpsert(kind, { siteId, sitePk, value, seenAt }),
+  );
+  const row = await client.first(
+    customEventDictionaryIdQuery(kind, sitePk, value),
   );
   const id = Number(row?.id ?? 0);
   if (!Number.isFinite(id) || id <= 0) {
@@ -268,36 +256,43 @@ async function hasPersistedVisit(
   sitePk: number,
   visitId: string,
 ): Promise<boolean> {
-  const persisted = await createDatabaseRuntime(context.env.DB).first<{
-    ok: number;
-  }>({
-    sql: `
-      SELECT 1 AS ok
-      FROM visits
-      WHERE site_pk = ? AND visit_id = ?
-      LIMIT 1
-    `,
-    bindings: [sitePk, visitId],
-    tag: "ingest.visits.confirm_persisted",
-  });
+  const visits = scan(schema.visits);
+  const persisted = await createD1DatabaseClient(context.env.DB).first(
+    compileD1Query(
+      limit(
+        project(
+          filter(
+            visits,
+            and(
+              eq(visits.columns.site_pk, param(sitePk)),
+              eq(visits.columns.visit_id, param(visitId)),
+            ),
+          ),
+          { ok: param(1) },
+        ),
+        1,
+      ),
+      { tag: "ingest.visits.confirm_persisted" },
+    ),
+  );
   return persisted !== null;
 }
 async function hasPersistedCustomEvent(
   context: IngestFlushContext,
   eventId: string,
 ): Promise<boolean> {
-  const persisted = await createDatabaseRuntime(context.env.DB).first<{
-    ok: number;
-  }>({
-    sql: `
-      SELECT 1 AS ok
-      FROM custom_events
-      WHERE event_id = ?
-      LIMIT 1
-    `,
-    bindings: [eventId],
-    tag: "ingest.custom_events.confirm_persisted",
-  });
+  const events = scan(schema.custom_events);
+  const persisted = await createD1DatabaseClient(context.env.DB).first(
+    compileD1Query(
+      limit(
+        project(filter(events, eq(events.columns.event_id, param(eventId))), {
+          ok: param(1),
+        }),
+        1,
+      ),
+      { tag: "ingest.custom_events.confirm_persisted" },
+    ),
+  );
   return persisted !== null;
 }
 function prepareCustomEventStatements(

@@ -1,4 +1,22 @@
-import { createDatabaseRuntime, D1_MAX_BOUND_PARAMETERS } from "@/lib/db";
+import {
+  and,
+  compileD1Query,
+  type CompiledQuery,
+  createD1DatabaseClient,
+  D1_MAX_BOUND_PARAMETERS,
+  eq,
+  filter,
+  gt,
+  inList,
+  limit as limitPlan,
+  lt,
+  or,
+  param,
+  project,
+  scan,
+  schema,
+  sort,
+} from "@/lib/db";
 import type { TeamDashboardData } from "@/lib/edge/analytics/contract";
 import {
   type FilterDocument,
@@ -404,24 +422,26 @@ export async function listTeamSites(
   teamId: string,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<TeamSiteRow[]> {
-  const result = await createDatabaseRuntime(env.DB).all<TeamSiteRow>({
-    sql: `
-      SELECT
-        id,
-        team_id AS teamId,
-        name,
-        domain,
-        public_enabled AS publicEnabled,
-        public_slug AS publicSlug,
-        created_at AS createdAt,
-        updated_at AS updatedAt
-      FROM sites
-      WHERE team_id = ?
-      ORDER BY created_at DESC
-    `,
-    bindings: [teamId],
-    tag: "analytics.sites.all",
+  const sites = scan(schema.sites);
+  const matchingSites = filter(sites, eq(sites.columns.team_id, param(teamId)));
+  const selected = project(matchingSites, {
+    id: matchingSites.columns.id,
+    teamId: matchingSites.columns.team_id,
+    name: matchingSites.columns.name,
+    domain: matchingSites.columns.domain,
+    publicEnabled: matchingSites.columns.public_enabled,
+    publicSlug: matchingSites.columns.public_slug,
+    createdAt: matchingSites.columns.created_at,
+    updatedAt: matchingSites.columns.updated_at,
   });
+  const teamSites = sort(selected, [
+    { expression: selected.columns.createdAt, direction: "DESC" },
+  ]);
+  const result = await createD1DatabaseClient(env.DB).all<TeamSiteRow>(
+    compileD1Query(teamSites, {
+      tag: "analytics.sites.all",
+    }) as unknown as CompiledQuery<TeamSiteRow>,
+  );
   recordD1RowsRead(diagnostics, result);
   return result.results;
 }
@@ -443,38 +463,46 @@ export async function queryTeamSitesPageFromD1(
   if (allowedSiteIds && allowedSiteIds.length === 0) {
     return { rows: [], nextCursor: null };
   }
-  const allowedClause = allowedSiteIds?.length
-    ? `AND id IN (${allowedSiteIds.map(() => "?").join(",")})`
-    : "";
-  const cursorClause = cursor
-    ? "AND (created_at < ? OR (created_at = ? AND id > ?))"
-    : "";
-  const result = await createDatabaseRuntime(env.DB).all<TeamSiteRow>({
-    sql: `
-      SELECT
-        id,
-        team_id AS teamId,
-        name,
-        domain,
-        public_enabled AS publicEnabled,
-        public_slug AS publicSlug,
-        created_at AS createdAt,
-        updated_at AS updatedAt
-      FROM sites
-      WHERE team_id = ?
-      ${allowedClause}
-      ${cursorClause}
-      ORDER BY created_at DESC, id ASC
-      LIMIT ?
-    `,
-    bindings: [
-      teamId,
-      ...(allowedSiteIds ?? []),
-      ...(cursor ? [cursor.createdAt, cursor.createdAt, cursor.id] : []),
-      limit + 1,
-    ],
-    tag: "analytics.sites.all",
+  const sites = scan(schema.sites);
+  const teamPredicate = eq(sites.columns.team_id, param(teamId));
+  const cursorPredicate = cursor
+    ? or(
+        lt(sites.columns.created_at, param(cursor.createdAt)),
+        and(
+          eq(sites.columns.created_at, param(cursor.createdAt)),
+          gt(sites.columns.id, param(cursor.id)),
+        ),
+      )
+    : undefined;
+  const pagePredicate = cursorPredicate
+    ? and(teamPredicate, cursorPredicate)
+    : teamPredicate;
+  const allowedPredicate = allowedSiteIds?.length
+    ? inList(sites.columns.id, allowedSiteIds)
+    : undefined;
+  const predicate = allowedPredicate
+    ? and(pagePredicate, allowedPredicate)
+    : pagePredicate;
+  const filtered = filter(sites, predicate);
+  const selected = project(filtered, {
+    id: filtered.columns.id,
+    teamId: filtered.columns.team_id,
+    name: filtered.columns.name,
+    domain: filtered.columns.domain,
+    publicEnabled: filtered.columns.public_enabled,
+    publicSlug: filtered.columns.public_slug,
+    createdAt: filtered.columns.created_at,
+    updatedAt: filtered.columns.updated_at,
   });
+  const ordered = sort(selected, [
+    { expression: selected.columns.createdAt, direction: "DESC" },
+    { expression: selected.columns.id, direction: "ASC" },
+  ]);
+  const result = await createD1DatabaseClient(env.DB).all<TeamSiteRow>(
+    compileD1Query(limitPlan(ordered, limit + 1), {
+      tag: "analytics.sites.all",
+    }) as unknown as CompiledQuery<TeamSiteRow>,
+  );
   recordD1RowsRead(diagnostics, result);
   const hasMore = result.results.length > limit;
   const rows = hasMore ? result.results.slice(0, limit) : result.results;

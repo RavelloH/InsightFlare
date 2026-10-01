@@ -1,5 +1,8 @@
-import { createDatabaseRuntime } from "@/lib/db";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
+import {
+  compileD1Query,
+  type CompiledQuery,
+  createD1DatabaseClient,
+} from "@/lib/db";
 import type {
   Env,
   NormalizedCustomEvent,
@@ -13,6 +16,10 @@ import {
   ORPHAN_CUSTOM_EVENT_TIMEOUT_MS,
   VISIT_TIMEOUT_MS,
 } from "./constants";
+import {
+  persistedRecentVisitorSessionQuery,
+  persistedVisitRowQuery,
+} from "./persisted-visit-queries";
 import { toUnixSeconds } from "./time";
 import type {
   BufferedCustomEventInput,
@@ -310,68 +317,31 @@ export async function findRecentVisitorSession(
   );
   if (buffered) return buffered;
 
-  const persisted = await createDatabaseRuntime(context.env.DB)
-    .first<RecentVisitorSession>({
-      sql: `
-      SELECT
-        session_id AS sessionId,
-        visit_id AS visitId,
-        status,
-        CASE
-          WHEN ? = 1
-            AND status IN ('open', 'hidden_pending')
-            AND hostname = ?
-            AND pathname = ?
-            AND query_string = ?
-            AND hash_fragment = ?
-            THEN 2
-          WHEN ? = 1
-            AND status IN ('open', 'hidden_pending')
-            AND hostname = ?
-            AND pathname = ?
-            AND (query_string = ? OR query_string = '' OR ? = '')
-            AND (hash_fragment = ? OR hash_fragment = '' OR ? = '')
-            THEN 1
-          ELSE 0
-        END AS routeMatch,
-        started_at AS startedAt,
-        last_activity_at AS lastActivityAt
-      FROM visits
-      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-        AND visitor_id = ?
-        AND visit_id != ?
-        AND session_id != ''
-        AND last_activity_at >= ?
-      ORDER BY
-        routeMatch DESC,
-        CASE WHEN status IN ('open', 'hidden_pending') THEN 0 ELSE 1 END,
-        last_activity_at DESC,
-        started_at DESC
-      LIMIT 1
-    `,
-      bindings: [
-        routeMatchEnabled,
-        routePreviousHostname,
-        routePreviousPathname,
-        routePreviousQueryString,
-        routePreviousHashFragment,
-        routeMatchEnabled,
-        routePreviousHostname,
-        routePreviousPathname,
-        routePreviousQueryString,
-        routePreviousQueryString,
-        routePreviousHashFragment,
-        routePreviousHashFragment,
-        input.siteId,
-        input.visitorId,
-        input.visitId,
-        cutoff,
-      ],
-      tag: "ingest.visits.find_recent_session",
-    })
+  let persisted: RecentVisitorSession | null = null;
+  try {
+    persisted = await createD1DatabaseClient(
+      context.env.DB,
+    ).first<RecentVisitorSession>(
+      compileD1Query(
+        persistedRecentVisitorSessionQuery({
+          siteId: input.siteId,
+          visitorId: input.visitorId,
+          visitId: input.visitId,
+          cutoff,
+          routeMatchEnabled,
+          routePreviousHostname,
+          routePreviousPathname,
+          routePreviousQueryString,
+          routePreviousHashFragment,
+        }),
+        { tag: "ingest.visits.find_recent_session" },
+      ) as unknown as CompiledQuery<RecentVisitorSession>,
+    );
+  } catch {
     // A persisted-session lookup is an optimization for session continuity;
     // a D1 outage must not turn a valid pageview into a failed ingest.
-    .catch(() => null);
+    persisted = null;
+  }
 
   return persisted ?? null;
 }
@@ -443,72 +413,13 @@ export async function readPersistedVisitRow(
   siteId: string,
   visitId: string,
 ): Promise<BufferedVisitRow | null> {
-  const row = await createDatabaseRuntime(
+  const row = await createD1DatabaseClient(
     context.env.DB,
-  ).first<BufferedVisitRow>({
-    sql: `
-      SELECT
-        visit_id AS visitId,
-        status,
-        site_id AS siteId,
-        visitor_id AS visitorId,
-        session_id AS sessionId,
-        started_at AS startedAt,
-        last_activity_at AS lastActivityAt,
-        ended_at AS endedAt,
-        finalized_at AS finalizedAt,
-        duration_ms AS durationMs,
-        COALESCE(duration_source, '') AS durationSource,
-        COALESCE(exit_reason, '') AS exitReason,
-        pathname,
-        query_string AS queryString,
-        hash_fragment AS hashFragment,
-        hostname,
-        title,
-        referrer_url AS referrerUrl,
-        referrer_host AS referrerHost,
-        utm_source AS utmSource,
-        utm_medium AS utmMedium,
-        utm_campaign AS utmCampaign,
-        utm_term AS utmTerm,
-        utm_content AS utmContent,
-        is_eu AS isEU,
-        country,
-        region,
-        region_code AS regionCode,
-        city,
-        continent,
-        latitude,
-        longitude,
-        postal_code AS postalCode,
-        metro_code AS metroCode,
-        timezone,
-        as_organization AS asOrganization,
-        ua_raw AS uaRaw,
-        browser,
-        browser_version AS browserVersion,
-        os,
-        os_version AS osVersion,
-        device_type AS deviceType,
-        screen_width AS screenWidth,
-        screen_height AS screenHeight,
-        language,
-        COALESCE(user_id, '') AS userId,
-        COALESCE(user_name, '') AS userName,
-        perf_ttfb_ms AS perfTtfbMs,
-        perf_fcp_ms AS perfFcpMs,
-        perf_lcp_ms AS perfLcpMs,
-        perf_cls AS perfCls,
-        perf_inp_ms AS perfInpMs,
-        created_at AS createdAt,
-        updated_at AS updatedAt
-      FROM visits
-      WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL} AND visit_id = ?
-      LIMIT 1
-    `,
-    bindings: [siteId, visitId],
-    tag: "ingest.visits.find_persisted",
-  });
+  ).first<BufferedVisitRow>(
+    compileD1Query(persistedVisitRowQuery(siteId, visitId), {
+      tag: "ingest.visits.find_persisted",
+    }) as unknown as CompiledQuery<BufferedVisitRow>,
+  );
 
   return row
     ? {

@@ -1,6 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Mutation,
+  compileD1Query,
+  createD1DatabaseClient,
+} from "@/lib/db";
 import {
   type TrafficVisitSnapshot,
   writeEventAnalyticsPoint,
@@ -16,7 +20,6 @@ import {
   type InvocationLogger,
   runWithInvocationLogger,
 } from "@/lib/edge/observability/logger";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type {
   Env,
   IngestEnvelopePayload,
@@ -55,6 +58,10 @@ import {
 } from "./flush";
 import { jsonResponse, type RealtimeSnapshotRecord } from "./normalize";
 import { pageviewTrafficSnapshot } from "./pageview-snapshot";
+import {
+  persistedIdentifyVisitQuery,
+  updatePersistedIdentifyMutation,
+} from "./persisted-visit-queries";
 import {
   pushInitialRealtimeSnapshot,
   pushRealtimeRecordToSockets,
@@ -1568,40 +1575,29 @@ export class IngestDurableObject extends DurableObject {
 
     if (rowsUpdated === 0 && !localVisit) {
       const instrumentedEnv = instrumentEnv(this.doEnv, logger);
-      const persistedVisit = await createDatabaseRuntime(instrumentedEnv.DB)
-        .first<{
-          sessionId: string;
-          visitorId: string;
-        }>({
-          sql: `
-          SELECT
-            session_id AS sessionId,
-            visitor_id AS visitorId
-          FROM visits
-          WHERE visit_id = ? AND site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-          LIMIT 1
-        `,
-          bindings: [record.visitId, record.siteId],
-          tag: "ingest.visits.find_persisted_identify",
-        })
+      const client = createD1DatabaseClient(instrumentedEnv.DB);
+      const persistedVisit = await client
+        .first(
+          compileD1Query(
+            persistedIdentifyVisitQuery(record.siteId, record.visitId),
+            { tag: "ingest.visits.find_persisted_identify" },
+          ),
+        )
         .catch(() => null);
       serverSessionId = persistedVisit?.sessionId || "";
       serverVisitorId = persistedVisit?.visitorId || "";
-      await createDatabaseRuntime(instrumentedEnv.DB)
-        .run({
-          sql: `
-          UPDATE visits
-          SET user_id = ?, user_name = ?
-          WHERE visit_id = ? AND site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-        `,
-          bindings: [
-            record.userId,
-            record.userName || null,
-            record.visitId,
-            record.siteId,
-          ],
-          tag: "ingest.visits.update_identify",
-        })
+      await client
+        .run(
+          compileD1Mutation(
+            updatePersistedIdentifyMutation({
+              siteId: record.siteId,
+              visitId: record.visitId,
+              userId: record.userId,
+              userName: record.userName || null,
+            }),
+            { tag: "ingest.visits.update_identify" },
+          ),
+        )
         .catch(() => {});
     }
     logger.info(

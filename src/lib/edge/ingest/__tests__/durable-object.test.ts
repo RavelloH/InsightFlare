@@ -1811,8 +1811,9 @@ describe("IngestDurableObject", () => {
     expect(
       persistedQueries.some(
         (query) =>
-          query.includes("session_id AS sessionId") &&
-          query.includes("visitor_id AS visitorId"),
+          query.includes('"session_id"') &&
+          query.includes('"visitor_id"') &&
+          query.includes('"visits"'),
       ),
     ).toBe(true);
   });
