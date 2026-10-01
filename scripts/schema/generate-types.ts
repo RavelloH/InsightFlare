@@ -28,9 +28,10 @@ export function generateSchemaTypes(schema: readonly SchemaObject[]): string {
       foreignKeys: object.foreignKeys,
     };
   }
-  const json = JSON.stringify(tables, null, 2)
-    .replace(/"([A-Za-z_$][\w$]*)":/g, "$1:")
-    .replaceAll(": null", ": null");
+  const json = JSON.stringify(tables, null, 2).replace(
+    /"([A-Za-z_$][\w$]*)":/g,
+    "$1:",
+  );
   return [
     "// Generated file. Do not edit manually.",
     'import type { GeneratedSchema } from "./types";',
