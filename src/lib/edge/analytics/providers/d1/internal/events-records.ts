@@ -3,7 +3,6 @@ import { buildEventRecordDetailPlan } from "@/lib/edge/analytics/engine/event-re
 import { readCustomEventDetail } from "@/lib/edge/analytics/providers/d1/internal/custom-event-read";
 import type { Env } from "@/lib/edge/types";
 
-import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   EventRecordRow,
   EventRecordSortKey,
@@ -22,6 +21,11 @@ import {
   visitSourceBindings,
 } from "./core";
 import { mapVisitPerformanceMetrics } from "./core-performance";
+import {
+  type EventRecordDetailOutputRow,
+  type EventRecordDetailRow,
+  queryEventRecordDetailOutputRowsFromD1,
+} from "./event-record-detail-output";
 import type { ScopedDatasetSql } from "./scoped-dataset";
 import { scopedDatasetFor } from "./scoped-dataset";
 // Event-record lists only need this projection for their output, filters, and
@@ -109,47 +113,6 @@ export interface EventRecordCursor {
 }
 interface EventRecordCursorRow extends EventRecordRow {
   eventPk: number;
-}
-interface EventRecordDetailRow extends EventRecordRow {
-  userId: string;
-  userName: string;
-  queryString: string;
-  hash: string;
-  referrerUrl: string;
-  utmSource: string;
-  utmMedium: string;
-  utmCampaign: string;
-  utmTerm: string;
-  utmContent: string;
-  isEU: number | boolean | string | null;
-  regionCode: string;
-  city: string;
-  continent: string;
-  latitude: number | null;
-  longitude: number | null;
-  postalCode: string;
-  metroCode: string;
-  timezone: string;
-  organization: string;
-  language: string;
-  userAgent: string;
-  screenWidth: number | null;
-  screenHeight: number | null;
-  status: string;
-  startedAt: number;
-  previousVisitId: string;
-  previousVisitStartedAt: number | null;
-  lastActivityAt: number;
-  endedAt: number | null;
-  finalizedAt: number | null;
-  durationMs: number | null;
-  durationSource: string;
-  exitReason: string;
-  perfTtfbMs: number | null;
-  perfFcpMs: number | null;
-  perfLcpMs: number | null;
-  perfCls: number | null;
-  perfInpMs: number | null;
 }
 export interface EventRecordPage {
   rows: EventRecordRow[];
@@ -351,15 +314,13 @@ export async function queryEventRecordDetailFromD1(
   eventId: string,
   window?: QueryWindow,
 ) {
-  const rows = await queryAnalyticsReportOutputRowsFromD1(
+  const rows = await queryEventRecordDetailOutputRowsFromD1(
     env,
     buildEventRecordDetailPlan({ siteId, eventId, window }),
-    "event-record-detail",
-    "event_record_detail_output_missing",
   );
   const rawRecord = rows[0];
   if (!rawRecord) return null;
-  const record = decodeEventRecordDetailRow(rawRecord);
+  const record = preserveEventRecordDetailOutput(rawRecord);
   const detail = await readCustomEventDetail(env, siteId, eventId);
   return {
     event: { ...mapEventRecord(record), eventKind: "custom_event" as const },
@@ -424,78 +385,82 @@ export async function queryEventRecordDetailFromD1(
   };
 }
 
-function eventDetailColumn<K extends keyof EventRecordDetailRow>(
-  row: Record<string, unknown>,
+function preserveEventDetailOutputColumn<K extends keyof EventRecordDetailRow>(
+  row: EventRecordDetailOutputRow,
   key: K,
 ): EventRecordDetailRow[K] {
-  // Preserve the value D1 returned, including unusual SQLite storage classes;
-  // this is a type bridge only and performs no parsing, defaulting, or coercion.
+  // The selected output aliases and logical slot metadata were checked before
+  // execution. This bridge preserves raw SQLite values for the legacy mapper;
+  // it does not decode, validate storage classes, default, or coerce values.
   return row[key] as EventRecordDetailRow[K];
 }
 
-function decodeEventRecordDetailRow(
-  row: Record<string, unknown>,
+function preserveEventRecordDetailOutput(
+  row: EventRecordDetailOutputRow,
 ): EventRecordDetailRow {
   return {
-    eventId: eventDetailColumn(row, "eventId"),
-    eventName: eventDetailColumn(row, "eventName"),
-    occurredAt: eventDetailColumn(row, "occurredAt"),
-    receivedAt: eventDetailColumn(row, "receivedAt"),
-    sequence: eventDetailColumn(row, "sequence"),
-    visitId: eventDetailColumn(row, "visitId"),
-    sessionId: eventDetailColumn(row, "sessionId"),
-    visitorId: eventDetailColumn(row, "visitorId"),
-    userId: eventDetailColumn(row, "userId"),
-    userName: eventDetailColumn(row, "userName"),
-    status: eventDetailColumn(row, "status"),
-    startedAt: eventDetailColumn(row, "startedAt"),
-    previousVisitId: eventDetailColumn(row, "previousVisitId"),
-    previousVisitStartedAt: eventDetailColumn(row, "previousVisitStartedAt"),
-    lastActivityAt: eventDetailColumn(row, "lastActivityAt"),
-    endedAt: eventDetailColumn(row, "endedAt"),
-    finalizedAt: eventDetailColumn(row, "finalizedAt"),
-    durationMs: eventDetailColumn(row, "durationMs"),
-    durationSource: eventDetailColumn(row, "durationSource"),
-    exitReason: eventDetailColumn(row, "exitReason"),
-    pathname: eventDetailColumn(row, "pathname"),
-    queryString: eventDetailColumn(row, "queryString"),
-    hash: eventDetailColumn(row, "hash"),
-    title: eventDetailColumn(row, "title"),
-    hostname: eventDetailColumn(row, "hostname"),
-    referrerUrl: eventDetailColumn(row, "referrerUrl"),
-    referrerHost: eventDetailColumn(row, "referrerHost"),
-    utmSource: eventDetailColumn(row, "utmSource"),
-    utmMedium: eventDetailColumn(row, "utmMedium"),
-    utmCampaign: eventDetailColumn(row, "utmCampaign"),
-    utmTerm: eventDetailColumn(row, "utmTerm"),
-    utmContent: eventDetailColumn(row, "utmContent"),
-    isEU: eventDetailColumn(row, "isEU"),
-    country: eventDetailColumn(row, "country"),
-    region: eventDetailColumn(row, "region"),
-    regionCode: eventDetailColumn(row, "regionCode"),
-    city: eventDetailColumn(row, "city"),
-    continent: eventDetailColumn(row, "continent"),
-    latitude: eventDetailColumn(row, "latitude"),
-    longitude: eventDetailColumn(row, "longitude"),
-    postalCode: eventDetailColumn(row, "postalCode"),
-    metroCode: eventDetailColumn(row, "metroCode"),
-    timezone: eventDetailColumn(row, "timezone"),
-    organization: eventDetailColumn(row, "organization"),
-    browser: eventDetailColumn(row, "browser"),
-    browserVersion: eventDetailColumn(row, "browserVersion"),
-    os: eventDetailColumn(row, "os"),
-    osVersion: eventDetailColumn(row, "osVersion"),
-    deviceType: eventDetailColumn(row, "deviceType"),
-    userAgent: eventDetailColumn(row, "userAgent"),
-    language: eventDetailColumn(row, "language"),
-    screenWidth: eventDetailColumn(row, "screenWidth"),
-    screenHeight: eventDetailColumn(row, "screenHeight"),
-    perfTtfbMs: eventDetailColumn(row, "perfTtfbMs"),
-    perfFcpMs: eventDetailColumn(row, "perfFcpMs"),
-    perfLcpMs: eventDetailColumn(row, "perfLcpMs"),
-    perfCls: eventDetailColumn(row, "perfCls"),
-    perfInpMs: eventDetailColumn(row, "perfInpMs"),
-    nodeCount: eventDetailColumn(row, "nodeCount"),
-    valueCount: eventDetailColumn(row, "valueCount"),
+    eventId: preserveEventDetailOutputColumn(row, "eventId"),
+    eventName: preserveEventDetailOutputColumn(row, "eventName"),
+    occurredAt: preserveEventDetailOutputColumn(row, "occurredAt"),
+    receivedAt: preserveEventDetailOutputColumn(row, "receivedAt"),
+    sequence: preserveEventDetailOutputColumn(row, "sequence"),
+    visitId: preserveEventDetailOutputColumn(row, "visitId"),
+    sessionId: preserveEventDetailOutputColumn(row, "sessionId"),
+    visitorId: preserveEventDetailOutputColumn(row, "visitorId"),
+    userId: preserveEventDetailOutputColumn(row, "userId"),
+    userName: preserveEventDetailOutputColumn(row, "userName"),
+    status: preserveEventDetailOutputColumn(row, "status"),
+    startedAt: preserveEventDetailOutputColumn(row, "startedAt"),
+    previousVisitId: preserveEventDetailOutputColumn(row, "previousVisitId"),
+    previousVisitStartedAt: preserveEventDetailOutputColumn(
+      row,
+      "previousVisitStartedAt",
+    ),
+    lastActivityAt: preserveEventDetailOutputColumn(row, "lastActivityAt"),
+    endedAt: preserveEventDetailOutputColumn(row, "endedAt"),
+    finalizedAt: preserveEventDetailOutputColumn(row, "finalizedAt"),
+    durationMs: preserveEventDetailOutputColumn(row, "durationMs"),
+    durationSource: preserveEventDetailOutputColumn(row, "durationSource"),
+    exitReason: preserveEventDetailOutputColumn(row, "exitReason"),
+    pathname: preserveEventDetailOutputColumn(row, "pathname"),
+    queryString: preserveEventDetailOutputColumn(row, "queryString"),
+    hash: preserveEventDetailOutputColumn(row, "hash"),
+    title: preserveEventDetailOutputColumn(row, "title"),
+    hostname: preserveEventDetailOutputColumn(row, "hostname"),
+    referrerUrl: preserveEventDetailOutputColumn(row, "referrerUrl"),
+    referrerHost: preserveEventDetailOutputColumn(row, "referrerHost"),
+    utmSource: preserveEventDetailOutputColumn(row, "utmSource"),
+    utmMedium: preserveEventDetailOutputColumn(row, "utmMedium"),
+    utmCampaign: preserveEventDetailOutputColumn(row, "utmCampaign"),
+    utmTerm: preserveEventDetailOutputColumn(row, "utmTerm"),
+    utmContent: preserveEventDetailOutputColumn(row, "utmContent"),
+    isEU: preserveEventDetailOutputColumn(row, "isEU"),
+    country: preserveEventDetailOutputColumn(row, "country"),
+    region: preserveEventDetailOutputColumn(row, "region"),
+    regionCode: preserveEventDetailOutputColumn(row, "regionCode"),
+    city: preserveEventDetailOutputColumn(row, "city"),
+    continent: preserveEventDetailOutputColumn(row, "continent"),
+    latitude: preserveEventDetailOutputColumn(row, "latitude"),
+    longitude: preserveEventDetailOutputColumn(row, "longitude"),
+    postalCode: preserveEventDetailOutputColumn(row, "postalCode"),
+    metroCode: preserveEventDetailOutputColumn(row, "metroCode"),
+    timezone: preserveEventDetailOutputColumn(row, "timezone"),
+    organization: preserveEventDetailOutputColumn(row, "organization"),
+    browser: preserveEventDetailOutputColumn(row, "browser"),
+    browserVersion: preserveEventDetailOutputColumn(row, "browserVersion"),
+    os: preserveEventDetailOutputColumn(row, "os"),
+    osVersion: preserveEventDetailOutputColumn(row, "osVersion"),
+    deviceType: preserveEventDetailOutputColumn(row, "deviceType"),
+    userAgent: preserveEventDetailOutputColumn(row, "userAgent"),
+    language: preserveEventDetailOutputColumn(row, "language"),
+    screenWidth: preserveEventDetailOutputColumn(row, "screenWidth"),
+    screenHeight: preserveEventDetailOutputColumn(row, "screenHeight"),
+    perfTtfbMs: preserveEventDetailOutputColumn(row, "perfTtfbMs"),
+    perfFcpMs: preserveEventDetailOutputColumn(row, "perfFcpMs"),
+    perfLcpMs: preserveEventDetailOutputColumn(row, "perfLcpMs"),
+    perfCls: preserveEventDetailOutputColumn(row, "perfCls"),
+    perfInpMs: preserveEventDetailOutputColumn(row, "perfInpMs"),
+    nodeCount: preserveEventDetailOutputColumn(row, "nodeCount"),
+    valueCount: preserveEventDetailOutputColumn(row, "valueCount"),
   };
 }

@@ -32,6 +32,7 @@ import { AnalyticsRelationalStorage } from "@/lib/edge/analytics/providers/d1/in
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import { mapEventRecord } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
 import { mapVisitPerformanceMetrics } from "@/lib/edge/analytics/providers/d1/internal/core-performance";
+import { queryEventRecordDetailOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/event-record-detail-output";
 import { queryEventRecordDetailFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
@@ -663,5 +664,72 @@ describe("Event record detail report D1 lowering", () => {
         "event-source-probe",
       ),
     ).rejects.toThrow("analytics_report_site_subject_unsupported:2");
+  });
+
+  it("rejects malformed detail output contracts before database execution", async () => {
+    const plan = buildEventRecordDetailPlan({
+      siteId: SITE_A,
+      eventId: "event-main",
+      window: WINDOW,
+    });
+    const output = plan.outputs.find(
+      (candidate) => candidate.id === "event-record-detail",
+    );
+    if (!output) throw new Error("event_record_detail_output_missing");
+
+    const missingAliasPlan = {
+      ...plan,
+      outputs: plan.outputs.map((candidate) =>
+        candidate.id === output.id
+          ? {
+              ...candidate,
+              fields: candidate.fields.filter(
+                (field) => field.name !== "eventName",
+              ),
+            }
+          : candidate,
+      ),
+    } as ValidatedLogicalPlan;
+    const duplicateAliasPlan = {
+      ...plan,
+      outputs: plan.outputs.map((candidate) =>
+        candidate.id === output.id
+          ? {
+              ...candidate,
+              fields: [...candidate.fields, candidate.fields[0]!],
+            }
+          : candidate,
+      ),
+    } as ValidatedLogicalPlan;
+    const occurredAtSlot = output.fields.find(
+      (field) => field.name === "occurredAt",
+    )!.slot;
+    const wrongScalarPlan = {
+      ...plan,
+      slots: plan.slots.map((slot) =>
+        slot.id === occurredAtSlot
+          ? { ...slot, type: { kind: "scalar", scalar: "string" } }
+          : slot,
+      ),
+    } as ValidatedLogicalPlan;
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const env = sqliteEnv(db, trace);
+
+    await expect(
+      queryEventRecordDetailOutputRowsFromD1(env, missingAliasPlan),
+    ).rejects.toThrow(
+      "event_record_detail_output_contract:missing_alias:eventName",
+    );
+    await expect(
+      queryEventRecordDetailOutputRowsFromD1(env, duplicateAliasPlan),
+    ).rejects.toThrow(
+      "event_record_detail_output_contract:duplicate_alias:eventId",
+    );
+    await expect(
+      queryEventRecordDetailOutputRowsFromD1(env, wrongScalarPlan),
+    ).rejects.toThrow(
+      "event_record_detail_output_contract:value_type:occurredAt:expected=datetime",
+    );
+    expect(trace.preparedSql).toHaveLength(0);
   });
 });
