@@ -5,6 +5,7 @@ import {
   caseWhen,
   castInteger,
   compileD1Query,
+  concatText,
   count,
   div,
   eq,
@@ -17,6 +18,8 @@ import {
   project,
   scan,
   sort,
+  textContains,
+  textStartsWith,
   trimSpaces,
   union,
 } from "@/lib/db";
@@ -36,6 +39,61 @@ function expectInvalid(callback: () => unknown): void {
 }
 
 describe("logical query plan validation", () => {
+  it("validates closed string-match functions and their metadata", () => {
+    const identities = scan(schema.site_identities);
+    const valid = textContains(identities.columns.site_id, "needle");
+    expect(() =>
+      validateMutationExpression(valid, [identities.scope]),
+    ).not.toThrow();
+    expect(() =>
+      validateMutationExpression(
+        textStartsWith(identities.columns.site_id, ""),
+        [identities.scope],
+      ),
+    ).not.toThrow();
+
+    const input = valid.arguments[0]!;
+    const pattern = valid.arguments[1]!;
+    const invalidExpressions: SqlExpression[] = [
+      { ...valid, arguments: [input] } as unknown as SqlExpression,
+      {
+        ...valid,
+        arguments: [input, pattern, pattern],
+      } as unknown as SqlExpression,
+      {
+        ...valid,
+        arguments: [param(1), pattern],
+      } as unknown as SqlExpression,
+      {
+        ...valid,
+        arguments: [input, concatText(param("a"), param("b"))],
+      } as unknown as SqlExpression,
+      {
+        ...valid,
+        arguments: [
+          input,
+          { ...pattern, resultType: { affinity: "text", nullable: true } },
+        ],
+      } as unknown as SqlExpression,
+      {
+        ...valid,
+        arguments: [input, { ...pattern, value: "bad\ud800literal" }],
+      } as unknown as SqlExpression,
+      {
+        ...valid,
+        resultType: { affinity: "integer", nullable: true },
+      } as unknown as SqlExpression,
+      {
+        ...valid,
+        resultType: { affinity: "text", nullable: false },
+      } as unknown as SqlExpression,
+    ];
+    for (const expression of invalidExpressions)
+      expectInvalid(() =>
+        validateMutationExpression(expression, [identities.scope]),
+      );
+  });
+
   it("validates default SQLite text trim input and result metadata", () => {
     const valid = trimSpaces(param(" value "));
     expect(() => validateMutationExpression(valid, [])).not.toThrow();

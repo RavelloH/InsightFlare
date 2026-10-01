@@ -3,6 +3,7 @@ import { isGeneratedSchemaObject } from "@/lib/db/schema";
 import { DatabaseCompilerError } from "./errors";
 import {
   type AnyExpression,
+  assertWellFormedTextPattern,
   coalesceResultAffinity,
   commonAffinity,
   parameterResultType,
@@ -295,6 +296,46 @@ function validateExpression(
           "text",
           expression.arguments.some((argument) => argument.resultType.nullable),
         );
+        return;
+      }
+      if (
+        expression.name === "text-contains" ||
+        expression.name === "text-starts-with" ||
+        expression.name === "text-ends-with"
+      ) {
+        if (
+          !Array.isArray(expression.arguments) ||
+          expression.arguments.length !== 2
+        )
+          invalid(`${expression.name}() requires exactly two arguments`);
+        const input = expression.arguments[0];
+        const pattern = expression.arguments[1];
+        if (
+          !input ||
+          typeof input !== "object" ||
+          !pattern ||
+          typeof pattern !== "object"
+        )
+          invalid(`${expression.name}() contains an invalid operand`);
+        validateExpression(input, scopes, activeSources, allowExcluded);
+        validateExpression(pattern, scopes, activeSources, allowExcluded);
+        if (input.resultType.affinity !== "text")
+          invalid(`${expression.name}() requires a TEXT input expression`);
+        if (
+          pattern.kind !== "parameter" ||
+          typeof pattern.value !== "string" ||
+          pattern.resultType.affinity !== "text" ||
+          pattern.resultType.nullable
+        )
+          invalid(`${expression.name}() requires a non-NULL string parameter`);
+        const publicName =
+          expression.name === "text-contains"
+            ? "textContains"
+            : expression.name === "text-starts-with"
+              ? "textStartsWith"
+              : "textEndsWith";
+        assertWellFormedTextPattern(publicName, pattern.value);
+        validateResultType(expression, "integer", input.resultType.nullable);
         return;
       }
       if (

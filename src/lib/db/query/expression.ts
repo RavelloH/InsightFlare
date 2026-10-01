@@ -138,6 +138,9 @@ export type SqlFunctionName =
   | "trim"
   | "trim-spaces"
   | "concat-text"
+  | "text-contains"
+  | "text-starts-with"
+  | "text-ends-with"
   | "length"
   | "abs"
   | "round";
@@ -844,6 +847,11 @@ export function callFunction(
     case "concat-text":
       affinity = "text";
       break;
+    case "text-contains":
+    case "text-starts-with":
+    case "text-ends-with":
+      affinity = "integer";
+      break;
     case "length":
       affinity = "integer";
       break;
@@ -878,6 +886,91 @@ export function trimSpaces<E extends SqlExpression<string | null>>(
       nullable: expression.resultType.nullable,
     },
   };
+}
+
+type NullableTextInput = SqlExpression<string | null>;
+
+type TextMatchExpression<E extends NullableTextInput> = FunctionExpression<
+  NullableValue<E, boolean>,
+  ExpressionResultType<"integer", NullableOf<E>>
+>;
+
+export function assertWellFormedTextPattern(
+  name: string,
+  pattern: string,
+): void {
+  if (typeof pattern !== "string")
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      `${name}() pattern must be a string`,
+    );
+  for (let index = 0; index < pattern.length; index++) {
+    const codeUnit = pattern.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = pattern.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        index++;
+        continue;
+      }
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        `${name}() pattern contains an unpaired UTF-16 surrogate at index ${index}`,
+      );
+    }
+    if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        `${name}() pattern contains an unpaired UTF-16 surrogate at index ${index}`,
+      );
+    }
+  }
+}
+
+function textMatch<E extends NullableTextInput>(
+  name: "text-contains" | "text-starts-with" | "text-ends-with",
+  input: E,
+  pattern: string,
+): TextMatchExpression<E> {
+  const publicName =
+    name === "text-contains"
+      ? "textContains"
+      : name === "text-starts-with"
+        ? "textStartsWith"
+        : "textEndsWith";
+  assertWellFormedTextPattern(publicName, pattern);
+  return {
+    kind: "function",
+    name,
+    arguments: [input, parameterExpression(pattern)],
+    resultType: {
+      affinity: "integer",
+      nullable: input.resultType.nullable,
+    },
+  } as TextMatchExpression<E>;
+}
+
+/** Literal, case-sensitive substring match. NULL input remains NULL. */
+export function textContains<E extends NullableTextInput>(
+  input: E,
+  needle: string,
+): TextMatchExpression<E> {
+  return textMatch("text-contains", input, needle);
+}
+
+/** Literal, case-sensitive prefix match. NULL input remains NULL. */
+export function textStartsWith<E extends NullableTextInput>(
+  input: E,
+  prefix: string,
+): TextMatchExpression<E> {
+  return textMatch("text-starts-with", input, prefix);
+}
+
+/** Literal, case-sensitive suffix match. NULL input remains NULL. */
+export function textEndsWith<E extends NullableTextInput>(
+  input: E,
+  suffix: string,
+): TextMatchExpression<E> {
+  return textMatch("text-ends-with", input, suffix);
 }
 
 type TextConcatAffinity = "text" | "integer" | "real" | "numeric" | "unknown";

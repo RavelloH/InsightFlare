@@ -237,6 +237,63 @@ export function compileD1Expression(
           ),
         );
       }
+      if (
+        expression.name === "text-contains" ||
+        expression.name === "text-starts-with" ||
+        expression.name === "text-ends-with"
+      ) {
+        const input = expression.arguments[0];
+        const pattern = expression.arguments[1];
+        if (
+          expression.arguments.length !== 2 ||
+          !input ||
+          !pattern ||
+          pattern.kind !== "parameter" ||
+          typeof pattern.value !== "string"
+        )
+          throw new DatabaseCompilerError(
+            "invalid_plan",
+            `${expression.name}() must have a TEXT input and string parameter`,
+          );
+
+        // The empty literal is a match for every non-NULL string. Including
+        // NULL in this OR expression preserves SQL's NULL result without
+        // leaving an unused pattern binding in the compiled statement.
+        if (pattern.value.length === 0)
+          return parenthesize(
+            concat(
+              compileD1Expression(input, scopes, context),
+              text(" IS NOT NULL OR NULL"),
+            ),
+          );
+
+        const renderedInput = compileD1Expression(input, scopes, context);
+        const renderedPattern = () =>
+          compileD1Expression(pattern, scopes, context);
+        if (expression.name === "text-ends-with")
+          return parenthesize(
+            concat(
+              text("SUBSTR(CAST("),
+              renderedInput,
+              text(" AS BLOB), -LENGTH(CAST("),
+              renderedPattern(),
+              text(" AS BLOB))) = CAST("),
+              renderedPattern(),
+              text(" AS BLOB)"),
+            ),
+          );
+
+        return parenthesize(
+          concat(
+            text("INSTR(CAST("),
+            renderedInput,
+            text(" AS BLOB), CAST("),
+            renderedPattern(),
+            text(" AS BLOB))"),
+            text(expression.name === "text-contains" ? " > 0" : " = 1"),
+          ),
+        );
+      }
       if (expression.name === "trim-spaces") {
         return concat(
           text("TRIM("),

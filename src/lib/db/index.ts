@@ -71,6 +71,9 @@ export {
   scalar,
   sub,
   sum,
+  textContains,
+  textEndsWith,
+  textStartsWith,
   trimSpaces,
   unixepoch,
 } from "./query/expression";

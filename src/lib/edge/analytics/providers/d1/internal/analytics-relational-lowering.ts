@@ -30,6 +30,9 @@ import {
   semiJoin,
   sort as sortRelation,
   sum,
+  textContains,
+  textEndsWith,
+  textStartsWith,
   union,
 } from "@/lib/db";
 import type {
@@ -692,6 +695,53 @@ function lowerExpression(
         candidateBounded: false,
       };
     }
+    case "string-match": {
+      const input = lowerExpression(
+        expression.input,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.input`,
+      );
+      if (
+        input.kind !== "scalar" ||
+        input.type.kind !== "scalar" ||
+        input.type.scalar !== "string"
+      )
+        reject(path, "String matching requires a string scalar expression.");
+      if (!expression.caseSensitive)
+        reject(
+          path,
+          "Case-insensitive matching is not supported by this adapter.",
+        );
+
+      let value = expression.value;
+      let stringInput = input.expression as SqlExpression<string | null>;
+      if (expression.stringNormalization === "trim") {
+        stringInput = applyTrim(
+          stringInput,
+          input.type,
+          `${path}.input`,
+        ) as SqlExpression<string | null>;
+        value = value.trim();
+      } else if (expression.stringNormalization !== undefined) {
+        reject(path, "This adapter does not support case-fold normalization.");
+      }
+
+      const predicate =
+        expression.operator === "starts-with"
+          ? textStartsWith(stringInput, value)
+          : expression.operator === "ends-with"
+            ? textEndsWith(stringInput, value)
+            : textContains(stringInput, value);
+      return {
+        kind: "scalar",
+        expression: predicate,
+        type: { kind: "scalar", scalar: "boolean" },
+        nullable: input.nullable,
+        candidateBounded: false,
+      };
+    }
     case "absolute": {
       const input = lowerExpression(
         expression.input,
@@ -719,7 +769,6 @@ function lowerExpression(
     }
     case "elapsed-duration-literal":
     case "calendar-period-literal":
-    case "string-match":
     case "arithmetic":
     case "round":
     case "time-bucket":

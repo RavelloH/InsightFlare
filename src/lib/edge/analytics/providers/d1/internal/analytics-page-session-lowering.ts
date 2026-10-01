@@ -751,18 +751,26 @@ function validateSessionDocumentExpression(
       Array.isArray(record.value) &&
       record.value.length > 0 &&
       record.value.every((value) => typeof value === "string");
+    const validStringMatch =
+      (record.operator === "contains" ||
+        record.operator === "startsWith" ||
+        record.operator === "endsWith") &&
+      typeof record.value === "string";
     const validNullTest =
       (record.operator === "isNull" || record.operator === "notNull") &&
       record.value === undefined;
     if (
       target?.kind !== "field" ||
       !contract ||
-      (!validComparison && !validMembership && !validNullTest)
+      (!validComparison &&
+        !validMembership &&
+        !validStringMatch &&
+        !validNullTest)
     ) {
       return unsupported(
         "session-equality-leaf-only",
         path,
-        "Only registered native Page/Event eq/neq, in/notIn, isNull/notNull primitive conditions are supported.",
+        "Only registered native Page/Event comparisons, set membership, string matching, and null tests are supported.",
       );
     }
     return undefined;

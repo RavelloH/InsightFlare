@@ -5007,14 +5007,13 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
     });
     expect("query" in emptyMembership).toBe(false);
 
-    const unsupportedStringMatch = lower(
+    const supportedStringMatch = lower(
       filterDocument(fieldCondition("page.path", "contains", "/a")),
     );
-    expect(unsupportedStringMatch).toMatchObject({
-      kind: "unsupported",
-      capability: "session-equality-leaf-only",
-    });
-    expect("query" in unsupportedStringMatch).toBe(false);
+    expect(supportedStringMatch.kind).toBe("supported");
+    if (supportedStringMatch.kind !== "supported")
+      throw new Error("Expected native Page string matching to be supported.");
+    expect(supportedStringMatch.query.bindings).toContain("/a");
 
     const unsupportedSites = lower(DOCUMENT, [SITE_A, SITE_B]);
     expect(unsupportedSites).toMatchObject({

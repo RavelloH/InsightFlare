@@ -17,6 +17,9 @@ import {
   project,
   rowNumber,
   scan,
+  textContains,
+  textEndsWith,
+  textStartsWith,
   trimSpaces,
   union,
   unixepoch,
@@ -74,6 +77,36 @@ export function compileTimeDatabaseTypeAssertions(): void {
     NullableTrimSpacesValue,
   ] = [true, true, true];
   void trimSpacesChecks;
+  const requiredTextMatch = textContains(users.columns.email, "example");
+  const nullableTextMatch = textStartsWith(visits.columns.user_name, "A");
+  const nullableSuffixMatch = textEndsWith(visits.columns.user_name, "Z");
+  type RequiredTextMatchResult = Assert<
+    Equal<
+      ExpressionResultOf<typeof requiredTextMatch>,
+      ExpressionResultType<"integer", false>
+    >
+  >;
+  type NullableTextMatchResult = Assert<
+    Equal<
+      ExpressionResultOf<typeof nullableTextMatch>,
+      ExpressionResultType<"integer", true>
+    >
+  >;
+  type NullableTextMatchValue = Assert<
+    Equal<ExpressionValue<typeof nullableTextMatch>, boolean | null>
+  >;
+  const textMatchChecks: [
+    RequiredTextMatchResult,
+    NullableTextMatchResult,
+    NullableTextMatchValue,
+  ] = [true, true, true];
+  void textMatchChecks;
+  // @ts-expect-error Numeric expressions are not string matching inputs.
+  textContains(visits.columns.started_at, "1");
+  // @ts-expect-error Matching patterns are non-null string literals.
+  textContains(users.columns.email, null);
+  // @ts-expect-error Matching patterns must be strings.
+  textStartsWith(users.columns.email, 1);
   const requiredConcat = concatText(param("task:"), param(-7));
   const nullableConcat = concatText(param("task:"), param(null), param("雪"));
   type ConcatValueIsString = Assert<
