@@ -1,3 +1,4 @@
+import { PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS } from "@insightflare/ui/overlay-scrollbar";
 import {
   RiApps2Line,
   RiBarChartBoxLine,
@@ -18,7 +19,6 @@ import {
   RiVipCrownLine,
   RiWindow2Line,
 } from "@remixicon/react";
-import type { PartialOptions } from "overlayscrollbars";
 
 import { type SiteData, type TeamData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
@@ -72,18 +72,8 @@ export const VALID_ANALYTICS_SECTIONS = new Set([
   "goals",
   "retention",
 ]);
-export const DASHBOARD_SCROLLBAR_OPTIONS = {
-  overflow: {
-    x: "hidden",
-    y: "scroll",
-  },
-  scrollbars: {
-    theme: "os-theme-insightflare",
-    autoHide: "move",
-    autoHideDelay: 420,
-    autoHideSuspend: false,
-  },
-} satisfies PartialOptions;
+export const DASHBOARD_SCROLLBAR_OPTIONS =
+  PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS;
 export const SIDEBAR_COLLAPSE_SECTION_CLASS =
   "max-h-20 overflow-hidden transition-[max-height,opacity,transform,padding,margin] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:max-h-0 group-data-[collapsible=icon]:-translate-y-1 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:opacity-0";
 export const SIDEBAR_COLLAPSE_SEPARATOR_CLASS =

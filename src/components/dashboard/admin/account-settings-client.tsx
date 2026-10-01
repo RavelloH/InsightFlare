@@ -1,4 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Checkbox } from "@insightflare/ui/checkbox";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "@insightflare/ui/field";
+import { Input } from "@insightflare/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiComputerLine,
   RiGlobalLine,
@@ -12,33 +39,6 @@ import { toast } from "sonner";
 
 import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { useReportingTimeZone } from "@/components/time-zone-provider";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
 import {
   buildTimeZoneOptions,
   FALLBACK_TIME_ZONE,

@@ -1,4 +1,18 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@insightflare/ui/dropdown-menu";
 import {
   RiArrowDownSLine,
   RiComputerLine,
@@ -21,15 +35,6 @@ import {
   type ComparisonTableMetric,
   createComparisonTableColumns,
 } from "@/components/dashboard/comparison/comparison-table";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import {
@@ -62,11 +67,11 @@ const CHART_COLORS = [
   "var(--muted-foreground)",
 ] as const;
 const COMPARISON_CHART_COLORS = [
-  "var(--color-compare-chart-1)",
-  "var(--color-compare-chart-2)",
-  "var(--color-compare-chart-3)",
-  "var(--color-compare-chart-4)",
-  "var(--color-compare-chart-5)",
+  "var(--color-chart-secondary-1)",
+  "var(--color-chart-secondary-2)",
+  "var(--color-chart-secondary-3)",
+  "var(--color-chart-secondary-4)",
+  "var(--color-chart-secondary-5)",
   "var(--muted-foreground)",
 ] as const;
 type ScreenSortKey =
@@ -294,7 +299,7 @@ function ScreenCategoryPieCard({
               {percentFormat(locale, item.share)}
             </span>
             {comparisonItem ? (
-              <span className="font-mono tabular-nums text-compare-primary">
+              <span className="font-mono tabular-nums text-chart-secondary">
                 {percentFormat(locale, comparisonItem.share)}
               </span>
             ) : null}
@@ -336,7 +341,7 @@ function ScreenCategoryPieCard({
             <span className="inline-flex items-center gap-1.5">
               <span
                 className="size-2 shrink-0 rounded-none"
-                style={{ backgroundColor: "var(--color-compare-chart-1)" }}
+                style={{ backgroundColor: "var(--color-chart-secondary-1)" }}
               />
               {comparisonLabel}
             </span>

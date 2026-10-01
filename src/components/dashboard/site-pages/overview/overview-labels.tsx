@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { Icon } from "@iconify/react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 
-import { AutoTransition } from "@/components/ui/auto-transition";
 import { intlLocale } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import { formatI18nTemplate } from "@/lib/i18n/template";

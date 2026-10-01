@@ -1,5 +1,12 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import {
   RiArrowDownLine,
   RiArrowRightSLine,
   RiArrowUpLine,
@@ -9,13 +16,6 @@ import {
 import { SiteTrafficStackChart } from "@/components/dashboard/charts/site-traffic-stack-chart";
 import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   durationFormat,
   numberFormat,

@@ -1,4 +1,12 @@
 import { memo, useMemo } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Spinner } from "@insightflare/ui/spinner";
 import { RiBarChartBoxLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -12,9 +20,6 @@ import {
   type DeviceTypeIcon,
   resolveDeviceTypeMeta,
 } from "@/components/dashboard/journeys/journey-display";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
 import { fetchBrowserCrossBreakdown } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";

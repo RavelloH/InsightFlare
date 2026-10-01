@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  RiDraggable,
-  RiLayoutColumnLine,
-  RiRefreshLine,
-} from "@remixicon/react";
-import { Reorder, useDragControls } from "motion/react";
-
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
+import { Button } from "@insightflare/ui/button";
+import { Checkbox } from "@insightflare/ui/checkbox";
+import { ResponsiveDialog } from "@insightflare/ui/responsive-dialog";
 import {
   ResponsiveDialogBody,
   ResponsiveDialogClose,
@@ -18,12 +11,19 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
-} from "@/components/ui/responsive-dialog";
+} from "@insightflare/ui/responsive-dialog";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@insightflare/ui/tooltip";
+import {
+  RiDraggable,
+  RiLayoutColumnLine,
+  RiRefreshLine,
+} from "@remixicon/react";
+import { Reorder, useDragControls } from "motion/react";
+
 import { cn } from "@/lib/utils";
 const STORAGE_VERSION = 1;
 export interface AnalyticsTableColumnDefinition<TId extends string = string> {

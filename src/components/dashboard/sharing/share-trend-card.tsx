@@ -1,4 +1,12 @@
 import { type ComponentType, memo, type ReactNode, useMemo } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
 import { RiLineChartLine } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
@@ -12,9 +20,6 @@ import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   addZonedInterval,
   startOfZonedInterval,
@@ -40,11 +45,11 @@ const CHART_COLORS = [
   "var(--muted-foreground)",
 ] as const;
 const COMPARISON_CHART_COLORS = [
-  "var(--color-compare-chart-1)",
-  "var(--color-compare-chart-2)",
-  "var(--color-compare-chart-3)",
-  "var(--color-compare-chart-4)",
-  "var(--color-compare-chart-5)",
+  "var(--color-chart-secondary-1)",
+  "var(--color-chart-secondary-2)",
+  "var(--color-chart-secondary-3)",
+  "var(--color-chart-secondary-4)",
+  "var(--color-chart-secondary-5)",
   "var(--muted-foreground)",
 ] as const;
 const CURRENT_PERIOD_STYLE = {

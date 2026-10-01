@@ -1,12 +1,4 @@
 import {
-  RiArrowRightLine,
-  RiCloseLine,
-  RiDeleteBinLine,
-  RiSave3Line,
-  RiSettings3Line,
-} from "@remixicon/react";
-
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -16,26 +8,33 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
+} from "@insightflare/ui/alert-dialog";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@insightflare/ui/card";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
+  RiArrowRightLine,
+  RiCloseLine,
+  RiDeleteBinLine,
+  RiSave3Line,
+  RiSettings3Line,
+} from "@remixicon/react";
 
 import { useTeamManagementContext } from "./context";
 import {

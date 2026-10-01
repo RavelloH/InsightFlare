@@ -1,5 +1,28 @@
 import type { ComponentType } from "react";
 import { useEffect, useRef, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogClose,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@insightflare/ui/responsive-dialog";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiCheckLine,
   RiCloseLine,
@@ -11,23 +34,6 @@ import {
 } from "@remixicon/react";
 
 import { BlockingRuleGeoSearchDialog } from "@/components/dashboard/admin/blocking-rule-geo-search-dialog";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-  ResponsiveDialogClose,
-  ResponsiveDialogContent,
-  ResponsiveDialogDescription,
-  ResponsiveDialogFooter,
-  ResponsiveDialogHeader,
-  ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
-import { Spinner } from "@/components/ui/spinner";
 import {
   type BlockingFieldId,
   type BlockingRuleSyntaxError,
@@ -98,9 +104,15 @@ function BlockingRuleHelpDialog({
               <h3 className="text-sm font-medium">
                 {dialogCopy.examplesTitle}
               </h3>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap border bg-muted/30 p-3 font-mono text-xs leading-relaxed">
-                {exampleConfig}
-              </pre>
+              <OverlayScrollbar
+                axis="both"
+                className="max-h-64 border bg-muted/30"
+                contentClassName="p-3"
+              >
+                <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed">
+                  {exampleConfig}
+                </pre>
+              </OverlayScrollbar>
               <p className="text-xs text-muted-foreground">
                 {copy.exampleDescription}
               </p>

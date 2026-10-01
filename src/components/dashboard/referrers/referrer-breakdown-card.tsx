@@ -1,4 +1,10 @@
 import { memo, type MouseEvent, useMemo } from "react";
+import { Clickable } from "@insightflare/ui/clickable";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import {
   RiArrowRightUpLine,
   RiSearchLine,
@@ -25,12 +31,6 @@ import {
   type ReferrerSortKey,
   type ReferrerTab,
 } from "@/components/dashboard/referrers/referrer-utils";
-import { Clickable } from "@/components/ui/clickable";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,

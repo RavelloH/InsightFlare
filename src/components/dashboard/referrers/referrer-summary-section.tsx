@@ -1,9 +1,14 @@
 import { memo, useMemo } from "react";
+import { ShareBreakdownView } from "@insightflare/product-ui/sharing";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
 import { RiShareForwardLine } from "@remixicon/react";
 
 import { ContentSwitch } from "@/components/dashboard/common/content-switch";
-import { ShareRadialCard } from "@/components/dashboard/sharing/share-radial-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { ReferrerSummaryData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
@@ -246,7 +251,7 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
         initial={false}
       >
         <div className="grid gap-4 md:grid-cols-2">
-          <ShareRadialCard
+          <ShareBreakdownView
             title={messages.referrers.splitTitle}
             items={splitItems}
             comparisonItems={comparisonShareItems?.splitItems}
@@ -256,7 +261,7 @@ export const ReferrerSummarySection = memo(function ReferrerSummarySection({
             loading={showInitialLoading}
             valueLabel={messages.common.views}
           />
-          <ShareRadialCard
+          <ShareBreakdownView
             title={messages.referrers.chartTitle}
             items={mixItems}
             comparisonItems={comparisonShareItems?.mixItems}

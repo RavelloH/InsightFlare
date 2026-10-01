@@ -1,4 +1,8 @@
 import { memo, useMemo } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { RiCloseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -13,10 +17,6 @@ import {
   OverviewTrendSection,
 } from "@/components/dashboard/site-pages/overview/metrics";
 import { OverviewPagesSection } from "@/components/dashboard/site-pages/overview/pages-section";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   fetchEventTypesTab,
   fetchOverviewPageCardTab,

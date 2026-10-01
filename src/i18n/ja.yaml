@@ -1,4 +1,34 @@
 appName: InsightFlare
+uiGallery:
+  searchLabel: UI コンポーネントを検索
+  searchPlaceholder: コンポーネントを検索
+  backToApp: InsightFlare に戻る
+  noSearchResults: 検索に一致するコンポーネントはありません。
+  toggleNavigation: ライブラリナビゲーションを切り替え
+  library: UI ライブラリ
+  componentsCount: "{count} 個のコンポーネント"
+  statesCount: "{count} 個の状態"
+  designSystem: InsightFlare デザインシステム
+  pageTitle: UI コンポーネント
+  catalogSummary: "{components} 個のコンポーネント · {states} 個の prop 値"
+  categories:
+    inputs: 入力
+    feedback: フィードバック
+    foundations: 基礎
+    navigation: ナビゲーション
+    data-display: データ表示
+    overlays: オーバーレイ
+    product-analytics: プロダクト UI / 分析
+    product-realtime: プロダクト UI / リアルタイム
+  browseCategories: カテゴリーから探す
+  featuredComponents: 注目のコンポーネント
+  backToCatalog: UI コンポーネント
+  canonicalStates: Props と値
+  browseAllComponents: すべてのコンポーネントを見る
+  previewState: プレビューを開く
+  resetPreview: プレビューをリセット
+  expandCode: コードを展開
+  collapseCode: コードを折りたたむ
 navigation:
   overview: 概要
   realtime: リアルタイム

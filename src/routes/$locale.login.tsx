@@ -1,15 +1,15 @@
-import { RiLoginBoxLine } from "@remixicon/react";
-import { createFileRoute } from "@tanstack/react-router";
-
-import { AuthPageActions } from "@/components/auth/auth-page-actions";
-import { LoginForm } from "@/components/auth/login-form";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@insightflare/ui/card";
+import { RiLoginBoxLine } from "@remixicon/react";
+import { createFileRoute } from "@tanstack/react-router";
+
+import { AuthPageActions } from "@/components/auth/auth-page-actions";
+import { LoginForm } from "@/components/auth/login-form";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
 

@@ -6,6 +6,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { Clickable } from "@insightflare/ui/clickable";
+import { Input } from "@insightflare/ui/input";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 import {
   RiChatQuoteLine,
   RiCheckLine,
@@ -14,13 +21,6 @@ import {
   RiFilterOffLine,
 } from "@remixicon/react";
 
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Clickable } from "@/components/ui/clickable";
-import { Input } from "@/components/ui/input";
-import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
-import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
 import { describeFilterExpression } from "@/lib/dashboard/filter-description";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {

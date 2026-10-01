@@ -1,0 +1,277 @@
+"use client";
+
+import * as React from "react";
+import { RiCloseLine, RiInformationLine } from "@remixicon/react";
+
+import { useIsMobile } from "../../hooks/use-mobile";
+import { cn } from "../../lib/utils";
+import { Button } from "./button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "./dialog";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerScrollArea,
+  DrawerTitle,
+  DrawerTrigger,
+} from "./drawer";
+import { VerticalScrollMask } from "./vertical-scroll-mask";
+
+const ResponsiveDialogContext = React.createContext(false);
+
+export function ResponsiveDialog({
+  children,
+  ...props
+}: React.ComponentProps<typeof Dialog>) {
+  const isMobile = useIsMobile();
+  const Root = isMobile ? Drawer : Dialog;
+
+  return (
+    <ResponsiveDialogContext.Provider value={isMobile}>
+      <Root {...props}>{children}</Root>
+    </ResponsiveDialogContext.Provider>
+  );
+}
+
+export function ResponsiveDialogTrigger({
+  ...props
+}: React.ComponentProps<typeof DialogTrigger>) {
+  const isMobile = React.useContext(ResponsiveDialogContext);
+  const Trigger = isMobile ? DrawerTrigger : DialogTrigger;
+
+  return <Trigger {...props} />;
+}
+
+export function ResponsiveDialogClose({
+  ...props
+}: React.ComponentProps<typeof DialogClose>) {
+  const isMobile = React.useContext(ResponsiveDialogContext);
+  const Close = isMobile ? DrawerClose : DialogClose;
+
+  return <Close {...props} />;
+}
+
+export function ResponsiveDialogContent({
+  children,
+  className,
+  desktopClassName,
+  drawerClassName,
+  overlayClassName,
+  showCloseButton = true,
+  ...props
+}: React.ComponentProps<typeof DialogContent> & {
+  desktopClassName?: string;
+  drawerClassName?: string;
+}) {
+  const isMobile = React.useContext(ResponsiveDialogContext);
+
+  if (isMobile) {
+    return (
+      <DrawerContent
+        className={cn(
+          "max-h-[80dvh] min-h-0 flex flex-col overflow-hidden",
+          drawerClassName,
+          className,
+        )}
+        overlayClassName={overlayClassName}
+        {...props}
+      >
+        {children}
+      </DrawerContent>
+    );
+  }
+
+  return (
+    <DialogContent
+      className={cn(
+        "max-h-[calc(100dvh-2rem)] min-h-0 max-w-full flex flex-col overflow-hidden",
+        desktopClassName,
+        className,
+      )}
+      overlayClassName={overlayClassName}
+      showCloseButton={showCloseButton}
+      {...props}
+    >
+      {children}
+    </DialogContent>
+  );
+}
+
+export function ResponsiveDialogBody({
+  children,
+  className,
+  scrollable = true,
+  ...props
+}: React.ComponentProps<"div"> & { scrollable?: boolean }) {
+  const isMobile = React.useContext(ResponsiveDialogContext);
+
+  if (!scrollable) {
+    return (
+      <div className={cn("flex min-h-0 flex-1 flex-col", className)} {...props}>
+        {children}
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <DrawerScrollArea
+        className="min-h-0 flex-1"
+        contentClassName={cn("px-4 pb-2", className)}
+        {...props}
+      >
+        {children}
+      </DrawerScrollArea>
+    );
+  }
+
+  return (
+    <VerticalScrollMask
+      className="min-h-0 flex-1"
+      contentClassName={className}
+      {...props}
+    >
+      {children}
+    </VerticalScrollMask>
+  );
+}
+
+export function ResponsiveDialogHeader({
+  className,
+  ...props
+}: React.ComponentProps<typeof DialogHeader>) {
+  const isMobile = React.useContext(ResponsiveDialogContext);
+
+  if (isMobile) {
+    return (
+      <DrawerHeader
+        className={cn("shrink-0 p-4 text-center md:text-center", className)}
+        {...props}
+      />
+    );
+  }
+
+  return <DialogHeader className={className} {...props} />;
+}
+
+export function ResponsiveDialogTitle({
+  children,
+  className,
+  icon: Icon = RiInformationLine,
+  iconClassName,
+  ...props
+}: React.ComponentProps<typeof DialogTitle>) {
+  const isMobile = React.useContext(ResponsiveDialogContext);
+
+  if (isMobile) {
+    return (
+      <DrawerTitle
+        className={cn(
+          "flex w-full items-center justify-center gap-2 text-center",
+          className,
+        )}
+        {...props}
+      >
+        {Icon ? (
+          <Icon className={cn("size-4 shrink-0", iconClassName)} />
+        ) : null}
+        <span className="min-w-0">{children}</span>
+      </DrawerTitle>
+    );
+  }
+
+  return (
+    <DialogTitle
+      className={className}
+      icon={Icon}
+      iconClassName={iconClassName}
+      {...props}
+    >
+      {children}
+    </DialogTitle>
+  );
+}
+
+export function ResponsiveDialogDescription({
+  ...props
+}: React.ComponentProps<typeof DialogDescription>) {
+  const isMobile = React.useContext(ResponsiveDialogContext);
+  const Description = isMobile ? DrawerDescription : DialogDescription;
+
+  return <Description {...props} />;
+}
+
+export function ResponsiveDialogFooter({
+  children,
+  className,
+  showCloseButton = false,
+  ...props
+}: React.ComponentProps<typeof DialogFooter>) {
+  const isMobile = React.useContext(ResponsiveDialogContext);
+
+  if (isMobile) {
+    return (
+      <DrawerFooter className={cn("shrink-0 p-4", className)} {...props}>
+        {children}
+        {showCloseButton ? (
+          <DrawerClose asChild>
+            <Button variant="outline">
+              <RiCloseLine />
+              <span>Close</span>
+            </Button>
+          </DrawerClose>
+        ) : null}
+      </DrawerFooter>
+    );
+  }
+
+  return (
+    <DialogFooter
+      className={className}
+      showCloseButton={showCloseButton}
+      {...props}
+    >
+      {children}
+    </DialogFooter>
+  );
+}
+
+export type ResponsiveDialogProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialog
+>;
+export type ResponsiveDialogTriggerProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialogTrigger
+>;
+export type ResponsiveDialogCloseProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialogClose
+>;
+export type ResponsiveDialogContentProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialogContent
+>;
+export type ResponsiveDialogBodyProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialogBody
+>;
+export type ResponsiveDialogHeaderProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialogHeader
+>;
+export type ResponsiveDialogTitleProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialogTitle
+>;
+export type ResponsiveDialogDescriptionProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialogDescription
+>;
+export type ResponsiveDialogFooterProps = React.ComponentPropsWithRef<
+  typeof ResponsiveDialogFooter
+>;

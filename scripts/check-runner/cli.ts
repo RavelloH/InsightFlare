@@ -86,6 +86,15 @@ function createTasks(fix: boolean): CheckTask[] {
       ],
     },
     {
+      name: "UI contracts",
+      steps: [
+        {
+          name: "UI contracts",
+          args: ["run", "check:ui-contracts"],
+        },
+      ],
+    },
+    {
       name: "Tracker SDK",
       steps: [
         {

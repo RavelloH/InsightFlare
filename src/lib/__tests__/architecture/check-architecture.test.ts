@@ -113,6 +113,159 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("enforces workspace UI package boundaries and public subpath imports", () => {
+    const root = fixture();
+    const files: Record<string, string> = {
+      "packages/ui/package.json": JSON.stringify({
+        name: "@insightflare/ui",
+        exports: {
+          "./components/*": "./src/components/*.tsx",
+          "./query/*": "./src/query/*.ts",
+        },
+      }),
+      "packages/product-ui/package.json": JSON.stringify({
+        name: "@insightflare/product-ui",
+        exports: { "./cards/*": "./src/cards/*.tsx" },
+      }),
+      "packages/ui/src/components/button.tsx":
+        "export const Button = () => null;\n",
+      "packages/ui/src/query/use-query.ts":
+        "export const useQuery = () => null;\n",
+      "src/lib/api-v1/client.ts": "export const client = true;\n",
+      "src/lib/edge/runtime/worker.ts": "export const runtime = true;\n",
+      "packages/product-ui/src/cards/site-card.tsx": [
+        'import { Button } from "@insightflare/ui/components/button";',
+        'import "@/lib/api-v1/client";',
+        'export { runtime } from "../../../../src/lib/edge/runtime/worker";',
+        'const load = () => import("@tanstack/react-query");',
+        'import { useQuery } from "@insightflare/ui/query/use-query";',
+        "export { Button, useQuery, load };",
+        "",
+      ].join("\n"),
+      "packages/ui/src/components/field.tsx": [
+        'import { runtime } from "../../../../src/lib/edge/runtime/worker";',
+        'import { ProductCard } from "@insightflare/product-ui/cards/site-card";',
+        'import { useQuery } from "@tanstack/react-query";',
+        "export { runtime, ProductCard, useQuery };",
+        "",
+      ].join("\n"),
+      "src/components/workspace-consumer.tsx": [
+        'import { Button } from "@insightflare/ui/components/button";',
+        'import { ProductCard } from "@insightflare/product-ui/cards/site-card";',
+        'import { PrivateButton } from "../../packages/ui/src/components/button";',
+        "export { Button, ProductCard, PrivateButton };",
+        "",
+      ].join("\n"),
+    };
+    for (const [relativePath, content] of Object.entries(files)) {
+      const absolutePath = path.join(root, relativePath);
+      mkdirSync(path.dirname(absolutePath), { recursive: true });
+      writeFileSync(absolutePath, content);
+    }
+
+    const violations = collectArchitectureViolations(root);
+    expect(
+      violations.map(({ rule, source, specifier, target }) => ({
+        rule,
+        source,
+        specifier,
+        target,
+      })),
+    ).toEqual([
+      {
+        rule: "product-ui-package-app-import",
+        source: "packages/product-ui/src/cards/site-card.tsx",
+        specifier: "@/lib/api-v1/client",
+        target: "src/lib/api-v1/client.ts",
+      },
+      {
+        rule: "product-ui-package-app-import",
+        source: "packages/product-ui/src/cards/site-card.tsx",
+        specifier: "../../../../src/lib/edge/runtime/worker",
+        target: "src/lib/edge/runtime/worker.ts",
+      },
+      {
+        rule: "product-ui-package-router-query-import",
+        source: "packages/product-ui/src/cards/site-card.tsx",
+        specifier: "@tanstack/react-query",
+        target: "__package__:@tanstack/react-query",
+      },
+      {
+        rule: "product-ui-package-app-feature-import",
+        source: "packages/product-ui/src/cards/site-card.tsx",
+        specifier: "@insightflare/ui/query/use-query",
+        target: "packages/ui/src/query/use-query.ts",
+      },
+      {
+        rule: "ui-package-app-import",
+        source: "packages/ui/src/components/field.tsx",
+        specifier: "../../../../src/lib/edge/runtime/worker",
+        target: "src/lib/edge/runtime/worker.ts",
+      },
+      {
+        rule: "ui-package-product-ui-import",
+        source: "packages/ui/src/components/field.tsx",
+        specifier: "@insightflare/product-ui/cards/site-card",
+        target: "packages/product-ui/src/cards/site-card.tsx",
+      },
+      {
+        rule: "ui-package-router-query-import",
+        source: "packages/ui/src/components/field.tsx",
+        specifier: "@tanstack/react-query",
+        target: "__package__:@tanstack/react-query",
+      },
+      {
+        rule: "app-package-source-import",
+        source: "src/components/workspace-consumer.tsx",
+        specifier: "../../packages/ui/src/components/button",
+        target: "packages/ui/src/components/button.tsx",
+      },
+    ]);
+  });
+
+  it("rejects Product UI imports of unexported UI subpaths", () => {
+    const root = fixture();
+    const files: Record<string, string> = {
+      "packages/ui/package.json": JSON.stringify({
+        name: "@insightflare/ui",
+        exports: { "./components/*": "./src/components/*.tsx" },
+      }),
+      "packages/ui/src/components/button.tsx":
+        "export const Button = () => null;\n",
+      "packages/product-ui/src/card.tsx": [
+        'import { Button } from "@insightflare/ui/private-button";',
+        'import { PrivateButton } from "../../ui/src/components/button";',
+        "export { Button, PrivateButton };",
+        "",
+      ].join("\n"),
+    };
+    for (const [relativePath, content] of Object.entries(files)) {
+      const absolutePath = path.join(root, relativePath);
+      mkdirSync(path.dirname(absolutePath), { recursive: true });
+      writeFileSync(absolutePath, content);
+    }
+
+    expect(
+      collectArchitectureViolations(root).map(({ rule, specifier }) => ({
+        rule,
+        specifier,
+      })),
+    ).toEqual([
+      {
+        rule: "product-ui-package-public-ui-subpath",
+        specifier: "@insightflare/ui/private-button",
+      },
+      {
+        rule: "product-ui-package-private-ui-import",
+        specifier: "../../ui/src/components/button",
+      },
+      {
+        rule: "product-ui-package-public-ui-subpath",
+        specifier: "../../ui/src/components/button",
+      },
+    ]);
+  });
+
   it("limits raw database escape helpers to foundation and Analytics adapters", () => {
     const root = fixture();
     mkdirSync(path.join(root, "src/lib/db"), { recursive: true });

@@ -1,5 +1,35 @@
 import { useEffect, useState } from "react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@insightflare/ui/alert-dialog";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import {
   RiAddLine,
   RiCloseLine,
   RiDeleteBinLine,
@@ -14,36 +44,6 @@ import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch
 import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { AdminUsersInitialData } from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";

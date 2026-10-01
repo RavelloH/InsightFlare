@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { fetchGoalSummary } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { describeFilterExpression } from "@/lib/dashboard/filter-description";
@@ -18,7 +23,7 @@ import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
 import { GoalActions } from "./goal-actions";
-import { GoalVisualization } from "./goal-visualization";
+import { GoalVisualizationAdapter } from "./goal-visualization";
 const noop = () => undefined;
 export function goalFilterSummary(
   goal: GoalDefinition,
@@ -63,7 +68,7 @@ export function GoalCardSkeleton({
         <div className="mb-4 space-y-1 text-sm">
           <Skeleton className="h-4 w-full" />
         </div>
-        <GoalVisualization locale={locale} labels={labels} loading />
+        <GoalVisualizationAdapter locale={locale} labels={labels} loading />
       </CardContent>
     </Card>
   );
@@ -215,7 +220,7 @@ export function GoalCard({
                 {labels.detailLoadError}
               </p>
             ) : (
-              <GoalVisualization
+              <GoalVisualizationAdapter
                 summary={summary.data?.data.summary}
                 comparisonSummary={comparisonSummary.data?.data.summary}
                 locale={locale}

@@ -1,4 +1,13 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  type ChartConfig,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@insightflare/ui/chart";
 import {
   CartesianGrid,
   Customized,
@@ -9,15 +18,6 @@ import {
   YAxis,
 } from "recharts";
 
-import { AutoTransition } from "@/components/ui/auto-transition";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
 import { intlLocale } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { PerformanceMetricKey } from "@/lib/dashboard-api/client/edge";
@@ -57,9 +57,9 @@ const PERFORMANCE_SERIES_COLORS = {
   p95: "var(--color-chart-5)",
 } as const;
 const PERFORMANCE_COMPARISON_SERIES_COLORS = {
-  p50: "var(--color-compare-chart-1)",
-  p75: "var(--color-compare-chart-4)",
-  p95: "var(--color-compare-chart-5)",
+  p50: "var(--color-chart-secondary-1)",
+  p75: "var(--color-chart-secondary-4)",
+  p95: "var(--color-chart-secondary-5)",
 } as const;
 const PERFORMANCE_TREND_ANIMATION_DURATION_MS = 1200;
 const PERFORMANCE_TREND_CONNECTOR_DELAY_MS =

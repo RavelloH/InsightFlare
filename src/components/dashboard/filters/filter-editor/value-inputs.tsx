@@ -1,4 +1,23 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import { Input } from "@insightflare/ui/input";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { Popover } from "@insightflare/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import { RiArrowDownSLine, RiSearchLine } from "@remixicon/react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
@@ -10,25 +29,6 @@ import {
   getFilterNumberDisplayUnits,
   toDisplayNumberMetadata,
 } from "@/components/dashboard/filters/filter-number-units";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { OverlayScrollbar } from "@/components/ui/overlay-scrollbar";
-import { Popover } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { DashboardFilterOptionKey } from "@/lib/dashboard/client/data/index";
 import {
   fetchEventTypeFields,

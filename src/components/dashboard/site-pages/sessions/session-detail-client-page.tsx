@@ -1,4 +1,5 @@
 import { memo, useCallback, useMemo, useState } from "react";
+import { Card, CardContent } from "@insightflare/ui/card";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
@@ -7,7 +8,6 @@ import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboar
 import { useDetailDrawerClose } from "@/components/dashboard/site-pages/common/detail-drawer";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import { PageDetailDrawer } from "@/components/dashboard/site-pages/pages/page-detail-drawer";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   fetchEventRecordDetail,
   fetchJourneyEventDetail,

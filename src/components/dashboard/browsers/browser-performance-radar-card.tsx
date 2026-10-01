@@ -1,4 +1,10 @@
 import { memo, useMemo } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
 import { RiPulseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -12,7 +18,6 @@ import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchBrowserRadar } from "@/lib/dashboard/client/data/index";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -26,7 +31,7 @@ const CHART_COLORS = [
   "var(--color-chart-3)",
   "var(--color-chart-4)",
 ] as const;
-const COMPARISON_CHART_COLOR = "var(--color-compare-primary)";
+const COMPARISON_CHART_COLOR = "var(--color-chart-secondary)";
 function emptyRadarUnlessAborted(error: unknown): BrowserRadarItem[] {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return [];

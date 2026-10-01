@@ -135,6 +135,147 @@ function runtimeBoundaryPackageTarget(specifier: string): string | null {
   return packageName ? `__package__:${packageName}` : null;
 }
 
+const WORKSPACE_PACKAGES = {
+  "@insightflare/ui": "packages/ui",
+  "@insightflare/product-ui": "packages/product-ui",
+} as const;
+
+type WorkspacePackageName = keyof typeof WORKSPACE_PACKAGES;
+
+interface WorkspaceImportTarget {
+  packageName: WorkspacePackageName;
+  target: string;
+  publicSubpath: boolean;
+}
+
+function workspacePackageForSpecifier(
+  specifier: string,
+): { packageName: WorkspacePackageName; subpath: string } | null {
+  for (const packageName of Object.keys(
+    WORKSPACE_PACKAGES,
+  ) as WorkspacePackageName[]) {
+    if (specifier === packageName) return { packageName, subpath: "." };
+    if (specifier.startsWith(`${packageName}/`))
+      return {
+        packageName,
+        subpath: `./${specifier.slice(packageName.length + 1)}`,
+      };
+  }
+  return null;
+}
+
+function exportTargetPaths(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(exportTargetPaths);
+  if (!value || typeof value !== "object") return [];
+  const conditions = value as Record<string, unknown>;
+  const order = ["types", "import", "browser", "default", "require", "node"];
+  return [
+    ...order.flatMap((condition) => exportTargetPaths(conditions[condition])),
+    ...Object.entries(conditions)
+      .filter(([condition]) => !order.includes(condition))
+      .flatMap(([, target]) => exportTargetPaths(target)),
+  ];
+}
+
+function resolveExportPath(
+  root: string,
+  packageName: WorkspacePackageName,
+  subpath: string,
+): WorkspaceImportTarget {
+  const packageDirectory = path.join(root, WORKSPACE_PACKAGES[packageName]);
+  const packageManifest = path.join(packageDirectory, "package.json");
+  const fallback = path.join(
+    WORKSPACE_PACKAGES[packageName],
+    "src",
+    subpath === "." ? "index" : subpath.slice(2),
+  );
+  let targetPatterns: string[] = [];
+  try {
+    const manifest = JSON.parse(readFileSync(packageManifest, "utf8")) as {
+      exports?: unknown;
+    };
+    const exportsField = manifest.exports;
+    if (typeof exportsField === "string" || Array.isArray(exportsField)) {
+      if (subpath === ".") targetPatterns = exportTargetPaths(exportsField);
+    } else if (exportsField && typeof exportsField === "object") {
+      const exportsMap = exportsField as Record<string, unknown>;
+      const hasSubpathKeys = Object.keys(exportsMap).some((key) =>
+        key.startsWith("."),
+      );
+      if (!hasSubpathKeys && subpath === ".") {
+        targetPatterns = exportTargetPaths(exportsField);
+      } else if (hasSubpathKeys) {
+        if (subpath in exportsMap) {
+          targetPatterns = exportTargetPaths(exportsMap[subpath]);
+        } else {
+          const matchingPatterns = Object.entries(exportsMap)
+            .map(([pattern, value]) => ({
+              pattern,
+              value,
+              specificity: pattern.replace("*", "").length,
+            }))
+            .filter(({ pattern }) => pattern.includes("*"))
+            .sort((left, right) => right.specificity - left.specificity);
+          for (const { pattern, value } of matchingPatterns) {
+            const star = pattern.indexOf("*");
+            if (star < 0) continue;
+            const prefix = pattern.slice(0, star);
+            const suffix = pattern.slice(star + 1);
+            if (
+              subpath.startsWith(prefix) &&
+              subpath.endsWith(suffix) &&
+              subpath.length >= prefix.length + suffix.length
+            ) {
+              const matched = subpath.slice(
+                prefix.length,
+                subpath.length - suffix.length,
+              );
+              targetPatterns.push(
+                ...exportTargetPaths(value).map((target) =>
+                  target.replaceAll("*", matched),
+                ),
+              );
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // A missing or malformed manifest leaves the import without a public export.
+  }
+
+  for (const targetPattern of targetPatterns) {
+    if (!targetPattern.startsWith("./")) continue;
+    const absolute = path.resolve(packageDirectory, targetPattern);
+    const resolved = resolveFileCandidate(absolute);
+    return {
+      packageName,
+      target: slash(path.relative(root, resolved ?? absolute)),
+      publicSubpath: true,
+    };
+  }
+  return {
+    packageName,
+    target: slash(fallback),
+    publicSubpath: false,
+  };
+}
+
+function resolveFileCandidate(base: string): string | null {
+  const candidates = [
+    base,
+    ...SOURCE_EXTENSIONS.map((extension) => `${base}${extension}`),
+    ...SOURCE_EXTENSIONS.map((extension) =>
+      path.join(base, `index${extension}`),
+    ),
+  ];
+  const resolved = candidates.find((candidate) =>
+    statSync(candidate, { throwIfNoEntry: false })?.isFile(),
+  );
+  return resolved ? slash(resolved) : null;
+}
+
 function walk(directory: string): string[] {
   if (!statSync(directory, { throwIfNoEntry: false })?.isDirectory()) return [];
   const files: string[] = [];
@@ -256,32 +397,230 @@ function resolveInternalImport(
   sourceAbsolute: string,
   specifier: string,
 ): string | null {
+  const workspaceImport = workspacePackageForSpecifier(specifier);
+  if (workspaceImport) {
+    const resolution = resolveExportPath(
+      root,
+      workspaceImport.packageName,
+      workspaceImport.subpath,
+    );
+    return resolution.publicSubpath ? resolution.target : null;
+  }
+
+  const sourceSpecifier = specifier.split(/[?#]/u, 1)[0]!;
+
   let base: string;
-  if (specifier.startsWith("@/")) {
-    base = path.join(root, "src", specifier.slice(2));
-  } else if (specifier.startsWith(".")) {
-    base = path.resolve(path.dirname(sourceAbsolute), specifier);
+  if (sourceSpecifier.startsWith("@/")) {
+    base = path.join(root, "src", sourceSpecifier.slice(2));
+  } else if (sourceSpecifier.startsWith(".")) {
+    base = path.resolve(path.dirname(sourceAbsolute), sourceSpecifier);
   } else {
     return null;
   }
 
-  const candidates = [
-    base,
-    ...SOURCE_EXTENSIONS.map((extension) => `${base}${extension}`),
-    ...SOURCE_EXTENSIONS.map((extension) =>
-      path.join(base, `index${extension}`),
-    ),
-  ];
-  const resolved = candidates.find((candidate) =>
-    statSync(candidate, { throwIfNoEntry: false })?.isFile(),
-  );
+  const resolved = resolveFileCandidate(base);
   if (resolved) return slash(path.relative(root, resolved));
 
   // Only report an unresolved project alias. Relative imports to non-source
   // assets (CSS, JSON, images) are outside this check's scope.
-  return specifier.startsWith("@/")
-    ? `__unresolved__/${specifier.slice(2)}`
+  return sourceSpecifier.startsWith("@/")
+    ? `__unresolved__/${sourceSpecifier.slice(2)}`
     : null;
+}
+
+function importedProjectPath(
+  root: string,
+  sourceAbsolute: string,
+  specifier: string,
+): string | null {
+  const workspaceImport = workspacePackageForSpecifier(specifier);
+  if (workspaceImport) {
+    return resolveExportPath(
+      root,
+      workspaceImport.packageName,
+      workspaceImport.subpath,
+    ).target;
+  }
+  if (specifier.startsWith("@/"))
+    return slash(
+      path.relative(root, path.join(root, "src", specifier.slice(2))),
+    );
+  if (specifier.startsWith(".")) {
+    const target = path.resolve(path.dirname(sourceAbsolute), specifier);
+    const relative = slash(path.relative(root, target));
+    return relative === ".." || relative.startsWith("../") ? null : relative;
+  }
+  return null;
+}
+
+function isTanStackRouterOrQuery(specifier: string): boolean {
+  return /^@tanstack\/(?:react-)?(?:router|query)(?:-[^/]+)?(?:\/|$)/u.test(
+    specifier,
+  );
+}
+
+function hasPathToken(target: string, tokens: readonly string[]): boolean {
+  const normalized = slash(target).toLowerCase();
+  return tokens.some((token) =>
+    new RegExp(`(?:^|[/_.-])${token}(?:$|[/_.-])`, "u").test(normalized),
+  );
+}
+
+function workspaceBoundaryViolations(
+  root: string,
+  source: string,
+  sourceAbsolute: string,
+  imported: ImportReference,
+  resolved: string | null,
+): ArchitectureViolation[] {
+  const isUiSource = isWithin(source, "packages/ui/src");
+  const isProductUiSource = isWithin(source, "packages/product-ui/src");
+  const isApplicationSource = isWithin(source, "src");
+  if (!isUiSource && !isProductUiSource && !isApplicationSource) return [];
+
+  const workspaceImport = workspacePackageForSpecifier(imported.specifier);
+  const projectTarget =
+    resolved && !resolved.startsWith("__unresolved__/")
+      ? resolved
+      : importedProjectPath(root, sourceAbsolute, imported.specifier);
+  const targetIsRootSource =
+    projectTarget !== null && isWithin(projectTarget, "src");
+  const targetIsUiSource =
+    projectTarget !== null && isWithin(projectTarget, "packages/ui/src");
+  const targetIsProductUiSource =
+    projectTarget !== null &&
+    isWithin(projectTarget, "packages/product-ui/src");
+  const findings: ArchitectureViolation[] = [];
+
+  const add = (rule: string, message: string, target = projectTarget) => {
+    findings.push({
+      rule,
+      source,
+      specifier: imported.specifier,
+      target: target ?? imported.specifier,
+      line: imported.line,
+      message,
+    });
+  };
+
+  if (isUiSource) {
+    if (imported.specifier.startsWith("@/") || targetIsRootSource)
+      add(
+        "ui-package-app-import",
+        "The shared UI package must not depend on root application source or its @/ alias.",
+      );
+    if (
+      workspaceImport?.packageName === "@insightflare/product-ui" ||
+      targetIsProductUiSource
+    )
+      add(
+        "ui-package-product-ui-import",
+        "The shared UI package must not depend on Product UI.",
+      );
+    if (isTanStackRouterOrQuery(imported.specifier))
+      add(
+        "ui-package-router-query-import",
+        "The shared UI package must not depend on TanStack Router or Query.",
+        `__package__:${imported.specifier.split("/").slice(0, 2).join("/")}`,
+      );
+    if (
+      !targetIsRootSource &&
+      projectTarget !== null &&
+      hasPathToken(projectTarget, [
+        "dashboard",
+        "api",
+        "route",
+        "routes",
+        "server",
+      ])
+    )
+      add(
+        "ui-package-app-feature-import",
+        "The shared UI package must not depend on Dashboard, API, route, or server code.",
+      );
+  }
+
+  if (isProductUiSource) {
+    if (imported.specifier.startsWith("@/") || targetIsRootSource)
+      add(
+        "product-ui-package-app-import",
+        "Product UI must not depend on root application source or its @/ alias.",
+      );
+    if (isTanStackRouterOrQuery(imported.specifier))
+      add(
+        "product-ui-package-router-query-import",
+        "Product UI must not depend on TanStack Router or Query.",
+        `__package__:${imported.specifier.split("/").slice(0, 2).join("/")}`,
+      );
+    if (
+      !targetIsRootSource &&
+      projectTarget !== null &&
+      hasPathToken(projectTarget, [
+        "api",
+        "query",
+        "queries",
+        "client",
+        "runtime",
+      ])
+    )
+      add(
+        "product-ui-package-app-feature-import",
+        "Product UI must not depend on API, query, client, or runtime code.",
+      );
+    if (targetIsUiSource && workspaceImport?.packageName !== "@insightflare/ui")
+      add(
+        "product-ui-package-private-ui-import",
+        "Product UI may depend on UI only through a public @insightflare/ui/* subpath.",
+      );
+    if (
+      targetIsUiSource &&
+      (!workspaceImport ||
+        workspaceImport.packageName !== "@insightflare/ui" ||
+        workspaceImport.subpath === "." ||
+        !resolveExportPath(root, "@insightflare/ui", workspaceImport.subpath)
+          .publicSubpath)
+    )
+      add(
+        "product-ui-package-public-ui-subpath",
+        "Product UI must import an exported @insightflare/ui/* public subpath.",
+      );
+  }
+
+  if (
+    isApplicationSource &&
+    workspaceImport &&
+    (targetIsUiSource || targetIsProductUiSource)
+  ) {
+    if (workspaceImport.subpath === ".")
+      add(
+        "app-package-public-subpath",
+        "Root application imports must use public @insightflare/ui/* or @insightflare/product-ui/* subpaths.",
+      );
+    else if (
+      !resolveExportPath(
+        root,
+        workspaceImport.packageName,
+        workspaceImport.subpath,
+      ).publicSubpath
+    )
+      add(
+        "app-package-public-subpath",
+        "Root application imports must use an exported public package subpath.",
+      );
+  }
+
+  if (
+    isApplicationSource &&
+    !workspaceImport &&
+    projectTarget !== null &&
+    /^packages\/[^/]+\/src(?:\/|$)/u.test(projectTarget)
+  )
+    add(
+      "app-package-source-import",
+      "Root application code must import workspace packages through their public package subpaths, not packages/*/src.",
+    );
+
+  return findings;
 }
 
 function ruleViolations(
@@ -603,10 +942,14 @@ export function collectArchitectureViolations(
   rootDirectory = process.cwd(),
 ): ArchitectureViolation[] {
   const root = path.resolve(rootDirectory);
-  const sourceRoot = path.join(root, "src");
+  const sourceRoots = [
+    path.join(root, "src"),
+    path.join(root, "packages/ui/src"),
+    path.join(root, "packages/product-ui/src"),
+  ];
   const violations: ArchitectureViolation[] = [];
 
-  for (const absolute of walk(sourceRoot)) {
+  for (const absolute of sourceRoots.flatMap(walk)) {
     const relative = slash(path.relative(root, absolute));
     if (
       relative
@@ -702,6 +1045,15 @@ export function collectArchitectureViolations(
         root,
         absolute,
         imported.specifier,
+      );
+      violations.push(
+        ...workspaceBoundaryViolations(
+          root,
+          relative,
+          absolute,
+          imported,
+          resolved,
+        ),
       );
       if (!resolved) {
         const packageTarget = runtimeBoundaryPackageTarget(imported.specifier);

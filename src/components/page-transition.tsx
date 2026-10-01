@@ -6,9 +6,7 @@ import {
   useState,
 } from "react";
 import { useRouterState } from "@tanstack/react-router";
-import { OverlayScrollbars } from "overlayscrollbars";
 
-import { shouldUseNativeScrollbars } from "@/components/ui/overlay-scrollbar";
 import {
   type NavigateRequest,
   registerPageTransitionHandler,
@@ -24,16 +22,15 @@ function isDashboardDetailRoute(pathname: string): boolean {
 }
 
 function scrollPageToTop(behavior: ScrollBehavior) {
-  const dashboardScrollContainer = document.querySelector<HTMLElement>(
-    "[data-dashboard-scroll-container]",
+  const pageScrollContainer = document.querySelector<HTMLElement>(
+    "[data-page-scroll-container], [data-dashboard-scroll-container]",
   );
 
-  if (dashboardScrollContainer) {
+  if (pageScrollContainer) {
     const scrollTarget =
-      (shouldUseNativeScrollbars()
-        ? null
-        : OverlayScrollbars(dashboardScrollContainer)?.elements().viewport) ??
-      dashboardScrollContainer;
+      pageScrollContainer.querySelector<HTMLElement>(
+        "[data-scrollbar-axis='vertical']",
+      ) ?? pageScrollContainer;
 
     scrollTarget.scrollTo({
       top: 0,

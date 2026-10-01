@@ -1,0 +1,257 @@
+{
+  "name": "@insightflare/ui",
+  "version": "0.7.1",
+  "type": "module",
+  "description": "Framework agnostic UI primitives for InsightFlare and external consumers.",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "dist",
+    "src",
+    "styles",
+    "build.mjs",
+    "tsconfig.build.json"
+  ],
+  "exports": {
+    "./styles.css": "./src/styles.css",
+    "./alert-dialog": {
+      "types": "./dist/components/ui/alert-dialog.d.ts",
+      "development": "./src/components/ui/alert-dialog.tsx",
+      "import": "./dist/components/ui/alert-dialog.js"
+    },
+    "./animated-number": {
+      "types": "./dist/components/ui/animated-number.d.ts",
+      "development": "./src/components/ui/animated-number.tsx",
+      "import": "./dist/components/ui/animated-number.js"
+    },
+    "./app-overlay": {
+      "types": "./dist/components/ui/app-overlay.d.ts",
+      "development": "./src/components/ui/app-overlay.tsx",
+      "import": "./dist/components/ui/app-overlay.js"
+    },
+    "./auto-resizer": {
+      "types": "./dist/components/ui/auto-resizer.d.ts",
+      "development": "./src/components/ui/auto-resizer.tsx",
+      "import": "./dist/components/ui/auto-resizer.js"
+    },
+    "./auto-transition": {
+      "types": "./dist/components/ui/auto-transition.d.ts",
+      "development": "./src/components/ui/auto-transition.tsx",
+      "import": "./dist/components/ui/auto-transition.js"
+    },
+    "./badge": {
+      "types": "./dist/components/ui/badge.d.ts",
+      "development": "./src/components/ui/badge.tsx",
+      "import": "./dist/components/ui/badge.js"
+    },
+    "./breadcrumb": {
+      "types": "./dist/components/ui/breadcrumb.d.ts",
+      "development": "./src/components/ui/breadcrumb.tsx",
+      "import": "./dist/components/ui/breadcrumb.js"
+    },
+    "./button-group": {
+      "types": "./dist/components/ui/button-group.d.ts",
+      "development": "./src/components/ui/button-group.tsx",
+      "import": "./dist/components/ui/button-group.js"
+    },
+    "./button": {
+      "types": "./dist/components/ui/button.d.ts",
+      "development": "./src/components/ui/button.tsx",
+      "import": "./dist/components/ui/button.js"
+    },
+    "./calendar": {
+      "types": "./dist/components/ui/calendar.d.ts",
+      "development": "./src/components/ui/calendar.tsx",
+      "import": "./dist/components/ui/calendar.js"
+    },
+    "./card": {
+      "types": "./dist/components/ui/card.d.ts",
+      "development": "./src/components/ui/card.tsx",
+      "import": "./dist/components/ui/card.js"
+    },
+    "./chart": {
+      "types": "./dist/components/ui/chart.d.ts",
+      "development": "./src/components/ui/chart.tsx",
+      "import": "./dist/components/ui/chart.js"
+    },
+    "./checkbox": {
+      "types": "./dist/components/ui/checkbox.d.ts",
+      "development": "./src/components/ui/checkbox.tsx",
+      "import": "./dist/components/ui/checkbox.js"
+    },
+    "./clickable": {
+      "types": "./dist/components/ui/clickable.d.ts",
+      "development": "./src/components/ui/clickable.tsx",
+      "import": "./dist/components/ui/clickable.js"
+    },
+    "./dialog": {
+      "types": "./dist/components/ui/dialog.d.ts",
+      "development": "./src/components/ui/dialog.tsx",
+      "import": "./dist/components/ui/dialog.js"
+    },
+    "./drawer": {
+      "types": "./dist/components/ui/drawer.d.ts",
+      "development": "./src/components/ui/drawer.tsx",
+      "import": "./dist/components/ui/drawer.js"
+    },
+    "./dropdown-menu": {
+      "types": "./dist/components/ui/dropdown-menu.d.ts",
+      "development": "./src/components/ui/dropdown-menu.tsx",
+      "import": "./dist/components/ui/dropdown-menu.js"
+    },
+    "./field": {
+      "types": "./dist/components/ui/field.d.ts",
+      "development": "./src/components/ui/field.tsx",
+      "import": "./dist/components/ui/field.js"
+    },
+    "./input": {
+      "types": "./dist/components/ui/input.d.ts",
+      "development": "./src/components/ui/input.tsx",
+      "import": "./dist/components/ui/input.js"
+    },
+    "./label": {
+      "types": "./dist/components/ui/label.d.ts",
+      "development": "./src/components/ui/label.tsx",
+      "import": "./dist/components/ui/label.js"
+    },
+    "./overlay-scrollbar": {
+      "types": "./dist/components/ui/overlay-scrollbar.d.ts",
+      "development": "./src/components/ui/overlay-scrollbar.tsx",
+      "import": "./dist/components/ui/overlay-scrollbar.js"
+    },
+    "./popover": {
+      "types": "./dist/components/ui/popover.d.ts",
+      "development": "./src/components/ui/popover.tsx",
+      "import": "./dist/components/ui/popover.js"
+    },
+    "./radio-group": {
+      "types": "./dist/components/ui/radio-group.d.ts",
+      "development": "./src/components/ui/radio-group.tsx",
+      "import": "./dist/components/ui/radio-group.js"
+    },
+    "./responsive-dialog": {
+      "types": "./dist/components/ui/responsive-dialog.d.ts",
+      "development": "./src/components/ui/responsive-dialog.tsx",
+      "import": "./dist/components/ui/responsive-dialog.js"
+    },
+    "./select": {
+      "types": "./dist/components/ui/select.d.ts",
+      "development": "./src/components/ui/select.tsx",
+      "import": "./dist/components/ui/select.js"
+    },
+    "./separator": {
+      "types": "./dist/components/ui/separator.d.ts",
+      "development": "./src/components/ui/separator.tsx",
+      "import": "./dist/components/ui/separator.js"
+    },
+    "./sheet": {
+      "types": "./dist/components/ui/sheet.d.ts",
+      "development": "./src/components/ui/sheet.tsx",
+      "import": "./dist/components/ui/sheet.js"
+    },
+    "./sidebar": {
+      "types": "./dist/components/ui/sidebar.d.ts",
+      "development": "./src/components/ui/sidebar.tsx",
+      "import": "./dist/components/ui/sidebar.js"
+    },
+    "./skeleton": {
+      "types": "./dist/components/ui/skeleton.d.ts",
+      "development": "./src/components/ui/skeleton.tsx",
+      "import": "./dist/components/ui/skeleton.js"
+    },
+    "./slider": {
+      "types": "./dist/components/ui/slider.d.ts",
+      "development": "./src/components/ui/slider.tsx",
+      "import": "./dist/components/ui/slider.js"
+    },
+    "./sonner": {
+      "types": "./dist/components/ui/sonner.d.ts",
+      "development": "./src/components/ui/sonner.tsx",
+      "import": "./dist/components/ui/sonner.js"
+    },
+    "./spinner": {
+      "types": "./dist/components/ui/spinner.d.ts",
+      "development": "./src/components/ui/spinner.tsx",
+      "import": "./dist/components/ui/spinner.js"
+    },
+    "./switch": {
+      "types": "./dist/components/ui/switch.d.ts",
+      "development": "./src/components/ui/switch.tsx",
+      "import": "./dist/components/ui/switch.js"
+    },
+    "./table": {
+      "types": "./dist/components/ui/table.d.ts",
+      "development": "./src/components/ui/table.tsx",
+      "import": "./dist/components/ui/table.js"
+    },
+    "./tabs": {
+      "types": "./dist/components/ui/tabs.d.ts",
+      "development": "./src/components/ui/tabs.tsx",
+      "import": "./dist/components/ui/tabs.js"
+    },
+    "./tooltip": {
+      "types": "./dist/components/ui/tooltip.d.ts",
+      "development": "./src/components/ui/tooltip.tsx",
+      "import": "./dist/components/ui/tooltip.js"
+    },
+    "./use-mobile": {
+      "types": "./dist/hooks/use-mobile.d.ts",
+      "development": "./src/hooks/use-mobile.ts",
+      "import": "./dist/hooks/use-mobile.js"
+    },
+    "./vertical-scroll-mask": {
+      "types": "./dist/components/ui/vertical-scroll-mask.d.ts",
+      "development": "./src/components/ui/vertical-scroll-mask.tsx",
+      "import": "./dist/components/ui/vertical-scroll-mask.js"
+    },
+    "./layer-manager": {
+      "types": "./dist/components/ui/layer/layer-manager.d.ts",
+      "development": "./src/components/ui/layer/layer-manager.tsx",
+      "import": "./dist/components/ui/layer/layer-manager.js"
+    },
+    "./layer-portal": {
+      "types": "./dist/components/ui/layer/layer-portal.d.ts",
+      "development": "./src/components/ui/layer/layer-portal.tsx",
+      "import": "./dist/components/ui/layer/layer-portal.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "development": "./src/contracts/index.ts",
+      "import": "./dist/contracts/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json"
+  },
+  "peerDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0"
+  },
+  "dependencies": {
+    "@number-flow/react": "^0.6.2",
+    "@remixicon/react": "^4.9.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "motion": "^12.43.0",
+    "overlayscrollbars": "^2.16.0",
+    "overlayscrollbars-react": "0.5.6",
+    "radix-ui": "^1.6.7",
+    "react-day-picker": "^9.14.0",
+    "recharts": "^2.15.4",
+    "shadcn": "^3.8.5",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.6.0",
+    "tw-animate-css": "^1.4.0",
+    "vaul": "^1.1.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "typescript": "^5.9.3"
+  }
+}

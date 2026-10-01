@@ -3,6 +3,38 @@ import type { Locale } from "./config";
 
 export interface AppMessages {
   appName: string;
+  uiGallery: {
+    searchLabel: string;
+    searchPlaceholder: string;
+    backToApp: string;
+    noSearchResults: string;
+    toggleNavigation: string;
+    library: string;
+    componentsCount: string;
+    statesCount: string;
+    designSystem: string;
+    pageTitle: string;
+    catalogSummary: string;
+    categories: {
+      inputs: string;
+      feedback: string;
+      foundations: string;
+      navigation: string;
+      "data-display": string;
+      overlays: string;
+      "product-analytics": string;
+      "product-realtime": string;
+    };
+    browseCategories: string;
+    featuredComponents: string;
+    backToCatalog: string;
+    canonicalStates: string;
+    browseAllComponents: string;
+    previewState: string;
+    resetPreview: string;
+    expandCode: string;
+    collapseCode: string;
+  };
   navigation: {
     overview: string;
     realtime: string;
@@ -2797,6 +2829,38 @@ export interface AppMessages {
 
 const enMessages = {
   appName: "InsightFlare",
+  uiGallery: {
+    searchLabel: "Search UI components",
+    searchPlaceholder: "Search components",
+    backToApp: "Back to InsightFlare",
+    noSearchResults: "No components match this search.",
+    toggleNavigation: "Toggle gallery navigation",
+    library: "UI Library",
+    componentsCount: "{count} components",
+    statesCount: "{count} states",
+    designSystem: "InsightFlare design system",
+    pageTitle: "UI Components",
+    catalogSummary: "{components} components · {states} prop values",
+    categories: {
+      inputs: "Inputs",
+      feedback: "Feedback",
+      foundations: "Foundations",
+      navigation: "Navigation",
+      "data-display": "Data display",
+      overlays: "Overlays",
+      "product-analytics": "Product UI / Analytics",
+      "product-realtime": "Product UI / Realtime",
+    },
+    browseCategories: "Browse by category",
+    featuredComponents: "Featured components",
+    backToCatalog: "UI Components",
+    canonicalStates: "Props and values",
+    browseAllComponents: "Browse all components",
+    previewState: "Open preview",
+    resetPreview: "Reset preview",
+    expandCode: "Expand code",
+    collapseCode: "Collapse code",
+  },
   navigation: {
     overview: "Overview",
     realtime: "Real-time",
@@ -5927,6 +5991,38 @@ const enMessages = {
 
 const zhMessages = {
   appName: "InsightFlare",
+  uiGallery: {
+    searchLabel: "搜索 UI 组件",
+    searchPlaceholder: "搜索组件",
+    backToApp: "返回 InsightFlare",
+    noSearchResults: "没有符合搜索条件的组件。",
+    toggleNavigation: "切换组件库导航",
+    library: "UI 组件库",
+    componentsCount: "{count} 个组件",
+    statesCount: "{count} 个状态",
+    designSystem: "InsightFlare 设计系统",
+    pageTitle: "UI 组件",
+    catalogSummary: "{components} 个组件 · {states} 个属性取值",
+    categories: {
+      inputs: "输入控件",
+      feedback: "反馈",
+      foundations: "基础",
+      navigation: "导航",
+      "data-display": "数据展示",
+      overlays: "浮层",
+      "product-analytics": "产品 UI / 分析",
+      "product-realtime": "产品 UI / 实时",
+    },
+    browseCategories: "按分类浏览",
+    featuredComponents: "精选组件",
+    backToCatalog: "UI 组件",
+    canonicalStates: "Props 与取值",
+    browseAllComponents: "浏览全部组件",
+    previewState: "打开预览",
+    resetPreview: "重置预览",
+    expandCode: "展开代码",
+    collapseCode: "收起代码",
+  },
   navigation: {
     overview: "总览",
     realtime: "实时",
@@ -8967,6 +9063,38 @@ const zhMessages = {
 
 const jaMessages = {
   appName: "InsightFlare",
+  uiGallery: {
+    searchLabel: "UI コンポーネントを検索",
+    searchPlaceholder: "コンポーネントを検索",
+    backToApp: "InsightFlare に戻る",
+    noSearchResults: "検索に一致するコンポーネントはありません。",
+    toggleNavigation: "ライブラリナビゲーションを切り替え",
+    library: "UI ライブラリ",
+    componentsCount: "{count} 個のコンポーネント",
+    statesCount: "{count} 個の状態",
+    designSystem: "InsightFlare デザインシステム",
+    pageTitle: "UI コンポーネント",
+    catalogSummary: "{components} 個のコンポーネント · {states} 個の prop 値",
+    categories: {
+      inputs: "入力",
+      feedback: "フィードバック",
+      foundations: "基礎",
+      navigation: "ナビゲーション",
+      "data-display": "データ表示",
+      overlays: "オーバーレイ",
+      "product-analytics": "プロダクト UI / 分析",
+      "product-realtime": "プロダクト UI / リアルタイム",
+    },
+    browseCategories: "カテゴリーから探す",
+    featuredComponents: "注目のコンポーネント",
+    backToCatalog: "UI コンポーネント",
+    canonicalStates: "Props と値",
+    browseAllComponents: "すべてのコンポーネントを見る",
+    previewState: "プレビューを開く",
+    resetPreview: "プレビューをリセット",
+    expandCode: "コードを展開",
+    collapseCode: "コードを折りたたむ",
+  },
   navigation: {
     overview: "概要",
     realtime: "リアルタイム",

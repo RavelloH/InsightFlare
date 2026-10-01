@@ -1,12 +1,12 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { RiPulseLine } from "@remixicon/react";
 
-import {
-  RealtimeRollingTrendChartIsland,
-  type TrafficPairDataPoint,
-} from "@/components/dashboard/realtime/realtime-rolling-trend-chart-island";
+import type { TrafficPairDataPoint } from "@/components/dashboard/charts/traffic-pair-chart";
+import { RealtimeRollingTrendChartIsland } from "@/components/dashboard/realtime/realtime-rolling-trend-chart-island";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  createChartAxisDateFormatter,
+  createChartTooltipDateFormatter,
+} from "@/lib/dashboard/chart-time";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type { RealtimeEvent } from "@/lib/realtime/types";
@@ -96,30 +96,36 @@ export const RealtimeTrafficTrendCard = memo(function RealtimeTrafficTrendCard({
     [events, now],
   );
   const isInitialLoading = !hasConnected && events.length === 0;
+  const axisFormatter = useMemo(
+    () => createChartAxisDateFormatter(locale, "minute", timeZone, "time"),
+    [locale, timeZone],
+  );
+  const tooltipFormatter = useMemo(
+    () => createChartTooltipDateFormatter(locale, "minute", timeZone),
+    [locale, timeZone],
+  );
+  const chartData = useMemo(
+    () =>
+      trendData.map((point) => {
+        const date = new Date(point.timestampMs);
+        return {
+          label: axisFormatter.format(date),
+          tooltipLabel: tooltipFormatter.format(date),
+          views: point.views,
+          visitors: point.visitors,
+        };
+      }),
+    [axisFormatter, tooltipFormatter, trendData],
+  );
 
   return (
-    <Card className="overflow-visible">
-      <CardHeader>
-        <CardTitle className="inline-flex items-center gap-2">
-          <RiPulseLine className="size-4" />
-          {messages.overview.trendTitle}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="relative">
-          <RealtimeRollingTrendChartIsland
-            locale={locale}
-            data={trendData}
-            viewsLabel={messages.common.views}
-            visitorsLabel={messages.common.visitors}
-            timeZone={timeZone}
-            interval="minute"
-            axisDateFormat="time"
-            loading={isInitialLoading}
-            dataIsComplete
-          />
-        </div>
-      </CardContent>
-    </Card>
+    <RealtimeRollingTrendChartIsland
+      locale={locale}
+      data={chartData}
+      viewsLabel={messages.common.views}
+      visitorsLabel={messages.common.visitors}
+      title={messages.overview.trendTitle}
+      state={isInitialLoading ? "loading" : "ready"}
+    />
   );
 });

@@ -1,11 +1,8 @@
 import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { RiAddLine, RiCloseLine, RiSave3Line } from "@remixicon/react";
-import { Reorder } from "motion/react";
-
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { Button } from "@insightflare/ui/button";
+import { Input } from "@insightflare/ui/input";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -14,15 +11,18 @@ import {
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
+} from "@insightflare/ui/responsive-dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
+import { RiAddLine, RiCloseLine, RiSave3Line } from "@remixicon/react";
+import { Reorder } from "motion/react";
+
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
   FunnelDefinition,

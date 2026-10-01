@@ -1,11 +1,11 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import { Cell, Pie, PieChart } from "recharts";
-
 import {
   type ChartConfig,
   ChartContainer,
   ChartTooltip,
-} from "@/components/ui/chart";
+} from "@insightflare/ui/chart";
+import { Cell, Pie, PieChart } from "recharts";
+
 import {
   numberFormat,
   percentFormatWithOneDecimal,
@@ -191,7 +191,7 @@ export const DonutChart = memo(function DonutChart({
                       <DonutTooltipPeriodRow
                         color={
                           comparisonItem?.color ??
-                          "var(--color-compare-chart-1)"
+                          "var(--color-chart-secondary-1)"
                         }
                         label={comparisonLabel ?? ""}
                         locale={locale}

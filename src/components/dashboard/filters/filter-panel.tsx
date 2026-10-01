@@ -1,14 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  RiCheckLine,
-  RiDeleteBinLine,
-  RiEditLine,
-  RiFileCopyLine,
-  RiSaveLine,
-} from "@remixicon/react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -17,8 +8,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@insightflare/ui/alert-dialog";
+import { Button } from "@insightflare/ui/button";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -27,8 +18,17 @@ import {
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/responsive-dialog";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
+  RiCheckLine,
+  RiDeleteBinLine,
+  RiEditLine,
+  RiFileCopyLine,
+  RiSaveLine,
+} from "@remixicon/react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import {
   createSavedFilter,
   deleteSavedFilter,

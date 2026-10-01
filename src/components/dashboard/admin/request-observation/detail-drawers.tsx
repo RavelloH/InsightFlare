@@ -1,9 +1,7 @@
 import { useMemo } from "react";
-
-import { CountryRegionMeta } from "@/components/dashboard/journeys/journey-display";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
 import {
   Drawer,
   DrawerContent,
@@ -11,9 +9,11 @@ import {
   DrawerHeader,
   DrawerScrollArea,
   DrawerTitle,
-} from "@/components/ui/drawer";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
+} from "@insightflare/ui/drawer";
+import { Separator } from "@insightflare/ui/separator";
+import { Skeleton } from "@insightflare/ui/skeleton";
+
+import { CountryRegionMeta } from "@/components/dashboard/journeys/journey-display";
 import { numberFormat, shortDateTimeWithSeconds } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";

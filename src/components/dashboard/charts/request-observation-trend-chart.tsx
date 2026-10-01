@@ -1,5 +1,11 @@
 import { memo, useMemo } from "react";
 import {
+  type ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@insightflare/ui/chart";
+import {
   Area,
   Bar,
   CartesianGrid,
@@ -11,12 +17,6 @@ import {
 } from "recharts";
 import type { CategoricalChartState } from "recharts/types/chart/types";
 
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
 import {
   durationFormat,
   intlLocale,

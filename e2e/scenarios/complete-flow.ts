@@ -11,6 +11,7 @@ import { registerPlatformIntegrationScenarios } from "./platform-integrations";
 import { registerSystemLifecycleScenarios } from "./system-lifecycle";
 import { registerTeamSiteManagementScenarios } from "./team-site-management";
 import { registerTrackingRealtimeScenarios } from "./tracking-realtime";
+import { registerUiGalleryScenarios } from "./ui-gallery";
 
 // Playwright schedules files independently. This is intentionally the only
 // registered E2E graph, so the stateful scenarios always run in this order.
@@ -27,4 +28,5 @@ test.describe.serial("InsightFlare E2E", () => {
   registerNonFunnelCoverageScenarios(context);
   registerSystemLifecycleScenarios(context);
   registerLayerSystemScenarios(context);
+  registerUiGalleryScenarios();
 });

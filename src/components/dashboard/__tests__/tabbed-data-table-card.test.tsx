@@ -13,81 +13,93 @@ import type {
 const sentinelState = vi.hoisted(() => ({
   onReachEnd: undefined as (() => void) | undefined,
 }));
-vi.mock("@/components/dashboard/common/use-infinite-table-sentinel", () => ({
-  useInfiniteTableSentinel: ({ onReachEnd }: { onReachEnd: () => void }) => {
-    sentinelState.onReachEnd = onReachEnd;
-    return () => undefined;
-  },
-}));
-vi.mock("@/components/dashboard/common/animated-data-table-row", () => ({
-  AnimatedDataTableRow: ({
-    children,
-    reduceMotion: _reduceMotion,
-    ...props
-  }: {
-    children: ReactNode;
-    reduceMotion?: boolean;
-  } & Record<string, unknown>) => <tr {...props}>{children}</tr>,
-}));
-vi.mock("@/components/dashboard/common/tabbed-scroll-mask-card", () => ({
-  TabbedScrollMaskCard: ({
-    children,
-    headerRight,
-  }: {
-    children: ReactNode;
-    headerRight?: ReactNode;
-  }) => (
-    <div>
-      {headerRight}
-      {children}
-    </div>
-  ),
-}));
-vi.mock("@/components/dashboard/common/data-table-switch", () => ({
-  DataTableSwitch: ({
-    loading,
-    hasContent,
-    header,
-    loadingLabel,
-    loadingRows,
-    rows,
-    footer,
-  }: {
-    loading: boolean;
-    hasContent: boolean;
-    header: ReactNode;
-    loadingLabel: string;
-    loadingRows?: ReactNode;
-    rows: ReactNode;
-    footer?: ReactNode;
-  }) =>
-    loading ? (
-      <table data-testid="loading">
-        <thead>{header}</thead>
-        <tbody>
-          {loadingRows ?? (
-            <tr>
-              <td>
-                <span data-testid="loading-indicator">{loadingLabel}</span>
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    ) : hasContent ? (
-      <table>
-        <thead>{header}</thead>
-        <tbody>
-          {rows}
-          {footer}
-        </tbody>
-      </table>
-    ) : (
-      <div data-testid="empty">Empty</div>
+vi.mock(
+  "../../../../packages/product-ui/src/tabbed-table/use-infinite-table-sentinel",
+  () => ({
+    useInfiniteTableSentinel: ({ onReachEnd }: { onReachEnd: () => void }) => {
+      sentinelState.onReachEnd = onReachEnd;
+      return () => undefined;
+    },
+  }),
+);
+vi.mock(
+  "../../../../packages/product-ui/src/tabbed-table/animated-data-table-row",
+  () => ({
+    AnimatedDataTableRow: ({
+      children,
+      reduceMotion: _reduceMotion,
+      ...props
+    }: {
+      children: ReactNode;
+      reduceMotion?: boolean;
+    } & Record<string, unknown>) => <tr {...props}>{children}</tr>,
+  }),
+);
+vi.mock(
+  "../../../../packages/product-ui/src/tabbed-table/tabbed-scroll-mask-card",
+  () => ({
+    TabbedScrollMaskCard: ({
+      children,
+      headerRight,
+    }: {
+      children: ReactNode;
+      headerRight?: ReactNode;
+    }) => (
+      <div>
+        {headerRight}
+        {children}
+      </div>
     ),
-}));
-vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }));
-vi.mock("@/components/ui/tooltip", () => ({
+  }),
+);
+vi.mock(
+  "../../../../packages/product-ui/src/tabbed-table/data-table-switch",
+  () => ({
+    DataTableSwitch: ({
+      loading,
+      hasContent,
+      header,
+      loadingLabel,
+      loadingRows,
+      rows,
+      footer,
+    }: {
+      loading: boolean;
+      hasContent: boolean;
+      header: ReactNode;
+      loadingLabel: string;
+      loadingRows?: ReactNode;
+      rows: ReactNode;
+      footer?: ReactNode;
+    }) =>
+      loading ? (
+        <table data-testid="loading">
+          <thead>{header}</thead>
+          <tbody>
+            {loadingRows ?? (
+              <tr>
+                <td>
+                  <span data-testid="loading-indicator">{loadingLabel}</span>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      ) : hasContent ? (
+        <table>
+          <thead>{header}</thead>
+          <tbody>
+            {rows}
+            {footer}
+          </tbody>
+        </table>
+      ) : (
+        <div data-testid="empty">Empty</div>
+      ),
+  }),
+);
+vi.mock("@insightflare/ui/use-mobile", () => ({ useIsMobile: () => false }));
+vi.mock("@insightflare/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: ReactNode }) => <>{children}</>,

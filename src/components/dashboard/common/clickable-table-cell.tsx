@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
+import { TableCell } from "@insightflare/ui/table";
 
-import { TableCell } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 interface ClickableTableCellProps {

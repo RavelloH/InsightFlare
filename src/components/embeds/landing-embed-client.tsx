@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 
 import { BrowserCrossBreakdownGrid } from "@/components/dashboard/browsers/browser-cross-breakdown-grid";
@@ -36,7 +37,6 @@ import {
   parseRealtimeCardFilters,
   RealtimeSummaryCardsSection,
 } from "@/components/dashboard/site-pages/realtime/realtime-summary-cards-section";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useRealtimeChannelSelector } from "@/hooks/use-realtime-channel";
 import {
   fetchEventsSummary,

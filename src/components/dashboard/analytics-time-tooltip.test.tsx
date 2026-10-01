@@ -1,5 +1,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { LayerManagerProvider } from "@insightflare/ui/layer-manager";
+import { TooltipProvider } from "@insightflare/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -7,8 +9,6 @@ import {
   AnalyticsTimeTooltipTarget,
 } from "@/components/dashboard/analytics-time-tooltip";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
-import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
-import { TooltipProvider } from "@/components/ui/tooltip";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 

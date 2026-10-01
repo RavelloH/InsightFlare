@@ -1,9 +1,9 @@
 import { memo, type ReactNode } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
 
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
 export const PerformanceDynamicValue = memo(function PerformanceDynamicValue({

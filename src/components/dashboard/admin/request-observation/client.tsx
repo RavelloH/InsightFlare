@@ -1,4 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ShareBreakdownView } from "@insightflare/product-ui/sharing";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiGlobalLine,
   RiRadarLine,
@@ -17,19 +29,7 @@ import {
   type AsyncDimensionBreakdownTab,
 } from "@/components/dashboard/common/async-dimension-breakdown-card";
 import { GeoPointsMapIsland } from "@/components/dashboard/geo/geo-points-map-island";
-import { ShareRadialCard } from "@/components/dashboard/sharing/share-radial-card";
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 import Link from "@/lib/router";
@@ -837,7 +837,7 @@ export function RequestObservationClient({
         </Card>
 
         <section className="grid min-w-0 gap-4 xl:grid-cols-2">
-          <ShareRadialCard
+          <ShareBreakdownView
             className="min-w-0 xl:col-span-2"
             title={labels.categoryShareTitle}
             items={categoryShareItems}

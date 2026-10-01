@@ -1,8 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RiSearchLine } from "@remixicon/react";
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   calculateChartYAxisWidth,
   type ChartConfig,
@@ -10,9 +7,12 @@ import {
   ChartTooltip,
   ChartTooltipIndicator,
   createChartNumberFormatter,
-} from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/chart";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
+import { RiSearchLine } from "@remixicon/react";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+
 import {
   addZonedInterval,
   startOfZonedInterval,
@@ -373,7 +373,7 @@ function EventTrendTooltip({
       },
       {
         label: `${resolvedComparisonLabel} · ${totalLabel}`,
-        color: "var(--color-compare-chart-1)",
+        color: "var(--color-chart-secondary-1)",
         value: comparisonTotal,
       },
     ];
@@ -516,7 +516,7 @@ export const EventTrendLegend = memo(function EventTrendLegend({
         {hasComparison ? (
           <span className="flex items-center gap-3 font-medium text-[11px] text-muted-foreground">
             <span>{totalLabel}</span>
-            <span className="text-compare-primary">
+            <span className="text-chart-secondary">
               {comparisonLabel ?? "Comparison"}
             </span>
           </span>

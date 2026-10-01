@@ -1,6 +1,47 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@insightflare/ui/alert-dialog";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldTitle,
+} from "@insightflare/ui/field";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { RadioGroup, RadioGroupItem } from "@insightflare/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@insightflare/ui/select";
+import { Slider } from "@insightflare/ui/slider";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
   RiArrowRightLine,
   RiBarChartBoxLine,
   RiCloseLine,
@@ -20,46 +61,6 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { PageHeading } from "@/components/dashboard/common/page-heading";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldLabel,
-  FieldTitle,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
-import { Spinner } from "@/components/ui/spinner";
 import {
   BLOCKING_FIELD_IDS,
   type BlockingFieldId,
@@ -948,11 +949,15 @@ export function SettingsClientPage({
                   {copy.loadingScript}
                 </div>
               ) : (
-                <div className="overflow-x-auto text-xs leading-relaxed text-foreground">
-                  <code className="font-mono">
+                <OverlayScrollbar
+                  axis="horizontal"
+                  className="text-xs leading-relaxed text-foreground"
+                  contentClassName="w-max min-w-full"
+                >
+                  <code className="font-mono whitespace-pre">
                     {scriptSnippet || copy.scriptUnavailable}
                   </code>
-                </div>
+                </OverlayScrollbar>
               )}
             </div>
             <Button

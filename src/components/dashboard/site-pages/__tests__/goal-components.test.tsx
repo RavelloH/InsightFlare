@@ -49,6 +49,8 @@ vi.mock(
       ),
   }),
 );
+import { LayerManagerProvider } from "@insightflare/ui/layer-manager";
+
 import { FunnelStepFilterDialog } from "@/components/dashboard/site-pages/funnels/funnel-step-filter-dialog";
 import {
   GoalCard,
@@ -61,7 +63,6 @@ import {
 import { GoalEditor } from "@/components/dashboard/site-pages/goals/goal-editor";
 import { goalDefinitionQueryKey } from "@/components/dashboard/site-pages/goals/goals-client-page";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
-import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
 import {
   fetchGoalSummary,
   fetchGoalTimeseries,

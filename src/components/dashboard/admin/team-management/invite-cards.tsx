@@ -1,3 +1,28 @@
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@insightflare/ui/select";
+import { Spinner } from "@insightflare/ui/spinner";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import {
   RiAddLine,
   RiCheckboxBlankCircleLine,
@@ -14,31 +39,6 @@ import { toast } from "sonner";
 
 import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import { TableActionButton } from "@/components/dashboard/common/table-action-button";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Spinner } from "@/components/ui/spinner";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { SiteData } from "@/lib/dashboard-api/client/edge";
 import { formatI18nTemplate } from "@/lib/i18n/template";

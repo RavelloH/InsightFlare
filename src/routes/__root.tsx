@@ -1,6 +1,18 @@
 import "@/lib/iconify";
 
 import jetBrainsMonoLatinUrl from "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { LayerManagerProvider } from "@insightflare/ui/layer-manager";
+import { SCROLLBAR_POLICY_INIT_SCRIPT } from "@insightflare/ui/overlay-scrollbar";
+import { TooltipProvider } from "@insightflare/ui/tooltip";
 import { RiFileWarningLine, RiGithubLine, RiHome4Line } from "@remixicon/react";
 import {
   createRootRoute,
@@ -11,29 +23,17 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 
+import globalStylesheetUrl from "@/app/globals.css?url";
+import { AppToaster } from "@/components/app-toaster";
 import { LayerSystemFixture } from "@/components/dashboard/site-pages/overview/layer-system-fixture";
 import { GlobalScrollbars } from "@/components/global-scrollbars";
 import { AppQueryProvider } from "@/components/query-client-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_NAME } from "@/lib/constants";
 import { localeToHtmlLang, resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";
-
-import "@/app/globals.css";
 const THEME_INIT_SCRIPT = `(function(){try{var k='insightflare-theme';var t=localStorage.getItem(k)||'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light'}catch(e){}})()`;
 const ESBUILD_NAME_HELPER_SCRIPT = `(function(){if(typeof globalThis.__name!=="function"){globalThis.__name=function(target){return target}}})()`;
 const DEMO_ANALYTICS_SCRIPT_SRC =
@@ -49,6 +49,14 @@ export const Route = createRootRoute({
     links: [
       { rel: "icon", href: "/favicon.ico" },
       { rel: "manifest", href: "/site.webmanifest" },
+      {
+        rel: "preload",
+        href: jetBrainsMonoLatinUrl,
+        as: "font",
+        type: "font/woff2",
+        crossOrigin: "anonymous",
+      },
+      { rel: "stylesheet", href: globalStylesheetUrl },
     ],
   }),
   notFoundComponent: NotFoundPage,
@@ -60,38 +68,29 @@ function RootDocument() {
   const locale = resolveLocale(pathname.split("/")[1]);
 
   return (
-    <html
-      lang={localeToHtmlLang(locale)}
-      suppressHydrationWarning
-      data-overlayscrollbars-initialize
-    >
+    <html lang={localeToHtmlLang(locale)} suppressHydrationWarning>
       <head>
-        <link
-          rel="preload"
-          href={jetBrainsMonoLatinUrl}
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
+        <ScriptOnce>{SCROLLBAR_POLICY_INIT_SCRIPT}</ScriptOnce>
         <HeadContent />
-      </head>
-      <body className="antialiased font-mono" data-overlayscrollbars-initialize>
         <ScriptOnce>{THEME_INIT_SCRIPT}</ScriptOnce>
-        <GlobalScrollbars />
-        <ScriptOnce>{ESBUILD_NAME_HELPER_SCRIPT}</ScriptOnce>
-        <LayerManagerProvider>
-          <LayerSystemFixture />
-          <AppQueryProvider>
-            <TimeZoneProvider>
-              <ThemeProvider>
-                <TooltipProvider>
-                  <Outlet />
-                </TooltipProvider>
-                <Toaster />
-              </ThemeProvider>
-            </TimeZoneProvider>
-          </AppQueryProvider>
-        </LayerManagerProvider>
+      </head>
+      <body className="antialiased font-mono">
+        <GlobalScrollbars>
+          <ScriptOnce>{ESBUILD_NAME_HELPER_SCRIPT}</ScriptOnce>
+          <LayerManagerProvider>
+            <LayerSystemFixture />
+            <AppQueryProvider>
+              <TimeZoneProvider>
+                <ThemeProvider>
+                  <TooltipProvider>
+                    <Outlet />
+                  </TooltipProvider>
+                  <AppToaster />
+                </ThemeProvider>
+              </TimeZoneProvider>
+            </AppQueryProvider>
+          </LayerManagerProvider>
+        </GlobalScrollbars>
         {import.meta.env.VITE_DEMO_MODE === "1" ? (
           <script defer src={DEMO_ANALYTICS_SCRIPT_SRC} />
         ) : null}

@@ -1,8 +1,8 @@
 import { memo } from "react";
+import { Button } from "@insightflare/ui/button";
 import { RiArrowLeftLine } from "@remixicon/react";
 
 import { PageHeading } from "@/components/dashboard/common/page-heading";
-import { Button } from "@/components/ui/button";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { useRouter } from "@/lib/router";

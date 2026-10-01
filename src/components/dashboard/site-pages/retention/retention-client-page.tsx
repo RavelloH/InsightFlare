@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { RiPulseLine, RiRepeat2Line } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -8,7 +9,6 @@ import {
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
-import { AutoTransition } from "@/components/ui/auto-transition";
 import { fetchRetention } from "@/lib/dashboard/client/data/index";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";

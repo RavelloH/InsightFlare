@@ -1,4 +1,5 @@
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@insightflare/ui/skeleton";
+
 import type { EventField } from "@/lib/dashboard-api/client/edge";
 
 import { normalizeEventFieldPath } from "./event-model";

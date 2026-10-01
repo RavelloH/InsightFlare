@@ -1,4 +1,10 @@
 import { memo, useMemo } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
 import { RiPulseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -12,7 +18,6 @@ import { EventPageHeader } from "@/components/dashboard/site-pages/events/page-h
 import { EventRecordsSection } from "@/components/dashboard/site-pages/events/records-section";
 import { parseOverviewCardFilters } from "@/components/dashboard/site-pages/overview/overview-filter-model";
 import { OverviewPagesSection } from "@/components/dashboard/site-pages/overview/pages-section";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   fetchEventTypeContextCards,
   fetchEventTypeDetail,

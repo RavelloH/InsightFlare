@@ -8,17 +8,15 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { PartialOptions } from "overlayscrollbars";
-import { OverlayScrollbars } from "overlayscrollbars";
-
-import { formatPathWithHash } from "@/components/dashboard/journeys/journey-display";
-import { prepareNativeScrollbarHost } from "@/components/ui/overlay-scrollbar";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { VerticalScrollMask } from "@/components/ui/vertical-scroll-mask";
+} from "@insightflare/ui/tooltip";
+import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
+import type { PartialOptions } from "overlayscrollbars";
+
+import { formatPathWithHash } from "@/components/dashboard/journeys/journey-display";
 import { parseGeoLocationValue } from "@/lib/analytics/geo-location";
 import { intlLocale } from "@/lib/dashboard/format";
 import {
@@ -401,16 +399,6 @@ export function MetaItem({
     metaItem
   );
 }
-function maybeReachScrollEnd(
-  instance: ReturnType<typeof OverlayScrollbars> | null,
-  onReachEnd?: (() => void) | null,
-): void {
-  if (!instance || !onReachEnd) return;
-  maybeReachScrollElementEnd(
-    instance.elements().scrollOffsetElement,
-    onReachEnd,
-  );
-}
 function maybeReachScrollElementEnd(
   scrollElement: HTMLElement | null,
   onReachEnd?: (() => void) | null,
@@ -438,71 +426,30 @@ export function LogStreamScrollbar({
   onReachEnd?: (() => void) | null;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
-    null,
-  );
   const onReachEndRef = useRef<(() => void) | null>(onReachEnd ?? null);
   useEffect(() => {
     onReachEndRef.current = onReachEnd ?? null;
   }, [onReachEnd]);
 
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    if (prepareNativeScrollbarHost(host)) {
-      const handleScroll = () => {
-        maybeReachScrollElementEnd(host, onReachEndRef.current);
-      };
-
-      host.addEventListener("scroll", handleScroll, { passive: true });
-      requestAnimationFrame(() => {
-        maybeReachScrollElementEnd(host, onReachEndRef.current);
-      });
-
-      return () => {
-        host.removeEventListener("scroll", handleScroll);
-      };
-    }
-
-    const existing = OverlayScrollbars(host);
-    const instance =
-      existing ?? OverlayScrollbars(host, PANEL_SCROLLBAR_OPTIONS);
-    if (existing) {
-      existing.options(PANEL_SCROLLBAR_OPTIONS);
-    }
-    scrollbarRef.current = instance;
-    instance.update();
-
-    const removeScrollListener = instance.on("scroll", () => {
-      maybeReachScrollEnd(instance, onReachEndRef.current);
-    });
-    requestAnimationFrame(() => {
-      maybeReachScrollEnd(instance, onReachEndRef.current);
-    });
+    const viewport = hostRef.current;
+    if (!viewport) return;
+    const checkEnd = () =>
+      maybeReachScrollElementEnd(viewport, onReachEndRef.current);
+    viewport.addEventListener("scroll", checkEnd, { passive: true });
+    const animationFrame = requestAnimationFrame(checkEnd);
 
     return () => {
-      removeScrollListener();
-      if (!existing) {
-        instance.destroy();
-      }
-      if (scrollbarRef.current === instance) {
-        scrollbarRef.current = null;
-      }
+      viewport.removeEventListener("scroll", checkEnd);
+      cancelAnimationFrame(animationFrame);
     };
   }, []);
 
   useEffect(() => {
-    const instance = scrollbarRef.current;
-    if (!instance) {
-      requestAnimationFrame(() => {
-        maybeReachScrollElementEnd(hostRef.current, onReachEndRef.current);
-      });
-      return;
-    }
-    instance.update();
-    requestAnimationFrame(() => {
-      maybeReachScrollEnd(instance, onReachEndRef.current);
-    });
+    const animationFrame = requestAnimationFrame(() =>
+      maybeReachScrollElementEnd(hostRef.current, onReachEndRef.current),
+    );
+    return () => cancelAnimationFrame(animationFrame);
   }, [syncKey]);
 
   return (

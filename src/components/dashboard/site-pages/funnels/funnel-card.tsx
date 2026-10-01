@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { Badge } from "@insightflare/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { fetchFunnelDetail } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
@@ -114,7 +119,6 @@ export function FunnelCardSkeleton({
           labels={labels}
           descriptionMessages={descriptionMessages}
           funnel={FUNNEL_CARD_SKELETON_FUNNEL}
-          compact
           loading
         />
       </CardContent>
@@ -230,7 +234,6 @@ export function FunnelCard({
               funnel={detail.data?.data.funnel ?? funnel}
               analysis={detail.data?.data.analysis}
               comparisonAnalysis={comparisonDetail.data?.data.analysis}
-              compact
               loading={detail.isFetching || !detail.data}
               comparisonLoading={
                 Boolean(comparisonQuery) &&

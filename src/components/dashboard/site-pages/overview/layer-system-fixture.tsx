@@ -1,25 +1,25 @@
 "use client";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { useLocation } from "@tanstack/react-router";
-
-import { DetailDrawer } from "@/components/dashboard/site-pages/common/detail-drawer";
-import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
-import { Button } from "@/components/ui/button";
+import { Button } from "@insightflare/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { OverlayFrame } from "@/components/ui/layer/layer-manager";
+} from "@insightflare/ui/dialog";
+import { OverlayFrame } from "@insightflare/ui/layer-manager";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@insightflare/ui/select";
+import { useLocation } from "@tanstack/react-router";
+
+import { DetailDrawer } from "@/components/dashboard/site-pages/common/detail-drawer";
+import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import { getMessages } from "@/lib/i18n/messages";
 const FIXTURE_QUERY = "__layerFixture";
 const DETAIL_COUNT = 5;
@@ -38,7 +38,7 @@ function SyntheticFrames() {
         <OverlayFrame
           key={index}
           id={`e2e-synthetic-layer-${index}`}
-          kind="command"
+          kind="overlay"
           open
         >
           <div data-layer-synthetic-index={index} />

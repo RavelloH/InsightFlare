@@ -6,13 +6,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
-
-import {
-  useAnimationOnChartSwitch,
-  useChartVisibility,
-} from "@/components/dashboard/charts/use-chart-animation";
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   type ChartConfig,
   ChartContainer,
@@ -20,9 +14,15 @@ import {
   ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
-} from "@/components/ui/chart";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
+} from "@insightflare/ui/chart";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+
+import {
+  useAnimationOnChartSwitch,
+  useChartVisibility,
+} from "@/components/dashboard/charts/use-chart-animation";
 import {
   type ChartAxisDateFormat,
   createChartAxisDateFormatter,

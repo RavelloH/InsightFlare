@@ -1,6 +1,4 @@
-import { RiBookOpenLine } from "@remixicon/react";
-
-import { Button } from "@/components/ui/button";
+import { Button } from "@insightflare/ui/button";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -9,7 +7,8 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
-} from "@/components/ui/responsive-dialog";
+} from "@insightflare/ui/responsive-dialog";
+import { RiBookOpenLine } from "@remixicon/react";
 
 interface SystemSettingsGuideDialogProps {
   triggerLabel: string;

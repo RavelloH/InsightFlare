@@ -6,6 +6,19 @@ import {
   useRef,
   useState,
 } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Button } from "@insightflare/ui/button";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerScrollArea,
+  DrawerTitle,
+} from "@insightflare/ui/drawer";
+import { Separator } from "@insightflare/ui/separator";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { RiExternalLinkLine } from "@remixicon/react";
 
 import { JsonTreePanel } from "@/components/dashboard/common/json-tree";
@@ -24,19 +37,6 @@ import {
 import { DetailDrawer } from "@/components/dashboard/site-pages/common/detail-drawer";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Button } from "@/components/ui/button";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerScrollArea,
-  DrawerTitle,
-} from "@/components/ui/drawer";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { EventRecordDetailData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";

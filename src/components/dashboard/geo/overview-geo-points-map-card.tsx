@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import { Card, CardTitle } from "@insightflare/ui/card";
 import { RiCopyrightLine, RiMapPin2Line } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
@@ -7,7 +8,6 @@ import {
   GeoPointsMapIsland,
   type GeoPointsMapPoint,
 } from "@/components/dashboard/geo/geo-points-map-island";
-import { Card, CardTitle } from "@/components/ui/card";
 import {
   emptyOverviewGeoPointsData,
   fetchOverviewGeoPoints,

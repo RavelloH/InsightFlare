@@ -59,12 +59,13 @@ vi.mock("motion/react", async (importOriginal) => {
     useDragControls: () => ({ start: () => undefined }),
   };
 });
+import { LayerManagerProvider } from "@insightflare/ui/layer-manager";
+import { TooltipProvider } from "@insightflare/ui/tooltip";
+
 import {
   AnalyticsTableColumnSettings,
   useAnalyticsTableColumns,
 } from "@/components/dashboard/common/analytics-table-column-settings";
-import { LayerManagerProvider } from "@/components/ui/layer/layer-manager";
-import { TooltipProvider } from "@/components/ui/tooltip";
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 describe("useAnalyticsTableColumns", () => {
   let container: HTMLDivElement;

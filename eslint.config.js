@@ -17,6 +17,7 @@ export default [
       ".tanstack/**",
       ".wrangler/**",
       "dist/**",
+      "packages/*/dist/**",
       "node_modules/**",
       "output/**",
       "plan/**",
@@ -108,7 +109,13 @@ export default [
     files: ["**/*.{ts,tsx,mts}"],
     languageOptions: {
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: [
+            "packages/ui/tests/*.ts",
+            "packages/ui/tests/*.tsx",
+          ],
+          defaultProject: "packages/ui/tsconfig.json",
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },

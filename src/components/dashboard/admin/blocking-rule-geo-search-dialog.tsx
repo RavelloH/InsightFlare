@@ -1,23 +1,16 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { RiArrowLeftLine, RiSearchLine } from "@remixicon/react";
-import { useQuery } from "@tanstack/react-query";
-
-import {
-  GeoBreadcrumbSeparator,
-  GeoCountryBreadcrumbItem,
-  GeoCountryFlag,
-} from "@/components/dashboard/geo/lazy-geo-location-label";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbList,
   BreadcrumbPage,
-} from "@/components/ui/breadcrumb";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@insightflare/ui/breadcrumb";
+import { Button } from "@insightflare/ui/button";
+import { Input } from "@insightflare/ui/input";
+import { Label } from "@insightflare/ui/label";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -27,7 +20,15 @@ import {
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
-} from "@/components/ui/responsive-dialog";
+} from "@insightflare/ui/responsive-dialog";
+import { RiArrowLeftLine, RiSearchLine } from "@remixicon/react";
+import { useQuery } from "@tanstack/react-query";
+
+import {
+  GeoBreadcrumbSeparator,
+  GeoCountryBreadcrumbItem,
+  GeoCountryFlag,
+} from "@/components/dashboard/geo/lazy-geo-location-label";
 import {
   fetchGeoCountryCodes,
   fetchGeoCountryTranslationPayload,
@@ -431,7 +432,10 @@ export function BlockingRuleGeoSearchDialog({
                 initial={false}
                 duration={0.15}
               >
-                <div className="max-h-80 overflow-auto border-y border-border">
+                <OverlayScrollbar
+                  axis="vertical"
+                  className="max-h-80 border-y border-border"
+                >
                   {isLoading ? (
                     <p className="px-3 py-8 text-center text-xs text-muted-foreground">
                       {copy.searchLoading}
@@ -480,7 +484,7 @@ export function BlockingRuleGeoSearchDialog({
                       {copy.searchNoResults}
                     </p>
                   )}
-                </div>
+                </OverlayScrollbar>
               </AutoTransition>
             </AutoResizer>
           </div>

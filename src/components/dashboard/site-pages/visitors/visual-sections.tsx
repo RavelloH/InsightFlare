@@ -6,6 +6,15 @@ import {
   useRef,
   useState,
 } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Clickable } from "@insightflare/ui/clickable";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import { RiArrowLeftLine } from "@remixicon/react";
 
 import { LazyGeoCityBreadcrumbLabel } from "@/components/dashboard/geo/lazy-geo-location-label";
@@ -17,14 +26,6 @@ import {
 import { useDetailDrawerReady } from "@/components/dashboard/site-pages/common/detail-drawer";
 import type { VisitorDetailMapTheme } from "@/components/dashboard/site-pages/visitors/visitor-detail-map-stage";
 import { useTheme } from "@/components/theme-provider";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Clickable } from "@/components/ui/clickable";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { zonedParts } from "@/lib/analytics/time-zone";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type {
@@ -360,7 +361,6 @@ export const ActivityGrid = memo(function ActivityGrid({
     return Math.max(7, Math.min(14, available / Math.max(1, mobileWeekCount)));
   }, [containerWidth, mobileWeekCount]);
   const activityStyle = {
-    scrollbarGutter: "stable",
     "--activity-cell-size": `${cellSizePx}px`,
     "--activity-mobile-cell-size": `${mobileCellSizePx}px`,
   } as CSSProperties;
@@ -436,9 +436,11 @@ export const ActivityGrid = memo(function ActivityGrid({
   );
 
   return (
-    <div
-      ref={containerRef}
-      className="w-full max-w-full overflow-x-auto pb-1"
+    <OverlayScrollbar
+      axis="horizontal"
+      className="w-full max-w-full pb-1"
+      contentClassName="w-max min-w-full"
+      scrollElementRef={containerRef}
       style={activityStyle}
     >
       <div className="mx-auto hidden w-max min-w-max sm:block">
@@ -497,6 +499,6 @@ export const ActivityGrid = memo(function ActivityGrid({
           </div>
         ))}
       </div>
-    </div>
+    </OverlayScrollbar>
   );
 });

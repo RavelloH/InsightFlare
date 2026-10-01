@@ -1,6 +1,9 @@
+import {
+  type ChartConfig,
+  ChartTooltipIndicator,
+} from "@insightflare/ui/chart";
 import type { TooltipProps } from "recharts";
 
-import { type ChartConfig, ChartTooltipIndicator } from "@/components/ui/chart";
 import { intlLocale } from "@/lib/dashboard/format";
 import type { DashboardInterval } from "@/lib/dashboard/query-state";
 import {
@@ -137,11 +140,11 @@ export function createTrafficPairComparisonChartConfig(
   return {
     comparisonVisitors: {
       label: `${comparisonLabel} · ${visitorsLabel}`,
-      color: "var(--color-compare-chart-3)",
+      color: "var(--color-chart-secondary-3)",
     },
     comparisonNonVisitorViews: {
       label: `${comparisonLabel} · ${viewsLabel}`,
-      color: "var(--color-compare-chart-1)",
+      color: "var(--color-chart-secondary-1)",
     },
     currentVisitors: {
       label: `${currentPeriodLabel} · ${visitorsLabel}`,
@@ -246,12 +249,12 @@ export function TrafficPairComparisonTooltip({
     },
     {
       label: `${comparisonLabel} · ${viewsLabel}`,
-      color: "var(--color-compare-chart-1)",
+      color: "var(--color-chart-secondary-1)",
       value: comparisonViews,
     },
     {
       label: `${comparisonLabel} · ${visitorsLabel}`,
-      color: "var(--color-compare-chart-3)",
+      color: "var(--color-chart-secondary-3)",
       value: comparisonVisitors,
     },
   ];

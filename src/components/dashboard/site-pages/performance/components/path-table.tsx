@@ -1,4 +1,11 @@
 import { memo, useCallback, useMemo, useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { RiRouteLine } from "@remixicon/react";
 
 import {
@@ -20,8 +27,6 @@ import {
   STATUS_STYLE,
   statusLabel,
 } from "@/components/dashboard/site-pages/performance/model";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { numberFormat } from "@/lib/dashboard/format";
 import { loadLocalTablePage } from "@/lib/dashboard/table-loader";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";

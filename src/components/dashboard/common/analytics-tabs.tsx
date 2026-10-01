@@ -8,6 +8,10 @@ import {
   useState,
 } from "react";
 import {
+  HORIZONTAL_SCROLLBAR_OPTIONS,
+  OverlayScrollbar,
+} from "@insightflare/ui/overlay-scrollbar";
+import {
   RiComputerLine,
   RiDashboardLine,
   RiFileList3Line,
@@ -27,13 +31,7 @@ import {
   RiUser3Line,
 } from "@remixicon/react";
 import { motion } from "motion/react";
-import type { PartialOptions } from "overlayscrollbars";
-import { OverlayScrollbars } from "overlayscrollbars";
 
-import {
-  prepareNativeScrollbarHost,
-  useNativeScrollbars,
-} from "@/components/ui/overlay-scrollbar";
 import { useLiveSearchParams } from "@/lib/dashboard/client/history";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import Link from "@/lib/router";
@@ -70,18 +68,6 @@ interface AnalyticsTabItem {
 interface AnalyticsTabsProps {
   items: AnalyticsTabItem[];
 }
-const TABS_SCROLLBAR_OPTIONS = {
-  overflow: {
-    x: "scroll",
-    y: "hidden",
-  },
-  scrollbars: {
-    theme: "os-theme-insightflare",
-    autoHide: "move",
-    autoHideDelay: 420,
-    autoHideSuspend: false,
-  },
-} satisfies PartialOptions;
 function getAnalyticsSectionIcon(key: AnalyticsTabKey) {
   if (key === "overview") return RiDashboardLine;
   if (key === "request-overview") return RiDashboardLine;
@@ -151,9 +137,6 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
   const searchParams = useLiveSearchParams();
   const normalizedPathname = normalizePathname(pathname || "");
   const scrollHostRef = useRef<HTMLDivElement | null>(null);
-  const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
-    null,
-  );
   const navRef = useRef<HTMLElement | null>(null);
   const linkRefs = useRef<Map<AnalyticsTabKey, HTMLAnchorElement>>(new Map());
   const leftMaskRef = useRef<HTMLDivElement | null>(null);
@@ -166,7 +149,6 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
     width: 0,
     visible: false,
   });
-  const nativeScrollbars = useNativeScrollbars();
 
   const pathActiveKey = useMemo(() => {
     const activeItem = items.find((item) =>
@@ -213,11 +195,7 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
 
   const syncMasks = useCallback(
     (container?: HTMLDivElement | null) => {
-      const current =
-        container ??
-        (scrollbarRef.current?.elements().viewport as
-          HTMLDivElement | undefined) ??
-        scrollHostRef.current;
+      const current = container ?? scrollHostRef.current;
       if (!current) {
         applyMaskVisibility(false, false);
         return;
@@ -282,53 +260,9 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
   useEffect(() => {
     const host = scrollHostRef.current;
     if (!host) return;
-    if (prepareNativeScrollbarHost(host)) {
-      const sync = () => {
-        syncIndicatorRef.current();
-        scheduleMaskSync(host);
-      };
-      const handleWheel = (event: WheelEvent) => {
-        if (!event.shiftKey) return;
-        const delta =
-          Math.abs(event.deltaY) >= Math.abs(event.deltaX)
-            ? event.deltaY
-            : event.deltaX;
-        if (delta === 0) return;
-        event.preventDefault();
-        host.scrollLeft += delta;
-      };
-
-      host.addEventListener("scroll", sync, { passive: true });
-      host.addEventListener("wheel", handleWheel, { passive: false });
-      const animationFrame = requestAnimationFrame(() => {
-        syncIndicatorRef.current();
-        syncMasks(host);
-      });
-
-      return () => {
-        host.removeEventListener("scroll", sync);
-        host.removeEventListener("wheel", handleWheel);
-        cancelAnimationFrame(animationFrame);
-        if (frameRef.current !== null) {
-          cancelAnimationFrame(frameRef.current);
-          frameRef.current = null;
-        }
-      };
-    }
-
-    const existing = OverlayScrollbars(host);
-    const instance =
-      existing ?? OverlayScrollbars(host, TABS_SCROLLBAR_OPTIONS);
-
-    if (existing) {
-      existing.options(TABS_SCROLLBAR_OPTIONS);
-    }
-    scrollbarRef.current = instance;
-
-    const viewport = instance.elements().viewport as HTMLDivElement;
     const sync = () => {
       syncIndicatorRef.current();
-      scheduleMaskSync(viewport);
+      scheduleMaskSync(host);
     };
     const handleWheel = (event: WheelEvent) => {
       if (!event.shiftKey) return;
@@ -338,31 +272,23 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
           : event.deltaX;
       if (delta === 0) return;
       event.preventDefault();
-      viewport.scrollLeft += delta;
+      host.scrollLeft += delta;
     };
 
-    instance.on("scroll", sync);
-    instance.on("updated", sync);
-    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    host.addEventListener("scroll", sync, { passive: true });
+    host.addEventListener("wheel", handleWheel, { passive: false });
     const animationFrame = requestAnimationFrame(() => {
       syncIndicatorRef.current();
-      syncMasks(viewport);
+      syncMasks(host);
     });
 
     return () => {
-      instance.off("scroll", sync);
-      instance.off("updated", sync);
-      viewport.removeEventListener("wheel", handleWheel);
+      host.removeEventListener("scroll", sync);
+      host.removeEventListener("wheel", handleWheel);
       cancelAnimationFrame(animationFrame);
       if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current);
         frameRef.current = null;
-      }
-      if (!existing) {
-        instance.destroy();
-      }
-      if (scrollbarRef.current === instance) {
-        scrollbarRef.current = null;
       }
     };
   }, [scheduleMaskSync, syncMasks]);
@@ -399,10 +325,12 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
         className="pointer-events-none absolute top-0 right-0 bottom-0 z-10 w-24 bg-gradient-to-l from-background/85 via-background/60 via-45% to-transparent opacity-0 transition-opacity duration-300"
       />
 
-      <div
-        ref={scrollHostRef}
-        className={nativeScrollbars ? "overflow-x-auto" : "overflow-hidden"}
-        data-overlayscrollbars-initialize={nativeScrollbars ? undefined : ""}
+      <OverlayScrollbar
+        axis="horizontal"
+        className="min-w-0"
+        contentClassName="w-max min-w-full"
+        options={HORIZONTAL_SCROLLBAR_OPTIONS}
+        scrollElementRef={scrollHostRef}
       >
         <nav ref={navRef} className="relative flex w-max items-center gap-4">
           {items.map((item) => {
@@ -450,7 +378,7 @@ export const AnalyticsTabs = memo(function AnalyticsTabs({
             }}
           />
         </nav>
-      </div>
+      </OverlayScrollbar>
     </div>
   );
 });

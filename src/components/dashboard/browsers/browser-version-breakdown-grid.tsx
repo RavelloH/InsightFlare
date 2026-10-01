@@ -1,4 +1,18 @@
 import { memo, useMemo, useState } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { Spinner } from "@insightflare/ui/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@insightflare/ui/tooltip";
 import { RiGlobalLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -7,20 +21,6 @@ import {
   type DonutChartDataPoint,
 } from "@/components/dashboard/charts/donut-chart";
 import { ContentSwitch } from "@/components/dashboard/common/content-switch";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
@@ -48,11 +48,11 @@ const DONUT_COLORS = [
   "var(--muted-foreground)",
 ] as const;
 const COMPARISON_DONUT_COLORS = [
-  "var(--color-compare-chart-1)",
-  "var(--color-compare-chart-2)",
-  "var(--color-compare-chart-3)",
-  "var(--color-compare-chart-4)",
-  "var(--color-compare-chart-5)",
+  "var(--color-chart-secondary-1)",
+  "var(--color-chart-secondary-2)",
+  "var(--color-chart-secondary-3)",
+  "var(--color-chart-secondary-4)",
+  "var(--color-chart-secondary-5)",
   "var(--muted-foreground)",
 ] as const;
 interface BrowserVersionBreakdownGridProps {
@@ -222,7 +222,7 @@ const BrowserVersionDonutCard = memo(function BrowserVersionDonutCard({
             <span className="inline-flex items-center gap-1.5">
               <span
                 className="size-2 shrink-0 rounded-none"
-                style={{ backgroundColor: "var(--color-compare-chart-1)" }}
+                style={{ backgroundColor: "var(--color-chart-secondary-1)" }}
               />
               {comparisonLabel}:{" "}
               {numberFormat(locale, comparisonBrowser?.visitors ?? 0)}

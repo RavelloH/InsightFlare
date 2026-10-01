@@ -1,9 +1,9 @@
 import { memo, useMemo } from "react";
+import { Card, CardContent } from "@insightflare/ui/card";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   fetchVisitorDetail,
   fetchVisitorEvents,

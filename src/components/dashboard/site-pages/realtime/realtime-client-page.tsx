@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { AnimatedNumber } from "@insightflare/ui/animated-number";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 
 import { RealtimeLogStreamCard } from "@/components/dashboard/realtime/realtime-log-stream-card";
 import {
@@ -12,8 +14,6 @@ import {
   RealtimeSummaryCardsSection,
 } from "@/components/dashboard/site-pages/realtime/realtime-summary-cards-section";
 import { useTheme } from "@/components/theme-provider";
-import { AnimatedNumber } from "@/components/ui/animated-number";
-import { AutoTransition } from "@/components/ui/auto-transition";
 import { useRealtimeChannelSelector } from "@/hooks/use-realtime-channel";
 import { useLiveSearchParams } from "@/lib/dashboard/client/history";
 import dynamic from "@/lib/dynamic";

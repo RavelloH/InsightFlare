@@ -3,14 +3,14 @@ import Map, { type MapRef, useControl } from "react-map-gl/maplibre";
 import { MapView, type MapViewState } from "@deck.gl/core";
 import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Spinner } from "@insightflare/ui/spinner";
 import type { Feature, GeoJSON, Geometry } from "geojson";
 import isoCountries from "i18n-iso-countries";
 import { animate, AnimatePresence, motion } from "motion/react";
 
 import { useTheme } from "@/components/theme-provider";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Spinner } from "@/components/ui/spinner";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { numberFormat } from "@/lib/dashboard/format";
 import {

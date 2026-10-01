@@ -1,20 +1,20 @@
 import { useMemo } from "react";
-import { RiAlarmWarningLine, RiCpuLine, RiRefreshLine } from "@remixicon/react";
-
-import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Badge } from "@insightflare/ui/badge";
+import { Button } from "@insightflare/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+} from "@insightflare/ui/card";
+import { Spinner } from "@insightflare/ui/spinner";
+import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import { RiAlarmWarningLine, RiCpuLine, RiRefreshLine } from "@remixicon/react";
+
+import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";

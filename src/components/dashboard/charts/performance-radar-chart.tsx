@@ -1,5 +1,11 @@
 import { memo, useMemo } from "react";
 import {
+  type ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipIndicator,
+} from "@insightflare/ui/chart";
+import {
   PolarAngleAxis,
   PolarGrid,
   PolarRadiusAxis,
@@ -7,12 +13,6 @@ import {
   RadarChart,
 } from "recharts";
 
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipIndicator,
-} from "@/components/ui/chart";
 import {
   durationFormat,
   numberFormat,
@@ -182,7 +182,7 @@ export const PerformanceRadarChart = memo(function PerformanceRadarChart({
   locale,
   className,
   comparisonMetrics,
-  comparisonColor = "var(--color-compare-primary)",
+  comparisonColor = "var(--color-chart-secondary)",
   comparisonLabel = "Comparison",
 }: PerformanceRadarChartProps) {
   const points = useMemo(

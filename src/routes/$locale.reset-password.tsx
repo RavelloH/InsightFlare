@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
-import { RiLockPasswordLine } from "@remixicon/react";
-import { createFileRoute } from "@tanstack/react-router";
-
-import { AuthPageActions } from "@/components/auth/auth-page-actions";
-import { ResetPasswordLinkForm } from "@/components/auth/reset-password-link-form";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@insightflare/ui/card";
+import { RiLockPasswordLine } from "@remixicon/react";
+import { createFileRoute } from "@tanstack/react-router";
+
+import { AuthPageActions } from "@/components/auth/auth-page-actions";
+import { ResetPasswordLinkForm } from "@/components/auth/reset-password-link-form";
 import type { Locale } from "@/lib/i18n/config";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";

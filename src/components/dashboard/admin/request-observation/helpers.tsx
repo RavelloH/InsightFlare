@@ -1,4 +1,9 @@
 import { memo, type ReactNode, useMemo } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
+import { TableCell } from "@insightflare/ui/table";
 import type { RiRobot2Line } from "@remixicon/react";
 
 import {
@@ -7,11 +12,6 @@ import {
 } from "@/components/dashboard/common/async-dimension-breakdown-card";
 import type { TabbedDataTablePage } from "@/components/dashboard/common/tabbed-data-table-card";
 import { GeoPointsMapIsland } from "@/components/dashboard/geo/geo-points-map-island";
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
-import { TableCell } from "@/components/ui/table";
 import {
   resolveCountryFlagCode,
   resolveCountryLabel,

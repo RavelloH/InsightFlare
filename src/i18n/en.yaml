@@ -1,4 +1,34 @@
 appName: InsightFlare
+uiGallery:
+  searchLabel: Search UI components
+  searchPlaceholder: Search components
+  backToApp: Back to InsightFlare
+  noSearchResults: No components match this search.
+  toggleNavigation: Toggle gallery navigation
+  library: UI Library
+  componentsCount: "{count} components"
+  statesCount: "{count} states"
+  designSystem: InsightFlare design system
+  pageTitle: UI Components
+  catalogSummary: "{components} components · {states} prop values"
+  categories:
+    inputs: Inputs
+    feedback: Feedback
+    foundations: Foundations
+    navigation: Navigation
+    data-display: Data display
+    overlays: Overlays
+    product-analytics: Product UI / Analytics
+    product-realtime: Product UI / Realtime
+  browseCategories: Browse by category
+  featuredComponents: Featured components
+  backToCatalog: UI Components
+  canonicalStates: Props and values
+  browseAllComponents: Browse all components
+  previewState: Open preview
+  resetPreview: Reset preview
+  expandCode: Expand code
+  collapseCode: Collapse code
 navigation:
   overview: Overview
   realtime: Real-time

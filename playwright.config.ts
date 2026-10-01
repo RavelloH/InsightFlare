@@ -14,6 +14,7 @@ if (!baseURL) {
 
 export default defineConfig({
   testDir: "./e2e",
+  snapshotPathTemplate: "{testDir}/{testFileName}-snapshots/{arg}{ext}",
   outputDir: process.env.INSIGHTFLARE_E2E_ARTIFACTS || "test-results",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),

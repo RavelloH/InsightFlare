@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { Card, CardContent, CardHeader } from "@insightflare/ui/card";
+import { Skeleton } from "@insightflare/ui/skeleton";
 
-import { AutoResizer } from "@/components/ui/auto-resizer";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 interface JourneyDetailStateSwitchProps {

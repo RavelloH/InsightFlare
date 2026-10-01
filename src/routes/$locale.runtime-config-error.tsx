@@ -1,3 +1,12 @@
+import { Button } from "@insightflare/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@insightflare/ui/card";
+import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import {
   RiErrorWarningLine,
   RiExternalLinkLine,
@@ -6,14 +15,6 @@ import {
 } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
 export const Route = createFileRoute("/$locale/runtime-config-error")({
@@ -84,9 +85,15 @@ function Page() {
               <p className="text-xs text-muted-foreground">
                 {copy.commandDescription}
               </p>
-              <code className="block overflow-x-auto border bg-muted px-3 py-2 text-xs">
-                pnpm run ops:secret:main
-              </code>
+              <OverlayScrollbar
+                axis="horizontal"
+                className="border bg-muted"
+                contentClassName="w-max min-w-full px-3 py-2"
+              >
+                <code className="block whitespace-pre text-xs">
+                  pnpm run ops:secret:main
+                </code>
+              </OverlayScrollbar>
               <p className="text-xs text-muted-foreground">
                 {copy.quickStartHint}
               </p>

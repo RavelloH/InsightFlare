@@ -1,4 +1,11 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  useSidebar,
+} from "@insightflare/ui/sidebar";
+import { Spinner } from "@insightflare/ui/spinner";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -8,13 +15,6 @@ import {
 import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
-import { AutoTransition } from "@/components/ui/auto-transition";
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-  useSidebar,
-} from "@/components/ui/sidebar";
-import { Spinner } from "@/components/ui/spinner";
 import { numberFormat } from "@/lib/dashboard/format";
 import {
   buildTeamSiteTrends,

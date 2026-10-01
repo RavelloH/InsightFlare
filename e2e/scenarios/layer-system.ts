@@ -97,35 +97,35 @@ async function clickVisibleSelectOption(
 async function openFilterAndUseSelect(
   page: Page,
   expectedFrameCount: number,
-  fieldValue: string,
-  valueText: string,
+  fieldValue: "event.name" | "page.path",
   artifactPrefix: string,
 ) {
   await expectFrameCount(page, expectedFrameCount);
-  const filterDialog = page.locator('[role="dialog"]:visible').last();
-  const selectTriggers = filterDialog.locator('[data-slot="select-trigger"]');
-  await expect(selectTriggers).toHaveCount(3);
-
-  await clickVisibleSelectOption(page, selectTriggers.nth(1), fieldValue);
-  await clickVisibleSelectOption(page, selectTriggers.nth(2), "eq");
-
-  const unsetValueButton = filterDialog
-    .getByRole("button")
-    .filter({ hasText: "未设置" })
+  const filterDialog = page
+    .getByRole("dialog")
+    .filter({
+      has: page.getByRole("button", { exact: true, name: "应用" }),
+    })
     .last();
-  if ((await unsetValueButton.count()) > 0) {
-    await unsetValueButton.click();
-    const valueInput = page.locator("input:visible").last();
-    await expect(valueInput).toBeVisible();
-    await valueInput.fill(valueText);
-    await page.locator("body").press("Escape");
-  } else {
-    const valueInput = filterDialog
-      .locator('input:not([type="hidden"])')
-      .last();
-    await expect(valueInput).toBeVisible();
-    await valueInput.fill(valueText);
-  }
+  const fieldLabels = {
+    "event.name": "事件名称",
+    "page.path": "页面路径",
+  } as const;
+  const fieldPicker = filterDialog
+    .getByRole("button", {
+      exact: true,
+      name: fieldLabels[fieldValue],
+    })
+    .last();
+  await fieldPicker.click();
+  const fieldOption = page
+    .getByRole("button", { exact: true, name: fieldLabels[fieldValue] })
+    .last();
+  await expect(fieldOption).toBeVisible();
+  await fieldOption.click();
+
+  const operatorTrigger = filterDialog.getByRole("combobox").last();
+  await clickVisibleSelectOption(page, operatorTrigger, "eq");
 
   await page.screenshot({
     path: artifactPath(`${artifactPrefix}-nested-frame.png`),
@@ -135,7 +135,7 @@ async function openFilterAndUseSelect(
   expect(nestedSnapshot.frames.at(-1)?.zIndex).toBe("0");
 
   const topFrameId = nestedSnapshot.frames.at(-1)?.id;
-  await selectTriggers.nth(2).click();
+  await operatorTrigger.click();
   const openFloatingContent = page
     .locator('[data-slot="select-content"]:visible')
     .last();
@@ -151,7 +151,7 @@ async function openFilterAndUseSelect(
   });
   await page.locator("body").press("Escape");
 
-  await filterDialog.getByRole("button", { name: "应用", exact: true }).click();
+  await filterDialog.getByRole("button", { name: "取消", exact: true }).click();
   await expectFrameCount(page, expectedFrameCount - 1);
   await page.screenshot({
     path: artifactPath(`${artifactPrefix}-after-close.png`),
@@ -250,8 +250,7 @@ async function runGoalFlow(
   await openFilterAndUseSelect(
     page,
     2,
-    "page.path",
-    "/layer-system",
+    "event.name",
     mobile ? "goal-mobile" : "goal",
   );
   await expect(page.locator('[role="dialog"]:visible')).toHaveCount(1);
@@ -261,7 +260,6 @@ async function runFunnelFlow(
   page: Page,
   route: string,
   name: string,
-  eventName: string,
   mobile: boolean,
 ) {
   await openFunnelEditor(page, route, name);
@@ -270,8 +268,7 @@ async function runFunnelFlow(
   await openFilterAndUseSelect(
     page,
     2,
-    "event.name",
-    eventName,
+    "page.path",
     mobile ? "funnel-mobile" : "funnel",
   );
   await expect(page.locator('[role="dialog"]:visible')).toHaveCount(1);
@@ -346,6 +343,9 @@ async function runDetailBackdropDismissal(page: Page, route: string) {
     waitUntil: "domcontentloaded",
   });
   await expectFrameCount(page, 5);
+  await expect(
+    page.locator('[data-detail-drawer-stack-depth="0"] > div'),
+  ).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
 
   const backdropHitTarget = await page.evaluate(() => {
     const hit = document.elementFromPoint(8, 8);
@@ -394,7 +394,7 @@ async function runSyntheticFixture(page: Page, route: string) {
   expect(snapshot.frames.map((frame) => frame.id)).toEqual(
     Array.from({ length: 20 }, (_, index) => `e2e-synthetic-layer-${index}`),
   );
-  expect(snapshot.frames.every((frame) => frame.kind === "command")).toBe(true);
+  expect(snapshot.frames.every((frame) => frame.kind === "overlay")).toBe(true);
   expect(snapshot.frames.every((frame) => frame.zIndex === "0")).toBe(true);
   expect(snapshot.frames.every((frame) => frame.parentId === "")).toBe(true);
   expect(snapshot.hasLegacyZAttribute).toBe(false);
@@ -451,11 +451,11 @@ export function registerLayerSystemScenarios(context: E2eContext) {
     await expectNoApplicationError(page);
 
     await page.setViewportSize({ width: 1280, height: 900 });
-    await runFunnelFlow(page, funnelRoute, funnelName, eventName, false);
+    await runFunnelFlow(page, funnelRoute, funnelName, false);
     await expectNoApplicationError(page);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await runFunnelFlow(page, funnelRoute, funnelName, eventName, true);
+    await runFunnelFlow(page, funnelRoute, funnelName, true);
     await expectNoApplicationError(page);
 
     await page.setViewportSize({ width: 1280, height: 900 });
