@@ -1,8 +1,4 @@
-import {
-  compileD1Query,
-  type CompiledQuery,
-  createD1DatabaseClient,
-} from "@/lib/db";
+import { compileD1Query, createD1DatabaseClient } from "@/lib/db";
 import type {
   Env,
   NormalizedCustomEvent,
@@ -319,9 +315,7 @@ export async function findRecentVisitorSession(
 
   let persisted: RecentVisitorSession | null = null;
   try {
-    persisted = await createD1DatabaseClient(
-      context.env.DB,
-    ).first<RecentVisitorSession>(
+    const persistedRow = await createD1DatabaseClient(context.env.DB).first(
       compileD1Query(
         persistedRecentVisitorSessionQuery({
           siteId: input.siteId,
@@ -335,8 +329,16 @@ export async function findRecentVisitorSession(
           routePreviousHashFragment,
         }),
         { tag: "ingest.visits.find_recent_session" },
-      ) as unknown as CompiledQuery<RecentVisitorSession>,
+      ),
     );
+    persisted = persistedRow
+      ? {
+          ...persistedRow,
+          // `visit_id != ?` excludes NULL under SQLite's three-valued logic;
+          // narrow only the selected field at this D1/domain boundary.
+          visitId: persistedRow.visitId as string,
+        }
+      : null;
   } catch {
     // A persisted-session lookup is an optimization for session continuity;
     // a D1 outage must not turn a valid pageview into a failed ingest.
@@ -413,26 +415,26 @@ export async function readPersistedVisitRow(
   siteId: string,
   visitId: string,
 ): Promise<BufferedVisitRow | null> {
-  const row = await createD1DatabaseClient(
-    context.env.DB,
-  ).first<BufferedVisitRow>(
+  const row = await createD1DatabaseClient(context.env.DB).first(
     compileD1Query(persistedVisitRowQuery(siteId, visitId), {
       tag: "ingest.visits.find_persisted",
-    }) as unknown as CompiledQuery<BufferedVisitRow>,
+    }),
   );
 
-  return row
-    ? {
-        ...row,
-        dirty: 0,
-        flushAttempts: 0,
-        hiddenAt: null,
-        lastFlushError: null,
-        flushDueAt: null,
-        nextDueAt: null,
-        bufferRevision: 1,
-      }
-    : null;
+  if (!row) return null;
+  return {
+    ...row,
+    // `visit_id = ?` uses the supplied string key, excluding NULL; narrow only
+    // this selected field when adapting the persisted row to the buffer DTO.
+    visitId: row.visitId as string,
+    dirty: 0,
+    flushAttempts: 0,
+    hiddenAt: null,
+    lastFlushError: null,
+    flushDueAt: null,
+    nextDueAt: null,
+    bufferRevision: 1,
+  };
 }
 function insertBufferedVisitRowIfAbsent(
   context: Pick<BufferStoreContext, "sqlRun">,

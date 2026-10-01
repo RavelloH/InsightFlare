@@ -1,7 +1,6 @@
 import {
   and,
   compileD1Query,
-  type CompiledQuery,
   createD1DatabaseClient,
   D1_MAX_BOUND_PARAMETERS,
   eq,
@@ -54,6 +53,16 @@ import {
 import { compileScopedDatasetSql } from "./scoped-dataset";
 // Visit sources use two bindings for their half-open time window.
 const MAX_SITE_IDS_PER_D1_QUERY = D1_MAX_BOUND_PARAMETERS - 2;
+
+function teamSiteWithDomainId<Row extends { readonly id: string | null }>(
+  row: Row,
+): Omit<Row, "id"> & { readonly id: string } {
+  // createSiteWithDefaultSettings generates and inserts a UUID for every site;
+  // TeamSiteRow carries that existing domain invariant. SQLite's catalog still
+  // reports the TEXT primary key as nullable, so narrow only this selected id.
+  return { ...row, id: row.id as string };
+}
+
 function hasEffectiveFilter(
   filters?: FilterDocument,
 ): filters is FilterDocument {
@@ -437,13 +446,13 @@ export async function listTeamSites(
   const teamSites = sort(selected, [
     { expression: selected.columns.createdAt, direction: "DESC" },
   ]);
-  const result = await createD1DatabaseClient(env.DB).all<TeamSiteRow>(
+  const result = await createD1DatabaseClient(env.DB).all(
     compileD1Query(teamSites, {
       tag: "analytics.sites.all",
-    }) as unknown as CompiledQuery<TeamSiteRow>,
+    }),
   );
   recordD1RowsRead(diagnostics, result);
-  return result.results;
+  return result.results.map(teamSiteWithDomainId);
 }
 export interface TeamSiteListPage {
   readonly rows: readonly TeamSiteRow[];
@@ -498,14 +507,15 @@ export async function queryTeamSitesPageFromD1(
     { expression: selected.columns.createdAt, direction: "DESC" },
     { expression: selected.columns.id, direction: "ASC" },
   ]);
-  const result = await createD1DatabaseClient(env.DB).all<TeamSiteRow>(
+  const result = await createD1DatabaseClient(env.DB).all(
     compileD1Query(limitPlan(ordered, limit + 1), {
       tag: "analytics.sites.all",
-    }) as unknown as CompiledQuery<TeamSiteRow>,
+    }),
   );
   recordD1RowsRead(diagnostics, result);
   const hasMore = result.results.length > limit;
-  const rows = hasMore ? result.results.slice(0, limit) : result.results;
+  const rawRows = hasMore ? result.results.slice(0, limit) : result.results;
+  const rows = rawRows.map(teamSiteWithDomainId);
   const last = rows.at(-1);
   return {
     rows,
