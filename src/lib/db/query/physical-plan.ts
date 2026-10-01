@@ -16,6 +16,7 @@ import type {
 import { validateLogicalQueryPlan } from "./validator";
 
 const MAX_SHARED_RELATION_FIELDS = 4;
+const MAX_MATERIALIZED_SHARED_RELATION_FIELDS = 16;
 
 export const MAX_D1_JSON_MEMBERSHIP_BYTES = 1_000_000;
 
@@ -51,6 +52,8 @@ export interface SharedRelationDefinition {
   readonly fields: readonly OutputField[];
   /** Names of shared CTEs referenced by this CTE, in definition order. */
   readonly dependencies: readonly string[];
+  /** CTE evaluation policy selected from the canonical logical query shape. */
+  readonly materialization: "auto" | "materialized";
 }
 
 export interface DirectScanProjectionChoice {
@@ -408,8 +411,11 @@ function hoistForbiddenNodes(root: LogicalQueryNode): Set<LogicalQueryNode> {
     contexts.add(inheritedForbidden);
     if (inheritedForbidden) forbidden.add(node);
 
+    const terminalRootSort = node === root && node.kind === "sort";
     const selectionBoundary =
-      inheritedForbidden || node.kind === "sort" || node.kind === "limit";
+      inheritedForbidden ||
+      (node.kind === "sort" && !terminalRootSort) ||
+      node.kind === "limit";
     for (const child of nodeChildren(node))
       visit(child.node, selectionBoundary);
     for (const query of nodeExpressions(node).flatMap(expressionSources))
@@ -548,23 +554,36 @@ function sharedRelationDefinitions(
   visit(root);
   const forbiddenToHoist = hoistForbiddenNodes(root);
 
-  const shared = new Set(
-    postorder.filter((node) => {
-      if ((incoming.get(node) ?? 0) < 2 || node.kind === "scan") return false;
-      if (forbiddenToHoist.has(node)) return false;
-      if (
-        node.fields.length === 0 ||
-        node.fields.length > MAX_SHARED_RELATION_FIELDS
-      )
-        return false;
-      const facts = candidateFacts(node);
-      return (
-        facts.selective &&
-        !facts.forbidden &&
-        facts.referencedScopes.every((scope) => facts.scopes.has(scope))
-      );
-    }),
-  );
+  const sharedMaterializations = new Map<
+    LogicalQueryNode,
+    SharedRelationDefinition["materialization"]
+  >();
+  for (const node of postorder) {
+    const incomingCount = incoming.get(node) ?? 0;
+    if (
+      incomingCount < 2 ||
+      node.kind === "scan" ||
+      forbiddenToHoist.has(node) ||
+      node.fields.length === 0 ||
+      node.fields.length > MAX_MATERIALIZED_SHARED_RELATION_FIELDS
+    )
+      continue;
+    const facts = candidateFacts(node);
+    const isSafe =
+      facts.selective &&
+      !facts.forbidden &&
+      facts.referencedScopes.every((scope) => facts.scopes.has(scope));
+    if (!isSafe) continue;
+
+    if (node.fields.length <= MAX_SHARED_RELATION_FIELDS) {
+      sharedMaterializations.set(node, "auto");
+      continue;
+    }
+    if (node.kind === "project" && incomingCount >= 3)
+      sharedMaterializations.set(node, "materialized");
+  }
+
+  const shared = new Set(sharedMaterializations.keys());
   if (shared.size === 0) return [];
 
   const names = new Map<LogicalQueryNode, string>();
@@ -610,6 +629,7 @@ function sharedRelationDefinitions(
         scope: node.scope,
         fields: node.fields,
         dependencies: orderedDependencies,
+        materialization: sharedMaterializations.get(node)!,
       };
     });
 }
@@ -667,6 +687,7 @@ export function validatePhysicalQueryPlan<Row extends object>(
         actual.name !== canonical.name ||
         actual.node !== canonical.node ||
         actual.scope !== canonical.scope ||
+        actual.materialization !== canonical.materialization ||
         !sameFields(actual.fields, canonical.fields) ||
         actual.dependencies.length !== canonical.dependencies.length ||
         actual.dependencies.some(

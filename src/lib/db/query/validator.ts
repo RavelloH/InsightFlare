@@ -262,9 +262,15 @@ function validateExpression(
     }
     case "function":
       if (
-        !["lower", "upper", "trim", "length", "abs", "round"].includes(
-          expression.name,
-        )
+        ![
+          "lower",
+          "upper",
+          "trim",
+          "trim-spaces",
+          "length",
+          "abs",
+          "round",
+        ].includes(expression.name)
       ) {
         throw new DatabaseCompilerError(
           "unsupported_expression",
@@ -282,7 +288,8 @@ function validateExpression(
         if (
           ((expression.name === "lower" ||
             expression.name === "upper" ||
-            expression.name === "trim") &&
+            expression.name === "trim" ||
+            expression.name === "trim-spaces") &&
             affinity !== "text" &&
             affinity !== "unknown") ||
           (expression.name === "length" &&
@@ -298,7 +305,8 @@ function validateExpression(
         const resultAffinity =
           expression.name === "lower" ||
           expression.name === "upper" ||
-          expression.name === "trim"
+          expression.name === "trim" ||
+          expression.name === "trim-spaces"
             ? "text"
             : expression.name === "length"
               ? "integer"

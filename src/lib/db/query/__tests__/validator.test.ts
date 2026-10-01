@@ -17,6 +17,7 @@ import {
   project,
   scan,
   sort,
+  trimSpaces,
   union,
 } from "@/lib/db";
 import { DatabaseCompilerError } from "@/lib/db/query/errors";
@@ -35,6 +36,26 @@ function expectInvalid(callback: () => unknown): void {
 }
 
 describe("logical query plan validation", () => {
+  it("validates default SQLite text trim input and result metadata", () => {
+    const valid = trimSpaces(param(" value "));
+    expect(() => validateMutationExpression(valid, [])).not.toThrow();
+    expect(() =>
+      validateMutationExpression(trimSpaces(param(null)), []),
+    ).not.toThrow();
+
+    const invalidInput = {
+      ...valid,
+      arguments: [param(1)],
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidInput, []));
+
+    const invalidResult = {
+      ...valid,
+      resultType: { affinity: "text", nullable: true },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidResult, []));
+  });
+
   it("validates integer casts and rejects invalid input/result metadata", () => {
     const sites = scan(schema.sites);
     const valid = castInteger(div(sites.columns.created_at, param(60)));

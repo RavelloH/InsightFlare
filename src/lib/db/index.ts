@@ -66,6 +66,7 @@ export {
   scalar,
   sub,
   sum,
+  trimSpaces,
   unixepoch,
 } from "./query/expression";
 export { lowerLogicalPlan } from "./query/physical-plan";

@@ -324,9 +324,44 @@ describe("architecture checker", () => {
         "<direct D1 operation>",
       ]),
     );
+
+    const metricPlanPath = path.join(
+      root,
+      "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
+    );
+    mkdirSync(path.dirname(metricPlanPath), { recursive: true });
+    writeFileSync(
+      metricPlanPath,
+      [
+        "export const execute = createD1DatabaseClient(database);",
+        'export const statement = "WITH base AS (SELECT 1) SELECT * FROM base";',
+        'export function direct(database) { return database.prepare("SELECT 1"); }',
+        "",
+      ].join("\n"),
+    );
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ rule }) => rule === "typed-dal-runtime-forbidden")
+        .map(({ source, specifier }) => ({ source, specifier })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          source: "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
+          specifier: "createD1DatabaseClient",
+        },
+        {
+          source: "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
+          specifier: "<raw SQL literal>",
+        },
+        {
+          source: "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
+          specifier: "<direct D1 operation>",
+        },
+      ]),
+    );
   });
 
-  it("allows one metrics query and guards the other hourly rollup functions", () => {
+  it("requires typed plans in every hourly rollup function", () => {
     const root = fixture();
     const sourcePath = path.join(
       root,
@@ -337,7 +372,7 @@ describe("architecture checker", () => {
       sourcePath,
       [
         "export async function aggregateSiteHours(env) {",
-        "  return createDatabaseRuntime(env.DB).all(`WITH base AS (SELECT 1) SELECT * FROM base`);",
+        "  return createD1DatabaseClient(env.DB).all(buildHourlyRollupMetricPlan(1, 0, 1));",
         "}",
         "export async function listAggregationCandidates(env) {",
         "  return createD1DatabaseClient(env.DB).all(aggregationCandidateQuery(10));",
@@ -367,7 +402,7 @@ describe("architecture checker", () => {
         .map(({ specifier }) => specifier),
     ).toEqual(
       expect.arrayContaining([
-        "<aggregate metrics runtime query count>",
+        "createDatabaseRuntime",
         "<direct D1 operation>",
         "raw-sql",
       ]),

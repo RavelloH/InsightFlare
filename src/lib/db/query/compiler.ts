@@ -30,6 +30,7 @@ import {
   optimizePhysicalMembershipBudget,
   type PhysicalMembershipUsage,
   type PhysicalQueryPlan,
+  type SharedRelationDefinition,
   validatePhysicalQueryPlan,
 } from "./physical-plan";
 import type { LogicalQueryNode, QuerySource, Relation } from "./plan";
@@ -90,6 +91,22 @@ function outputList(
 ): SqlFragment[] {
   return Array.from({ length: width }, (_, index) =>
     concat(column(index, alias), text(` AS "_c${index + outputOffset}"`)),
+  );
+}
+
+function compileSharedRelationDefinition(
+  shared: SharedRelationDefinition,
+  body: SqlFragment,
+): SqlFragment {
+  return concat(
+    identifier(shared.name),
+    text(
+      shared.materialization === "materialized"
+        ? " AS MATERIALIZED ("
+        : " AS (",
+    ),
+    body,
+    text(")"),
   );
 }
 
@@ -210,6 +227,13 @@ export function compileD1Expression(
         text(")"),
       );
     case "function":
+      if (expression.name === "trim-spaces") {
+        return concat(
+          text("TRIM("),
+          compileD1Expression(expression.arguments[0]!, scopes, context),
+          text(")"),
+        );
+      }
       if (expression.name === "trim") {
         // Match ECMAScript String.prototype.trim(), used by Filter v1's
         // trimmed-text fields. SQLite's default TRIM() only removes U+0020.
@@ -702,7 +726,7 @@ function optimizeForFinalShape(physical: PhysicalQueryPlan<object>): {
     context.bypassSharedNode = shared.node;
     const body = compileNode(shared.node, context, new Map());
     context.bypassSharedNode = undefined;
-    return concat(identifier(shared.name), text(" AS ("), body, text(")"));
+    return compileSharedRelationDefinition(shared, body);
   });
   const main = compileQuerySource(source, context, new Map());
   const query =
@@ -781,7 +805,7 @@ function renderAndBudget(
     context.bypassSharedNode = shared.node;
     const body = compileNode(shared.node, context, new Map());
     context.bypassSharedNode = undefined;
-    return concat(identifier(shared.name), text(" AS ("), body, text(")"));
+    return compileSharedRelationDefinition(shared, body);
   });
   const main = compileQuerySource(source, context, new Map());
   const query =

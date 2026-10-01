@@ -1,4 +1,4 @@
-import { createD1DatabaseClient, createDatabaseRuntime } from "@/lib/db";
+import { createD1DatabaseClient } from "@/lib/db";
 import {
   type AggregateSiteHourMetricRow,
   ROLLUP_LAG_HOURS,
@@ -12,6 +12,7 @@ import {
 import type { Env } from "@/lib/edge/types";
 import { ONE_HOUR_MS } from "@/lib/edge/utils";
 
+import { buildHourlyRollupMetricPlan } from "./hourly-rollup-metric-plan";
 import {
   prepareAggregationFailureMutation,
   prepareAggregationSuccessMutations,
@@ -111,109 +112,16 @@ async function aggregateSiteHours(
   inputCutoffMs: number,
 ): Promise<number> {
   if (endHour < startHour) return 0;
-  const startMs = startHour * ONE_HOUR_MS;
-  const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
-  const metrics = await createDatabaseRuntime(
-    env.DB,
-  ).all<AggregateSiteHourMetricRow>({
-    sql: `
-      WITH base_visits AS MATERIALIZED (
-        SELECT
-          site_id AS siteId,
-          CAST(started_at / ? AS INTEGER) AS hourBucket,
-          duration_ms,
-          perf_ttfb_ms,
-          perf_fcp_ms,
-          perf_lcp_ms,
-          perf_cls,
-          perf_inp_ms,
-          visitor_id,
-          session_id
-        FROM visits
-        WHERE site_pk = ?
-          AND started_at >= ?
-          AND started_at < ?
-          AND status != 'open'
-      )
-      SELECT
-        'basic' AS metric,
-        siteId,
-        hourBucket,
-        COUNT(*) AS views,
-        COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS durationMsSum,
-        COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationMsCount,
-        COALESCE(SUM(CASE WHEN perf_ttfb_ms IS NOT NULL THEN perf_ttfb_ms ELSE 0 END), 0) AS perfTtfbSum,
-        COALESCE(SUM(CASE WHEN perf_ttfb_ms IS NOT NULL THEN 1 ELSE 0 END), 0) AS perfTtfbCount,
-        COALESCE(SUM(CASE WHEN perf_fcp_ms IS NOT NULL THEN perf_fcp_ms ELSE 0 END), 0) AS perfFcpSum,
-        COALESCE(SUM(CASE WHEN perf_fcp_ms IS NOT NULL THEN 1 ELSE 0 END), 0) AS perfFcpCount,
-        COALESCE(SUM(CASE WHEN perf_lcp_ms IS NOT NULL THEN perf_lcp_ms ELSE 0 END), 0) AS perfLcpSum,
-        COALESCE(SUM(CASE WHEN perf_lcp_ms IS NOT NULL THEN 1 ELSE 0 END), 0) AS perfLcpCount,
-        COALESCE(SUM(CASE WHEN perf_cls IS NOT NULL THEN perf_cls ELSE 0 END), 0) AS perfClsSum,
-        COALESCE(SUM(CASE WHEN perf_cls IS NOT NULL THEN 1 ELSE 0 END), 0) AS perfClsCount,
-        COALESCE(SUM(CASE WHEN perf_inp_ms IS NOT NULL THEN perf_inp_ms ELSE 0 END), 0) AS perfInpSum,
-        COALESCE(SUM(CASE WHEN perf_inp_ms IS NOT NULL THEN 1 ELSE 0 END), 0) AS perfInpCount,
-        CAST(NULL AS TEXT) AS visitorId,
-        CAST(NULL AS TEXT) AS sessionId,
-        CAST(NULL AS INTEGER) AS visitCount
-      FROM base_visits
-      GROUP BY siteId, hourBucket
-
-      UNION ALL
-
-      SELECT
-        'visitor' AS metric,
-        siteId,
-        hourBucket,
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        visitor_id AS visitorId,
-        CAST(NULL AS TEXT) AS sessionId,
-        CAST(NULL AS INTEGER) AS visitCount
-      FROM base_visits
-      WHERE TRIM(COALESCE(visitor_id, '')) != ''
-      GROUP BY siteId, hourBucket, visitor_id
-
-      UNION ALL
-
-      SELECT
-        'session' AS metric,
-        siteId,
-        hourBucket,
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS INTEGER),
-        CAST(NULL AS TEXT) AS visitorId,
-        session_id AS sessionId,
-        COUNT(*) AS visitCount
-      FROM base_visits
-      WHERE TRIM(COALESCE(session_id, '')) != ''
-      GROUP BY siteId, hourBucket, session_id
-      ORDER BY metric ASC, hourBucket ASC, visitorId ASC, sessionId ASC
-    `,
-    bindings: [ONE_HOUR_MS, sitePk, startMs, endExclusiveMs],
-    tag: "scheduled-tasks.visits.all",
-  });
+  const metricResult = await createD1DatabaseClient(env.DB).all(
+    buildHourlyRollupMetricPlan(sitePk, startHour, endHour),
+  );
+  const metrics = {
+    ...metricResult,
+    results: metricResult.results.map((row): AggregateSiteHourMetricRow => ({
+      ...row,
+      hourBucket: Number(row.hourBucket),
+    })),
+  };
   const byHour = new Map<number, StoredRollupRow>();
   for (const row of metrics.results.filter((item) => item.metric === "basic")) {
     byHour.set(Number(row.hourBucket), {

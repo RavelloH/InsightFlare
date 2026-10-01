@@ -47,6 +47,7 @@ import {
   semiJoin,
   sort,
   sum,
+  trimSpaces,
   union,
   unixepoch,
   update,
@@ -194,6 +195,44 @@ describe("typed D1 query compiler", () => {
         );
         expect(query.sql).toContain("char(9, 10, 11, 12, 13, 32, 160");
         expect(executeAll(db, query)).toEqual([{ value: "value" }]);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps default SQLite TRIM limited to U+0020 without changing ECMAScript trim", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "trim-spaces-test",
+      );
+      const sites = scan(schema.site_identities);
+      const cases = [
+        { input: "  value  ", sqlite: "value", ecma: "value" },
+        { input: "\tvalue\t", sqlite: "\tvalue\t", ecma: "value" },
+        { input: "\nvalue\n", sqlite: "\nvalue\n", ecma: "value" },
+        {
+          input: "\u00a0value\u00a0",
+          sqlite: "\u00a0value\u00a0",
+          ecma: "value",
+        },
+        { input: "   ", sqlite: "", ecma: "" },
+        { input: "", sqlite: "", ecma: "" },
+        { input: null, sqlite: null, ecma: null },
+      ] as const;
+
+      for (const { input, sqlite, ecma } of cases) {
+        const query = compileD1Query(
+          project(sites, {
+            spaces: trimSpaces(param(input)),
+            ecma: callFunction("trim", param(input)),
+          }),
+        );
+        expect(query.sql).toContain("TRIM(");
+        if (input !== null)
+          expect(query.sql).toContain("char(9, 10, 11, 12, 13, 32, 160");
+        expect(executeAll(db, query)).toEqual([{ spaces: sqlite, ecma }]);
       }
     } finally {
       db.close();

@@ -36,6 +36,7 @@ import {
   sort,
   sub,
   sum,
+  trimSpaces,
   union,
   unixepoch,
 } from "@/lib/db";
@@ -126,6 +127,18 @@ describe("typed SQL expressions", () => {
       },
     );
     expect(callFunction("trim", sites.columns.public_slug).resultType).toEqual({
+      affinity: "text",
+      nullable: true,
+    });
+    expect(trimSpaces(sites.columns.name).resultType).toEqual({
+      affinity: "text",
+      nullable: false,
+    });
+    expect(trimSpaces(sites.columns.public_slug).resultType).toEqual({
+      affinity: "text",
+      nullable: true,
+    });
+    expect(trimSpaces(param(null)).resultType).toEqual({
       affinity: "text",
       nullable: true,
     });

@@ -133,7 +133,7 @@ export interface InListExpression<
 }
 
 export type SqlFunctionName =
-  "lower" | "upper" | "trim" | "length" | "abs" | "round";
+  "lower" | "upper" | "trim" | "trim-spaces" | "length" | "abs" | "round";
 
 export interface FunctionExpression<
   T = unknown,
@@ -833,6 +833,7 @@ export function callFunction(
     case "lower":
     case "upper":
     case "trim":
+    case "trim-spaces":
       affinity = "text";
       break;
     case "length":
@@ -849,6 +850,23 @@ export function callFunction(
     arguments: [expression],
     resultType: {
       affinity,
+      nullable: expression.resultType.nullable,
+    },
+  };
+}
+
+export function trimSpaces<E extends SqlExpression<string | null>>(
+  expression: E,
+): FunctionExpression<
+  NullableValue<E, string>,
+  ExpressionResultType<"text", NullableOf<E>>
+> {
+  return {
+    kind: "function",
+    name: "trim-spaces",
+    arguments: [expression],
+    resultType: {
+      affinity: "text",
       nullable: expression.resultType.nullable,
     },
   };

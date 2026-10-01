@@ -14,6 +14,7 @@ import {
   param,
   project,
   scan,
+  trimSpaces,
   union,
   unixepoch,
   update,
@@ -45,6 +46,31 @@ export function compileTimeDatabaseTypeAssertions(): void {
   eq(users.columns.id, param(42));
 
   const visits = scan(schema.visits);
+  const nonNullableTrim = trimSpaces(users.columns.email);
+  const nullableTrim = trimSpaces(visits.columns.user_name);
+  type TrimSpacesNonNullability = Assert<
+    Equal<
+      ExpressionResultOf<typeof nonNullableTrim>,
+      ExpressionResultType<"text", false>
+    >
+  >;
+  type TrimSpacesKeepsNullability = Assert<
+    Equal<
+      ExpressionResultOf<typeof nullableTrim>,
+      ExpressionResultType<"text", true>
+    >
+  >;
+  type NullableTrimSpacesValue = Assert<
+    Equal<ExpressionValue<typeof nullableTrim>, string | null>
+  >;
+  const trimSpacesChecks: [
+    TrimSpacesNonNullability,
+    TrimSpacesKeepsNullability,
+    NullableTrimSpacesValue,
+  ] = [true, true, true];
+  void trimSpacesChecks;
+  // @ts-expect-error SQLite TRIM accepts text and unknown-affinity expressions only.
+  trimSpaces(visits.columns.started_at);
   const castNonNullable = castInteger(visits.columns.started_at);
   const castNullable = castInteger(visits.columns.ended_at);
   type CastIntegerKeepsNonNullability = Assert<
@@ -268,6 +294,8 @@ export function compileTimeDatabaseTypeAssertions(): void {
   callFunction("length", sites.columns.created_at);
   // @ts-expect-error abs() accepts numeric expressions.
   callFunction("abs", sites.columns.name);
+  // @ts-expect-error Direct access to the default-trim SQL operation stays on the typed helper.
+  callFunction("trim-spaces", sites.columns.name);
 
   const nullableSlug = project(sites, { slug: sites.columns.public_slug });
   const requiredSlug = project(sites, { slug: sites.columns.name });
