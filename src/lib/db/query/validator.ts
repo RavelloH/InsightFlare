@@ -169,6 +169,21 @@ function validateExpression(
         invalid("Comparison operands have incompatible SQL affinities");
       validateResultType(expression, "integer", false);
       return;
+    case "cast-integer":
+      validateExpression(
+        expression.expression,
+        scopes,
+        activeSources,
+        allowExcluded,
+      );
+      if (!isNumeric(expression.expression.resultType.affinity))
+        invalid("CAST AS INTEGER requires a numeric or unknown expression");
+      validateResultType(
+        expression,
+        "integer",
+        expression.expression.resultType.nullable,
+      );
+      return;
     case "boolean":
       if (expression.operator !== "AND" && expression.operator !== "OR")
         invalid(`Unsupported boolean operator: ${String(expression.operator)}`);

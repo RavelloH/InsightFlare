@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   aggregate,
   caseWhen,
+  castInteger,
   compileD1Query,
   count,
+  div,
   eq,
   excluded,
   filter,
@@ -33,6 +35,26 @@ function expectInvalid(callback: () => unknown): void {
 }
 
 describe("logical query plan validation", () => {
+  it("validates integer casts and rejects invalid input/result metadata", () => {
+    const sites = scan(schema.sites);
+    const valid = castInteger(div(sites.columns.created_at, param(60)));
+    expect(() =>
+      validateMutationExpression(valid, [sites.scope]),
+    ).not.toThrow();
+
+    const invalidInput = {
+      ...castInteger(param(1)),
+      expression: param("text"),
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidInput, []));
+
+    const invalidResult = {
+      ...castInteger(param(1)),
+      resultType: { affinity: "integer", nullable: true },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(invalidResult, []));
+  });
+
   it("independently validates CASE branches, affinities, and result metadata", () => {
     const users = scan(schema.users);
     const valid = caseWhen(

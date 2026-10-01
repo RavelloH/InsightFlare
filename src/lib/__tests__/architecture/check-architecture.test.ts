@@ -296,6 +296,84 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("keeps hourly rollup query and mutation builders free of execution APIs", () => {
+    const root = fixture();
+    const sourcePath = path.join(
+      root,
+      "src/lib/edge/scheduled-tasks/hourly-rollup-persistence.ts",
+    );
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(
+      sourcePath,
+      [
+        "export const execute = createD1DatabaseClient(database);",
+        'export const statement = "UPDATE visits SET status = ?";',
+        'export function direct(database) { return database.prepare("SELECT 1"); }',
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ rule }) => rule === "typed-dal-runtime-forbidden")
+        .map(({ specifier }) => specifier),
+    ).toEqual(
+      expect.arrayContaining([
+        "createD1DatabaseClient",
+        "<raw SQL literal>",
+        "<direct D1 operation>",
+      ]),
+    );
+  });
+
+  it("allows one metrics query and guards the other hourly rollup functions", () => {
+    const root = fixture();
+    const sourcePath = path.join(
+      root,
+      "src/lib/edge/scheduled-tasks/hourly-rollup.ts",
+    );
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(
+      sourcePath,
+      [
+        "export async function aggregateSiteHours(env) {",
+        "  return createDatabaseRuntime(env.DB).all(`WITH base AS (SELECT 1) SELECT * FROM base`);",
+        "}",
+        "export async function listAggregationCandidates(env) {",
+        "  return createD1DatabaseClient(env.DB).all(aggregationCandidateQuery(10));",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    expect(collectArchitectureViolations(root)).toEqual([]);
+
+    writeFileSync(
+      sourcePath,
+      [
+        "export async function aggregateSiteHours(env) {",
+        "  const rows = await createDatabaseRuntime(env.DB).all(`WITH base AS (SELECT 1) SELECT * FROM base`);",
+        "  return createDatabaseRuntime(env.DB).all(`SELECT 2`);",
+        "}",
+        "export async function readFirstClosedHour(env) {",
+        '  return env.DB.prepare("SELECT 1");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root)
+        .filter(({ rule }) => rule === "typed-hourly-rollup-forbidden")
+        .map(({ specifier }) => specifier),
+    ).toEqual(
+      expect.arrayContaining([
+        "<aggregate metrics runtime query count>",
+        "<direct D1 operation>",
+        "raw-sql",
+      ]),
+    );
+  });
+
   it("guards D1 access in a mixed D1/DO function without banning its DO SQL", () => {
     const root = fixture();
     const sourcePath = path.join(root, "src/lib/edge/ingest/buffer-store.ts");

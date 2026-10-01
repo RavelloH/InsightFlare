@@ -7,6 +7,7 @@ import {
   avg,
   callFunction,
   caseWhen,
+  castInteger,
   coalesce,
   compileD1Query,
   count,
@@ -104,6 +105,18 @@ describe("typed SQL expressions", () => {
     });
     expect(div(param(1), param(0)).resultType).toEqual({
       affinity: "numeric",
+      nullable: true,
+    });
+    expect(castInteger(div(param(-3), param(2))).resultType).toEqual({
+      affinity: "integer",
+      nullable: true,
+    });
+    expect(castInteger(param(2.75)).resultType).toEqual({
+      affinity: "integer",
+      nullable: false,
+    });
+    expect(castInteger(param(null)).resultType).toEqual({
+      affinity: "integer",
       nullable: true,
     });
     expect(callFunction("lower", sites.columns.public_slug).resultType).toEqual(

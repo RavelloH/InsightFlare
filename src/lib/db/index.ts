@@ -30,6 +30,7 @@ export { DatabaseCompilerError } from "./query/errors";
 export type {
   CaseExpression,
   CaseWhenBranch,
+  CastIntegerExpression,
   DistinctFromExpression,
   SqlExpression,
 } from "./query/expression";
@@ -39,6 +40,7 @@ export {
   avg,
   callFunction,
   caseWhen,
+  castInteger,
   coalesce,
   count,
   countDistinct,

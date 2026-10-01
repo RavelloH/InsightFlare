@@ -1,6 +1,7 @@
 import {
   callFunction,
   caseWhen,
+  castInteger,
   coalesce,
   compileD1Query,
   eq,
@@ -44,6 +45,32 @@ export function compileTimeDatabaseTypeAssertions(): void {
   eq(users.columns.id, param(42));
 
   const visits = scan(schema.visits);
+  const castNonNullable = castInteger(visits.columns.started_at);
+  const castNullable = castInteger(visits.columns.ended_at);
+  type CastIntegerKeepsNonNullability = Assert<
+    Equal<
+      ExpressionResultOf<typeof castNonNullable>,
+      ExpressionResultType<"integer", false>
+    >
+  >;
+  type CastIntegerKeepsNullability = Assert<
+    Equal<
+      ExpressionResultOf<typeof castNullable>,
+      ExpressionResultType<"integer", true>
+    >
+  >;
+  type CastIntegerNullableValue = Assert<
+    Equal<ExpressionValue<typeof castNullable>, number | null>
+  >;
+  const castChecks: [
+    CastIntegerKeepsNonNullability,
+    CastIntegerKeepsNullability,
+    CastIntegerNullableValue,
+  ] = [true, true, true];
+  void castChecks;
+  // @ts-expect-error CAST AS INTEGER accepts numeric expressions only.
+  castInteger(users.columns.id);
+
   const nullableDistinct = isDistinctFrom(visits.columns.ended_at, param(null));
   const nullableMetric: number | null = 1;
   isDistinctFrom(visits.columns.perf_ttfb_ms, param(nullableMetric));

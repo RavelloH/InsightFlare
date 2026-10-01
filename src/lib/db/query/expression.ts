@@ -80,6 +80,14 @@ export interface DistinctFromExpression<
   readonly right: SqlExpression;
 }
 
+export interface CastIntegerExpression<
+  T = number | null,
+  Result extends ExpressionResultType = ExpressionResultType<"integer", true>,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "cast-integer";
+  readonly expression: SqlExpression;
+}
+
 export interface BooleanExpression<
   T = boolean | null,
   Result extends ExpressionResultType = ExpressionResultType<
@@ -211,6 +219,7 @@ export type SqlExpression<
   | ExcludedExpression<T, Result>
   | BinaryExpression<T, Result>
   | DistinctFromExpression<T, Result>
+  | CastIntegerExpression<T, Result>
   | BooleanExpression<T, Result>
   | NotExpression<T, Result>
   | NullCheckExpression<T, Result>
@@ -514,6 +523,22 @@ export function isDistinctFrom<
     left,
     right,
     resultType: { affinity: "integer", nullable: false },
+  };
+}
+
+export function castInteger<E extends SqlExpression<number | null>>(
+  expression: E,
+): CastIntegerExpression<
+  true extends ExpressionResultOf<E>["nullable"] ? number | null : number,
+  ExpressionResultType<"integer", ExpressionResultOf<E>["nullable"]>
+> {
+  return {
+    kind: "cast-integer",
+    expression,
+    resultType: {
+      affinity: "integer",
+      nullable: expression.resultType.nullable,
+    } as ExpressionResultType<"integer", ExpressionResultOf<E>["nullable"]>,
   };
 }
 

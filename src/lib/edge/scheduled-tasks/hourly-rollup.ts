@@ -1,13 +1,22 @@
-import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
+import { createD1DatabaseClient, createDatabaseRuntime } from "@/lib/db";
 import {
   type AggregateSiteHourMetricRow,
   ROLLUP_LAG_HOURS,
-  ROLLUP_SCHEMA_VERSION,
   type StoredRollupRow,
 } from "@/lib/edge/analytics/contract/hourly-rollup";
+import {
+  aggregationCandidateQuery,
+  firstClosedHourQuery,
+  firstOpenHourQuery,
+} from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-read-plans";
 import type { Env } from "@/lib/edge/types";
 import { ONE_HOUR_MS } from "@/lib/edge/utils";
 
+import {
+  prepareAggregationFailureMutation,
+  prepareAggregationSuccessMutations,
+  prepareFinalizeStaleOpenVisitsMutation,
+} from "./hourly-rollup-persistence";
 import type { ScheduledTaskLogger, ScheduledTaskOutcome } from "./runner";
 const ROLLUP_MAX_HOURS_PER_SITE = 24 * 7;
 interface HourlyAggregationOptions {
@@ -32,41 +41,14 @@ interface AggregationCandidateRow {
   aggregatedUntilHour: number | null;
   lastError: string | null;
 }
-interface HourBucketRow {
-  hourBucket: number | null;
-}
 async function listAggregationCandidates(
   env: Env,
   endHour: number,
 ): Promise<AggregationCandidateRow[]> {
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
-  const result = await createDatabaseRuntime(
-    env.DB,
-  ).all<AggregationCandidateRow>({
-    sql: `
-      SELECT
-        s.id AS siteId,
-        si.site_pk AS sitePk,
-        st.aggregated_until_hour AS aggregatedUntilHour,
-        st.last_error AS lastError
-      FROM sites s
-      INNER JOIN site_identities si
-        ON si.site_id = s.id
-      LEFT JOIN visit_hourly_aggregation_state st
-        ON st.site_pk = si.site_pk
-      WHERE st.site_pk IS NOT NULL
-         OR EXISTS (
-           SELECT 1
-           FROM visits v
-           WHERE v.site_pk = si.site_pk
-             AND v.started_at < ?
-           LIMIT 1
-         )
-      ORDER BY COALESCE(st.last_success_at, 0) ASC, s.id ASC
-    `,
-    bindings: [endExclusiveMs],
-    tag: "scheduled-tasks.sites.all",
-  });
+  const result = await createD1DatabaseClient(env.DB).all(
+    aggregationCandidateQuery(endExclusiveMs),
+  );
   return result.results.map((row) => ({
     siteId: String(row.siteId ?? ""),
     sitePk: Number(row.sitePk),
@@ -86,19 +68,9 @@ async function readFirstClosedHour(
   endHour: number,
 ): Promise<number | null> {
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
-  const row = await createDatabaseRuntime(env.DB).first<HourBucketRow>({
-    sql: `
-      SELECT CAST(started_at / ? AS INTEGER) AS hourBucket
-      FROM visits
-      WHERE site_pk = ?
-        AND started_at < ?
-        AND status != 'open'
-      ORDER BY started_at ASC
-      LIMIT 1
-    `,
-    bindings: [ONE_HOUR_MS, sitePk, endExclusiveMs],
-    tag: "scheduled-tasks.visits.first",
-  });
+  const row = await createD1DatabaseClient(env.DB).first(
+    firstClosedHourQuery(sitePk, endExclusiveMs),
+  );
   if (!row || row.hourBucket === null || row.hourBucket === undefined) {
     return null;
   }
@@ -111,19 +83,9 @@ async function readFirstOpenHour(
   endHour: number,
 ): Promise<number | null> {
   const endExclusiveMs = (endHour + 1) * ONE_HOUR_MS;
-  const row = await createDatabaseRuntime(env.DB).first<HourBucketRow>({
-    sql: `
-      SELECT CAST(started_at / ? AS INTEGER) AS hourBucket
-      FROM visits
-      WHERE site_pk = ?
-        AND status = 'open'
-        AND started_at < ?
-      ORDER BY started_at ASC
-      LIMIT 1
-    `,
-    bindings: [ONE_HOUR_MS, sitePk, endExclusiveMs],
-    tag: "scheduled-tasks.visits.first",
-  });
+  const row = await createD1DatabaseClient(env.DB).first(
+    firstOpenHourQuery(sitePk, endExclusiveMs),
+  );
   if (!row || row.hourBucket === null || row.hourBucket === undefined) {
     return null;
   }
@@ -135,21 +97,9 @@ async function finalizeStaleOpenVisits(
   cutoffMs: number,
   finalizedAt: number,
 ): Promise<number> {
-  const result = await createDatabaseRuntime(env.DB).run({
-    sql: `
-      UPDATE visits
-      SET status = 'timeout',
-          last_activity_at = ?,
-          ended_at = ?,
-          finalized_at = ?,
-          duration_ms = NULL,
-          duration_source = 'timeout'
-      WHERE status = 'open'
-        AND last_activity_at < ?
-    `,
-    bindings: [finalizedAt, finalizedAt, finalizedAt, cutoffMs],
-    tag: "scheduled_tasks.hourly_rollup.finalize_stale_visits",
-  });
+  const result = await createD1DatabaseClient(env.DB).run(
+    prepareFinalizeStaleOpenVisitsMutation(cutoffMs, finalizedAt),
+  );
   return Number(result.meta.changes ?? 0);
 }
 async function aggregateSiteHours(
@@ -310,7 +260,7 @@ async function aggregateSiteHours(
     sessionsByHour.set(hour, list);
   }
 
-  const statements: DatabaseStatement[] = [];
+  const rollupsToWrite = new Map<number, StoredRollupRow>();
   for (const [hour, rollup] of byHour.entries()) {
     const visitorIds = Array.from(new Set(visitorsByHour.get(hour) ?? []))
       .map((value) => value.trim())
@@ -324,88 +274,23 @@ async function aggregateSiteHours(
       .filter(([sessionId, count]) => sessionId.length > 0 && count > 0)
       .sort(([left], [right]) => left.localeCompare(right));
     const bounces = sessionCounts.filter(([, count]) => count === 1).length;
-    statements.push({
-      sql: `
-          INSERT INTO visit_hourly_rollups (
-            site_id, site_pk, hour_bucket, views, sessions, visitors, bounces,
-            duration_ms_sum, duration_ms_count, visitor_set_json,
-            session_counts_json, perf_ttfb_sum, perf_ttfb_count,
-            perf_fcp_sum, perf_fcp_count, perf_lcp_sum, perf_lcp_count,
-            perf_cls_sum, perf_cls_count, perf_inp_sum, perf_inp_count,
-            input_cutoff_ms, aggregated_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)
-          ON CONFLICT(site_pk, hour_bucket) DO UPDATE SET
-            site_pk = excluded.site_pk,
-            views = excluded.views,
-            sessions = excluded.sessions,
-            visitors = excluded.visitors,
-            bounces = excluded.bounces,
-            duration_ms_sum = excluded.duration_ms_sum,
-            duration_ms_count = excluded.duration_ms_count,
-            visitor_set_json = excluded.visitor_set_json,
-            session_counts_json = excluded.session_counts_json,
-            perf_ttfb_sum = excluded.perf_ttfb_sum,
-            perf_ttfb_count = excluded.perf_ttfb_count,
-            perf_fcp_sum = excluded.perf_fcp_sum,
-            perf_fcp_count = excluded.perf_fcp_count,
-            perf_lcp_sum = excluded.perf_lcp_sum,
-            perf_lcp_count = excluded.perf_lcp_count,
-            perf_cls_sum = excluded.perf_cls_sum,
-            perf_cls_count = excluded.perf_cls_count,
-            perf_inp_sum = excluded.perf_inp_sum,
-            perf_inp_count = excluded.perf_inp_count,
-            input_cutoff_ms = excluded.input_cutoff_ms,
-            aggregated_at = excluded.aggregated_at,
-            schema_version = excluded.schema_version
-        `,
-      bindings: [
-        siteId,
-        sitePk,
-        hour,
-        rollup.views,
-        sessionCounts.length,
-        visitorIds.length,
-        bounces,
-        rollup.durationMsSum,
-        rollup.durationMsCount,
-        JSON.stringify(visitorIds),
-        JSON.stringify(sessionCounts),
-        rollup.perfTtfbSum,
-        rollup.perfTtfbCount,
-        rollup.perfFcpSum,
-        rollup.perfFcpCount,
-        rollup.perfLcpSum,
-        rollup.perfLcpCount,
-        rollup.perfClsSum,
-        rollup.perfClsCount,
-        rollup.perfInpSum,
-        rollup.perfInpCount,
-        inputCutoffMs,
-        ROLLUP_SCHEMA_VERSION,
-      ],
-      tag: "scheduled_tasks.hourly_rollup.upsert_hour",
+    rollupsToWrite.set(hour, {
+      ...rollup,
+      sessions: sessionCounts.length,
+      visitors: visitorIds.length,
+      bounces,
+      visitorSetJson: JSON.stringify(visitorIds),
+      sessionCountsJson: JSON.stringify(sessionCounts),
     });
   }
-
-  statements.push({
-    sql: `
-        INSERT INTO visit_hourly_aggregation_state (
-          site_id, site_pk, aggregated_until_hour, lag_hours, last_run_at,
-          last_success_at, last_error
-        ) VALUES (?, ?, ?, ?, unixepoch(), unixepoch(), NULL)
-        ON CONFLICT(site_pk) DO UPDATE SET
-          site_pk = excluded.site_pk,
-          aggregated_until_hour = excluded.aggregated_until_hour,
-          lag_hours = excluded.lag_hours,
-          last_run_at = excluded.last_run_at,
-          last_success_at = excluded.last_success_at,
-          last_error = NULL
-      `,
-    bindings: [siteId, sitePk, endHour, ROLLUP_LAG_HOURS],
-    tag: "scheduled_tasks.hourly_rollup.update_state",
-  });
-
-  await createDatabaseRuntime(env.DB).batch(statements);
+  const mutations = prepareAggregationSuccessMutations(
+    siteId,
+    sitePk,
+    endHour,
+    inputCutoffMs,
+    rollupsToWrite,
+  );
+  await createD1DatabaseClient(env.DB).batch(mutations);
   return byHour.size;
 }
 async function markAggregationFailed(
@@ -418,19 +303,9 @@ async function markAggregationFailed(
     0,
     400,
   );
-  await createDatabaseRuntime(env.DB).run({
-    sql: `
-      INSERT INTO visit_hourly_aggregation_state (
-        site_id, site_pk, aggregated_until_hour, lag_hours, last_run_at, last_error
-      ) VALUES (?, ?, 0, ?, unixepoch(), ?)
-      ON CONFLICT(site_pk) DO UPDATE SET
-        site_pk = excluded.site_pk,
-        last_run_at = excluded.last_run_at,
-        last_error = excluded.last_error
-    `,
-    bindings: [siteId, sitePk, ROLLUP_LAG_HOURS, message],
-    tag: "scheduled_tasks.hourly_rollup.mark_failed",
-  });
+  await createD1DatabaseClient(env.DB).run(
+    prepareAggregationFailureMutation(siteId, sitePk, message),
+  );
 }
 export async function runHourlyAggregation(
   env: Env,

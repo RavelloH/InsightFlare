@@ -13,6 +13,7 @@ import {
   avg,
   callFunction,
   caseWhen,
+  castInteger,
   coalesce,
   compileD1Mutation,
   compileD1Query,
@@ -21,6 +22,7 @@ import {
   D1StatementBudgetError,
   deleteFrom,
   distinct,
+  div,
   eq,
   excluded,
   filter,
@@ -114,6 +116,60 @@ describe("typed D1 query compiler", () => {
     expect(JSON.stringify(packedA.physicalPlanShape)).not.toContain(
       "private-a",
     );
+  });
+
+  it("casts numeric hour expressions with SQLite integer truncation semantics", () => {
+    const database = createMigratedDatabase();
+    database
+      .prepare(
+        "INSERT INTO users (id, email, name, username) VALUES ('owner', 'owner@example.test', 'Owner', 'owner')",
+      )
+      .run();
+    database
+      .prepare(
+        "INSERT INTO teams (id, name, slug, owner_user_id) VALUES ('t', 'T', 't', 'owner')",
+      )
+      .run();
+    database
+      .prepare(
+        "INSERT INTO sites (id, team_id, name, domain) VALUES ('s', 't', 'S', 's.test')",
+      )
+      .run();
+
+    try {
+      const sites = scan(schema.sites);
+      const compiled = compileD1Query(
+        project(sites, {
+          negativeFraction: castInteger(param(-1.9)),
+          positiveFraction: castInteger(param(1.9)),
+          negativeHour: castInteger(div(param(-3_600_001), param(3_600_000))),
+          zeroDivisor: castInteger(div(param(1), param(0))),
+          nullInput: castInteger(param(null)),
+        }),
+      );
+      expect(compiled.sql).toContain("CAST(");
+      expect(compiled.sql).toContain(" AS INTEGER)");
+      expect(compiled.bindings).toEqual([
+        -1.9,
+        1.9,
+        -3_600_001,
+        3_600_000,
+        1,
+        0,
+        null,
+      ]);
+      expect(executeAll(database, compiled)).toEqual([
+        {
+          negativeFraction: -1,
+          positiveFraction: 1,
+          negativeHour: -1,
+          zeroDivisor: null,
+          nullInput: null,
+        },
+      ]);
+    } finally {
+      database.close();
+    }
   });
 
   it("implements ECMAScript trim semantics for text expressions", () => {

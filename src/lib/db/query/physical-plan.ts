@@ -272,6 +272,7 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
         break;
       case "not":
       case "null-check":
+      case "cast-integer":
         visit(current.expression);
         break;
       case "in-list":
@@ -466,6 +467,9 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
           case "not":
           case "null-check":
           case "in-list":
+            inspect(current.expression);
+            break;
+          case "cast-integer":
             inspect(current.expression);
             break;
           case "in-subquery":

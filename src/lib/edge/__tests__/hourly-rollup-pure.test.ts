@@ -6,10 +6,12 @@ import {
   hasFilters,
   normalizeFilterDocument,
 } from "@/lib/edge/analytics/contract";
+import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import {
   hasFilterDocument,
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollups,
+  queryOverviewForSitesFromHourlyRollupsPartial,
   queryTrendForSitesFromHourlyRollups,
 } from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
 import type { Env } from "@/lib/edge/types";
@@ -55,6 +57,40 @@ describe("hasFilterDocument", () => {
   });
 });
 describe("queryOverviewForSitesFromHourlyRollups", () => {
+  it("sums D1 row diagnostics once for each executed typed query", async () => {
+    const db = makeDbMock();
+    db.all
+      .mockResolvedValueOnce({
+        results: [{ siteId: "site-1", aggregatedUntilHour: 1 }],
+        meta: { rows_read: 4 },
+      } as never)
+      .mockResolvedValueOnce({
+        results: [],
+        meta: { rows_read: 7 },
+      } as never);
+    const diagnostics = createD1ReadDiagnostics();
+    const env = { DB: db } as unknown as Env;
+
+    const result = await queryOverviewForSitesFromHourlyRollupsPartial(
+      env,
+      ["site-1"],
+      {
+        startMs: 60 * 60 * 1000,
+        endExclusiveMs: 2 * 60 * 60 * 1000,
+        nowMs: 3 * 60 * 60 * 1000,
+        timeZone: "UTC",
+      },
+      diagnostics,
+    );
+
+    expect(result).toHaveLength(1);
+    expect(db.all).toHaveBeenCalledTimes(2);
+    expect(diagnostics).toMatchObject({
+      rowsRead: 11,
+      rowsReadAvailable: true,
+    });
+  });
+
   it("returns empty Map for empty siteIds", async () => {
     const env = { DB: makeDbMock() } as unknown as Env;
     const result = await queryOverviewForSitesFromHourlyRollups(env, [], {

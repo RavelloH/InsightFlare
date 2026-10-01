@@ -1,6 +1,5 @@
-import { createDatabaseRuntime, D1_MAX_BOUND_PARAMETERS } from "@/lib/db";
+import { createD1DatabaseClient, D1_MAX_BOUND_PARAMETERS } from "@/lib/db";
 import { type StoredRollupRow } from "@/lib/edge/analytics/contract/hourly-rollup";
-import { sitePksFromSiteIdsSql } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 import { ONE_HOUR_MS } from "@/lib/edge/utils";
 
@@ -13,6 +12,11 @@ import type {
   TrendAggregateRow,
 } from "./core-types";
 import { type D1ReadDiagnostics, recordD1RowsRead } from "./diagnostics";
+import {
+  aggregationStatesQuery,
+  detailVisitsQuery,
+  storedRollupsQuery,
+} from "./hourly-rollup-read-plans";
 function siteIdChunks(siteIds: string[], fixedBindingCount = 0): string[][] {
   const maxSiteIds = D1_MAX_BOUND_PARAMETERS - fixedBindingCount;
   if (maxSiteIds < 1 && siteIds.length > 0) {
@@ -23,10 +27,6 @@ function siteIdChunks(siteIds: string[], fixedBindingCount = 0): string[][] {
     chunks.push(siteIds.slice(index, index + maxSiteIds));
   }
   return chunks;
-}
-interface AggregationStateRow {
-  siteId: string;
-  aggregatedUntilHour: number;
 }
 interface RollupWindowGroup {
   siteIds: string[];
@@ -328,16 +328,8 @@ async function queryAggregationStates(
   const states = new Map<string, number>();
   const requested = new Set(siteIds);
   for (const chunk of siteIdChunks(siteIds)) {
-    const result = await createDatabaseRuntime(env.DB).all<AggregationStateRow>(
-      {
-        sql: `
-      SELECT site_id AS siteId, aggregated_until_hour AS aggregatedUntilHour
-      FROM visit_hourly_aggregation_state
-      WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
-    `,
-        bindings: [...chunk],
-        tag: "analytics.visit_hourly_aggregation_state.all",
-      },
+    const result = await createD1DatabaseClient(env.DB).all(
+      aggregationStatesQuery(chunk),
     );
     recordD1RowsRead(diagnostics, result);
     for (const row of result.results) {
@@ -390,26 +382,9 @@ async function queryDetailAccumulatorsForSites(
   }
   const accumulators = new Map<string, MetricAccumulator>();
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const result = await createDatabaseRuntime(env.DB).all<DetailVisitRow>({
-      sql: `
-      SELECT
-        site_id AS siteId,
-        started_at AS startedAt,
-        COALESCE(visitor_id, '') AS visitorId,
-        COALESCE(session_id, '') AS sessionId,
-        duration_ms AS durationMs,
-        perf_ttfb_ms AS perfTtfbMs,
-        perf_fcp_ms AS perfFcpMs,
-        perf_lcp_ms AS perfLcpMs,
-        perf_cls AS perfCls,
-        perf_inp_ms AS perfInpMs
-      FROM visits
-      WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
-        AND started_at >= ? AND started_at < ?
-    `,
-      bindings: [...chunk, window.startMs, window.endExclusiveMs],
-      tag: "analytics.visits.all",
-    });
+    const result = await createD1DatabaseClient(env.DB).all(
+      detailVisitsQuery(chunk, window),
+    );
     recordD1RowsRead(diagnostics, result);
 
     for (const row of result.results) {
@@ -431,37 +406,9 @@ async function queryStoredRollupsForSites(
   if (siteIds.length === 0 || endExclusiveHour <= startHour) return [];
   const rollups: StoredRollupRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const result = await createDatabaseRuntime(env.DB).all<StoredRollupRow>({
-      sql: `
-      SELECT
-        site_id AS siteId,
-        hour_bucket AS hourBucket,
-        views,
-        sessions,
-        visitors,
-        bounces,
-        duration_ms_sum AS durationMsSum,
-        duration_ms_count AS durationMsCount,
-        visitor_set_json AS visitorSetJson,
-        session_counts_json AS sessionCountsJson,
-        perf_ttfb_sum AS perfTtfbSum,
-        perf_ttfb_count AS perfTtfbCount,
-        perf_fcp_sum AS perfFcpSum,
-        perf_fcp_count AS perfFcpCount,
-        perf_lcp_sum AS perfLcpSum,
-        perf_lcp_count AS perfLcpCount,
-        perf_cls_sum AS perfClsSum,
-        perf_cls_count AS perfClsCount,
-        perf_inp_sum AS perfInpSum,
-        perf_inp_count AS perfInpCount
-      FROM visit_hourly_rollups
-      WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
-        AND hour_bucket >= ? AND hour_bucket < ?
-      ORDER BY hour_bucket ASC
-    `,
-      bindings: [...chunk, startHour, endExclusiveHour],
-      tag: "analytics.visit_hourly_rollups.all",
-    });
+    const result = await createD1DatabaseClient(env.DB).all(
+      storedRollupsQuery(chunk, startHour, endExclusiveHour),
+    );
     recordD1RowsRead(diagnostics, result);
     rollups.push(...result.results);
   }
@@ -713,27 +660,9 @@ async function queryDetailVisitsForSites(
   }
   const visits: DetailVisitRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const result = await createDatabaseRuntime(env.DB).all<DetailVisitRow>({
-      sql: `
-      SELECT
-        site_id AS siteId,
-        started_at AS startedAt,
-        COALESCE(visitor_id, '') AS visitorId,
-        COALESCE(session_id, '') AS sessionId,
-        duration_ms AS durationMs,
-        perf_ttfb_ms AS perfTtfbMs,
-        perf_fcp_ms AS perfFcpMs,
-        perf_lcp_ms AS perfLcpMs,
-        perf_cls AS perfCls,
-        perf_inp_ms AS perfInpMs
-      FROM visits
-      WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
-        AND started_at >= ? AND started_at < ?
-      ORDER BY started_at ASC
-    `,
-      bindings: [...chunk, window.startMs, window.endExclusiveMs],
-      tag: "analytics.visits.all",
-    });
+    const result = await createD1DatabaseClient(env.DB).all(
+      detailVisitsQuery(chunk, window, true),
+    );
     recordD1RowsRead(diagnostics, result);
     visits.push(...result.results);
   }

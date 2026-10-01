@@ -74,6 +74,7 @@ function isPredicateExpression(expression: SqlExpression): boolean {
     case "excluded":
     case "function":
     case "aggregate":
+    case "cast-integer":
     case "coalesce":
     case "unixepoch":
     case "scalar-subquery":

@@ -169,6 +169,11 @@ function typedDalConvergenceViolations(
   relativePath: string,
   sourceText: string,
 ): ArchitectureViolation[] {
+  const hourlyRollupPureModules = new Set([
+    "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-read-plans.ts",
+    "src/lib/edge/scheduled-tasks/hourly-rollup-persistence.ts",
+  ]);
+  const isHourlyRollupPureModule = hourlyRollupPureModules.has(relativePath);
   const ingestRuntimeModules = new Set([
     "src/lib/edge/ingest/flush.ts",
     "src/lib/edge/ingest/custom-event-flush.ts",
@@ -182,7 +187,8 @@ function typedDalConvergenceViolations(
     relativePath !==
       "src/lib/edge/analytics/interfaces/dashboard/saved-filters.ts" &&
     !ingestRuntimeModules.has(relativePath) &&
-    !ingestMutationHelpers.has(relativePath)
+    !ingestMutationHelpers.has(relativePath) &&
+    !isHourlyRollupPureModule
   )
     return [];
 
@@ -197,6 +203,14 @@ function typedDalConvergenceViolations(
   const forbidden = new Set([
     "createDatabaseRuntime",
     "DatabaseStatement",
+    ...(isHourlyRollupPureModule
+      ? [
+          "createD1DatabaseClient",
+          "unsafeRawMutation",
+          "unsafeRawSql",
+          "queryD1All",
+        ]
+      : []),
     ...(ingestMutationHelpers.has(relativePath)
       ? ["createD1DatabaseClient", "unsafeRawMutation", "unsafeRawSql"]
       : []),
@@ -219,7 +233,7 @@ function typedDalConvergenceViolations(
     if (ts.isIdentifier(node) && forbidden.has(node.text))
       addViolation(node, node.text);
     if (
-      ingestMutationHelpers.has(relativePath) &&
+      (ingestMutationHelpers.has(relativePath) || isHourlyRollupPureModule) &&
       ((ts.isStringLiteralLike(node) &&
         /^(?:SELECT|INSERT|UPDATE|DELETE|PRAGMA)\b/iu.test(
           node.text.trimStart(),
@@ -230,6 +244,13 @@ function typedDalConvergenceViolations(
           )))
     )
       addViolation(node, "<raw SQL literal>");
+    if (
+      isHourlyRollupPureModule &&
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ["prepare", "batch", "exec"].includes(node.expression.name.text)
+    )
+      addViolation(node, "<direct D1 operation>");
     ts.forEachChild(node, visit);
   };
   visit(source);
@@ -366,6 +387,12 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
     "deleteExpiredInBatches",
     "runDatabaseMaintenance",
   ],
+  "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries.ts": [
+    "queryAggregationStates",
+    "queryDetailAccumulatorsForSites",
+    "queryStoredRollupsForSites",
+    "queryDetailVisitsForSites",
+  ],
 };
 
 const TYPED_QUERY_DO_SQL_FORWARDING: Readonly<
@@ -428,6 +455,8 @@ function typedQueryFunctionViolations(
       message,
     });
   };
+  const isD1Binding = (expression: ts.Expression): boolean =>
+    ts.isPropertyAccessExpression(expression) && expression.name.text === "DB";
   const isDoSqlForwardingArgument = (node: ts.Node): boolean => {
     const parent = node.parent;
     if (!ts.isCallExpression(parent) || parent.arguments[0] !== node)
@@ -445,6 +474,17 @@ function typedQueryFunctionViolations(
           node,
           node.text,
           "This migrated query function must use the typed query/mutation compiler, not DatabaseRuntime or queryD1All.",
+        );
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["prepare", "batch", "exec"].includes(node.expression.name.text) &&
+        isD1Binding(node.expression.expression)
+      )
+        report(
+          node,
+          "<direct D1 operation>",
+          "This migrated query function must execute compiled plans through createD1DatabaseClient.",
         );
       if (
         (!allowDoSqlForwarding || !isDoSqlForwardingArgument(node)) &&
@@ -506,6 +546,169 @@ function typedQueryFunctionViolations(
     ts.forEachChild(node, visit);
   };
   visit(source);
+  return violations;
+}
+
+const TYPED_HOURLY_SCHEDULE_FUNCTIONS = new Set([
+  "listAggregationCandidates",
+  "readFirstClosedHour",
+  "readFirstOpenHour",
+  "finalizeStaleOpenVisits",
+  "aggregateSiteHours",
+  "markAggregationFailed",
+  "runHourlyAggregation",
+]);
+
+function typedHourlyScheduledFunctionViolations(
+  relativePath: string,
+  sourceText: string,
+): ArchitectureViolation[] {
+  if (relativePath !== "src/lib/edge/scheduled-tasks/hourly-rollup.ts")
+    return [];
+  const source = ts.createSourceFile(
+    relativePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const violations: ArchitectureViolation[] = [];
+  const isMetricsFunction = (name: string) => name === "aggregateSiteHours";
+  const isRuntimeAllCall = (node: ts.Node): boolean =>
+    ts.isCallExpression(node) &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    node.expression.name.text === "all" &&
+    ts.isCallExpression(node.expression.expression) &&
+    ts.isIdentifier(node.expression.expression.expression) &&
+    node.expression.expression.expression.text === "createDatabaseRuntime";
+  const isInsideRuntimeAllCall = (node: ts.Node, body: ts.Node): boolean => {
+    for (
+      let current: ts.Node | undefined = node;
+      current;
+      current = current.parent
+    ) {
+      if (isRuntimeAllCall(current)) return true;
+      if (current === body) break;
+    }
+    return false;
+  };
+  const isD1Binding = (expression: ts.Expression): boolean =>
+    ts.isPropertyAccessExpression(expression) && expression.name.text === "DB";
+  const report = (node: ts.Node, specifier: string, message: string) => {
+    violations.push({
+      rule: "typed-hourly-rollup-forbidden",
+      source: relativePath,
+      specifier,
+      target: relativePath,
+      line:
+        source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+      message,
+    });
+  };
+  const inspectBody = (
+    body: ts.ConciseBody,
+    name: string,
+    nameNode: ts.Node,
+  ) => {
+    const allowsMetricsRuntime = isMetricsFunction(name);
+    let runtimeAllCalls = 0;
+    const visit = (node: ts.Node) => {
+      if (isRuntimeAllCall(node)) {
+        runtimeAllCalls += 1;
+        if (!allowsMetricsRuntime)
+          report(
+            node,
+            "createDatabaseRuntime",
+            "Hourly rollup database access must use typed D1 plans except the retained aggregate metrics query.",
+          );
+      }
+      if (
+        ts.isIdentifier(node) &&
+        node.text === "createDatabaseRuntime" &&
+        !(allowsMetricsRuntime && isInsideRuntimeAllCall(node, body))
+      )
+        report(
+          node,
+          node.text,
+          "Hourly rollup database access must use typed D1 plans except the retained aggregate metrics query.",
+        );
+      if (
+        ts.isIdentifier(node) &&
+        ["DatabaseStatement", "queryD1All", "unsafeRawSql"].includes(node.text)
+      )
+        report(
+          node,
+          node.text,
+          "Hourly rollup functions must execute typed plans and mutations through createD1DatabaseClient.",
+        );
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["prepare", "batch", "exec"].includes(node.expression.name.text) &&
+        isD1Binding(node.expression.expression)
+      )
+        report(
+          node,
+          "<direct D1 operation>",
+          "Hourly rollup functions must execute typed plans and mutations through createD1DatabaseClient.",
+        );
+      const isRawSql =
+        (ts.isStringLiteralLike(node) ||
+          ts.isNoSubstitutionTemplateLiteral(node)) &&
+        /^(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|PRAGMA)\b/iu.test(
+          node.text.trimStart(),
+        );
+      if (
+        isRawSql &&
+        !(allowsMetricsRuntime && isInsideRuntimeAllCall(node, body))
+      )
+        report(
+          node,
+          "raw-sql",
+          "Hourly rollup functions must use typed plans except for the retained aggregate metrics query.",
+        );
+      if (
+        ts.isTemplateExpression(node) &&
+        /^(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|PRAGMA)\b/iu.test(
+          node.head.text.trimStart(),
+        ) &&
+        !(allowsMetricsRuntime && isInsideRuntimeAllCall(node, body))
+      )
+        report(
+          node,
+          "raw-sql",
+          "Hourly rollup functions must use typed plans except for the retained aggregate metrics query.",
+        );
+      ts.forEachChild(node, visit);
+    };
+    visit(body);
+    if (allowsMetricsRuntime && runtimeAllCalls !== 1)
+      report(
+        nameNode,
+        "<aggregate metrics runtime query count>",
+        "aggregateSiteHours must retain exactly one DatabaseRuntime all() query for the raw metrics aggregate.",
+      );
+  };
+  const inspect = (node: ts.Node) => {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name &&
+      TYPED_HOURLY_SCHEDULE_FUNCTIONS.has(node.name.text) &&
+      node.body
+    )
+      inspectBody(node.body, node.name.text, node.name);
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      TYPED_HOURLY_SCHEDULE_FUNCTIONS.has(node.name.text) &&
+      node.initializer &&
+      (ts.isArrowFunction(node.initializer) ||
+        ts.isFunctionExpression(node.initializer))
+    )
+      inspectBody(node.initializer.body, node.name.text, node.name);
+    ts.forEachChild(node, inspect);
+  };
+  inspect(source);
   return violations;
 }
 
@@ -925,6 +1128,9 @@ export function collectArchitectureViolations(
     violations.push(...typedDalConvergenceViolations(relative, sourceText));
     violations.push(...ingestTypedBatchViolations(relative, sourceText));
     violations.push(...typedQueryFunctionViolations(relative, sourceText));
+    violations.push(
+      ...typedHourlyScheduledFunctionViolations(relative, sourceText),
+    );
 
     const addSourceRuleViolation = (
       rule: string,

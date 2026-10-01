@@ -142,6 +142,12 @@ export function compileD1Expression(
           compileD1Expression(expression.right, scopes, context),
         ),
       );
+    case "cast-integer":
+      return concat(
+        text("CAST("),
+        compileD1Expression(expression.expression, scopes, context),
+        text(" AS INTEGER)"),
+      );
     case "boolean":
       return parenthesize(
         join(
