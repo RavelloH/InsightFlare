@@ -1,6 +1,6 @@
 import { type HTMLMotionProps, motion } from "motion/react";
 
-import { cn } from "../utils/cn";
+import { cn } from "../../../lib/utils";
 
 const DATA_ROW_LAYOUT_TRANSITION = {
   layout: {

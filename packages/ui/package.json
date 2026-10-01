@@ -185,6 +185,11 @@
       "development": "./src/components/ui/table.tsx",
       "import": "./dist/components/ui/table.js"
     },
+    "./tabbed-table": {
+      "types": "./dist/components/ui/tabbed-table/index.d.ts",
+      "development": "./src/components/ui/tabbed-table/index.ts",
+      "import": "./dist/components/ui/tabbed-table/index.js"
+    },
     "./tabs": {
       "types": "./dist/components/ui/tabs.d.ts",
       "development": "./src/components/ui/tabs.tsx",

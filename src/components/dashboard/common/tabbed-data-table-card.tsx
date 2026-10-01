@@ -1,7 +1,7 @@
 import { memo } from "react";
 import type { TabbedDataTableCardProps } from "@insightflare/product-ui/tabbed-table";
 import {
-  TabbedDataTableCardView,
+  TabbedDataTableCardDataController,
   type TabbedDataTablePage,
   type TabbedDataTableQueryOptions,
   type TabbedDataTableRowBase,
@@ -39,7 +39,10 @@ function TabbedDataTableCardImpl<
   TKey extends string = string,
 >(props: TabbedDataTableCardProps<TTab, TRow, TKey>) {
   return (
-    <TabbedDataTableCardView {...props} useDataQuery={useDashboardTableQuery} />
+    <TabbedDataTableCardDataController
+      {...props}
+      useDataQuery={useDashboardTableQuery}
+    />
   );
 }
 

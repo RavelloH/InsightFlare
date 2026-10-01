@@ -1,14 +1,9 @@
 import type { ReactNode } from "react";
-import { AutoResizer } from "@insightflare/ui/auto-resizer";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
-import { Spinner } from "@insightflare/ui/spinner";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "@insightflare/ui/table";
+
+import { AutoResizer } from "../auto-resizer";
+import { AutoTransition } from "../auto-transition";
+import { Spinner } from "../spinner";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "../table";
 interface DataTableSwitchProps {
   loading: boolean;
   hasContent: boolean;

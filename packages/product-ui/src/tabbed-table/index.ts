@@ -1,13 +1,9 @@
 export {
   MAX_EXPORT_PAGES,
   MAX_EXPORT_ROWS,
-  TabbedDataTableCardView,
-  type TabbedDataTableCardViewProps,
+  TabbedDataTableCardDataController,
+  type TabbedDataTableCardDataControllerProps,
 } from "./tabbed-data-table-card";
-export {
-  TabbedScrollMaskCard,
-  type TabbedScrollMaskCardTab,
-} from "./tabbed-scroll-mask-card";
 export type * from "./types";
 export {
   buildCsv,
@@ -22,3 +18,12 @@ export {
   sanitizeCsvFilename,
   sortLocalTableRows,
 } from "./utils";
+export {
+  TabbedDataTableHeader,
+  TabbedDataTableRows,
+  TabbedDataTableView,
+  type TabbedDataTableViewProps,
+  type TabbedDataTableViewState,
+  TabbedScrollMaskCard,
+  type TabbedScrollMaskCardTab,
+} from "@insightflare/ui/tabbed-table";

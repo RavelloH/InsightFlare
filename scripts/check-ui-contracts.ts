@@ -182,8 +182,6 @@ const publicComponentSubpaths = Object.keys(uiPackage.exports)
 const productComponentSubpaths = Object.keys(productPackage.exports)
   .filter((entry) => entry.startsWith("./"))
   .map((entry) => entry.slice(2))
-  // This subpath is a collection of table building blocks and helpers, not a
-  // single component with one representative gallery contract.
   .filter((entry) => entry !== "styles.css" && entry !== "tabbed-table");
 
 const registrySource = ts.createSourceFile(

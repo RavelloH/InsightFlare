@@ -1,10 +1,10 @@
 import { type ReactNode } from "react";
-import { Card } from "@insightflare/ui/card";
-import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
-import { Tabs, TabsList, TabsTrigger } from "@insightflare/ui/tabs";
-import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 
-import { cn } from "../utils/cn";
+import { cn } from "../../../lib/utils";
+import { Card } from "../card";
+import { OverlayScrollbar } from "../overlay-scrollbar";
+import { Tabs, TabsList, TabsTrigger } from "../tabs";
+import { VerticalScrollMask } from "../vertical-scroll-mask";
 export interface TabbedScrollMaskCardTab<T extends string = string> {
   value: T;
   label: string;

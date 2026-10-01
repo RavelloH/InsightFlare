@@ -44,6 +44,7 @@ import {
   sliderContract,
   spinnerContract,
   switchContract,
+  tabbedTableContract,
   tableContract,
   tabsContract,
   toasterContract,
@@ -81,6 +82,8 @@ export interface UiGalleryEntry {
   readonly slug: string;
   readonly packageType: "ui" | "product-ui";
   readonly apiEntry: string;
+  readonly maxValuesPerRow?: number;
+  readonly previewAlignment?: "center" | "start";
   readonly contract: UiGalleryContract;
 }
 
@@ -1471,6 +1474,20 @@ const galleryContracts = {
     ],
     { comparisonItems: undefined },
   ),
+  tabbedTable: registerPropCards(tabbedTableContract, [
+    propCard("state", [
+      propValue("ready"),
+      propValue("loading"),
+      propValue("loading-more"),
+      propValue("empty", "Empty", {
+        rows: [],
+        rowsByTab: { pages: [], sources: [] },
+      }),
+      propValue("error"),
+    ]),
+    propCard("defaultValue", [propValue("pages"), propValue("sources")]),
+    propCard("headerHidden", [propValue(false), propValue(true)]),
+  ]),
 } as const;
 
 export const uiGalleryRegistry = [
@@ -1700,12 +1717,14 @@ export const uiGalleryRegistry = [
     slug: "goal-visualization",
     packageType: "product-ui",
     apiEntry: "@insightflare/product-ui/goals",
+    previewAlignment: "start",
     contract: galleryContracts.goalVisualization,
   },
   {
     slug: "funnel",
     packageType: "product-ui",
     apiEntry: "@insightflare/product-ui/funnel",
+    previewAlignment: "start",
     contract: galleryContracts.funnel,
   },
   {
@@ -1719,6 +1738,14 @@ export const uiGalleryRegistry = [
     packageType: "product-ui",
     apiEntry: "@insightflare/product-ui/sharing",
     contract: galleryContracts.sharing,
+  },
+  {
+    slug: "tabbed-table",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/tabbed-table",
+    maxValuesPerRow: 3,
+    previewAlignment: "start",
+    contract: galleryContracts.tabbedTable,
   },
 ] as const satisfies readonly UiGalleryEntry[];
 

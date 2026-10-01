@@ -1,9 +1,14 @@
+export {
+  createTabRecord,
+  firstSortableColumnKey,
+  getColumnsForTab,
+} from "@insightflare/ui/tabbed-table";
+
 import type {
   TabbedDataTableColumn,
   TabbedDataTableExportLabels,
   TabbedDataTableRowBase,
   TabbedDataTableSortState,
-  TabbedDataTableTab,
 } from "./types";
 
 export function sortLocalTableRows<
@@ -39,38 +44,6 @@ export function defaultNormalizeRows<TRow extends TabbedDataTableRowBase>(
 ): TRow[] {
   // Preserve the loader-provided order and avoid cloning every inactive tab.
   return rows as TRow[];
-}
-export function createTabRecord<TTab extends string, TValue>(
-  tabs: readonly TabbedDataTableTab<TTab>[],
-  createValue: (tab: TabbedDataTableTab<TTab>) => TValue,
-): Record<TTab, TValue> {
-  return tabs.reduce(
-    (acc, tab) => {
-      acc[tab.value] = createValue(tab);
-      return acc;
-    },
-    {} as Record<TTab, TValue>,
-  );
-}
-export function getColumnsForTab<
-  TTab extends string,
-  TRow extends TabbedDataTableRowBase,
-  TKey extends string,
->(
-  columns:
-    | readonly TabbedDataTableColumn<TRow, TKey, TTab>[]
-    | ((tab: TTab) => readonly TabbedDataTableColumn<TRow, TKey, TTab>[]),
-  tab: TTab,
-): readonly TabbedDataTableColumn<TRow, TKey, TTab>[] {
-  return typeof columns === "function" ? columns(tab) : columns;
-}
-export function firstSortableColumnKey<
-  TRow extends TabbedDataTableRowBase,
-  TKey extends string,
-  TTab extends string,
->(columns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[]): TKey {
-  return (columns.find((column) => column.sortable !== false) ?? columns[0])
-    .key;
 }
 export function sanitizeCsvFilename(value: string): string {
   const trimmed = value.trim() || "table-export";

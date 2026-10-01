@@ -34,7 +34,14 @@ import {
 } from "@insightflare/ui/select";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { Spinner } from "@insightflare/ui/spinner";
-import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import {
+  DataTableSwitch,
+  TabbedDataTableHeader,
+  TabbedDataTableRows,
+  TabbedDataTableView,
+  type TabbedDataTableViewState,
+} from "@insightflare/ui/tabbed-table";
+import { TableCell, TableRow } from "@insightflare/ui/table";
 import {
   Tooltip,
   TooltipContent,
@@ -42,18 +49,9 @@ import {
 } from "@insightflare/ui/tooltip";
 import { useIsMobile } from "@insightflare/ui/use-mobile";
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
-import {
-  RiArrowDownSLine,
-  RiArrowUpSLine,
-  RiDownloadLine,
-  RiSearchLine,
-} from "@remixicon/react";
-import { AnimatePresence, useReducedMotion } from "motion/react";
+import { RiDownloadLine, RiSearchLine } from "@remixicon/react";
 
 import { cn } from "../utils/cn";
-import { AnimatedDataTableRow } from "./animated-data-table-row";
-import { DataTableSwitch } from "./data-table-switch";
-import { TabbedScrollMaskCard } from "./tabbed-scroll-mask-card";
 import type {
   TabbedDataTableCardProps,
   TabbedDataTableColumn,
@@ -78,7 +76,7 @@ import {
 } from "./utils";
 import { sortLocalTableRows } from "./utils";
 
-export interface TabbedDataTableCardViewProps<
+export interface TabbedDataTableCardDataControllerProps<
   TTab extends string,
   TRow extends TabbedDataTableRowBase,
   TKey extends string = string,
@@ -87,7 +85,7 @@ export interface TabbedDataTableCardViewProps<
 }
 export const MAX_EXPORT_ROWS = 50_000;
 export const MAX_EXPORT_PAGES = 500;
-function TabbedDataTableCardImpl<
+function TabbedDataTableCardDataControllerImpl<
   TTab extends string,
   TRow extends TabbedDataTableRowBase,
   TKey extends string = string,
@@ -113,6 +111,7 @@ function TabbedDataTableCardImpl<
   labelColumnLabel,
   loadingLabel,
   emptyLabel,
+  errorLabel,
   search,
   export: exportConfigProp,
   headerRight,
@@ -130,9 +129,8 @@ function TabbedDataTableCardImpl<
   getRowClassName,
   onRowClick,
   formatNumber,
-}: TabbedDataTableCardViewProps<TTab, TRow, TKey>) {
+}: TabbedDataTableCardDataControllerProps<TTab, TRow, TKey>) {
   const isMobile = useIsMobile();
-  const reduceDataRowMotion = useReducedMotion() ?? false;
   const controlled = value !== undefined;
   const tabsKey = useMemo(
     () =>
@@ -414,6 +412,7 @@ function TabbedDataTableCardImpl<
   const activeLoading = completedRows
     ? false
     : isPending || (pendingTab === activeTab && isFetching);
+  const activeError = dataQuery.isError ?? false;
   const searchLoading =
     activeSearchTab === activeTab ? (completedRows ? false : isPending) : false;
   useEffect(() => {
@@ -432,7 +431,6 @@ function TabbedDataTableCardImpl<
     pendingTab,
   ]);
   const activeSearchColumns = getColumnsForTab(columns, activeSearchTab);
-  const colSpan = 1 + activeColumns.length;
   const searchColSpan = 1 + activeSearchColumns.length;
   const activeHasMore = Boolean(hasNextPage);
   const activeLoadingMore = isFetchingNextPage;
@@ -491,15 +489,7 @@ function TabbedDataTableCardImpl<
     onValueChange?.(next);
   }
 
-  function toggleSort(tab: TTab, key: TKey) {
-    const current = effectiveSortByTab[tab];
-    const next: TabbedDataTableSortState<TKey> =
-      current.key === key
-        ? {
-            key,
-            direction: current.direction === "desc" ? "asc" : "desc",
-          }
-        : { key, direction: "desc" as const };
+  function updateSort(tab: TTab, next: TabbedDataTableSortState<TKey>) {
     if (onSortChange) {
       onSortChange(tab, next);
       return;
@@ -510,79 +500,20 @@ function TabbedDataTableCardImpl<
     }));
   }
 
-  function renderSortIndicator(tab: TTab, key: TKey) {
-    const sort = effectiveSortByTab[tab];
-    if (sort.key === key) {
-      return sort.direction === "desc" ? (
-        <RiArrowDownSLine className="size-3.5" />
-      ) : (
-        <RiArrowUpSLine className="size-3.5" />
-      );
-    }
-
-    return (
-      <span className="inline-flex flex-col leading-none text-muted-foreground">
-        <RiArrowUpSLine className="-mb-1 size-3.5" />
-        <RiArrowDownSLine className="-mt-1 size-3.5" />
-      </span>
-    );
-  }
-
   function renderTableHeader(
     tab: TTab,
     metricColumns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[],
   ) {
-    const tabMeta = tabByValue.get(tab) ?? tabs[0];
-    const firstColumnLabel =
-      typeof labelColumnLabel === "function"
-        ? labelColumnLabel(tabMeta)
-        : (labelColumnLabel ?? tabMeta.columnLabel ?? tabMeta.label);
-
     return (
-      <TableRow className="hover:bg-transparent">
-        <TableHead className="h-8 p-0">
-          <div className="px-4">{firstColumnLabel}</div>
-        </TableHead>
-        {metricColumns.map((column) => {
-          const sortable = column.sortable !== false;
-          const active = effectiveSortByTab[tab].key === column.key;
-
-          return (
-            <TableHead
-              key={column.key}
-              aria-sort={
-                sortable && active
-                  ? effectiveSortByTab[tab].direction === "asc"
-                    ? "ascending"
-                    : "descending"
-                  : "none"
-              }
-              className={cn("h-8 w-20 p-0", column.widthClassName)}
-            >
-              <div className="flex justify-end px-2">
-                <button
-                  type="button"
-                  aria-label={
-                    sortable ? sortActionLabel?.(column.label) : undefined
-                  }
-                  className={cn(
-                    "inline-flex items-center gap-1 whitespace-nowrap transition-colors",
-                    active ? "text-foreground" : "text-muted-foreground",
-                    !sortable && "cursor-default",
-                    column.headerClassName,
-                  )}
-                  onClick={() => {
-                    if (sortable) toggleSort(tab, column.key);
-                  }}
-                >
-                  {column.label}
-                  {sortable ? renderSortIndicator(tab, column.key) : null}
-                </button>
-              </div>
-            </TableHead>
-          );
-        })}
-      </TableRow>
+      <TabbedDataTableHeader
+        tabs={tabs}
+        tab={tab}
+        columns={metricColumns}
+        sort={effectiveSortByTab[tab]}
+        labelColumnLabel={labelColumnLabel}
+        sortActionLabel={sortActionLabel}
+        onSortChange={updateSort}
+      />
     );
   }
 
@@ -592,123 +523,26 @@ function TabbedDataTableCardImpl<
     metricColumns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[],
     source: "card" | "search",
   ) {
-    const sort = effectiveSortByTab[tab];
-    const progressColumn =
-      progress === false
-        ? null
-        : (metricColumns.find((column) =>
-            progress === "sort"
-              ? column.key === sort.key
-              : column.key === progress,
-          ) ?? metricColumns[0]);
-    const progressTotal = progressColumn
-      ? rows.reduce(
-          (sum, row) =>
-            sum +
-            Math.max(
-              0,
-              Number(
-                progressColumn.sortValue?.(row, tab) ??
-                  progressColumn.getValue(row, tab),
-              ),
-            ),
-          0,
-        )
-      : 0;
-
     return (
-      <AnimatePresence initial={false} mode="popLayout">
-        {rows.map((row, index) => {
-          const key =
-            rowAdapter?.getKey?.(row, tab) ??
-            getRowKey?.(row, tab) ??
-            row.key ??
-            String(index);
-          const rowValue = progressColumn
-            ? Math.max(
-                0,
-                Number(
-                  progressColumn.sortValue?.(row, tab) ??
-                    progressColumn.getValue(row, tab),
-                ),
-              )
-            : 0;
-          const progressPercent =
-            progressColumn && progressTotal > 0
-              ? Math.min(100, (rowValue / progressTotal) * 100)
-              : 0;
-          const context = { row, tab, sort, source };
-          const active =
-            rowAdapter?.getActive?.(row, tab) ??
-            getRowActive?.(row, tab) ??
-            false;
-          const interactive =
-            rowAdapter?.getInteractive?.(row, tab) ??
-            getRowInteractive?.(row, tab) ??
-            Boolean(rowAdapter?.onClick ?? onRowClick);
-
-          return (
-            <AnimatedDataTableRow
-              key={`${rowKeyPrefix ?? source}-${tab}-${key}`}
-              reduceMotion={reduceDataRowMotion}
-              className={cn(
-                "group/row bg-no-repeat transition-[background-size,filter] duration-300 ease-out hover:bg-transparent",
-                interactive
-                  ? "cursor-pointer hover:brightness-95"
-                  : "cursor-default",
-                active && "brightness-95",
-                rowAdapter?.getClassName?.(row, context),
-                getRowClassName?.(row, context),
-              )}
-              style={
-                progressColumn
-                  ? {
-                      backgroundImage:
-                        "linear-gradient(90deg, var(--muted) 0%, var(--muted) 100%)",
-                      backgroundSize: `${progressPercent.toFixed(2)}% 100%`,
-                      backgroundPosition: "left top",
-                    }
-                  : undefined
-              }
-              onClick={() =>
-                (rowAdapter?.onClick ?? onRowClick)?.(row, context)
-              }
-            >
-              <TableCell className="whitespace-normal p-0 align-top">
-                <div className="px-4 py-2 leading-5 whitespace-normal break-words">
-                  {(
-                    rowAdapter?.renderLabel ??
-                    renderLabel ??
-                    ((fallbackRow: TRow) => fallbackRow.key ?? "")
-                  )(row, context)}
-                </div>
-              </TableCell>
-              {metricColumns.map((column, index) => {
-                const value = column.getValue(row, tab);
-                return (
-                  <TableCell key={column.key} className="p-0">
-                    <div
-                      className={cn(
-                        index === metricColumns.length - 1
-                          ? "px-4 py-2 text-right"
-                          : "px-2 py-2 text-right",
-                        column.className,
-                      )}
-                    >
-                      {column.format?.(value, row, tab) ??
-                        formatNumber?.(value, row, tab) ??
-                        value}
-                    </div>
-                  </TableCell>
-                );
-              })}
-            </AnimatedDataTableRow>
-          );
-        })}
-      </AnimatePresence>
+      <TabbedDataTableRows
+        tab={tab}
+        rows={rows}
+        columns={metricColumns}
+        sort={effectiveSortByTab[tab]}
+        source={source}
+        rowAdapter={rowAdapter}
+        renderLabel={renderLabel}
+        progress={progress}
+        rowKeyPrefix={rowKeyPrefix}
+        getRowKey={getRowKey}
+        getRowActive={getRowActive}
+        getRowInteractive={getRowInteractive}
+        getRowClassName={getRowClassName}
+        onRowClick={onRowClick}
+        formatNumber={formatNumber}
+      />
     );
   }
-
   function renderLoadMoreRows(
     tab: TTab,
     metricColumns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[],
@@ -1199,18 +1033,46 @@ function TabbedDataTableCardImpl<
   const syncKey = [
     requestKey ?? "",
     activeTab,
-    activeLoading ? "loading" : "idle",
+    activeError ? "error" : activeLoading ? "loading" : "idle",
     effectiveSortByTab[activeTab].key,
     effectiveSortByTab[activeTab].direction,
     activeRows.length,
   ].join(":");
+  const activeState: TabbedDataTableViewState = activeError
+    ? "error"
+    : activeLoading
+      ? "loading"
+      : activeLoadingMore
+        ? "loading-more"
+        : activeRows.length === 0
+          ? "empty"
+          : "ready";
 
   return (
     <>
-      <TabbedScrollMaskCard
-        value={activeTab}
-        onValueChange={(next) => setActiveTab(next)}
+      <TabbedDataTableView
         tabs={tabs}
+        columns={columns}
+        rows={activeRows}
+        state={activeState}
+        value={activeTab}
+        onValueChange={setActiveTab}
+        sortByTab={effectiveSortByTab}
+        onSortChange={updateSort}
+        sortActionLabel={sortActionLabel}
+        labelColumnLabel={labelColumnLabel}
+        loadingLabel={loadingLabel}
+        loadingMoreLabel={loadingLabel}
+        emptyLabel={emptyLabel}
+        errorLabel={errorLabel}
+        loadingRows={
+          activeLoading
+            ? renderInitialLoadingRows(activeTab, activeColumns, "card")
+            : undefined
+        }
+        footer={
+          activeHasMore ? renderLoadMoreRows(activeTab, activeColumns) : null
+        }
         headerRight={
           headerRight || exportAction || searchAction ? (
             <div className="inline-flex items-center gap-1">
@@ -1226,27 +1088,23 @@ function TabbedDataTableCardImpl<
         tabTriggerClassName={tabTriggerClassName}
         viewportClassName={viewportClassName}
         syncKey={syncKey}
-      >
-        <DataTableSwitch
-          loading={activeLoading}
-          hasContent={activeRows.length > 0}
-          loadingLabel={loadingLabel}
-          emptyLabel={emptyLabel}
-          colSpan={colSpan}
-          header={renderTableHeader(activeTab, activeColumns)}
-          rows={renderRows(activeTab, activeRows, activeColumns, "card")}
-          footer={
-            activeHasMore ? renderLoadMoreRows(activeTab, activeColumns) : null
-          }
-          contentKey={`card-${contentTransitionKey ?? requestKey ?? ""}-${activeTab}`}
-          animate={!activeLoading}
-        />
-      </TabbedScrollMaskCard>
+        rowAdapter={rowAdapter}
+        renderLabel={renderLabel}
+        progress={progress}
+        rowKeyPrefix={rowKeyPrefix}
+        getRowKey={getRowKey}
+        getRowActive={getRowActive}
+        getRowInteractive={getRowInteractive}
+        getRowClassName={getRowClassName}
+        onRowClick={onRowClick}
+        formatNumber={formatNumber}
+        contentKey={`card-${contentTransitionKey ?? requestKey ?? ""}-${activeTab}`}
+      />
       {searchPanel}
       {exportPanel}
     </>
   );
 }
-export const TabbedDataTableCardView = memo(
-  TabbedDataTableCardImpl,
-) as typeof TabbedDataTableCardImpl;
+export const TabbedDataTableCardDataController = memo(
+  TabbedDataTableCardDataControllerImpl,
+) as typeof TabbedDataTableCardDataControllerImpl;

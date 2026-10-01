@@ -54,6 +54,10 @@ function UiGalleryDetail() {
   if (!entry) throw notFound();
 
   const { contract } = entry;
+  const maxValuesPerRow = Math.max(
+    1,
+    Math.floor(entry.maxValuesPerRow ?? MAX_PROP_VALUES_PER_ROW),
+  );
   const copy = getUiGalleryCopy(entry, locale);
   const messages = getMessages(locale).uiGallery;
   const installPackage =
@@ -77,7 +81,7 @@ function UiGalleryDetail() {
       const columns = Math.max(
         1,
         Math.min(
-          MAX_PROP_VALUES_PER_ROW,
+          maxValuesPerRow,
           Math.floor(
             (width + PROP_VALUE_GAP) / (MIN_PROP_VALUE_WIDTH + PROP_VALUE_GAP),
           ),
@@ -90,7 +94,7 @@ function UiGalleryDetail() {
     const observer = new ResizeObserver(updateValuesPerRow);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [maxValuesPerRow]);
 
   return (
     <div className="space-y-8">
@@ -153,7 +157,10 @@ function UiGalleryDetail() {
 
         <div ref={propGridRef} className="grid gap-4">
           {contract.propCards.map((card) => {
-            const valueRows = splitIntoBalancedRows(card.values, valuesPerRow);
+            const valueRows = splitIntoBalancedRows(
+              card.values,
+              Math.min(valuesPerRow, maxValuesPerRow),
+            );
 
             return (
               <PropCard
@@ -277,6 +284,7 @@ function PropCard({
                       cardId={card.id}
                       valueId={value.id}
                       deferred={value.preview === "on-demand"}
+                      previewAlignment={entry.previewAlignment ?? "center"}
                       previewLabel={previewLabel}
                       resetLabel={resetLabel}
                       previewOverrides={getDynamicPreviewOverrides(
@@ -462,6 +470,7 @@ function PropValuePreview({
   cardId,
   valueId,
   deferred,
+  previewAlignment,
   previewLabel,
   resetLabel,
   previewOverrides,
@@ -471,6 +480,7 @@ function PropValuePreview({
   cardId: string;
   valueId: string;
   deferred: boolean;
+  previewAlignment: "center" | "start";
   previewLabel: string;
   resetLabel: string;
   previewOverrides?: Record<string, unknown>;
@@ -487,8 +497,6 @@ function PropValuePreview({
   const isVerticalScrollMaskDemo =
     entrySlug === "vertical-scroll-mask" && cardId === "enabled";
   const isAutoToastDemo = entrySlug === "sonner" && cardId === "position";
-  const isLeftAlignedProductPreview =
-    entrySlug === "goal-visualization" || entrySlug === "funnel";
 
   useEffect(() => {
     if (
@@ -568,10 +576,10 @@ function PropValuePreview({
 
   return (
     <div
-      className={`flex w-full min-w-0 flex-col gap-3 ${isLeftAlignedProductPreview ? "items-start" : "items-center"}`}
+      className={`flex w-full min-w-0 flex-col gap-3 ${previewAlignment === "start" ? "items-start" : "items-center"}`}
     >
       <div
-        className={`w-full min-w-0 ${isLeftAlignedProductPreview ? "text-left [&>*]:mx-0" : "text-center [&>*]:mx-auto"}`}
+        className={`w-full min-w-0 ${previewAlignment === "start" ? "text-left [&>*]:mx-0" : "text-center [&>*]:mx-auto"}`}
       >
         {contract.renderPropValue(cardId, valueId, showDeferredPreview, {
           ...previewOverrides,

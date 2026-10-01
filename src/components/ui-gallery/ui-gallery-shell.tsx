@@ -120,6 +120,7 @@ const uiEntryIcons: Record<string, RemixiconComponentType> = {
   funnel: RiFlowChart,
   "realtime-traffic-trend": RiPulseLine,
   sharing: RiPieChart2Line,
+  "tabbed-table": RiTableLine,
 };
 const uiGalleryCategories = listUiGalleryCategories();
 

@@ -17,6 +17,12 @@ export {
   selectFixtures,
 } from "../components/ui/select.contract";
 export { sidebarContract } from "../components/ui/sidebar.contract";
+export {
+  type TabbedDataTableViewContract,
+  type TabbedDataTableViewFixture,
+  tabbedDataTableViewContract as tabbedTableContract,
+  tabbedDataTableViewFixtures as tabbedTableFixtures,
+} from "../components/ui/tabbed-table-view.contract";
 export { tableContract } from "../components/ui/table.contract";
 export {
   type ComponentCategoryId,

@@ -23,7 +23,7 @@ vi.mock(
   }),
 );
 vi.mock(
-  "../../../../packages/product-ui/src/tabbed-table/animated-data-table-row",
+  "../../../../packages/ui/src/components/ui/tabbed-table/animated-data-table-row",
   () => ({
     AnimatedDataTableRow: ({
       children,
@@ -36,7 +36,7 @@ vi.mock(
   }),
 );
 vi.mock(
-  "../../../../packages/product-ui/src/tabbed-table/tabbed-scroll-mask-card",
+  "../../../../packages/ui/src/components/ui/tabbed-table/tabbed-scroll-mask-card",
   () => ({
     TabbedScrollMaskCard: ({
       children,
@@ -53,7 +53,7 @@ vi.mock(
   }),
 );
 vi.mock(
-  "../../../../packages/product-ui/src/tabbed-table/data-table-switch",
+  "../../../../packages/ui/src/components/ui/tabbed-table/data-table-switch",
   () => ({
     DataTableSwitch: ({
       loading,
