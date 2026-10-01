@@ -668,37 +668,61 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
     }
   });
 
-  it("rejects sorted logical outputs before emitting SQL", () => {
-    const context = {
-      subject: createSemanticSubjectDomain({
-        origin: "site",
-        siteIds: [SITE_A as never],
-      }),
-      time: createSemanticTemporalDomains({
-        candidate: CANDIDATE_RANGE as never,
-        read: { kind: "bounded", range: READ_RANGE as never },
-        reportingTimeZone: "UTC" as never,
-        capturedAtMs: 200 as never,
-      }),
-      scope: resolveAnalyticsScope("session"),
-    };
-    const builder = new LogicalPlanBuilder(context);
-    const pages = builder.source("page", {
-      temporalDomain: "read",
-      attributes: ["page.path"],
-    });
-    const output = builder.sort(pages, [
-      { slot: "attribute:page.path", direction: "asc", nulls: "last" },
-    ]);
-    builder.output("unsupported", output, [{ name: "page", slot: "entity" }]);
-    const plan = builder.finish();
-    expect(() =>
-      new AnalyticsLogicalToDbLowerer(plan, {
+  it.each([
+    { direction: "asc", nulls: "first", expected: /ORDER BY[^;]* ASC/u },
+    {
+      direction: "asc",
+      nulls: "last",
+      expected: /ORDER BY[^;]* IS NULL ASC[^;]* ASC/u,
+    },
+    { direction: "desc", nulls: "last", expected: /ORDER BY[^;]* DESC/u },
+    {
+      direction: "desc",
+      nulls: "first",
+      expected: /ORDER BY[^;]* IS NULL DESC[^;]* DESC/u,
+    },
+  ] as const)(
+    "lowers scalar sorts with direction=$direction and nulls=$nulls",
+    ({ direction, nulls, expected }) => {
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+      const builder = new LogicalPlanBuilder(context);
+      const pages = builder.source("page", {
+        temporalDomain: "read",
+        attributes: ["page.path"],
+      });
+      const sorted = builder.sort(pages, [
+        { slot: "attribute:page.path", direction, nulls },
+      ]);
+      const output = builder.limit(sorted, 2);
+      builder.output("unsupported", output, [{ name: "page", slot: "entity" }]);
+      const plan = builder.finish();
+      const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
         siteId: SITE_A,
         time: plan.context.time,
-      }).lower(plan.outputs[0]!),
-    ).toThrow("Logical sort is outside the current D1 capability set.");
-  });
+      });
+      const lowered = lowerer.lower(plan.outputs[0]!);
+      const query = compileD1Query(
+        lowerer.projectOutput(lowered, [
+          { name: "page", slot: output.slots.entity!, component: 0 },
+        ]),
+      );
+      expect(query.sql).toMatch(expected);
+      expect(query.sql).toMatch(/ORDER BY[\s\S]*LIMIT \?/u);
+      expect(query.bindings).toContain(2);
+    },
+  );
 
   it("rejects inconsistent slot metadata and malformed predicates at the DB lowering boundary", () => {
     const context = {
@@ -785,7 +809,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           );
         },
         reason:
-          /Occurrence-time bindings are outside the current D1 capability set/u,
+          /Source value lineage for page differs from its declared binding/u,
       },
       {
         change: (plan) => {
@@ -1182,14 +1206,21 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         { name: "label", slot: "label" },
       ]);
       const casePlan = caseBuilder.finish();
-      expect(() =>
-        new AnalyticsLogicalToDbLowerer(casePlan, {
-          siteId: SITE_A,
-          time: casePlan.context.time,
-        }).lower(casePlan.outputs[0]!),
-      ).toThrow(
-        /Expression kind case is outside the current D1 capability set/u,
-      );
+      const caseLowerer = new AnalyticsLogicalToDbLowerer(casePlan, {
+        siteId: SITE_A,
+        time: casePlan.context.time,
+      });
+      const caseLowered = caseLowerer.lower(casePlan.outputs[0]!);
+      const caseRelation = caseLowerer.projectOutput(caseLowered, [
+        {
+          name: "label",
+          slot: casePlan.outputs[0]!.fields[0]!.slot,
+        },
+      ]);
+      const caseRows = await createD1DatabaseClient(
+        createSqliteD1Database(db),
+      ).all(compileD1Query(caseRelation));
+      expect(caseRows.results).toEqual([{ label: "A" }, { label: "other" }]);
     } finally {
       db.close();
     }

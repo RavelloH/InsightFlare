@@ -338,6 +338,76 @@ describe("architecture checker", () => {
     );
   });
 
+  it("guards both migrated Journey observation readers and the pure plan", () => {
+    const root = fixture();
+    const writeSource = (relativePath: string, source: string) => {
+      const absolutePath = path.join(root, relativePath);
+      mkdirSync(path.dirname(absolutePath), { recursive: true });
+      writeFileSync(absolutePath, `${source}\n`);
+    };
+    const queryPath =
+      "src/lib/edge/analytics/providers/d1/internal/journey-detail-queries.ts";
+    const planPath =
+      "src/lib/edge/analytics/engine/journey-observation-plan.ts";
+    writeSource(
+      queryPath,
+      [
+        "export async function queryJourneyEventsForDetailFromD1(env) {",
+        "  return queryD1CompiledAll(env, plan());",
+        "}",
+        "async function queryDetailSourceFromD1(env) {",
+        "  return queryD1CompiledAll(env, plan());",
+        "}",
+      ].join("\n"),
+    );
+    writeSource(planPath, "export function buildJourneyObservationPlan() {};");
+    expect(collectArchitectureViolations(root)).toEqual([]);
+
+    writeSource(
+      queryPath,
+      [
+        "export async function queryJourneyEventsForDetailFromD1(env) {",
+        '  return queryD1All(env.DB, "SELECT * FROM visits", []);',
+        "}",
+        "async function queryDetailSourceFromD1(env) {",
+        '  return env.DB.prepare("SELECT * FROM visits");',
+        "}",
+      ].join("\n"),
+    );
+    writeSource(
+      planPath,
+      'export function buildJourneyObservationPlan() { return "custom_events"; }',
+    );
+    expect(
+      collectArchitectureViolations(root).map(
+        ({ rule, source, specifier }) => ({ rule, source, specifier }),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          rule: "typed-query-function-forbidden",
+          source: queryPath,
+          specifier: "queryD1All",
+        },
+        {
+          rule: "typed-query-function-forbidden",
+          source: queryPath,
+          specifier: "raw-sql",
+        },
+        {
+          rule: "typed-query-function-forbidden",
+          source: queryPath,
+          specifier: "<direct D1 operation>",
+        },
+        {
+          rule: "analytics-semantic-plan-storage-forbidden",
+          source: planPath,
+          specifier: "custom_events",
+        },
+      ]),
+    );
+  });
+
   it("keeps the typed query guard scoped to migrated funnel definitions", () => {
     const root = fixture();
     const sourcePath = path.join(

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
 import {
+  assertSemanticObservationAttributeContracts,
+  isObservationKind,
   semanticAttribute,
   semanticAttributeCatalog,
   semanticObservationAttributeCatalog,
@@ -14,6 +16,28 @@ import {
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 
 describe("semantic attribute and dimension catalogs", () => {
+  it("recognizes only supported Observation kinds", () => {
+    expect(isObservationKind("page")).toBe(true);
+    expect(isObservationKind("event")).toBe(true);
+    expect(isObservationKind("session")).toBe(false);
+  });
+
+  it("rejects duplicate and malformed Observation attribute contracts", () => {
+    const attribute = semanticObservationAttributeCatalog[0]!;
+    expect(() =>
+      assertSemanticObservationAttributeContracts(
+        [attribute],
+        new Set([attribute.id]),
+      ),
+    ).toThrow(`duplicate_semantic_attribute:${attribute.id}`);
+    expect(() =>
+      assertSemanticObservationAttributeContracts(
+        [{ ...attribute, observationKinds: ["page"] }],
+        new Set(),
+      ),
+    ).toThrow(`invalid_observation_attribute_contract:${attribute.id}`);
+  });
+
   it("derives every registered filter field without copying compiler strategies", () => {
     expect(semanticAttributeCatalog).toHaveLength(analyticsFilterRegistry.size);
     for (const [id, field] of analyticsFilterRegistry) {
@@ -77,26 +101,44 @@ describe("semantic attribute and dimension catalogs", () => {
 
   it("keeps raw Observation identities internal to semantic plans", () => {
     expect(semanticAttributeCatalog).toHaveLength(analyticsFilterRegistry.size);
-    expect(semanticObservationAttributeCatalog.map(({ id }) => id)).toEqual([
-      "observation.sessionId",
-      "observation.visitorId",
-    ]);
-    for (const id of [
-      "observation.sessionId",
-      "observation.visitorId",
-    ] as const) {
+    expect(semanticObservationAttributeCatalog.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([
+        "observation.sessionId",
+        "observation.visitorId",
+        "observation.kind",
+        "observation.id",
+        "observation.eventName",
+        "observation.ownerPageStartedAt",
+        "observation.startedAt",
+        "observation.perfCls",
+      ]),
+    );
+    for (const attribute of semanticObservationAttributeCatalog) {
+      const { id } = attribute;
       expect(analyticsFilterRegistry.has(id)).toBe(false);
-      expect(semanticAttribute(id)).toMatchObject({
+      expect(semanticAttribute(id)).toEqual({
         id,
         nativeEntity: "observation",
         observationKinds: ["event", "page"],
-        valueType: { kind: "scalar", scalar: "string" },
-        nullable: false,
+        valueType: attribute.valueType,
+        nullable: attribute.nullable,
         evaluation: "observation",
         presence: "non-null",
-        empty: "empty-string-is-value",
+        empty:
+          attribute.valueType.kind === "scalar" &&
+          attribute.valueType.scalar === "string"
+            ? "empty-string-is-value"
+            : "unsupported",
         comparison: "case-sensitive",
       });
     }
+    expect(semanticAttribute("observation.perfTtfbMs")).toMatchObject({
+      valueType: { kind: "scalar", scalar: "number", unit: "ms" },
+      nullable: true,
+    });
+    expect(semanticAttribute("observation.perfCls")).toMatchObject({
+      valueType: { kind: "scalar", scalar: "number", unit: "ratio" },
+      nullable: true,
+    });
   });
 });

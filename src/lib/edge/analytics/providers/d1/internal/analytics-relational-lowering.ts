@@ -3,6 +3,7 @@ import {
   and,
   antiJoin,
   callFunction,
+  caseWhen,
   coalesce,
   count,
   distinct,
@@ -23,6 +24,7 @@ import {
   param,
   project,
   semiJoin,
+  sort as sortRelation,
   union,
 } from "@/lib/db";
 import type {
@@ -60,6 +62,7 @@ import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/e
 
 import {
   type AnalyticsDbRelation,
+  type AnalyticsObservationIdentityConstraint,
   AnalyticsRelationalStorage,
   type AnalyticsRelationalStorageContext,
 } from "./analytics-relational-storage";
@@ -586,12 +589,71 @@ function lowerExpression(
         candidateBounded: false,
       };
     }
+    case "case": {
+      const branchNullabilities: boolean[] = [];
+      const branches = expression.branches.map((branch, index) => {
+        const when = lowerExpression(
+          branch.when,
+          relation,
+          logicalSlots,
+          visible,
+          `${path}.branches[${index}].when`,
+        );
+        const then = lowerExpression(
+          branch.then,
+          relation,
+          logicalSlots,
+          visible,
+          `${path}.branches[${index}].then`,
+        );
+        if (
+          when.kind !== "scalar" ||
+          when.type.kind !== "scalar" ||
+          when.type.scalar !== "boolean"
+        )
+          reject(
+            `${path}.branches[${index}].when`,
+            "CASE conditions must lower to boolean scalar values.",
+          );
+        if (then.kind !== "scalar")
+          reject(
+            `${path}.branches[${index}].then`,
+            "CASE branches cannot return entity values.",
+          );
+        branchNullabilities.push(then.nullable);
+        return {
+          when: asPredicate(when.expression, `${path}.branches[${index}].when`),
+          then: then.expression,
+        };
+      });
+      const otherwise = lowerExpression(
+        expression.otherwise,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.otherwise`,
+      );
+      if (otherwise.kind !== "scalar")
+        reject(path, "CASE fallback cannot return an entity value.");
+      return {
+        kind: "scalar",
+        expression: caseWhen(
+          branches as [
+            { when: Predicate; then: AnyExpression },
+            ...{ when: Predicate; then: AnyExpression }[],
+          ],
+          otherwise.expression,
+        ),
+        type: otherwise.type,
+        nullable: otherwise.nullable || branchNullabilities.some(Boolean),
+        candidateBounded: false,
+      };
+    }
     case "elapsed-duration-literal":
     case "calendar-period-literal":
     case "string-match":
     case "arithmetic":
     case "round":
-    case "case":
     case "time-bucket":
       reject(
         path,
@@ -811,6 +873,44 @@ export class AnalyticsLogicalToDbLowerer {
         result = this.#lowerRelationshipLookup(node, path);
         break;
       case "filter": {
+        const source = this.#nodes.get(node.input);
+        const sourceConstraint =
+          source?.kind === "source"
+            ? this.#observationIdentityConstraint(source, node.predicate)
+            : undefined;
+        if (
+          source?.kind === "source" &&
+          sourceConstraint &&
+          this.#sourceHasOnlyFilterConsumer(source.id, node.id)
+        ) {
+          const input = this.#lowerSource(
+            source,
+            nodePath(source.id),
+            sourceConstraint,
+          );
+          this.#memo.set(source.id, input);
+          const values = node.output
+            .filter((slot) => this.#requiredOutput(node).has(slot))
+            .map((slot) => ({
+              slot,
+              value: readValue(input.relation, input.slots, slot, path),
+            }));
+          const projected = projectedValues(
+            input.relation,
+            values,
+            this.#logicalSlots,
+            path,
+          );
+          result = {
+            ...projected,
+            candidateActivity: input.candidateActivity,
+            candidateActivitySessionRelation:
+              input.candidateActivitySessionRelation,
+            candidateActivitySessionRestricted:
+              input.candidateActivitySessionRestricted,
+          };
+          break;
+        }
         const input = this.#lowerNode(node.input);
         const visible = new Map(input.slots);
         const predicate = asPredicate(
@@ -868,12 +968,45 @@ export class AnalyticsLogicalToDbLowerer {
       case "join":
         result = this.#lowerJoin(node, path);
         break;
-      case "sort":
-        reject(
-          path,
-          `Logical ${node.kind} is outside the current D1 capability set.`,
-        );
+      case "sort": {
+        const input = this.#lowerNode(node.input);
+        const keys: {
+          readonly expression: SqlExpression;
+          readonly direction: "ASC" | "DESC";
+        }[] = [];
+        node.keys.forEach((key, index) => {
+          const keyPath = `${path}.keys[${index}]`;
+          const logical = logicalSlot(
+            this.#logicalSlots,
+            key.slot,
+            `${keyPath}.slot`,
+          );
+          if (logical.type.kind !== "scalar")
+            reject(keyPath, "Sort keys must be scalar values.");
+          const value = readValue(
+            input.relation,
+            input.slots,
+            key.slot,
+            `${keyPath}.slot`,
+          );
+          if (value.kind !== "scalar")
+            reject(keyPath, "Sort keys must be scalar values.");
+          const direction = key.direction === "asc" ? "ASC" : "DESC";
+          const nativeNulls = key.direction === "asc" ? "first" : "last";
+          if (key.nulls !== nativeNulls) {
+            keys.push({
+              expression: isNull(value.expression),
+              direction: key.nulls === "first" ? "DESC" : "ASC",
+            });
+          }
+          keys.push({ expression: value.expression, direction });
+        });
+        result = {
+          ...input,
+          relation: sortRelation(input.relation, keys),
+        };
         break;
+      }
       case "limit": {
         const input = this.#lowerNode(node.input);
         result = {
@@ -887,13 +1020,96 @@ export class AnalyticsLogicalToDbLowerer {
     return result;
   }
 
-  #lowerSource(node: SourceNode, path: string): LoweredRelation {
+  #observationIdentityConstraint(
+    source: SourceNode,
+    predicate: LogicalExpr,
+  ): AnalyticsObservationIdentityConstraint | undefined {
+    if (
+      source.entity !== "observation" ||
+      source.temporalDomain !== "read" ||
+      predicate.kind !== "comparison" ||
+      predicate.operator !== "eq" ||
+      predicate.stringNormalization !== undefined
+    )
+      return undefined;
+
+    const candidates = [
+      [predicate.left, predicate.right] as const,
+      [predicate.right, predicate.left] as const,
+    ];
+    for (const [slotExpression, literalExpression] of candidates) {
+      if (
+        slotExpression.kind !== "slot" ||
+        literalExpression.kind !== "literal"
+      )
+        continue;
+      const binding = source.values.find(
+        (value) =>
+          value.kind === "attribute" && value.slot === slotExpression.slot,
+      );
+      if (
+        binding?.kind !== "attribute" ||
+        (binding.attribute !== "observation.sessionId" &&
+          binding.attribute !== "observation.visitorId") ||
+        literalExpression.valueType.kind !== "scalar" ||
+        literalExpression.valueType.scalar !== "string" ||
+        typeof literalExpression.value !== "string"
+      )
+        continue;
+      return {
+        attribute: binding.attribute,
+        value: literalExpression.value,
+      };
+    }
+    return undefined;
+  }
+
+  #sourceHasOnlyFilterConsumer(
+    sourceId: RelationId,
+    consumerId: RelationId,
+  ): boolean {
+    if (this.#plan.outputs.some((output) => output.relation === sourceId))
+      return false;
+    for (const node of this.#plan.nodes) {
+      if (node.id === consumerId) continue;
+      const inputs = (() => {
+        switch (node.kind) {
+          case "source":
+            return [];
+          case "relationship-lookup":
+          case "filter":
+          case "project":
+          case "distinct":
+          case "aggregate":
+          case "sort":
+          case "limit":
+            return [node.input];
+          case "set-operation":
+            return node.inputs;
+          case "semi-join":
+          case "anti-join":
+            return [node.left, node.right];
+          case "join":
+            return [node.left, node.right];
+        }
+      })();
+      if (inputs.includes(sourceId)) return false;
+    }
+    return true;
+  }
+
+  #lowerSource(
+    node: SourceNode,
+    path: string,
+    sourceConstraint?: AnalyticsObservationIdentityConstraint,
+  ): LoweredRelation {
     let lowered;
     try {
       lowered = this.#storage.lowerSource(
         node,
         path,
         this.#requiredOutput(node),
+        sourceConstraint,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -927,7 +1143,10 @@ export class AnalyticsLogicalToDbLowerer {
             logical.lineage.relationship === binding.relationship) ||
           (binding.kind === "attribute" &&
             logical.lineage.kind === "attribute" &&
-            logical.lineage.attribute === binding.attribute);
+            logical.lineage.attribute === binding.attribute) ||
+          (binding.kind === "occurrence-time" &&
+            logical.lineage.kind === "derived" &&
+            logical.lineage.operation === "occurrence-time");
         const bindingName =
           binding.kind === "attribute"
             ? binding.attribute
@@ -967,6 +1186,7 @@ export class AnalyticsLogicalToDbLowerer {
     const sourceSignature = JSON.stringify([
       node.entity,
       node.temporalDomain,
+      sourceConstraint ?? null,
       node.values.map((binding) => {
         const logical = logicalSlot(
           this.#logicalSlots,
@@ -1643,11 +1863,16 @@ export class AnalyticsLogicalToDbLowerer {
       case "aggregate":
       case "set-operation":
       case "join":
-      case "sort":
         // The supported aggregates/joins expose scalars, and set operations
-        // expose Session keys. Sort cannot be lowered yet. None can
-        // supply a storage-backed Observation identity in this capability set.
+        // expose Session keys. None can supply a storage-backed Observation
+        // identity in this capability set.
         return false;
+      case "sort":
+        return this.#hasStorageBackedObservationIdentity(
+          node.input,
+          slot,
+          nextActive,
+        );
       case "limit":
         return this.#hasStorageBackedObservationIdentity(
           node.input,
@@ -1886,8 +2111,8 @@ export class AnalyticsLogicalToDbLowerer {
           }
           case "sort":
             add(node.input, [
+              ...node.output.filter((slot) => needed.has(slot)),
               ...node.keys.map((key) => key.slot),
-              ...node.output,
             ]);
             break;
           case "limit":

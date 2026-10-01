@@ -1,3 +1,7 @@
+import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
+import { buildJourneyObservationPlan } from "@/lib/edge/analytics/engine/journey-observation-plan";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import { currentD1Operation } from "@/lib/edge/observability/logger";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
@@ -13,6 +17,7 @@ import {
   buildTargetVisitSourceCte,
   detailCustomEventSourceBindings,
   queryD1All,
+  queryD1CompiledAll,
   targetVisitSourceBindings,
 } from "./core";
 import {
@@ -82,94 +87,50 @@ export async function queryJourneyEventsForDetailFromD1(
   siteId: string,
   target: DetailTarget,
 ): Promise<JourneyEventRow[]> {
-  const sql = `
-WITH
-${buildTargetVisitSourceCte(detailTargetColumn(target))},
-filtered_visits AS (
-  SELECT *
-  FROM visit_source
-),
-${buildDetailCustomEventSourceCte()},
-page_events AS (
-  SELECT
-    visit_id AS id,
-    'pageview' AS kind,
-    'pageview' AS eventType,
-    started_at AS occurredAt,
-    visit_id AS visitId,
-    session_id AS sessionId,
-    visitor_id AS visitorId,
-    pathname,
-    hash_fragment AS hash,
-    title,
-    hostname,
-    referrer_host AS referrerHost,
-    referrer_url AS referrerUrl,
-    country,
-    region,
-    city,
-    browser,
-    browser_version AS browserVersion,
-    os,
-    os_version AS osVersion,
-    device_type AS deviceType,
-    screen_width AS screenWidth,
-    screen_height AS screenHeight,
-    COALESCE(duration_ms, 0) AS durationMs,
-    perf_ttfb_ms AS perfTtfbMs,
-    perf_fcp_ms AS perfFcpMs,
-    perf_lcp_ms AS perfLcpMs,
-    perf_cls AS perfCls,
-    perf_inp_ms AS perfInpMs
-  FROM filtered_visits
-),
-custom_event_rows AS (
-  SELECT
-    event_id AS id,
-    'custom' AS kind,
-    event_name AS eventType,
-    occurred_at AS occurredAt,
-    visit_id AS visitId,
-    session_id AS sessionId,
-    visitor_id AS visitorId,
-    pathname,
-    hash_fragment AS hash,
-    title,
-    hostname,
-    referrer_host AS referrerHost,
-    referrer_url AS referrerUrl,
-    country,
-    region,
-    city,
-    browser,
-    browser_version AS browserVersion,
-    os,
-    os_version AS osVersion,
-    device_type AS deviceType,
-    screen_width AS screenWidth,
-    screen_height AS screenHeight,
-    0 AS durationMs,
-    perf_ttfb_ms AS perfTtfbMs,
-    perf_fcp_ms AS perfFcpMs,
-    perf_lcp_ms AS perfLcpMs,
-    perf_cls AS perfCls,
-    perf_inp_ms AS perfInpMs
-  FROM event_source
-)
-SELECT *
-FROM (
-  SELECT * FROM page_events
-  UNION ALL
-  SELECT * FROM custom_event_rows
-)
-ORDER BY occurredAt DESC, id DESC
-`;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...targetVisitSourceBindings(siteId, target.value),
-      ...detailCustomEventSourceBindings(siteId),
-    ])
-  ).map(mapJourneyEventRow);
+  const rows = await queryJourneyObservationRows(
+    env,
+    siteId,
+    target,
+    "timeline",
+  );
+  return rows.map(mapJourneyEventRow);
+}
+
+async function queryJourneyObservationRows(
+  env: Env,
+  siteId: string,
+  target: DetailTarget,
+  shape: "timeline" | "detail-source",
+  window?: QueryWindow,
+): Promise<Record<string, unknown>[]> {
+  const plan = buildJourneyObservationPlan({
+    siteId,
+    target,
+    shape,
+    ...(window ? { window } : {}),
+  });
+  const output = plan.outputs.find(
+    (candidate) =>
+      candidate.id ===
+      (shape === "timeline"
+        ? "journey-observation-timeline"
+        : "journey-observation-detail-source"),
+  );
+  if (!output) throw new Error("journey_observation_output_missing");
+  const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+    siteId,
+    time: plan.context.time,
+  });
+  const lowered = lowerer.lower(output);
+  const relation = lowerer.projectOutput(
+    lowered,
+    output.fields.map((field) => ({ name: field.name, slot: field.slot })),
+  );
+  const query = compileD1Query(lowerLogicalPlan(relation), {
+    tag: currentD1Operation() ?? "analytics.query.all",
+  });
+  const rows = await queryD1CompiledAll<object>(env, query);
+  return rows.map((row) => Object.fromEntries(Object.entries(row)));
 }
 type JourneyEventDetailKind = Exclude<JourneyEventRow["kind"], "custom">;
 function nullableDetailNumber(
@@ -483,102 +444,19 @@ async function queryDetailSourceFromD1(
   target: DetailTarget,
   window?: QueryWindow,
 ): Promise<VisitorDetailSourceRow[]> {
-  const sql = `
-WITH
-${buildTargetVisitSourceCte(detailTargetColumn(target), {
-  withinWindow: Boolean(window),
-})},
-filtered_visits AS MATERIALIZED (
-  SELECT *
-  FROM visit_source
-),
-${buildDetailCustomEventSourceCte({ materialize: true })}
-SELECT
-  'visit' AS sourceType,
-  visit_id AS visitId,
-  visitor_id AS visitorId,
-  session_id AS sessionId,
-  user_id AS userId,
-  user_name AS userName,
-  status,
-  started_at AS startedAt,
-  last_activity_at AS lastActivityAt,
-  ended_at AS endedAt,
-  duration_ms AS durationMs,
-  pathname,
-  hash_fragment AS hash,
-  title,
-  hostname,
-  referrer_host AS referrerHost,
-  referrer_url AS referrerUrl,
-  country,
-  region,
-  region_code AS regionCode,
-  city,
-  latitude,
-  longitude,
-  browser,
-  browser_version AS browserVersion,
-  os,
-  os_version AS osVersion,
-  device_type AS deviceType,
-  screen_width AS screenWidth,
-  screen_height AS screenHeight,
-  perf_ttfb_ms AS perfTtfbMs,
-  perf_fcp_ms AS perfFcpMs,
-  perf_lcp_ms AS perfLcpMs,
-  perf_cls AS perfCls,
-  perf_inp_ms AS perfInpMs,
-  NULL AS eventId,
-  NULL AS eventType,
-  NULL AS occurredAt
-FROM filtered_visits
-UNION ALL
-SELECT
-  'custom' AS sourceType,
-  visit_id AS visitId,
-  visitor_id AS visitorId,
-  session_id AS sessionId,
-  user_id AS userId,
-  user_name AS userName,
-  NULL AS status,
-  NULL AS startedAt,
-  NULL AS lastActivityAt,
-  NULL AS endedAt,
-  NULL AS durationMs,
-  pathname,
-  hash_fragment AS hash,
-  title,
-  hostname,
-  referrer_host AS referrerHost,
-  referrer_url AS referrerUrl,
-  country,
-  region,
-  NULL AS regionCode,
-  city,
-  NULL AS latitude,
-  NULL AS longitude,
-  browser,
-  browser_version AS browserVersion,
-  os,
-  os_version AS osVersion,
-  device_type AS deviceType,
-  screen_width AS screenWidth,
-  screen_height AS screenHeight,
-  perf_ttfb_ms AS perfTtfbMs,
-  perf_fcp_ms AS perfFcpMs,
-  perf_lcp_ms AS perfLcpMs,
-  perf_cls AS perfCls,
-  perf_inp_ms AS perfInpMs,
-  event_id AS eventId,
-  event_name AS eventType,
-  occurred_at AS occurredAt
-FROM event_source
-`;
-  return queryD1All<VisitorDetailSourceRow>(env, sql, [
-    ...targetVisitSourceBindings(siteId, target.value, window),
-    ...detailCustomEventSourceBindings(siteId),
-  ]);
+  const rows = await queryJourneyObservationRows(
+    env,
+    siteId,
+    target,
+    "detail-source",
+    window,
+  );
+  return rows.map((row) => {
+    const sourceType = row.sourceType;
+    if (sourceType !== "visit" && sourceType !== "custom")
+      throw new Error("journey_observation_source_type_invalid");
+    return { ...row, sourceType };
+  });
 }
 function deriveVisitorDetailRows(rows: VisitorDetailSourceRow[]): {
   visitor: VisitorRow | null;

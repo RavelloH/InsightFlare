@@ -165,7 +165,14 @@ function infer(
           expression.value !== null &&
           (typeof expression.value !== "number" ||
             !Number.isFinite(expression.value))) ||
-        (["string", "date", "datetime", "json-scalar"].includes(
+        (expression.valueType.scalar === "datetime" &&
+          expression.value !== null &&
+          !(
+            typeof expression.value === "string" ||
+            (typeof expression.value === "number" &&
+              Number.isFinite(expression.value))
+          )) ||
+        (["string", "date", "json-scalar"].includes(
           expression.valueType.scalar,
         ) &&
           expression.value !== null &&

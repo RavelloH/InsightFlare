@@ -7,6 +7,7 @@ import {
 import {
   semanticAttributeCatalog,
   type SemanticAttributeDefinition,
+  semanticObservationAttributeCatalog,
 } from "./attributes";
 import {
   semanticDimensionCatalog,
@@ -40,7 +41,10 @@ export function validateSemanticCatalog(input?: {
   readonly attributes?: readonly SemanticAttributeDefinition[];
   readonly dimensions?: readonly SemanticDimensionDefinition[];
 }): readonly SemanticCatalogIssue[] {
-  const attributes = input?.attributes ?? semanticAttributeCatalog;
+  const attributes = input?.attributes ?? [
+    ...semanticAttributeCatalog,
+    ...semanticObservationAttributeCatalog,
+  ];
   const dimensions = input?.dimensions ?? semanticDimensionCatalog;
   const issues: SemanticCatalogIssue[] = [];
   const attributeIds = new Set(attributes.map((attribute) => attribute.id));

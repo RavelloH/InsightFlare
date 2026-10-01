@@ -153,55 +153,148 @@ export const semanticAttributeCatalog: readonly SemanticAttributeDefinition[] =
       .sort((left, right) => left.id.localeCompare(right.id)),
   );
 
-/** Internal raw identity reads for Observation plans; these are not Filter fields. */
+interface ObservationAttributeInput {
+  readonly name: string;
+  readonly scalar: SemanticScalarType;
+  readonly nullable: boolean;
+  readonly unit?: SemanticUnit;
+}
+
+function observationAttribute(
+  input: ObservationAttributeInput,
+): SemanticAttributeDefinition {
+  const isText = input.scalar === "string";
+  return Object.freeze({
+    id: `observation.${input.name}`,
+    valueType: Object.freeze({
+      kind: "scalar",
+      scalar: input.scalar,
+      ...(input.unit ? { unit: input.unit } : {}),
+    }),
+    nativeEntity: "observation",
+    observationKinds: Object.freeze(["event", "page"] as const),
+    nullable: input.nullable,
+    evaluation: "observation",
+    presence: "non-null",
+    empty: isText ? "empty-string-is-value" : "unsupported",
+    comparison: "case-sensitive",
+  });
+}
+
+/** Internal report reads for Observation plans; these are not Filter fields. */
 export const semanticObservationAttributeCatalog: readonly SemanticAttributeDefinition[] =
   Object.freeze([
-    Object.freeze({
-      id: "observation.sessionId",
-      valueType: Object.freeze({ kind: "scalar", scalar: "string" }),
-      nativeEntity: "observation",
-      observationKinds: Object.freeze(["event", "page"] as const),
+    { name: "sessionId", scalar: "string", nullable: false },
+    { name: "visitorId", scalar: "string", nullable: false },
+    { name: "kind", scalar: "string", nullable: false },
+    { name: "id", scalar: "string", nullable: true },
+    { name: "eventId", scalar: "string", nullable: true },
+    { name: "eventName", scalar: "string", nullable: true },
+    { name: "visitId", scalar: "string", nullable: true },
+    { name: "userId", scalar: "string", nullable: true },
+    { name: "userName", scalar: "string", nullable: true },
+    { name: "status", scalar: "string", nullable: true },
+    {
+      name: "ownerPageStartedAt",
+      scalar: "datetime",
       nullable: false,
-      evaluation: "observation",
-      presence: "non-null",
-      empty: "empty-string-is-value",
-      comparison: "case-sensitive",
-    }),
-    Object.freeze({
-      id: "observation.visitorId",
-      valueType: Object.freeze({ kind: "scalar", scalar: "string" }),
-      nativeEntity: "observation",
-      observationKinds: Object.freeze(["event", "page"] as const),
-      nullable: false,
-      evaluation: "observation",
-      presence: "non-null",
-      empty: "empty-string-is-value",
-      comparison: "case-sensitive",
-    }),
-  ] satisfies readonly SemanticAttributeDefinition[]);
+    },
+    { name: "startedAt", scalar: "datetime", nullable: true },
+    { name: "lastActivityAt", scalar: "datetime", nullable: true },
+    { name: "endedAt", scalar: "datetime", nullable: true },
+    { name: "durationMs", scalar: "number", nullable: true, unit: "ms" },
+    { name: "pathname", scalar: "string", nullable: false },
+    { name: "hash", scalar: "string", nullable: false },
+    { name: "title", scalar: "string", nullable: false },
+    { name: "hostname", scalar: "string", nullable: false },
+    { name: "referrerHost", scalar: "string", nullable: false },
+    { name: "referrerUrl", scalar: "string", nullable: false },
+    { name: "country", scalar: "string", nullable: false },
+    { name: "region", scalar: "string", nullable: false },
+    { name: "regionCode", scalar: "string", nullable: false },
+    { name: "city", scalar: "string", nullable: false },
+    { name: "latitude", scalar: "number", nullable: true },
+    { name: "longitude", scalar: "number", nullable: true },
+    { name: "browser", scalar: "string", nullable: false },
+    { name: "browserVersion", scalar: "string", nullable: false },
+    { name: "os", scalar: "string", nullable: false },
+    { name: "osVersion", scalar: "string", nullable: false },
+    { name: "deviceType", scalar: "string", nullable: false },
+    {
+      name: "screenWidth",
+      scalar: "number",
+      nullable: true,
+      unit: "px",
+    },
+    {
+      name: "screenHeight",
+      scalar: "number",
+      nullable: true,
+      unit: "px",
+    },
+    {
+      name: "perfTtfbMs",
+      scalar: "number",
+      nullable: true,
+      unit: "ms",
+    },
+    {
+      name: "perfFcpMs",
+      scalar: "number",
+      nullable: true,
+      unit: "ms",
+    },
+    {
+      name: "perfLcpMs",
+      scalar: "number",
+      nullable: true,
+      unit: "ms",
+    },
+    {
+      name: "perfCls",
+      scalar: "number",
+      nullable: true,
+      unit: "ratio",
+    },
+    {
+      name: "perfInpMs",
+      scalar: "number",
+      nullable: true,
+      unit: "ms",
+    },
+  ] satisfies readonly ObservationAttributeInput[]).map(observationAttribute);
 
-const registeredSemanticAttributeIds = new Set(
-  semanticAttributeCatalog.map((attribute) => attribute.id),
-);
-for (const attribute of semanticObservationAttributeCatalog) {
-  if (registeredSemanticAttributeIds.has(attribute.id))
-    throw new Error(`duplicate_semantic_attribute:${attribute.id}`);
-  registeredSemanticAttributeIds.add(attribute.id);
-  if (
-    attribute.nativeEntity !== "observation" ||
-    attribute.observationKinds.length !== 2 ||
-    !attribute.observationKinds.includes("page") ||
-    !attribute.observationKinds.includes("event") ||
-    attribute.valueType.kind !== "scalar" ||
-    attribute.valueType.scalar !== "string" ||
-    attribute.nullable ||
-    attribute.evaluation !== "observation" ||
-    attribute.presence !== "non-null" ||
-    attribute.empty !== "empty-string-is-value" ||
-    attribute.comparison !== "case-sensitive"
-  )
-    throw new Error(`invalid_observation_attribute_contract:${attribute.id}`);
+export function assertSemanticObservationAttributeContracts(
+  attributes: readonly SemanticAttributeDefinition[],
+  registeredSemanticAttributeIds: Set<string>,
+): void {
+  for (const attribute of attributes) {
+    if (registeredSemanticAttributeIds.has(attribute.id))
+      throw new Error(`duplicate_semantic_attribute:${attribute.id}`);
+    registeredSemanticAttributeIds.add(attribute.id);
+    if (
+      attribute.nativeEntity !== "observation" ||
+      attribute.observationKinds.length !== 2 ||
+      !attribute.observationKinds.includes("page") ||
+      !attribute.observationKinds.includes("event") ||
+      attribute.valueType.kind !== "scalar" ||
+      !["string", "number", "datetime"].includes(attribute.valueType.scalar) ||
+      attribute.evaluation !== "observation" ||
+      attribute.presence !== "non-null" ||
+      attribute.empty !==
+        (attribute.valueType.scalar === "string"
+          ? "empty-string-is-value"
+          : "unsupported") ||
+      attribute.comparison !== "case-sensitive"
+    )
+      throw new Error(`invalid_observation_attribute_contract:${attribute.id}`);
+  }
 }
+
+assertSemanticObservationAttributeContracts(
+  semanticObservationAttributeCatalog,
+  new Set(semanticAttributeCatalog.map((attribute) => attribute.id)),
+);
 
 export function semanticAttribute(
   id: SemanticAttributeId,

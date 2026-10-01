@@ -171,6 +171,7 @@ function typedDalConvergenceViolations(
 ): ArchitectureViolation[] {
   const typedQueryPureModules = new Set([
     "src/lib/edge/analytics/engine/journey-target-presence-plan.ts",
+    "src/lib/edge/analytics/engine/journey-observation-plan.ts",
     "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-read-plans.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-persistence.ts",
@@ -342,11 +343,11 @@ function analyticsSemanticPlanStorageViolations(
   relativePath: string,
   sourceText: string,
 ): ArchitectureViolation[] {
-  if (
-    relativePath !==
-    "src/lib/edge/analytics/engine/journey-target-presence-plan.ts"
-  )
-    return [];
+  const guardedPlans = new Set([
+    "src/lib/edge/analytics/engine/journey-target-presence-plan.ts",
+    "src/lib/edge/analytics/engine/journey-observation-plan.ts",
+  ]);
+  if (!guardedPlans.has(relativePath)) return [];
   const match =
     /\b(?:site_identities|visits|custom_events|custom_event_names|sessions)\b/iu.exec(
       sourceText,
@@ -390,6 +391,10 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
   ],
   "src/lib/edge/analytics/providers/d1/internal/journey-list-queries.ts": [
     "queryJourneyTargetExistsFromD1",
+  ],
+  "src/lib/edge/analytics/providers/d1/internal/journey-detail-queries.ts": [
+    "queryJourneyEventsForDetailFromD1",
+    "queryDetailSourceFromD1",
   ],
   "src/lib/edge/ingest/alarm-sweep.ts": ["sweepIngestAlarms"],
   "src/lib/edge/ingest/flush-types.ts": ["resolveSitePk"],

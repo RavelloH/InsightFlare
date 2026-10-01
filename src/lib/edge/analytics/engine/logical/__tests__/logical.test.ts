@@ -70,6 +70,35 @@ function planWithForgedFilter(predicate: LogicalExpr): LogicalPlan {
 }
 
 describe("logical relational IR", () => {
+  it("accepts finite epoch-millisecond datetime literals", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", { includeOccurrenceTime: true });
+    const inRange = builder.filter(
+      pages,
+      builder.compare(
+        "gte",
+        builder.slot(pages, "time"),
+        builder.literal(1_760_000_000_000, {
+          kind: "scalar",
+          scalar: "datetime",
+        }),
+      ),
+    );
+    builder.output("recent-pages", inRange, [{ name: "page", slot: "entity" }]);
+    expect(() => validateLogicalPlan(builder.finish())).not.toThrow();
+
+    const invalidBuilder = createBuilder();
+    const invalidPages = invalidBuilder.source("page", {
+      includeOccurrenceTime: true,
+    });
+    expect(() =>
+      invalidBuilder.literal(Number.NaN, {
+        kind: "scalar",
+        scalar: "datetime",
+      }),
+    ).toThrow("Literal value does not match its declared scalar type.");
+  });
+
   it("provides data-only logical scalar and entity values", () => {
     expect(entityValueType("session")).toEqual({
       kind: "entity",

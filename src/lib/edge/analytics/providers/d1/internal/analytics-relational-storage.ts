@@ -27,7 +27,10 @@ import type {
   SourceNode,
   SourceValueBinding,
 } from "@/lib/edge/analytics/engine/logical/nodes";
-import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
+import {
+  semanticAttribute,
+  semanticObservationAttributeCatalog,
+} from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
 import {
@@ -65,6 +68,11 @@ export interface AnalyticsRelationalStorageContext {
   readonly time: SemanticTemporalDomains;
 }
 
+export interface AnalyticsObservationIdentityConstraint {
+  readonly attribute: ObservationIdentityAttribute;
+  readonly value: string;
+}
+
 type ObservationIdentityAttribute =
   "observation.sessionId" | "observation.visitorId";
 
@@ -72,6 +80,94 @@ function isObservationIdentityAttribute(
   value: string,
 ): value is ObservationIdentityAttribute {
   return value === "observation.sessionId" || value === "observation.visitorId";
+}
+
+const observationReportAttributeIds = new Set(
+  semanticObservationAttributeCatalog.map((attribute) => attribute.id),
+);
+
+function isObservationReportAttribute(value: string): boolean {
+  return observationReportAttributeIds.has(value);
+}
+
+const observationReportColumnByAttribute: Readonly<Record<string, string>> = {
+  "observation.sessionId": "session_id",
+  "observation.visitorId": "visitor_id",
+  "observation.visitId": "visit_id",
+  "observation.userId": "user_id",
+  "observation.userName": "user_name",
+  "observation.status": "status",
+  "observation.ownerPageStartedAt": "started_at",
+  "observation.startedAt": "started_at",
+  "observation.lastActivityAt": "last_activity_at",
+  "observation.endedAt": "ended_at",
+  "observation.durationMs": "duration_ms",
+  "observation.pathname": "pathname",
+  "observation.hash": "hash_fragment",
+  "observation.title": "title",
+  "observation.hostname": "hostname",
+  "observation.referrerHost": "referrer_host",
+  "observation.referrerUrl": "referrer_url",
+  "observation.country": "country",
+  "observation.region": "region",
+  "observation.regionCode": "region_code",
+  "observation.city": "city",
+  "observation.latitude": "latitude",
+  "observation.longitude": "longitude",
+  "observation.browser": "browser",
+  "observation.browserVersion": "browser_version",
+  "observation.os": "os",
+  "observation.osVersion": "os_version",
+  "observation.deviceType": "device_type",
+  "observation.screenWidth": "screen_width",
+  "observation.screenHeight": "screen_height",
+  "observation.perfTtfbMs": "perf_ttfb_ms",
+  "observation.perfFcpMs": "perf_fcp_ms",
+  "observation.perfLcpMs": "perf_lcp_ms",
+  "observation.perfCls": "perf_cls",
+  "observation.perfInpMs": "perf_inp_ms",
+};
+
+function observationReportOutputColumn(attributeId: string): string {
+  const suffix = attributeId.slice("observation.".length);
+  return `report_${suffix}`;
+}
+
+function requireObservationReportValue(
+  expression: AnyExpression,
+  attributeId: string,
+  path: string,
+): void {
+  const attribute = semanticAttribute(attributeId);
+  if (
+    !attribute ||
+    !observationReportAttributeIds.has(attributeId) ||
+    attribute.nativeEntity !== "observation" ||
+    attribute.valueType.kind !== "scalar"
+  )
+    throw new Error(
+      `${path}.values: ${attributeId} is not a report Observation attribute.`,
+    );
+  const scalar = attribute.valueType.scalar;
+  const affinityMatches =
+    scalar === "string"
+      ? expression.resultType.affinity === "text"
+      : scalar === "datetime" || scalar === "date"
+        ? expression.resultType.affinity === "integer"
+        : scalar === "number"
+          ? expression.resultType.affinity === "integer" ||
+            expression.resultType.affinity === "real"
+          : scalar === "boolean"
+            ? expression.resultType.affinity === "integer"
+            : false;
+  if (!affinityMatches)
+    throw new Error(
+      `${path}.values: ${attributeId} no longer maps to a compatible D1 scalar affinity.`,
+    );
+  if (expression.resultType.nullable && !attribute.nullable)
+    throw new Error(
+      `${path}.values: ${attributeId} can be NULL but its report metadata is non-nullable.`,
+    );
 }
 
 function column(relation: AnalyticsDbRelation, name: string): AnyExpression {
@@ -84,7 +180,7 @@ function column(relation: AnalyticsDbRelation, name: string): AnyExpression {
 function requireStorageTextColumn(
   expression: AnyExpression,
   fieldId: string,
-): void {
+): SqlExpression<string, ExpressionResultType<"text", false>> {
   if (
     expression.resultType.affinity !== "text" ||
     expression.resultType.nullable
@@ -93,6 +189,10 @@ function requireStorageTextColumn(
       `Registered field ${fieldId} no longer maps to a non-null D1 TEXT column.`,
     );
   }
+  return expression as SqlExpression<
+    string,
+    ExpressionResultType<"text", false>
+  >;
 }
 
 /** D1-only physical carrier catalog for the currently proven Page/Event subset. */
@@ -110,6 +210,7 @@ export class AnalyticsRelationalStorage {
     string,
     AnalyticsDbRelation
   >();
+  readonly #reportObservationCarriers = new Map<string, AnalyticsDbRelation>();
 
   constructor(context: AnalyticsRelationalStorageContext) {
     this.#siteId = context.siteId;
@@ -120,6 +221,7 @@ export class AnalyticsRelationalStorage {
     node: SourceNode,
     path: string,
     requiredSlots: ReadonlySet<SlotId> = new Set(node.output),
+    sourceConstraint?: AnalyticsObservationIdentityConstraint,
   ): LoweredAnalyticsSource {
     const relationships = node.values.filter(
       (binding) => binding.kind === "related-entity",
@@ -128,6 +230,13 @@ export class AnalyticsRelationalStorage {
       (binding) => binding.kind === "attribute",
     );
     for (const binding of attributes) {
+      if (isObservationReportAttribute(binding.attribute)) {
+        if (node.entity !== "observation")
+          throw new Error(
+            `${path}.values: Report attributes are available only on Observation.`,
+          );
+        continue;
+      }
       if (
         isObservationIdentityAttribute(binding.attribute) &&
         semanticAttribute(binding.attribute)?.nativeEntity === "observation"
@@ -141,6 +250,12 @@ export class AnalyticsRelationalStorage {
     const requiredAttributes = attributes.filter((binding) =>
       requiredSlots.has(binding.slot),
     );
+    const declaredReportAttributes = attributes
+      .map((binding) => binding.attribute)
+      .filter(isObservationReportAttribute);
+    const requiredReportAttributes = requiredAttributes
+      .map((binding) => binding.attribute)
+      .filter(isObservationReportAttribute);
     const identityAttributes = requiredAttributes
       .map((binding) => binding.attribute)
       .filter(isObservationIdentityAttribute);
@@ -149,7 +264,7 @@ export class AnalyticsRelationalStorage {
         `${path}.values: Raw identity attributes are available only on Observation.`,
       );
     const declaredContracts = attributes.flatMap((binding) => {
-      if (isObservationIdentityAttribute(binding.attribute)) return [];
+      if (isObservationReportAttribute(binding.attribute)) return [];
       const contract = nativePrimitiveFieldContract(binding.attribute);
       if (!contract)
         throw new Error(
@@ -176,6 +291,13 @@ export class AnalyticsRelationalStorage {
     );
     const needsOwnerJoin = relationships.some(
       (binding) => binding.relationship === "observation.session",
+    );
+    const includesOccurrenceTime = node.values.some(
+      (binding) =>
+        binding.kind === "occurrence-time" && requiredSlots.has(binding.slot),
+    );
+    const declaresOccurrenceTime = node.values.some(
+      (binding) => binding.kind === "occurrence-time",
     );
     let carrier: AnalyticsDbRelation;
     let activity: "page" | "event" | "observation";
@@ -214,7 +336,21 @@ export class AnalyticsRelationalStorage {
           `${path}.values: Mixed Page/Event bindings do not define one native Observation carrier.`,
         );
       }
-      if (fieldActivity === undefined) {
+      if (declaredReportAttributes.length > 0 && declaredContracts.length > 0)
+        throw new Error(
+          `${path}.values: Report Observation attributes cannot be mixed with native primitive fields.`,
+        );
+      if (declaredReportAttributes.length > 0 || declaresOccurrenceTime) {
+        activity = "observation";
+        carrier = this.#reportObservations({
+          domain: node.temporalDomain,
+          attributes: requiredReportAttributes,
+          includeIdentity: selfRequired,
+          includeSession: needsSessionRelation,
+          includeOccurrenceTime: includesOccurrenceTime,
+          sourceConstraint,
+        });
+      } else if (fieldActivity === undefined) {
         if (node.temporalDomain !== "candidate")
           throw new Error(
             `${path}.temporalDomain: An unqualified Observation source is supported only for the candidate Page/Event union.`,
@@ -364,6 +500,23 @@ export class AnalyticsRelationalStorage {
           });
           continue;
         }
+        if (isObservationReportAttribute(binding.attribute)) {
+          if (node.entity !== "observation")
+            throw new Error(
+              `${path}.values: Report attributes are available only on Observation.`,
+            );
+          const reportValue = column(
+            carrier,
+            observationReportOutputColumn(binding.attribute),
+          );
+          requireObservationReportValue(reportValue, binding.attribute, path);
+          values.set(binding.slot, {
+            kind: "scalar",
+            value: reportValue,
+            candidateBounded: false,
+          });
+          continue;
+        }
         const contract = nativePrimitiveFieldContract(binding.attribute);
         if (!contract)
           throw new Error(
@@ -385,10 +538,28 @@ export class AnalyticsRelationalStorage {
           value: fieldColumn,
           candidateBounded: false,
         });
+      } else if (binding.kind === "occurrence-time") {
+        const occurrenceColumn =
+          node.entity === "observation"
+            ? "occurrence_time"
+            : node.entity === "page"
+              ? "started_at"
+              : "occurred_at";
+        const occurrence = column(carrier, occurrenceColumn);
+        if (
+          occurrence.resultType.affinity !== "integer" ||
+          occurrence.resultType.nullable
+        )
+          throw new Error(
+            `${path}.values: Observation occurrence time must remain a non-null D1 INTEGER.`,
+          );
+        values.set(binding.slot, {
+          kind: "scalar",
+          value: occurrence,
+          candidateBounded: false,
+        });
       } else {
-        throw new Error(
-          `${path}.values: Occurrence-time bindings are outside the current D1 capability set.`,
-        );
+        throw new Error(`${path}.values: Unsupported source binding.`);
       }
     }
 
@@ -417,9 +588,7 @@ export class AnalyticsRelationalStorage {
     return this.#sitesCache;
   }
 
-  #sitePages(
-    ownerColumns: readonly ("session_id" | "visitor_id")[],
-  ): AnalyticsDbRelation {
+  #sitePages(ownerColumns: readonly string[]): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
     const cacheKey = canonicalColumns.join(",");
     const existing = this.#sitePageCarriers.get(cacheKey);
@@ -430,7 +599,7 @@ export class AnalyticsRelationalStorage {
       visit_id: source.columns.visit_id,
     };
     for (const name of canonicalColumns)
-      pageProjections[name] = source.columns[name];
+      pageProjections[name] = column(source, name);
     const pages = project(source, pageProjections);
     const sites = this.#sites();
     const scoped = join(
@@ -487,10 +656,49 @@ export class AnalyticsRelationalStorage {
 
   #attachOwner(
     events: AnalyticsDbRelation,
-    ownerColumns: readonly ("session_id" | "visitor_id")[],
+    ownerColumns: readonly string[],
+    identityConstraint?: AnalyticsObservationIdentityConstraint,
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
-    const pages = this.#sitePages(canonicalColumns);
+    const ownerPages = this.#sitePages(canonicalColumns);
+    const pages = identityConstraint
+      ? filter(
+          ownerPages,
+          eq(
+            requireStorageTextColumn(
+              column(
+                ownerPages,
+                identityConstraint.attribute === "observation.sessionId"
+                  ? "session_id"
+                  : "visitor_id",
+              ),
+              identityConstraint.attribute,
+            ),
+            param(identityConstraint.value),
+          ),
+        )
+      : ownerPages;
+    if (identityConstraint) {
+      const joined = join(
+        pages,
+        events,
+        and(
+          eq(pages.columns.site_pk, events.columns.site_pk),
+          eq(pages.columns.visit_id, events.columns.visit_id),
+        ),
+      );
+      const projections: Record<string, AnyExpression> = {
+        site_pk: joined.columns.left_site_pk,
+        site_id: joined.columns.right_site_id,
+        event_id: joined.columns.right_event_id,
+        visit_id: joined.columns.right_visit_id,
+        event_name_id: joined.columns.right_event_name_id,
+        occurred_at: joined.columns.right_occurred_at,
+      };
+      for (const name of canonicalColumns)
+        projections[`owner_${name}`] = joined.columns[`left_${name}`]!;
+      return project(joined, projections);
+    }
     const joined = join(
       events,
       pages,
@@ -508,11 +716,27 @@ export class AnalyticsRelationalStorage {
       occurred_at: joined.columns.left_occurred_at,
     };
     for (const name of canonicalColumns)
-      projections[
-        name === "session_id" ? "owner_session_id" : "owner_visitor_id"
-      ] = joined.columns[`right_${name}`]!;
+      projections[`owner_${name}`] = joined.columns[`right_${name}`]!;
     if (joined.columns.left_event_name)
       projections.event_name = joined.columns.left_event_name;
+    return project(joined, projections);
+  }
+
+  #attachReportName(events: AnalyticsDbRelation): AnalyticsDbRelation {
+    const names = scan(schema.custom_event_names);
+    const joined = join(
+      events,
+      names,
+      eq(
+        events.columns.event_name_id as AnyExpression,
+        names.columns.id as AnyExpression,
+      ),
+      "left",
+    );
+    const projections: Record<string, AnyExpression> = {};
+    for (const name of Object.keys(events.columns))
+      projections[name] = joined.columns[`left_${name}`]!;
+    projections.event_name = joined.columns.right_name;
     return project(joined, projections);
   }
 
@@ -526,9 +750,10 @@ export class AnalyticsRelationalStorage {
       "query_string",
       "hash_fragment",
     ],
+    allowRetainedHistory = false,
   ): AnalyticsDbRelation {
     const columns = [...new Set(["site_pk", ...requiredColumns])].sort();
-    const cacheKey = `${String(domain)}:${columns.join(",")}`;
+    const cacheKey = `${String(domain)}:${allowRetainedHistory}:${columns.join(",")}`;
     const existing = this.#pageCarriers.get(cacheKey);
     if (existing) return existing;
     const pages = scan(schema.visits);
@@ -541,6 +766,7 @@ export class AnalyticsRelationalStorage {
       scoped,
       domain,
       scoped.columns.left_started_at,
+      allowRetainedHistory,
     );
     const carrierColumns: Record<string, AnyExpression> = {};
     for (const name of columns)
@@ -588,6 +814,13 @@ export class AnalyticsRelationalStorage {
         ))
     )
       columns.add("session_id");
+    if (
+      node.values.some(
+        (binding) =>
+          binding.kind === "occurrence-time" && requiredSlots.has(binding.slot),
+      )
+    )
+      columns.add("started_at");
     if (identityAttributes.includes("observation.sessionId"))
       columns.add("session_id");
     if (identityAttributes.includes("observation.visitorId"))
@@ -615,8 +848,12 @@ export class AnalyticsRelationalStorage {
     return [...columns];
   }
 
-  #events(domain: SourceNode["temporalDomain"]): AnalyticsDbRelation {
-    const existing = this.#eventCarriers.get(domain);
+  #events(
+    domain: SourceNode["temporalDomain"],
+    allowRetainedHistory = false,
+  ): AnalyticsDbRelation {
+    const cacheKey = `${String(domain)}:${allowRetainedHistory}`;
+    const existing = this.#eventCarriers.get(cacheKey);
     if (existing) return existing;
     const source = scan(schema.custom_events);
     const events = project(source, {
@@ -636,6 +873,7 @@ export class AnalyticsRelationalStorage {
       scoped,
       domain,
       scoped.columns.left_occurred_at,
+      allowRetainedHistory,
     );
     const carrier = project(ranged, {
       site_pk: ranged.columns.left_site_pk,
@@ -645,7 +883,7 @@ export class AnalyticsRelationalStorage {
       event_name_id: ranged.columns.left_event_name_id,
       occurred_at: ranged.columns.left_occurred_at,
     });
-    this.#eventCarriers.set(domain, carrier);
+    this.#eventCarriers.set(cacheKey, carrier);
     return carrier;
   }
 
@@ -671,20 +909,31 @@ export class AnalyticsRelationalStorage {
 
   #eventsWithOwner(
     domain: SourceNode["temporalDomain"],
-    ownerColumns: readonly ("session_id" | "visitor_id")[],
+    ownerColumns: readonly string[],
+    allowRetainedHistory = false,
+    identityConstraint?: AnalyticsObservationIdentityConstraint,
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
-    const cacheKey = `${String(domain)}:${canonicalColumns.join(",")}`;
+    const cacheKey = JSON.stringify([
+      domain,
+      allowRetainedHistory,
+      canonicalColumns,
+      identityConstraint ?? null,
+    ]);
     const existing = this.#ownedEventCarriers.get(cacheKey);
     if (existing) return existing;
-    const carrier = this.#attachOwner(this.#events(domain), canonicalColumns);
+    const carrier = this.#attachOwner(
+      this.#events(domain, allowRetainedHistory),
+      canonicalColumns,
+      identityConstraint,
+    );
     this.#ownedEventCarriers.set(cacheKey, carrier);
     return carrier;
   }
 
   #eventsWithNameAndOwner(
     domain: SourceNode["temporalDomain"],
-    ownerColumns: readonly ("session_id" | "visitor_id")[],
+    ownerColumns: readonly string[],
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
     const cacheKey = `${String(domain)}:${canonicalColumns.join(",")}`;
@@ -783,11 +1032,211 @@ export class AnalyticsRelationalStorage {
     return carrier;
   }
 
+  #reportObservations(input: {
+    readonly domain: SourceNode["temporalDomain"];
+    readonly attributes: readonly string[];
+    readonly includeIdentity: boolean;
+    readonly includeSession: boolean;
+    readonly includeOccurrenceTime: boolean;
+    readonly sourceConstraint?: AnalyticsObservationIdentityConstraint;
+  }): AnalyticsDbRelation {
+    const attributes = [...new Set(input.attributes)].sort();
+    const cacheKey = JSON.stringify([
+      input.domain,
+      attributes,
+      input.includeIdentity,
+      input.includeSession,
+      input.includeOccurrenceTime,
+      input.sourceConstraint ?? null,
+    ]);
+    const existing = this.#reportObservationCarriers.get(cacheKey);
+    if (existing) return existing;
+
+    const pageColumns = new Set<string>();
+    if (
+      input.includeIdentity ||
+      attributes.includes("observation.id") ||
+      attributes.includes("observation.visitId")
+    )
+      pageColumns.add("visit_id");
+    if (input.includeOccurrenceTime) pageColumns.add("started_at");
+    if (input.includeSession || attributes.includes("observation.sessionId"))
+      pageColumns.add("session_id");
+    if (attributes.includes("observation.visitorId"))
+      pageColumns.add("visitor_id");
+    for (const attribute of attributes) {
+      const physical = observationReportColumnByAttribute[attribute];
+      if (physical) pageColumns.add(physical);
+    }
+
+    const basePages = this.#pages(input.domain, [...pageColumns], true);
+    const pages = input.sourceConstraint
+      ? filter(
+          basePages,
+          eq(
+            requireStorageTextColumn(
+              column(
+                basePages,
+                input.sourceConstraint.attribute === "observation.sessionId"
+                  ? "session_id"
+                  : "visitor_id",
+              ),
+              input.sourceConstraint.attribute,
+            ),
+            param(input.sourceConstraint.value),
+          ),
+        )
+      : basePages;
+    const pageProjections: Record<string, AnyExpression> = {
+      site_pk: pages.columns.site_pk,
+    };
+    if (input.includeIdentity) {
+      pageProjections.observation_kind = param("page");
+      pageProjections.observation_id = column(pages, "visit_id");
+    }
+    if (input.includeSession) {
+      pageProjections.session_site_pk = pages.columns.site_pk;
+      pageProjections.session_id = column(pages, "session_id");
+      pageProjections.session_present = this.#sessionPresent(
+        column(pages, "session_id"),
+      );
+    }
+    if (attributes.includes("observation.sessionId"))
+      pageProjections.raw_session_id = column(pages, "session_id");
+    if (attributes.includes("observation.visitorId"))
+      pageProjections.raw_visitor_id = column(pages, "visitor_id");
+    if (input.includeOccurrenceTime)
+      pageProjections.occurrence_time = column(pages, "started_at");
+    for (const attribute of attributes)
+      pageProjections[observationReportOutputColumn(attribute)] =
+        this.#pageReportValue(pages, attribute);
+    const pageRows = project(pages, pageProjections);
+
+    const ownerColumns = this.#reportOwnerColumns(
+      attributes,
+      input.includeSession,
+    );
+    let events = this.#eventsWithOwner(
+      input.domain,
+      ownerColumns,
+      true,
+      input.sourceConstraint,
+    );
+    if (attributes.includes("observation.eventName"))
+      events = this.#attachReportName(events);
+    const eventProjections: Record<string, AnyExpression> = {
+      site_pk: events.columns.site_pk,
+    };
+    if (input.includeIdentity) {
+      eventProjections.observation_kind = param("event");
+      eventProjections.observation_id = column(events, "event_id");
+    }
+    if (input.includeSession) {
+      eventProjections.session_site_pk = events.columns.site_pk;
+      eventProjections.session_id = column(events, "owner_session_id");
+      eventProjections.session_present = this.#sessionPresent(
+        column(events, "owner_session_id"),
+      );
+    }
+    if (attributes.includes("observation.sessionId"))
+      eventProjections.raw_session_id = column(events, "owner_session_id");
+    if (attributes.includes("observation.visitorId"))
+      eventProjections.raw_visitor_id = column(events, "owner_visitor_id");
+    if (input.includeOccurrenceTime)
+      eventProjections.occurrence_time = column(events, "occurred_at");
+    for (const attribute of attributes)
+      eventProjections[observationReportOutputColumn(attribute)] =
+        this.#eventReportValue(events, attribute);
+    const eventRows = project(events, eventProjections);
+    const carrier = union(pageRows, eventRows, true);
+    this.#reportObservationCarriers.set(cacheKey, carrier);
+    return carrier;
+  }
+
+  #reportOwnerColumns(
+    attributes: readonly string[],
+    includeSession: boolean,
+  ): string[] {
+    const columns = new Set<string>();
+    if (includeSession) columns.add("session_id");
+    for (const attribute of attributes) {
+      if (
+        attribute === "observation.id" ||
+        attribute === "observation.kind" ||
+        attribute === "observation.eventId" ||
+        attribute === "observation.eventName" ||
+        attribute === "observation.visitId" ||
+        this.#eventReportValueIsNull(attribute)
+      )
+        continue;
+      const physical = observationReportColumnByAttribute[attribute];
+      if (physical) columns.add(physical);
+    }
+    return [...columns];
+  }
+
+  #eventReportValueIsNull(attribute: string): boolean {
+    return (
+      attribute === "observation.eventId" ||
+      attribute === "observation.eventName" ||
+      attribute === "observation.status" ||
+      attribute === "observation.startedAt" ||
+      attribute === "observation.lastActivityAt" ||
+      attribute === "observation.endedAt" ||
+      attribute === "observation.durationMs"
+    );
+  }
+
+  #pageReportValue(
+    pages: AnalyticsDbRelation,
+    attribute: string,
+  ): AnyExpression {
+    if (attribute === "observation.kind") return param("page");
+    if (attribute === "observation.id") return column(pages, "visit_id");
+    if (
+      attribute === "observation.eventId" ||
+      attribute === "observation.eventName"
+    )
+      return param(null);
+    const physical = observationReportColumnByAttribute[attribute];
+    if (!physical)
+      throw new Error(
+        `No D1 report Observation mapping exists for ${attribute}.`,
+      );
+    return column(pages, physical);
+  }
+
+  #eventReportValue(
+    events: AnalyticsDbRelation,
+    attribute: string,
+  ): AnyExpression {
+    if (attribute === "observation.kind") return param("event");
+    if (attribute === "observation.id" || attribute === "observation.eventId")
+      return column(events, "event_id");
+    if (attribute === "observation.eventName")
+      return column(events, "event_name");
+    if (attribute === "observation.visitId") return column(events, "visit_id");
+    if (this.#eventReportValueIsNull(attribute)) return param(null);
+    const physical = observationReportColumnByAttribute[attribute];
+    if (!physical)
+      throw new Error(
+        `No D1 report Observation mapping exists for ${attribute}.`,
+      );
+    return column(events, `owner_${physical}`);
+  }
+
   #inRange(
     source: AnalyticsDbRelation,
     domain: SourceNode["temporalDomain"],
     occurrence: AnyExpression,
+    allowRetainedHistory = false,
   ): AnalyticsDbRelation {
+    if (
+      allowRetainedHistory &&
+      domain === "read" &&
+      this.#time.read.kind === "retained-history"
+    )
+      return source;
     const range =
       domain === "candidate"
         ? this.#time.candidate
