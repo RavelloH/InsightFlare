@@ -157,7 +157,11 @@ export class IngestDurableObject extends DurableObject {
       throw error;
     } finally {
       logger.info("do.request.completed");
-      logger.emit();
+      try {
+        await logger.emitWhenComplete();
+      } catch {
+        // A log sink failure must not replace the request result or error.
+      }
     }
   }
 
@@ -243,7 +247,11 @@ export class IngestDurableObject extends DurableObject {
       throw error;
     } finally {
       logger.info("do.alarm.completed");
-      logger.emit();
+      try {
+        await logger.emitWhenComplete();
+      } catch {
+        // A log sink failure must not replace the alarm result or error.
+      }
     }
   }
 
@@ -461,6 +469,7 @@ export class IngestDurableObject extends DurableObject {
     } else {
       logger.info(event, data);
     }
+    // This synchronous WebSocket lifecycle callback performs no D1 work.
     logger.emit();
   }
 

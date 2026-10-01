@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
@@ -44,6 +44,9 @@ import {
   type NativePrimitiveFieldId,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-primitive-predicate-lowering";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import { instrumentEnv } from "@/lib/edge/observability/bindings";
+import { createInvocationLogger } from "@/lib/edge/observability/logger";
+import type { Env } from "@/lib/edge/types";
 import {
   evaluateFilterDocument,
   type FilterEvaluationEntity,
@@ -4750,7 +4753,18 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       expect(rootNotExpected).not.toEqual(primitiveNotInExpected);
 
       const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
-      const client = createD1DatabaseClient(createSqliteD1Database(db, trace));
+      const logger = createInvocationLogger({
+        source: "worker",
+        trigger: "request",
+      });
+      const instrumentedEnv = instrumentEnv(
+        {
+          DB: createSqliteD1Database(db, trace),
+          INGEST_DO: {} as DurableObjectNamespace,
+        } as Env,
+        logger,
+      );
+      const client = createD1DatabaseClient(instrumentedEnv.DB);
       for (const item of cases) {
         const lowered = lower(item.document);
         expect(lowered.kind, item.name).toBe("supported");
@@ -4879,6 +4893,36 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         }),
       );
       expect(trace.preparedSql).toHaveLength(cases.length + 4);
+
+      const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+      let record;
+      try {
+        record = await logger.emitWhenComplete();
+      } finally {
+        consoleLog.mockRestore();
+      }
+      const requiredTags = [
+        "analytics.session-filter.wave-2",
+        "analytics.filtered-session-count.wave-3",
+        "analytics.filtered-session-views.wave-4",
+        "analytics.filtered-session-overview-pair.wave-5",
+      ];
+      for (const tag of requiredTags) {
+        const event = record.logs.find(
+          (candidate) =>
+            candidate.message.startsWith("db.query.v1.all.success") &&
+            candidate.data?.tag === tag,
+        );
+        expect(event?.data).toMatchObject({
+          operation: "all",
+          status: "success",
+          rowsRead: null,
+          rowsWritten: null,
+          dbDurationMs: null,
+          physicalPlanHash: expect.stringMatching(/^v1:/u),
+        });
+      }
+      expect(record.performance.d1Statements).toBe(trace.preparedSql.length);
     } finally {
       db.close();
     }

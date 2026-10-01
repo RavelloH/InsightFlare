@@ -1,6 +1,6 @@
 import { createDatabaseRuntime } from "@/lib/db/d1-runtime";
 import type { CompiledMutation } from "@/lib/db/mutation/plan";
-import type { DatabaseRuntime } from "@/lib/db/types";
+import type { DatabaseRuntime, DatabaseRuntimeOptions } from "@/lib/db/types";
 
 import type { CompiledQuery } from "./compiled";
 
@@ -30,6 +30,9 @@ export function createDatabaseClient(runtime: DatabaseRuntime): DatabaseClient {
   };
 }
 
-export function createD1DatabaseClient(database: D1Database): DatabaseClient {
-  return createDatabaseClient(createDatabaseRuntime(database));
+export function createD1DatabaseClient(
+  database: D1Database,
+  options?: DatabaseRuntimeOptions,
+): DatabaseClient {
+  return createDatabaseClient(createDatabaseRuntime(database, options));
 }

@@ -5,7 +5,10 @@ export {
   D1_MAX_SQL_UTF8_BYTES,
   D1StatementBudgetError,
 } from "./d1-budget";
-export { createDatabaseRuntime } from "./d1-runtime";
+export {
+  createDatabaseRuntime,
+  registerDatabaseQueryObserver,
+} from "./d1-runtime";
 export { compileD1Mutation } from "./mutation/compiler";
 export type { CompiledMutation, MutationNode } from "./mutation/plan";
 export {
@@ -77,6 +80,14 @@ export type { GeneratedSchemaObject, GeneratedSchemaTable } from "./schema";
 export { schema } from "./schema";
 export type {
   DatabaseBinding,
+  DatabaseObservationReason,
+  DatabaseObservationSession,
+  DatabaseObservationStatus,
+  DatabaseOperation,
+  DatabasePhysicalPlanShape,
+  DatabaseQueryObservation,
+  DatabaseQueryObserver,
   DatabaseRuntime,
+  DatabaseRuntimeOptions,
   DatabaseStatement,
 } from "./types";

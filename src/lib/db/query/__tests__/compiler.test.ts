@@ -76,6 +76,46 @@ function executeRun(
 }
 
 describe("typed D1 query compiler", () => {
+  it("attaches bounded value-free metadata for the selected final emission", () => {
+    const sites = scan(schema.site_identities);
+    const native = compileD1Query(
+      project(sites, {
+        contains: inList(sites.columns.site_id, ["a", "b"]),
+      }),
+    );
+    const jsonValues = (prefix: string) =>
+      Array.from({ length: 101 }, (_unused, index) => `${prefix}-${index}`);
+    const packedA = compileD1Query(
+      project(sites, {
+        contains: inList(sites.columns.site_id, jsonValues("private-a")),
+      }),
+    );
+    const packedB = compileD1Query(
+      project(sites, {
+        contains: inList(sites.columns.site_id, jsonValues("private-b")),
+      }),
+    );
+
+    expect(native.physicalPlanShape).toMatchObject({
+      version: 1,
+      nativeMembershipCount: 1,
+      jsonMembershipCount: 0,
+    });
+    expect(packedA.sql).toContain("json_each(?)");
+    expect(packedA.bindings).toHaveLength(1);
+    expect(packedA.physicalPlanShape).toMatchObject({
+      version: 1,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 1,
+    });
+    expect(packedA.physicalPlanShape).toEqual(packedB.physicalPlanShape);
+    expect(packedA.sql).toBe(packedB.sql);
+    expect(packedA.bindings).not.toEqual(packedB.bindings);
+    expect(JSON.stringify(packedA.physicalPlanShape)).not.toContain(
+      "private-a",
+    );
+  });
+
   it("implements ECMAScript trim semantics for text expressions", () => {
     const db = createMigratedDatabase();
     try {
@@ -535,8 +575,14 @@ describe("typed D1 query compiler", () => {
       expect(
         lowerLogicalPlan(computedProjection).directScanProjections,
       ).toEqual([]);
-      expect(compileD1Query(computedProjection)).toEqual(
-        compileD1QueryUnoptimizedForTest(computedProjection),
+      const optimizedComputedProjection = compileD1Query(computedProjection);
+      const mechanicalComputedProjection =
+        compileD1QueryUnoptimizedForTest(computedProjection);
+      expect(optimizedComputedProjection.sql).toBe(
+        mechanicalComputedProjection.sql,
+      );
+      expect(optimizedComputedProjection.bindings).toEqual(
+        mechanicalComputedProjection.bindings,
       );
 
       const outerSites = scan(schema.site_identities);
@@ -551,8 +597,15 @@ describe("typed D1 query compiler", () => {
       expect(
         lowerLogicalPlan(correlatedMembership).directScanProjections,
       ).toEqual([]);
-      expect(compileD1Query(correlatedMembership)).toEqual(
-        compileD1QueryUnoptimizedForTest(correlatedMembership),
+      const optimizedCorrelatedMembership =
+        compileD1Query(correlatedMembership);
+      const mechanicalCorrelatedMembership =
+        compileD1QueryUnoptimizedForTest(correlatedMembership);
+      expect(optimizedCorrelatedMembership.sql).toBe(
+        mechanicalCorrelatedMembership.sql,
+      );
+      expect(optimizedCorrelatedMembership.bindings).toEqual(
+        mechanicalCorrelatedMembership.bindings,
       );
     } finally {
       db.close();

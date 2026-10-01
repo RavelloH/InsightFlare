@@ -1,15 +1,19 @@
+import type { DatabaseQueryObservation, DatabaseQueryObserver } from "@/lib/db";
+import { registerDatabaseQueryObserver } from "@/lib/db";
 import type { Env } from "@/lib/edge/types";
 
 import type {
   InvocationD1RowsCoverage,
   InvocationLogData,
   InvocationLogger,
+  InvocationLogLevel,
 } from "./logger";
 import { errorLogData } from "./logger";
 const INSTRUMENTED_ENV = Symbol("insightflare.instrumented-env");
 const INVOCATION_LOGGER = Symbol("insightflare.invocation-logger");
 const RAW_D1_STATEMENT = new WeakMap<object, D1PreparedStatement>();
 const D1_META_STATE = new WeakMap<InvocationLogger, D1MetaState>();
+const MAX_OBSERVED_BATCH_MEMBERS = 32;
 type D1MetaLike = {
   /** Business mutation count; it is not a resource write-row metric. */
   changes?: unknown;
@@ -83,6 +87,106 @@ function recordD1Result(logger: InvocationLogger, result: unknown): void {
       if (attempts > 1) logger.increment("d1Retries", attempts - 1);
     }
   }
+}
+
+function observationMessage(
+  event: DatabaseQueryObservation,
+  selectedMemberCount: number,
+): string {
+  const operation = event.operation;
+  const reason = event.reason ? `.${event.reason}` : "";
+  const budget = event.budget
+    ? `.item-${event.budget.item}.actual-${event.budget.actual}.limit-${event.budget.limit}`
+    : "";
+  if (operation === "batch" && event.batchIndex === null)
+    return `db.query.v1.batch.${event.status}.summary.${event.statementCount}.members-${selectedMemberCount}-of-${event.statementCount}${reason}${budget}`;
+  return `db.query.v1.${operation}.${event.status}${reason}${budget}`;
+}
+
+function observationLogData(
+  event: DatabaseQueryObservation,
+): InvocationLogData {
+  const data: InvocationLogData = {
+    tag: event.tag,
+    operation: event.operation,
+    status: event.status,
+    rowsRead: event.rowsRead,
+    rowsWritten: event.rowsWritten,
+    dbDurationMs: event.dbDurationMs,
+    elapsedMs: event.elapsedMs,
+    sqlBytes: event.sqlBytes,
+    bindings: event.bindings,
+    physicalPlanHash: event.physicalPlanHash,
+  };
+  if (event.operation === "batch") {
+    data.batchId = event.batchId;
+    data.batchIndex = event.batchIndex;
+  }
+  return data;
+}
+
+function createD1QueryObserver(
+  logger: InvocationLogger,
+): DatabaseQueryObserver {
+  return {
+    begin(input) {
+      const batch = input.operation === "batch";
+      const selectedLimit = batch
+        ? Math.min(input.statementCount, MAX_OBSERVED_BATCH_MEMBERS)
+        : 1;
+      const reservation = logger.reserveEvents(batch ? selectedLimit + 1 : 1);
+      if (reservation.capacity === 0) return undefined;
+
+      const selectedCount = batch
+        ? Math.min(selectedLimit, Math.max(0, reservation.capacity - 1))
+        : 1;
+      const statementIndexes = Array.from(
+        { length: selectedCount },
+        (_unused, index) => index,
+      );
+      let resolveCompletion!: () => void;
+      const completion = new Promise<void>((resolve) => {
+        resolveCompletion = resolve;
+      });
+      try {
+        logger.track(completion);
+      } catch {
+        reservation.release();
+        resolveCompletion();
+        return undefined;
+      }
+
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        reservation.release();
+        resolveCompletion();
+      };
+      return {
+        statementIndexes,
+        includeBatchSummary: batch,
+        record(event) {
+          try {
+            const level: InvocationLogLevel =
+              event.status === "failed"
+                ? "error"
+                : event.status === "rejected"
+                  ? "warn"
+                  : "info";
+            reservation.record(
+              level,
+              observationMessage(event, statementIndexes.length),
+              observationLogData(event),
+            );
+          } catch {
+            // The logging sink is deliberately best-effort.
+          }
+        },
+        release,
+      };
+    },
+  };
 }
 function markMissingD1BatchResults(
   logger: InvocationLogger,
@@ -180,7 +284,7 @@ function wrapD1Database(
   database: D1Database,
   logger: InvocationLogger,
 ): D1Database {
-  return new Proxy(database, {
+  const wrapped = new Proxy(database, {
     get(target, property, receiver) {
       if (property === "prepare") {
         return (sql: string) =>
@@ -211,6 +315,8 @@ function wrapD1Database(
       return typeof value === "function" ? value.bind(target) : value;
     },
   }) as D1Database;
+  registerDatabaseQueryObserver(wrapped, createD1QueryObserver(logger));
+  return wrapped;
 }
 function wrapAsyncBinding<T extends object>(
   binding: T,
@@ -297,11 +403,15 @@ export function instrumentEnv(env: Env, logger: InvocationLogger): Env {
   if ((env as Env & { [INSTRUMENTED_ENV]?: boolean })[INSTRUMENTED_ENV]) {
     return env;
   }
+  let wrappedDatabase: D1Database | undefined;
   return new Proxy(env, {
     get(target, property, receiver) {
       if (property === INSTRUMENTED_ENV) return true;
       if (property === INVOCATION_LOGGER) return logger;
-      if (property === "DB") return wrapD1Database(target.DB, logger);
+      if (property === "DB") {
+        wrappedDatabase ??= wrapD1Database(target.DB, logger);
+        return wrappedDatabase;
+      }
       if (property === "INGEST_DO") {
         return wrapDurableObjectNamespace(target.INGEST_DO, logger);
       }

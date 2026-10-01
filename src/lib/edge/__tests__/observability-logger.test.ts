@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  compileD1Query,
+  createD1DatabaseClient,
+  createDatabaseRuntime,
+  project,
+  scan,
+} from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import { measureExternalFetch } from "@/lib/edge/observability/bindings";
 import {
@@ -12,6 +20,7 @@ import {
   runWithD1Operation,
   runWithInvocationLogger,
 } from "@/lib/edge/observability/logger";
+import type { Env } from "@/lib/edge/types";
 describe("edge observability logger", () => {
   beforeEach(() => {
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -456,6 +465,219 @@ describe("edge observability logger", () => {
     });
   });
 
+  it("observes compiled DAL queries through the request-scoped D1 proxy", async () => {
+    const result = {
+      success: true,
+      results: [{ site_id: "site-a" }],
+      meta: {
+        rows_read: 7,
+        rows_written: 0,
+        timings: { sql_duration_ms: 0.625 },
+      },
+    };
+    const statement = {
+      bind: vi.fn(),
+      all: vi.fn().mockResolvedValue(result),
+      first: vi.fn(),
+      run: vi.fn(),
+      raw: vi.fn(),
+    };
+    statement.bind.mockImplementation(() => statement);
+    const prepare = vi.fn().mockReturnValue(statement as D1PreparedStatement);
+    const database: D1Database = {
+      prepare,
+      batch: vi.fn(),
+      exec: vi.fn(),
+      withSession: vi.fn(),
+      dump: vi.fn(),
+    };
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const instrumented = instrumentEnv(
+      { DB: database, INGEST_DO: {} as DurableObjectNamespace } as Env,
+      logger,
+    );
+    const sites = scan(schema.site_identities);
+    const query = compileD1Query(
+      project(sites, { site_id: sites.columns.site_id }),
+      { tag: "observability.typed-dal" },
+    );
+
+    await expect(
+      createD1DatabaseClient(instrumented.DB).all(query),
+    ).resolves.toBe(result);
+    const record = await logger.emitWhenComplete();
+    const observation = record.logs.find((event) =>
+      event.message.startsWith("db.query.v1.all.success"),
+    );
+
+    expect(observation?.data).toMatchObject({
+      tag: "observability.typed-dal",
+      operation: "all",
+      status: "success",
+      rowsRead: 7,
+      rowsWritten: 0,
+      dbDurationMs: 0.625,
+      sqlBytes: new TextEncoder().encode(query.sql).byteLength,
+      bindings: query.bindings?.length ?? 0,
+      physicalPlanHash: expect.stringMatching(/^v1:/u),
+    });
+    expect(Object.keys(observation?.data ?? {})).toHaveLength(10);
+    expect(record.performance.d1Statements).toBe(1);
+    expect(record.performance.d1RowsRead).toBe(7);
+    expect(JSON.stringify(record)).not.toContain(query.sql);
+  });
+
+  it("skips fingerprint work when the invocation log is already full", async () => {
+    const result = { success: true, results: [] };
+    const statement = {
+      bind: vi.fn(),
+      all: vi.fn().mockResolvedValue(result),
+      first: vi.fn(),
+      run: vi.fn(),
+      raw: vi.fn(),
+    };
+    statement.bind.mockImplementation(() => statement);
+    const database: D1Database = {
+      prepare: () => statement as D1PreparedStatement,
+      batch: vi.fn(),
+      exec: vi.fn(),
+      withSession: vi.fn(),
+      dump: vi.fn(),
+    };
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+      maxEvents: 1,
+    });
+    logger.info("request.event-budget-full");
+    const instrumented = instrumentEnv(
+      { DB: database, INGEST_DO: {} as DurableObjectNamespace } as Env,
+      logger,
+    );
+    const sites = scan(schema.site_identities);
+    const query = compileD1Query(
+      project(sites, { site_id: sites.columns.site_id }),
+    );
+    const digest = vi.spyOn(globalThis.crypto.subtle, "digest");
+
+    await createDatabaseRuntime(instrumented.DB).all(query);
+    const record = await logger.emitWhenComplete();
+
+    expect(statement.all).toHaveBeenCalledExactlyOnceWith();
+    expect(digest).not.toHaveBeenCalled();
+    expect(record.logs).toEqual([
+      {
+        timeMs: expect.any(Number),
+        level: "info",
+        message: "request.event-budget-full",
+      },
+    ]);
+    expect(record.logsTruncated).toBe(true);
+  });
+
+  it("isolates batch observations by request and keeps the full batch shape", async () => {
+    const result = {
+      success: true,
+      results: [],
+      meta: {
+        duration: 0.375,
+        size_after: 0,
+        rows_read: 3,
+        rows_written: 0,
+        last_row_id: 0,
+        changed_db: false,
+        changes: 0,
+        timings: { sql_duration_ms: 0.375 },
+      },
+    };
+    const statement = {
+      bind: vi.fn(),
+      all: vi.fn(),
+      first: vi.fn(),
+      run: vi.fn(),
+      raw: vi.fn(),
+    };
+    statement.bind.mockImplementation(() => statement);
+    const database: D1Database = {
+      prepare: vi.fn(() => statement as D1PreparedStatement),
+      batch: vi.fn().mockResolvedValue([result, result]),
+      exec: vi.fn(),
+      withSession: vi.fn(),
+      dump: vi.fn(),
+    };
+    const rawEnv = {
+      DB: database,
+      INGEST_DO: {} as DurableObjectNamespace,
+    } as Env;
+    const firstLogger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const secondLogger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const firstDb = instrumentEnv(rawEnv, firstLogger).DB;
+    const secondDb = instrumentEnv(rawEnv, secondLogger).DB;
+    const sites = scan(schema.site_identities);
+    const makeQuery = (tag: string) =>
+      compileD1Query(project(sites, { site_id: sites.columns.site_id }), {
+        tag,
+      });
+
+    await Promise.all([
+      createDatabaseRuntime(firstDb).batch([
+        makeQuery("request-a.first"),
+        makeQuery("request-a.second"),
+      ]),
+      createDatabaseRuntime(secondDb).batch([
+        makeQuery("request-b.first"),
+        makeQuery("request-b.second"),
+      ]),
+    ]);
+    const [firstRecord, secondRecord] = await Promise.all([
+      firstLogger.emitWhenComplete(),
+      secondLogger.emitWhenComplete(),
+    ]);
+    const firstEvents = firstRecord.logs.filter((event) =>
+      event.message.startsWith("db.query.v1.batch."),
+    );
+    const secondEvents = secondRecord.logs.filter((event) =>
+      event.message.startsWith("db.query.v1.batch."),
+    );
+
+    expect(firstEvents).toHaveLength(3);
+    expect(secondEvents).toHaveLength(3);
+    for (const events of [firstEvents, secondEvents]) {
+      expect(new Set(events.map((event) => event.data?.batchId)).size).toBe(1);
+      expect(
+        events.every((event) => Object.keys(event.data ?? {}).length === 12),
+      ).toBe(true);
+    }
+    expect(firstEvents[0]?.data?.batchId).not.toBe(
+      secondEvents[0]?.data?.batchId,
+    );
+    expect(
+      firstEvents
+        .filter((event) => event.data?.batchIndex !== null)
+        .map((event) => event.data?.tag)
+        .sort(),
+    ).toEqual(["request-a.first", "request-a.second"]);
+    expect(
+      secondEvents
+        .filter((event) => event.data?.batchIndex !== null)
+        .map((event) => event.data?.tag)
+        .sort(),
+    ).toEqual(["request-b.first", "request-b.second"]);
+    expect(firstRecord.performance.d1Statements).toBe(2);
+    expect(secondRecord.performance.d1Statements).toBe(2);
+    expect(firstRecord.performance.d1RowsRead).toBe(6);
+    expect(secondRecord.performance.d1RowsRead).toBe(6);
+  });
+
   it("marks rows-read unavailable when completed D1 operations have no metadata", async () => {
     const statement = {
       bind: vi.fn(),
@@ -581,6 +803,56 @@ describe("edge observability logger", () => {
         }),
       },
     });
+  });
+
+  it("records external fetch failures and preserves each rejection", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const error = new Error("upstream unavailable");
+    const nonError = "upstream returned an invalid rejection";
+
+    await expect(
+      measureExternalFetch(logger, "external_fetch.error", () =>
+        Promise.reject(error),
+      ),
+    ).rejects.toBe(error);
+    await expect(
+      measureExternalFetch(logger, "external_fetch.non_error", () =>
+        Promise.reject(nonError),
+      ),
+    ).rejects.toBe(nonError);
+
+    const record = logger.build();
+    expect(record.performance).toMatchObject({
+      externalFetches: 2,
+      failedExternalFetches: 2,
+      operations: {
+        "external_fetch.error": { count: 1, failed: 1 },
+        "external_fetch.non_error": { count: 1, failed: 1 },
+      },
+    });
+    expect(record.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: "external_fetch.error.failed",
+          data: expect.objectContaining({
+            errorName: "Error",
+            errorMessage: "upstream unavailable",
+          }),
+        }),
+        expect.objectContaining({
+          level: "error",
+          message: "external_fetch.non_error.failed",
+          data: expect.objectContaining({
+            errorName: "NonError",
+            errorMessage: nonError,
+          }),
+        }),
+      ]),
+    );
   });
 
   it("normalizes invalid limits and non-finite elapsed time", () => {

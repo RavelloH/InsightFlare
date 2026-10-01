@@ -164,6 +164,16 @@ export interface InvocationSpan {
   fail(data?: InvocationLogData): void;
 }
 
+export interface InvocationLogEventReservation {
+  readonly capacity: number;
+  record(
+    level: InvocationLogLevel,
+    message: string,
+    data?: InvocationLogData,
+  ): boolean;
+  release(): void;
+}
+
 export interface InvocationLogRecord {
   v: typeof OBSERVABILITY_LOG_VERSION;
   source: InvocationSource;
@@ -249,6 +259,7 @@ export interface InvocationLogger {
     metrics: InvocationD1OperationMetrics,
   ): void;
   recordDoSqlOperation(metrics: InvocationDoSqlMetrics): void;
+  reserveEvents(maximum: number): InvocationLogEventReservation;
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
   emitWhenComplete(): Promise<InvocationLogRecord>;
@@ -304,6 +315,7 @@ export function createInvocationLogger(
   const startedAtMs = now();
   const maxEvents = resolveMaxEvents(options.maxEvents);
   const events: InvocationLogEvent[] = [];
+  let reservedEvents = 0;
   let traceId = options.traceId;
   let request: InvocationRequest | undefined;
   let performance: InvocationPerformancePatch = {};
@@ -340,14 +352,14 @@ export function createInvocationLogger(
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
   }
 
-  function record(
+  function appendEvent(
     level: InvocationLogLevel,
     message: string,
     data?: InvocationLogData,
-  ): void {
-    if (events.length >= maxEvents) {
+  ): boolean {
+    if (emitted) {
       logsTruncated = true;
-      return;
+      return false;
     }
     const safeData = sanitizeData(data);
     events.push({
@@ -356,6 +368,19 @@ export function createInvocationLogger(
       message,
       ...(safeData ? { data: safeData } : {}),
     });
+    return true;
+  }
+
+  function record(
+    level: InvocationLogLevel,
+    message: string,
+    data?: InvocationLogData,
+  ): void {
+    if (events.length + reservedEvents >= maxEvents) {
+      logsTruncated = true;
+      return;
+    }
+    appendEvent(level, message, data);
   }
 
   function addOperation(
@@ -531,6 +556,42 @@ export function createInvocationLogger(
           doSqlRowsWrittenAvailable,
           doSqlCompleted,
         ),
+      };
+    },
+    reserveEvents(maximum) {
+      const requested =
+        Number.isInteger(maximum) && maximum > 0
+          ? Math.min(maximum, MAX_INVOCATION_LOG_EVENTS)
+          : 0;
+      const capacity = Math.max(
+        0,
+        Math.min(requested, maxEvents - events.length - reservedEvents),
+      );
+      if (capacity < requested) logsTruncated = true;
+      if (capacity === 0) {
+        return {
+          capacity: 0,
+          record: () => false,
+          release() {},
+        };
+      }
+      reservedEvents += capacity;
+      let remaining = capacity;
+      let released = false;
+      return {
+        capacity,
+        record(level, message, data) {
+          if (released || remaining === 0) return false;
+          remaining -= 1;
+          reservedEvents -= 1;
+          return appendEvent(level, message, data);
+        },
+        release() {
+          if (released) return;
+          released = true;
+          reservedEvents -= remaining;
+          remaining = 0;
+        },
       };
     },
     build,

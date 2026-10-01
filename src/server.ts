@@ -185,7 +185,11 @@ export default {
       throw error;
     } finally {
       logger.info("request.completed");
-      logger.emit();
+      try {
+        ctx.waitUntil(logger.emitWhenComplete().catch(() => undefined));
+      } catch {
+        // Observability must not replace the completed response or error.
+      }
     }
   },
 
@@ -202,7 +206,11 @@ export default {
     const instrumentedEnv = instrumentEnv(env, logger);
     if (shouldSkipScheduledTasks(env)) {
       logger.info("scheduled.skipped");
-      logger.emit();
+      try {
+        await logger.emitWhenComplete();
+      } catch {
+        // Logging failure must not change the skipped-task result.
+      }
       return;
     }
     ctx.waitUntil(
@@ -221,7 +229,13 @@ export default {
             logger.error("scheduled.failed");
             throw error;
           })
-          .finally(() => logger.emit()),
+          .finally(async () => {
+            try {
+              await logger.emitWhenComplete();
+            } catch {
+              // Logging failure must not replace the scheduled task result.
+            }
+          }),
       ),
     );
   },

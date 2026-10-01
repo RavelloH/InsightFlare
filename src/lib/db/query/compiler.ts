@@ -11,7 +11,10 @@ import {
   text,
 } from "@/lib/db/sql/fragment";
 import { identifier } from "@/lib/db/sql/identifier";
-import type { DatabaseStatement } from "@/lib/db/types";
+import type {
+  DatabasePhysicalPlanShape,
+  DatabaseStatement,
+} from "@/lib/db/types";
 
 import type { CompiledQuery } from "./compiled";
 import { DatabaseCompilerError } from "./errors";
@@ -637,7 +640,13 @@ function compileD1QueryInternal(
     const hasJsonStrategy = membershipOptimization.strategies.some(
       (strategy) => strategy.strategy === "json-text",
     );
-    if (!hasJsonStrategy) return compileAndBudget(nativeQuery, options);
+    if (!hasJsonStrategy)
+      return compileAndBudget(
+        nativeQuery,
+        options,
+        undefined,
+        physicalPlanShape(canonicalPhysical, true),
+      );
     return renderAndBudget(
       canonicalPhysical,
       options,
@@ -765,13 +774,43 @@ function renderAndBudget(
     definitions.length === 0
       ? main
       : concat(text("WITH "), join(definitions, text(", ")), text(" "), main);
-  return compileAndBudget(query, options, expectedBindingCount);
+  return compileAndBudget(
+    query,
+    options,
+    expectedBindingCount,
+    includeSharedRelations
+      ? physicalPlanShape(physical, true, strategies)
+      : undefined,
+  );
+}
+
+function physicalPlanShape(
+  physical: PhysicalQueryPlan<object>,
+  includeSharedRelations: boolean,
+  strategies = physical.membershipOptimization?.strategies ?? [],
+): DatabasePhysicalPlanShape {
+  let nativeMembershipCount = 0;
+  let jsonMembershipCount = 0;
+  for (const strategy of strategies) {
+    if (strategy.strategy === "json-text") jsonMembershipCount += 1;
+    else nativeMembershipCount += 1;
+  }
+  return {
+    version: 1,
+    cteCount: includeSharedRelations ? physical.sharedRelations.length : 0,
+    directScanProjectionCount: includeSharedRelations
+      ? physical.directScanProjections.length
+      : 0,
+    nativeMembershipCount,
+    jsonMembershipCount,
+  };
 }
 
 function compileAndBudget(
   query: SqlFragment,
   options: D1CompileOptions,
   expectedBindingCount?: number,
+  shape?: DatabasePhysicalPlanShape,
 ): CompiledQuery<object> {
   if (
     expectedBindingCount !== undefined &&
@@ -784,6 +823,7 @@ function compileAndBudget(
   const statement: DatabaseStatement = {
     sql: query.text,
     bindings: query.bindings,
+    ...(shape === undefined ? {} : { physicalPlanShape: shape }),
     ...(options.tag === undefined ? {} : { tag: options.tag }),
   };
   assertD1StatementBudget(statement);
