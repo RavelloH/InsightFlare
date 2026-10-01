@@ -1,4 +1,5 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import type { CompiledQuery } from "@/lib/db";
+import { createD1DatabaseClient, createDatabaseRuntime } from "@/lib/db";
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import {
   currentD1Operation,
@@ -342,14 +343,34 @@ export async function queryD1All<T extends object>(
   bindings: Array<string | number | null>,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<T[]> {
+  return recordD1All(diagnostics, () =>
+    createDatabaseRuntime(env.DB).all<T>({
+      sql,
+      bindings,
+      tag: currentD1Operation() ?? "analytics.query.all",
+    }),
+  );
+}
+
+/** Execute a compiler-produced Analytics query through the shared D1 client. */
+export async function queryD1CompiledAll<Row extends object>(
+  env: Env,
+  query: CompiledQuery<Row>,
+  diagnostics?: D1ReadDiagnostics,
+): Promise<Row[]> {
+  return recordD1All(diagnostics, () =>
+    createD1DatabaseClient(env.DB).all(query),
+  );
+}
+
+async function recordD1All<Row extends object>(
+  diagnostics: D1ReadDiagnostics | undefined,
+  execute: () => Promise<D1Result<Row>>,
+): Promise<Row[]> {
   const logger = currentInvocationLogger();
   const operation = currentD1Operation();
   const startedAt = globalThis.performance?.now() ?? Date.now();
-  const result = await createDatabaseRuntime(env.DB).all<T>({
-    sql,
-    bindings,
-    tag: operation ?? "analytics.query.all",
-  });
+  const result = await execute();
   const finishedAt = globalThis.performance?.now() ?? Date.now();
   recordD1RowsRead(diagnostics, result);
   if (logger && operation) {

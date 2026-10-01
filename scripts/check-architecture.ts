@@ -170,6 +170,7 @@ function typedDalConvergenceViolations(
   sourceText: string,
 ): ArchitectureViolation[] {
   const typedQueryPureModules = new Set([
+    "src/lib/edge/analytics/engine/journey-target-presence-plan.ts",
     "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-read-plans.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-persistence.ts",
@@ -337,7 +338,37 @@ function ingestTypedBatchViolations(
   return violations;
 }
 
+function analyticsSemanticPlanStorageViolations(
+  relativePath: string,
+  sourceText: string,
+): ArchitectureViolation[] {
+  if (
+    relativePath !==
+    "src/lib/edge/analytics/engine/journey-target-presence-plan.ts"
+  )
+    return [];
+  const match =
+    /\b(?:site_identities|visits|custom_events|custom_event_names|sessions)\b/iu.exec(
+      sourceText,
+    );
+  if (match?.index === undefined) return [];
+  return [
+    {
+      rule: "analytics-semantic-plan-storage-forbidden",
+      source: relativePath,
+      specifier: match[0],
+      target: relativePath,
+      line: sourceText.slice(0, match.index).split(/\r?\n/u).length,
+      message:
+        "Analytics semantic plans must describe business concepts without naming physical storage tables.",
+    },
+  ];
+}
+
 const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
+  "src/lib/edge/analytics/providers/d1/internal/core-sources.ts": [
+    "queryD1CompiledAll",
+  ],
   "src/lib/edge/analytics/providers/d1/internal/goals.ts": [
     "queryGoalDefinitionsPage",
     "queryGoalDefinition",
@@ -356,6 +387,9 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
     "readCustomEventsForVisit",
     "readCustomEventVisitId",
     "readCustomEventDetail",
+  ],
+  "src/lib/edge/analytics/providers/d1/internal/journey-list-queries.ts": [
+    "queryJourneyTargetExistsFromD1",
   ],
   "src/lib/edge/ingest/alarm-sweep.ts": ["sweepIngestAlarms"],
   "src/lib/edge/ingest/flush-types.ts": ["resolveSitePk"],
@@ -1092,6 +1126,9 @@ export function collectArchitectureViolations(
     if (isGeneratedFile(relative, sourceText)) continue;
 
     violations.push(...typedDalConvergenceViolations(relative, sourceText));
+    violations.push(
+      ...analyticsSemanticPlanStorageViolations(relative, sourceText),
+    );
     violations.push(...ingestTypedBatchViolations(relative, sourceText));
     violations.push(...typedQueryFunctionViolations(relative, sourceText));
     violations.push(

@@ -27,6 +27,7 @@ import type {
   SourceNode,
   SourceValueBinding,
 } from "@/lib/edge/analytics/engine/logical/nodes";
+import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
 import {
@@ -64,6 +65,15 @@ export interface AnalyticsRelationalStorageContext {
   readonly time: SemanticTemporalDomains;
 }
 
+type ObservationIdentityAttribute =
+  "observation.sessionId" | "observation.visitorId";
+
+function isObservationIdentityAttribute(
+  value: string,
+): value is ObservationIdentityAttribute {
+  return value === "observation.sessionId" || value === "observation.visitorId";
+}
+
 function column(relation: AnalyticsDbRelation, name: string): AnyExpression {
   const expression = relation.columns[name];
   if (!expression)
@@ -90,14 +100,14 @@ export class AnalyticsRelationalStorage {
   readonly #siteId: string;
   readonly #time: SemanticTemporalDomains;
   #sitesCache?: AnalyticsDbRelation;
-  #pagesCache?: AnalyticsDbRelation;
+  readonly #sitePageCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #pageCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #eventCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #namedEventCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #ownedEventCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #namedOwnedEventCarriers = new Map<string, AnalyticsDbRelation>();
   readonly #candidateObservationCarriers = new Map<
-    boolean,
+    string,
     AnalyticsDbRelation
   >();
 
@@ -117,23 +127,62 @@ export class AnalyticsRelationalStorage {
     const attributes = node.values.filter(
       (binding) => binding.kind === "attribute",
     );
-    const contracts = attributes.map((binding) => {
+    for (const binding of attributes) {
+      if (
+        isObservationIdentityAttribute(binding.attribute) &&
+        semanticAttribute(binding.attribute)?.nativeEntity === "observation"
+      )
+        continue;
+      if (!nativePrimitiveFieldContract(binding.attribute))
+        throw new Error(
+          `${path}.values: No registered D1 primitive storage mapping exists for ${binding.attribute}.`,
+        );
+    }
+    const requiredAttributes = attributes.filter((binding) =>
+      requiredSlots.has(binding.slot),
+    );
+    const identityAttributes = requiredAttributes
+      .map((binding) => binding.attribute)
+      .filter(isObservationIdentityAttribute);
+    if (identityAttributes.length > 0 && node.entity !== "observation")
+      throw new Error(
+        `${path}.values: Raw identity attributes are available only on Observation.`,
+      );
+    const declaredContracts = attributes.flatMap((binding) => {
+      if (isObservationIdentityAttribute(binding.attribute)) return [];
       const contract = nativePrimitiveFieldContract(binding.attribute);
       if (!contract)
         throw new Error(
           `${path}.values: No registered D1 primitive storage mapping exists for ${binding.attribute}.`,
         );
-      return { binding, contract };
+      return [{ binding, contract }];
     });
+    const contracts = declaredContracts.filter(({ binding }) =>
+      requiredSlots.has(binding.slot),
+    );
     const pageColumns = this.#requiredPageColumns(
       node,
       contracts,
       requiredSlots,
+      identityAttributes,
+    );
+    const selfRequired = node.values.some(
+      (binding) => binding.kind === "self" && requiredSlots.has(binding.slot),
+    );
+    const needsSessionRelation = relationships.some(
+      (binding) =>
+        binding.relationship === "observation.session" &&
+        requiredSlots.has(binding.slot),
+    );
+    const needsOwnerJoin = relationships.some(
+      (binding) => binding.relationship === "observation.session",
     );
     let carrier: AnalyticsDbRelation;
     let activity: "page" | "event" | "observation";
     if (node.entity === "page") {
-      if (contracts.some(({ contract }) => contract.activity !== "page"))
+      if (
+        declaredContracts.some(({ contract }) => contract.activity !== "page")
+      )
         throw new Error(
           `${path}.values: A Page source cannot bind Event fields.`,
         );
@@ -141,7 +190,9 @@ export class AnalyticsRelationalStorage {
       activity = "page";
       carrier = this.#pages(node.temporalDomain, pageColumns);
     } else if (node.entity === "event") {
-      if (contracts.some(({ contract }) => contract.activity !== "event"))
+      if (
+        declaredContracts.some(({ contract }) => contract.activity !== "event")
+      )
         throw new Error(
           `${path}.values: An Event source cannot bind Page fields.`,
         );
@@ -153,9 +204,11 @@ export class AnalyticsRelationalStorage {
           : this.#events(node.temporalDomain);
     } else if (node.entity === "observation") {
       this.#requireRelationships(relationships, ["observation.session"], path);
-      const fieldActivity = contracts[0]?.contract.activity;
+      const fieldActivity = declaredContracts[0]?.contract.activity;
       if (
-        contracts.some(({ contract }) => contract.activity !== fieldActivity)
+        declaredContracts.some(
+          ({ contract }) => contract.activity !== fieldActivity,
+        )
       ) {
         throw new Error(
           `${path}.values: Mixed Page/Event bindings do not define one native Observation carrier.`,
@@ -167,12 +220,11 @@ export class AnalyticsRelationalStorage {
             `${path}.temporalDomain: An unqualified Observation source is supported only for the candidate Page/Event union.`,
           );
         activity = "observation";
-        carrier = this.#candidateObservations(
-          node.values.some(
-            (binding) =>
-              binding.kind === "self" && requiredSlots.has(binding.slot),
-          ),
-        );
+        carrier = this.#candidateObservations({
+          includeIdentity: selfRequired,
+          includeSession: needsSessionRelation,
+          identityAttributes,
+        });
       } else if (fieldActivity === "page") {
         // Source bindings and the registered native field contract, rather
         // than a parent Filter or metric shape, select native Page evidence.
@@ -180,17 +232,23 @@ export class AnalyticsRelationalStorage {
         carrier = this.#pages(node.temporalDomain, pageColumns);
       } else {
         activity = "event";
-        const needsSession = relationships.some(
-          (binding) => binding.relationship === "observation.session",
+        const ownerIdentityColumns = this.#ownerIdentityColumns(
+          identityAttributes,
+          needsSessionRelation,
         );
-        carrier = contracts.some(
+        const includeOwner = needsOwnerJoin || ownerIdentityColumns.length > 0;
+        const needsName = declaredContracts.some(
           ({ binding }) => binding.attribute === "event.name",
-        )
-          ? needsSession
-            ? this.#eventsWithNameAndOwner(node.temporalDomain)
+        );
+        carrier = needsName
+          ? includeOwner
+            ? this.#eventsWithNameAndOwner(
+                node.temporalDomain,
+                ownerIdentityColumns,
+              )
             : this.#eventsWithName(node.temporalDomain)
-          : needsSession
-            ? this.#eventsWithOwner(node.temporalDomain)
+          : includeOwner
+            ? this.#eventsWithOwner(node.temporalDomain, ownerIdentityColumns)
             : this.#events(node.temporalDomain);
       }
     } else {
@@ -289,6 +347,23 @@ export class AnalyticsRelationalStorage {
             );
         }
       } else if (binding.kind === "attribute") {
+        if (isObservationIdentityAttribute(binding.attribute)) {
+          if (node.entity !== "observation")
+            throw new Error(
+              `${path}.values: Raw identity attributes are available only on Observation.`,
+            );
+          values.set(binding.slot, {
+            kind: "scalar",
+            value: this.#observationIdentityColumn(
+              carrier,
+              binding.attribute,
+              activity,
+              path,
+            ),
+            candidateBounded: false,
+          });
+          continue;
+        }
         const contract = nativePrimitiveFieldContract(binding.attribute);
         if (!contract)
           throw new Error(
@@ -342,15 +417,21 @@ export class AnalyticsRelationalStorage {
     return this.#sitesCache;
   }
 
-  #sitePages(): AnalyticsDbRelation {
-    if (this.#pagesCache) return this.#pagesCache;
+  #sitePages(
+    ownerColumns: readonly ("session_id" | "visitor_id")[],
+  ): AnalyticsDbRelation {
+    const canonicalColumns = [...new Set(ownerColumns)].sort();
+    const cacheKey = canonicalColumns.join(",");
+    const existing = this.#sitePageCarriers.get(cacheKey);
+    if (existing) return existing;
     const source = scan(schema.visits);
-    const pages = project(source, {
+    const pageProjections: Record<string, AnyExpression> = {
       site_pk: source.columns.site_pk,
       visit_id: source.columns.visit_id,
-      session_id: source.columns.session_id,
-      visitor_id: source.columns.visitor_id,
-    });
+    };
+    for (const name of canonicalColumns)
+      pageProjections[name] = source.columns[name];
+    const pages = project(source, pageProjections);
     const sites = this.#sites();
     const scoped = join(
       pages,
@@ -358,13 +439,15 @@ export class AnalyticsRelationalStorage {
       eq(pages.columns.site_pk, sites.columns.site_pk),
     );
     const validIds = filter(scoped, isNotNull(scoped.columns.left_visit_id));
-    this.#pagesCache = project(validIds, {
+    const carrierProjections: Record<string, AnyExpression> = {
       site_pk: validIds.columns.left_site_pk,
       visit_id: validIds.columns.left_visit_id,
-      session_id: validIds.columns.left_session_id,
-      visitor_id: validIds.columns.left_visitor_id,
-    });
-    return this.#pagesCache;
+    };
+    for (const name of canonicalColumns)
+      carrierProjections[name] = validIds.columns[`left_${name}`]!;
+    const carrier = project(validIds, carrierProjections);
+    this.#sitePageCarriers.set(cacheKey, carrier);
+    return carrier;
   }
 
   #siteEventNames(): AnalyticsDbRelation {
@@ -402,8 +485,12 @@ export class AnalyticsRelationalStorage {
     });
   }
 
-  #attachOwner(events: AnalyticsDbRelation): AnalyticsDbRelation {
-    const pages = this.#sitePages();
+  #attachOwner(
+    events: AnalyticsDbRelation,
+    ownerColumns: readonly ("session_id" | "visitor_id")[],
+  ): AnalyticsDbRelation {
+    const canonicalColumns = [...new Set(ownerColumns)].sort();
+    const pages = this.#sitePages(canonicalColumns);
     const joined = join(
       events,
       pages,
@@ -419,9 +506,11 @@ export class AnalyticsRelationalStorage {
       visit_id: joined.columns.left_visit_id,
       event_name_id: joined.columns.left_event_name_id,
       occurred_at: joined.columns.left_occurred_at,
-      owner_session_id: joined.columns.right_session_id,
-      owner_visitor_id: joined.columns.right_visitor_id,
     };
+    for (const name of canonicalColumns)
+      projections[
+        name === "session_id" ? "owner_session_id" : "owner_visitor_id"
+      ] = joined.columns[`right_${name}`]!;
     if (joined.columns.left_event_name)
       projections.event_name = joined.columns.left_event_name;
     return project(joined, projections);
@@ -474,6 +563,7 @@ export class AnalyticsRelationalStorage {
       readonly contract: NativePrimitiveFieldContract;
     }[],
     requiredSlots: ReadonlySet<SlotId>,
+    identityAttributes: readonly ObservationIdentityAttribute[],
   ): readonly string[] {
     const columns = new Set<string>();
     if (
@@ -498,6 +588,10 @@ export class AnalyticsRelationalStorage {
         ))
     )
       columns.add("session_id");
+    if (identityAttributes.includes("observation.sessionId"))
+      columns.add("session_id");
+    if (identityAttributes.includes("observation.visitorId"))
+      columns.add("visitor_id");
     for (const { binding, contract } of contracts) {
       if (!requiredSlots.has(binding.slot) || contract.activity !== "page")
         continue;
@@ -563,51 +657,121 @@ export class AnalyticsRelationalStorage {
     return carrier;
   }
 
-  #eventsWithOwner(domain: SourceNode["temporalDomain"]): AnalyticsDbRelation {
-    const existing = this.#ownedEventCarriers.get(domain);
+  #ownerIdentityColumns(
+    attributes: readonly ObservationIdentityAttribute[],
+    includeSession: boolean,
+  ): ("session_id" | "visitor_id")[] {
+    const requested = new Set(attributes);
+    const columns: ("session_id" | "visitor_id")[] = [];
+    if (includeSession || requested.has("observation.sessionId"))
+      columns.push("session_id");
+    if (requested.has("observation.visitorId")) columns.push("visitor_id");
+    return columns;
+  }
+
+  #eventsWithOwner(
+    domain: SourceNode["temporalDomain"],
+    ownerColumns: readonly ("session_id" | "visitor_id")[],
+  ): AnalyticsDbRelation {
+    const canonicalColumns = [...new Set(ownerColumns)].sort();
+    const cacheKey = `${String(domain)}:${canonicalColumns.join(",")}`;
+    const existing = this.#ownedEventCarriers.get(cacheKey);
     if (existing) return existing;
-    const carrier = this.#attachOwner(this.#events(domain));
-    this.#ownedEventCarriers.set(domain, carrier);
+    const carrier = this.#attachOwner(this.#events(domain), canonicalColumns);
+    this.#ownedEventCarriers.set(cacheKey, carrier);
     return carrier;
   }
 
   #eventsWithNameAndOwner(
     domain: SourceNode["temporalDomain"],
+    ownerColumns: readonly ("session_id" | "visitor_id")[],
   ): AnalyticsDbRelation {
-    const existing = this.#namedOwnedEventCarriers.get(domain);
+    const canonicalColumns = [...new Set(ownerColumns)].sort();
+    const cacheKey = `${String(domain)}:${canonicalColumns.join(",")}`;
+    const existing = this.#namedOwnedEventCarriers.get(cacheKey);
     if (existing) return existing;
-    const carrier = this.#attachOwner(this.#eventsWithName(domain));
-    this.#namedOwnedEventCarriers.set(domain, carrier);
+    const carrier = this.#attachOwner(
+      this.#eventsWithName(domain),
+      canonicalColumns,
+    );
+    this.#namedOwnedEventCarriers.set(cacheKey, carrier);
     return carrier;
   }
 
-  #candidateObservations(includeIdentity: boolean): AnalyticsDbRelation {
-    const existing = this.#candidateObservationCarriers.get(includeIdentity);
-    if (existing) return existing;
-    const pages = this.#pages("candidate", [
-      "session_id",
-      ...(includeIdentity ? ["visit_id"] : []),
+  #candidateObservations(input: {
+    readonly includeIdentity: boolean;
+    readonly includeSession: boolean;
+    readonly identityAttributes: readonly ObservationIdentityAttribute[];
+  }): AnalyticsDbRelation {
+    const identityAttributes = [
+      ...(input.identityAttributes.includes("observation.sessionId")
+        ? (["observation.sessionId"] as const)
+        : []),
+      ...(input.identityAttributes.includes("observation.visitorId")
+        ? (["observation.visitorId"] as const)
+        : []),
+    ];
+    const cacheKey = JSON.stringify([
+      input.includeIdentity,
+      input.includeSession,
+      identityAttributes,
     ]);
+    const existing = this.#candidateObservationCarriers.get(cacheKey);
+    if (existing) return existing;
+    const ownerIdentityColumns = this.#ownerIdentityColumns(
+      identityAttributes,
+      input.includeSession,
+    );
+    const pageColumns = [
+      ...(input.includeSession ||
+      identityAttributes.includes("observation.sessionId")
+        ? (["session_id"] as const)
+        : []),
+      ...(identityAttributes.includes("observation.visitorId")
+        ? (["visitor_id"] as const)
+        : []),
+      ...(input.includeIdentity ? (["visit_id"] as const) : []),
+    ];
+    const pages = this.#pages("candidate", pageColumns);
     const pageProjections: Record<string, AnyExpression> = {
       site_pk: pages.columns.site_pk,
-      session_site_pk: pages.columns.site_pk,
-      session_id: pages.columns.session_id,
-      session_present: this.#sessionPresent(pages.columns.session_id),
     };
-    if (includeIdentity) {
+    if (input.includeSession) {
+      pageProjections.session_site_pk = pages.columns.site_pk;
+      pageProjections.session_id = pages.columns.session_id;
+      pageProjections.session_present = this.#sessionPresent(
+        pages.columns.session_id,
+      );
+    }
+    if (identityAttributes.includes("observation.sessionId"))
+      pageProjections.raw_session_id = pages.columns.session_id;
+    if (identityAttributes.includes("observation.visitorId"))
+      pageProjections.raw_visitor_id = pages.columns.visitor_id;
+    if (input.includeIdentity) {
       pageProjections.observation_kind = param("page");
       pageProjections.observation_id = pages.columns.visit_id;
     }
     const pageRows = project(pages, pageProjections);
 
-    const events = this.#eventsWithOwner("candidate");
+    const events =
+      ownerIdentityColumns.length > 0
+        ? this.#eventsWithOwner("candidate", ownerIdentityColumns)
+        : this.#attachOwner(this.#events("candidate"), ownerIdentityColumns);
     const eventProjections: Record<string, AnyExpression> = {
       site_pk: events.columns.site_pk,
-      session_site_pk: events.columns.site_pk,
-      session_id: events.columns.owner_session_id,
-      session_present: this.#sessionPresent(events.columns.owner_session_id),
     };
-    if (includeIdentity) {
+    if (input.includeSession) {
+      eventProjections.session_site_pk = events.columns.site_pk;
+      eventProjections.session_id = events.columns.owner_session_id;
+      eventProjections.session_present = this.#sessionPresent(
+        events.columns.owner_session_id,
+      );
+    }
+    if (identityAttributes.includes("observation.sessionId"))
+      eventProjections.raw_session_id = events.columns.owner_session_id;
+    if (identityAttributes.includes("observation.visitorId"))
+      eventProjections.raw_visitor_id = events.columns.owner_visitor_id;
+    if (input.includeIdentity) {
       eventProjections.observation_kind = param("event");
       eventProjections.observation_id = events.columns.event_id;
     }
@@ -615,7 +779,7 @@ export class AnalyticsRelationalStorage {
     // Observation is a bag of activity rows. Keep duplicate projected
     // session keys until an explicit Logical Distinct/Set node removes them.
     const carrier = union(pageRows, eventRows, true);
-    this.#candidateObservationCarriers.set(includeIdentity, carrier);
+    this.#candidateObservationCarriers.set(cacheKey, carrier);
     return carrier;
   }
 
@@ -664,6 +828,40 @@ export class AnalyticsRelationalStorage {
       ExpressionResultType<"text", boolean>
     >;
     return and(isNotNull(typedSessionId), neq(typedSessionId, param("")));
+  }
+
+  #observationIdentityColumn(
+    source: AnalyticsDbRelation,
+    attributeId: ObservationIdentityAttribute,
+    activity: "page" | "event" | "observation",
+    path: string,
+  ): AnyExpression {
+    const attribute = semanticAttribute(attributeId);
+    if (
+      !attribute ||
+      attribute.nativeEntity !== "observation" ||
+      attribute.valueType.kind !== "scalar" ||
+      attribute.valueType.scalar !== "string" ||
+      attribute.nullable
+    )
+      throw new Error(
+        `${path}.values: ${attributeId} no longer has its non-null Observation text contract.`,
+      );
+    const name =
+      attributeId === "observation.sessionId"
+        ? activity === "observation"
+          ? "raw_session_id"
+          : activity === "event"
+            ? "owner_session_id"
+            : "session_id"
+        : activity === "observation"
+          ? "raw_visitor_id"
+          : activity === "event"
+            ? "owner_visitor_id"
+            : "visitor_id";
+    const expression = column(source, name);
+    requireStorageTextColumn(expression, attributeId);
+    return expression;
   }
 
   #sessionValue(

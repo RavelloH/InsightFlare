@@ -153,10 +153,63 @@ export const semanticAttributeCatalog: readonly SemanticAttributeDefinition[] =
       .sort((left, right) => left.id.localeCompare(right.id)),
   );
 
+/** Internal raw identity reads for Observation plans; these are not Filter fields. */
+export const semanticObservationAttributeCatalog: readonly SemanticAttributeDefinition[] =
+  Object.freeze([
+    Object.freeze({
+      id: "observation.sessionId",
+      valueType: Object.freeze({ kind: "scalar", scalar: "string" }),
+      nativeEntity: "observation",
+      observationKinds: Object.freeze(["event", "page"] as const),
+      nullable: false,
+      evaluation: "observation",
+      presence: "non-null",
+      empty: "empty-string-is-value",
+      comparison: "case-sensitive",
+    }),
+    Object.freeze({
+      id: "observation.visitorId",
+      valueType: Object.freeze({ kind: "scalar", scalar: "string" }),
+      nativeEntity: "observation",
+      observationKinds: Object.freeze(["event", "page"] as const),
+      nullable: false,
+      evaluation: "observation",
+      presence: "non-null",
+      empty: "empty-string-is-value",
+      comparison: "case-sensitive",
+    }),
+  ] satisfies readonly SemanticAttributeDefinition[]);
+
+const registeredSemanticAttributeIds = new Set(
+  semanticAttributeCatalog.map((attribute) => attribute.id),
+);
+for (const attribute of semanticObservationAttributeCatalog) {
+  if (registeredSemanticAttributeIds.has(attribute.id))
+    throw new Error(`duplicate_semantic_attribute:${attribute.id}`);
+  registeredSemanticAttributeIds.add(attribute.id);
+  if (
+    attribute.nativeEntity !== "observation" ||
+    attribute.observationKinds.length !== 2 ||
+    !attribute.observationKinds.includes("page") ||
+    !attribute.observationKinds.includes("event") ||
+    attribute.valueType.kind !== "scalar" ||
+    attribute.valueType.scalar !== "string" ||
+    attribute.nullable ||
+    attribute.evaluation !== "observation" ||
+    attribute.presence !== "non-null" ||
+    attribute.empty !== "empty-string-is-value" ||
+    attribute.comparison !== "case-sensitive"
+  )
+    throw new Error(`invalid_observation_attribute_contract:${attribute.id}`);
+}
+
 export function semanticAttribute(
   id: SemanticAttributeId,
 ): SemanticAttributeDefinition | undefined {
-  return semanticAttributeCatalog.find((attribute) => attribute.id === id);
+  return (
+    semanticAttributeCatalog.find((attribute) => attribute.id === id) ??
+    semanticObservationAttributeCatalog.find((attribute) => attribute.id === id)
+  );
 }
 
 export function isObservationKind(value: unknown): value is ObservationKind {

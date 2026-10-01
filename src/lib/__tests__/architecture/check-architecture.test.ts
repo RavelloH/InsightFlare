@@ -260,6 +260,84 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("keeps journey target presence typed and its semantic plan storage-free", () => {
+    const root = fixture();
+    const writeSource = (relativePath: string, lines: readonly string[]) => {
+      const absolutePath = path.join(root, relativePath);
+      mkdirSync(path.dirname(absolutePath), { recursive: true });
+      writeFileSync(absolutePath, `${lines.join("\n")}\n`);
+    };
+    const journeyPath =
+      "src/lib/edge/analytics/providers/d1/internal/journey-list-queries.ts";
+    const adapterPath =
+      "src/lib/edge/analytics/providers/d1/internal/core-sources.ts";
+    const planPath =
+      "src/lib/edge/analytics/engine/journey-target-presence-plan.ts";
+
+    writeSource(journeyPath, [
+      "export async function queryJourneyTargetExistsFromD1(env, siteId) {",
+      "  const plan = buildJourneyTargetPresencePlan(siteId);",
+      "  return queryD1CompiledAll(env, compileD1Query(lower(plan)));",
+      "}",
+    ]);
+    writeSource(adapterPath, [
+      "export async function queryD1CompiledAll(env, query) {",
+      "  return createD1DatabaseClient(env.DB).all(query);",
+      "}",
+    ]);
+    writeSource(planPath, [
+      "export function buildJourneyTargetPresencePlan(input) {",
+      "  return new LogicalPlanBuilder(input);",
+      "}",
+    ]);
+    expect(collectArchitectureViolations(root)).toEqual([]);
+
+    writeSource(journeyPath, [
+      "export async function queryJourneyTargetExistsFromD1(env) {",
+      '  return queryD1All(env.DB, "SELECT * FROM visits", []);',
+      "}",
+    ]);
+    writeSource(adapterPath, [
+      "export async function queryD1CompiledAll(env, query) {",
+      '  return queryD1All(env.DB, "SELECT 1", []);',
+      "}",
+    ]);
+    writeSource(planPath, [
+      "export function buildJourneyTargetPresencePlan(input) {",
+      '  return "visits";',
+      "}",
+    ]);
+
+    expect(
+      collectArchitectureViolations(root).map(
+        ({ rule, source, specifier }) => ({ rule, source, specifier }),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          rule: "typed-query-function-forbidden",
+          source: journeyPath,
+          specifier: "queryD1All",
+        },
+        {
+          rule: "typed-query-function-forbidden",
+          source: journeyPath,
+          specifier: "raw-sql",
+        },
+        {
+          rule: "typed-query-function-forbidden",
+          source: adapterPath,
+          specifier: "queryD1All",
+        },
+        {
+          rule: "analytics-semantic-plan-storage-forbidden",
+          source: planPath,
+          specifier: "visits",
+        },
+      ]),
+    );
+  });
+
   it("keeps the typed query guard scoped to migrated funnel definitions", () => {
     const root = fixture();
     const sourcePath = path.join(

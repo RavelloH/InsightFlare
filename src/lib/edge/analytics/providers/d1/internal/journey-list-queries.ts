@@ -1,10 +1,13 @@
+import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
 import {
   createScopedFilterPlan,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   type FunnelConfigV2,
 } from "@/lib/edge/analytics/contract";
-import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
+import { buildJourneyTargetPresencePlan } from "@/lib/edge/analytics/engine/journey-target-presence-plan";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import { currentD1Operation } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 import { pageResult } from "@/lib/pagination";
 
@@ -26,6 +29,7 @@ import {
   DEFAULT_VISITOR_LIST_SORT,
   eventSourceBindings,
   queryD1All,
+  queryD1CompiledAll,
   visitSourceBindings,
 } from "./core";
 import { buildFunnelMembershipSqlPlan } from "./funnel-planner";
@@ -351,37 +355,26 @@ export async function queryJourneyTargetExistsFromD1(
   target: { readonly type: "visitor" | "session"; readonly value: string },
   window: QueryWindow,
 ): Promise<boolean> {
-  const rows = await queryD1All<{ present: number }>(
-    env,
-    `
-WITH entity_universe AS (
-  SELECT ${target.type === "visitor" ? "visitor_id" : "session_id"} AS entity_id
-  FROM visits
-  WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-    AND started_at >= ? AND started_at < ?
-  UNION
-  SELECT v.${target.type === "visitor" ? "visitor_id" : "session_id"} AS entity_id
-  FROM custom_events ce
-  INNER JOIN visits v
-    ON v.site_pk = ce.site_pk AND v.visit_id = ce.visit_id
-  WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
-    AND ce.occurred_at >= ? AND ce.occurred_at < ?
-)
-SELECT 1 AS present
-FROM entity_universe
-WHERE entity_id = ?
-LIMIT 1
-`,
-    [
-      siteId,
-      window.startMs,
-      window.endExclusiveMs,
-      siteId,
-      window.startMs,
-      window.endExclusiveMs,
-      target.value,
-    ],
-  );
+  const logicalPlan = buildJourneyTargetPresencePlan({
+    siteId,
+    target,
+    window,
+  });
+  const output = logicalPlan.outputs[0];
+  if (!output || output.fields.length !== 1)
+    throw new Error("journey_target_presence_output_invalid");
+  const lowerer = new AnalyticsLogicalToDbLowerer(logicalPlan, {
+    siteId,
+    time: logicalPlan.context.time,
+  });
+  const lowered = lowerer.lower(output);
+  const relation = lowerer.projectOutput(lowered, [
+    { name: "present", slot: output.fields[0]!.slot },
+  ]);
+  const query = compileD1Query(lowerLogicalPlan(relation), {
+    tag: currentD1Operation() ?? "analytics.query.all",
+  });
+  const rows = await queryD1CompiledAll(env, query);
   return rows.length > 0;
 }
 function visitorCursorFromRow(

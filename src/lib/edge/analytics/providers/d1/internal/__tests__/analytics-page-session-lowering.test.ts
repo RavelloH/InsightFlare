@@ -668,41 +668,36 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
     }
   });
 
-  it("rejects sorted and limited logical outputs before emitting SQL", () => {
-    for (const kind of ["sort", "limit"] as const) {
-      const context = {
-        subject: createSemanticSubjectDomain({
-          origin: "site",
-          siteIds: [SITE_A as never],
-        }),
-        time: createSemanticTemporalDomains({
-          candidate: CANDIDATE_RANGE as never,
-          read: { kind: "bounded", range: READ_RANGE as never },
-          reportingTimeZone: "UTC" as never,
-          capturedAtMs: 200 as never,
-        }),
-        scope: resolveAnalyticsScope("session"),
-      };
-      const builder = new LogicalPlanBuilder(context);
-      const pages = builder.source("page", {
-        temporalDomain: "read",
-        attributes: ["page.path"],
-      });
-      const output =
-        kind === "sort"
-          ? builder.sort(pages, [
-              { slot: "attribute:page.path", direction: "asc", nulls: "last" },
-            ])
-          : builder.limit(pages, 1);
-      builder.output("unsupported", output, [{ name: "page", slot: "entity" }]);
-      const plan = builder.finish();
-      expect(() =>
-        new AnalyticsLogicalToDbLowerer(plan, {
-          siteId: SITE_A,
-          time: plan.context.time,
-        }).lower(plan.outputs[0]!),
-      ).toThrow(`Logical ${kind} is outside the current D1 capability set.`);
-    }
+  it("rejects sorted logical outputs before emitting SQL", () => {
+    const context = {
+      subject: createSemanticSubjectDomain({
+        origin: "site",
+        siteIds: [SITE_A as never],
+      }),
+      time: createSemanticTemporalDomains({
+        candidate: CANDIDATE_RANGE as never,
+        read: { kind: "bounded", range: READ_RANGE as never },
+        reportingTimeZone: "UTC" as never,
+        capturedAtMs: 200 as never,
+      }),
+      scope: resolveAnalyticsScope("session"),
+    };
+    const builder = new LogicalPlanBuilder(context);
+    const pages = builder.source("page", {
+      temporalDomain: "read",
+      attributes: ["page.path"],
+    });
+    const output = builder.sort(pages, [
+      { slot: "attribute:page.path", direction: "asc", nulls: "last" },
+    ]);
+    builder.output("unsupported", output, [{ name: "page", slot: "entity" }]);
+    const plan = builder.finish();
+    expect(() =>
+      new AnalyticsLogicalToDbLowerer(plan, {
+        siteId: SITE_A,
+        time: plan.context.time,
+      }).lower(plan.outputs[0]!),
+    ).toThrow("Logical sort is outside the current D1 capability set.");
   });
 
   it("rejects inconsistent slot metadata and malformed predicates at the DB lowering boundary", () => {
@@ -3688,7 +3683,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         { leafCount: 12, kind: "supported" },
       ]);
       expect(boundaryCosts[0]).toMatchObject({
-        sqlBytes: 49_629,
+        sqlBytes: 49_493,
         bindings: 54,
         cteCount: 12,
         explain: {
@@ -3699,7 +3694,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         },
       });
       expect(boundaryCosts[1]).toMatchObject({
-        sqlBytes: 67_403,
+        sqlBytes: 67_267,
         bindings: 74,
         cteCount: 16,
         explain: {
@@ -3715,7 +3710,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         and: {
           statements: 1,
           bindings: 21,
-          sqlBytes: 20_574,
+          sqlBytes: 20_438,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3723,7 +3718,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         or: {
           statements: 1,
           bindings: 17,
-          sqlBytes: 16_145,
+          sqlBytes: 16_009,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3731,7 +3726,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         not: {
           statements: 1,
           bindings: 16,
-          sqlBytes: 16_765,
+          sqlBytes: 16_629,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3739,7 +3734,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         "nested-and-not": {
           statements: 1,
           bindings: 21,
-          sqlBytes: 21_104,
+          sqlBytes: 20_968,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3747,7 +3742,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         "or-set-operation": {
           statements: 1,
           bindings: 21,
-          sqlBytes: 20_927,
+          sqlBytes: 20_791,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3756,7 +3751,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       expect(costs["six-leaf-mixed"]).toMatchObject({
         statements: 1,
         bindings: 44,
-        sqlBytes: 41_187,
+        sqlBytes: 41_051,
         cteCount: 10,
         explain: {
           pageRangeIndexSearches: 4,
@@ -4319,7 +4314,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       expect(observedCosts["event-only"]).toMatchObject({
         statements: 1,
         bindings: 16,
-        sqlLength: 13_940,
+        sqlLength: 13_804,
         explain: {
           eventTimeRangeSearches: 2,
           integerPrimaryKeyLookups: 3,

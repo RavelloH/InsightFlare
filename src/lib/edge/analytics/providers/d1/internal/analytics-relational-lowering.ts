@@ -14,6 +14,7 @@ import {
   isNotNull,
   isNull,
   join,
+  limit as limitRelation,
   lt,
   lte,
   neq,
@@ -256,6 +257,16 @@ function projectedValues(
     Object.assign(projections, projected.projections);
     layouts.set(slot, projected.layout);
   });
+  if (values.length === 0) {
+    const relation: AnalyticsDbRelation = project(input, {
+      __analytics_row: param(1),
+    });
+    return {
+      relation,
+      slots: layouts,
+      candidateActivitySessionRestricted: false,
+    };
+  }
   const relation: AnalyticsDbRelation = project(input, projections);
   return {
     relation,
@@ -858,11 +869,19 @@ export class AnalyticsLogicalToDbLowerer {
         result = this.#lowerJoin(node, path);
         break;
       case "sort":
-      case "limit":
         reject(
           path,
           `Logical ${node.kind} is outside the current D1 capability set.`,
         );
+        break;
+      case "limit": {
+        const input = this.#lowerNode(node.input);
+        result = {
+          ...input,
+          relation: limitRelation(input.relation, node.count),
+        };
+        break;
+      }
     }
     this.#memo.set(id, result);
     return result;
@@ -1625,11 +1644,16 @@ export class AnalyticsLogicalToDbLowerer {
       case "set-operation":
       case "join":
       case "sort":
-      case "limit":
         // The supported aggregates/joins expose scalars, and set operations
-        // expose Session keys. Sort/Limit cannot be lowered yet. None can
+        // expose Session keys. Sort cannot be lowered yet. None can
         // supply a storage-backed Observation identity in this capability set.
         return false;
+      case "limit":
+        return this.#hasStorageBackedObservationIdentity(
+          node.input,
+          slot,
+          nextActive,
+        );
       case "relationship-lookup":
         return (
           slot !== node.relatedSlot &&
@@ -1867,7 +1891,10 @@ export class AnalyticsLogicalToDbLowerer {
             ]);
             break;
           case "limit":
-            add(node.input, node.output);
+            add(
+              node.input,
+              node.output.filter((slot) => needed.has(slot)),
+            );
             break;
         }
       }
@@ -1875,20 +1902,24 @@ export class AnalyticsLogicalToDbLowerer {
   }
 
   #addRequiredSlots(relation: RelationId, slots: readonly SlotId[]): boolean {
-    const required = this.#requiredSlots.get(relation) ?? new Set<SlotId>();
     let changed = false;
+    let required = this.#requiredSlots.get(relation);
+    if (!required) {
+      required = new Set<SlotId>();
+      this.#requiredSlots.set(relation, required);
+      changed = true;
+    }
     for (const slot of slots) {
       if (required.has(slot)) continue;
       required.add(slot);
       changed = true;
     }
-    this.#requiredSlots.set(relation, required);
     return changed;
   }
 
   #requiredOutput(node: LogicalNode): ReadonlySet<SlotId> {
     const required = this.#requiredSlots.get(node.id);
-    return required && required.size > 0 ? required : new Set(node.output);
+    return required ?? new Set(node.output);
   }
 
   #expressionSlots(expression: LogicalExpr): readonly SlotId[] {

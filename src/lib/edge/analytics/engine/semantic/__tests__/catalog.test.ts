@@ -4,6 +4,7 @@ import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
 import {
   semanticAttribute,
   semanticAttributeCatalog,
+  semanticObservationAttributeCatalog,
 } from "@/lib/edge/analytics/engine/semantic/attributes";
 import { validateSemanticCatalog } from "@/lib/edge/analytics/engine/semantic/catalog";
 import {
@@ -71,6 +72,31 @@ describe("semantic attribute and dimension catalogs", () => {
     for (const id of ANALYTICS_DIMENSIONS) {
       expect(semanticDimension(id)).toEqual({ id, attribute: id });
       expect(semanticAttribute(id)).toBeDefined();
+    }
+  });
+
+  it("keeps raw Observation identities internal to semantic plans", () => {
+    expect(semanticAttributeCatalog).toHaveLength(analyticsFilterRegistry.size);
+    expect(semanticObservationAttributeCatalog.map(({ id }) => id)).toEqual([
+      "observation.sessionId",
+      "observation.visitorId",
+    ]);
+    for (const id of [
+      "observation.sessionId",
+      "observation.visitorId",
+    ] as const) {
+      expect(analyticsFilterRegistry.has(id)).toBe(false);
+      expect(semanticAttribute(id)).toMatchObject({
+        id,
+        nativeEntity: "observation",
+        observationKinds: ["event", "page"],
+        valueType: { kind: "scalar", scalar: "string" },
+        nullable: false,
+        evaluation: "observation",
+        presence: "non-null",
+        empty: "empty-string-is-value",
+        comparison: "case-sensitive",
+      });
     }
   });
 });
