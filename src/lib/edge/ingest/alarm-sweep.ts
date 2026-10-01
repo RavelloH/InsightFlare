@@ -1,4 +1,11 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Query,
+  createD1DatabaseClient,
+  project,
+  scan,
+  schema,
+  sort,
+} from "@/lib/db";
 import {
   errorLogData,
   type InvocationLogger,
@@ -6,7 +13,7 @@ import {
 import type { Env } from "@/lib/edge/types";
 const SWEEP_PARALLELISM = 8;
 interface SiteRow {
-  id: string;
+  id: string | null;
 }
 /**
  * Wake every site DO so previously stranded due work can re-enter the normal
@@ -19,10 +26,14 @@ export async function sweepIngestAlarms(
 ): Promise<void> {
   let sites: SiteRow[];
   try {
-    const result = await createDatabaseRuntime(env.DB).all<SiteRow>({
-      sql: "SELECT id FROM sites ORDER BY created_at ASC",
-      tag: "ingest.alarm_sweep.sites",
-    });
+    const siteTable = scan(schema.sites);
+    const ordered = sort(siteTable, [
+      { expression: siteTable.columns.created_at, direction: "ASC" },
+    ]);
+    const query = project(ordered, { id: ordered.columns.id });
+    const result = await createD1DatabaseClient(env.DB).all(
+      compileD1Query(query, { tag: "ingest.alarm_sweep.sites" }),
+    );
     sites = result.results;
   } catch (error) {
     logger.error("scheduled.ingest_alarm_sweep_failed", errorLogData(error));

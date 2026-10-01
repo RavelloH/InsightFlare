@@ -1,4 +1,11 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Mutation,
+  compileD1Query,
+  createD1DatabaseClient,
+  insertOrIgnore,
+  project,
+  schema,
+} from "@/lib/db";
 import type {
   TrafficSessionEndedInput,
   TrafficVisitFinalizedInput,
@@ -7,6 +14,7 @@ import type {
   InvocationLogger,
   InvocationPerformanceCounter,
 } from "@/lib/edge/observability/logger";
+import { sitePkRelationForSiteId } from "@/lib/edge/sites/identity-query";
 import type { Env } from "@/lib/edge/types";
 
 import type { RealtimeSnapshotRecord } from "./normalize";
@@ -48,32 +56,27 @@ export async function resolveSitePk(
   const cached = context.sitePks.get(siteId);
   if (cached !== undefined) return cached;
 
-  const existing = await createDatabaseRuntime(context.env.DB).first<{
-    sitePk: number;
-  }>({
-    sql: `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
-    bindings: [siteId],
-    tag: "ingest.site_identities.first",
-  });
+  const client = createD1DatabaseClient(context.env.DB);
+  const identity = sitePkRelationForSiteId(siteId);
+  const identityQuery = () =>
+    compileD1Query(project(identity, { sitePk: identity.columns.site_pk }), {
+      tag: "ingest.site_identities.first",
+    });
+  const existing = await client.first(identityQuery());
   const existingPk = Number(existing?.sitePk ?? 0);
   if (Number.isSafeInteger(existingPk) && existingPk > 0) {
     context.sitePks.set(siteId, existingPk);
     return existingPk;
   }
 
-  await createDatabaseRuntime(context.env.DB).run({
-    sql: `INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)`,
-    bindings: [siteId],
-    tag: "ingest.site_identities.insert",
-  });
+  await client.run(
+    compileD1Mutation(
+      insertOrIgnore(schema.site_identities, { site_id: siteId }),
+      { tag: "ingest.site_identities.insert" },
+    ),
+  );
 
-  const created = await createDatabaseRuntime(context.env.DB).first<{
-    sitePk: number;
-  }>({
-    sql: `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
-    bindings: [siteId],
-    tag: "ingest.site_identities.first",
-  });
+  const created = await client.first(identityQuery());
   const sitePk = Number(created?.sitePk ?? 0);
   if (!Number.isSafeInteger(sitePk) || sitePk <= 0) {
     throw new Error(`Failed to resolve site identity for ${siteId}`);

@@ -179,6 +179,77 @@ describe("architecture checker", () => {
     ]);
   });
 
+  it("guards only the migrated query function bodies against legacy access", () => {
+    const root = fixture();
+    const sourcePath = path.join(
+      root,
+      "src/lib/edge/analytics/providers/d1/internal/goals.ts",
+    );
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(
+      sourcePath,
+      [
+        'import { queryD1All as legacyQuery } from "legacy-module";',
+        "export async function queryGoalDefinition() {",
+        '  return legacyQuery("SELECT 1", []);',
+        "}",
+        "export async function queryGoalDefinitionsPage() { return []; }",
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root).filter(
+        ({ rule }) => rule === "typed-query-function-forbidden",
+      ),
+    ).toMatchObject([
+      {
+        source: "src/lib/edge/analytics/providers/d1/internal/goals.ts",
+        specifier: "legacyQuery",
+      },
+      {
+        source: "src/lib/edge/analytics/providers/d1/internal/goals.ts",
+        specifier: "raw-sql",
+      },
+    ]);
+  });
+
+  it("keeps the typed query guard scoped to migrated funnel definitions", () => {
+    const root = fixture();
+    const sourcePath = path.join(
+      root,
+      "src/lib/edge/analytics/providers/d1/internal/funnels.ts",
+    );
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(
+      sourcePath,
+      [
+        "export async function queryFunnelAnalysis() {",
+        '  return queryD1All("SELECT 1", []);',
+        "}",
+        "export async function queryFunnelDefinitionsPage() {",
+        '  return queryD1All("SELECT 1", []);',
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root).filter(
+        ({ rule }) => rule === "typed-query-function-forbidden",
+      ),
+    ).toMatchObject([
+      {
+        source: "src/lib/edge/analytics/providers/d1/internal/funnels.ts",
+        specifier: "queryD1All",
+      },
+      {
+        source: "src/lib/edge/analytics/providers/d1/internal/funnels.ts",
+        specifier: "raw-sql",
+      },
+    ]);
+  });
+
   it("keeps Analytics contracts and shared domains out of runtime modules", () => {
     const root = fixture();
     const files: Record<string, string> = {

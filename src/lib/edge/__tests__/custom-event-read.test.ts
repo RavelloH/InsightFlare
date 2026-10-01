@@ -136,8 +136,8 @@ describe("custom event read helpers", () => {
     await expect(
       readCustomEventVisitId(env, "site-1", "missing"),
     ).resolves.toBe(null);
-    expect(hit.bind).toHaveBeenCalledWith("site-1", "event-1");
-    expect(miss.bind).toHaveBeenCalledWith("site-1", "missing");
+    expect(hit.bind).toHaveBeenCalledWith("site-1", "event-1", 1);
+    expect(miss.bind).toHaveBeenCalledWith("site-1", "missing", 1);
   });
 
   it("returns null when a custom event detail row is absent", async () => {
@@ -148,7 +148,7 @@ describe("custom event read helpers", () => {
       null,
     );
     expect(prepare).toHaveBeenCalledTimes(1);
-    expect(detailStatement.bind).toHaveBeenCalledWith("site-1", "missing");
+    expect(detailStatement.bind).toHaveBeenCalledWith("site-1", "missing", 1);
   });
 
   it("rebuilds custom event detail JSON from node rows", async () => {

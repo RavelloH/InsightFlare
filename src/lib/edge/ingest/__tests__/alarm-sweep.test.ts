@@ -21,13 +21,15 @@ function createEnv(
   let responseIndex = 0;
   const fetch = vi.fn(async () => responses[responseIndex++]);
   const get = vi.fn(() => ({ fetch }));
+  const prepared = {
+    bind: vi.fn(() => prepared),
+    all: vi.fn(async () => ({
+      results: siteIds.map((id) => ({ id })),
+    })),
+  };
   const env = {
     DB: {
-      prepare: vi.fn(() => ({
-        all: vi.fn(async () => ({
-          results: siteIds.map((id) => ({ id })),
-        })),
-      })),
+      prepare: vi.fn(() => prepared),
     },
     INGEST_DO: {
       idFromName: vi.fn((siteId: string) => siteId),

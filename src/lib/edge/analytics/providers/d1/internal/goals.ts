@@ -1,4 +1,8 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Mutation,
+  compileD1Query,
+  createD1DatabaseClient,
+} from "@/lib/db";
 import type { GoalDefinition } from "@/lib/edge/analytics/contract/goal";
 import {
   decodeGoalConfig,
@@ -9,7 +13,13 @@ import {
 } from "@/lib/edge/analytics/contract/goal-config";
 import type { Env } from "@/lib/edge/types";
 
-import { queryD1All } from "./core";
+import {
+  analysisDefinitionByIdQuery,
+  analysisDefinitionsPageQuery,
+  archiveAnalysisDefinition,
+  insertAnalysisDefinition,
+  updateAnalysisDefinition,
+} from "./analysis-definition-queries";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -65,25 +75,18 @@ export async function queryGoalDefinitionsPage(
   limit: number,
   cursor?: GoalDefinitionCursor | null,
 ) {
-  const cursorClause = cursor
-    ? "AND (created_at < ? OR (created_at = ? AND id < ?))"
-    : "";
-  const rows = await queryD1All<Record<string, unknown>>(
-    env,
-    `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
-     FROM analysis_definitions
-     WHERE site_id = ? AND kind = ? AND archived_at IS NULL
-     ${cursorClause}
-     ORDER BY created_at DESC, id DESC
-     LIMIT ?`,
-    [
-      siteId,
-      GOAL_ANALYSIS_KIND,
-      ...(cursor ? [cursor.createdAt, cursor.createdAt, cursor.id] : []),
-      limit + 1,
-    ],
+  const result = await createD1DatabaseClient(env.DB).all(
+    compileD1Query(
+      analysisDefinitionsPageQuery({
+        kind: GOAL_ANALYSIS_KIND,
+        siteId,
+        limit: limit + 1,
+        cursor,
+      }),
+      { tag: "analytics.goals.page" },
+    ),
   );
-  const mapped = await Promise.all(rows.map(mapGoalDefinition));
+  const mapped = await Promise.all(result.results.map(mapGoalDefinition));
   const page = pageResult(mapped, limit);
   const nextCursor =
     page.hasMore && page.last
@@ -120,12 +123,18 @@ export async function queryGoalDefinition(
   siteId: string,
   goalId: string,
 ): Promise<GoalDefinition | null> {
-  const rows = await queryD1All<Record<string, unknown>>(
-    env,
-    "SELECT id, site_id, name, config_json, config_version, created_at, updated_at FROM analysis_definitions WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL LIMIT 1",
-    [goalId, siteId, GOAL_ANALYSIS_KIND],
+  const result = await createD1DatabaseClient(env.DB).all(
+    compileD1Query(
+      analysisDefinitionByIdQuery({
+        kind: GOAL_ANALYSIS_KIND,
+        siteId,
+        id: goalId,
+      }),
+      { tag: "analytics.goals.detail" },
+    ),
   );
-  return rows[0] ? mapGoalDefinition(rows[0]) : null;
+  const row = result.results[0];
+  return row ? mapGoalDefinition(row) : null;
 }
 export async function createGoalDefinition(
   env: Env,
@@ -137,20 +146,20 @@ export async function createGoalDefinition(
   const encoded = encodeGoalConfig(config);
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1_000);
-  await createDatabaseRuntime(env.DB).run({
-    sql: "INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    bindings: [
-      id,
-      siteId,
-      GOAL_ANALYSIS_KIND,
-      name,
-      encoded.configJson,
-      encoded.configVersion,
-      now,
-      now,
-    ],
-    tag: "analytics.goals.insert",
-  });
+  await createD1DatabaseClient(env.DB).run(
+    compileD1Mutation(
+      insertAnalysisDefinition({
+        id,
+        siteId,
+        kind: GOAL_ANALYSIS_KIND,
+        name,
+        configJson: encoded.configJson,
+        configVersion: encoded.configVersion,
+        timestamp: now,
+      }),
+      { tag: "analytics.goals.insert" },
+    ),
+  );
   const goal = await queryGoalDefinition(env, siteId, id);
   if (!goal) throw new Error("goal_create_readback_failed");
   return goal;
@@ -165,19 +174,20 @@ export async function updateGoalDefinition(
   validateGoalConfigForWrite(config);
   const encoded = encodeGoalConfig(config);
   const now = Math.floor(Date.now() / 1_000);
-  await createDatabaseRuntime(env.DB).run({
-    sql: "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind=? AND archived_at IS NULL",
-    bindings: [
-      name,
-      encoded.configJson,
-      encoded.configVersion,
-      now,
-      goalId,
-      siteId,
-      GOAL_ANALYSIS_KIND,
-    ],
-    tag: "analytics.goals.update",
-  });
+  await createD1DatabaseClient(env.DB).run(
+    compileD1Mutation(
+      updateAnalysisDefinition({
+        kind: GOAL_ANALYSIS_KIND,
+        siteId,
+        id: goalId,
+        name,
+        configJson: encoded.configJson,
+        configVersion: encoded.configVersion,
+        timestamp: now,
+      }),
+      { tag: "analytics.goals.update" },
+    ),
+  );
   const goal = await queryGoalDefinition(env, siteId, goalId);
   if (!goal) throw new Error("goal_update_readback_failed");
   return goal;
@@ -188,9 +198,15 @@ export async function archiveGoalDefinition(
   goalId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1_000);
-  await createDatabaseRuntime(env.DB).run({
-    sql: "UPDATE analysis_definitions SET archived_at = ?, updated_at = ? WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL",
-    bindings: [now, now, goalId, siteId, GOAL_ANALYSIS_KIND],
-    tag: "analytics.goals.archive",
-  });
+  await createD1DatabaseClient(env.DB).run(
+    compileD1Mutation(
+      archiveAnalysisDefinition({
+        kind: GOAL_ANALYSIS_KIND,
+        siteId,
+        id: goalId,
+        timestamp: now,
+      }),
+      { tag: "analytics.goals.archive" },
+    ),
+  );
 }

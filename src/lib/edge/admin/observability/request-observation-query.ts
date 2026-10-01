@@ -6,7 +6,15 @@ import {
   type AnalyticsEngineConfig,
   redactAnalyticsEngineConfig,
 } from "@/lib/analytics-engine-config";
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Query,
+  createD1DatabaseClient,
+  filter,
+  inList,
+  project,
+  scan,
+  schema,
+} from "@/lib/db";
 import { forb } from "@/lib/edge/admin/response";
 import { analyticsEngineAvailability } from "@/lib/edge/analytics-engine/config";
 import {
@@ -305,18 +313,19 @@ export async function siteLookupByIds(env: Env, ids: string[]) {
   if (ids.length === 0)
     return new Map<string, { name: string; domain: string }>();
   const sites = new Map<string, { name: string; domain: string }>();
+  const client = createD1DatabaseClient(env.DB);
   for (let index = 0; index < ids.length; index += MAX_SITE_IDS_PER_D1_QUERY) {
     const chunk = ids.slice(index, index + MAX_SITE_IDS_PER_D1_QUERY);
-    const placeholders = chunk.map(() => "?").join(",");
-    const rows = await createDatabaseRuntime(env.DB).all<{
-      id: string;
-      name: string;
-      domain: string;
-    }>({
-      sql: `SELECT id, name, domain FROM sites WHERE id IN (${placeholders})`,
-      bindings: [...chunk],
-      tag: "admin.sites.all",
+    const siteRows = scan(schema.sites);
+    const matching = filter(siteRows, inList(siteRows.columns.id, chunk));
+    const query = project(matching, {
+      id: matching.columns.id,
+      name: matching.columns.name,
+      domain: matching.columns.domain,
     });
+    const rows = await client.all(
+      compileD1Query(query, { tag: "admin.sites.all" }),
+    );
     for (const row of rows.results) {
       sites.set(String(row.id || ""), {
         name: String(row.name || ""),

@@ -144,8 +144,10 @@ describe("funnel v2 query handler", () => {
     );
     expect(update.status).toBe(200);
     expect(
-      calls.some((call) =>
-        call.sql.startsWith("UPDATE analysis_definitions SET name"),
+      calls.some(
+        (call) =>
+          call.sql.includes('UPDATE "analysis_definitions"') &&
+          call.sql.includes('SET "name" = ?'),
       ),
     ).toBe(true);
   });

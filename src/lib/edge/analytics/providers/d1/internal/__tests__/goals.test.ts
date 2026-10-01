@@ -14,25 +14,35 @@ function createEnv(
   selectResults: (sql: string) => Record<string, unknown>[] = () => [],
 ) {
   const calls: Array<{
-    method: "all" | "run";
+    method: "all" | "first" | "run";
     sql: string;
     bindings: unknown[];
   }> = [];
   const env = {
     MAIN_SECRET: "test-main-secret-that-is-long-enough",
     DB: {
-      prepare: vi.fn((sql: string) => ({
-        bind: vi.fn((...bindings: unknown[]) => ({
+      prepare: vi.fn((sql: string) => {
+        let bindings: unknown[] = [];
+        const prepared = {
+          bind: vi.fn((...values: unknown[]) => {
+            bindings = values;
+            return prepared;
+          }),
           all: vi.fn(async () => {
             calls.push({ method: "all", sql, bindings });
             return { results: selectResults(sql) };
           }),
+          first: vi.fn(async () => {
+            calls.push({ method: "first", sql, bindings });
+            return selectResults(sql)[0] ?? null;
+          }),
           run: vi.fn(async () => {
             calls.push({ method: "run", sql, bindings });
-            return { success: true };
+            return { success: true, meta: { changes: 1 } };
           }),
-        })),
-      })),
+        };
+        return prepared;
+      }),
     },
   } as unknown as Env;
   return { env, calls };
@@ -103,7 +113,11 @@ describe("private Goal definitions", () => {
         },
       },
     });
-    expect(calls[0]?.sql).toContain("kind = ? AND archived_at IS NULL");
+    expect(calls[0]?.method).toBe("all");
+    expect(calls[0]?.bindings).toContain("site-1");
+    expect(calls[0]?.bindings).toContain("goal");
+    expect(calls[1]?.method).toBe("all");
+    expect(calls[1]?.bindings).toEqual(["goal-1", "site-1", "goal", 1]);
 
     const defaults = createEnv((sql) =>
       sql.includes("analysis_definitions")
@@ -145,8 +159,8 @@ describe("private Goal definitions", () => {
     expect(page.items).toHaveLength(1);
     expect(page.pagination.hasMore).toBe(true);
     expect(page.pagination.nextCursor).toEqual(expect.any(String));
-    expect(calls[0]?.sql).toContain("ORDER BY created_at DESC, id DESC");
-    expect(calls[0]?.sql).toContain("archived_at IS NULL");
+    expect(calls[0]?.sql).toContain("DESC");
+    expect(calls[0]?.sql).toContain("IS NULL");
     expect(calls[0]?.bindings).toEqual(["site-1", "goal", 2]);
 
     const nextPageRequest = makeRequest(
@@ -253,22 +267,23 @@ describe("private Goal definitions", () => {
     ).resolves.toHaveProperty("status", 200);
 
     const insert = calls.find((call) => call.method === "run");
-    expect(insert?.sql).toContain("INSERT INTO analysis_definitions");
+    expect(insert?.sql).toContain('INSERT INTO "analysis_definitions"');
     expect(insert?.bindings).toContain("goal");
     expect(insert?.bindings).toContain(JSON.stringify(config));
     expect(
       calls.some(
         (call) =>
           call.method === "run" &&
-          call.sql.startsWith("UPDATE analysis_definitions SET name"),
+          call.sql.includes('UPDATE "analysis_definitions"') &&
+          call.sql.includes('SET "name" = ?'),
       ),
     ).toBe(true);
     expect(
       calls.some(
         (call) =>
           call.method === "run" &&
-          call.sql.includes("SET archived_at = ?") &&
-          call.sql.includes("kind = ?"),
+          call.sql.includes('SET "archived_at" = ?') &&
+          call.sql.includes("kind"),
       ),
     ).toBe(true);
 

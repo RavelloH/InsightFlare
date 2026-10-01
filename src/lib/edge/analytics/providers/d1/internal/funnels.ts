@@ -1,4 +1,8 @@
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Mutation,
+  compileD1Query,
+  createD1DatabaseClient,
+} from "@/lib/db";
 import type { QueryWindow } from "@/lib/edge/analytics/contract";
 import {
   createScopedFilterPlan,
@@ -14,6 +18,13 @@ import {
 } from "@/lib/edge/analytics/contract/funnel-config";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  analysisDefinitionByIdQuery,
+  analysisDefinitionsPageQuery,
+  archiveAnalysisDefinition,
+  insertAnalysisDefinition,
+  updateAnalysisDefinition,
+} from "./analysis-definition-queries";
 import { queryD1All } from "./core";
 import { encodeD1FunnelConfig } from "./funnel-config-validation";
 import { buildFunnelSqlPlan } from "./funnel-planner";
@@ -77,25 +88,18 @@ export async function queryFunnelDefinitionsPage(
   limit: number,
   cursor?: FunnelDefinitionCursor | null,
 ) {
-  const cursorClause = cursor
-    ? "AND (created_at < ? OR (created_at = ? AND id < ?))"
-    : "";
-  const rows = await queryD1All<Record<string, unknown>>(
-    env,
-    `SELECT id, site_id, name, config_json, config_version, created_at, updated_at
-     FROM analysis_definitions
-     WHERE site_id = ? AND kind = ? AND archived_at IS NULL
-     ${cursorClause}
-     ORDER BY created_at DESC, id DESC
-     LIMIT ?`,
-    [
-      siteId,
-      FUNNEL_ANALYSIS_KIND,
-      ...(cursor ? [cursor.createdAt, cursor.createdAt, cursor.id] : []),
-      limit + 1,
-    ],
+  const result = await createD1DatabaseClient(env.DB).all(
+    compileD1Query(
+      analysisDefinitionsPageQuery({
+        kind: FUNNEL_ANALYSIS_KIND,
+        siteId,
+        limit: limit + 1,
+        cursor,
+      }),
+      { tag: "analytics.funnels.page" },
+    ),
   );
-  const mapped = await Promise.all(rows.map(mapFunnelDefinition));
+  const mapped = await Promise.all(result.results.map(mapFunnelDefinition));
   const page = pageResult(mapped, limit);
   const nextCursor =
     page.hasMore && page.last
@@ -132,12 +136,18 @@ export async function queryFunnelDefinition(
   siteId: string,
   funnelId: string,
 ): Promise<FunnelDefinition | null> {
-  const rows = await queryD1All<Record<string, unknown>>(
-    env,
-    "SELECT id, site_id, name, config_json, config_version, created_at, updated_at FROM analysis_definitions WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL LIMIT 1",
-    [funnelId, siteId, FUNNEL_ANALYSIS_KIND],
+  const result = await createD1DatabaseClient(env.DB).all(
+    compileD1Query(
+      analysisDefinitionByIdQuery({
+        kind: FUNNEL_ANALYSIS_KIND,
+        siteId,
+        id: funnelId,
+      }),
+      { tag: "analytics.funnels.detail" },
+    ),
   );
-  return rows[0] ? mapFunnelDefinition(rows[0]) : null;
+  const row = result.results[0];
+  return row ? mapFunnelDefinition(row) : null;
 }
 function baseFunnelDataset(
   siteId: string,
@@ -252,20 +262,20 @@ export async function createFunnelDefinition(
   const encoded = encodeD1FunnelConfig(config);
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1_000);
-  await createDatabaseRuntime(env.DB).run({
-    sql: "INSERT INTO analysis_definitions (id, site_id, kind, name, config_json, config_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    bindings: [
-      id,
-      siteId,
-      FUNNEL_ANALYSIS_KIND,
-      name,
-      encoded.configJson,
-      encoded.configVersion,
-      now,
-      now,
-    ],
-    tag: "analytics.funnels.insert",
-  });
+  await createD1DatabaseClient(env.DB).run(
+    compileD1Mutation(
+      insertAnalysisDefinition({
+        id,
+        siteId,
+        kind: FUNNEL_ANALYSIS_KIND,
+        name,
+        configJson: encoded.configJson,
+        configVersion: encoded.configVersion,
+        timestamp: now,
+      }),
+      { tag: "analytics.funnels.insert" },
+    ),
+  );
   const funnel = await queryFunnelDefinition(env, siteId, id);
   if (!funnel) throw new Error("funnel_create_readback_failed");
   return funnel;
@@ -279,19 +289,20 @@ export async function updateFunnelDefinition(
 ): Promise<FunnelDefinition> {
   const encoded = encodeD1FunnelConfig(config);
   const now = Math.floor(Date.now() / 1_000);
-  await createDatabaseRuntime(env.DB).run({
-    sql: "UPDATE analysis_definitions SET name=?, config_json=?, config_version=?, updated_at=? WHERE id=? AND site_id=? AND kind=? AND archived_at IS NULL",
-    bindings: [
-      name,
-      encoded.configJson,
-      encoded.configVersion,
-      now,
-      funnelId,
-      siteId,
-      FUNNEL_ANALYSIS_KIND,
-    ],
-    tag: "analytics.funnels.update",
-  });
+  await createD1DatabaseClient(env.DB).run(
+    compileD1Mutation(
+      updateAnalysisDefinition({
+        kind: FUNNEL_ANALYSIS_KIND,
+        siteId,
+        id: funnelId,
+        name,
+        configJson: encoded.configJson,
+        configVersion: encoded.configVersion,
+        timestamp: now,
+      }),
+      { tag: "analytics.funnels.update" },
+    ),
+  );
   const funnel = await queryFunnelDefinition(env, siteId, funnelId);
   if (!funnel) throw new Error("funnel_update_readback_failed");
   return funnel;
@@ -302,9 +313,15 @@ export async function archiveFunnelDefinition(
   funnelId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1_000);
-  await createDatabaseRuntime(env.DB).run({
-    sql: "UPDATE analysis_definitions SET archived_at = ?, updated_at = ? WHERE id = ? AND site_id = ? AND kind = ? AND archived_at IS NULL",
-    bindings: [now, now, funnelId, siteId, FUNNEL_ANALYSIS_KIND],
-    tag: "analytics.funnels.archive",
-  });
+  await createD1DatabaseClient(env.DB).run(
+    compileD1Mutation(
+      archiveAnalysisDefinition({
+        kind: FUNNEL_ANALYSIS_KIND,
+        siteId,
+        id: funnelId,
+        timestamp: now,
+      }),
+      { tag: "analytics.funnels.archive" },
+    ),
+  );
 }

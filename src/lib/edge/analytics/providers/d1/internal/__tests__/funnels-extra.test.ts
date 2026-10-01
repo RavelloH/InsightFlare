@@ -104,8 +104,10 @@ describe("handleFunnel", () => {
       handleFunnel(env, "site-1", update.url, undefined, update.request),
     ).resolves.toHaveProperty("status", 200);
     expect(
-      calls.some((call) =>
-        call.sql.startsWith("UPDATE analysis_definitions SET name"),
+      calls.some(
+        (call) =>
+          call.sql.includes('UPDATE "analysis_definitions"') &&
+          call.sql.includes('SET "name" = ?'),
       ),
     ).toBe(true);
   });

@@ -205,6 +205,142 @@ function typedDalConvergenceViolations(
   return violations;
 }
 
+const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
+  "src/lib/edge/analytics/providers/d1/internal/goals.ts": [
+    "queryGoalDefinitionsPage",
+    "queryGoalDefinition",
+    "createGoalDefinition",
+    "updateGoalDefinition",
+    "archiveGoalDefinition",
+  ],
+  "src/lib/edge/analytics/providers/d1/internal/funnels.ts": [
+    "queryFunnelDefinitionsPage",
+    "queryFunnelDefinition",
+    "createFunnelDefinition",
+    "updateFunnelDefinition",
+    "archiveFunnelDefinition",
+  ],
+  "src/lib/edge/analytics/providers/d1/internal/custom-event-read.ts": [
+    "readCustomEventsForVisit",
+    "readCustomEventVisitId",
+    "readCustomEventDetail",
+  ],
+  "src/lib/edge/ingest/alarm-sweep.ts": ["sweepIngestAlarms"],
+  "src/lib/edge/ingest/flush-types.ts": ["resolveSitePk"],
+  "src/lib/edge/admin/observability/request-observation-query.ts": [
+    "siteLookupByIds",
+  ],
+};
+
+function typedQueryFunctionViolations(
+  relativePath: string,
+  sourceText: string,
+): ArchitectureViolation[] {
+  const targetNames = TYPED_QUERY_FUNCTIONS[relativePath];
+  if (!targetNames) return [];
+
+  const source = ts.createSourceFile(
+    relativePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    relativePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const targets = new Set(targetNames);
+  const forbiddenNames = new Set([
+    "createDatabaseRuntime",
+    "DatabaseStatement",
+    "queryD1All",
+  ]);
+  const forbiddenBindings = new Set(forbiddenNames);
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const clause = statement.importClause;
+    if (
+      !clause ||
+      !clause.namedBindings ||
+      !ts.isNamedImports(clause.namedBindings)
+    )
+      continue;
+    for (const element of clause.namedBindings.elements) {
+      const importedName = element.propertyName?.text ?? element.name.text;
+      if (forbiddenNames.has(importedName))
+        forbiddenBindings.add(element.name.text);
+    }
+  }
+
+  const violations: ArchitectureViolation[] = [];
+  const report = (node: ts.Node, specifier: string, message: string) => {
+    const line =
+      source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+    violations.push({
+      rule: "typed-query-function-forbidden",
+      source: relativePath,
+      specifier,
+      target: relativePath,
+      line,
+      message,
+    });
+  };
+  const inspectBody = (body: ts.Node) => {
+    const visit = (node: ts.Node) => {
+      if (ts.isIdentifier(node) && forbiddenBindings.has(node.text))
+        report(
+          node,
+          node.text,
+          "This migrated query function must use the typed query/mutation compiler, not DatabaseRuntime or queryD1All.",
+        );
+      if (
+        (ts.isStringLiteralLike(node) ||
+          ts.isNoSubstitutionTemplateLiteral(node)) &&
+        /^(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|PRAGMA)\b/iu.test(
+          node.text.trimStart(),
+        )
+      )
+        report(
+          node,
+          "raw-sql",
+          "This migrated query function must express database work as a typed plan, not a raw SQL string.",
+        );
+      if (
+        ts.isTemplateExpression(node) &&
+        /^(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|PRAGMA)\b/iu.test(
+          node.head.text.trimStart(),
+        )
+      )
+        report(
+          node,
+          "raw-sql",
+          "This migrated query function must express database work as a typed plan, not a raw SQL string.",
+        );
+      ts.forEachChild(node, visit);
+    };
+    visit(body);
+  };
+
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name &&
+      targets.has(node.name.text) &&
+      node.body
+    )
+      inspectBody(node.body);
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      targets.has(node.name.text) &&
+      node.initializer &&
+      (ts.isArrowFunction(node.initializer) ||
+        ts.isFunctionExpression(node.initializer))
+    )
+      inspectBody(node.initializer.body);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return violations;
+}
+
 function importsIn(sourceText: string, fileName: string): ImportReference[] {
   const source = ts.createSourceFile(
     fileName,
@@ -619,6 +755,7 @@ export function collectArchitectureViolations(
     if (isGeneratedFile(relative, sourceText)) continue;
 
     violations.push(...typedDalConvergenceViolations(relative, sourceText));
+    violations.push(...typedQueryFunctionViolations(relative, sourceText));
 
     const addSourceRuleViolation = (
       rule: string,
