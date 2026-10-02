@@ -11,7 +11,8 @@ import type {
 } from "@/lib/edge/analytics/engine/semantic/value-types";
 
 export type LogicalLiteralValue = string | number | boolean | null;
-export type LogicalStringNormalization = "trim" | "trim-case-fold";
+export type LogicalStringNormalization =
+  "trim" | "trim-case-fold" | "trim-ascii-space" | "ascii-case-fold";
 
 export interface LogicalSlotExpression {
   readonly kind: "slot";

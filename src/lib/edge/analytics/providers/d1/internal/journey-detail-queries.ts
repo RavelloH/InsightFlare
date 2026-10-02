@@ -1,3 +1,7 @@
+import {
+  buildJourneySessionDetailPlan,
+  buildJourneyVisitorDetailPlan,
+} from "@/lib/edge/analytics/engine/journey-entity-detail-plan";
 import { buildJourneyObservationPlan } from "@/lib/edge/analytics/engine/journey-observation-plan";
 import { buildJourneyPageviewDetailPlan } from "@/lib/edge/analytics/engine/journey-page-report-plan";
 import type { Env } from "@/lib/edge/types";
@@ -10,21 +14,10 @@ import type {
   SessionRow,
   VisitorRow,
 } from "./core";
-import {
-  buildDetailCustomEventSourceCte,
-  buildTargetVisitSourceCte,
-  detailCustomEventSourceBindings,
-  queryD1All,
-  targetVisitSourceBindings,
-} from "./core";
-import {
-  buildSessionAggregationSql,
-  buildVisitorAggregationSql,
-} from "./journey-aggregation-sql";
+import { queryJourneyEntityDetailRowsFromD1 } from "./journey-entity-detail-query";
 import type { DetailTarget } from "./journey-helpers";
 import {
   averageGapMs,
-  detailTargetColumn,
   mapGeoPointRow,
   mapJourneyEventRow,
   mapSessionRow,
@@ -44,19 +37,12 @@ export async function queryVisitorForDetailFromD1(
   siteId: string,
   visitorId: string,
 ): Promise<VisitorRow | null> {
-  const sql = `
-WITH
-${buildTargetVisitSourceCte("visitor_id")},
-filtered_visits AS (
-  SELECT visit_source.*, 1 AS is_visit_observation
-  FROM visit_source
-),
-${buildDetailCustomEventSourceCte()},
-${buildVisitorAggregationSql({ orderBy: "lastSeenAt DESC, visitorId ASC", limitOffset: "LIMIT 1" })}`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...targetVisitSourceBindings(siteId, visitorId),
-    ...detailCustomEventSourceBindings(siteId),
-  ]);
+  const plan = buildJourneyVisitorDetailPlan({ siteId, visitorId });
+  const rows = await queryJourneyEntityDetailRowsFromD1(
+    env,
+    plan,
+    "journey-visitor-detail",
+  );
   return rows[0] ? mapVisitorRow(rows[0]) : null;
 }
 export async function querySessionsForDetailFromD1(
@@ -64,20 +50,13 @@ export async function querySessionsForDetailFromD1(
   siteId: string,
   target: DetailTarget,
 ): Promise<SessionRow[]> {
-  const sql = `
-WITH
-${buildTargetVisitSourceCte(detailTargetColumn(target))},
-filtered_visits AS (
-  SELECT visit_source.*, 1 AS is_visit_observation
-  FROM visit_source
-),
-${buildDetailCustomEventSourceCte()},
-${buildSessionAggregationSql({ orderBy: "startedAt DESC, sessionId ASC" })}`;
+  const plan = buildJourneySessionDetailPlan({ siteId, target });
   return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...targetVisitSourceBindings(siteId, target.value),
-      ...detailCustomEventSourceBindings(siteId),
-    ])
+    await queryJourneyEntityDetailRowsFromD1(
+      env,
+      plan,
+      "journey-session-detail",
+    )
   ).map(mapSessionRow);
 }
 export async function queryJourneyEventsForDetailFromD1(

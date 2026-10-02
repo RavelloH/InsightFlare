@@ -133,6 +133,8 @@ function nodeHeader(node: LogicalNode): string {
       return `${relation(node.id)} Project grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "aggregate":
       return `${relation(node.id)} Aggregate grain=${grain(node.grain)} input=${relation(node.input)}`;
+    case "ordered-member":
+      return `${relation(node.id)} OrderedMember grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "distinct":
       return `${relation(node.id)} Distinct grain=${grain(node.grain)} excludeNull=${node.excludeNull}`;
     case "set-operation":
@@ -192,6 +194,16 @@ function nodeLines(
       );
       node.measures.forEach((_, index) =>
         lines.push(`  MEASURE ${aggregateMeasure(node, index)}`),
+      );
+      break;
+    case "ordered-member":
+      node.groups.forEach((group) =>
+        lines.push(`  GROUP ${formatSlot(group, slots)}`),
+      );
+      node.order.forEach((key) =>
+        lines.push(
+          `  ORDER ${formatSlot(key.slot, slots)} ${key.direction.toUpperCase()} NULLS ${key.nulls.toUpperCase()}`,
+        ),
       );
       break;
     case "distinct":

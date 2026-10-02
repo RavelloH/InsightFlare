@@ -1960,7 +1960,9 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           siteId: SITE_A,
           time: keyedPlan.context.time,
         }).lower(keyedPlan.outputs[0]!),
-      ).toThrow(/Only a keyless inner join of scalar relations is supported/u);
+      ).toThrow(
+        /Only keyless scalar inner joins and keyed scalar inner\/left joins are supported/u,
+      );
     } finally {
       db.close();
     }

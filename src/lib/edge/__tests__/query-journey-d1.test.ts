@@ -362,8 +362,9 @@ describe("edge journey detail D1 queries", () => {
     ).resolves.toBeNull();
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].sql).toContain("visitor_id = ?");
-    expect(calls[0].bindings).toEqual([siteId, "visitor-missing", siteId]);
+    expect(calls[0].sql).toMatch(/visitor_id/u);
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain("visitor-missing");
   });
 
   it("combines visitor, session, and event rows into visitor detail metrics", async () => {
@@ -1496,7 +1497,9 @@ describe("edge journey detail D1 queries", () => {
       },
     ]);
 
-    expect(calls[0].sql).toContain("session_id = ?");
+    expect(calls[0].sql).toMatch(/session_id/u);
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain("session-2");
     expect(calls[1].sql).toContain("UNION ALL");
     expect(calls[2].bindings).toContain(siteId);
     expect(calls[2].bindings).toContain("session-2");

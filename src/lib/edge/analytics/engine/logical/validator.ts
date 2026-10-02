@@ -107,14 +107,44 @@ function validateStringNormalization(
   normalization: unknown,
   operands: readonly LogicalValueType[],
   path: string,
+  comparisonOperator?: "eq" | "neq" | "gt" | "gte" | "lt" | "lte",
 ): void {
   if (normalization === undefined) return;
-  if (normalization !== "trim" && normalization !== "trim-case-fold") {
+  const isComparisonOnlyMode =
+    normalization === "trim-ascii-space" || normalization === "ascii-case-fold";
+  if (
+    normalization !== "trim" &&
+    normalization !== "trim-case-fold" &&
+    !isComparisonOnlyMode
+  ) {
     throw new LogicalPlanError([
       {
         code: "invalid-expression",
         path,
         message: "String normalization mode is invalid.",
+      },
+    ]);
+  }
+  if (isComparisonOnlyMode && comparisonOperator === undefined) {
+    throw new LogicalPlanError([
+      {
+        code: "invalid-expression",
+        path,
+        message: "String normalization mode is invalid for this expression.",
+      },
+    ]);
+  }
+  if (
+    isComparisonOnlyMode &&
+    comparisonOperator !== "eq" &&
+    comparisonOperator !== "neq"
+  ) {
+    throw new LogicalPlanError([
+      {
+        code: "invalid-expression",
+        path,
+        message:
+          "ASCII string normalization is supported only for equality comparisons.",
       },
     ]);
   }
@@ -230,6 +260,7 @@ function infer(
         expression.stringNormalization,
         [left.type, right.type],
         `${path}.stringNormalization`,
+        expression.operator,
       );
       if (
         left.type.kind === "entity" &&
@@ -1381,6 +1412,23 @@ function validateNode(
           "Join keys do not cover right grain.",
         );
       }
+      if (right.grain.kind === "keyed") {
+        const keyedSlots = [
+          ...right.grain.keys,
+          ...node.keys.flatMap((key) => [key.left, key.right]),
+        ];
+        if (
+          keyedSlots.some((id) => {
+            const kind = types.get(id)?.type.kind;
+            return kind !== "scalar" && kind !== "bucket";
+          })
+        )
+          fail(
+            "invalid-join",
+            `${path}.keys`,
+            "Joins to keyed relations require scalar or bucket grain and key slots.",
+          );
+      }
       if (node.joinType === "inner") {
         if (node.rightAliases.length !== 0)
           fail(
@@ -1408,7 +1456,9 @@ function validateNode(
           if (
             !output ||
             !sameType(source.type, output.type) ||
-            !output.nullable
+            !output.nullable ||
+            output.lineage.kind !== "alias" ||
+            output.lineage.source !== alias.source
           ) {
             fail(
               "invalid-join",
@@ -1423,6 +1473,72 @@ function validateNode(
         ];
       }
       expectedGrain = left.grain;
+      break;
+    }
+    case "ordered-member": {
+      const input = assertRelation(node.input, states, `${path}.input`);
+      if (node.groups.length === 0)
+        fail(
+          "invalid-topology",
+          `${path}.groups`,
+          "Ordered member selection requires at least one group key.",
+        );
+      if (new Set(node.groups).size !== node.groups.length)
+        fail(
+          "invalid-topology",
+          `${path}.groups`,
+          "Ordered member group keys must not repeat.",
+        );
+      node.groups.forEach((id, index) => {
+        const group = resolveVisibleSlot(input, id, `${path}.groups[${index}]`);
+        if (group.type.kind !== "scalar")
+          fail(
+            "invalid-expression",
+            `${path}.groups[${index}]`,
+            "Ordered member groups require scalar slots.",
+          );
+      });
+      if (node.order.length === 0)
+        fail(
+          "invalid-topology",
+          `${path}.order`,
+          "Ordered member selection requires at least one order key.",
+        );
+      const orderSlots = node.order.map((key) => key.slot);
+      if (new Set(orderSlots).size !== orderSlots.length)
+        fail(
+          "invalid-topology",
+          `${path}.order`,
+          "Ordered member order keys must not repeat.",
+        );
+      node.order.forEach((key, index) => {
+        const keyPath = `${path}.order[${index}]`;
+        const orderSlot = resolveVisibleSlot(
+          input,
+          key.slot,
+          `${keyPath}.slot`,
+        );
+        if (orderSlot.type.kind !== "scalar")
+          fail(
+            "invalid-expression",
+            `${keyPath}.slot`,
+            "Ordered member ordering requires scalar slots.",
+          );
+        if (key.direction !== "asc" && key.direction !== "desc")
+          fail(
+            "invalid-topology",
+            `${keyPath}.direction`,
+            "Ordered member direction is invalid.",
+          );
+        if (key.nulls !== "first" && key.nulls !== "last")
+          fail(
+            "invalid-topology",
+            `${keyPath}.nulls`,
+            "Ordered member null ordering is invalid.",
+          );
+      });
+      expectedOutput = input.node.output;
+      expectedGrain = { kind: "keyed", keys: [...node.groups] };
       break;
     }
     case "sort": {
@@ -1569,6 +1685,7 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
         case "filter":
         case "semi-join":
         case "anti-join":
+        case "ordered-member":
         case "sort":
         case "limit":
           return [];

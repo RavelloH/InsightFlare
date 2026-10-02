@@ -171,6 +171,7 @@ function typedDalConvergenceViolations(
 ): ArchitectureViolation[] {
   const typedQueryPureModules = new Set([
     "src/lib/edge/analytics/engine/journey-target-presence-plan.ts",
+    "src/lib/edge/analytics/engine/journey-entity-detail-plan.ts",
     "src/lib/edge/analytics/engine/journey-observation-plan.ts",
     "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-read-plans.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
@@ -345,12 +346,22 @@ function analyticsSemanticPlanStorageViolations(
 ): ArchitectureViolation[] {
   const guardedPlans = new Set([
     "src/lib/edge/analytics/engine/journey-target-presence-plan.ts",
+    "src/lib/edge/analytics/engine/journey-entity-detail-plan.ts",
     "src/lib/edge/analytics/engine/journey-observation-plan.ts",
   ]);
   if (!guardedPlans.has(relativePath)) return [];
+  // This plan exposes a business metric named `sessions`; allow its output
+  // projection key while continuing to reject physical-table references.
+  const searchableText =
+    relativePath ===
+    "src/lib/edge/analytics/engine/journey-entity-detail-plan.ts"
+      ? sourceText.replace(/\bsessions(?=\s*:\s*joined\()/u, (alias) =>
+          " ".repeat(alias.length),
+        )
+      : sourceText;
   const match =
     /\b(?:site_identities|visits|custom_events|custom_event_names|sessions)\b/iu.exec(
-      sourceText,
+      searchableText,
     );
   if (match?.index === undefined) return [];
   return [
@@ -519,6 +530,8 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
     "queryJourneyTargetExistsFromD1",
   ],
   "src/lib/edge/analytics/providers/d1/internal/journey-detail-queries.ts": [
+    "queryVisitorForDetailFromD1",
+    "querySessionsForDetailFromD1",
     "queryJourneyEventsForDetailFromD1",
     "queryDetailSourceFromD1",
     "queryJourneyEventDetailFromD1",

@@ -28,13 +28,16 @@ import {
   or,
   param,
   project,
+  rowNumber,
   semiJoin,
   sort as sortRelation,
   sum,
   textContains,
   textEndsWith,
   textStartsWith,
+  trimSpaces,
   union,
+  window as windowRelation,
 } from "@/lib/db";
 import type {
   AnyExpression,
@@ -42,6 +45,7 @@ import type {
   Predicate,
   SqlExpression,
 } from "@/lib/db/query/expression";
+import type { WindowOrderKey } from "@/lib/db/query/plan";
 import type { LogicalExpr } from "@/lib/edge/analytics/engine/logical/expression";
 import type {
   RelationId,
@@ -53,6 +57,7 @@ import type {
   DistinctNode,
   JoinNode,
   LogicalNode,
+  OrderedMemberNode,
   ProjectNode,
   RelationshipLookupNode,
   SemiJoinNode,
@@ -365,6 +370,36 @@ function applyTrim(
   return callFunction("trim", expression as SqlExpression<string | null>);
 }
 
+function trimAsciiSpaces(value: string): string {
+  return value.replace(/^ +| +$/g, "");
+}
+
+function foldAsciiCase(value: string): string {
+  return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
+}
+
+function normalizeStringComparisonValue(
+  expression: AnyExpression,
+  logicalType: LogicalValueType,
+  literal: LogicalExpr | undefined,
+  normalization: "trim-ascii-space" | "ascii-case-fold",
+  path: string,
+): AnyExpression {
+  if (logicalType.kind !== "scalar" || logicalType.scalar !== "string")
+    reject(path, "String normalization is supported only for string values.");
+  if (literal?.kind === "literal" && typeof literal.value === "string") {
+    return param(
+      normalization === "trim-ascii-space"
+        ? trimAsciiSpaces(literal.value)
+        : foldAsciiCase(literal.value),
+    );
+  }
+  const text = expression as SqlExpression<string | null>;
+  return normalization === "trim-ascii-space"
+    ? trimSpaces(text)
+    : callFunction("lower", text);
+}
+
 function equalityForEntities(
   left: LoweredValue,
   right: LoweredValue,
@@ -453,6 +488,16 @@ function lowerExpression(
         right.kind === "scalar"
           ? right.type
           : reject(path, "Entity comparison requires matching entity keys.");
+      if (
+        (expression.stringNormalization === "trim-ascii-space" ||
+          expression.stringNormalization === "ascii-case-fold") &&
+        expression.operator !== "eq" &&
+        expression.operator !== "neq"
+      )
+        reject(
+          path,
+          "ASCII normalization is supported only for equality comparisons.",
+        );
       if (expression.stringNormalization === "trim") {
         leftExpression =
           expression.left.kind === "literal" &&
@@ -464,6 +509,24 @@ function lowerExpression(
           typeof expression.right.value === "string"
             ? param(expression.right.value.trim())
             : applyTrim(rightExpression, rightType, `${path}.right`);
+      } else if (
+        expression.stringNormalization === "trim-ascii-space" ||
+        expression.stringNormalization === "ascii-case-fold"
+      ) {
+        leftExpression = normalizeStringComparisonValue(
+          leftExpression,
+          leftType,
+          expression.left,
+          expression.stringNormalization,
+          `${path}.left`,
+        );
+        rightExpression = normalizeStringComparisonValue(
+          rightExpression,
+          rightType,
+          expression.right,
+          expression.stringNormalization,
+          `${path}.right`,
+        );
       } else if (expression.stringNormalization !== undefined) {
         reject(path, "This adapter does not support case-fold normalization.");
       }
@@ -848,6 +911,7 @@ function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
     case "project":
     case "aggregate":
     case "distinct":
+    case "ordered-member":
     case "sort":
     case "limit":
       return [node.input];
@@ -1118,6 +1182,9 @@ export class AnalyticsLogicalToDbLowerer {
       }
       case "project":
         result = this.#lowerProject(node, path);
+        break;
+      case "ordered-member":
+        result = this.#lowerOrderedMember(node, path);
         break;
       case "distinct":
         result = this.#lowerDistinct(node, path);
@@ -1936,6 +2003,12 @@ export class AnalyticsLogicalToDbLowerer {
           )
         );
       }
+      case "ordered-member":
+        return this.#hasStorageBackedObservationIdentity(
+          node.input,
+          slot,
+          nextActive,
+        );
       case "semi-join":
       case "anti-join":
         return this.#hasStorageBackedObservationIdentity(
@@ -2108,43 +2181,231 @@ export class AnalyticsLogicalToDbLowerer {
     return { relation, slots, candidateActivitySessionRestricted: false };
   }
 
-  #lowerJoin(node: JoinNode, path: string): LoweredRelation {
-    if (
-      node.joinType !== "inner" ||
-      node.keys.length !== 0 ||
-      node.grain.kind !== "scalar"
-    )
-      reject(
-        path,
-        "Only a keyless inner join of scalar relations is supported.",
+  #lowerOrderedMember(node: OrderedMemberNode, path: string): LoweredRelation {
+    const input = this.#lowerNode(node.input);
+    const partitionBy = node.groups.map((slot, index) => {
+      const slotPath = `${path}.groups[${index}]`;
+      const logical = logicalSlot(this.#logicalSlots, slot, slotPath);
+      if (logical.type.kind !== "scalar")
+        reject(slotPath, "Ordered-member groups must be scalar values.");
+      const value = readValue(input.relation, input.slots, slot, slotPath);
+      if (value.kind !== "scalar")
+        reject(slotPath, "Ordered-member groups must be scalar values.");
+      return value.expression;
+    });
+    const orderBy: WindowOrderKey[] = [];
+    node.order.forEach((key, index) => {
+      const keyPath = `${path}.order[${index}]`;
+      const logical = logicalSlot(
+        this.#logicalSlots,
+        key.slot,
+        `${keyPath}.slot`,
       );
+      if (logical.type.kind !== "scalar")
+        reject(keyPath, "Ordered-member keys must be scalar values.");
+      const value = readValue(
+        input.relation,
+        input.slots,
+        key.slot,
+        `${keyPath}.slot`,
+      );
+      if (value.kind !== "scalar")
+        reject(keyPath, "Ordered-member keys must be scalar values.");
+      const direction = key.direction === "asc" ? "ASC" : "DESC";
+      const nativeNulls = key.direction === "asc" ? "first" : "last";
+      if (key.nulls !== nativeNulls) {
+        orderBy.push({
+          expression: isNull(value.expression),
+          direction: key.nulls === "first" ? "DESC" : "ASC",
+        });
+      }
+      orderBy.push({ expression: value.expression, direction });
+    });
+
+    if (partitionBy.length === 0 || orderBy.length === 0)
+      reject(path, "Ordered-member requires groups and order keys.");
+    const ranked = windowRelation(input.relation, {
+      __analytics_ordered_member_rank: rowNumber({
+        partitionBy,
+        orderBy: orderBy as [WindowOrderKey, ...WindowOrderKey[]],
+      }),
+    });
+    const selected = filter(
+      ranked,
+      eq(ranked.columns.__analytics_ordered_member_rank, param(1)),
+    );
+    const inputNode = this.#logicalNode(node.input);
+    if (!inputNode)
+      reject(`${path}.input`, "The ordered-member input node is missing.");
+    const values = inputNode.output
+      .filter((slot) => this.#requiredOutput(node).has(slot))
+      .map((slot) => ({
+        slot,
+        value: readValue(selected, input.slots, slot, path),
+      }));
+    const projected = projectedValues(
+      selected,
+      values,
+      this.#logicalSlots,
+      path,
+    );
+    return {
+      ...projected,
+      candidateActivity: input.candidateActivity,
+      candidateActivitySessionRelation: input.candidateActivitySessionRelation,
+      candidateActivitySessionRestricted:
+        input.candidateActivitySessionRestricted,
+    };
+  }
+
+  #lowerJoin(node: JoinNode, path: string): LoweredRelation {
+    const leftNode = this.#logicalNode(node.left);
+    const rightNode = this.#logicalNode(node.right);
+    if (!leftNode || !rightNode) reject(path, "A join input node is missing.");
+    const keylessScalarInner =
+      node.joinType === "inner" &&
+      node.keys.length === 0 &&
+      node.grain.kind === "scalar";
+    if (!keylessScalarInner) {
+      if (
+        (node.joinType !== "inner" && node.joinType !== "left") ||
+        node.keys.length === 0 ||
+        rightNode.grain.kind === "entity"
+      )
+        reject(
+          path,
+          "Only keyless scalar inner joins and keyed scalar inner/left joins are supported.",
+        );
+      const coveredRightKeys = new Set(node.keys.map((key) => key.right));
+      for (const [index, key] of node.keys.entries()) {
+        const leftKey = logicalSlot(
+          this.#logicalSlots,
+          key.left,
+          `${path}.keys[${index}].left`,
+        );
+        const rightKey = logicalSlot(
+          this.#logicalSlots,
+          key.right,
+          `${path}.keys[${index}].right`,
+        );
+        if (
+          (leftKey.type.kind !== "scalar" && leftKey.type.kind !== "bucket") ||
+          (rightKey.type.kind !== "scalar" &&
+            rightKey.type.kind !== "bucket") ||
+          !isSameLogicalValueType(leftKey.type, rightKey.type)
+        )
+          reject(
+            `${path}.keys[${index}]`,
+            "Keyed joins require matching scalar or bucket key types.",
+          );
+      }
+      const rightGrainKeys =
+        rightNode.grain.kind === "keyed" ? rightNode.grain.keys : [];
+      for (const [index, key] of rightGrainKeys.entries()) {
+        const slot = logicalSlot(
+          this.#logicalSlots,
+          key,
+          `${path}.right.grain.keys[${index}]`,
+        );
+        if (
+          (slot.type.kind !== "scalar" && slot.type.kind !== "bucket") ||
+          !coveredRightKeys.has(key)
+        )
+          reject(
+            `${path}.keys`,
+            "Join keys must cover the complete scalar or bucket right grain.",
+          );
+      }
+    }
     const left = this.#lowerNode(node.left);
     const right = this.#lowerNode(node.right);
-    const joined = join(left.relation, right.relation, eq(param(1), param(1)));
-    const leftNode = this.#logicalNode(node.left)!;
-    const rightNode = this.#logicalNode(node.right)!;
+    const predicate = keylessScalarInner
+      ? eq(param(1), param(1))
+      : combinePredicates(
+          "and",
+          node.keys.map((key, index) => {
+            const leftValue = readValue(
+              left.relation,
+              left.slots,
+              key.left,
+              `${path}.keys[${index}].left`,
+            );
+            const rightValue = readValue(
+              right.relation,
+              right.slots,
+              key.right,
+              `${path}.keys[${index}].right`,
+            );
+            if (leftValue.kind !== "scalar" || rightValue.kind !== "scalar")
+              reject(
+                `${path}.keys[${index}]`,
+                "Keyed joins require scalar physical key expressions.",
+              );
+            return eq(leftValue.expression, rightValue.expression);
+          }),
+          `${path}.keys`,
+        );
+    const joined = join(
+      left.relation,
+      right.relation,
+      predicate,
+      node.joinType,
+    );
     const required = this.#requiredOutput(node);
-    const values = [
+    const values: { readonly slot: SlotId; readonly value: LoweredValue }[] = [
       ...leftNode.output
         .filter((slot) => required.has(slot))
         .map((slot) => ({
           slot,
           value: this.#joinedValue(joined, left.slots.get(slot), "left_", path),
         })),
-      ...rightNode.output
-        .filter((slot) => required.has(slot))
-        .map((slot) => ({
-          slot,
-          value: this.#joinedValue(
-            joined,
-            right.slots.get(slot),
-            "right_",
-            path,
-          ),
-        })),
     ];
+    const aliases =
+      node.joinType === "left"
+        ? new Map(node.rightAliases.map((alias) => [alias.source, alias.alias]))
+        : undefined;
+    for (const sourceSlot of rightNode.output) {
+      const outputSlot = aliases?.get(sourceSlot) ?? sourceSlot;
+      if (!required.has(outputSlot)) continue;
+      let value = this.#joinedValue(
+        joined,
+        right.slots.get(sourceSlot),
+        "right_",
+        path,
+      );
+      if (!keylessScalarInner) {
+        if (value.kind !== "scalar")
+          reject(
+            `${path}.right.${String(sourceSlot)}`,
+            "Keyed joins currently expose scalar right values only.",
+          );
+        if (aliases) {
+          const alias = logicalSlot(
+            this.#logicalSlots,
+            outputSlot,
+            `${path}.rightAliases.${String(outputSlot)}`,
+          );
+          if (alias.type.kind !== "scalar" || !alias.nullable)
+            reject(
+              `${path}.rightAliases.${String(outputSlot)}`,
+              "Left-joined scalar aliases must be nullable.",
+            );
+          value = { ...value, nullable: alias.nullable };
+        }
+      }
+      values.push({ slot: outputSlot, value });
+    }
     const projected = projectedValues(joined, values, this.#logicalSlots, path);
-    return projected;
+    return keylessScalarInner
+      ? projected
+      : {
+          ...projected,
+          candidateActivity: left.candidateActivity,
+          candidateActivitySessionRelation:
+            left.candidateActivitySessionRelation,
+          candidateActivitySessionRestricted:
+            left.candidateActivitySessionRestricted,
+        };
   }
 
   #joinedValue(
@@ -2219,6 +2480,13 @@ export class AnalyticsLogicalToDbLowerer {
                 add(node.input, this.#expressionSlots(projection.expression));
             }
             break;
+          case "ordered-member":
+            add(node.input, [
+              ...node.output.filter((slot) => needed.has(slot)),
+              ...node.groups,
+              ...node.order.map((key) => key.slot),
+            ]);
+            break;
           case "relationship-lookup":
             add(node.input, [
               ...node.output.filter(
@@ -2282,11 +2550,18 @@ export class AnalyticsLogicalToDbLowerer {
                 ...left.output.filter((slot) => needed.has(slot)),
                 ...node.keys.map((key) => key.left),
               ]);
-            if (right)
+            if (right) {
+              const requestedRight =
+                node.joinType === "left"
+                  ? node.rightAliases
+                      .filter((alias) => needed.has(alias.alias))
+                      .map((alias) => alias.source)
+                  : right.output.filter((slot) => needed.has(slot));
               add(node.right, [
-                ...right.output.filter((slot) => needed.has(slot)),
+                ...requestedRight,
                 ...node.keys.map((key) => key.right),
               ]);
+            }
             break;
           }
           case "sort":

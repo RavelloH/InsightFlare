@@ -161,6 +161,14 @@ export interface SortNode extends LogicalNodeBase {
   readonly keys: readonly SortKey[];
 }
 
+/** Selects the first input row in each SQL NULL-equal group. */
+export interface OrderedMemberNode extends LogicalNodeBase {
+  readonly kind: "ordered-member";
+  readonly input: RelationId;
+  readonly groups: readonly SlotId[];
+  readonly order: readonly SortKey[];
+}
+
 export interface LimitNode extends LogicalNodeBase {
   readonly kind: "limit";
   readonly input: RelationId;
@@ -178,5 +186,6 @@ export type LogicalNode =
   | SemiJoinNode
   | AntiJoinNode
   | JoinNode
+  | OrderedMemberNode
   | SortNode
   | LimitNode;

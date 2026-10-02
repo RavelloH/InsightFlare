@@ -684,6 +684,15 @@ export function lowerAnalyticsFilteredSessionOverviewPairPlan(
       );
       const sessionsSlot = requireMetricField(plan, output, 0, "sessions");
       const viewsSlot = requireMetricField(plan, output, 1, "views");
+      const scalarBranchJoin = plan.nodes.find((node) => node.kind === "join");
+      requirePlan(
+        scalarBranchJoin?.joinType === "inner" &&
+          scalarBranchJoin.keys.length === 0,
+        scalarBranchJoin
+          ? planNodePath(scalarBranchJoin.id) + ".keys"
+          : "nodes",
+        "The aggregate pair must retain its canonical keyless inner Join.",
+      );
       const sessionsAggregate = countRowsAggregateForOutput(
         plan,
         sessionsSlot,
