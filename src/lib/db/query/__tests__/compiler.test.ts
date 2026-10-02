@@ -53,6 +53,7 @@ import {
   union,
   unixepoch,
   update,
+  valuesRelation,
   window,
   windowCountRows,
 } from "@/lib/db";
@@ -1670,6 +1671,27 @@ describe("typed D1 query compiler", () => {
           actual: 101,
         }),
       );
+
+      const rowValues = Array.from({ length: 101 }, (_unused, index) => ({
+        site_id: `row-source-${index}`,
+      }));
+      const rowSource = valuesRelation(
+        { site_id: { affinity: "text", nullable: false } } as const,
+        rowValues,
+      );
+      const insertRows = compileD1Mutation(
+        insertFromQuery(schema.site_identities, ["site_id"], rowSource),
+      );
+      expect(insertRows.bindings).toHaveLength(1);
+      expect(insertRows.sql).toContain('json_each("_segments".column1)');
+      executeRun(db, insertRows);
+      expect(
+        db
+          .prepare(
+            "SELECT site_id FROM site_identities WHERE site_id LIKE 'row-source-%' ORDER BY site_id",
+          )
+          .all(),
+      ).toHaveLength(101);
     } finally {
       db.close();
     }

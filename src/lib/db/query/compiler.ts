@@ -30,11 +30,18 @@ import {
   optimizePhysicalMembershipBudget,
   type PhysicalMembershipUsage,
   type PhysicalQueryPlan,
+  type PhysicalTextRowStrategy,
+  type PhysicalTextRowUsage,
   recursiveClosureCount,
   type SharedRelationDefinition,
   validatePhysicalQueryPlan,
 } from "./physical-plan";
-import type { LogicalQueryNode, QuerySource, Relation } from "./plan";
+import type {
+  LogicalQueryNode,
+  QuerySource,
+  Relation,
+  ValuesRelationNode,
+} from "./plan";
 import type { ProjectNode } from "./plan";
 
 export interface ScopeBinding {
@@ -59,6 +66,14 @@ interface RenderContext {
     { readonly strategy: "native" | "json-text"; readonly jsonText?: string }
   >;
   readonly membershipUsage?: Map<AnyInListExpression, number>;
+  readonly textRowStrategies?: ReadonlyMap<
+    ValuesRelationNode,
+    {
+      readonly strategy: "native" | "json-rows";
+      readonly jsonSegments?: readonly string[];
+    }
+  >;
+  readonly textRowUsage?: Map<ValuesRelationNode, number>;
   bypassSharedNode?: LogicalQueryNode;
 }
 
@@ -400,6 +415,71 @@ function compileNode(
     );
   }
   switch (node.kind) {
+    case "values-relation": {
+      if (context.textRowUsage)
+        context.textRowUsage.set(
+          node,
+          (context.textRowUsage.get(node) ?? 0) + 1,
+        );
+      const strategy = context.textRowStrategies?.get(node);
+      const selections = node.fields.map((_field, index) =>
+        concat(
+          strategy?.strategy === "json-rows"
+            ? concat(
+                text('json_extract("_tuple".value, \'$['),
+                text(String(index)),
+                text("]')"),
+              )
+            : concat(
+                identifier("_values"),
+                text("."),
+                identifier(`column${index + 1}`),
+              ),
+          text(` AS "_c${index}"`),
+        ),
+      );
+      if (node.rows.length === 0)
+        return concat(
+          text("SELECT "),
+          join(
+            node.fields.map((_field, index) =>
+              concat(text("NULL"), text(` AS "_c${index}"`)),
+            ),
+          ),
+          text(" WHERE 0"),
+        );
+      if (strategy?.strategy === "json-rows") {
+        const segments = strategy.jsonSegments ?? [];
+        return concat(
+          text("SELECT "),
+          join(selections),
+          text(" FROM (VALUES "),
+          join(
+            segments.map((segment) =>
+              concat(text("("), parameter(segment), text(")")),
+            ),
+          ),
+          text(
+            ') AS "_segments" JOIN json_each("_segments".column1) AS "_tuple"',
+          ),
+        );
+      }
+      return concat(
+        text("SELECT "),
+        join(selections),
+        text(" FROM (VALUES "),
+        join(
+          node.rows.map((row) =>
+            concat(
+              text("("),
+              join(row.map((value) => parameter(value))),
+              text(")"),
+            ),
+          ),
+        ),
+        text(') AS "_values"'),
+      );
+    }
     case "scan": {
       const alias = nextAlias(context, "t");
       const columns = Object.values(node.table.columns);
@@ -783,6 +863,8 @@ function renderContext(
   membershipUsage?: RenderContext["membershipUsage"],
   directScanProjections: RenderContext["directScanProjections"] = new Map(),
   reservedIdentifiers: ReadonlySet<string> = new Set(),
+  textRowStrategies?: RenderContext["textRowStrategies"],
+  textRowUsage?: RenderContext["textRowUsage"],
 ): RenderContext {
   return {
     scanAlias: 0,
@@ -795,6 +877,8 @@ function renderContext(
     directScanProjections,
     ...(membershipStrategies ? { membershipStrategies } : {}),
     ...(membershipUsage ? { membershipUsage } : {}),
+    ...(textRowStrategies ? { textRowStrategies } : {}),
+    ...(textRowUsage ? { textRowUsage } : {}),
   };
 }
 
@@ -817,7 +901,7 @@ function reservePlanIdentifiers(
     visited.add(node);
     if (node.kind === "scan") identifiers.add(node.table.name);
     const children =
-      node.kind === "scan"
+      node.kind === "scan" || node.kind === "values-relation"
         ? []
         : node.kind === "filter" ||
             node.kind === "project" ||
@@ -978,9 +1062,13 @@ function compileD1QueryInternal(
 
   if (includeSharedRelations) {
     const membershipOptimization = canonicalPhysical.membershipOptimization!;
-    const hasJsonStrategy = membershipOptimization.strategies.some(
-      (strategy) => strategy.strategy === "json-text",
-    );
+    const hasJsonStrategy =
+      membershipOptimization.strategies.some(
+        (strategy) => strategy.strategy === "json-text",
+      ) ||
+      (membershipOptimization.rowStrategies ?? []).some(
+        (strategy) => strategy.strategy === "json-rows",
+      );
     if (!hasJsonStrategy)
       return compileAndBudget(
         nativeQuery,
@@ -994,6 +1082,7 @@ function compileD1QueryInternal(
       true,
       membershipOptimization.strategies,
       membershipOptimization.selectedBindingCount,
+      membershipOptimization.rowStrategies ?? [],
     );
   }
 
@@ -1019,12 +1108,15 @@ function optimizeForFinalShape(physical: PhysicalQueryPlan<object>): {
     ),
   );
   const membershipUsage = new Map<AnyInListExpression, number>();
+  const textRowUsage = new Map<ValuesRelationNode, number>();
   const context = renderContext(
     sharedNames,
     undefined,
     membershipUsage,
     directScanProjections,
     reservePlanIdentifiers(physical),
+    undefined,
+    textRowUsage,
   );
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;
@@ -1049,6 +1141,10 @@ function optimizeForFinalShape(physical: PhysicalQueryPlan<object>): {
               occurrences,
             }) satisfies PhysicalMembershipUsage,
         ),
+        rowUsage: [...textRowUsage].map(
+          ([node, occurrences]) =>
+            ({ node, occurrences }) satisfies PhysicalTextRowUsage,
+        ),
       },
       D1_MAX_BOUND_PARAMETERS,
     ),
@@ -1064,6 +1160,7 @@ function renderAndBudget(
     PhysicalQueryPlan<object>["membershipOptimization"]
   >["strategies"],
   expectedBindingCount?: number,
+  rowStrategies: readonly PhysicalTextRowStrategy[] = [],
 ): CompiledQuery<object> {
   const source: QuerySource = {
     node: physical.root,
@@ -1097,6 +1194,27 @@ function renderAndBudget(
         ),
       )
     : undefined;
+  const textRowStrategies =
+    rowStrategies.length === 0
+      ? undefined
+      : new Map(
+          rowStrategies.map(
+            (item) =>
+              [
+                item.node,
+                {
+                  strategy: item.strategy,
+                  ...(item.jsonSegments === undefined
+                    ? {}
+                    : {
+                        jsonSegments: item.jsonSegments.map(
+                          ({ jsonText }) => jsonText,
+                        ),
+                      }),
+                },
+              ] as const,
+          ),
+        );
   const context = includeSharedRelations
     ? renderContext(
         sharedNames,
@@ -1104,6 +1222,7 @@ function renderAndBudget(
         undefined,
         directScanProjections,
         reservePlanIdentifiers(physical),
+        textRowStrategies,
       )
     : renderContext(
         sharedNames,
@@ -1111,6 +1230,7 @@ function renderAndBudget(
         undefined,
         new Map(),
         reservePlanIdentifiers(physical),
+        textRowStrategies,
       );
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;
@@ -1140,12 +1260,13 @@ function physicalPlanShape(
 ): DatabasePhysicalPlanShape {
   let nativeMembershipCount = 0;
   let jsonMembershipCount = 0;
+  let nativeRowRelationCount = 0;
+  let jsonRowRelationCount = 0;
   for (const strategy of strategies) {
     if (strategy.strategy === "json-text") jsonMembershipCount += 1;
     else nativeMembershipCount += 1;
   }
-  return {
-    version: 1,
+  const common = {
     cteCount: includeSharedRelations
       ? physical.sharedRelations.length + recursiveClosureCount(physical.root)
       : recursiveClosureCount(physical.root),
@@ -1155,6 +1276,19 @@ function physicalPlanShape(
     nativeMembershipCount,
     jsonMembershipCount,
   };
+  const rowStrategies = physical.membershipOptimization?.rowStrategies ?? [];
+  for (const strategy of rowStrategies) {
+    if (strategy.strategy === "json-rows") jsonRowRelationCount += 1;
+    else nativeRowRelationCount += 1;
+  }
+  return rowStrategies.length === 0
+    ? { version: 1, ...common }
+    : {
+        version: 2,
+        ...common,
+        nativeRowRelationCount,
+        jsonRowRelationCount,
+      };
 }
 
 function compileAndBudget(

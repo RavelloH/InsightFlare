@@ -389,6 +389,55 @@ describe("D1 database runtime", () => {
     });
   });
 
+  it("hashes v2 row-relation emission without including row payload values", async () => {
+    const { database } = createDatabase();
+    const events: DatabaseQueryObservation[] = [];
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const sql =
+      'SELECT json_extract("_tuple".value, \'$[0]\') AS "_c0" FROM (VALUES (?)) AS "_segments" JOIN json_each("_segments".column1) AS "_tuple"';
+    const shape: DatabasePhysicalPlanShape = {
+      version: 2,
+      cteCount: 0,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 1,
+    };
+
+    await runtime.all({
+      sql,
+      bindings: ['[["private-row-a"]]'],
+      physicalPlanShape: shape,
+    });
+    await runtime.all({
+      sql,
+      bindings: ['[["private-row-b"]]'],
+      physicalPlanShape: shape,
+    });
+    await waitForObservations(events, 2);
+
+    const expectedHash = `v2:${await sha256Hex(
+      JSON.stringify([
+        "d1-query-shape-v2",
+        sql,
+        shape.cteCount,
+        shape.directScanProjectionCount,
+        shape.nativeMembershipCount,
+        shape.jsonMembershipCount,
+        shape.nativeRowRelationCount,
+        shape.jsonRowRelationCount,
+      ]),
+    )}`;
+    expect(events.map((event) => event.physicalPlanHash)).toEqual([
+      expectedHash,
+      expectedHash,
+    ]);
+    expect(JSON.stringify(events)).not.toContain("private-row-");
+  });
+
   it("uses valid fallback timing and omits invalid or failed result metrics", async () => {
     const { database, prepared, result: baseResult } = createDatabase();
     const events: DatabaseQueryObservation[] = [];

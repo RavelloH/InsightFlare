@@ -159,7 +159,12 @@ function shapeIsValid(
   shape: DatabasePhysicalPlanShape | undefined,
 ): shape is DatabasePhysicalPlanShape {
   return (
-    shape?.version === 1 &&
+    (shape?.version === 1 ||
+      (shape?.version === 2 &&
+        Number.isInteger(shape.nativeRowRelationCount) &&
+        shape.nativeRowRelationCount >= 0 &&
+        Number.isInteger(shape.jsonRowRelationCount) &&
+        shape.jsonRowRelationCount >= 0)) &&
     Number.isInteger(shape.cteCount) &&
     shape.cteCount >= 0 &&
     Number.isInteger(shape.directScanProjectionCount) &&
@@ -178,15 +183,28 @@ async function physicalPlanHash(
   const shape = statement.physicalPlanShape;
   if (!shapeIsValid(shape) || sqlBytes > D1_MAX_SQL_UTF8_BYTES) return null;
   try {
+    if (shape.version === 1) {
+      const payload = JSON.stringify([
+        "d1-query-shape-v1",
+        statement.sql,
+        shape.cteCount,
+        shape.directScanProjectionCount,
+        shape.nativeMembershipCount,
+        shape.jsonMembershipCount,
+      ]);
+      return `v1:${await sha256Hex(payload)}`;
+    }
     const payload = JSON.stringify([
-      "d1-query-shape-v1",
+      "d1-query-shape-v2",
       statement.sql,
       shape.cteCount,
       shape.directScanProjectionCount,
       shape.nativeMembershipCount,
       shape.jsonMembershipCount,
+      shape.nativeRowRelationCount,
+      shape.jsonRowRelationCount,
     ]);
-    return `v1:${await sha256Hex(payload)}`;
+    return `v2:${await sha256Hex(payload)}`;
   } catch {
     return null;
   }

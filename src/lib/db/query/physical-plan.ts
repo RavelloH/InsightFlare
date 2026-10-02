@@ -12,6 +12,7 @@ import type {
   QuerySource,
   Relation,
   ScanNode,
+  ValuesRelationNode,
 } from "./plan";
 import { validateLogicalQueryPlan } from "./validator";
 
@@ -38,11 +39,31 @@ export interface PhysicalMembershipOptimization {
   readonly nativeBindingCount: number;
   readonly selectedBindingCount: number;
   readonly strategies: readonly PhysicalMembershipStrategy[];
+  readonly rowStrategies?: readonly PhysicalTextRowStrategy[];
 }
 
 export interface PhysicalMembershipOptimizationFacts {
   readonly nativeBindingCount: number;
   readonly usage: readonly PhysicalMembershipUsage[];
+  readonly rowUsage?: readonly PhysicalTextRowUsage[];
+}
+
+export interface PhysicalTextRowUsage {
+  readonly node: ValuesRelationNode;
+  readonly occurrences: number;
+}
+
+export interface PhysicalTextRowJsonSegment {
+  readonly jsonText: string;
+  readonly jsonUtf8Bytes: number;
+}
+
+export interface PhysicalTextRowStrategy {
+  readonly node: ValuesRelationNode;
+  readonly occurrences: number;
+  readonly strategy: "native" | "json-rows";
+  readonly jsonSegments?: readonly PhysicalTextRowJsonSegment[];
+  readonly nativeBindingsSaved: number;
 }
 
 export interface SharedRelationDefinition {
@@ -131,6 +152,44 @@ function encodedJsonMembershipValues(
     : undefined;
 }
 
+function encodedJsonTextRows(
+  node: ValuesRelationNode,
+): readonly PhysicalTextRowJsonSegment[] | undefined {
+  if (node.rows.length === 0) return undefined;
+  const segments: PhysicalTextRowJsonSegment[] = [];
+  let tuples: string[] = [];
+  let tupleBytes = 0;
+  for (const row of node.rows) {
+    const tuple = JSON.stringify(row);
+    const bytes = new TextEncoder().encode(tuple).byteLength;
+    if (bytes + 2 > MAX_D1_JSON_MEMBERSHIP_BYTES) return undefined;
+    const nextBytes = tupleBytes + bytes + (tuples.length === 0 ? 0 : 1) + 2;
+    if (tuples.length > 0 && nextBytes > MAX_D1_JSON_MEMBERSHIP_BYTES) {
+      const jsonText = `[${tuples.join(",")}]`;
+      segments.push({
+        jsonText,
+        jsonUtf8Bytes: new TextEncoder().encode(jsonText).byteLength,
+      });
+      tuples = [];
+      tupleBytes = 0;
+    }
+    tuples.push(tuple);
+    tupleBytes += bytes + (tuples.length === 1 ? 0 : 1);
+  }
+  if (tuples.length > 0) {
+    const jsonText = `[${tuples.join(",")}]`;
+    segments.push({
+      jsonText,
+      jsonUtf8Bytes: new TextEncoder().encode(jsonText).byteLength,
+    });
+  }
+  return segments.every(
+    (segment) => segment.jsonUtf8Bytes <= MAX_D1_JSON_MEMBERSHIP_BYTES,
+  )
+    ? segments
+    : undefined;
+}
+
 /** Select the generic D1 physical representation from measured final-shape costs. */
 export function optimizePhysicalMembershipBudget<Row extends object>(
   plan: PhysicalQueryPlan<Row>,
@@ -161,34 +220,75 @@ export function optimizePhysicalMembershipBudget<Row extends object>(
       );
     return item;
   });
+  const rowUsage = (facts.rowUsage ?? []).map((item) => {
+    if (!item || !item.node || item.node.kind !== "values-relation")
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Invalid physical text row relation facts",
+      );
+    if (!Number.isInteger(item.occurrences) || item.occurrences < 1)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Invalid physical text row relation occurrence count",
+      );
+    return item;
+  });
 
   const savingsByExpression = new Map<AnyInListExpression, number>();
   const encodingByExpression = new Map<
     AnyInListExpression,
     { readonly jsonText: string; readonly jsonUtf8Bytes: number } | undefined
   >();
+  const savingsByRowNode = new Map<ValuesRelationNode, number>();
+  const encodingByRowNode = new Map<
+    ValuesRelationNode,
+    readonly PhysicalTextRowJsonSegment[] | undefined
+  >();
   let remaining = facts.nativeBindingCount;
   if (remaining > bindingLimit) {
-    const candidates = usage
-      .map((item, order) => ({
+    const rowCandidates = rowUsage.map((item, order) => {
+      const encoding = encodedJsonTextRows(item.node);
+      encodingByRowNode.set(item.node, encoding);
+      return {
+        ...item,
+        order: usage.length + order,
+        kind: "text-row" as const,
+        saving: encoding
+          ? item.occurrences *
+            (item.node.rows.length * item.node.columns.length - encoding.length)
+          : 0,
+      };
+    });
+    const candidates = [
+      ...usage.map((item, order) => ({
         ...item,
         order,
+        kind: "membership" as const,
         saving: item.occurrences * (item.expression.values.length - 1),
-      }))
+      })),
+      ...rowCandidates,
+    ]
       .filter((item) => item.saving > 0)
       .sort(
         (left, right) => right.saving - left.saving || left.order - right.order,
       );
     for (const candidate of candidates) {
       if (remaining <= bindingLimit) break;
-      let encoding = encodingByExpression.get(candidate.expression);
-      if (!encoding && !encodingByExpression.has(candidate.expression)) {
-        encoding = encodedJsonMembershipValues(candidate.expression);
-        encodingByExpression.set(candidate.expression, encoding);
+      if (candidate.kind === "membership") {
+        let encoding = encodingByExpression.get(candidate.expression);
+        if (!encoding && !encodingByExpression.has(candidate.expression)) {
+          encoding = encodedJsonMembershipValues(candidate.expression);
+          encodingByExpression.set(candidate.expression, encoding);
+        }
+        if (!encoding) continue;
+        savingsByExpression.set(candidate.expression, candidate.saving);
+        remaining -= candidate.saving;
+      } else {
+        const encoding = encodingByRowNode.get(candidate.node);
+        if (!encoding) continue;
+        savingsByRowNode.set(candidate.node, candidate.saving);
+        remaining -= candidate.saving;
       }
-      if (!encoding) continue;
-      savingsByExpression.set(candidate.expression, candidate.saving);
-      remaining -= candidate.saving;
     }
   }
 
@@ -216,6 +316,29 @@ export function optimizePhysicalMembershipBudget<Row extends object>(
       nativeBindingsSaved,
     };
   });
+  const rowStrategies: PhysicalTextRowStrategy[] = rowUsage.map((item) => {
+    const nativeBindingsSaved = savingsByRowNode.get(item.node) ?? 0;
+    if (nativeBindingsSaved === 0)
+      return {
+        node: item.node,
+        occurrences: item.occurrences,
+        strategy: "native",
+        nativeBindingsSaved: 0,
+      };
+    const jsonSegments = encodingByRowNode.get(item.node);
+    if (!jsonSegments)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Selected physical text row relation has no safe JSON encoding",
+      );
+    return {
+      node: item.node,
+      occurrences: item.occurrences,
+      strategy: "json-rows",
+      jsonSegments,
+      nativeBindingsSaved,
+    };
+  });
 
   return {
     ...plan,
@@ -223,6 +346,7 @@ export function optimizePhysicalMembershipBudget<Row extends object>(
       nativeBindingCount: facts.nativeBindingCount,
       selectedBindingCount: remaining,
       strategies,
+      rowStrategies,
     },
   };
 }
@@ -231,28 +355,60 @@ export function hasSamePhysicalMembershipOptimization(
   actual: PhysicalMembershipOptimization | undefined,
   expected: PhysicalMembershipOptimization,
 ): boolean {
+  const actualRowStrategies = actual?.rowStrategies ?? [];
+  const expectedRowStrategies = expected.rowStrategies ?? [];
   if (
     !actual ||
     actual.nativeBindingCount !== expected.nativeBindingCount ||
     actual.selectedBindingCount !== expected.selectedBindingCount ||
     !Array.isArray(actual.strategies) ||
-    actual.strategies.length !== expected.strategies.length
+    actual.strategies.length !== expected.strategies.length ||
+    !Array.isArray(actualRowStrategies) ||
+    actualRowStrategies.length !== expectedRowStrategies.length
   )
     return false;
-  return actual.strategies.every((item, index) => {
-    const canonical = expected.strategies[index];
-    return (
-      !!item &&
-      typeof item === "object" &&
-      !!canonical &&
-      item.expression === canonical.expression &&
-      item.occurrences === canonical.occurrences &&
-      item.strategy === canonical.strategy &&
-      item.jsonText === canonical.jsonText &&
-      item.jsonUtf8Bytes === canonical.jsonUtf8Bytes &&
-      item.nativeBindingsSaved === canonical.nativeBindingsSaved
-    );
-  });
+  return (
+    actual.strategies.every((item, index) => {
+      const canonical = expected.strategies[index];
+      return (
+        !!item &&
+        typeof item === "object" &&
+        !!canonical &&
+        item.expression === canonical.expression &&
+        item.occurrences === canonical.occurrences &&
+        item.strategy === canonical.strategy &&
+        item.jsonText === canonical.jsonText &&
+        item.jsonUtf8Bytes === canonical.jsonUtf8Bytes &&
+        item.nativeBindingsSaved === canonical.nativeBindingsSaved
+      );
+    }) &&
+    actualRowStrategies.every((item, index) => {
+      const canonical = expectedRowStrategies[index];
+      return (
+        !!item &&
+        typeof item === "object" &&
+        !!canonical &&
+        item.node === canonical.node &&
+        item.occurrences === canonical.occurrences &&
+        item.strategy === canonical.strategy &&
+        item.nativeBindingsSaved === canonical.nativeBindingsSaved &&
+        Array.isArray(item.jsonSegments) ===
+          Array.isArray(canonical.jsonSegments) &&
+        (item.jsonSegments ?? []).length ===
+          (canonical.jsonSegments ?? []).length &&
+        (item.jsonSegments ?? []).every(
+          (segment: PhysicalTextRowJsonSegment, segmentIndex: number) => {
+            const expectedSegment = canonical.jsonSegments?.[segmentIndex];
+            return (
+              !!expectedSegment &&
+              segment.jsonText === expectedSegment.jsonText &&
+              segment.jsonUtf8Bytes === expectedSegment.jsonUtf8Bytes
+            );
+          },
+        )
+      );
+    })
+  );
 }
 
 function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
@@ -284,6 +440,7 @@ function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
     case "recursive-closure":
       return [node.predicate];
     case "scan":
+    case "values-relation":
     case "distinct":
     case "union":
       return [];
@@ -345,7 +502,7 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
 }
 
 function nodeChildren(node: LogicalQueryNode): QuerySource[] {
-  return node.kind === "scan"
+  return node.kind === "scan" || node.kind === "values-relation"
     ? []
     : node.kind === "filter" ||
         node.kind === "project" ||
@@ -769,7 +926,11 @@ export function validatePhysicalQueryPlan<Row extends object>(
 export function lowerLogicalQuerySource<Row extends object>(
   source: QuerySource,
 ): PhysicalQueryPlan<Row> {
-  validateLogicalQueryPlan(source.node);
+  validateLogicalQueryPlan(
+    "kind" in source && source.kind === "relation"
+      ? (source as Relation<object>)
+      : source.node,
+  );
   if (
     source.scope !== source.node.scope ||
     !sameFields(source.fields, source.node.fields)

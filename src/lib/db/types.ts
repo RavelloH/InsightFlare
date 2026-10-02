@@ -10,13 +10,20 @@ export type DatabaseObservationReason =
   "budget" | "database_failure" | "result_failure" | "missing_batch_result";
 
 /** Small, value-free description of the compiler's final physical emission. */
-export interface DatabasePhysicalPlanShape {
-  readonly version: 1;
+interface DatabasePhysicalPlanShapeFields {
   readonly cteCount: number;
   readonly directScanProjectionCount: number;
   readonly nativeMembershipCount: number;
   readonly jsonMembershipCount: number;
 }
+
+export type DatabasePhysicalPlanShape =
+  | (DatabasePhysicalPlanShapeFields & { readonly version: 1 })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 2;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+    });
 
 interface DatabaseObservationFields {
   readonly version: 1;

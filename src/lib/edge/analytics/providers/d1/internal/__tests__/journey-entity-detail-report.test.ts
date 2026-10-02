@@ -71,8 +71,9 @@ interface VisitFixture {
 
 type LegacyReportRow = Record<string, unknown>;
 type JourneyDetailPlan = ReturnType<typeof buildJourneyVisitorDetailPlan>;
-type PhysicalPlanShape = NonNullable<
-  ReturnType<typeof compileD1Query>["physicalPlanShape"]
+type PhysicalPlanShape = Extract<
+  NonNullable<ReturnType<typeof compileD1Query>["physicalPlanShape"]>,
+  { readonly version: 1 }
 >;
 
 const databases = new Set<DatabaseSync>();
@@ -602,12 +603,17 @@ function assertDetailQueryEvidence(
   const typedQuery = compileJourneyDetailQuery(plan, outputId);
   expect(typedQuery.sql).toBe(sql);
   expect(typedQuery.bindings).toEqual(bindings);
+  expect(typedQuery.physicalPlanShape?.version).toBe(1);
+  const typedShape =
+    typedQuery.physicalPlanShape?.version === 1
+      ? typedQuery.physicalPlanShape
+      : undefined;
   const evidence = collectQueryEvidence(
     database,
     sql!,
     bindings!,
     trace.preparedSql.length,
-    typedQuery.physicalPlanShape,
+    typedShape,
   );
   const failureContext = `${label} legacy/typed SQL comparison: ${JSON.stringify({ legacy: legacyEvidence, typed: evidence })}`;
   const explainText = evidence.explainDetails.join("\n");

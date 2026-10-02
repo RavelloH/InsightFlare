@@ -98,6 +98,7 @@ export {
   semiJoin,
   sort,
   union,
+  valuesRelation,
   window,
   windowCountRows,
 } from "./query/plan";

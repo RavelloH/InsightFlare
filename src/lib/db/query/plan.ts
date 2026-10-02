@@ -67,6 +67,18 @@ export interface ScanNode extends QuerySourceBase {
   readonly table: SchemaObjectReference;
 }
 
+export interface TextRowRelationColumn {
+  readonly name: string;
+  readonly nullable: boolean;
+}
+
+/** A finite, value-only row source. Rows are ordered tuples in schema order. */
+export interface ValuesRelationNode extends QuerySourceBase {
+  readonly kind: "values-relation";
+  readonly columns: readonly TextRowRelationColumn[];
+  readonly rows: readonly (readonly (string | null)[])[];
+}
+
 interface QuerySourceBase {
   readonly scope: RelationScope;
   readonly fields: readonly OutputField[];
@@ -199,6 +211,7 @@ export function hasOwnedRecursiveClosureScopes(
 
 export type LogicalQueryNode =
   | ScanNode
+  | ValuesRelationNode
   | FilterNode
   | ProjectNode
   | JoinNode
@@ -296,6 +309,174 @@ export function scan<T extends GeneratedSchemaObject>(
   ) as ColumnExpressions<T>;
   const node: ScanNode = { kind: "scan", table, scope, fields };
   return relation(node, scope, fields, expressions);
+}
+
+export type TextRowRelationSchema = Readonly<
+  Record<string, { readonly affinity: "text"; readonly nullable: boolean }>
+>;
+
+type TextRowValue<Field> = Field extends { readonly nullable: true }
+  ? string | null
+  : string;
+
+export type TextRowRelationRow<Schema extends TextRowRelationSchema> = {
+  readonly [Key in keyof Schema]: TextRowValue<Schema[Key]>;
+};
+
+type TextRowRelationColumns<Schema extends TextRowRelationSchema> = {
+  readonly [Key in keyof Schema]: ColumnExpression<
+    TextRowValue<Schema[Key]>,
+    ExpressionResultType<"text", Schema[Key]["nullable"]>
+  >;
+};
+
+function hasWellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index++;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** Construct a finite text row relation with stable schema and bag semantics. */
+export function valuesRelation<const Schema extends TextRowRelationSchema>(
+  schema: Schema,
+  rows: readonly TextRowRelationRow<Schema>[],
+): Relation<TextRowRelationRow<Schema>, TextRowRelationColumns<Schema>> {
+  if (
+    !plainRecord(schema) ||
+    Reflect.ownKeys(schema).some((key) => typeof key !== "string") ||
+    Reflect.ownKeys(schema).length !== Object.keys(schema).length
+  )
+    throw new DatabaseCompilerError("invalid_plan", "Invalid text row schema");
+  const columns = Object.keys(schema).map((name) => {
+    const descriptor = Object.getOwnPropertyDescriptor(schema, name);
+    const definition = descriptor?.value;
+    const affinityDescriptor = plainRecord(definition)
+      ? Object.getOwnPropertyDescriptor(definition, "affinity")
+      : undefined;
+    const nullableDescriptor = plainRecord(definition)
+      ? Object.getOwnPropertyDescriptor(definition, "nullable")
+      : undefined;
+    if (
+      !descriptor ||
+      !("value" in descriptor) ||
+      !plainRecord(definition) ||
+      Reflect.ownKeys(definition).length !== 2 ||
+      Reflect.ownKeys(definition).some((key) => typeof key !== "string") ||
+      !hasOnlyOwnKeys(definition, ["affinity", "nullable"]) ||
+      !affinityDescriptor ||
+      !("value" in affinityDescriptor) ||
+      !nullableDescriptor ||
+      !("value" in nullableDescriptor) ||
+      affinityDescriptor.value !== "text" ||
+      typeof nullableDescriptor.value !== "boolean"
+    )
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        `Invalid text row schema field: ${name}`,
+      );
+    return { name, nullable: nullableDescriptor!.value as boolean };
+  });
+  if (columns.length === 0)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Text row relation schema must contain at least one field",
+    );
+  const fields = columns.map(({ name, nullable }) =>
+    outputField(name, "text", nullable),
+  );
+  assertFields(fields);
+  if (!Array.isArray(rows))
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Text relation rows must be an array",
+    );
+  if (Reflect.ownKeys(rows).length !== rows.length + 1)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Text relation rows cannot be decorated",
+    );
+  const expectedNames = columns.map(({ name }) => name);
+  const copiedRows: (readonly (string | null)[])[] = [];
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    if (!Object.prototype.hasOwnProperty.call(rows, rowIndex))
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Text relation rows cannot be sparse",
+      );
+    const row = rows[rowIndex];
+    if (
+      !plainRecord(row) ||
+      Reflect.ownKeys(row).length !== expectedNames.length ||
+      Reflect.ownKeys(row).some((key) => typeof key !== "string") ||
+      Object.keys(row).length !== expectedNames.length ||
+      expectedNames.some(
+        (name) => !Object.prototype.hasOwnProperty.call(row, name),
+      )
+    )
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Text relation row shape does not match its schema",
+      );
+    const tuple = expectedNames.map((name, columnIndex) => {
+      const descriptor = Object.getOwnPropertyDescriptor(row, name);
+      const value =
+        descriptor && "value" in descriptor ? descriptor.value : undefined;
+      const column = columns[columnIndex]!;
+      if (
+        !descriptor ||
+        !("value" in descriptor) ||
+        (typeof value !== "string" && value !== null) ||
+        (value === null && !column.nullable) ||
+        (typeof value === "string" && !hasWellFormedUtf16(value))
+      )
+        throw new DatabaseCompilerError(
+          "invalid_plan",
+          `Invalid text value for row field: ${name}`,
+        );
+      return value;
+    });
+    copiedRows.push(tuple);
+  }
+  const scope = createRelationScope();
+  const node: ValuesRelationNode = {
+    kind: "values-relation",
+    columns,
+    rows: copiedRows,
+    scope,
+    fields,
+  };
+  const expressions = Object.fromEntries(
+    fields.map((field, index) => [
+      field.name,
+      rebindColumn(scope, index, field.name, {
+        affinity: "text",
+        nullable: field.nullable,
+      }),
+    ]),
+  ) as TextRowRelationColumns<Schema>;
+  return relation(node, scope, fields, expressions);
+}
+
+function hasOnlyOwnKeys(value: object, keys: readonly string[]): boolean {
+  const allowed = new Set(keys);
+  return (
+    Object.keys(value).length === keys.length &&
+    Object.keys(value).every((key) => allowed.has(key))
+  );
 }
 
 export function filter<

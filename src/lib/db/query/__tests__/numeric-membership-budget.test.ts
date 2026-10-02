@@ -9,17 +9,21 @@ import {
   compileD1Mutation,
   compileD1Query,
   D1StatementBudgetError,
+  eq,
   filter,
   inList,
   insertFromQuery,
   inSubquery,
+  join,
   lowerLogicalPlan,
   not,
   param,
   project,
   scan,
   union,
+  valuesRelation,
 } from "@/lib/db";
+import { optimizePhysicalMembershipBudget } from "@/lib/db/query/physical-plan";
 import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
@@ -95,6 +99,394 @@ function projectWithAdditionalBindings(
 }
 
 describe("numeric membership binding optimizer", () => {
+  it("chooses text rows and membership values together from final savings", () => {
+    const visits = scan(schema.visits);
+    const rowSchema = {
+      row_key: { affinity: "text", nullable: false },
+      row_value: { affinity: "text", nullable: false },
+    } as const;
+    const membershipValues = Array.from(
+      { length: 101 },
+      (_, index) => `member-${index}`,
+    );
+    const membershipOnlyWins = valuesRelation(
+      rowSchema,
+      Array.from({ length: 40 }, (_unused, index) => ({
+        row_key: `key-${index}`,
+        row_value: `value-${index}`,
+      })),
+    );
+    const first = compileD1Query(
+      join(
+        membershipOnlyWins,
+        visits,
+        eq(membershipOnlyWins.columns.row_value, visits.columns.pathname),
+      ),
+    );
+    const joinedFirst = join(
+      membershipOnlyWins,
+      visits,
+      eq(membershipOnlyWins.columns.row_value, visits.columns.pathname),
+    );
+    const firstWithMembership = compileD1Query(
+      filter(
+        joinedFirst,
+        inList(joinedFirst.columns.right_pathname, membershipValues),
+      ),
+    );
+    const firstWithNumericMembership = compileD1Query(
+      filter(
+        joinedFirst,
+        inList(
+          joinedFirst.columns.right_duration_ms,
+          Array.from({ length: 101 }, (_, index) => index) as never,
+        ),
+      ),
+    );
+    const packedRows = valuesRelation(
+      rowSchema,
+      Array.from({ length: 60 }, (_unused, index) => ({
+        row_key: `key-${index}`,
+        row_value: `value-${index}`,
+      })),
+    );
+    const joinedPackedRows = join(
+      packedRows,
+      visits,
+      eq(packedRows.columns.row_value, visits.columns.pathname),
+    );
+    const bothSelected = compileD1Query(
+      filter(
+        joinedPackedRows,
+        inList(
+          joinedPackedRows.columns.right_pathname,
+          Array.from({ length: 121 }, (_, index) => `member-${index}`),
+        ),
+      ),
+    );
+
+    expect(first.bindings).toHaveLength(80);
+    expect(first.physicalPlanShape).toMatchObject({
+      version: 2,
+      nativeRowRelationCount: 1,
+      jsonRowRelationCount: 0,
+    });
+    expect(firstWithMembership.bindings).toHaveLength(81);
+    expect(firstWithMembership.sql).toContain("json_each(?)");
+    expect(firstWithMembership.physicalPlanShape).toMatchObject({
+      version: 2,
+      nativeRowRelationCount: 1,
+      jsonRowRelationCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 1,
+    });
+    expect(firstWithNumericMembership.bindings).toHaveLength(81);
+    expect(firstWithNumericMembership.physicalPlanShape).toMatchObject({
+      version: 2,
+      nativeRowRelationCount: 1,
+      jsonRowRelationCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 1,
+    });
+    expect(bothSelected.bindings).toHaveLength(2);
+    expect(bothSelected.sql.match(/json_each\(\?\)/gu)).toHaveLength(1);
+    expect(bothSelected.sql.match(/json_extract\("_tuple"/gu)).not.toBeNull();
+    expect(bothSelected.physicalPlanShape).toMatchObject({
+      version: 2,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 1,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 1,
+    });
+  });
+
+  it("keeps text rows native through 100 bindings and packs complete UTF8 tuples", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      const schema = {
+        value: { affinity: "text", nullable: false },
+      } as const;
+      const hundred = valuesRelation(
+        schema,
+        Array.from({ length: 100 }, (_unused, index) => ({
+          value: `small-${index}`,
+        })),
+      );
+      const hundredCompiled = compileD1Query(hundred);
+      expect(hundredCompiled.bindings).toHaveLength(100);
+      expect(hundredCompiled.physicalPlanShape).toMatchObject({
+        version: 2,
+        nativeRowRelationCount: 1,
+        jsonRowRelationCount: 0,
+      });
+
+      const exactUtf8Limit = `${"雪".repeat(333_331)}a`;
+      expect(new TextEncoder().encode(exactUtf8Limit).byteLength).toBe(999_994);
+      const rowsAtLimit = valuesRelation(schema, [
+        { value: exactUtf8Limit },
+        ...Array.from({ length: 100 }, () => ({ value: "tail" })),
+      ]);
+      const packed = compileD1Query(rowsAtLimit);
+      expect(packed.bindings).toHaveLength(2);
+      expect(
+        (packed.bindings ?? []).map(
+          (binding) => new TextEncoder().encode(String(binding)).byteLength,
+        ),
+      ).toEqual([1_000_000, expect.any(Number)]);
+      expect(packed.physicalPlanShape).toMatchObject({
+        version: 2,
+        nativeRowRelationCount: 0,
+        jsonRowRelationCount: 1,
+      });
+      const actual = executeAll(db, packed) as Array<{ value: string }>;
+      expect(actual).toHaveLength(101);
+      expect(actual.filter((row) => row.value === "tail")).toHaveLength(100);
+      expect(actual[0]?.value).toBe(exactUtf8Limit);
+
+      const overLimit = valuesRelation(schema, [
+        { value: "x".repeat(999_995) },
+        ...Array.from({ length: 100 }, () => ({ value: "tail" })),
+      ]);
+      expectBindingBudgetError(() => compileD1Query(overLimit), 101);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recomputes text row bindings and physical JSON segmentation for forged plans", () => {
+    const relation = valuesRelation(
+      {
+        first: { affinity: "text", nullable: false },
+        second: { affinity: "text", nullable: true },
+      } as const,
+      Array.from({ length: 60 }, (_unused, index) => ({
+        first: `first-${index}`,
+        second: index % 2 === 0 ? null : `second-${index}`,
+      })),
+    );
+    const physical = lowerLogicalPlan(relation);
+    if (physical.root.kind !== "values-relation")
+      throw new Error("expected a text values root");
+    const optimized = optimizePhysicalMembershipBudget(
+      physical,
+      {
+        nativeBindingCount: 120,
+        usage: [],
+        rowUsage: [{ node: physical.root, occurrences: 1 }],
+      },
+      100,
+    );
+    expect(compileD1Query(optimized).bindings).toHaveLength(1);
+
+    const rowStrategy = optimized.membershipOptimization?.rowStrategies?.[0];
+    if (
+      !rowStrategy ||
+      rowStrategy.strategy !== "json-rows" ||
+      !rowStrategy.jsonSegments
+    )
+      throw new Error("expected JSON row encoding metadata");
+    const forged = {
+      ...optimized,
+      membershipOptimization: {
+        ...optimized.membershipOptimization,
+        rowStrategies: [
+          {
+            ...rowStrategy,
+            jsonSegments: [
+              {
+                ...rowStrategy.jsonSegments[0]!,
+                jsonText: '[["forged",null]]',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    expect(() => compileD1Query(forged)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+
+    const invalidLogical = {
+      ...relation,
+      node: {
+        ...relation.node,
+        rows: [["valid", 3]],
+      },
+    };
+    expect(() => compileD1Query(invalidLogical as never)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+  });
+
+  it("rejects malformed text row nodes and optimizer usage metadata", () => {
+    const relation = valuesRelation(
+      { value: { affinity: "text", nullable: false } } as const,
+      [{ value: "valid" }] as const,
+    );
+    const malformedNodes = [
+      { ...relation.node, columns: [] },
+      {
+        ...relation.node,
+        columns: [{ name: "value", nullable: "false" }],
+      },
+      {
+        ...relation.node,
+        columns: [
+          { name: "value", nullable: false },
+          { name: "value", nullable: false },
+        ],
+        fields: [...relation.node.fields, relation.node.fields[0]!],
+      },
+      {
+        ...relation.node,
+        fields: [{ ...relation.node.fields[0]!, nullable: true }],
+      },
+      {
+        ...relation.node,
+        rows: Object.assign([["valid"]], { extra: true }),
+      },
+      { ...relation.node, rows: [["too", "many"]] },
+    ];
+    for (const node of malformedNodes)
+      expect(() => compileD1Query({ ...relation, node } as never)).toThrow();
+
+    expect(() =>
+      compileD1Query({ ...relation, fields: [] } as never),
+    ).toThrow();
+    expect(() =>
+      compileD1Query({
+        ...relation,
+        columns: { other: relation.columns.value },
+      } as never),
+    ).toThrow();
+    expect(() =>
+      compileD1Query({
+        ...relation,
+        columns: { value: param("forged") },
+      } as never),
+    ).toThrow();
+
+    const physical = lowerLogicalPlan(relation);
+    expect(() =>
+      optimizePhysicalMembershipBudget(
+        physical,
+        { nativeBindingCount: -1, usage: [] },
+        100,
+      ),
+    ).toThrow();
+    expect(() =>
+      optimizePhysicalMembershipBudget(
+        physical,
+        {
+          nativeBindingCount: 1,
+          usage: [{ expression: {} as never, occurrences: 1 }],
+        },
+        100,
+      ),
+    ).toThrow();
+    expect(() =>
+      optimizePhysicalMembershipBudget(
+        physical,
+        {
+          nativeBindingCount: 1,
+          usage: [
+            {
+              expression: { kind: "in-list" } as never,
+              occurrences: 0,
+            },
+          ],
+        },
+        100,
+      ),
+    ).toThrow();
+    expect(() =>
+      optimizePhysicalMembershipBudget(
+        physical,
+        {
+          nativeBindingCount: 1,
+          usage: [],
+          rowUsage: [{ node: null as never, occurrences: 1 }],
+        },
+        100,
+      ),
+    ).toThrow();
+    expect(() =>
+      optimizePhysicalMembershipBudget(
+        physical,
+        {
+          nativeBindingCount: 1,
+          usage: [],
+          rowUsage: [{ node: physical.root as never, occurrences: 0 }],
+        },
+        100,
+      ),
+    ).toThrow();
+  });
+
+  it("measures repeated and competing row relations at their final render occurrences", () => {
+    const repeatedSchema = Object.fromEntries(
+      Array.from({ length: 17 }, (_unused, index) => [
+        `field_${index}`,
+        { affinity: "text", nullable: false },
+      ]),
+    ) as Record<
+      string,
+      { readonly affinity: "text"; readonly nullable: false }
+    >;
+    const repeatedRows = Array.from(
+      { length: 3 },
+      (_unused, rowIndex) =>
+        Object.fromEntries(
+          Array.from({ length: 17 }, (_cell, columnIndex) => [
+            `field_${columnIndex}`,
+            `r${rowIndex}-c${columnIndex}`,
+          ]),
+        ) as Record<string, string>,
+    );
+    const repeatedSource = valuesRelation(repeatedSchema, repeatedRows);
+    const duplicated = compileD1Query(
+      union(repeatedSource, repeatedSource, true),
+    );
+    expect(duplicated.bindings).toHaveLength(2);
+    expect(duplicated.bindings?.[0]).toBe(duplicated.bindings?.[1]);
+    expect(
+      duplicated.sql.match(/json_each\("_segments"\.column1\)/gu),
+    ).toHaveLength(2);
+
+    const db = new DatabaseSync(":memory:");
+    try {
+      const schema = { key: { affinity: "text", nullable: false } } as const;
+      const leftRows = valuesRelation(
+        schema,
+        Array.from({ length: 55 }, (_unused, index) => ({
+          key: `key-${index}`,
+        })),
+      );
+      const rightRows = valuesRelation(
+        schema,
+        Array.from({ length: 55 }, (_unused, index) => ({
+          key: `key-${index}`,
+        })),
+      );
+      const compiled = compileD1Query(
+        join(
+          leftRows,
+          rightRows,
+          eq(leftRows.columns.key, rightRows.columns.key),
+        ),
+      );
+      expect(compiled.bindings).toHaveLength(56);
+      expect(compiled.physicalPlanShape).toMatchObject({
+        version: 2,
+        nativeRowRelationCount: 1,
+        jsonRowRelationCount: 1,
+      });
+      expect(executeAll(db, compiled)).toHaveLength(55);
+    } finally {
+      db.close();
+    }
+  });
+
   it("matches frozen native INTEGER IN and NOT IN oracles, including 3VL and weak storage", () => {
     const db = createDatabase();
     try {

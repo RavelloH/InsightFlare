@@ -20,6 +20,7 @@ import type {
   Relation,
   SortNode,
   UnionNode,
+  ValuesRelationNode,
   WindowNode,
   WindowOrderKey,
   WindowSpecification,
@@ -38,6 +39,38 @@ function invalid(message: string): never {
 function hasOnlyKeys(value: object, keys: readonly string[]): boolean {
   const allowed = new Set(keys);
   return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function wellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index++;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) return false;
+  }
+  return true;
+}
+
+function denseArray(value: unknown, length: number): boolean {
+  if (
+    !Array.isArray(value) ||
+    value.length !== length ||
+    Object.getPrototypeOf(value) !== Array.prototype
+  )
+    return false;
+  const keys = Reflect.ownKeys(value);
+  return (
+    keys.length === length + 1 &&
+    keys.includes("length") &&
+    Array.from(
+      { length },
+      (_item, index) =>
+        Object.getOwnPropertyDescriptor(value, String(index)) !== undefined &&
+        "value" in Object.getOwnPropertyDescriptor(value, String(index))!,
+    ).every(Boolean)
+  );
 }
 
 function validateIdentifier(value: string): void {
@@ -567,7 +600,7 @@ function closureExpressionSources(expression: SqlExpression): QuerySource[] {
 
 function closureNodeSources(node: LogicalQueryNode): QuerySource[] {
   const children =
-    node.kind === "scan"
+    node.kind === "scan" || node.kind === "values-relation"
       ? []
       : node.kind === "filter" ||
           node.kind === "project" ||
@@ -630,6 +663,7 @@ function validRelationScope(scope: RelationScope): boolean {
     typeof scope === "object" &&
     !Array.isArray(scope) &&
     typeof scope.marker === "symbol" &&
+    Reflect.ownKeys(scope).length === 1 &&
     hasOnlyKeys(scope, ["marker"])
   );
 }
@@ -725,6 +759,80 @@ function validateSource(
     const validateChild = (child: QuerySource) =>
       validateSource(child, activeSources, outerScopes);
     switch (node.kind) {
+      case "values-relation": {
+        const values = node as ValuesRelationNode;
+        if (
+          !hasOnlyKeys(values, [
+            "kind",
+            "columns",
+            "rows",
+            "scope",
+            "fields",
+          ]) ||
+          !Array.isArray(values.columns) ||
+          !denseArray(values.columns, values.columns.length) ||
+          values.columns.length === 0 ||
+          values.columns.length !== values.fields.length ||
+          !Array.isArray(values.rows) ||
+          !validRelationScope(values.scope)
+        )
+          invalid("Text row relation has invalid metadata");
+        const columnNames = new Set<string>();
+        const expectedFields = values.columns.map((column) => {
+          const item = column as object;
+          const nameDescriptor = item
+            ? Object.getOwnPropertyDescriptor(item, "name")
+            : undefined;
+          const nullableDescriptor = item
+            ? Object.getOwnPropertyDescriptor(item, "nullable")
+            : undefined;
+          if (
+            !column ||
+            typeof column !== "object" ||
+            Reflect.ownKeys(column).length !== 2 ||
+            !hasOnlyKeys(column, ["name", "nullable"]) ||
+            !nameDescriptor ||
+            !("value" in nameDescriptor) ||
+            !nullableDescriptor ||
+            !("value" in nullableDescriptor) ||
+            typeof nameDescriptor.value !== "string" ||
+            typeof nullableDescriptor.value !== "boolean"
+          )
+            invalid("Text row relation column metadata is invalid");
+          const name = nameDescriptor.value;
+          const nullable = nullableDescriptor.value;
+          validateIdentifier(name);
+          if (columnNames.has(name))
+            invalid("Text row relation has duplicate schema fields");
+          columnNames.add(name);
+          return { name, affinity: "text", nullable };
+        });
+        if (
+          values.fields.length !== expectedFields.length ||
+          values.fields.some(
+            (field, index) => !sameFieldMetadata(field, expectedFields[index]!),
+          )
+        )
+          invalid("Text row relation fields do not match its schema");
+        if (!denseArray(values.rows, values.rows.length))
+          invalid("Text row relation rows cannot be sparse or decorated");
+        for (let rowIndex = 0; rowIndex < values.rows.length; rowIndex++) {
+          const row = values.rows[rowIndex];
+          if (!denseArray(row, values.columns.length))
+            invalid("Text row relation tuple does not match its schema");
+          for (let columnIndex = 0; columnIndex < row.length; columnIndex++) {
+            const value = row[columnIndex];
+            const column = values.columns[columnIndex]!;
+            if (
+              (typeof value !== "string" && value !== null) ||
+              (value === null && !column.nullable) ||
+              (typeof value === "string" && !wellFormedUtf16(value))
+            )
+              invalid("Text row relation contains an invalid cell value");
+          }
+        }
+        return;
+      }
       case "scan": {
         if (!isGeneratedSchemaObject(node.table))
           invalid(
@@ -1192,6 +1300,57 @@ export function validateLogicalQueryPlan(
 ): void {
   const root = "node" in plan ? plan.node : plan;
   validateSource(sourceOf(root), new Set(), new Map());
+  if ("node" in plan && plan.node.kind === "values-relation") {
+    const node = plan.node;
+    if (
+      !hasOnlyKeys(plan, ["kind", "node", "scope", "fields", "columns"]) ||
+      Reflect.ownKeys(plan).length !== 5 ||
+      plan.scope !== node.scope ||
+      !Array.isArray(plan.fields) ||
+      !sameFieldArray(plan.fields, node.fields) ||
+      !plan.columns ||
+      typeof plan.columns !== "object" ||
+      Array.isArray(plan.columns)
+    )
+      invalid("Text row relation public metadata does not match its node");
+    const names = Object.keys(plan.columns);
+    if (
+      Reflect.ownKeys(plan.columns).length !== node.columns.length ||
+      names.length !== node.columns.length ||
+      names.some((name, index) => name !== node.columns[index]?.name)
+    )
+      invalid("Text row relation columns do not match its schema order");
+    node.columns.forEach((column, index) => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        plan.columns,
+        column.name,
+      );
+      const expression =
+        descriptor && "value" in descriptor ? descriptor.value : undefined;
+      if (
+        !expression ||
+        typeof expression !== "object" ||
+        expression.kind !== "column" ||
+        expression.scope !== node.scope ||
+        expression.index !== index ||
+        expression.name !== column.name ||
+        !expression.resultType ||
+        expression.resultType.affinity !== "text" ||
+        expression.resultType.nullable !== column.nullable
+      )
+        invalid("Text row relation column expression metadata is invalid");
+    });
+  }
+}
+
+function sameFieldArray(
+  left: readonly OutputField[],
+  right: readonly OutputField[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((field, index) => sameFieldMetadata(field, right[index]!))
+  );
 }
 
 export function validatePredicate(
