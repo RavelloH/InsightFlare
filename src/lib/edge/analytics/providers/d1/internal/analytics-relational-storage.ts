@@ -57,7 +57,7 @@ export type AnalyticsSourceValue =
     }
   | {
       readonly kind: "entity";
-      readonly entity: "observation" | "page" | "event" | "session";
+      readonly entity: "observation" | "page" | "event" | "session" | "visitor";
       readonly keys: readonly AnyExpression[];
       readonly present: Predicate;
       readonly nullable: boolean;
@@ -525,6 +525,11 @@ export class AnalyticsRelationalStorage {
         binding.relationship === "observation.session" &&
         requiredSlots.has(binding.slot),
     );
+    const needsVisitorRelation = relationships.some(
+      (binding) =>
+        binding.relationship === "observation.visitor" &&
+        requiredSlots.has(binding.slot),
+    );
     const needsOwnerJoin = relationships.some(
       (binding) => binding.relationship === "observation.session",
     );
@@ -626,7 +631,11 @@ export class AnalyticsRelationalStorage {
             : this.#events(node.temporalDomain);
       }
     } else if (node.entity === "observation") {
-      this.#requireRelationships(relationships, ["observation.session"], path);
+      this.#requireRelationships(
+        relationships,
+        ["observation.session", "observation.visitor"],
+        path,
+      );
       const fieldActivity = declaredContracts[0]?.contract.activity;
       if (
         declaredContracts.some(
@@ -648,7 +657,9 @@ export class AnalyticsRelationalStorage {
           attributes: requiredReportAttributes,
           includeIdentity: selfRequired,
           includeSession: needsSessionRelation,
+          includeVisitor: needsVisitorRelation,
           includeOccurrenceTime: includesOccurrenceTime,
+          optionalOwner: needsVisitorRelation && !needsOwnerJoin,
         });
       } else if (fieldActivity === undefined) {
         if (node.temporalDomain !== "candidate")
@@ -659,6 +670,9 @@ export class AnalyticsRelationalStorage {
         carrier = this.#candidateObservations({
           includeIdentity: selfRequired,
           includeSession: needsSessionRelation,
+          includeVisitor: needsVisitorRelation,
+          optionalOwner: needsVisitorRelation && !needsOwnerJoin,
+          requiresOwnerJoin: needsOwnerJoin,
           identityAttributes,
         });
       } else if (fieldActivity === "page") {
@@ -671,8 +685,10 @@ export class AnalyticsRelationalStorage {
         const ownerIdentityColumns = this.#ownerIdentityColumns(
           identityAttributes,
           needsSessionRelation,
+          needsVisitorRelation,
         );
         const includeOwner = needsOwnerJoin || ownerIdentityColumns.length > 0;
+        const optionalOwner = needsVisitorRelation && !needsOwnerJoin;
         const needsName = declaredContracts.some(
           ({ binding }) => binding.attribute === "event.name",
         );
@@ -681,10 +697,16 @@ export class AnalyticsRelationalStorage {
             ? this.#eventsWithNameAndOwner(
                 node.temporalDomain,
                 ownerIdentityColumns,
+                optionalOwner,
               )
             : this.#eventsWithName(node.temporalDomain)
           : includeOwner
-            ? this.#eventsWithOwner(node.temporalDomain, ownerIdentityColumns)
+            ? this.#eventsWithOwner(
+                node.temporalDomain,
+                ownerIdentityColumns,
+                false,
+                optionalOwner,
+              )
             : this.#events(node.temporalDomain);
       }
     } else {
@@ -791,6 +813,25 @@ export class AnalyticsRelationalStorage {
                 carrier,
                 activity === "event" ? "owner_session_id" : "session_id",
                 activity === "observation" ? "session_site_pk" : "site_pk",
+                node.temporalDomain,
+              ),
+            );
+            break;
+          case "observation.visitor":
+            if (node.entity !== "observation")
+              throw new Error(
+                `${path}.values: observation.visitor is only valid on Observation.`,
+              );
+            values.set(
+              binding.slot,
+              this.#visitorValue(
+                carrier,
+                "site_pk",
+                activity === "observation"
+                  ? "visitor_id"
+                  : activity === "event"
+                    ? "owner_visitor_id"
+                    : "visitor_id",
                 node.temporalDomain,
               ),
             );
@@ -1016,14 +1057,32 @@ export class AnalyticsRelationalStorage {
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
     const pages = this.#sitePages(canonicalColumns);
-    const joined = join(
-      events,
-      pages,
-      and(
-        eq(events.columns.site_pk, pages.columns.site_pk),
-        eq(events.columns.visit_id, pages.columns.visit_id),
-      ),
+    const condition = and(
+      eq(events.columns.site_pk, pages.columns.site_pk),
+      eq(events.columns.visit_id, pages.columns.visit_id),
     );
+    const joined = join(events, pages, condition);
+    return this.#projectOwnedEvents(joined, canonicalColumns);
+  }
+
+  #attachOptionalOwner(
+    events: AnalyticsDbRelation,
+    ownerColumns: readonly string[],
+  ): AnalyticsDbRelation {
+    const canonicalColumns = [...new Set(ownerColumns)].sort();
+    const pages = this.#sitePages(canonicalColumns);
+    const condition = and(
+      eq(events.columns.site_pk, pages.columns.site_pk),
+      eq(events.columns.visit_id, pages.columns.visit_id),
+    );
+    const joined = join(events, pages, condition, "left");
+    return this.#projectOwnedEvents(joined, canonicalColumns);
+  }
+
+  #projectOwnedEvents(
+    joined: AnalyticsDbRelation,
+    canonicalColumns: readonly string[],
+  ): AnalyticsDbRelation {
     const projections: Record<string, AnyExpression> = {
       site_pk: joined.columns.left_site_pk,
       site_id: joined.columns.left_site_id,
@@ -1347,6 +1406,15 @@ export class AnalyticsRelationalStorage {
     if (
       node.values.some(
         (binding) =>
+          binding.kind === "related-entity" &&
+          binding.relationship === "observation.visitor" &&
+          requiredSlots.has(binding.slot),
+      )
+    )
+      columns.add("visitor_id");
+    if (
+      node.values.some(
+        (binding) =>
           binding.kind === "occurrence-time" && requiredSlots.has(binding.slot),
       )
     )
@@ -1413,12 +1481,14 @@ export class AnalyticsRelationalStorage {
   #ownerIdentityColumns(
     attributes: readonly ObservationIdentityAttribute[],
     includeSession: boolean,
+    includeVisitor = false,
   ): ("session_id" | "visitor_id")[] {
     const requested = new Set(attributes);
     const columns: ("session_id" | "visitor_id")[] = [];
     if (includeSession || requested.has("observation.sessionId"))
       columns.push("session_id");
-    if (requested.has("observation.visitorId")) columns.push("visitor_id");
+    if (includeVisitor || requested.has("observation.visitorId"))
+      columns.push("visitor_id");
     return columns;
   }
 
@@ -1426,19 +1496,21 @@ export class AnalyticsRelationalStorage {
     domain: SourceNode["temporalDomain"],
     ownerColumns: readonly string[],
     allowRetainedHistory = false,
+    optionalOwner = false,
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
     const cacheKey = JSON.stringify([
       domain,
       allowRetainedHistory,
       canonicalColumns,
+      optionalOwner,
     ]);
     const existing = this.#ownedEventCarriers.get(cacheKey);
     if (existing) return existing;
-    const carrier = this.#attachOwner(
-      this.#events(domain, allowRetainedHistory),
-      canonicalColumns,
-    );
+    const events = this.#events(domain, allowRetainedHistory);
+    const carrier = optionalOwner
+      ? this.#attachOptionalOwner(events, canonicalColumns)
+      : this.#attachOwner(events, canonicalColumns);
     this.#ownedEventCarriers.set(cacheKey, carrier);
     return carrier;
   }
@@ -1446,15 +1518,16 @@ export class AnalyticsRelationalStorage {
   #eventsWithNameAndOwner(
     domain: SourceNode["temporalDomain"],
     ownerColumns: readonly string[],
+    optionalOwner = false,
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
-    const cacheKey = `${String(domain)}:${canonicalColumns.join(",")}`;
+    const cacheKey = `${String(domain)}:${canonicalColumns.join(",")}:${optionalOwner}`;
     const existing = this.#namedOwnedEventCarriers.get(cacheKey);
     if (existing) return existing;
-    const carrier = this.#attachOwner(
-      this.#eventsWithName(domain),
-      canonicalColumns,
-    );
+    const events = this.#eventsWithName(domain);
+    const carrier = optionalOwner
+      ? this.#attachOptionalOwner(events, canonicalColumns)
+      : this.#attachOwner(events, canonicalColumns);
     this.#namedOwnedEventCarriers.set(cacheKey, carrier);
     return carrier;
   }
@@ -1462,6 +1535,9 @@ export class AnalyticsRelationalStorage {
   #candidateObservations(input: {
     readonly includeIdentity: boolean;
     readonly includeSession: boolean;
+    readonly includeVisitor: boolean;
+    readonly optionalOwner: boolean;
+    readonly requiresOwnerJoin: boolean;
     readonly identityAttributes: readonly ObservationIdentityAttribute[];
   }): AnalyticsDbRelation {
     const identityAttributes = [
@@ -1475,6 +1551,9 @@ export class AnalyticsRelationalStorage {
     const cacheKey = JSON.stringify([
       input.includeIdentity,
       input.includeSession,
+      input.includeVisitor,
+      input.optionalOwner,
+      input.requiresOwnerJoin,
       identityAttributes,
     ]);
     const existing = this.#candidateObservationCarriers.get(cacheKey);
@@ -1482,13 +1561,15 @@ export class AnalyticsRelationalStorage {
     const ownerIdentityColumns = this.#ownerIdentityColumns(
       identityAttributes,
       input.includeSession,
+      input.includeVisitor,
     );
     const pageColumns = [
       ...(input.includeSession ||
       identityAttributes.includes("observation.sessionId")
         ? (["session_id"] as const)
         : []),
-      ...(identityAttributes.includes("observation.visitorId")
+      ...(input.includeVisitor ||
+      identityAttributes.includes("observation.visitorId")
         ? (["visitor_id"] as const)
         : []),
       ...(input.includeIdentity ? (["visit_id"] as const) : []),
@@ -1504,6 +1585,9 @@ export class AnalyticsRelationalStorage {
         pages.columns.session_id,
       );
     }
+    if (input.includeVisitor) {
+      pageProjections.visitor_id = pages.columns.visitor_id;
+    }
     if (identityAttributes.includes("observation.sessionId"))
       pageProjections.raw_session_id = pages.columns.session_id;
     if (identityAttributes.includes("observation.visitorId"))
@@ -1515,9 +1599,14 @@ export class AnalyticsRelationalStorage {
     const pageRows = project(pages, pageProjections);
 
     const events =
-      ownerIdentityColumns.length > 0
-        ? this.#eventsWithOwner("candidate", ownerIdentityColumns)
-        : this.#attachOwner(this.#events("candidate"), ownerIdentityColumns);
+      input.requiresOwnerJoin || ownerIdentityColumns.length > 0
+        ? this.#eventsWithOwner(
+            "candidate",
+            ownerIdentityColumns,
+            false,
+            input.optionalOwner,
+          )
+        : this.#events("candidate");
     const eventProjections: Record<string, AnyExpression> = {
       site_pk: events.columns.site_pk,
     };
@@ -1527,6 +1616,9 @@ export class AnalyticsRelationalStorage {
       eventProjections.session_present = this.#sessionPresent(
         events.columns.owner_session_id,
       );
+    }
+    if (input.includeVisitor) {
+      eventProjections.visitor_id = events.columns.owner_visitor_id;
     }
     if (identityAttributes.includes("observation.sessionId"))
       eventProjections.raw_session_id = events.columns.owner_session_id;
@@ -1549,7 +1641,9 @@ export class AnalyticsRelationalStorage {
     readonly attributes: readonly string[];
     readonly includeIdentity: boolean;
     readonly includeSession: boolean;
+    readonly includeVisitor: boolean;
     readonly includeOccurrenceTime: boolean;
+    readonly optionalOwner: boolean;
   }): AnalyticsDbRelation {
     const attributes = [...new Set(input.attributes)].sort();
     const cacheKey = JSON.stringify([
@@ -1557,7 +1651,9 @@ export class AnalyticsRelationalStorage {
       attributes,
       input.includeIdentity,
       input.includeSession,
+      input.includeVisitor,
       input.includeOccurrenceTime,
+      input.optionalOwner,
     ]);
     const existing = this.#reportObservationCarriers.get(cacheKey);
     if (existing) return existing;
@@ -1572,7 +1668,7 @@ export class AnalyticsRelationalStorage {
     if (input.includeOccurrenceTime) pageColumns.add("started_at");
     if (input.includeSession || attributes.includes("observation.sessionId"))
       pageColumns.add("session_id");
-    if (attributes.includes("observation.visitorId"))
+    if (input.includeVisitor || attributes.includes("observation.visitorId"))
       pageColumns.add("visitor_id");
     for (const attribute of attributes) {
       const physical = observationReportColumn(attribute);
@@ -1594,6 +1690,9 @@ export class AnalyticsRelationalStorage {
         column(pages, "session_id"),
       );
     }
+    if (input.includeVisitor) {
+      pageProjections.visitor_id = column(pages, "visitor_id");
+    }
     if (attributes.includes("observation.sessionId"))
       pageProjections.raw_session_id = column(pages, "session_id");
     if (attributes.includes("observation.visitorId"))
@@ -1608,8 +1707,17 @@ export class AnalyticsRelationalStorage {
     const ownerColumns = this.#reportOwnerColumns(
       attributes,
       input.includeSession,
+      input.includeVisitor,
     );
-    let events = this.#eventsWithOwner(input.domain, ownerColumns, true);
+    const optionalOwner =
+      input.optionalOwner &&
+      ownerColumns.every((ownerColumn) => ownerColumn === "visitor_id");
+    let events = this.#eventsWithOwner(
+      input.domain,
+      ownerColumns,
+      true,
+      optionalOwner,
+    );
     if (attributes.includes("observation.eventName"))
       events = this.#attachReportName(events);
     if (attributes.includes("observation.sameSiteEventName"))
@@ -1627,6 +1735,9 @@ export class AnalyticsRelationalStorage {
       eventProjections.session_present = this.#sessionPresent(
         column(events, "owner_session_id"),
       );
+    }
+    if (input.includeVisitor) {
+      eventProjections.visitor_id = column(events, "owner_visitor_id");
     }
     if (attributes.includes("observation.sessionId"))
       eventProjections.raw_session_id = column(events, "owner_session_id");
@@ -1646,9 +1757,11 @@ export class AnalyticsRelationalStorage {
   #reportOwnerColumns(
     attributes: readonly string[],
     includeSession: boolean,
+    includeVisitor: boolean,
   ): string[] {
     const columns = new Set<string>();
     if (includeSession) columns.add("session_id");
+    if (includeVisitor) columns.add("visitor_id");
     for (const attribute of attributes) {
       if (
         attribute === "observation.id" ||
@@ -1780,6 +1893,26 @@ export class AnalyticsRelationalStorage {
       ExpressionResultType<"text", boolean>
     >;
     return and(isNotNull(typedSessionId), neq(typedSessionId, param("")));
+  }
+
+  #visitorValue(
+    source: AnalyticsDbRelation,
+    visitorSiteColumn: string,
+    visitorColumn: string,
+    domain: SourceNode["temporalDomain"],
+  ): AnalyticsSourceValue {
+    const visitorId = column(source, visitorColumn) as SqlExpression<
+      string | null,
+      ExpressionResultType<"text", boolean>
+    >;
+    return {
+      kind: "entity",
+      entity: "visitor",
+      keys: [column(source, visitorSiteColumn), visitorId],
+      present: and(isNotNull(visitorId), neq(visitorId, param(""))),
+      nullable: true,
+      candidateBounded: domain === "candidate",
+    };
   }
 
   #observationIdentityColumn(

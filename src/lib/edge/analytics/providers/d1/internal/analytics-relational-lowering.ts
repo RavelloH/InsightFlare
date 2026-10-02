@@ -884,22 +884,39 @@ function keyEqual(
   return eq(left.expression, right.expression);
 }
 
-function assertNonNullableSessionSet(
+function assertNonNullableUnaryEntitySet(
   inputNode: LogicalNode,
   entry: LoweredRelation,
+  logicalSlots: ReadonlyMap<SlotId, LogicalSlot>,
   path: string,
-): void {
+): AnalyticsEntityKind {
   if (inputNode.output.length !== 1)
-    reject(path, "Only unary Session identity sets are currently supported.");
-  const value = entry.slots.get(inputNode.output[0]!);
+    reject(path, "Only unary scoped identity sets are currently supported.");
+  const slot = inputNode.output[0]!;
+  const value = entry.slots.get(slot);
+  const declared = logicalSlot(logicalSlots, slot, path);
   if (
+    inputNode.grain.kind !== "entity" ||
+    inputNode.grain.key !== slot ||
     !value ||
     value.kind !== "entity" ||
-    value.type.entity !== "session" ||
-    value.nullable ||
-    value.keyColumns.length !== 2
+    !["observation", "session", "visitor"].includes(value.type.entity) ||
+    inputNode.grain.entity !== value.type.entity ||
+    declared.type.kind !== "entity" ||
+    declared.type.entity !== value.type.entity ||
+    declared.nullable ||
+    value.nullable
   )
-    reject(path, "Set operations require a non-null composite Session key.");
+    reject(
+      path,
+      value?.kind === "entity" && value.type.entity === "session"
+        ? "Set operations require a non-null composite Session key."
+        : "Set operations require one non-null scoped entity identity.",
+    );
+  const expectedKeyWidth = value.type.entity === "observation" ? 3 : 2;
+  if (value.keyColumns.length !== expectedKeyWidth)
+    reject(path, "Set operation entity key has an invalid composite width.");
+  return value.type.entity;
 }
 
 function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
@@ -1528,13 +1545,41 @@ export class AnalyticsLogicalToDbLowerer {
 
   #lowerSetOperation(node: SetOperationNode, path: string): LoweredRelation {
     const inputs = node.inputs.map((id) => this.#lowerNode(id));
+    const inputEntities: AnalyticsEntityKind[] = [];
     for (const [index, input] of inputs.entries()) {
       const inputNode = this.#nodes.get(node.inputs[index]!);
       if (!inputNode) reject(path, `Set input ${index} does not exist.`);
-      assertNonNullableSessionSet(inputNode, input, `${path}.inputs[${index}]`);
+      inputEntities.push(
+        assertNonNullableUnaryEntitySet(
+          inputNode,
+          input,
+          this.#logicalSlots,
+          `${path}.inputs[${index}]`,
+        ),
+      );
     }
     if (node.output.length !== 1)
-      reject(path, "Only unary Session identity sets are currently supported.");
+      reject(path, "Only unary scoped identity sets are currently supported.");
+    const outputSlot = node.output[0]!;
+    const outputType = logicalSlot(
+      this.#logicalSlots,
+      outputSlot,
+      `${path}.output[0]`,
+    );
+    const entity = inputEntities[0]!;
+    if (
+      inputEntities.some((inputEntity) => inputEntity !== entity) ||
+      node.grain.kind !== "entity" ||
+      node.grain.key !== outputSlot ||
+      node.grain.entity !== entity ||
+      outputType.type.kind !== "entity" ||
+      outputType.type.entity !== entity ||
+      outputType.nullable
+    )
+      reject(
+        path,
+        "Set inputs and output must preserve one non-null scoped entity identity.",
+      );
 
     const aligned = inputs.map((input, inputIndex) => {
       const sourceNode = this.#nodes.get(node.inputs[inputIndex]!);
@@ -1629,11 +1674,18 @@ export class AnalyticsLogicalToDbLowerer {
     node: RelationshipLookupNode,
     path: string,
   ): LoweredRelation {
-    if (node.relationship !== "observation.session")
+    if (
+      node.relationship !== "observation.session" &&
+      node.relationship !== "observation.visitor"
+    )
       reject(
         path,
         `Relationship ${node.relationship} has no D1 lookup mapping.`,
       );
+    const target =
+      node.relationship === "observation.session"
+        ? { entity: "session" as const, idColumn: "session_id" as const }
+        : { entity: "visitor" as const, idColumn: "visitor_id" as const };
     const input = this.#lowerNode(node.input);
     const required = this.#requiredOutput(node);
     const outputValues = node.output.filter((slot) => required.has(slot));
@@ -1665,17 +1717,17 @@ export class AnalyticsLogicalToDbLowerer {
     if (key.kind !== "entity" || key.entity !== "observation" || key.nullable)
       reject(
         path,
-        "Observation session lookup requires a non-null composite Observation key.",
+        `Observation ${target.entity} lookup requires a non-null composite Observation key.`,
       );
     if (!this.#hasStorageBackedObservationIdentity(node.input, node.inputKey))
       reject(
         path,
-        "Observation session lookup requires an identity preserved from a registered Page/Event Source.",
+        `Observation ${target.entity} lookup requires an identity preserved from a registered Page/Event Source.`,
       );
     if (key.keys.length !== 3)
       reject(
         path,
-        "Observation session lookup requires site, activity kind, and local identity keys.",
+        `Observation ${target.entity} lookup requires site, activity kind, and local identity keys.`,
       );
     const observationKind = key.keys[1]! as SqlExpression<
       string | null,
@@ -1702,7 +1754,7 @@ export class AnalyticsLogicalToDbLowerer {
     const pages = project(pageTable, {
       site_pk: pageTable.columns.site_pk,
       visit_id: pageTable.columns.visit_id,
-      session_id: pageTable.columns.session_id,
+      [target.idColumn]: pageTable.columns[target.idColumn],
     });
     const pageJoined = join(
       pageInput,
@@ -1712,8 +1764,12 @@ export class AnalyticsLogicalToDbLowerer {
         eq(pageKey.keys[2]!, pages.columns.visit_id),
       ),
     );
-    const pageSessionId = relationColumn(pageJoined, "right_session_id", path);
-    const pageSessionText = pageSessionId as SqlExpression<
+    const pageTargetId = relationColumn(
+      pageJoined,
+      `right_${target.idColumn}`,
+      path,
+    );
+    const pageTargetText = pageTargetId as SqlExpression<
       string | null,
       ExpressionResultType<"text", boolean>
     >;
@@ -1735,13 +1791,10 @@ export class AnalyticsLogicalToDbLowerer {
       slot: node.relatedSlot,
       value: {
         kind: "entity",
-        entity: "session",
-        keys: [
-          relationColumn(pageJoined, "right_site_pk", path),
-          pageSessionId,
-        ],
+        entity: target.entity,
+        keys: [relationColumn(pageJoined, "right_site_pk", path), pageTargetId],
         present: asPredicate(
-          and(isNotNull(pageSessionText), neq(pageSessionText, param(""))),
+          and(isNotNull(pageTargetText), neq(pageTargetText, param(""))),
           path,
         ),
         nullable: true,
@@ -1785,7 +1838,7 @@ export class AnalyticsLogicalToDbLowerer {
     const owners = project(ownerTable, {
       site_pk: ownerTable.columns.site_pk,
       visit_id: ownerTable.columns.visit_id,
-      session_id: ownerTable.columns.session_id,
+      [target.idColumn]: ownerTable.columns[target.idColumn],
     });
     const eventWithOwner = join(
       eventJoined,
@@ -1796,12 +1849,12 @@ export class AnalyticsLogicalToDbLowerer {
       ),
       "left",
     );
-    const ownerSessionId = relationColumn(
+    const ownerTargetId = relationColumn(
       eventWithOwner,
-      "right_session_id",
+      `right_${target.idColumn}`,
       path,
     );
-    const ownerSessionText = ownerSessionId as SqlExpression<
+    const ownerTargetText = ownerTargetId as SqlExpression<
       string | null,
       ExpressionResultType<"text", boolean>
     >;
@@ -1823,13 +1876,13 @@ export class AnalyticsLogicalToDbLowerer {
       slot: node.relatedSlot,
       value: {
         kind: "entity",
-        entity: "session",
+        entity: target.entity,
         keys: [
           relationColumn(eventWithOwner, "right_site_pk", path),
-          ownerSessionId,
+          ownerTargetId,
         ],
         present: asPredicate(
-          and(isNotNull(ownerSessionText), neq(ownerSessionText, param(""))),
+          and(isNotNull(ownerTargetText), neq(ownerTargetText, param(""))),
           path,
         ),
         nullable: true,
@@ -2019,12 +2072,35 @@ export class AnalyticsLogicalToDbLowerer {
           slot,
           nextActive,
         );
+      case "set-operation": {
+        if (
+          node.output.length !== 1 ||
+          node.output[0] !== slot ||
+          node.grain.kind !== "entity" ||
+          node.grain.key !== slot ||
+          node.grain.entity !== "observation"
+        )
+          return false;
+        return node.inputs.every((inputId) => {
+          const inputNode = this.#nodes.get(inputId);
+          const inputSlot = inputNode?.output[0];
+          return (
+            inputNode?.output.length === 1 &&
+            inputNode.grain.kind === "entity" &&
+            inputNode.grain.entity === "observation" &&
+            inputNode.grain.key === inputSlot &&
+            inputSlot !== undefined &&
+            this.#hasStorageBackedObservationIdentity(
+              inputId,
+              inputSlot,
+              nextActive,
+            )
+          );
+        });
+      }
       case "aggregate":
-      case "set-operation":
       case "join":
-        // The supported aggregates/joins expose scalars, and set operations
-        // expose Session keys. None can supply a storage-backed Observation
-        // identity in this capability set.
+        // Aggregates and joins do not supply a storage-backed Observation key.
         return false;
       case "sort":
         return this.#hasStorageBackedObservationIdentity(

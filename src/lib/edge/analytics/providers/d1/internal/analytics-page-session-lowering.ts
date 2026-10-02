@@ -768,18 +768,25 @@ function validateSessionDocumentExpression(
     const validNullTest =
       (record.operator === "isNull" || record.operator === "notNull") &&
       record.value === undefined;
+    const validPresence =
+      (record.operator === "exists" ||
+        record.operator === "notExists" ||
+        record.operator === "isEmpty" ||
+        record.operator === "notEmpty") &&
+      record.value === undefined;
     if (
       target?.kind !== "field" ||
       !contract ||
       (!validComparison &&
         !validMembership &&
         !validStringMatch &&
-        !validNullTest)
+        !validNullTest &&
+        !validPresence)
     ) {
       return unsupported(
         "session-equality-leaf-only",
         path,
-        "Only registered native Page/Event comparisons, set membership, string matching, and null tests are supported.",
+        "Only registered native Page/Event comparisons, set membership, string matching, null tests, and field presence tests are supported.",
       );
     }
     return undefined;

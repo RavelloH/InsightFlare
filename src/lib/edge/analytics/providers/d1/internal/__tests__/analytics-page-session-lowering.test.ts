@@ -1843,7 +1843,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           siteId: SITE_A,
           time: scalarPlan.context.time,
         }).lower(scalarPlan.outputs[0]!),
-      ).toThrow(/Set operations require a non-null composite Session key/u);
+      ).toThrow(/one non-null scoped entity identity/u);
 
       const unboundedContext = {
         ...context,
@@ -4644,6 +4644,45 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           ],
         },
         {
+          name: "title-exists-matches-non-null-storage",
+          document: filterDocument(fieldCondition("page.title", "exists")),
+          expected: [
+            "s-title-match",
+            "s-title-conflict",
+            "s-title-negative",
+            "s-title-empty",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+            "s-mixed",
+            "s-page-only",
+          ],
+        },
+        {
+          name: "title-not-exists-does-not-match-non-null-storage",
+          document: filterDocument(fieldCondition("page.title", "notExists")),
+          expected: [],
+        },
+        {
+          name: "title-is-empty-matches-only-raw-empty-string",
+          document: filterDocument(fieldCondition("page.title", "isEmpty")),
+          expected: ["s-title-empty"],
+        },
+        {
+          name: "title-not-empty-preserves-raw-whitespace",
+          document: filterDocument(fieldCondition("page.title", "notEmpty")),
+          expected: [
+            "s-title-match",
+            "s-title-conflict",
+            "s-title-negative",
+            "s-title-whitespace",
+            "s-query-map",
+            "s-hash-map",
+            "s-mixed",
+            "s-page-only",
+          ],
+        },
+        {
           name: "root-not-title-eq-includes-no-read-candidates",
           document: filterDocument({ kind: "not", child: pageEq }),
           expected: [
@@ -4815,7 +4854,8 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         // A bare Page/Event condition is anchored to its native activity, so
         // null tests use only that activity's evidence for the leaf oracle.
         const leafDataset =
-          item.name === "title-is-null-on-non-null-storage"
+          item.name === "title-is-null-on-non-null-storage" ||
+          item.name === "title-not-exists-does-not-match-non-null-storage"
             ? { ...evaluatorDataset, events: [] }
             : item.name === "event-is-null-does-not-invent-event-evidence"
               ? { ...evaluatorDataset, pages: [] }
