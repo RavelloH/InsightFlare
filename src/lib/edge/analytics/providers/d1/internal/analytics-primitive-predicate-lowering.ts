@@ -44,8 +44,11 @@ type NativeEventNameStorageMapping = {
 export type NativePrimitiveFieldId =
   | "page.path"
   | "page.title"
+  | "page.hostname"
   | "page.query"
   | "page.hash"
+  | "referrer.domain"
+  | "referrer.url"
   | "event.name"
   | "utm.source"
   | "utm.medium"
@@ -55,7 +58,12 @@ export type NativePrimitiveFieldId =
   | "client.browser"
   | "client.browserVersion"
   | "client.os"
+  | "client.deviceType"
   | "client.language"
+  | "geo.country"
+  | "geo.region"
+  | "geo.city"
+  | "geo.continent"
   | "geo.timeZone"
   | "geo.organization"
   | "user.id"
@@ -65,11 +73,17 @@ interface NativePrimitiveFieldContractBase {
   readonly id: NativePrimitiveFieldId;
   readonly conditionEntity: FilterConditionEntity;
   readonly observationKinds: readonly ("page" | "event")[];
+  readonly valueKind: "string" | "enum";
+  readonly profile: "trimmed-text" | "case-folded-text" | "direct-referrer";
+  readonly comparison: "case-sensitive" | "case-insensitive";
   readonly compilerStrategy:
     | "column.pathname"
     | "column.title"
+    | "column.hostname"
     | "column.query_string"
     | "column.hash_fragment"
+    | "column.referrer_host"
+    | "column.referrer_url"
     | "column.utm_source"
     | "column.utm_medium"
     | "column.utm_campaign"
@@ -78,7 +92,12 @@ interface NativePrimitiveFieldContractBase {
     | "column.browser"
     | "column.browser_version"
     | "column.os"
+    | "column.device_type"
     | "column.language"
+    | "column.country"
+    | "column.region"
+    | "column.city"
+    | "column.continent"
     | "column.timezone"
     | "column.as_organization"
     | "column.user_id"
@@ -101,11 +120,33 @@ export type NativePrimitivePredicate =
   | { readonly operator: "in" | "notIn"; readonly values: readonly string[] }
   | { readonly operator: "isNull" | "notNull" };
 
+const TRIMMED_CASE_SENSITIVE_TEXT = {
+  valueKind: "string",
+  profile: "trimmed-text",
+  comparison: "case-sensitive",
+} as const;
+const CASE_FOLDED_CASE_INSENSITIVE_TEXT = {
+  valueKind: "string",
+  profile: "case-folded-text",
+  comparison: "case-insensitive",
+} as const;
+const CASE_FOLDED_CASE_INSENSITIVE_ENUM = {
+  valueKind: "enum",
+  profile: "case-folded-text",
+  comparison: "case-insensitive",
+} as const;
+const DIRECT_REFERRER_CASE_INSENSITIVE_TEXT = {
+  valueKind: "string",
+  profile: "direct-referrer",
+  comparison: "case-insensitive",
+} as const;
+
 const FIELD_CONTRACTS: Readonly<
   Record<NativePrimitiveFieldId, NativePrimitiveFieldContract>
 > = {
   "page.path": {
     id: "page.path",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "page",
     observationKinds: ["page", "event"],
@@ -117,6 +158,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "page.title": {
     id: "page.title",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "page",
     observationKinds: ["page", "event"],
@@ -126,8 +168,21 @@ const FIELD_CONTRACTS: Readonly<
     storageNullable: false,
     nullable: true,
   },
+  "page.hostname": {
+    id: "page.hostname",
+    ...CASE_FOLDED_CASE_INSENSITIVE_TEXT,
+    activity: "page",
+    conditionEntity: "page",
+    observationKinds: ["page", "event"],
+    compilerStrategy: "column.hostname",
+    storageSource: "visit",
+    storageColumn: "hostname",
+    storageNullable: false,
+    nullable: true,
+  },
   "page.query": {
     id: "page.query",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "page",
     observationKinds: ["page", "event"],
@@ -139,6 +194,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "page.hash": {
     id: "page.hash",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "page",
     observationKinds: ["page", "event"],
@@ -148,8 +204,33 @@ const FIELD_CONTRACTS: Readonly<
     storageNullable: false,
     nullable: true,
   },
+  "referrer.domain": {
+    id: "referrer.domain",
+    ...DIRECT_REFERRER_CASE_INSENSITIVE_TEXT,
+    activity: "page",
+    conditionEntity: "activity",
+    observationKinds: ["page", "event"],
+    compilerStrategy: "column.referrer_host",
+    storageSource: "visit",
+    storageColumn: "referrer_host",
+    storageNullable: false,
+    nullable: true,
+  },
+  "referrer.url": {
+    id: "referrer.url",
+    ...DIRECT_REFERRER_CASE_INSENSITIVE_TEXT,
+    activity: "page",
+    conditionEntity: "activity",
+    observationKinds: ["page", "event"],
+    compilerStrategy: "column.referrer_url",
+    storageSource: "visit",
+    storageColumn: "referrer_url",
+    storageNullable: false,
+    nullable: true,
+  },
   "event.name": {
     id: "event.name",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "event",
     conditionEntity: "event",
     observationKinds: ["event"],
@@ -161,6 +242,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "utm.source": {
     id: "utm.source",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -172,6 +254,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "utm.medium": {
     id: "utm.medium",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -183,6 +266,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "utm.campaign": {
     id: "utm.campaign",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -194,6 +278,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "utm.term": {
     id: "utm.term",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -205,6 +290,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "utm.content": {
     id: "utm.content",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -216,6 +302,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "client.browser": {
     id: "client.browser",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -227,6 +314,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "client.browserVersion": {
     id: "client.browserVersion",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -238,6 +326,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "client.os": {
     id: "client.os",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -249,6 +338,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "client.language": {
     id: "client.language",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -258,8 +348,69 @@ const FIELD_CONTRACTS: Readonly<
     storageNullable: false,
     nullable: true,
   },
+  "client.deviceType": {
+    id: "client.deviceType",
+    ...CASE_FOLDED_CASE_INSENSITIVE_ENUM,
+    activity: "page",
+    conditionEntity: "activity",
+    observationKinds: ["page", "event"],
+    compilerStrategy: "column.device_type",
+    storageSource: "visit",
+    storageColumn: "device_type",
+    storageNullable: false,
+    nullable: true,
+  },
+  "geo.country": {
+    id: "geo.country",
+    ...CASE_FOLDED_CASE_INSENSITIVE_ENUM,
+    activity: "page",
+    conditionEntity: "activity",
+    observationKinds: ["page", "event"],
+    compilerStrategy: "column.country",
+    storageSource: "visit",
+    storageColumn: "country",
+    storageNullable: false,
+    nullable: true,
+  },
+  "geo.region": {
+    id: "geo.region",
+    ...CASE_FOLDED_CASE_INSENSITIVE_TEXT,
+    activity: "page",
+    conditionEntity: "activity",
+    observationKinds: ["page", "event"],
+    compilerStrategy: "column.region",
+    storageSource: "visit",
+    storageColumn: "region",
+    storageNullable: false,
+    nullable: true,
+  },
+  "geo.city": {
+    id: "geo.city",
+    ...CASE_FOLDED_CASE_INSENSITIVE_TEXT,
+    activity: "page",
+    conditionEntity: "activity",
+    observationKinds: ["page", "event"],
+    compilerStrategy: "column.city",
+    storageSource: "visit",
+    storageColumn: "city",
+    storageNullable: false,
+    nullable: true,
+  },
+  "geo.continent": {
+    id: "geo.continent",
+    ...CASE_FOLDED_CASE_INSENSITIVE_ENUM,
+    activity: "page",
+    conditionEntity: "activity",
+    observationKinds: ["page", "event"],
+    compilerStrategy: "column.continent",
+    storageSource: "visit",
+    storageColumn: "continent",
+    storageNullable: false,
+    nullable: true,
+  },
   "geo.timeZone": {
     id: "geo.timeZone",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -271,6 +422,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "geo.organization": {
     id: "geo.organization",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -282,6 +434,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "user.id": {
     id: "user.id",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -293,6 +446,7 @@ const FIELD_CONTRACTS: Readonly<
   },
   "user.name": {
     id: "user.name",
+    ...TRIMMED_CASE_SENSITIVE_TEXT,
     activity: "page",
     conditionEntity: "activity",
     observationKinds: ["page", "event"],
@@ -341,8 +495,9 @@ export function nativePrimitiveFieldContract(
     !attribute ||
     !filterObservationKindsMatch ||
     !semanticObservationKindsMatch ||
-    field.valueKind !== "string" ||
-    field.profile !== "trimmed-text" ||
+    field.valueKind !== contract.valueKind ||
+    field.profile !== contract.profile ||
+    field.comparison !== contract.comparison ||
     field.compilerStrategy !== contract.compilerStrategy ||
     field.source !== contract.storageSource ||
     field.nativeEntity !== expectedNativeEntity ||
@@ -350,7 +505,6 @@ export function nativePrimitiveFieldContract(
     field.evaluation !== "observation" ||
     field.presence !== "non-null-column" ||
     field.empty !== "raw-empty-string" ||
-    field.comparison !== "case-sensitive" ||
     field.nullable !== contract.nullable ||
     attribute.id !== contract.id ||
     attribute.valueType.kind !== "scalar" ||
@@ -360,7 +514,7 @@ export function nativePrimitiveFieldContract(
     attribute.evaluation !== "observation" ||
     attribute.presence !== "non-null" ||
     attribute.empty !== "empty-string-is-value" ||
-    attribute.comparison !== "case-sensitive"
+    attribute.comparison !== contract.comparison
   ) {
     return undefined;
   }

@@ -738,7 +738,54 @@ describe("primitive Filter v1 condition lowering", () => {
     `);
   });
 
-  it("returns stable unsupported results for legal non-primitive Filter v1 features", () => {
+  it("lowers valueless field presence using raw null and empty-string tests", () => {
+    const expected = {
+      exists: { kind: "null-test", negated: true },
+      notExists: { kind: "null-test", negated: false },
+      isEmpty: {
+        kind: "boolean",
+        operator: "and",
+        terms: [
+          { kind: "null-test", negated: true },
+          {
+            kind: "comparison",
+            operator: "eq",
+            right: { kind: "literal", value: "" },
+          },
+        ],
+      },
+      notEmpty: {
+        kind: "boolean",
+        operator: "and",
+        terms: [
+          { kind: "null-test", negated: true },
+          {
+            kind: "comparison",
+            operator: "neq",
+            right: { kind: "literal", value: "" },
+          },
+        ],
+      },
+    } as const;
+
+    for (const [operator, shape] of Object.entries(expected)) {
+      const lowered = lowerToPlan(analyzedCondition("page.path", operator));
+      expect(lowered.result.kind).toBe("supported");
+      const filter = lowered.plan?.nodes.find((node) => node.kind === "filter");
+      expect(
+        filter?.kind === "filter" ? filter.predicate : undefined,
+      ).toMatchObject(shape);
+    }
+
+    const empty = lowerToPlan(analyzedCondition("page.path", "isEmpty"));
+    const predicate = empty.plan?.nodes.find((node) => node.kind === "filter");
+    if (!predicate || predicate.kind !== "filter")
+      throw new Error("presence_filter_missing");
+    expect(predicate.predicate).not.toHaveProperty("stringNormalization");
+    expect(JSON.stringify(predicate.predicate)).not.toContain("trim-case-fold");
+  });
+
+  it("returns stable unsupported results for non-primitive Filter v1 features", () => {
     const between = lowerToPlan(
       analyzedCondition("page.durationMs", "between", [100, 500]),
     );
@@ -749,24 +796,6 @@ describe("primitive Filter v1 condition lowering", () => {
       operator: "between",
     });
     expect(between.builder.finish().nodes).toEqual([]);
-
-    const emptyString = lowerToPlan(analyzedCondition("page.path", "isEmpty"));
-    expect(emptyString.result).toMatchObject({
-      kind: "unsupported",
-      code: "unsupported-operator",
-      fieldId: "page.path",
-      operator: "isEmpty",
-    });
-
-    for (const operator of ["exists", "notExists", "notEmpty"] as const) {
-      const result = lowerToPlan(analyzedCondition("page.path", operator));
-      expect(result.result).toMatchObject({
-        kind: "unsupported",
-        code: "unsupported-operator",
-        fieldId: "page.path",
-        operator,
-      });
-    }
 
     const payload = analyzedPayloadCondition();
     const payloadResult = lowerFilterCondition(

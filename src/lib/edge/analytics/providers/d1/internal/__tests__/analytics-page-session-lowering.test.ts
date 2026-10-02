@@ -4967,7 +4967,8 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
     );
     expect(unsupportedField).toMatchObject({
       kind: "unsupported",
-      capability: "session-equality-leaf-only",
+      capability: "session-boolean-plan-shape",
+      reason: expect.stringContaining("case-fold normalization"),
     });
     expect("query" in unsupportedField).toBe(false);
 

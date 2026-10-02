@@ -112,6 +112,12 @@ const SUPPORTED_STRING_MATCHES = new Set<FilterOperator>([
   "endsWith",
 ]);
 const SUPPORTED_NULL_TESTS = new Set<FilterOperator>(["isNull", "notNull"]);
+const SUPPORTED_FIELD_PRESENCE = new Set<FilterOperator>([
+  "exists",
+  "notExists",
+  "isEmpty",
+  "notEmpty",
+]);
 
 function invalid(code: string): never {
   throw new Error(`filter_lowering_${code}`);
@@ -198,22 +204,33 @@ export function preparePrimitiveFieldCondition(
     return invalid("invalid_condition");
   }
   const loweredCondition = normalized.root;
-  if (
-    (loweredCondition.operator === "isEmpty" ||
-      loweredCondition.operator === "notEmpty") &&
-    attribute.empty === "unsupported"
-  ) {
-    return unsupported(
-      "unsupported-presence",
-      field.id,
-      loweredCondition.operator,
-    );
+  if (SUPPORTED_FIELD_PRESENCE.has(loweredCondition.operator)) {
+    if (attribute.presence !== "non-null") {
+      return unsupported(
+        "unsupported-presence",
+        field.id,
+        loweredCondition.operator,
+      );
+    }
+    if (
+      (loweredCondition.operator === "isEmpty" ||
+        loweredCondition.operator === "notEmpty") &&
+      ((field.valueKind !== "string" && field.valueKind !== "enum") ||
+        attribute.empty !== "empty-string-is-value")
+    ) {
+      return unsupported(
+        "unsupported-presence",
+        field.id,
+        loweredCondition.operator,
+      );
+    }
   }
   if (
     !SUPPORTED_COMPARISONS.has(loweredCondition.operator) &&
     !SUPPORTED_SET_OPERATORS.has(loweredCondition.operator) &&
     !SUPPORTED_STRING_MATCHES.has(loweredCondition.operator) &&
-    !SUPPORTED_NULL_TESTS.has(loweredCondition.operator)
+    !SUPPORTED_NULL_TESTS.has(loweredCondition.operator) &&
+    !SUPPORTED_FIELD_PRESENCE.has(loweredCondition.operator)
   ) {
     return unsupported(
       "unsupported-operator",
@@ -246,6 +263,23 @@ export function primitivePredicateForSource(
 ): LogicalExpressionHandle {
   const input = builder.slot(source, `attribute:${field.id}`);
   const normalization = stringNormalizationFor(field);
+
+  if (SUPPORTED_FIELD_PRESENCE.has(condition.operator)) {
+    if (condition.operator === "exists") return builder.isNull(input, true);
+    if (condition.operator === "notExists") return builder.isNull(input);
+
+    // Presence tests inspect the stored value exactly as it is. In particular,
+    // do not use Filter's trimming or case-folding canonicalization here.
+    const rawEmptyLiteral = literal(builder, attribute.valueType, "");
+    return builder.and(
+      builder.isNull(input, true),
+      builder.compare(
+        condition.operator === "isEmpty" ? "eq" : "neq",
+        input,
+        rawEmptyLiteral,
+      ),
+    );
+  }
 
   if (SUPPORTED_NULL_TESTS.has(condition.operator)) {
     return builder.isNull(input, condition.operator === "notNull");
