@@ -66,6 +66,7 @@ function isPredicateExpression(expression: SqlExpression): boolean {
     case "null-check":
     case "in-list":
     case "in-subquery":
+    case "text-like":
       return true;
     case "case":
       return expression.resultType.affinity === "integer";
@@ -75,7 +76,11 @@ function isPredicateExpression(expression: SqlExpression): boolean {
     case "function":
     case "aggregate":
     case "cast-integer":
+    case "cast-text":
+    case "text-position":
+    case "text-substring":
     case "coalesce":
+    case "constant":
     case "unixepoch":
     case "scalar-subquery":
       return false;

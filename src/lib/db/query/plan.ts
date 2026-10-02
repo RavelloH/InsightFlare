@@ -79,6 +79,12 @@ export interface ValuesRelationNode extends QuerySourceBase {
   readonly rows: readonly (readonly (string | null)[])[];
 }
 
+export interface JsonScalarArrayNode extends QuerySourceBase {
+  readonly kind: "json-scalar-array";
+  readonly valueKind: "text" | "numeric";
+  readonly values: readonly (string | number)[];
+}
+
 interface QuerySourceBase {
   readonly scope: RelationScope;
   readonly fields: readonly OutputField[];
@@ -212,6 +218,7 @@ export function hasOwnedRecursiveClosureScopes(
 export type LogicalQueryNode =
   | ScanNode
   | ValuesRelationNode
+  | JsonScalarArrayNode
   | FilterNode
   | ProjectNode
   | JoinNode
@@ -315,9 +322,8 @@ export type TextRowRelationSchema = Readonly<
   Record<string, { readonly affinity: "text"; readonly nullable: boolean }>
 >;
 
-type TextRowValue<Field> = Field extends { readonly nullable: true }
-  ? string | null
-  : string;
+type TextRowValue<Field extends { readonly nullable: boolean }> =
+  true extends Field["nullable"] ? string | null : string;
 
 export type TextRowRelationRow<Schema extends TextRowRelationSchema> = {
   readonly [Key in keyof Schema]: TextRowValue<Schema[Key]>;
@@ -467,8 +473,84 @@ export function valuesRelation<const Schema extends TextRowRelationSchema>(
         nullable: field.nullable,
       }),
     ]),
-  ) as TextRowRelationColumns<Schema>;
+  ) as unknown as TextRowRelationColumns<Schema>;
   return relation(node, scope, fields, expressions);
+}
+
+type JsonScalarArrayValue<Kind extends "text" | "numeric"> = Kind extends "text"
+  ? string
+  : number;
+type JsonScalarArrayRow<Kind extends "text" | "numeric"> = {
+  readonly value: JsonScalarArrayValue<Kind>;
+};
+type JsonScalarArrayColumns<Kind extends "text" | "numeric"> = {
+  readonly value: ColumnExpression<
+    JsonScalarArrayValue<Kind>,
+    ExpressionResultType<Kind extends "text" ? "text" : "numeric", false>
+  >;
+};
+
+/**
+ * Construct a copied one-column scalar relation lowered through SQLite JSON.
+ * Text cells intentionally retain lone UTF-16 surrogates for JSON decoding.
+ */
+export function jsonScalarArray<const Kind extends "text" | "numeric">(
+  valueKind: Kind,
+  values: readonly JsonScalarArrayValue<Kind>[],
+): Relation<JsonScalarArrayRow<Kind>, JsonScalarArrayColumns<Kind>> {
+  if (valueKind !== "text" && valueKind !== "numeric")
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "jsonScalarArray() requires a text or numeric value kind",
+    );
+  if (
+    !Array.isArray(values) ||
+    Object.getPrototypeOf(values) !== Array.prototype ||
+    Reflect.ownKeys(values).length !== values.length + 1 ||
+    !Reflect.ownKeys(values).includes("length")
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "jsonScalarArray() values must be a dense, undecorated array",
+    );
+  const copiedValues: (string | number)[] = [];
+  for (let index = 0; index < values.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(values, String(index));
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "jsonScalarArray() values cannot be sparse or use accessors",
+      );
+    const value = descriptor.value;
+    if (
+      (valueKind === "text" && typeof value !== "string") ||
+      (valueKind === "numeric" &&
+        (typeof value !== "number" || !Number.isFinite(value)))
+    )
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        `jsonScalarArray() requires homogeneous ${valueKind} scalars`,
+      );
+    copiedValues.push(value as string | number);
+  }
+  Object.freeze(copiedValues);
+  const affinity = valueKind === "text" ? "text" : "numeric";
+  const fields = [outputField("value", affinity, false)];
+  const scope = createRelationScope();
+  const node: JsonScalarArrayNode = {
+    kind: "json-scalar-array",
+    valueKind,
+    values: copiedValues,
+    scope,
+    fields,
+  };
+  const columns = {
+    value: rebindColumn(scope, 0, "value", {
+      affinity,
+      nullable: false,
+    }),
+  } as JsonScalarArrayColumns<Kind>;
+  return relation(node, scope, fields, columns);
 }
 
 function hasOnlyOwnKeys(value: object, keys: readonly string[]): boolean {

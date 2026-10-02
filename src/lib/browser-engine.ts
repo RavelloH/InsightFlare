@@ -1,4 +1,4 @@
-const BLINK_TOKENS = [
+export const BROWSER_ENGINE_BLINK_TOKENS = [
   "chrome",
   "chromium",
   "edge",
@@ -54,7 +54,7 @@ export function browserEngineLabel(browser: string, os?: string): string {
   ) {
     return "Gecko";
   }
-  if (includesAny(normalizedBrowser, BLINK_TOKENS)) {
+  if (includesAny(normalizedBrowser, BROWSER_ENGINE_BLINK_TOKENS)) {
     return "Blink";
   }
   if (
@@ -74,6 +74,9 @@ export function browserEngineCaseSql(
   const normalizedOs = osColumn
     ? `LOWER(TRIM(COALESCE(${osColumn}, '')))`
     : "''";
+  const blinkCondition = BROWSER_ENGINE_BLINK_TOKENS.map(
+    (token) => `${normalizedBrowser} LIKE '%${token}%'`,
+  ).join(" OR ");
 
   return `CASE
     WHEN ${normalizedBrowser} = '' THEN ''
@@ -81,7 +84,7 @@ export function browserEngineCaseSql(
     WHEN ${normalizedOs} LIKE '%ios%' THEN 'WebKit'
     WHEN ${normalizedBrowser} LIKE '%opera mini%' OR ${normalizedBrowser} LIKE '%presto%' THEN 'Presto'
     WHEN ${normalizedBrowser} LIKE '%firefox%' OR ${normalizedBrowser} LIKE '%gecko%' THEN 'Gecko'
-    WHEN ${normalizedBrowser} LIKE '%chrome%' OR ${normalizedBrowser} LIKE '%chromium%' OR ${normalizedBrowser} LIKE '%edge%' OR ${normalizedBrowser} LIKE '%edg%' OR ${normalizedBrowser} LIKE '%opera%' OR ${normalizedBrowser} LIKE '%opr%' OR ${normalizedBrowser} LIKE '%brave%' OR ${normalizedBrowser} LIKE '%vivaldi%' OR ${normalizedBrowser} LIKE '%arc%' OR ${normalizedBrowser} LIKE '%samsung internet%' OR ${normalizedBrowser} LIKE '%webview%' OR ${normalizedBrowser} LIKE '%yandex%' OR ${normalizedBrowser} LIKE '%uc browser%' OR ${normalizedBrowser} LIKE '%duckduckgo%' OR ${normalizedBrowser} LIKE '%whale%' OR ${normalizedBrowser} LIKE '%qqbrowser%' OR ${normalizedBrowser} LIKE '%miui browser%' OR ${normalizedBrowser} LIKE '%coc coc%' THEN 'Blink'
+    WHEN ${blinkCondition} THEN 'Blink'
     WHEN ${normalizedBrowser} LIKE '%safari%' OR ${normalizedBrowser} LIKE '%webkit%' THEN 'WebKit'
     ELSE ''
   END`;

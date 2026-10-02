@@ -13,6 +13,7 @@ import {
 } from "./expression";
 import type {
   AggregateNode,
+  JsonScalarArrayNode,
   LogicalQueryNode,
   OutputField,
   QuerySource,
@@ -51,6 +52,53 @@ function wellFormedUtf16(value: string): boolean {
     } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) return false;
   }
   return true;
+}
+
+function singleUnicodeScalar(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.includes("\0") ||
+    !wellFormedUtf16(value)
+  )
+    return false;
+  return (
+    value.length === 1 ||
+    (value.length === 2 &&
+      value.charCodeAt(0) >= 0xd800 &&
+      value.charCodeAt(0) <= 0xdbff)
+  );
+}
+
+function booleanValueExpression(expression: SqlExpression): boolean {
+  switch (expression.kind) {
+    case "binary":
+      return ["=", "<>", ">", ">=", "<", "<="].includes(expression.operator);
+    case "distinct-from":
+    case "boolean":
+    case "not":
+    case "null-check":
+    case "in-list":
+    case "in-subquery":
+    case "text-like":
+      return true;
+    case "function":
+      return ["text-contains", "text-starts-with", "text-ends-with"].includes(
+        expression.name,
+      );
+    default:
+      return false;
+  }
+}
+
+function isSafeConstant(value: unknown): value is string | number | null {
+  return (
+    value === null ||
+    (typeof value === "string" &&
+      !value.includes("\0") &&
+      wellFormedUtf16(value)) ||
+    (typeof value === "number" && Number.isSafeInteger(value))
+  );
 }
 
 function denseArray(value: unknown, length: number): boolean {
@@ -113,13 +161,17 @@ function validateExpression(
   allowExcluded = false,
 ): void {
   if (
+    !expression ||
+    typeof expression !== "object" ||
     !expression.resultType ||
     !["integer", "real", "text", "blob", "numeric", "unknown"].includes(
       expression.resultType.affinity,
     ) ||
     typeof expression.resultType.nullable !== "boolean"
   )
-    invalid(`${expression.kind} is missing valid result metadata`);
+    invalid(
+      `${expression?.kind ?? "SQL expression"} is missing valid result metadata`,
+    );
   switch (expression.kind) {
     case "column":
       if (!scopes.has(expression.scope))
@@ -228,6 +280,142 @@ function validateExpression(
         expression.expression.resultType.nullable,
       );
       return;
+    case "cast-text": {
+      validateExpression(
+        expression.expression,
+        scopes,
+        activeSources,
+        allowExcluded,
+      );
+      const source = expression.expression;
+      if (
+        !["text", "integer", "real", "numeric"].includes(
+          source.resultType.affinity,
+        ) ||
+        booleanValueExpression(source) ||
+        (source.kind === "parameter" &&
+          typeof source.value !== "string" &&
+          typeof source.value !== "number")
+      )
+        invalid("CAST AS TEXT requires a declared text or numeric expression");
+      validateResultType(expression, "text", source.resultType.nullable);
+      return;
+    }
+    case "text-position": {
+      validateExpression(expression.text, scopes, activeSources, allowExcluded);
+      validateExpression(
+        expression.needle,
+        scopes,
+        activeSources,
+        allowExcluded,
+      );
+      const textInputs = [expression.text, expression.needle];
+      if (
+        textInputs.some(
+          (input) =>
+            !["text", "unknown"].includes(input.resultType.affinity) ||
+            (input.kind === "parameter" &&
+              typeof input.value !== "string" &&
+              input.value !== null),
+        )
+      )
+        invalid("INSTR() requires text expressions");
+      validateResultType(
+        expression,
+        "integer",
+        textInputs.some((input) => input.resultType.nullable),
+      );
+      return;
+    }
+    case "text-substring": {
+      validateExpression(expression.text, scopes, activeSources, allowExcluded);
+      validateExpression(
+        expression.start,
+        scopes,
+        activeSources,
+        allowExcluded,
+      );
+      if (expression.length !== undefined)
+        validateExpression(
+          expression.length,
+          scopes,
+          activeSources,
+          allowExcluded,
+        );
+      const textInput = expression.text;
+      const numericInputs = [
+        expression.start,
+        ...(expression.length ? [expression.length] : []),
+      ];
+      if (
+        !["text", "unknown"].includes(textInput.resultType.affinity) ||
+        (textInput.kind === "parameter" &&
+          typeof textInput.value !== "string" &&
+          textInput.value !== null)
+      )
+        invalid("SUBSTR() requires a text expression");
+      if (
+        numericInputs.some(
+          (input) =>
+            !isNumeric(input.resultType.affinity) ||
+            booleanValueExpression(input) ||
+            (input.kind === "parameter" &&
+              typeof input.value !== "number" &&
+              input.value !== null),
+        )
+      )
+        invalid("SUBSTR() start and length must be numeric expressions");
+      validateResultType(
+        expression,
+        "text",
+        textInput.resultType.nullable ||
+          numericInputs.some((input) => input.resultType.nullable),
+      );
+      return;
+    }
+    case "text-like": {
+      validateExpression(expression.text, scopes, activeSources, allowExcluded);
+      validateExpression(
+        expression.pattern,
+        scopes,
+        activeSources,
+        allowExcluded,
+      );
+      const textInputs = [expression.text, expression.pattern];
+      if (
+        textInputs.some(
+          (input) =>
+            !["text", "unknown"].includes(input.resultType.affinity) ||
+            (input.kind === "parameter" &&
+              typeof input.value !== "string" &&
+              input.value !== null),
+        )
+      )
+        invalid("LIKE requires text expressions");
+      if (
+        expression.escape !== undefined &&
+        !singleUnicodeScalar(expression.escape)
+      )
+        invalid("LIKE ESCAPE must be one non-NUL Unicode scalar");
+      validateResultType(
+        expression,
+        "integer",
+        textInputs.some((input) => input.resultType.nullable),
+      );
+      return;
+    }
+    case "constant": {
+      if (!isSafeConstant(expression.value))
+        invalid("constant() contains an unsupported value");
+      const affinity =
+        expression.value === null
+          ? "unknown"
+          : typeof expression.value === "string"
+            ? "text"
+            : "integer";
+      validateResultType(expression, affinity, expression.value === null);
+      return;
+    }
     case "boolean":
       if (expression.operator !== "AND" && expression.operator !== "OR")
         invalid(`Unsupported boolean operator: ${String(expression.operator)}`);
@@ -564,7 +752,26 @@ function closureExpressionSources(expression: SqlExpression): QuerySource[] {
     case "not":
     case "null-check":
     case "cast-integer":
+    case "cast-text":
       return closureExpressionSources(expression.expression);
+    case "text-position":
+      return [
+        ...closureExpressionSources(expression.text),
+        ...closureExpressionSources(expression.needle),
+      ];
+    case "text-substring":
+      return [
+        ...closureExpressionSources(expression.text),
+        ...closureExpressionSources(expression.start),
+        ...(expression.length
+          ? closureExpressionSources(expression.length)
+          : []),
+      ];
+    case "text-like":
+      return [
+        ...closureExpressionSources(expression.text),
+        ...closureExpressionSources(expression.pattern),
+      ];
     case "in-list":
       return closureExpressionSources(expression.expression);
     case "in-subquery":
@@ -594,13 +801,16 @@ function closureExpressionSources(expression: SqlExpression): QuerySource[] {
     case "parameter":
     case "excluded":
     case "unixepoch":
+    case "constant":
       return [];
   }
 }
 
 function closureNodeSources(node: LogicalQueryNode): QuerySource[] {
   const children =
-    node.kind === "scan" || node.kind === "values-relation"
+    node.kind === "scan" ||
+    node.kind === "values-relation" ||
+    node.kind === "json-scalar-array"
       ? []
       : node.kind === "filter" ||
           node.kind === "project" ||
@@ -693,6 +903,22 @@ function validateClosurePredicateShape(expression: SqlExpression): void {
     case "in-list":
       validateClosurePredicateShape(expression.expression);
       break;
+    case "cast-text":
+      validateClosurePredicateShape(expression.expression);
+      break;
+    case "text-position":
+      validateClosurePredicateShape(expression.text);
+      validateClosurePredicateShape(expression.needle);
+      break;
+    case "text-substring":
+      validateClosurePredicateShape(expression.text);
+      validateClosurePredicateShape(expression.start);
+      if (expression.length) validateClosurePredicateShape(expression.length);
+      break;
+    case "text-like":
+      validateClosurePredicateShape(expression.text);
+      validateClosurePredicateShape(expression.pattern);
+      break;
     case "function":
       expression.arguments.forEach(validateClosurePredicateShape);
       break;
@@ -700,6 +926,7 @@ function validateClosurePredicateShape(expression: SqlExpression): void {
     case "parameter":
     case "excluded":
     case "unixepoch":
+    case "constant":
       break;
     case "coalesce":
       expression.expressions.forEach(validateClosurePredicateShape);
@@ -759,6 +986,40 @@ function validateSource(
     const validateChild = (child: QuerySource) =>
       validateSource(child, activeSources, outerScopes);
     switch (node.kind) {
+      case "json-scalar-array": {
+        const values = node as JsonScalarArrayNode;
+        const keys = Reflect.ownKeys(values);
+        const expectedKeys = ["kind", "valueKind", "values", "scope", "fields"];
+        if (
+          keys.length !== expectedKeys.length ||
+          keys.some(
+            (key) => typeof key !== "string" || !expectedKeys.includes(key),
+          ) ||
+          !["text", "numeric"].includes(values.valueKind) ||
+          !Array.isArray(values.values) ||
+          !Object.isFrozen(values.values) ||
+          !denseArray(values.values, values.values.length) ||
+          !validRelationScope(values.scope) ||
+          values.fields.length !== 1
+        )
+          invalid("JSON scalar array has invalid source metadata");
+        const expectedField = {
+          name: "value",
+          affinity: values.valueKind === "text" ? "text" : "numeric",
+          nullable: false,
+        };
+        if (!sameFieldMetadata(values.fields[0]!, expectedField))
+          invalid("JSON scalar array field metadata is invalid");
+        for (const value of values.values) {
+          if (
+            (values.valueKind === "text" && typeof value !== "string") ||
+            (values.valueKind === "numeric" &&
+              (typeof value !== "number" || !Number.isFinite(value)))
+          )
+            invalid("JSON scalar array contains an invalid value");
+        }
+        return;
+      }
       case "values-relation": {
         const values = node as ValuesRelationNode;
         if (
@@ -1262,6 +1523,23 @@ function validateSource(
             case "in-list":
               validateLocalColumnNames(expression.expression);
               return;
+            case "cast-text":
+              validateLocalColumnNames(expression.expression);
+              return;
+            case "text-position":
+              validateLocalColumnNames(expression.text);
+              validateLocalColumnNames(expression.needle);
+              return;
+            case "text-substring":
+              validateLocalColumnNames(expression.text);
+              validateLocalColumnNames(expression.start);
+              if (expression.length)
+                validateLocalColumnNames(expression.length);
+              return;
+            case "text-like":
+              validateLocalColumnNames(expression.text);
+              validateLocalColumnNames(expression.pattern);
+              return;
             case "function":
               expression.arguments.forEach(validateLocalColumnNames);
               return;
@@ -1281,6 +1559,7 @@ function validateSource(
             case "parameter":
             case "excluded":
             case "unixepoch":
+            case "constant":
               return;
           }
         };

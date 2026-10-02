@@ -441,6 +441,7 @@ function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
       return [node.predicate];
     case "scan":
     case "values-relation":
+    case "json-scalar-array":
     case "distinct":
     case "union":
       return [];
@@ -462,7 +463,21 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
       case "not":
       case "null-check":
       case "cast-integer":
+      case "cast-text":
         visit(current.expression);
+        break;
+      case "text-position":
+        visit(current.text);
+        visit(current.needle);
+        break;
+      case "text-substring":
+        visit(current.text);
+        visit(current.start);
+        if (current.length) visit(current.length);
+        break;
+      case "text-like":
+        visit(current.text);
+        visit(current.pattern);
         break;
       case "in-list":
         visit(current.expression);
@@ -494,6 +509,7 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
       case "parameter":
       case "excluded":
       case "unixepoch":
+      case "constant":
         break;
     }
   };
@@ -502,7 +518,9 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
 }
 
 function nodeChildren(node: LogicalQueryNode): QuerySource[] {
-  return node.kind === "scan" || node.kind === "values-relation"
+  return node.kind === "scan" ||
+    node.kind === "values-relation" ||
+    node.kind === "json-scalar-array"
     ? []
     : node.kind === "filter" ||
         node.kind === "project" ||
@@ -688,6 +706,22 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
           case "in-list":
             inspect(current.expression);
             break;
+          case "cast-text":
+            inspect(current.expression);
+            break;
+          case "text-position":
+            inspect(current.text);
+            inspect(current.needle);
+            break;
+          case "text-substring":
+            inspect(current.text);
+            inspect(current.start);
+            if (current.length) inspect(current.length);
+            break;
+          case "text-like":
+            inspect(current.text);
+            inspect(current.pattern);
+            break;
           case "cast-integer":
             inspect(current.expression);
             break;
@@ -715,6 +749,7 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
           case "excluded":
           case "unixepoch":
           case "scalar-subquery":
+          case "constant":
             break;
         }
       };

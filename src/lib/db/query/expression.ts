@@ -88,6 +88,52 @@ export interface CastIntegerExpression<
   readonly expression: SqlExpression;
 }
 
+export interface CastTextExpression<
+  T = string | null,
+  Result extends ExpressionResultType = ExpressionResultType<"text", true>,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "cast-text";
+  readonly expression: SqlExpression;
+}
+
+export interface TextPositionExpression<
+  T = number | null,
+  Result extends ExpressionResultType = ExpressionResultType<"integer", true>,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "text-position";
+  readonly text: SqlExpression;
+  readonly needle: SqlExpression;
+}
+
+export interface TextSubstringExpression<
+  T = string | null,
+  Result extends ExpressionResultType = ExpressionResultType<"text", true>,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "text-substring";
+  readonly text: SqlExpression;
+  readonly start: SqlExpression;
+  readonly length?: SqlExpression;
+}
+
+export interface TextLikeExpression<
+  T = boolean | null,
+  Result extends ExpressionResultType = ExpressionResultType<"integer", true>,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "text-like";
+  readonly text: SqlExpression;
+  readonly pattern: SqlExpression;
+  /** Fixed single-scalar ESCAPE value, bound by the compiler when present. */
+  readonly escape?: string;
+}
+
+export interface ConstantExpression<
+  T = string | number | null,
+  Result extends ExpressionResultType = ExpressionResultType,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "constant";
+  readonly value: string | number | null;
+}
+
 export interface BooleanExpression<
   T = boolean | null,
   Result extends ExpressionResultType = ExpressionResultType<
@@ -230,6 +276,11 @@ export type SqlExpression<
   | BinaryExpression<T, Result>
   | DistinctFromExpression<T, Result>
   | CastIntegerExpression<T, Result>
+  | CastTextExpression<T, Result>
+  | TextPositionExpression<T, Result>
+  | TextSubstringExpression<T, Result>
+  | TextLikeExpression<T, Result>
+  | ConstantExpression<T, Result>
   | BooleanExpression<T, Result>
   | NotExpression<T, Result>
   | NullCheckExpression<T, Result>
@@ -803,6 +854,225 @@ export const div = <
 
 type NullableValue<E extends AnyExpression, Value> =
   NullableOf<E> extends true ? Value | null : Value;
+
+type RequireAffinity<
+  E extends AnyExpression,
+  Allowed extends ExpressionAffinity,
+> = [Exclude<AffinityOf<E>, Allowed>] extends [never] ? unknown : never;
+type RequireValue<E extends AnyExpression, Allowed> = [
+  Exclude<ExpressionValue<E>, null>,
+] extends [Allowed]
+  ? unknown
+  : never;
+type InputsNullable<Inputs extends readonly AnyExpression[]> =
+  true extends NullableOf<Inputs[number]> ? true : false;
+type NullableInputValue<Inputs extends readonly AnyExpression[], Value> =
+  InputsNullable<Inputs> extends true ? Value | null : Value;
+
+type CastableTextSource = "text" | "integer" | "real" | "numeric";
+type TextSourceAffinity = "text" | "unknown";
+type NumericSourceAffinity = "integer" | "real" | "numeric" | "unknown";
+
+function hasWellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index++;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isSingleUnicodeScalar(value: string): boolean {
+  if (!value || value.includes("\0") || !hasWellFormedUtf16(value))
+    return false;
+  if (value.length === 1) return true;
+  return (
+    value.length === 2 &&
+    value.charCodeAt(0) >= 0xd800 &&
+    value.charCodeAt(0) <= 0xdbff
+  );
+}
+
+/** SQLite CAST AS TEXT; the declared source affinity is intentionally narrow. */
+export function castText<E extends AnyExpression>(
+  expression: E &
+    RequireAffinity<E, CastableTextSource> &
+    RequireValue<E, string | number>,
+): CastTextExpression<
+  NullableValue<E, string>,
+  ExpressionResultType<"text", NullableOf<E>>
+> {
+  return {
+    kind: "cast-text",
+    expression,
+    resultType: {
+      affinity: "text",
+      nullable: expression.resultType.nullable,
+    } as ExpressionResultType<"text", NullableOf<E>>,
+  };
+}
+
+export function textPosition<
+  Text extends AnyExpression,
+  Needle extends AnyExpression,
+>(
+  text: Text &
+    RequireAffinity<Text, TextSourceAffinity> &
+    RequireValue<Text, string>,
+  needle: Needle &
+    RequireAffinity<Needle, TextSourceAffinity> &
+    RequireValue<Needle, string>,
+): TextPositionExpression<
+  NullableInputValue<readonly [Text, Needle], number>,
+  ExpressionResultType<"integer", InputsNullable<readonly [Text, Needle]>>
+> {
+  return {
+    kind: "text-position",
+    text,
+    needle,
+    resultType: {
+      affinity: "integer",
+      nullable: text.resultType.nullable || needle.resultType.nullable,
+    } as ExpressionResultType<
+      "integer",
+      InputsNullable<readonly [Text, Needle]>
+    >,
+  };
+}
+
+export function textSubstring<
+  Text extends AnyExpression,
+  Start extends AnyExpression,
+>(
+  text: Text &
+    RequireAffinity<Text, TextSourceAffinity> &
+    RequireValue<Text, string>,
+  start: Start &
+    RequireAffinity<Start, NumericSourceAffinity> &
+    RequireValue<Start, number>,
+): TextSubstringExpression<
+  NullableInputValue<readonly [Text, Start], string>,
+  ExpressionResultType<"text", InputsNullable<readonly [Text, Start]>>
+>;
+export function textSubstring<
+  Text extends AnyExpression,
+  Start extends AnyExpression,
+  Length extends AnyExpression,
+>(
+  text: Text &
+    RequireAffinity<Text, TextSourceAffinity> &
+    RequireValue<Text, string>,
+  start: Start &
+    RequireAffinity<Start, NumericSourceAffinity> &
+    RequireValue<Start, number>,
+  length: Length &
+    RequireAffinity<Length, NumericSourceAffinity> &
+    RequireValue<Length, number>,
+): TextSubstringExpression<
+  NullableInputValue<readonly [Text, Start, Length], string>,
+  ExpressionResultType<"text", InputsNullable<readonly [Text, Start, Length]>>
+>;
+export function textSubstring(
+  text: SqlExpression,
+  start: SqlExpression,
+  length?: SqlExpression,
+): TextSubstringExpression<
+  string | null,
+  ExpressionResultType<"text", boolean>
+> {
+  return {
+    kind: "text-substring",
+    text,
+    start,
+    ...(length ? { length } : {}),
+    resultType: {
+      affinity: "text",
+      nullable:
+        text.resultType.nullable ||
+        start.resultType.nullable ||
+        (length?.resultType.nullable ?? false),
+    },
+  };
+}
+
+/** SQLite LIKE predicate, with SQLite's default wildcard and case rules. */
+export function textLike<
+  Text extends AnyExpression,
+  Pattern extends AnyExpression,
+>(
+  text: Text &
+    RequireAffinity<Text, TextSourceAffinity> &
+    RequireValue<Text, string>,
+  pattern: Pattern &
+    RequireAffinity<Pattern, TextSourceAffinity> &
+    RequireValue<Pattern, string>,
+  escape?: string,
+): TextLikeExpression<
+  NullableInputValue<readonly [Text, Pattern], boolean>,
+  ExpressionResultType<"integer", InputsNullable<readonly [Text, Pattern]>>
+> {
+  if (escape !== undefined && !isSingleUnicodeScalar(escape))
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "textLike() escape must be one non-NUL Unicode scalar",
+    );
+  return {
+    kind: "text-like",
+    text,
+    pattern,
+    ...(escape === undefined ? {} : { escape }),
+    resultType: {
+      affinity: "integer",
+      nullable: text.resultType.nullable || pattern.resultType.nullable,
+    } as ExpressionResultType<
+      "integer",
+      InputsNullable<readonly [Text, Pattern]>
+    >,
+  };
+}
+
+type ConstantResult<Value> = Value extends string
+  ? ExpressionResultType<"text", false>
+  : Value extends number
+    ? ExpressionResultType<"integer", false>
+    : ExpressionResultType<"unknown", true>;
+
+/** Build a fixed, safely serialized SQL constant (not a raw SQL escape hatch). */
+export function constant<Value extends string>(
+  value: Value,
+): ConstantExpression<Value, ConstantResult<Value>>;
+export function constant<Value extends number>(
+  value: Value,
+): ConstantExpression<Value, ConstantResult<Value>>;
+export function constant(
+  value: null,
+): ConstantExpression<null, ConstantResult<null>>;
+export function constant(value: string | number | null): ConstantExpression {
+  if (
+    (typeof value === "string" &&
+      (!hasWellFormedUtf16(value) || value.includes("\0"))) ||
+    (typeof value === "number" && !Number.isSafeInteger(value))
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "constant() requires a NUL-free well-formed string, safe integer, or null",
+    );
+  return {
+    kind: "constant",
+    value,
+    resultType:
+      value === null
+        ? { affinity: "unknown", nullable: true }
+        : typeof value === "string"
+          ? { affinity: "text", nullable: false }
+          : { affinity: "integer", nullable: false },
+  };
+}
 
 export function callFunction<
   E extends SqlExpression<string | null>,

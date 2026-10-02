@@ -37,6 +37,7 @@ import {
   validatePhysicalQueryPlan,
 } from "./physical-plan";
 import type {
+  JsonScalarArrayNode,
   LogicalQueryNode,
   QuerySource,
   Relation,
@@ -112,6 +113,74 @@ function outputList(
   );
 }
 
+const MAX_D1_JSON_SCALAR_ARRAY_BYTES = 1_000_000;
+
+function jsonScalarArraySegments(node: JsonScalarArrayNode): readonly string[] {
+  const encoder = new TextEncoder();
+  const segments: string[] = [];
+  let cells: string[] = [];
+  let bytes = 2; // []
+  for (const value of node.values) {
+    const cell = JSON.stringify(value);
+    if (cell === undefined)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "JSON scalar array contains a non-serializable value",
+      );
+    const cellBytes = encoder.encode(cell).byteLength;
+    if (cellBytes + 2 > MAX_D1_JSON_SCALAR_ARRAY_BYTES)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "A JSON scalar array value exceeds the per-segment encoding limit",
+      );
+    const nextBytes = bytes + (cells.length === 0 ? 0 : 1) + cellBytes;
+    if (cells.length > 0 && nextBytes > MAX_D1_JSON_SCALAR_ARRAY_BYTES) {
+      segments.push(`[${cells.join(",")}]`);
+      cells = [];
+      bytes = 2;
+    }
+    cells.push(cell);
+    bytes += (cells.length === 1 ? 0 : 1) + cellBytes;
+  }
+  if (cells.length > 0) segments.push(`[${cells.join(",")}]`);
+  return segments;
+}
+
+function constantSql(value: string | number | null): SqlFragment {
+  if (value === null) return text("NULL");
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value))
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "SQL constants must be safe integers",
+      );
+    return text(Object.is(value, -0) ? "0" : String(value));
+  }
+  if (value.includes("\0"))
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "SQL text constants cannot contain NUL",
+    );
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff))
+        throw new DatabaseCompilerError(
+          "invalid_plan",
+          "SQL text constants must contain well-formed UTF-16",
+        );
+      index++;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "SQL text constants must contain well-formed UTF-16",
+      );
+    }
+  }
+  return text(`'${value.replaceAll("'", "''")}'`);
+}
+
 function compileSharedRelationDefinition(
   shared: SharedRelationDefinition,
   body: SqlFragment,
@@ -183,6 +252,47 @@ export function compileD1Expression(
         compileD1Expression(expression.expression, scopes, context),
         text(" AS INTEGER)"),
       );
+    case "cast-text":
+      return concat(
+        text("CAST("),
+        compileD1Expression(expression.expression, scopes, context),
+        text(" AS TEXT)"),
+      );
+    case "text-position":
+      return concat(
+        text("INSTR("),
+        compileD1Expression(expression.text, scopes, context),
+        text(", "),
+        compileD1Expression(expression.needle, scopes, context),
+        text(")"),
+      );
+    case "text-substring":
+      return concat(
+        text("SUBSTR("),
+        compileD1Expression(expression.text, scopes, context),
+        text(", "),
+        compileD1Expression(expression.start, scopes, context),
+        ...(expression.length
+          ? [
+              text(", "),
+              compileD1Expression(expression.length, scopes, context),
+            ]
+          : []),
+        text(")"),
+      );
+    case "text-like":
+      return parenthesize(
+        concat(
+          compileD1Expression(expression.text, scopes, context),
+          text(" LIKE "),
+          compileD1Expression(expression.pattern, scopes, context),
+          ...(expression.escape === undefined
+            ? []
+            : [text(" ESCAPE "), parameter(expression.escape)]),
+        ),
+      );
+    case "constant":
+      return constantSql(expression.value);
     case "boolean":
       return parenthesize(
         join(
@@ -415,6 +525,20 @@ function compileNode(
     );
   }
   switch (node.kind) {
+    case "json-scalar-array": {
+      if (node.values.length === 0) return text('SELECT NULL AS "_c0" WHERE 0');
+      const segments = jsonScalarArraySegments(node);
+      return join(
+        segments.map((segment) =>
+          concat(
+            text('SELECT "_json_scalar".value AS "_c0" FROM json_each('),
+            parameter(segment),
+            text(') AS "_json_scalar"'),
+          ),
+        ),
+        text(" UNION ALL "),
+      );
+    }
     case "values-relation": {
       if (context.textRowUsage)
         context.textRowUsage.set(
@@ -901,7 +1025,9 @@ function reservePlanIdentifiers(
     visited.add(node);
     if (node.kind === "scan") identifiers.add(node.table.name);
     const children =
-      node.kind === "scan" || node.kind === "values-relation"
+      node.kind === "scan" ||
+      node.kind === "values-relation" ||
+      node.kind === "json-scalar-array"
         ? []
         : node.kind === "filter" ||
             node.kind === "project" ||
@@ -958,7 +1084,21 @@ function reservePlanIdentifiers(
         case "not":
         case "null-check":
         case "cast-integer":
+        case "cast-text":
           visitExpressionQueries(expression.expression);
+          break;
+        case "text-position":
+          visitExpressionQueries(expression.text);
+          visitExpressionQueries(expression.needle);
+          break;
+        case "text-substring":
+          visitExpressionQueries(expression.text);
+          visitExpressionQueries(expression.start);
+          if (expression.length) visitExpressionQueries(expression.length);
+          break;
+        case "text-like":
+          visitExpressionQueries(expression.text);
+          visitExpressionQueries(expression.pattern);
           break;
         case "in-list":
           visitExpressionQueries(expression.expression);
@@ -991,6 +1131,7 @@ function reservePlanIdentifiers(
         case "parameter":
         case "excluded":
         case "unixepoch":
+        case "constant":
           break;
       }
     };

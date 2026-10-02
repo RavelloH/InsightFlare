@@ -3,9 +3,11 @@ import {
   callFunction,
   caseWhen,
   castInteger,
+  castText,
   coalesce,
   compileD1Query,
   concatText,
+  constant,
   eq,
   excluded,
   filter,
@@ -13,6 +15,7 @@ import {
   inSubquery,
   isDistinctFrom,
   join,
+  jsonScalarArray,
   onConflictDoUpdate,
   param,
   project,
@@ -21,11 +24,15 @@ import {
   scan,
   textContains,
   textEndsWith,
+  textLike,
+  textPosition,
   textStartsWith,
+  textSubstring,
   trimSpaces,
   union,
   unixepoch,
   update,
+  valuesRelation,
   window,
   windowCountRows,
 } from "@/lib/db";
@@ -36,6 +43,7 @@ import type {
   ExpressionResultType,
   ExpressionValue,
 } from "@/lib/db/query/expression";
+import type { TextRowRelationSchema } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
 type Equal<A, B> =
@@ -262,6 +270,74 @@ export function compileTimeDatabaseTypeAssertions(): void {
   ];
   void projectionChecks;
 
+  const widenedNullable: boolean = true;
+  const widenedSchema = {
+    optional_text: { affinity: "text", nullable: widenedNullable },
+  } as const satisfies TextRowRelationSchema;
+  const widenedRows = valuesRelation(widenedSchema, [{ optional_text: null }]);
+  type WidenedNullableTextIncludesNull = Assert<
+    Equal<
+      ExpressionValue<typeof widenedRows.columns.optional_text>,
+      string | null
+    >
+  >;
+  const widenedNullableFixture: WidenedNullableTextIncludesNull = true;
+  void widenedNullableFixture;
+  const literalRequiredSchema = {
+    required_text: { affinity: "text", nullable: false },
+  } as const satisfies TextRowRelationSchema;
+  // @ts-expect-error Literal nullable=false excludes a NULL cell.
+  valuesRelation(literalRequiredSchema, [{ required_text: null }]);
+
+  const castTextValue = castText(users.columns.email);
+  const positionValue = textPosition(users.columns.email, param("@"));
+  const substringValue = textSubstring(
+    users.columns.email,
+    param(-2),
+    param(2),
+  );
+  const likeValue = textLike(users.columns.email, param("%@%"));
+  const literalValue = constant("O'Brien");
+  const jsonTextValues = jsonScalarArray("text", ["first", "second"]);
+  const jsonNumericValues = jsonScalarArray("numeric", [1, 2.5, -0]);
+  type CastTextValueIsString = Assert<
+    Equal<ExpressionValue<typeof castTextValue>, string>
+  >;
+  type PositionValueIsNumber = Assert<
+    Equal<ExpressionValue<typeof positionValue>, number>
+  >;
+  type SubstringValueIsString = Assert<
+    Equal<ExpressionValue<typeof substringValue>, string>
+  >;
+  type LikeValueIsBoolean = Assert<
+    Equal<ExpressionValue<typeof likeValue>, boolean>
+  >;
+  type ConstantRetainsItsLiteral = Assert<
+    Equal<ExpressionValue<typeof literalValue>, "O'Brien">
+  >;
+  type JsonTextArrayColumnMetadata = Assert<
+    Equal<
+      ExpressionResultOf<typeof jsonTextValues.columns.value>,
+      ExpressionResultType<"text", false>
+    >
+  >;
+  type JsonNumericArrayColumnMetadata = Assert<
+    Equal<
+      ExpressionResultOf<typeof jsonNumericValues.columns.value>,
+      ExpressionResultType<"numeric", false>
+    >
+  >;
+  const primitiveTypeChecks: [
+    CastTextValueIsString,
+    PositionValueIsNumber,
+    SubstringValueIsString,
+    LikeValueIsBoolean,
+    ConstantRetainsItsLiteral,
+    JsonTextArrayColumnMetadata,
+    JsonNumericArrayColumnMetadata,
+  ] = [true, true, true, true, true, true, true];
+  void primitiveTypeChecks;
+
   const events = scan(schema.custom_events);
   const names = scan(schema.custom_event_names);
   const left = join(
@@ -405,6 +481,12 @@ export function compileTimeDatabaseTypeAssertions(): void {
   eq(sites.columns.id, param(42));
   // @ts-expect-error lower() accepts text expressions.
   callFunction("lower", sites.columns.created_at);
+  // @ts-expect-error castText does not accept predicate/boolean expressions.
+  castText(eq(users.columns.id, param("user-1")));
+  // @ts-expect-error textPosition requires text-compatible expressions.
+  textPosition(users.columns.email, sites.columns.created_at);
+  // @ts-expect-error jsonScalarArray numeric cells must be numbers.
+  jsonScalarArray("numeric", [1, true]);
   // @ts-expect-error length() accepts text or blob expressions.
   callFunction("length", sites.columns.created_at);
   // @ts-expect-error abs() accepts numeric expressions.
