@@ -34,6 +34,7 @@ import {
   isSemanticRelationshipId,
   semanticRelationship,
 } from "@/lib/edge/analytics/engine/semantic/relationships";
+import { validateSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { isCanonicalSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import {
   createSemanticTemporalDomains,
@@ -374,6 +375,22 @@ function infer(
       };
     }
     case "string-match": {
+      if (
+        expression.semantics !== undefined &&
+        (expression.semantics !== "legacy-record-search-v1" ||
+          expression.operator !== "contains" ||
+          expression.caseSensitive ||
+          expression.stringNormalization !== undefined)
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path: path + ".semantics",
+            message:
+              "Legacy record search semantics require case-insensitive, unnormalized contains.",
+          },
+        ]);
+      }
       const input = infer(expression.input, resolveSlot, `${path}.input`);
       if (input.type.kind !== "scalar" || input.type.scalar !== "string") {
         throw new LogicalPlanError([
@@ -389,7 +406,13 @@ function infer(
         [input.type],
         `${path}.stringNormalization`,
       );
-      return { type: scalar("boolean"), nullable: input.nullable };
+      return {
+        type: scalar("boolean"),
+        nullable:
+          expression.semantics === "legacy-record-search-v1"
+            ? false
+            : input.nullable,
+      };
     }
     case "arithmetic": {
       if (
@@ -981,6 +1004,23 @@ function validateNode(
   let expectedGrain: LogicalGrain;
   switch (node.kind) {
     case "source": {
+      if (node.selection) {
+        if (node.entity !== "event")
+          fail(
+            "invalid-source",
+            path + ".selection",
+            "Scoped selections are currently supported only on Event Sources.",
+          );
+        try {
+          validateSemanticScopedSourceSelection(node.selection, plan.context);
+        } catch (error) {
+          fail(
+            "invalid-source",
+            path + ".selection",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
       if (!isAnalyticsEntityKind(node.entity))
         fail("invalid-source", `${path}.entity`, "Unknown source entity.");
       if (!temporalDomainExists(plan.context.time, node.temporalDomain)) {

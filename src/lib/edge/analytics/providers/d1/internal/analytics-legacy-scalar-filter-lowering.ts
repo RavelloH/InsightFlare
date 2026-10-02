@@ -138,6 +138,7 @@ function assertFieldExpression(
 function fieldForCondition(
   condition: FilterCondition,
   location: string,
+  mode: LegacyScalarValueMode = "row-scalar-v1",
 ): RegisteredFilterField {
   if (condition.target.kind !== "field") {
     unsupported(
@@ -154,10 +155,13 @@ function fieldForCondition(
       `No registered filter field exists for ${condition.target.field}.`,
     );
   }
-  if (
+  const isSessionBoundary =
     field.profile === "session-boundary" ||
     field.compilerStrategy === "session.boundary.entry" ||
-    field.compilerStrategy === "session.boundary.exit" ||
+    field.compilerStrategy === "session.boundary.exit";
+  if (
+    (isSessionBoundary && mode !== "session-boundary-v1") ||
+    (!isSessionBoundary && mode === "session-boundary-v1") ||
     field.compilerStrategy === "event.payload"
   ) {
     unsupported(
@@ -173,8 +177,21 @@ function fieldForCondition(
       `The ${field.id} target requires event-payload lowering.`,
     );
   }
+  if (
+    mode === "entity-fact-v1" &&
+    !field.compilerStrategy.startsWith("fact.")
+  ) {
+    unsupported(
+      "unsupported_target",
+      `${location}.target.field`,
+      "Entity-fact value semantics require a registered fact field.",
+    );
+  }
   return field;
 }
+
+export type LegacyScalarValueMode =
+  "row-scalar-v1" | "entity-fact-v1" | "session-boundary-v1";
 
 function visitColumn(
   context: LegacyScalarFilterContext,
@@ -494,6 +511,7 @@ function compareScalar(
   operator: FilterOperator,
   value: FilterValue | readonly FilterValue[] | undefined,
   location: string,
+  mode: LegacyScalarValueMode = "row-scalar-v1",
 ): Predicate {
   const textField = isTextField(field);
   const normalized = textField ? lowerForField(left, field) : left;
@@ -522,7 +540,10 @@ function compareScalar(
       );
     }
     const values = nativeSetValues(field, operator, value, `${location}.value`);
-    if (values.length >= LEGACY_JSON_EACH_SET_THRESHOLD) {
+    if (
+      mode !== "entity-fact-v1" &&
+      values.length >= LEGACY_JSON_EACH_SET_THRESHOLD
+    ) {
       return jsonSetPredicate(normalized, field, operator, values);
     }
     const membership = textField
@@ -690,11 +711,47 @@ export function lowerLegacyScalarFilterCondition(
   condition: FilterCondition,
   resolvedValue: SqlExpression,
 ): Predicate {
+  return lowerLegacyScalarValueCondition(
+    condition,
+    resolvedValue,
+    "row-scalar-v1",
+  );
+}
+
+/** Resolve a registered legacy strategy and lower the leaf in one step. */
+export function lowerLegacyScalarContextCondition(
+  condition: FilterCondition,
+  context: LegacyScalarFilterContext,
+  mode: LegacyScalarValueMode = "row-scalar-v1",
+): Predicate {
   const location =
     condition.target.kind === "field"
       ? condition.target.field
       : "condition.target";
-  const field = fieldForCondition(condition, location);
+  const { expression } = resolveConditionValue(
+    condition,
+    context,
+    location,
+    mode,
+  );
+  return lowerLegacyScalarValueCondition(condition, expression, mode);
+}
+
+/**
+ * Compare one legacy Filter leaf against a typed expression while preserving
+ * its explicit value-codec profile. Entity facts keep all sets native; row
+ * scalar and session-boundary leaves retain the old threshold-eight codec.
+ */
+export function lowerLegacyScalarValueCondition(
+  condition: FilterCondition,
+  resolvedValue: SqlExpression,
+  mode: LegacyScalarValueMode,
+): Predicate {
+  const location =
+    condition.target.kind === "field"
+      ? condition.target.field
+      : "condition.target";
+  const field = fieldForCondition(condition, location, mode);
   assertFieldExpression(field, resolvedValue, `${location}.target.field`);
   const value = normalizedConditionValue(condition, location);
   return compareScalar(
@@ -703,6 +760,7 @@ export function lowerLegacyScalarFilterCondition(
     condition.operator,
     value,
     location,
+    mode,
   );
 }
 
@@ -710,11 +768,12 @@ function resolveConditionValue(
   condition: FilterCondition,
   context: LegacyScalarFilterContext,
   location: string,
+  mode: LegacyScalarValueMode = "row-scalar-v1",
 ): {
   readonly field: RegisteredFilterField;
   readonly expression: SqlExpression;
 } {
-  const field = fieldForCondition(condition, location);
+  const field = fieldForCondition(condition, location, mode);
   const strategy = field.compilerStrategy;
   const expression = resolveStrategy(
     strategy,

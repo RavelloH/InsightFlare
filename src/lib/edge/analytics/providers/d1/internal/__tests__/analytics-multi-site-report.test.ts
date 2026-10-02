@@ -498,10 +498,10 @@ describe("authorized multi-site Analytics report lowering", () => {
       },
       {
         tag: "wave25.analytics_report.event-report",
-        sqlBytes: 14615,
+        sqlBytes: 14422,
         bindings: 7,
         physicalPlanHash:
-          "v1:875e127b652bbbff56a3bb1380f3ecf5e43604608bff1bd0d90eba4c7efd6769",
+          "v1:3b5c3a43b14735e8061f28bdaee8aa099b511f5fa087a4d8923824800063a3ee",
         statements: 1,
       },
       {
@@ -657,9 +657,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           },
         }),
         output: "event-record-detail",
-        bytes: 29021,
+        bytes: 28825,
         bindings: 12,
-        hash: "v1:37640936520cc10d692d05082587090ddf32859487c9536d7be1f1e9aa4791bf",
+        hash: "v1:b3f16aa0a44bdf0146488b9a8a4256e1488df370d9ab735ec7a366fb60035dd8",
       },
       {
         plan: buildJourneyObservationPlan({
@@ -669,9 +669,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           window: WINDOW,
         }),
         output: "journey-observation-detail-source",
-        bytes: 25489,
+        bytes: 25293,
         bindings: 25,
-        hash: "v1:d2ea1b4ba8bb4b3944b220b41610d1d68b47c4ca979822fd5da1a9b79dfb0704",
+        hash: "v1:bc9eaab74c2644176c2c700a5e2251349bf8796681b9ab62637d2e528615dc81",
       },
     ];
 

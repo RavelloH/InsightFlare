@@ -570,6 +570,18 @@ function commonQueryMatches(): SqlMatch[] {
       ["event_id AS eventId", "ORDER BY"],
       [eventRecordRow, { ...eventRecordRow, eventId: "evt-2" }],
     ),
+    {
+      match: (sql, bindings) =>
+        sql.includes('"custom_events"') &&
+        sql.includes('"custom_event_names"') &&
+        sql.includes("ORDER BY") &&
+        sql.includes("LIMIT ?") &&
+        bindings.some(
+          (binding) =>
+            typeof binding === "string" && binding.includes("%signup%"),
+        ),
+      all: [eventRecordRow, { ...eventRecordRow, eventId: "evt-2" }],
+    },
     allMatch(
       ["field_rows AS", "GROUP BY path, valueType"],
       [

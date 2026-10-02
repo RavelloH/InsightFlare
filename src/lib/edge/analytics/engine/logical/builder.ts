@@ -4,6 +4,7 @@ import {
   elapsedDurationLiteral,
   type LogicalExpr,
   type LogicalLiteralValue,
+  type LogicalStringMatchExpression,
   type LogicalStringNormalization,
 } from "@/lib/edge/analytics/engine/logical/expression";
 import type { LogicalGrain } from "@/lib/edge/analytics/engine/logical/grain";
@@ -54,6 +55,10 @@ import {
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import { semanticRelationship } from "@/lib/edge/analytics/engine/semantic/relationships";
 import {
+  type SemanticScopedSourceSelection,
+  snapshotSemanticScopedSourceSelection,
+} from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
+import {
   createSemanticTemporalDomains,
   temporalDomainExists,
   type TemporalDomainRef,
@@ -81,6 +86,7 @@ export interface LogicalSourceOptions {
   readonly attributes?: readonly SemanticAttributeId[];
   readonly relationships?: readonly SemanticRelationshipId[];
   readonly includeOccurrenceTime?: boolean;
+  readonly selection?: SemanticScopedSourceSelection;
 }
 
 export interface LogicalAggregateInput {
@@ -107,6 +113,10 @@ export class LogicalPlanBuilder {
   readonly #outputs: LogicalPlan["outputs"][number][] = [];
   readonly #slotById = new Map<SlotId, LogicalSlot>();
   readonly #relationById = new Map<RelationId, InternalRelationState>();
+  readonly #selectionSnapshots = new WeakMap<
+    object,
+    SemanticScopedSourceSelection
+  >();
   #nextRelationId = 0;
   #nextSlotId = 0;
 
@@ -131,6 +141,9 @@ export class LogicalPlanBuilder {
     entity: AnalyticsEntityKind,
     options: LogicalSourceOptions = {},
   ): LogicalRelationHandle {
+    const selection = options.selection
+      ? this.#snapshotSelection(options.selection)
+      : undefined;
     const temporalDomain = options.temporalDomain ?? "candidate";
     if (!temporalDomainExists(this.#context.time, temporalDomain)) {
       throw new Error(
@@ -216,11 +229,25 @@ export class LogicalPlanBuilder {
       id: this.#newRelationId(),
       entity,
       temporalDomain,
+      ...(selection ? { selection } : {}),
       values,
       output: values.map((value) => value.slot),
       grain: { kind: "entity", entity, key: self.id },
     } satisfies LogicalNode;
     return this.#addNode(node, namedSlots, node.grain, [temporalDomain]);
+  }
+
+  #snapshotSelection(
+    selection: SemanticScopedSourceSelection,
+  ): SemanticScopedSourceSelection {
+    const cached = this.#selectionSnapshots.get(selection);
+    if (cached) return cached;
+    const snapshot = snapshotSemanticScopedSourceSelection(
+      selection,
+      this.#context,
+    );
+    this.#selectionSnapshots.set(selection, snapshot);
+    return snapshot;
   }
 
   relationshipLookup(
@@ -389,6 +416,7 @@ export class LogicalPlanBuilder {
     value: string,
     caseSensitive = false,
     stringNormalization?: LogicalStringNormalization,
+    semantics?: LogicalStringMatchExpression["semantics"],
   ): LogicalExpressionHandle {
     return this.#expression({
       kind: "string-match",
@@ -396,6 +424,7 @@ export class LogicalPlanBuilder {
       input: input.expression,
       value,
       caseSensitive,
+      ...(semantics ? { semantics } : {}),
       ...(stringNormalization ? { stringNormalization } : {}),
     });
   }

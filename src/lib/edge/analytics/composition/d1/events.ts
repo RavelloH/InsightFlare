@@ -143,6 +143,8 @@ export function registerEventProviders(
             siteId: options.siteId,
             window: timeWindow(request.time),
             filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+            scopePlan: request.scopePlan,
+            queryTime: request.time,
             audience: request.context.policy.audience,
             sort: {
               field: "occurredAt",

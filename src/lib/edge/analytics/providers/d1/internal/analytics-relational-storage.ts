@@ -1,5 +1,7 @@
 import {
   and,
+  coalesce,
+  constant,
   eq,
   filter,
   gte,
@@ -336,9 +338,14 @@ function requireEventReportValue(
           : scalar === "boolean"
             ? expression.resultType.affinity === "integer"
             : false;
+  const sqliteIntegerPrimaryKeyIsNonNullByDefinition =
+    attributeId === "event.report.internalPk" &&
+    expression.resultType.affinity === "integer";
   if (
     !affinityMatches ||
-    (expression.resultType.nullable && !attribute.nullable)
+    (expression.resultType.nullable &&
+      !attribute.nullable &&
+      !sqliteIntegerPrimaryKeyIsNonNullByDefinition)
   )
     throw new Error(
       `${path}.values: ${attributeId} no longer maps to its registered D1 scalar contract.`,
@@ -347,6 +354,7 @@ function requireEventReportValue(
 
 const eventReportColumnByAttribute: Readonly<Record<string, string>> = {
   "event.report.localId": "event_id",
+  "event.report.internalPk": "event_pk",
   "event.report.ownerVisitId": "visit_id",
   "event.report.nameId": "event_name_id",
   "event.report.occurredAt": "occurred_at",
@@ -944,10 +952,16 @@ export class AnalyticsRelationalStorage {
             throw new Error(
               `${path}.values: Internal Event report attributes are available only on Event.`,
             );
-          const reportValue = this.#eventDetailReportValue(
+          const rawReportValue = this.#eventDetailReportValue(
             carrier,
             binding.attribute,
           );
+          // SQLite INTEGER PRIMARY KEY aliases the rowid and is non-NULL by
+          // table invariant even though PRAGMA reports it as nullable.
+          const reportValue =
+            binding.attribute === "event.report.internalPk"
+              ? this.#eventPrimaryKey(rawReportValue, path)
+              : rawReportValue;
           requireEventReportValue(reportValue, binding.attribute, path);
           values.set(binding.slot, {
             kind: "scalar",
@@ -1200,7 +1214,11 @@ export class AnalyticsRelationalStorage {
   }
 
   #attachReportName(events: AnalyticsDbRelation): AnalyticsDbRelation {
-    const names = scan(schema.custom_event_names);
+    const source = scan(schema.custom_event_names);
+    const names = project(source, {
+      id: source.columns.id,
+      name: source.columns.name,
+    });
     const joined = join(
       events,
       names,
@@ -1218,7 +1236,12 @@ export class AnalyticsRelationalStorage {
   }
 
   #attachSameSiteReportName(events: AnalyticsDbRelation): AnalyticsDbRelation {
-    const names = scan(schema.custom_event_names);
+    const source = scan(schema.custom_event_names);
+    const names = project(source, {
+      id: source.columns.id,
+      site_pk: source.columns.site_pk,
+      name: source.columns.name,
+    });
     const joined = join(
       events,
       names,
@@ -1460,6 +1483,26 @@ export class AnalyticsRelationalStorage {
     const physical = eventReportColumnByAttribute[attributeId];
     if (physical) return column(events, physical);
     throw new Error(`No D1 Event report mapping exists for ${attributeId}.`);
+  }
+
+  #eventPrimaryKey(
+    expression: AnyExpression,
+    path: string,
+  ): SqlExpression<number, ExpressionResultType<"integer", false>> {
+    if (expression.resultType.affinity !== "integer")
+      throw new Error(
+        `${path}.values: Event internal primary key must remain an INTEGER.`,
+      );
+    // PRAGMA marks INTEGER PRIMARY KEY as nullable; SQLite guarantees the
+    // rowid alias is present. COALESCE only carries that invariant into the
+    // Generic expression type and is value-preserving for valid rows.
+    return coalesce(
+      expression as SqlExpression<
+        number | null,
+        ExpressionResultType<"integer", true>
+      >,
+      constant(0),
+    ) as SqlExpression<number, ExpressionResultType<"integer", false>>;
   }
 
   #requiredPageColumns(

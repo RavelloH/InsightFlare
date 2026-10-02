@@ -34,6 +34,7 @@ import {
   sum,
   textContains,
   textEndsWith,
+  textLike,
   textStartsWith,
   trimSpaces,
   union,
@@ -76,10 +77,12 @@ import type {
 import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
 
+import { AnalyticsLegacyScopedStorage } from "./analytics-legacy-scoped-storage";
 import {
   type AnalyticsDbRelation,
   AnalyticsRelationalStorage,
   type AnalyticsRelationalStorageContext,
+  type LoweredAnalyticsSource,
   normalizeAnalyticsRelationalSiteIds,
 } from "./analytics-relational-storage";
 
@@ -774,6 +777,33 @@ function lowerExpression(
         input.type.scalar !== "string"
       )
         reject(path, "String matching requires a string scalar expression.");
+      if (expression.semantics === "legacy-record-search-v1") {
+        if (
+          expression.operator !== "contains" ||
+          expression.caseSensitive ||
+          expression.stringNormalization !== undefined
+        )
+          reject(path, "The legacy record-search expression is malformed.");
+        const nullableText = input.expression as SqlExpression<
+          string | null,
+          ExpressionResultType<"text", boolean>
+        >;
+        const normalized = callFunction(
+          "lower",
+          trimSpaces(coalesce(nullableText, param(""))),
+        );
+        const escaped = expression.value
+          .replaceAll("\\", "\\\\")
+          .replaceAll("%", "\\%")
+          .replaceAll("_", "\\_");
+        return {
+          kind: "scalar",
+          expression: textLike(normalized, param(`%${escaped}%`), "\\"),
+          type: { kind: "scalar", scalar: "boolean" },
+          nullable: false,
+          candidateBounded: false,
+        };
+      }
       if (!expression.caseSensitive)
         reject(
           path,
@@ -973,8 +1003,11 @@ export class AnalyticsLogicalToDbLowerer {
       readonly layouts: readonly SlotLayout[];
     }
   >();
+  readonly #sourceSelectionIds = new WeakMap<object, number>();
+  #nextSourceSelectionId = 1;
   readonly #requiredSlots = new Map<RelationId, Set<SlotId>>();
   readonly #storage: AnalyticsRelationalStorage;
+  readonly #scopedStorage: AnalyticsLegacyScopedStorage;
 
   constructor(
     plan: ValidatedLogicalPlan,
@@ -1008,6 +1041,16 @@ export class AnalyticsLogicalToDbLowerer {
       plan.slots.map((slot) => [slot.id, slot] as const),
     );
     this.#storage = new AnalyticsRelationalStorage(storageContext);
+    this.#scopedStorage = new AnalyticsLegacyScopedStorage(storageContext);
+  }
+
+  #sourceSelectionId(selection: object | undefined): number | null {
+    if (!selection) return null;
+    const existing = this.#sourceSelectionIds.get(selection);
+    if (existing !== undefined) return existing;
+    const next = this.#nextSourceSelectionId++;
+    this.#sourceSelectionIds.set(selection, next);
+    return next;
   }
 
   lower(output: LogicalOutput): LoweredAnalyticsLogicalOutput {
@@ -1272,13 +1315,14 @@ export class AnalyticsLogicalToDbLowerer {
   }
 
   #lowerSource(node: SourceNode, path: string): LoweredRelation {
-    let lowered;
+    let lowered: LoweredAnalyticsSource;
     try {
-      lowered = this.#storage.lowerSource(
+      const source = this.#storage.lowerSource(
         node,
         path,
         this.#requiredOutput(node),
       );
+      lowered = this.#scopedStorage.lowerEventReportSource(node, path, source);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const separator = message.indexOf(": ");
@@ -1354,6 +1398,7 @@ export class AnalyticsLogicalToDbLowerer {
     const sourceSignature = JSON.stringify([
       node.entity,
       node.temporalDomain,
+      this.#sourceSelectionId(node.selection),
       node.values.map((binding) => {
         const logical = logicalSlot(
           this.#logicalSlots,

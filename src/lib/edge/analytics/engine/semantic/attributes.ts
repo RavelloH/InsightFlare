@@ -728,6 +728,11 @@ export const semanticEventReportAttributeCatalog: readonly SemanticAttributeDefi
       nullable: false,
     }),
     eventReportAttribute({
+      name: "internalPk",
+      scalar: "number",
+      nullable: false,
+    }),
+    eventReportAttribute({
       name: "ownerVisitId",
       scalar: "string",
       nullable: false,

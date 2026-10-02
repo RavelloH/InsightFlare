@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   analyticsFilterRegistry,
+  attachScopedFilterMetadata,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   type FunnelConfigV2,
@@ -12,6 +13,7 @@ import {
   type QueryAudience,
   type QueryInput,
   type QueryTime,
+  scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -153,12 +155,17 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
     );
     CREATE TABLE custom_event_json_paths (
       id INTEGER PRIMARY KEY,
+      site_id TEXT NOT NULL,
       path TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      last_seen_at INTEGER NOT NULL DEFAULT 0,
       site_pk INTEGER GENERATED ALWAYS AS (1) STORED
     );
     CREATE TABLE custom_event_json_values (
-      event_pk INTEGER NOT NULL, path_id INTEGER NOT NULL, value_type INTEGER NOT NULL,
-      occurred_at INTEGER NOT NULL, string_value TEXT, number_value REAL, boolean_value INTEGER,
+      event_pk INTEGER NOT NULL, node_id INTEGER NOT NULL, site_id TEXT NOT NULL,
+      event_name_id INTEGER NOT NULL, path_id INTEGER NOT NULL, occurred_at INTEGER NOT NULL,
+      scope_node_id INTEGER, value_type INTEGER NOT NULL, string_value TEXT,
+      string_hash TEXT, number_value REAL, boolean_value INTEGER,
       site_pk INTEGER GENERATED ALWAYS AS (1) STORED
     );
     CREATE INDEX idx_custom_events_site_pk_name_time
@@ -278,13 +285,29 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
       null,
     );
   d1.database
-    .prepare("INSERT INTO custom_event_json_paths VALUES (?, ?)")
-    .run(1, "/href");
+    .prepare(
+      "INSERT INTO custom_event_json_paths (id, site_id, path) VALUES (?, ?, ?)",
+    )
+    .run(1, siteId, "/href");
   d1.database
     .prepare(
-      "INSERT INTO custom_event_json_values VALUES (?, ?, ?, ?, ?, ?, ?)",
+      `INSERT INTO custom_event_json_values (
+        event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+        value_type, string_value, number_value, boolean_value
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(1, 1, 1, eventTime, "https://example.test/next", null, null);
+    .run(
+      1,
+      1,
+      siteId,
+      1,
+      1,
+      eventTime,
+      1,
+      "https://example.test/next",
+      null,
+      null,
+    );
   return {
     env: {
       DB: d1 as unknown as D1Database,
@@ -462,18 +485,26 @@ function seedFilterSemanticsTruthFixture(d1: SqliteD1Database): void {
     );
   }
   d1.database
-    .prepare("INSERT INTO custom_event_json_paths VALUES (?, ?)")
-    .run(1, "/plan");
+    .prepare(
+      "INSERT INTO custom_event_json_paths (id, site_id, path) VALUES (?, ?, ?)",
+    )
+    .run(1, siteId, "/plan");
   d1.database
     .prepare(
-      "INSERT INTO custom_event_json_values VALUES (?, ?, ?, ?, ?, ?, ?)",
+      `INSERT INTO custom_event_json_values (
+        event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+        value_type, string_value, number_value, boolean_value
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(111, 1, 1, eventTime, "free", null, null);
+    .run(111, 111, siteId, 110, 1, eventTime, 1, "free", null, null);
   d1.database
     .prepare(
-      "INSERT INTO custom_event_json_values VALUES (?, ?, ?, ?, ?, ?, ?)",
+      `INSERT INTO custom_event_json_values (
+        event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+        value_type, string_value, number_value, boolean_value
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(112, 1, 1, eventTime, "pro", null, null);
+    .run(112, 112, siteId, 111, 1, eventTime, 1, "pro", null, null);
 }
 
 function readTruthRelationIds(
@@ -540,8 +571,40 @@ function preparedJourneyFilters(
   return prepared.filters!;
 }
 
+function preparedEventRecordFilters(
+  filters: FilterDocument,
+  scopePreference: TruthScope,
+) {
+  return prepareScopedQuery("event-records", {
+    context: siteQueryContext(siteId, "private-dashboard"),
+    time: {
+      range: {
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+      },
+      reportingTimeZone: "UTC",
+      capturedAtMs: window.nowMs,
+    },
+    filters,
+    scopePreference,
+  } as QueryInput & { time: QueryTime });
+}
+
+function recordFieldFilter(
+  field: string,
+  operator: "eq" | "gte",
+  value: string | number,
+): FilterDocument {
+  return truthFilters({
+    kind: "condition",
+    target: { kind: "field", field: field as never },
+    operator,
+    value,
+  });
+}
+
 describe("event detail D1 SQL", () => {
-  it("runs event-record pages through the canonical scoped dataset", async () => {
+  it("runs event-record pages through the unified typed query", async () => {
     const { env, d1 } = createSqliteEventEnv();
     const prepared = prepareScopedQuery("event-records", {
       context: siteQueryContext(siteId, "private-dashboard"),
@@ -573,7 +636,307 @@ describe("event detail D1 SQL", () => {
         "event-other-name",
         "event-1",
       ]);
-      expect(d1.calls.at(-1)?.sql).toContain("FROM scope_final_events es");
+      expect(d1.calls).toHaveLength(1);
+      expect(d1.calls[0]?.sql).toContain('FROM "custom_events"');
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("applies prepared observation and entity filters to typed event pages", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const sessionFilters = preparedEventRecordFilters(
+        recordFieldFilter("session.views", "gte", 2),
+        "session",
+      );
+      const sessionPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        sessionFilters.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: sessionFilters.scopePlan,
+        },
+      );
+      expect(sessionPage.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
+
+      const pageFilters = preparedEventRecordFilters(
+        recordFieldFilter("page.path", "eq", "/entry"),
+        "session",
+      );
+      const pageScoped = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        pageFilters.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: pageFilters.scopePlan,
+        },
+      );
+      expect(pageScoped.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
+
+      const visitorFilters = preparedEventRecordFilters(
+        recordFieldFilter("visitor.sessions", "gte", 1),
+        "visitor",
+      );
+      const visitorPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        visitorFilters.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: visitorFilters.scopePlan,
+        },
+      );
+      expect(visitorPage.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
+
+      const combinedSessionFilters = preparedEventRecordFilters(
+        truthFilters({
+          kind: "and",
+          children: [
+            recordFieldFilter("session.views", "gte", 2).root!,
+            recordFieldFilter("session.events", "gte", 2).root!,
+          ],
+        }),
+        "session",
+      );
+      const combinedSessionPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        combinedSessionFilters.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: combinedSessionFilters.scopePlan,
+        },
+      );
+      expect(combinedSessionPage.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
+
+      const notSessionFilters = preparedEventRecordFilters(
+        truthFilters({
+          kind: "not",
+          child: recordFieldFilter("session.views", "gte", 3).root!,
+        }),
+        "session",
+      );
+      const notSessionPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        notSessionFilters.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: notSessionFilters.scopePlan,
+        },
+      );
+      expect(notSessionPage.rows).toEqual([]);
+
+      const observationFilters = preparedEventRecordFilters(
+        recordFieldFilter("page.path", "eq", "/posts/minecraft-meteor-guide"),
+        "event",
+      );
+      const observationPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        observationFilters.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: observationFilters.scopePlan,
+        },
+      );
+      expect(observationPage.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps the direct reader's omitted performance dependency error", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      await expect(
+        queryEventRecordPageFromD1(
+          env,
+          siteId,
+          window,
+          recordFieldFilter("performance.lcpMs", "gte", 1),
+          {
+            limit: 50,
+            sort: { key: "occurredAt", direction: "desc" },
+          },
+        ),
+      ).rejects.toThrow("perf_lcp_ms was not supplied by the current scope");
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("lowers payload, cross-entity, disjunctive and prepared identity filters", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const payloadFilters = truthFilters({
+        kind: "condition",
+        target: { kind: "event-payload", path: "/href" as never },
+        operator: "contains",
+        value: "example.test",
+      });
+      const payloadPrepared = preparedEventRecordFilters(
+        payloadFilters,
+        "event",
+      );
+      const payloadPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        payloadPrepared.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: payloadPrepared.scopePlan,
+        },
+      );
+      expect(payloadPage.rows.map((row) => row.eventId)).toEqual(["event-1"]);
+
+      const crossEntityFilters = preparedEventRecordFilters(
+        recordFieldFilter("visitor.sessions", "gte", 1),
+        "session",
+      );
+      const crossEntityPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        crossEntityFilters.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: crossEntityFilters.scopePlan,
+        },
+      );
+      expect(crossEntityPage.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
+
+      const disjunction = truthFilters({
+        kind: "or",
+        children: [
+          recordFieldFilter("session.views", "gte", 2).root!,
+          recordFieldFilter("session.events", "gte", 2).root!,
+        ],
+      });
+      const disjunctionPrepared = preparedEventRecordFilters(
+        disjunction,
+        "session",
+      );
+      const disjunctionPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        disjunctionPrepared.filters!,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: disjunctionPrepared.scopePlan,
+        },
+      );
+      expect(disjunctionPage.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
+
+      const observationPrepared = preparedEventRecordFilters(
+        EMPTY_FILTER_DOCUMENT,
+        "event",
+      );
+      const observationMetadata = scopedFilterMetadata(
+        observationPrepared.filters,
+      )!;
+      const observationPlan = {
+        ...observationMetadata.plan,
+        advancedMatches: {
+          eventIds: [{ siteId, id: "event-1" }],
+        },
+      };
+      const observationFilters = attachScopedFilterMetadata(
+        observationPrepared.filters!,
+        { ...observationMetadata, plan: observationPlan },
+      );
+      const explicitObservationPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        observationFilters,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: observationPlan,
+        },
+      );
+      expect(explicitObservationPage.rows.map((row) => row.eventId)).toEqual([
+        "event-1",
+      ]);
+
+      const entityPrepared = preparedEventRecordFilters(
+        EMPTY_FILTER_DOCUMENT,
+        "session",
+      );
+      const entityMetadata = scopedFilterMetadata(entityPrepared.filters)!;
+      const entityPlan = {
+        ...entityMetadata.plan,
+        advancedMatches: {
+          entityIds: [{ siteId, id: "session-1" }],
+        },
+      };
+      const entityFilters = attachScopedFilterMetadata(
+        entityPrepared.filters!,
+        {
+          ...entityMetadata,
+          plan: entityPlan,
+        },
+      );
+      const explicitEntityPage = await queryEventRecordPageFromD1(
+        env,
+        siteId,
+        window,
+        entityFilters,
+        {
+          limit: 50,
+          sort: { key: "occurredAt", direction: "desc" },
+          scopePlan: entityPlan,
+        },
+      );
+      expect(explicitEntityPage.rows.map((row) => row.eventId)).toEqual([
+        "event-other-name",
+        "event-1",
+      ]);
     } finally {
       d1.close();
     }
@@ -831,7 +1194,7 @@ describe("event detail D1 SQL", () => {
       expect(cursorQuery?.sql).not.toContain("OFFSET");
       expect(cursorQuery?.sql).not.toContain("SELECT *");
       expect(cursorQuery?.sql).not.toContain("filtered_events AS");
-      expect(cursorQuery?.sql).toContain("FROM event_source es");
+      expect(cursorQuery?.sql).toContain('FROM "custom_events"');
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cursorQuery?.sql ?? "SELECT 1"}`)
         .all(...(cursorQuery?.bindings ?? []));
@@ -871,13 +1234,11 @@ describe("event detail D1 SQL", () => {
         .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
         .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
       const planDetails = plan.map((row) => row.detail).join("\n");
-      expect(query?.sql).toContain("target_event_name AS");
-      expect(query?.sql).not.toContain("TRIM(COALESCE(es.event_name");
       expect(planDetails).toContain("idx_custom_events_site_pk_name_time");
-      expect(query?.sql).toContain("v.query_string");
-      expect(query?.sql).toContain("v.referrer_url");
-      expect(query?.sql).toContain("v.screen_width");
-      expect(query?.sql).toContain("v.as_organization");
+      expect(query?.sql).toContain('"query_string"');
+      expect(query?.sql).toContain('"referrer_url"');
+      expect(query?.sql).toContain('"screen_width"');
+      expect(query?.sql).toContain('"as_organization"');
     } finally {
       d1.close();
     }

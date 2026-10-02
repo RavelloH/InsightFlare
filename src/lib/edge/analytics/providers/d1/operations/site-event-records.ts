@@ -7,6 +7,8 @@ import {
   filterFingerprint,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { mapEventRecord } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
 import {
@@ -28,6 +30,8 @@ export interface ReadSiteEventRecordsInput {
   readonly siteId: string;
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly queryTime?: QueryTime;
   readonly search?: string;
   readonly eventName?: string;
   readonly sort: {
@@ -123,6 +127,8 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
       search,
       eventName,
       cursor,
+      scopePlan: input.scopePlan,
+      queryTime: input.queryTime,
     },
   );
   return {

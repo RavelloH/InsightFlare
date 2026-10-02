@@ -495,10 +495,10 @@ describe("Event record detail report D1 lowering", () => {
     expect(mainQueryLog?.data).toMatchObject({
       operation: "all",
       status: "success",
-      sqlBytes: 29_021,
+      sqlBytes: 28_825,
       bindings: 12,
       physicalPlanHash:
-        "v1:37640936520cc10d692d05082587090ddf32859487c9536d7be1f1e9aa4791bf",
+        "v1:b3f16aa0a44bdf0146488b9a8a4256e1488df370d9ab735ec7a366fb60035dd8",
     });
     expect(
       new TextEncoder().encode(LEGACY_EVENT_DETAIL_SQL).byteLength,

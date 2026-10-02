@@ -7,6 +7,7 @@ import type {
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
+import type { SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import type { TemporalDomainRef } from "@/lib/edge/analytics/engine/semantic/time";
 
 export interface LogicalNodeBase {
@@ -33,6 +34,7 @@ export interface SourceNode extends LogicalNodeBase {
   readonly kind: "source";
   readonly entity: AnalyticsEntityKind;
   readonly temporalDomain: TemporalDomainRef;
+  readonly selection?: SemanticScopedSourceSelection;
   readonly values: readonly SourceValueBinding[];
 }
 

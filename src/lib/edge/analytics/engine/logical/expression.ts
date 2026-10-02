@@ -78,6 +78,7 @@ export interface LogicalStringMatchExpression {
   readonly input: LogicalExpr;
   readonly value: string;
   readonly caseSensitive: boolean;
+  readonly semantics?: "legacy-record-search-v1";
   /** Storage-independent Filter v1 string normalization semantics. */
   readonly stringNormalization?: LogicalStringNormalization;
 }

@@ -4,6 +4,7 @@ export * from "./dimensions";
 export * from "./entities";
 export * from "./metrics";
 export * from "./relationships";
+export * from "./scoped-source-selection";
 export * from "./subject";
 export * from "./time";
 export * from "./validator";
