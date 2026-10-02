@@ -1968,7 +1968,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
     }
   });
 
-  it("rejects unsupported entity, payload, and mixed-activity Source contracts", () => {
+  it("lowers canonical Session Sources and rejects payload and mixed-activity contracts", () => {
     const context = {
       subject: createSemanticSubjectDomain({
         origin: "site",
@@ -1989,12 +1989,11 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       { name: "session", slot: "entity" },
     ]);
     const sessionPlan = sessionBuilder.finish();
-    expect(() =>
-      new AnalyticsLogicalToDbLowerer(sessionPlan, {
-        siteId: SITE_A,
-        time: sessionPlan.context.time,
-      }).lower(sessionPlan.outputs[0]!),
-    ).toThrow(/supports Page, Event, and Observation carriers only/u);
+    const sessionLowerer = new AnalyticsLogicalToDbLowerer(sessionPlan, {
+      siteId: SITE_A,
+      time: sessionPlan.context.time,
+    });
+    expect(() => sessionLowerer.lower(sessionPlan.outputs[0]!)).not.toThrow();
 
     const payloadBuilder = new LogicalPlanBuilder(context);
     const payloadEvents = payloadBuilder.source("event", {

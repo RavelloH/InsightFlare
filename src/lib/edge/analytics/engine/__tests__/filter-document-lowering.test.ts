@@ -671,6 +671,51 @@ describe("FilterDocument Boolean lowering", () => {
     }
   });
 
+  it("routes numeric Session and Visitor between through shared lowering", () => {
+    for (const item of [
+      { field: "session.views", scope: "session" },
+      { field: "visitor.events", scope: "visitor" },
+    ] as const) {
+      const builder = createBuilder();
+      const analysis = analyzeExpression(
+        fieldCondition(item.field, "between", [2, 5]),
+      );
+      const lowered = materialize(builder, analysis, {
+        targetScope: item.scope,
+        resolveTemporalDomain: explicitDomain("filter"),
+      });
+      expect(lowered.result).toMatchObject({
+        kind: "supported",
+        scope: item.scope,
+      });
+      const source = lowered.plan?.nodes.find(
+        (node) => node.kind === "source" && node.entity === item.scope,
+      );
+      expect(source).toMatchObject({
+        kind: "source",
+        entity: item.scope,
+        temporalDomain: "filter",
+      });
+      const filter = lowered.plan?.nodes.find((node) => node.kind === "filter");
+      if (!filter || filter.kind !== "filter")
+        throw new Error("between_filter_missing");
+      if (
+        filter.predicate.kind !== "boolean" ||
+        filter.predicate.operator !== "and" ||
+        filter.predicate.terms.length !== 2
+      )
+        throw new Error("between_predicate_not_closed_range");
+      const [minimum, maximum] = filter.predicate.terms;
+      if (minimum?.kind !== "comparison" || maximum?.kind !== "comparison")
+        throw new Error("between_comparisons_missing");
+      expect(minimum.operator).toBe("gte");
+      expect(maximum.operator).toBe("lte");
+      expect(minimum.left).toEqual(maximum.left);
+      expect(minimum.right).toMatchObject({ kind: "literal", value: 2 });
+      expect(maximum.right).toMatchObject({ kind: "literal", value: 5 });
+    }
+  });
+
   it("preserves nested AND/OR/NOT across mixed explicit time domains", () => {
     const root: FilterExpression = {
       kind: "and",

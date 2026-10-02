@@ -43,6 +43,14 @@ import {
   type NativePrimitiveFieldContract,
   nativePrimitiveFieldContract,
 } from "./analytics-primitive-predicate-lowering";
+import {
+  type AnalyticsScopeFactContract,
+  analyticsScopeFactContract,
+  type AnalyticsScopeFactEntity,
+  type AnalyticsScopeFactId,
+  buildAnalyticsScopeFactRelation,
+  isAnalyticsScopeFactId,
+} from "./analytics-scope-fact-storage";
 
 export type AnalyticsDbRelation = Relation<
   object,
@@ -456,6 +464,14 @@ export class AnalyticsRelationalStorage {
         semanticAttribute(binding.attribute)?.nativeEntity === "observation"
       )
         continue;
+      if (isAnalyticsScopeFactId(binding.attribute)) {
+        if (node.entity !== "session" && node.entity !== "visitor")
+          throw new Error(
+            `${path}.values: ${binding.attribute} is available only on its native Session or Visitor entity.`,
+          );
+        analyticsScopeFactContract(binding.attribute, node.entity, path);
+        continue;
+      }
       if (!nativePrimitiveFieldContract(binding.attribute))
         throw new Error(
           `${path}.values: No registered D1 primitive storage mapping exists for ${binding.attribute}.`,
@@ -484,7 +500,8 @@ export class AnalyticsRelationalStorage {
       if (
         isObservationReportAttribute(binding.attribute) ||
         isSemanticPageReportAttribute(binding.attribute) ||
-        isSemanticEventReportAttribute(binding.attribute)
+        isSemanticEventReportAttribute(binding.attribute) ||
+        isAnalyticsScopeFactId(binding.attribute)
       )
         return [];
       const contract = nativePrimitiveFieldContract(binding.attribute);
@@ -520,6 +537,18 @@ export class AnalyticsRelationalStorage {
     const selfRequired = node.values.some(
       (binding) => binding.kind === "self" && requiredSlots.has(binding.slot),
     );
+    const declaredScopeFactContracts: AnalyticsScopeFactContract[] =
+      node.entity === "session" || node.entity === "visitor"
+        ? attributes
+            .filter((binding) => isAnalyticsScopeFactId(binding.attribute))
+            .map((binding) =>
+              analyticsScopeFactContract(
+                binding.attribute,
+                node.entity as AnalyticsScopeFactEntity,
+                path,
+              ),
+            )
+        : [];
     const needsSessionRelation = relationships.some(
       (binding) =>
         binding.relationship === "observation.session" &&
@@ -551,7 +580,9 @@ export class AnalyticsRelationalStorage {
       (binding) => binding.kind === "occurrence-time",
     );
     let carrier: AnalyticsDbRelation;
-    let activity: "page" | "event" | "observation";
+    let scopeFactValues: ReadonlyMap<AnalyticsScopeFactId, AnyExpression> =
+      new Map();
+    let activity: "page" | "event" | "observation" | "session" | "visitor";
     if (node.entity === "page") {
       if (
         declaredPageReportAttributes.length > 0 &&
@@ -718,9 +749,31 @@ export class AnalyticsRelationalStorage {
               )
             : this.#events(node.temporalDomain);
       }
+    } else if (node.entity === "session" || node.entity === "visitor") {
+      this.#requireRelationships(relationships, [], path);
+      if (declaresOccurrenceTime)
+        throw new Error(
+          `${path}.values: Occurrence time is not available on Session or Visitor fact sources.`,
+        );
+      activity = node.entity;
+      const pages = this.#pages(node.temporalDomain, [
+        "session_id",
+        "visitor_id",
+      ]);
+      const events = this.#eventsWithNameAndOwner(node.temporalDomain, [
+        "session_id",
+        "visitor_id",
+      ]);
+      const facts = buildAnalyticsScopeFactRelation({
+        entity: node.entity,
+        facts: declaredScopeFactContracts,
+        activity: { pages, events },
+      });
+      carrier = facts.relation;
+      scopeFactValues = facts.values;
     } else {
       throw new Error(
-        `${path}.entity: D1 lowering currently supports Page, Event, and Observation carriers only.`,
+        `${path}.entity: D1 lowering supports Page, Event, Observation, and canonical Session/Visitor count-fact sources only.`,
       );
     }
 
@@ -734,19 +787,25 @@ export class AnalyticsRelationalStorage {
             ? column(carrier, "visit_id")
             : entity === "event"
               ? column(carrier, "event_id")
-              : column(
-                  carrier,
-                  activity === "observation"
-                    ? "observation_id"
-                    : activity === "page"
-                      ? "visit_id"
-                      : "event_id",
-                );
+              : entity === "session" || entity === "visitor"
+                ? column(carrier, "entity_id")
+                : column(
+                    carrier,
+                    activity === "observation"
+                      ? "observation_id"
+                      : activity === "page"
+                        ? "visit_id"
+                        : "event_id",
+                  );
         const sitePk = column(carrier, "site_pk");
         const observationKind =
           activity === "observation"
             ? column(carrier, "observation_kind")
-            : param(activity);
+            : param(
+                activity === "session" || activity === "visitor"
+                  ? "page"
+                  : activity,
+              );
         values.set(binding.slot, {
           kind: "entity",
           entity,
@@ -754,7 +813,10 @@ export class AnalyticsRelationalStorage {
             entity === "observation"
               ? [sitePk, observationKind, localId]
               : [sitePk, localId],
-          present: isNotNull(sitePk),
+          present:
+            entity === "session" || entity === "visitor"
+              ? and(isNotNull(sitePk), this.#sessionPresent(localId))
+              : isNotNull(sitePk),
           nullable: false,
           candidateBounded: node.temporalDomain === "candidate",
         });
@@ -851,6 +913,32 @@ export class AnalyticsRelationalStorage {
             );
         }
       } else if (binding.kind === "attribute") {
+        if (isAnalyticsScopeFactId(binding.attribute)) {
+          if (node.entity !== "session" && node.entity !== "visitor")
+            throw new Error(
+              `${path}.values: ${binding.attribute} is available only on its native Session or Visitor entity.`,
+            );
+          const contract = analyticsScopeFactContract(
+            binding.attribute,
+            node.entity,
+            path,
+          );
+          const factValue = scopeFactValues.get(contract.id);
+          if (
+            !factValue ||
+            factValue.resultType.affinity !== "integer" ||
+            factValue.resultType.nullable
+          )
+            throw new Error(
+              `${path}.values: ${binding.attribute} must lower to a non-null D1 INTEGER count fact.`,
+            );
+          values.set(binding.slot, {
+            kind: "scalar",
+            value: factValue,
+            candidateBounded: false,
+          });
+          continue;
+        }
         if (isSemanticEventReportAttribute(binding.attribute)) {
           if (node.entity !== "event")
             throw new Error(
@@ -894,6 +982,10 @@ export class AnalyticsRelationalStorage {
           if (node.entity !== "observation")
             throw new Error(
               `${path}.values: Raw identity attributes are available only on Observation.`,
+            );
+          if (activity === "session" || activity === "visitor")
+            throw new Error(
+              `${path}.values: Session/Visitor count-fact sources do not expose raw Observation identities.`,
             );
           values.set(binding.slot, {
             kind: "scalar",

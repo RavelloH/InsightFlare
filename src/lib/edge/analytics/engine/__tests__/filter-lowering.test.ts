@@ -11,6 +11,7 @@ import {
   observationCapabilityForAttribute,
   observationSourceForAttribute,
   preparePrimitiveFieldCondition,
+  primitivePredicateForSource,
 } from "@/lib/edge/analytics/engine/filter-lowering";
 import {
   type LogicalPlan,
@@ -738,6 +739,44 @@ describe("primitive Filter v1 condition lowering", () => {
     `);
   });
 
+  it("lowers numeric Session and Visitor between as a closed range", () => {
+    for (const item of [
+      { field: "session.events", minimum: 2, maximum: 5 },
+      { field: "visitor.sessions", minimum: 1, maximum: 3 },
+    ] as const) {
+      const lowered = lowerToPlan(
+        analyzedCondition(item.field, "between", [item.minimum, item.maximum]),
+      );
+      expect(lowered.result.kind).toBe("supported");
+      const predicate = lowered.plan?.nodes.find(
+        (node) => node.kind === "filter",
+      );
+      if (!predicate || predicate.kind !== "filter")
+        throw new Error("between_filter_missing");
+      if (
+        predicate.predicate.kind !== "boolean" ||
+        predicate.predicate.operator !== "and" ||
+        predicate.predicate.terms.length !== 2
+      )
+        throw new Error("between_predicate_not_closed_range");
+      const [minimum, maximum] = predicate.predicate.terms;
+      if (minimum?.kind !== "comparison" || maximum?.kind !== "comparison")
+        throw new Error("between_comparisons_missing");
+      expect(minimum.operator).toBe("gte");
+      expect(maximum.operator).toBe("lte");
+      expect(minimum.left).toEqual(maximum.left);
+      expect(minimum.left).toMatchObject({ kind: "slot" });
+      expect(minimum.right).toMatchObject({
+        kind: "literal",
+        value: item.minimum,
+      });
+      expect(maximum.right).toMatchObject({
+        kind: "literal",
+        value: item.maximum,
+      });
+    }
+  });
+
   it("lowers valueless field presence using raw null and empty-string tests", () => {
     const expected = {
       exists: { kind: "null-test", negated: true },
@@ -786,6 +825,40 @@ describe("primitive Filter v1 condition lowering", () => {
   });
 
   it("returns stable unsupported results for non-primitive Filter v1 features", () => {
+    const booleanBetween = preparePrimitiveFieldCondition({
+      kind: "condition",
+      target: { kind: "field", field: "session.bounce" },
+      operator: "between",
+      value: [0, 1],
+    } as unknown as FilterCondition);
+    expect(booleanBetween).toEqual({
+      kind: "unsupported",
+      code: "unsupported-operator",
+      fieldId: "session.bounce",
+      operator: "between",
+    });
+    const numericRange = preparePrimitiveFieldCondition(
+      analyzedCondition("session.views", "between", [2, 5]).condition,
+    );
+    if (numericRange.kind !== "prepared")
+      throw new Error("numeric_count_between_preparation_failed");
+    const predicateBuilder = createBuilder();
+    const numericSource = predicateBuilder.source("session", {
+      attributes: ["session.views"],
+    });
+    expect(() =>
+      primitivePredicateForSource(
+        predicateBuilder,
+        numericSource,
+        {
+          ...numericRange.condition,
+          value: [Number.NaN, Number.POSITIVE_INFINITY],
+        } as unknown as FilterCondition,
+        numericRange.field,
+        numericRange.attribute,
+      ),
+    ).toThrow("filter_lowering_unsupported_between");
+
     const between = lowerToPlan(
       analyzedCondition("page.durationMs", "between", [100, 500]),
     );

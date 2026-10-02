@@ -105,6 +105,13 @@ const SUPPORTED_COMPARISONS = new Set<FilterOperator>([
   "lt",
   "lte",
 ]);
+const NUMERIC_SCOPE_COUNT_FACTS = new Set([
+  "session.views",
+  "session.events",
+  "visitor.sessions",
+  "visitor.views",
+  "visitor.events",
+]);
 const SUPPORTED_SET_OPERATORS = new Set<FilterOperator>(["in", "notIn"]);
 const SUPPORTED_STRING_MATCHES = new Set<FilterOperator>([
   "contains",
@@ -195,6 +202,14 @@ export function preparePrimitiveFieldCondition(
   const field = analyticsFilterRegistry.get(condition.target.field);
   const attribute = semanticAttribute(condition.target.field);
   if (!field || !attribute) return invalid("unknown_field");
+  if (
+    condition.operator === "between" &&
+    (!NUMERIC_SCOPE_COUNT_FACTS.has(field.id) ||
+      field.valueKind !== "number" ||
+      attribute.valueType.kind !== "scalar" ||
+      attribute.valueType.scalar !== "number")
+  )
+    return unsupported("unsupported-operator", field.id, condition.operator);
 
   const normalized = normalizeFilterDocument(
     { version: 1, root: condition },
@@ -204,6 +219,17 @@ export function preparePrimitiveFieldCondition(
     return invalid("invalid_condition");
   }
   const loweredCondition = normalized.root;
+  const isNumericBetween =
+    loweredCondition.operator === "between" &&
+    NUMERIC_SCOPE_COUNT_FACTS.has(field.id) &&
+    field.valueKind === "number" &&
+    attribute.valueType.kind === "scalar" &&
+    attribute.valueType.scalar === "number" &&
+    Array.isArray(loweredCondition.value) &&
+    loweredCondition.value.length === 2 &&
+    loweredCondition.value.every(
+      (value) => typeof value === "number" && Number.isFinite(value),
+    );
   if (SUPPORTED_FIELD_PRESENCE.has(loweredCondition.operator)) {
     if (attribute.presence !== "non-null") {
       return unsupported(
@@ -228,6 +254,7 @@ export function preparePrimitiveFieldCondition(
   if (
     !SUPPORTED_COMPARISONS.has(loweredCondition.operator) &&
     !SUPPORTED_SET_OPERATORS.has(loweredCondition.operator) &&
+    !isNumericBetween &&
     !SUPPORTED_STRING_MATCHES.has(loweredCondition.operator) &&
     !SUPPORTED_NULL_TESTS.has(loweredCondition.operator) &&
     !SUPPORTED_FIELD_PRESENCE.has(loweredCondition.operator)
@@ -283,6 +310,43 @@ export function primitivePredicateForSource(
 
   if (SUPPORTED_NULL_TESTS.has(condition.operator)) {
     return builder.isNull(input, condition.operator === "notNull");
+  }
+
+  if (condition.operator === "between") {
+    if (
+      field.valueKind !== "number" ||
+      !NUMERIC_SCOPE_COUNT_FACTS.has(field.id) ||
+      attribute.valueType.kind !== "scalar" ||
+      attribute.valueType.scalar !== "number" ||
+      !Array.isArray(condition.value) ||
+      condition.value.length !== 2 ||
+      condition.value.some(
+        (value) => typeof value !== "number" || !Number.isFinite(value),
+      )
+    )
+      return invalid("unsupported_between");
+    const minimum = condition.value[0] as number;
+    const maximum = condition.value[1] as number;
+    return builder.and(
+      builder.compare(
+        "gte",
+        input,
+        literal(
+          builder,
+          attribute.valueType,
+          literalValue(field, minimum, "gte"),
+        ),
+      ),
+      builder.compare(
+        "lte",
+        input,
+        literal(
+          builder,
+          attribute.valueType,
+          literalValue(field, maximum, "lte"),
+        ),
+      ),
+    );
   }
 
   if (SUPPORTED_SET_OPERATORS.has(condition.operator)) {
