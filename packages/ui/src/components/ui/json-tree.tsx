@@ -1,17 +1,13 @@
 import { type ReactNode, useState } from "react";
-import { AutoResizer } from "@insightflare/ui/auto-resizer";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
-import { Clickable } from "@insightflare/ui/clickable";
-import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@insightflare/ui/tooltip";
 import { RiArrowDownSLine, RiFileCopyLine } from "@remixicon/react";
 import { toast } from "sonner";
 
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
+import { AutoResizer } from "./auto-resizer";
+import { AutoTransition } from "./auto-transition";
+import { Clickable } from "./clickable";
+import { OverlayScrollbar } from "./overlay-scrollbar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 export interface JsonTreeLabels {
   expandField: string;
   collapseField: string;
@@ -22,13 +18,13 @@ export interface JsonTreeLabels {
   copiedValue: string;
   copyValueFailed: string;
 }
-interface JsonTreeProps {
+export interface JsonTreeProps {
   value: unknown;
   labels: JsonTreeLabels;
   depth?: number;
   label?: ReactNode;
 }
-interface JsonTreePanelProps {
+export interface JsonTreePanelProps {
   value: unknown;
   labels: JsonTreeLabels;
   className?: string;

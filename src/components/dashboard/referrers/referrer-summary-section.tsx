@@ -1,5 +1,6 @@
 import { memo, useMemo } from "react";
 import { ShareBreakdownView } from "@insightflare/product-ui/sharing";
+import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import {
   Card,
   CardContent,
@@ -8,7 +9,6 @@ import {
 } from "@insightflare/ui/card";
 import { RiShareForwardLine } from "@remixicon/react";
 
-import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { ReferrerSummaryData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";

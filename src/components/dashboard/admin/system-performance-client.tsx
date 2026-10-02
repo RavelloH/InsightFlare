@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Select,
   SelectContent,
@@ -37,7 +38,6 @@ import {
   type LatencyPercentileChartPoint,
 } from "@/components/dashboard/charts/latency-percentile-chart";
 import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import type { SystemPerformanceInitialData } from "@/lib/dashboard/management-data";

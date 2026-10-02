@@ -17,11 +17,11 @@ import {
   DrawerScrollArea,
   DrawerTitle,
 } from "@insightflare/ui/drawer";
+import { JsonTreePanel } from "@insightflare/ui/json-tree";
 import { Separator } from "@insightflare/ui/separator";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { RiExternalLinkLine } from "@remixicon/react";
 
-import { JsonTreePanel } from "@/components/dashboard/common/json-tree";
 import {
   GeoPointsMapIsland,
   type GeoPointsMapPoint,

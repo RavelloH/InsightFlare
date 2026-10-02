@@ -18,7 +18,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@insightflare/ui/dialog";
+import { JsonTreePanel } from "@insightflare/ui/json-tree";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -53,8 +55,6 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { JsonTreePanel } from "@/components/dashboard/common/json-tree";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import {

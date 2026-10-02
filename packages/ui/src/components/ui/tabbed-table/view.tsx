@@ -3,7 +3,6 @@ import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
 import { cn } from "../../../lib/utils";
-import { Spinner } from "../spinner";
 import type {
   TabbedDataTableColumn,
   TabbedDataTableRowAdapter,
@@ -19,8 +18,12 @@ import {
 } from "../tabbed-table.utils";
 import { TableCell, TableHead, TableRow } from "../table";
 import { AnimatedDataTableRow } from "./animated-data-table-row";
-import { DataTableSwitch } from "./data-table-switch";
+import {
+  DataTableSwitch,
+  TabbedDataTableSkeletonRows,
+} from "./data-table-switch";
 import { TabbedScrollMaskCard } from "./tabbed-scroll-mask-card";
+import { useLoadMoreSentinel } from "./use-load-more-sentinel";
 
 type NonEmptyTabs<TTab extends string> = readonly [
   TabbedDataTableTab<TTab>,
@@ -68,6 +71,9 @@ export interface TabbedDataTableViewProps<
   emptyLabel: string;
   errorLabel?: string;
   loadingMoreLabel?: string;
+  loadingRowCount?: number;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
   loadingRows?: ReactNode;
   footer?: ReactNode;
   headerRight?: ReactNode;
@@ -388,6 +394,9 @@ export function TabbedDataTableView<
   emptyLabel,
   errorLabel,
   loadingMoreLabel,
+  loadingRowCount = 3,
+  hasMore = false,
+  onLoadMore,
   loadingRows,
   footer,
   headerRight,
@@ -420,6 +429,11 @@ export function TabbedDataTableView<
     : tabs[0].value;
   const activeColumns = getColumnsForTab(columns, activeTab);
   const activeRows = rowsByTab?.[activeTab] ?? rows;
+  const canLoadMore = state === "ready" && hasMore && onLoadMore !== undefined;
+  const setLoadMoreSentinel = useLoadMoreSentinel({
+    enabled: canLoadMore,
+    onReachEnd: onLoadMore,
+  });
   const [internalSortByTab, setInternalSortByTab] = useState<
     Record<TTab, TabbedDataTableSortState<TKey>>
   >(() =>
@@ -501,20 +515,28 @@ export function TabbedDataTableView<
         formatNumber={formatNumber}
       />
     );
-  const loadMoreFooter =
+  const loadMoreSkeletonRows =
     state === "loading-more" && !footer ? (
-      <TableRow>
-        <TableCell
-          colSpan={1 + activeColumns.length}
-          className="h-12 text-center text-muted-foreground"
-        >
-          <span className="inline-flex items-center gap-2">
-            <Spinner className="size-4" />
-            {loadingMoreLabel ?? loadingLabel}
-          </span>
-        </TableCell>
-      </TableRow>
+      <TabbedDataTableSkeletonRows
+        count={3}
+        colSpan={1 + activeColumns.length}
+        keyPrefix={`loading-more-${activeTab}`}
+        statusLabel={loadingMoreLabel ?? loadingLabel}
+      />
     ) : null;
+  const loadMoreSentinelRow = canLoadMore ? (
+    <TableRow
+      aria-hidden="true"
+      className="pointer-events-none h-px border-0 hover:bg-transparent"
+    >
+      <TableCell
+        colSpan={1 + activeColumns.length}
+        className="h-px border-0 p-0"
+      >
+        <div ref={setLoadMoreSentinel} className="h-px" />
+      </TableCell>
+    </TableRow>
+  ) : null;
 
   return (
     <TabbedScrollMaskCard
@@ -537,6 +559,7 @@ export function TabbedDataTableView<
         loadingLabel={loadingLabel}
         emptyLabel={emptyLabel}
         colSpan={1 + activeColumns.length}
+        loadingRowCount={loadingRowCount}
         header={
           <TabbedDataTableHeader
             tabs={tabs}
@@ -551,9 +574,13 @@ export function TabbedDataTableView<
         rows={contentRows}
         loadingRows={loadingRows}
         footer={
-          state === "ready" || state === "loading-more"
-            ? (footer ?? loadMoreFooter)
-            : null
+          state === "ready" || state === "loading-more" ? (
+            <>
+              {footer}
+              {loadMoreSkeletonRows}
+              {loadMoreSentinelRow}
+            </>
+          ) : null
         }
         contentKey={contentKey ?? `${activeTab}:${activeRows.length}`}
         animate={animate}

@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
-import { AutoResizer } from "@insightflare/ui/auto-resizer";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
-import { Spinner } from "@insightflare/ui/spinner";
 
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
+import { AutoResizer } from "./auto-resizer";
+import { AutoTransition } from "./auto-transition";
+import { Spinner } from "./spinner";
 
-interface ContentSwitchProps {
+export interface AsyncContentProps {
   loading: boolean;
   hasContent: boolean;
   loadingLabel: string;
@@ -17,7 +17,7 @@ interface ContentSwitchProps {
   initial?: boolean;
 }
 
-export function ContentSwitch({
+export function AsyncContent({
   loading,
   hasContent,
   loadingLabel,
@@ -27,7 +27,7 @@ export function ContentSwitch({
   className,
   minHeightClassName = "min-h-[120px]",
   initial = true,
-}: ContentSwitchProps) {
+}: AsyncContentProps) {
   return (
     <AutoResizer className={className} initial={initial}>
       <AutoTransition initial={initial} duration={0.22}>

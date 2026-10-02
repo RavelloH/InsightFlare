@@ -1,3 +1,5 @@
+import { PageHeading } from "@insightflare/ui/page-heading";
+
 import { BrowserCrossBreakdownGrid } from "@/components/dashboard/browsers/browser-cross-breakdown-grid";
 import { BrowserEngineShareTrendCard } from "@/components/dashboard/browsers/browser-engine-share-trend-card";
 import { BrowserPerformanceRadarCard } from "@/components/dashboard/browsers/browser-performance-radar-card";
@@ -5,7 +7,6 @@ import { BrowserShareOverview } from "@/components/dashboard/browsers/browser-sh
 import { BrowserShareTrendCard } from "@/components/dashboard/browsers/browser-share-trend-card";
 import { BrowserVersionBreakdownGrid } from "@/components/dashboard/browsers/browser-version-breakdown-grid";
 import { CanIUseCompatCard } from "@/components/dashboard/browsers/caniuse-compat-card";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

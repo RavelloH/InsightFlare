@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Input } from "@insightflare/ui/input";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { RiSearchLine } from "@remixicon/react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
@@ -7,7 +8,6 @@ import {
   AnalyticsTableColumnSettings,
   useAnalyticsTableColumns,
 } from "@/components/dashboard/common/analytics-table-column-settings";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import {
   createSessionTableColumnDefinitions,
   SESSION_TABLE_COLUMNS_STORAGE_KEY,

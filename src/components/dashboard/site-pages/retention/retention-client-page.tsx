@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { RiPulseLine, RiRepeat2Line } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Card,
@@ -15,7 +16,6 @@ import {
   type StackedBreakdownBarRow,
   type StackedBreakdownBarSeries,
 } from "@/components/dashboard/charts/stacked-breakdown-bar-chart";
-import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import {
   type DeviceTypeIcon,
   resolveDeviceTypeMeta,

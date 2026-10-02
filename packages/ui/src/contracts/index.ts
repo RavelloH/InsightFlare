@@ -1,3 +1,4 @@
+export { asyncContentContract } from "../components/ui/async-content.contract";
 export {
   buttonContract,
   buttonFixtures,
@@ -5,12 +6,14 @@ export {
 export { cardContract } from "../components/ui/card.contract";
 export * from "../components/ui/composites.contract";
 export { inputContract, inputFixtures } from "../components/ui/input.contract";
+export { jsonTreeContract } from "../components/ui/json-tree.contract";
 export {
   dialogContract,
   drawerContract,
   popoverContract,
   tooltipContract,
 } from "../components/ui/overlays.contract";
+export { pageHeadingContract } from "../components/ui/page-heading.contract";
 export * from "../components/ui/primitives.contract";
 export {
   selectContract,

@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
+import { PageHeading } from "@insightflare/ui/page-heading";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { OverviewGeoPointsMapCard } from "@/components/dashboard/geo/overview-geo-points-map-card";
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import {

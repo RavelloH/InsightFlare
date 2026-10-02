@@ -4,6 +4,7 @@ import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Badge } from "@insightflare/ui/badge";
 import { Button } from "@insightflare/ui/button";
 import { Card, CardContent } from "@insightflare/ui/card";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiExternalLinkLine,
@@ -15,7 +16,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { VersionUpdateDetailsButton } from "@/components/dashboard/version-update-details-button";
 import { intlLocale } from "@/lib/dashboard/format";
 import { type Locale, resolveLocale } from "@/lib/i18n/config";

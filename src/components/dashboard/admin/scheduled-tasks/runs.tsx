@@ -11,6 +11,7 @@ import {
   DrawerScrollArea,
   DrawerTitle,
 } from "@insightflare/ui/drawer";
+import { JsonTreePanel } from "@insightflare/ui/json-tree";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { Spinner } from "@insightflare/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
@@ -18,7 +19,6 @@ import type { RiTimeLine } from "@remixicon/react";
 import { RiCloseCircleLine, RiFileList3Line } from "@remixicon/react";
 
 import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
-import { JsonTreePanel } from "@/components/dashboard/common/json-tree";
 import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import {
   durationFormat,

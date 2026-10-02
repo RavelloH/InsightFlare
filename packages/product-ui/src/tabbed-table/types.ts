@@ -5,6 +5,7 @@ import type {
   TabbedDataTableRowBase,
   TabbedDataTableRowContext,
   TabbedDataTableSortState,
+  TabbedDataTableTab,
 } from "@insightflare/ui/tabbed-table";
 
 export type {

@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Card, CardContent, CardTitle } from "@insightflare/ui/card";
 import { RiShareForwardLine } from "@remixicon/react";
@@ -8,7 +9,6 @@ import {
   buildPerformanceRadarMaxByMetric,
   PerformanceRadarChart,
 } from "@/components/dashboard/charts/performance-radar-chart";
-import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

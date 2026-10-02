@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from "react";
+import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Card,
@@ -20,7 +21,6 @@ import {
   DonutChart,
   type DonutChartDataPoint,
 } from "@/components/dashboard/charts/donut-chart";
-import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";

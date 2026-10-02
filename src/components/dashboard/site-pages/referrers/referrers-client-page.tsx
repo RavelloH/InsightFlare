@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { useQuery } from "@tanstack/react-query";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import type { TabbedDataTableLoader } from "@/components/dashboard/common/tabbed-data-table-card";
 import type { ComparisonTableMetric } from "@/components/dashboard/comparison/comparison-table";
 import {

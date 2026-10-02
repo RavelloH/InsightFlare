@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Card,
@@ -27,7 +28,6 @@ import {
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client/data/index";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";

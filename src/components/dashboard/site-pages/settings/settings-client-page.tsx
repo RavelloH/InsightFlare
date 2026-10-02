@@ -31,6 +31,7 @@ import {
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { RadioGroup, RadioGroupItem } from "@insightflare/ui/radio-group";
 import {
   Select,
@@ -60,7 +61,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import {
   BLOCKING_FIELD_IDS,
   type BlockingFieldId,

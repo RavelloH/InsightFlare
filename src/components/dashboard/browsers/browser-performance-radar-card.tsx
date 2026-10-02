@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import {
   Card,
   CardContent,
@@ -13,7 +14,6 @@ import {
   PerformanceRadarChart,
   type PerformanceRadarMetricKey,
 } from "@/components/dashboard/charts/performance-radar-chart";
-import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

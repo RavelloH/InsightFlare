@@ -30,6 +30,11 @@
       "development": "./src/components/ui/app-overlay.tsx",
       "import": "./dist/components/ui/app-overlay.js"
     },
+    "./async-content": {
+      "types": "./dist/components/ui/async-content.d.ts",
+      "development": "./src/components/ui/async-content.tsx",
+      "import": "./dist/components/ui/async-content.js"
+    },
     "./auto-resizer": {
       "types": "./dist/components/ui/auto-resizer.d.ts",
       "development": "./src/components/ui/auto-resizer.tsx",
@@ -110,6 +115,11 @@
       "development": "./src/components/ui/input.tsx",
       "import": "./dist/components/ui/input.js"
     },
+    "./json-tree": {
+      "types": "./dist/components/ui/json-tree.d.ts",
+      "development": "./src/components/ui/json-tree.tsx",
+      "import": "./dist/components/ui/json-tree.js"
+    },
     "./label": {
       "types": "./dist/components/ui/label.d.ts",
       "development": "./src/components/ui/label.tsx",
@@ -119,6 +129,11 @@
       "types": "./dist/components/ui/overlay-scrollbar.d.ts",
       "development": "./src/components/ui/overlay-scrollbar.tsx",
       "import": "./dist/components/ui/overlay-scrollbar.js"
+    },
+    "./page-heading": {
+      "types": "./dist/components/ui/page-heading.d.ts",
+      "development": "./src/components/ui/page-heading.tsx",
+      "import": "./dist/components/ui/page-heading.js"
     },
     "./popover": {
       "types": "./dist/components/ui/popover.d.ts",

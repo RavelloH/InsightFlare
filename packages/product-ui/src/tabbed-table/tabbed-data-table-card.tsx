@@ -32,7 +32,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@insightflare/ui/select";
-import { Skeleton } from "@insightflare/ui/skeleton";
 import { Spinner } from "@insightflare/ui/spinner";
 import {
   DataTableSwitch,
@@ -41,7 +40,6 @@ import {
   TabbedDataTableView,
   type TabbedDataTableViewState,
 } from "@insightflare/ui/tabbed-table";
-import { TableCell, TableRow } from "@insightflare/ui/table";
 import {
   Tooltip,
   TooltipContent,
@@ -51,7 +49,6 @@ import { useIsMobile } from "@insightflare/ui/use-mobile";
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 import { RiDownloadLine, RiSearchLine } from "@remixicon/react";
 
-import { cn } from "../utils/cn";
 import type {
   TabbedDataTableCardProps,
   TabbedDataTableColumn,
@@ -61,7 +58,6 @@ import type {
   TabbedDataTableRowBase,
   TabbedDataTableSortState,
 } from "./types";
-import { useInfiniteTableSentinel } from "./use-infinite-table-sentinel";
 export type * from "./types";
 import {
   buildCsv,
@@ -445,13 +441,6 @@ function TabbedDataTableCardDataControllerImpl<
     loadMoreInFlightRef.current = true;
     void fetchNextPage();
   }, [activeHasMore, activeLoadingMore, fetchNextPage]);
-  const loadMoreSentinelRef = useInfiniteTableSentinel({
-    enabled: !activeLoading && !activeLoadingMore && activeHasMore,
-    onReachEnd: loadMore,
-    rootMargin: "0px",
-    triggerDistance: 0,
-  });
-
   const activeSearchTitle =
     searchConfig?.title?.(activeSearchTabMeta) ??
     searchConfig?.placeholder?.(activeSearchTabMeta) ??
@@ -543,78 +532,6 @@ function TabbedDataTableCardDataControllerImpl<
       />
     );
   }
-  function renderLoadMoreRows(
-    tab: TTab,
-    metricColumns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[],
-  ) {
-    return Array.from({ length: 3 }, (_, rowIndex) => (
-      <TableRow
-        key={`load-more-skeleton-${tab}-${rowIndex}`}
-        aria-hidden="true"
-        className="pointer-events-none hover:bg-transparent"
-      >
-        <TableCell className="whitespace-normal p-0 align-top">
-          <div className="px-4 py-2">
-            <Skeleton
-              className={cn("h-5", rowIndex === 1 ? "w-[72%]" : "w-[58%]")}
-            />
-          </div>
-        </TableCell>
-        {metricColumns.map((column, columnIndex) => (
-          <TableCell key={column.key} className="p-0">
-            <div
-              ref={
-                columnIndex === metricColumns.length - 1
-                  ? loadMoreSentinelRef
-                  : undefined
-              }
-              className={cn(
-                "flex justify-end px-2 py-2",
-                columnIndex === metricColumns.length - 1 && "px-4",
-              )}
-            >
-              <Skeleton className="h-4 w-14" />
-            </div>
-          </TableCell>
-        ))}
-      </TableRow>
-    ));
-  }
-
-  function renderInitialLoadingRows(
-    tab: TTab,
-    metricColumns: readonly TabbedDataTableColumn<TRow, TKey, TTab>[],
-    source: "card" | "search",
-  ) {
-    return Array.from({ length: Math.max(1, limit) }, (_, rowIndex) => (
-      <TableRow
-        key={`initial-loading-skeleton-${source}-${tab}-${rowIndex}`}
-        aria-hidden="true"
-        className="pointer-events-none hover:bg-transparent"
-      >
-        <TableCell className="whitespace-normal p-0 align-top">
-          <div className="px-4 py-2 leading-5">
-            <Skeleton
-              className={cn("h-5", rowIndex % 3 === 1 ? "w-[72%]" : "w-[58%]")}
-            />
-          </div>
-        </TableCell>
-        {metricColumns.map((column, columnIndex) => (
-          <TableCell key={column.key} className="p-0">
-            <div
-              className={cn(
-                "flex justify-end px-2 py-2",
-                columnIndex === metricColumns.length - 1 && "px-4",
-              )}
-            >
-              <Skeleton className="h-4 w-14" />
-            </div>
-          </TableCell>
-        ))}
-      </TableRow>
-    ));
-  }
-
   function rowLabel(row: TRow, tab: TTab) {
     return (
       exportConfig?.getRowLabel?.(row, tab) ??
@@ -830,16 +747,8 @@ function TabbedDataTableCardDataControllerImpl<
             loadingLabel={loadingLabel}
             emptyLabel={emptyLabel}
             colSpan={searchColSpan}
+            loadingRowCount={Math.max(1, limit)}
             header={renderTableHeader(activeSearchTab, activeSearchColumns)}
-            loadingRows={
-              searchLoading
-                ? renderInitialLoadingRows(
-                    activeSearchTab,
-                    activeSearchColumns,
-                    "search",
-                  )
-                : undefined
-            }
             rows={renderRows(
               activeSearchTab,
               searchedRows,
@@ -1063,16 +972,11 @@ function TabbedDataTableCardDataControllerImpl<
         labelColumnLabel={labelColumnLabel}
         loadingLabel={loadingLabel}
         loadingMoreLabel={loadingLabel}
+        hasMore={activeHasMore}
+        onLoadMore={loadMore}
         emptyLabel={emptyLabel}
         errorLabel={errorLabel}
-        loadingRows={
-          activeLoading
-            ? renderInitialLoadingRows(activeTab, activeColumns, "card")
-            : undefined
-        }
-        footer={
-          activeHasMore ? renderLoadMoreRows(activeTab, activeColumns) : null
-        }
+        loadingRowCount={Math.max(1, limit)}
         headerRight={
           headerRight || exportAction || searchAction ? (
             <div className="inline-flex items-center gap-1">

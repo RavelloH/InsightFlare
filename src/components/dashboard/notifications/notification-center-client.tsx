@@ -4,6 +4,7 @@ import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Badge } from "@insightflare/ui/badge";
 import { Button } from "@insightflare/ui/button";
 import { Card, CardContent } from "@insightflare/ui/card";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Select,
   SelectContent,
@@ -27,7 +28,6 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { NotificationCenterInitialData } from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";

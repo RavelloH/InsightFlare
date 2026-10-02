@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
 import { useAnalyticsTableColumns } from "@/components/dashboard/common/analytics-table-column-settings";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

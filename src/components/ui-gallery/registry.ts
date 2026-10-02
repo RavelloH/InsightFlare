@@ -14,6 +14,7 @@ import {
   alertDialogContract,
   animatedNumberContract,
   appOverlayContract,
+  asyncContentContract,
   autoResizerContract,
   autoTransitionContract,
   badgeContract,
@@ -31,8 +32,10 @@ import {
   dropdownMenuContract,
   fieldContract,
   inputContract,
+  jsonTreeContract,
   labelContract,
   overlayScrollbarContract,
+  pageHeadingContract,
   popoverContract,
   radioGroupContract,
   responsiveDialogContract,
@@ -83,7 +86,7 @@ export interface UiGalleryEntry {
   readonly packageType: "ui" | "product-ui";
   readonly apiEntry: string;
   readonly maxValuesPerRow?: number;
-  readonly previewAlignment?: "center" | "start";
+  readonly previewAlignment?: "center" | "start" | "centered-left";
   readonly contract: UiGalleryContract;
 }
 
@@ -222,6 +225,74 @@ function scrollbarItems(labels: readonly string[], className: string) {
 }
 
 const galleryContracts = {
+  asyncContent: registerPropCards(asyncContentContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("hasContent", [propValue(true), propValue(false)]),
+    propCard("loadingLabel", [
+      propValue("Loading report…"),
+      propValue("Loading analytics…"),
+    ]),
+    propCard("loadingContent", [
+      propValue(
+        "default",
+        "Spinner and label",
+        { loadingContent: undefined },
+        false,
+      ),
+      propValue(
+        "custom",
+        "Custom placeholder",
+        {
+          loading: true,
+          loadingContent: createElement(
+            "div",
+            {
+              className:
+                "flex min-h-20 items-center justify-center border bg-card p-4",
+            },
+            "Loading summary…",
+          ),
+        },
+        false,
+      ),
+    ]),
+    propCard("emptyContent", [
+      propValue("No report data available."),
+      propValue("No results found."),
+    ]),
+    propCard("children", [
+      propValue(
+        "Report content",
+        "Report content",
+        {
+          children: createElement(
+            "div",
+            { className: "border bg-card p-4" },
+            "Report content",
+          ),
+        },
+        false,
+      ),
+      propValue(
+        "Analytics content",
+        "Analytics content",
+        {
+          children: createElement(
+            "div",
+            { className: "border bg-card p-4" },
+            "Analytics summary",
+          ),
+        },
+        false,
+      ),
+    ]),
+    propCard("className", [propValue("w-full"), propValue("max-w-2xl")]),
+    propCard("minHeightClassName", [
+      propValue("min-h-[120px]"),
+      propValue("min-h-64"),
+    ]),
+    propCard("initial", [propValue(true), propValue(false)]),
+  ]),
   button: registerPropCards(
     buttonContract,
     [
@@ -681,6 +752,33 @@ const galleryContracts = {
       ),
     ]),
   ]),
+  jsonTree: registerPropCards(jsonTreeContract, [
+    propCard("value", [
+      propValue(
+        "event-payload",
+        "Event payload",
+        {
+          value: {
+            event: "checkout.completed",
+            visitor: { id: "visitor_1284", returning: true },
+            properties: { currency: "USD", total: 84.5 },
+          },
+        },
+        false,
+      ),
+      propValue(
+        "source-array",
+        "Source array",
+        { value: ["direct", "search", "social"] },
+        false,
+      ),
+      propValue("scalar", "Scalar", { value: "checkout.completed" }, false),
+    ]),
+    propCard("className", [
+      propValue("default", "Default", { className: undefined }, false),
+      propValue("max-w-2xl", "Constrained width", { className: "max-w-2xl" }),
+    ]),
+  ]),
   select: registerPropCards(selectContract, [
     propCard("defaultValue", [propValue("daily"), propValue("weekly")]),
     propCard("value", [propValue("daily"), propValue("weekly")]),
@@ -1105,6 +1203,32 @@ const galleryContracts = {
       ),
     ]),
   ]),
+  pageHeading: registerPropCards(pageHeadingContract, [
+    propCard("title", [propValue("Goals"), propValue("Funnels")]),
+    propCard("subtitle", [
+      propValue(
+        "Measure conversion from a single reusable event or page condition.",
+      ),
+      propValue("Measure conversion through multi-step user journeys."),
+    ]),
+    propCard("actions", [
+      propValue("none", "No actions", { actions: undefined }, false),
+      propValue(
+        "new-goal",
+        "New goal button",
+        {
+          actions: createElement(
+            "button",
+            {
+              className: "border bg-primary px-3 py-2 text-primary-foreground",
+            },
+            "New goal",
+          ),
+        },
+        false,
+      ),
+    ]),
+  ]),
   toaster: registerPropCards(toasterContract, [
     propCard("theme", [
       propValue("light"),
@@ -1510,6 +1634,12 @@ export const uiGalleryRegistry = [
     contract: galleryContracts.badge,
   },
   {
+    slug: "async-content",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/async-content",
+    contract: galleryContracts.asyncContent,
+  },
+  {
     slug: "calendar",
     packageType: "ui",
     apiEntry: "@insightflare/ui/calendar",
@@ -1594,10 +1724,23 @@ export const uiGalleryRegistry = [
     contract: galleryContracts.breadcrumb,
   },
   {
+    slug: "page-heading",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/page-heading",
+    previewAlignment: "centered-left",
+    contract: galleryContracts.pageHeading,
+  },
+  {
     slug: "chart",
     packageType: "ui",
     apiEntry: "@insightflare/ui/chart",
     contract: galleryContracts.chart,
+  },
+  {
+    slug: "json-tree",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/json-tree",
+    contract: galleryContracts.jsonTree,
   },
   {
     slug: "select",

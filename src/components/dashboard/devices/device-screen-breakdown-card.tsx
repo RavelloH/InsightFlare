@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { Button } from "@insightflare/ui/button";
 import {
   Card,
@@ -24,7 +25,6 @@ import {
   DonutChart,
   type DonutChartDataPoint,
 } from "@/components/dashboard/charts/donut-chart";
-import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,

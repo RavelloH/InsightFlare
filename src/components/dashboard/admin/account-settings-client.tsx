@@ -18,6 +18,7 @@ import {
   FieldLabel,
 } from "@insightflare/ui/field";
 import { Input } from "@insightflare/ui/input";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Select,
   SelectContent,
@@ -37,7 +38,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { useReportingTimeZone } from "@/components/time-zone-provider";
 import {
   buildTimeZoneOptions,

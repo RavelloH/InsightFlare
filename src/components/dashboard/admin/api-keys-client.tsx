@@ -31,6 +31,7 @@ import {
 } from "@insightflare/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@insightflare/ui/field";
 import { Input } from "@insightflare/ui/input";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -69,7 +70,6 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import type { ApiKeysInitialData } from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";

@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { Input } from "@insightflare/ui/input";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import {
@@ -29,7 +30,6 @@ import {
   useAnalyticsTableColumns,
 } from "@/components/dashboard/common/analytics-table-column-settings";
 import { ClickableTableCell } from "@/components/dashboard/common/clickable-table-cell";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import {
   BrowserMeta,
   CountryRegionMeta,

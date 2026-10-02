@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { RiSpeedUpLine } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
@@ -14,7 +15,6 @@ import {
   PerformanceTrendChart,
   type PerformanceTrendChartLabels,
 } from "@/components/dashboard/charts/performance-trend-chart";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

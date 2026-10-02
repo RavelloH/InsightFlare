@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Table,
   TableBody,
@@ -16,7 +17,6 @@ import {
 import { RiExternalLinkLine, RiLinksLine } from "@remixicon/react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { PublicLinkCopyButton } from "@/components/dashboard/sharing/public-link-copy-button";
 import { PublicLinkSettingsButton } from "@/components/dashboard/sharing/public-link-settings-button";
 import { canManageTeam } from "@/lib/dashboard/permissions";

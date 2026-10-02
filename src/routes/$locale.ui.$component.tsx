@@ -480,7 +480,7 @@ function PropValuePreview({
   cardId: string;
   valueId: string;
   deferred: boolean;
-  previewAlignment: "center" | "start";
+  previewAlignment: "center" | "start" | "centered-left";
   previewLabel: string;
   resetLabel: string;
   previewOverrides?: Record<string, unknown>;
@@ -574,13 +574,18 @@ function PropValuePreview({
     );
   }
 
+  const previewContentClass =
+    previewAlignment === "start"
+      ? "w-full min-w-0 text-left [&>*]:mx-0"
+      : previewAlignment === "centered-left"
+        ? "w-full max-w-sm min-w-0 text-left [&>*]:mx-auto"
+        : "w-full min-w-0 text-center [&>*]:mx-auto";
+
   return (
     <div
       className={`flex w-full min-w-0 flex-col gap-3 ${previewAlignment === "start" ? "items-start" : "items-center"}`}
     >
-      <div
-        className={`w-full min-w-0 ${previewAlignment === "start" ? "text-left [&>*]:mx-0" : "text-center [&>*]:mx-auto"}`}
-      >
+      <div className={previewContentClass}>
         {contract.renderPropValue(cardId, valueId, showDeferredPreview, {
           ...previewOverrides,
           ...(entrySlug === "overlay-scrollbar"

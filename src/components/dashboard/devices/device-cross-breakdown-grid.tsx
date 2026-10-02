@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import {
   Card,
   CardContent,
@@ -13,7 +14,6 @@ import {
   type StackedBreakdownBarRow,
   type StackedBreakdownBarSeries,
 } from "@/components/dashboard/charts/stacked-breakdown-bar-chart";
-import { ContentSwitch } from "@/components/dashboard/common/content-switch";
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
 import { fetchClientCrossBreakdown } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";

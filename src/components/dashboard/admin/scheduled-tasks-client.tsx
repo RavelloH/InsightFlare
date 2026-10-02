@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Select,
   SelectContent,
@@ -30,7 +31,6 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
 import { numberFormat, shortDateTimeWithSeconds } from "@/lib/dashboard/format";
 import type { ScheduledTasksInitialData } from "@/lib/dashboard/management-data";

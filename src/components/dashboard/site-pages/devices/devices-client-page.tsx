@@ -1,4 +1,5 @@
-import { PageHeading } from "@/components/dashboard/common/page-heading";
+import { PageHeading } from "@insightflare/ui/page-heading";
+
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

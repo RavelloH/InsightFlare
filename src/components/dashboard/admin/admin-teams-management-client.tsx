@@ -10,6 +10,7 @@ import {
 } from "@insightflare/ui/card";
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import { Spinner } from "@insightflare/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import {
@@ -22,7 +23,6 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
 import { shortDateTime } from "@/lib/dashboard/format";

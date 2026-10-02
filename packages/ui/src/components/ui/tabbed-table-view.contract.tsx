@@ -115,6 +115,9 @@ const commonProps = {
   renderLabel: (row: TabbedTableRow) => row.label,
   loadingLabel: "Loading table…",
   loadingMoreLabel: "Loading more rows…",
+  loadingRowCount: 3,
+  hasMore: false,
+  onLoadMore: () => {},
   emptyLabel: "No data available.",
   errorLabel: "Unable to load table data.",
 } satisfies Omit<TabbedTableViewProps, "state">;
@@ -133,7 +136,7 @@ export const tabbedDataTableViewFixtures = [
   {
     id: "tabbed-table.loading-more",
     title: "Loading more",
-    props: { ...commonProps, state: "loading-more" },
+    props: { ...commonProps, state: "loading-more", hasMore: true },
   },
   {
     id: "tabbed-table.empty",

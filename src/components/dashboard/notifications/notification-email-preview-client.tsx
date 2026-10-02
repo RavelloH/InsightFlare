@@ -10,6 +10,7 @@ import {
 } from "@insightflare/ui/card";
 import { Field, FieldLabel } from "@insightflare/ui/field";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
+import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Select,
   SelectContent,
@@ -22,7 +23,6 @@ import { RiMailSendLine, RiRefreshLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { PageHeading } from "@/components/dashboard/common/page-heading";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import {
   isValidLocale,
