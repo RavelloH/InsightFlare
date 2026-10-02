@@ -116,7 +116,14 @@ function createTasks(fix: boolean): CheckTask[] {
     },
     {
       name: "Typecheck",
-      dependsOn: fix ? ["Lint"] : undefined,
+      dependsOn: [
+        "Layer contract",
+        "Architecture",
+        "Tracker SDK",
+        "Format",
+        "Lint",
+        "Translations",
+      ],
       steps: [
         {
           name: "Typecheck",
@@ -126,7 +133,7 @@ function createTasks(fix: boolean): CheckTask[] {
     },
     {
       name: "Coverage",
-      dependsOn: fix ? ["Lint"] : undefined,
+      dependsOn: ["Typecheck", "Spec"],
       steps: [
         {
           name: "Coverage",
@@ -136,7 +143,7 @@ function createTasks(fix: boolean): CheckTask[] {
     },
     {
       name: "Spec",
-      dependsOn: fix ? ["Lint"] : undefined,
+      dependsOn: ["Typecheck"],
       parallelSteps: true,
       steps: [
         {

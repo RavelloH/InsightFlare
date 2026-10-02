@@ -797,36 +797,50 @@ describe("advanced filter activity report query differential", () => {
     }
   });
 
+  // The isolated V8-coverage run took about six seconds; leave a bounded 20s
+  // for this real 20,001-row differential under full-check CPU contention.
   it("applies the real legacy-compatible 20,001-row per-query limit", async () => {
     const database = createFixture();
-    const site = addSite(database, "wave26-limit-site");
-    const insert = database.prepare(
-      "INSERT INTO visits (visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at, pathname, hostname, site_pk) VALUES (?, ?, ?, ?, 'closed', 120, 120, '/', 'limit.fixture', ?)",
-    );
-    for (let index = 0; index < SQLITE_ACTIVITY_LIMIT + 2; index += 1) {
-      const id = `limit-${index.toString().padStart(5, "0")}`;
-      insert.run(id, site.id, "visitor", "session", site.pk);
+    try {
+      const site = addSite(database, "wave26-limit-site");
+      const insert = database.prepare(
+        "INSERT INTO visits (visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at, pathname, hostname, site_pk) VALUES (?, ?, ?, ?, 'closed', 120, 120, '/', 'limit.fixture', ?)",
+      );
+      database.exec("BEGIN");
+      try {
+        for (let index = 0; index < SQLITE_ACTIVITY_LIMIT + 2; index += 1) {
+          const id = `limit-${index.toString().padStart(5, "0")}`;
+          insert.run(id, site.id, "visitor", "session", site.pk);
+        }
+        database.exec("COMMIT");
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+
+      const range = { startMs: 100, endExclusiveMs: 200 } as const;
+      const subject = subjectFor([site.id]);
+      const expected = legacyChunkRows(database, [site.id], range);
+      const actual = await observeQuery(database, (env) =>
+        queryAdvancedFilterActivityRange({
+          env,
+          subject,
+          siteIds: [site.id],
+          range,
+        }),
+      );
+
+      expect(expected).toHaveLength(SQLITE_ACTIVITY_LIMIT);
+      expect(actual.rows).toHaveLength(SQLITE_ACTIVITY_LIMIT);
+      expect(actual.rows.map((row) => consumed({ ...row }))).toEqual(
+        expected.map(consumed),
+      );
+      expect(actual.rows[0]?.id).toBe("limit-00000");
+      expect(actual.rows.at(-1)?.id).toBe("limit-20000");
+      expect(actual.trace.preparedSql).toHaveLength(1);
+    } finally {
+      databases.delete(database);
+      database.close();
     }
-
-    const range = { startMs: 100, endExclusiveMs: 200 } as const;
-    const subject = subjectFor([site.id]);
-    const expected = legacyChunkRows(database, [site.id], range);
-    const actual = await observeQuery(database, (env) =>
-      queryAdvancedFilterActivityRange({
-        env,
-        subject,
-        siteIds: [site.id],
-        range,
-      }),
-    );
-
-    expect(expected).toHaveLength(SQLITE_ACTIVITY_LIMIT);
-    expect(actual.rows).toHaveLength(SQLITE_ACTIVITY_LIMIT);
-    expect(actual.rows.map((row) => consumed({ ...row }))).toEqual(
-      expected.map(consumed),
-    );
-    expect(actual.rows[0]?.id).toBe("limit-00000");
-    expect(actual.rows.at(-1)?.id).toBe("limit-20000");
-    expect(actual.trace.preparedSql).toHaveLength(1);
-  });
+  }, 20_000);
 });

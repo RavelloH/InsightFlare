@@ -4,10 +4,9 @@ import path from "path";
 import { defineConfig } from "vitest/config";
 import { parse } from "yaml";
 
-// Keep the test pool bounded on high-core machines.  V8 coverage writes one
-// temporary file per worker; an unbounded pool makes that merge flaky under
-// the full check and can also starve the integration tests of CPU.
-const VITEST_MAX_WORKERS = Math.min(16, Math.max(1, osCpus().length));
+// V8 coverage plus the real SQLite stress fixtures use substantial per-worker
+// memory. Cap the pool so the full check retains room for the verification tasks.
+const VITEST_MAX_WORKERS = Math.min(4, Math.max(1, osCpus().length));
 
 export default defineConfig({
   plugins: [

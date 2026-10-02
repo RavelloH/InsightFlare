@@ -271,17 +271,25 @@ function sqliteEnv(
     INSERT INTO visits (visit_id, site_id, site_pk, visitor_id, session_id, started_at, pathname, title, duration_ms, hostname)
     VALUES (?, ?, 1, ?, ?, ?, ?, ?, 5, ?)
   `);
-  for (const activity of activities) {
-    insertVisit.run(
-      activity.visitId,
-      SITE_ID,
-      activity.visitorId,
-      activity.sessionId,
-      activity.pageTimeMs,
-      activity.pathname,
-      activity.title ?? activity.pathname,
-      activity.hostname ?? "example.test",
-    );
+  database.exec("BEGIN");
+  try {
+    for (const activity of activities) {
+      insertVisit.run(
+        activity.visitId,
+        SITE_ID,
+        activity.visitorId,
+        activity.sessionId,
+        activity.pageTimeMs,
+        activity.pathname,
+        activity.title ?? activity.pathname,
+        activity.hostname ?? "example.test",
+      );
+    }
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    database.close();
+    throw error;
   }
   database
     .prepare(
@@ -804,6 +812,8 @@ describe("D1 advanced filter execution", () => {
     }
   });
 
+  // The isolated V8-coverage run took about six seconds; leave a bounded 20s
+  // for both real range reads and the overflow check under full-check CPU load.
   it("keeps the 20,000 activity budget across separate range reads", async () => {
     const pageCountPerRange = 10_000;
     const activities = Array.from(
@@ -874,7 +884,7 @@ describe("D1 advanced filter execution", () => {
     } finally {
       database.close();
     }
-  });
+  }, 20_000);
 
   it("uses evaluation history for Core and Relation while legacy fields stay in the candidate range", async () => {
     const { env, database } = sqliteEnv();
