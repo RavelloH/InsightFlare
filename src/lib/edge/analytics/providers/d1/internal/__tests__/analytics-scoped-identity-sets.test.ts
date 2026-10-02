@@ -19,6 +19,7 @@ import {
   LogicalPlanBuilder,
   lowerFilterDocumentToScope,
 } from "@/lib/edge/analytics/engine";
+import type { SlotId } from "@/lib/edge/analytics/engine/logical/ids";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
@@ -404,30 +405,38 @@ function insertEvent(
   );
 }
 
-/** Raw-SQL definition of candidate Observation identity, retaining kind. */
-function legacyObservationUniverse(
+function rawObservationActivityRows(
   db: DatabaseSync,
   sitePk: number,
+  range: Readonly<{ startMs: number; endExclusiveMs: number }>,
+  owner: "required" | "optional",
 ): ObservationKey[] {
+  const ownerJoin =
+    owner === "required"
+      ? "JOIN visits AS owner ON owner.site_pk = event.site_pk " +
+        "AND owner.visit_id = event.visit_id "
+      : "LEFT JOIN visits AS owner ON owner.site_pk = event.site_pk " +
+        "AND owner.visit_id = event.visit_id ";
   return db
     .prepare(
       "SELECT site_pk, 'page' AS observation_kind, visit_id AS observation_id " +
-        "FROM visits WHERE site_pk = ? AND status = 'complete' " +
+        "FROM visits WHERE site_pk = ? " +
         "AND started_at >= ? AND started_at < ? " +
-        // SQLite UNION is DISTINCT unless ALL is spelled explicitly.
-        "UNION " +
-        "SELECT site_pk, 'event' AS observation_kind, event_id AS observation_id " +
-        "FROM custom_events WHERE site_pk = ? " +
-        "AND occurred_at >= ? AND occurred_at < ? " +
+        "UNION ALL " +
+        "SELECT event.site_pk, 'event' AS observation_kind, " +
+        "event.event_id AS observation_id FROM custom_events AS event " +
+        ownerJoin +
+        "WHERE event.site_pk = ? " +
+        "AND event.occurred_at >= ? AND event.occurred_at < ? " +
         "ORDER BY observation_kind, observation_id",
     )
     .all(
       sitePk,
-      CANDIDATE_RANGE.startMs,
-      CANDIDATE_RANGE.endExclusiveMs,
+      range.startMs,
+      range.endExclusiveMs,
       sitePk,
-      CANDIDATE_RANGE.startMs,
-      CANDIDATE_RANGE.endExclusiveMs,
+      range.startMs,
+      range.endExclusiveMs,
     )
     .map((row) => {
       const value = row as {
@@ -441,6 +450,108 @@ function legacyObservationUniverse(
         value.observation_id,
       ] as const;
     });
+}
+
+/** Raw activity bag that an explicitly optional Visitor source preserves. */
+function rawCandidateObservationUniverse(
+  db: DatabaseSync,
+  sitePk: number,
+): ObservationKey[] {
+  return rawObservationActivityRows(db, sitePk, CANDIDATE_RANGE, "optional");
+}
+
+/** Frozen pre-Wave31 candidate Observation Source row domain. */
+function legacyCandidateObservationUniverse(
+  db: DatabaseSync,
+  sitePk: number,
+): ObservationKey[] {
+  return rawObservationActivityRows(db, sitePk, CANDIDATE_RANGE, "required");
+}
+
+function rawActivityVisitorRows(
+  db: DatabaseSync,
+  sitePk: number,
+  range: Readonly<{ startMs: number; endExclusiveMs: number }>,
+  owner: "required" | "optional",
+): Array<readonly [sitePk: number, visitorId: string | null]> {
+  const ownerJoin =
+    owner === "required"
+      ? "JOIN visits AS owner ON owner.site_pk = event.site_pk " +
+        "AND owner.visit_id = event.visit_id "
+      : "LEFT JOIN visits AS owner ON owner.site_pk = event.site_pk " +
+        "AND owner.visit_id = event.visit_id ";
+  return db
+    .prepare(
+      "SELECT site_pk, visitor_id FROM visits WHERE site_pk = ? " +
+        "AND started_at >= ? AND started_at < ? " +
+        "UNION ALL " +
+        "SELECT event.site_pk, owner.visitor_id FROM custom_events AS event " +
+        ownerJoin +
+        "WHERE event.site_pk = ? AND event.occurred_at >= ? AND event.occurred_at < ? " +
+        "ORDER BY 1, 2",
+    )
+    .all(
+      sitePk,
+      range.startMs,
+      range.endExclusiveMs,
+      sitePk,
+      range.startMs,
+      range.endExclusiveMs,
+    )
+    .map((row) => {
+      const value = row as {
+        readonly site_pk: number;
+        readonly visitor_id: string | null;
+      };
+      return [value.site_pk, value.visitor_id] as const;
+    });
+}
+
+async function executeOutputProjection(
+  db: DatabaseSync,
+  lowerer: AnalyticsLogicalToDbLowerer,
+  output: Parameters<AnalyticsLogicalToDbLowerer["lower"]>[0],
+  columns: Parameters<AnalyticsLogicalToDbLowerer["projectOutput"]>[1],
+): Promise<Array<Readonly<Record<string, unknown>>>> {
+  const lowered = lowerer.lower(output);
+  const query = compileD1Query(lowerer.projectOutput(lowered, columns));
+  const result = await createD1DatabaseClient(createSqliteD1Database(db)).all(
+    query,
+  );
+  return result.results as Array<Readonly<Record<string, unknown>>>;
+}
+
+function observationIdentityBag(
+  rows: readonly Readonly<Record<string, unknown>>[],
+): string[] {
+  return rows
+    .map((row) =>
+      encodeIdentity([
+        row.site_pk as number,
+        row.observation_kind as "page" | "event",
+        row.entity_id as string,
+      ]),
+    )
+    .sort();
+}
+
+function observationRawIdentityBag(rows: readonly ObservationKey[]): string[] {
+  return rows.map(encodeIdentity).sort();
+}
+
+function visitorIdentityBag(
+  rows: readonly Readonly<Record<string, unknown>>[],
+  siteColumn: string,
+  idColumn: string,
+): string[] {
+  return rows
+    .map((row) =>
+      JSON.stringify([
+        row[siteColumn] as number,
+        row[idColumn] as string | null,
+      ]),
+    )
+    .sort();
 }
 
 function legacyReportObservationRows(
@@ -602,7 +713,7 @@ function decodeRawIdentity(
     : [row.site_pk!, row.entity_id!];
 }
 
-function encodeIdentity(key: readonly (number | string)[]): string {
+function encodeIdentity(key: readonly (number | string | null)[]): string {
   return JSON.stringify(key);
 }
 
@@ -638,11 +749,13 @@ function legacyCandidateSet(
 ): Set<string> {
   const rows =
     scope === "observation"
-      ? legacyObservationUniverse(db, sitePk).map(([keySite, kind, id]) => ({
-          site_pk: keySite,
-          observation_kind: kind,
-          entity_id: id,
-        }))
+      ? legacyCandidateObservationUniverse(db, sitePk).map(
+          ([keySite, kind, id]) => ({
+            site_pk: keySite,
+            observation_kind: kind,
+            entity_id: id,
+          }),
+        )
       : scope === "session"
         ? legacySessionUniverse(db, sitePk).map(([keySite, id]) => ({
             site_pk: keySite,
@@ -1207,12 +1320,27 @@ function seedBoundaryFixture(db: DatabaseSync): number {
 }
 
 describe("Wave31 scoped identity raw-SQL oracle", () => {
-  it("freezes migrated-schema candidate keys and exact visitor identity handling", () => {
+  it("separates the legacy candidate owner domain from optional Visitor activity", () => {
     const db = createMigratedDatabase();
     try {
       const { siteAPk } = seedIdentityFixture(db);
 
-      expect(legacyObservationUniverse(db, siteAPk)).toEqual([
+      expect(legacyCandidateObservationUniverse(db, siteAPk)).toEqual([
+        [siteAPk, "event", "a-candidate-one"],
+        [siteAPk, "event", "a-foreign-dictionary-event"],
+        [siteAPk, "page", "a-candidate-one"],
+        [siteAPk, "page", "a-candidate-two"],
+        [siteAPk, "page", "a-case-visitor-lower"],
+        [siteAPk, "page", "a-case-visitor-upper"],
+        [siteAPk, "page", "a-empty-native-fields"],
+        [siteAPk, "page", "a-empty-visitor"],
+        [siteAPk, "page", "a-null-native-fields"],
+        [siteAPk, "page", "a-same-session-other-page"],
+        [siteAPk, "page", "a-space-native-fields"],
+        [siteAPk, "page", "a-space-visitor"],
+        [siteAPk, "page", "a-unicode-visitor"],
+      ]);
+      expect(rawCandidateObservationUniverse(db, siteAPk)).toEqual([
         [siteAPk, "event", "a-candidate-one"],
         [siteAPk, "event", "a-cross-site-owner-event"],
         [siteAPk, "event", "a-foreign-dictionary-event"],
@@ -1969,6 +2097,529 @@ describe("Wave31 scoped identity raw-SQL oracle", () => {
           "observation",
         ),
       ).toEqual(legacyCandidateSet(db, siteAPk, "observation"));
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps candidate and report Observation bags stable across output demand", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteAPk } = seedIdentityFixture(db);
+      db.exec("PRAGMA foreign_keys = OFF");
+      const candidateNameId = insertEventName(
+        db,
+        SITE_A,
+        siteAPk,
+        "wave31-candidate-without-owner",
+      );
+      insertEvent(db, {
+        siteId: SITE_A,
+        sitePk: siteAPk,
+        id: "z-candidate-without-owner",
+        ownerVisitId: "missing-candidate-owner",
+        eventNameId: candidateNameId,
+        occurredAt: 180,
+      });
+      const readNameId = insertEventName(
+        db,
+        SITE_A,
+        siteAPk,
+        "wave31-read-without-owner",
+      );
+      insertEvent(db, {
+        siteId: SITE_A,
+        sitePk: siteAPk,
+        id: "z-read-without-owner",
+        ownerVisitId: "missing-read-owner",
+        eventNameId: readNameId,
+        occurredAt: 90,
+      });
+
+      const identityColumns = (slot: SlotId) =>
+        [
+          { name: "site_pk", slot, component: 0 },
+          { name: "observation_kind", slot, component: 1 },
+          { name: "entity_id", slot, component: 2 },
+        ] as const;
+      const visitorColumns = (slot: SlotId) =>
+        [
+          { name: "visitor_site_pk", slot, component: 0 },
+          { name: "visitor_id", slot, component: 1 },
+        ] as const;
+
+      const candidateBuilder = new LogicalPlanBuilder(
+        planContext("observation", [SITE_A]),
+      );
+      const candidateSource = candidateBuilder.source("observation", {
+        temporalDomain: "candidate",
+        relationships: ["observation.visitor"],
+      });
+      const candidateIdentity = candidateSource.slots.entity!;
+      const candidateVisitor =
+        candidateSource.slots["relationship:observation.visitor"]!;
+      candidateBuilder.output("identity-only", candidateSource, [
+        { name: "identity", slot: "entity" },
+      ]);
+      candidateBuilder.output("identity-and-visitor", candidateSource, [
+        { name: "identity", slot: "entity" },
+        { name: "visitor", slot: "relationship:observation.visitor" },
+      ]);
+      candidateBuilder.output("visitor-only", candidateSource, [
+        { name: "visitor", slot: "relationship:observation.visitor" },
+      ]);
+      const candidateCount = candidateBuilder.aggregate(candidateSource, {}, [
+        { name: "activityCount", kind: "count-rows" },
+      ]);
+      candidateBuilder.output("hidden-count", candidateCount, [
+        { name: "count", slot: "activityCount" },
+      ]);
+      candidateBuilder.output("identity-after-count", candidateSource, [
+        { name: "identity", slot: "entity" },
+      ]);
+      const candidatePlan = candidateBuilder.finish();
+      const candidateLowerer = new AnalyticsLogicalToDbLowerer(candidatePlan, {
+        siteIds: [SITE_A],
+        time: candidatePlan.context.time,
+      });
+      const candidateIdentityOnly = await executeOutputProjection(
+        db,
+        candidateLowerer,
+        candidatePlan.outputs[0]!,
+        identityColumns(candidateIdentity),
+      );
+      const candidateIdentityAndVisitor = await executeOutputProjection(
+        db,
+        candidateLowerer,
+        candidatePlan.outputs[1]!,
+        [
+          ...identityColumns(candidateIdentity),
+          ...visitorColumns(candidateVisitor),
+        ],
+      );
+      const candidateVisitorOnly = await executeOutputProjection(
+        db,
+        candidateLowerer,
+        candidatePlan.outputs[2]!,
+        visitorColumns(candidateVisitor),
+      );
+      const candidateCountRows = await executeOutputProjection(
+        db,
+        candidateLowerer,
+        candidatePlan.outputs[3]!,
+        [
+          {
+            name: "activity_count",
+            slot: candidatePlan.outputs[3]!.fields[0]!.slot,
+          },
+        ],
+      );
+      const candidateIdentityAgain = await executeOutputProjection(
+        db,
+        candidateLowerer,
+        candidatePlan.outputs[4]!,
+        identityColumns(candidateIdentity),
+      );
+      const optionalCandidateRows = rawCandidateObservationUniverse(
+        db,
+        siteAPk,
+      );
+      const optionalCandidateBag = observationRawIdentityBag(
+        optionalCandidateRows,
+      );
+      expect(observationIdentityBag(candidateIdentityOnly)).toEqual(
+        optionalCandidateBag,
+      );
+      expect(observationIdentityBag(candidateIdentityAndVisitor)).toEqual(
+        optionalCandidateBag,
+      );
+      expect(observationIdentityBag(candidateIdentityAgain)).toEqual(
+        optionalCandidateBag,
+      );
+      expect(
+        visitorIdentityBag(
+          candidateVisitorOnly,
+          "visitor_site_pk",
+          "visitor_id",
+        ),
+      ).toEqual(
+        rawActivityVisitorRows(db, siteAPk, CANDIDATE_RANGE, "optional")
+          .map(encodeIdentity)
+          .sort(),
+      );
+      expect(Number(candidateCountRows[0]?.activity_count)).toBe(
+        optionalCandidateRows.length,
+      );
+      for (const eventId of [
+        "a-cross-site-owner-event",
+        "z-candidate-without-owner",
+      ]) {
+        expect(
+          candidateIdentityAndVisitor.find((row) => row.entity_id === eventId),
+        ).toMatchObject({
+          visitor_site_pk: siteAPk,
+          visitor_id: null,
+        });
+      }
+
+      const legacyCandidateBuilder = new LogicalPlanBuilder(
+        planContext("observation", [SITE_A]),
+      );
+      const legacyCandidateSource = legacyCandidateBuilder.source(
+        "observation",
+        { temporalDomain: "candidate" },
+      );
+      const legacyCandidateIdentity = legacyCandidateSource.slots.entity!;
+      legacyCandidateBuilder.output("legacy-identity", legacyCandidateSource, [
+        { name: "identity", slot: "entity" },
+      ]);
+      const legacyCount = legacyCandidateBuilder.aggregate(
+        legacyCandidateSource,
+        {},
+        [{ name: "activityCount", kind: "count-rows" }],
+      );
+      legacyCandidateBuilder.output("legacy-hidden-count", legacyCount, [
+        { name: "count", slot: "activityCount" },
+      ]);
+      const legacyCandidatePlan = legacyCandidateBuilder.finish();
+      const legacyCandidateLowerer = new AnalyticsLogicalToDbLowerer(
+        legacyCandidatePlan,
+        { siteIds: [SITE_A], time: legacyCandidatePlan.context.time },
+      );
+      const legacyIdentityRows = await executeOutputProjection(
+        db,
+        legacyCandidateLowerer,
+        legacyCandidatePlan.outputs[0]!,
+        identityColumns(legacyCandidateIdentity),
+      );
+      const legacyCountRows = await executeOutputProjection(
+        db,
+        legacyCandidateLowerer,
+        legacyCandidatePlan.outputs[1]!,
+        [
+          {
+            name: "activity_count",
+            slot: legacyCandidatePlan.outputs[1]!.fields[0]!.slot,
+          },
+        ],
+      );
+      const legacyCandidateRows = legacyCandidateObservationUniverse(
+        db,
+        siteAPk,
+      );
+      expect(observationIdentityBag(legacyIdentityRows)).toEqual(
+        observationRawIdentityBag(legacyCandidateRows),
+      );
+      expect(Number(legacyCountRows[0]?.activity_count)).toBe(
+        legacyCandidateRows.length,
+      );
+      expect(legacyIdentityRows).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ entity_id: "a-cross-site-owner-event" }),
+          expect.objectContaining({ entity_id: "z-candidate-without-owner" }),
+        ]),
+      );
+
+      const sessionBuilder = new LogicalPlanBuilder(
+        planContext("observation", [SITE_A]),
+      );
+      const sessionSource = sessionBuilder.source("observation", {
+        temporalDomain: "candidate",
+        relationships: ["observation.session", "observation.visitor"],
+      });
+      const sessionIdentity = sessionSource.slots.entity!;
+      const sessionVisitor =
+        sessionSource.slots["relationship:observation.visitor"]!;
+      sessionBuilder.output("session-identity-only", sessionSource, [
+        { name: "identity", slot: "entity" },
+      ]);
+      sessionBuilder.output("session-identity-and-visitor", sessionSource, [
+        { name: "identity", slot: "entity" },
+        { name: "visitor", slot: "relationship:observation.visitor" },
+      ]);
+      const sessionSourceCount = sessionBuilder.aggregate(sessionSource, {}, [
+        { name: "activityCount", kind: "count-rows" },
+      ]);
+      sessionBuilder.output("session-source-hidden-count", sessionSourceCount, [
+        { name: "count", slot: "activityCount" },
+      ]);
+      const sessionPlan = sessionBuilder.finish();
+      const sessionLowerer = new AnalyticsLogicalToDbLowerer(sessionPlan, {
+        siteIds: [SITE_A],
+        time: sessionPlan.context.time,
+      });
+      const sessionIdentityOnly = await executeOutputProjection(
+        db,
+        sessionLowerer,
+        sessionPlan.outputs[0]!,
+        identityColumns(sessionIdentity),
+      );
+      const sessionIdentityAndVisitor = await executeOutputProjection(
+        db,
+        sessionLowerer,
+        sessionPlan.outputs[1]!,
+        [
+          ...identityColumns(sessionIdentity),
+          ...visitorColumns(sessionVisitor),
+        ],
+      );
+      const sessionSourceCountRows = await executeOutputProjection(
+        db,
+        sessionLowerer,
+        sessionPlan.outputs[2]!,
+        [
+          {
+            name: "activity_count",
+            slot: sessionPlan.outputs[2]!.fields[0]!.slot,
+          },
+        ],
+      );
+      const sessionRequiredRows = legacyCandidateObservationUniverse(
+        db,
+        siteAPk,
+      );
+      const sessionRequiredBag = observationRawIdentityBag(sessionRequiredRows);
+      expect(observationIdentityBag(sessionIdentityOnly)).toEqual(
+        sessionRequiredBag,
+      );
+      expect(observationIdentityBag(sessionIdentityAndVisitor)).toEqual(
+        sessionRequiredBag,
+      );
+      expect(Number(sessionSourceCountRows[0]?.activity_count)).toBe(
+        sessionRequiredRows.length,
+      );
+
+      const readBuilder = new LogicalPlanBuilder(
+        planContext("observation", [SITE_A], {
+          read: { kind: "bounded", range: READ_RANGE },
+        }),
+      );
+      const readSource = readBuilder.source("observation", {
+        temporalDomain: "read",
+        attributes: ["observation.kind", "observation.eventName"],
+        relationships: ["observation.visitor"],
+        includeOccurrenceTime: true,
+      });
+      const readIdentity = readSource.slots.entity!;
+      const readVisitor = readSource.slots["relationship:observation.visitor"]!;
+      const eventName = readSource.slots["attribute:observation.eventName"]!;
+      readBuilder.output("read-identity-only", readSource, [
+        { name: "identity", slot: "entity" },
+      ]);
+      readBuilder.output("read-identity-and-visitor", readSource, [
+        { name: "identity", slot: "entity" },
+        { name: "visitor", slot: "relationship:observation.visitor" },
+      ]);
+      readBuilder.output("read-visitor-only", readSource, [
+        { name: "visitor", slot: "relationship:observation.visitor" },
+      ]);
+      readBuilder.output("read-event-name-only", readSource, [
+        { name: "eventName", slot: "attribute:observation.eventName" },
+      ]);
+      const readCount = readBuilder.aggregate(readSource, {}, [
+        { name: "activityCount", kind: "count-rows" },
+      ]);
+      readBuilder.output("read-hidden-count", readCount, [
+        { name: "count", slot: "activityCount" },
+      ]);
+      readBuilder.output("read-identity-after-count", readSource, [
+        { name: "identity", slot: "entity" },
+      ]);
+      const readPlan = readBuilder.finish();
+      const readLowerer = new AnalyticsLogicalToDbLowerer(readPlan, {
+        siteIds: [SITE_A],
+        time: readPlan.context.time,
+      });
+      const readIdentityOnly = await executeOutputProjection(
+        db,
+        readLowerer,
+        readPlan.outputs[0]!,
+        identityColumns(readIdentity),
+      );
+      const readIdentityAndVisitor = await executeOutputProjection(
+        db,
+        readLowerer,
+        readPlan.outputs[1]!,
+        [...identityColumns(readIdentity), ...visitorColumns(readVisitor)],
+      );
+      const readVisitorOnly = await executeOutputProjection(
+        db,
+        readLowerer,
+        readPlan.outputs[2]!,
+        visitorColumns(readVisitor),
+      );
+      const readEventNameOnly = await executeOutputProjection(
+        db,
+        readLowerer,
+        readPlan.outputs[3]!,
+        [{ name: "event_name", slot: eventName }],
+      );
+      const readCountRows = await executeOutputProjection(
+        db,
+        readLowerer,
+        readPlan.outputs[4]!,
+        [
+          {
+            name: "activity_count",
+            slot: readPlan.outputs[4]!.fields[0]!.slot,
+          },
+        ],
+      );
+      const readIdentityAgain = await executeOutputProjection(
+        db,
+        readLowerer,
+        readPlan.outputs[5]!,
+        identityColumns(readIdentity),
+      );
+      const optionalReadRows = rawObservationActivityRows(
+        db,
+        siteAPk,
+        READ_RANGE,
+        "optional",
+      );
+      const optionalReadBag = observationRawIdentityBag(optionalReadRows);
+      expect(observationIdentityBag(readIdentityOnly)).toEqual(optionalReadBag);
+      expect(observationIdentityBag(readIdentityAndVisitor)).toEqual(
+        optionalReadBag,
+      );
+      expect(observationIdentityBag(readIdentityAgain)).toEqual(
+        optionalReadBag,
+      );
+      expect(readEventNameOnly).toHaveLength(optionalReadRows.length);
+      expect(
+        readEventNameOnly.find(
+          (row) => row.event_name === "wave31-read-without-owner",
+        ),
+      ).toBeDefined();
+      expect(
+        visitorIdentityBag(readVisitorOnly, "visitor_site_pk", "visitor_id"),
+      ).toEqual(
+        rawActivityVisitorRows(db, siteAPk, READ_RANGE, "optional")
+          .map(encodeIdentity)
+          .sort(),
+      );
+      expect(Number(readCountRows[0]?.activity_count)).toBe(
+        optionalReadRows.length,
+      );
+      expect(
+        readIdentityAndVisitor.find(
+          (row) => row.entity_id === "z-read-without-owner",
+        ),
+      ).toMatchObject({
+        visitor_site_pk: siteAPk,
+        visitor_id: null,
+      });
+
+      const contextBuilder = new LogicalPlanBuilder(
+        planContext("observation", [SITE_A], {
+          read: { kind: "bounded", range: READ_RANGE },
+        }),
+      );
+      const contextSource = contextBuilder.source("observation", {
+        temporalDomain: "read",
+        attributes: ["observation.kind", "observation.contextPageTitle"],
+        relationships: ["observation.visitor"],
+        includeOccurrenceTime: true,
+      });
+      const contextIdentity = contextSource.slots.entity!;
+      const contextVisitor =
+        contextSource.slots["relationship:observation.visitor"]!;
+      const contextTitle =
+        contextSource.slots["attribute:observation.contextPageTitle"]!;
+      contextBuilder.output("context-identity-only", contextSource, [
+        { name: "identity", slot: "entity" },
+      ]);
+      contextBuilder.output("context-identity-and-visitor", contextSource, [
+        { name: "identity", slot: "entity" },
+        { name: "visitor", slot: "relationship:observation.visitor" },
+      ]);
+      contextBuilder.output("context-visitor-only", contextSource, [
+        { name: "visitor", slot: "relationship:observation.visitor" },
+      ]);
+      contextBuilder.output("context-title-only", contextSource, [
+        { name: "title", slot: "attribute:observation.contextPageTitle" },
+      ]);
+      const contextCount = contextBuilder.aggregate(contextSource, {}, [
+        { name: "activityCount", kind: "count-rows" },
+      ]);
+      contextBuilder.output("context-hidden-count", contextCount, [
+        { name: "count", slot: "activityCount" },
+      ]);
+      const contextPlan = contextBuilder.finish();
+      const contextLowerer = new AnalyticsLogicalToDbLowerer(contextPlan, {
+        siteIds: [SITE_A],
+        time: contextPlan.context.time,
+      });
+      const contextIdentityOnly = await executeOutputProjection(
+        db,
+        contextLowerer,
+        contextPlan.outputs[0]!,
+        identityColumns(contextIdentity),
+      );
+      const contextIdentityAndVisitor = await executeOutputProjection(
+        db,
+        contextLowerer,
+        contextPlan.outputs[1]!,
+        [
+          ...identityColumns(contextIdentity),
+          ...visitorColumns(contextVisitor),
+        ],
+      );
+      const contextVisitorOnly = await executeOutputProjection(
+        db,
+        contextLowerer,
+        contextPlan.outputs[2]!,
+        visitorColumns(contextVisitor),
+      );
+      const contextTitleOnly = await executeOutputProjection(
+        db,
+        contextLowerer,
+        contextPlan.outputs[3]!,
+        [{ name: "context_title", slot: contextTitle }],
+      );
+      const contextCountRows = await executeOutputProjection(
+        db,
+        contextLowerer,
+        contextPlan.outputs[4]!,
+        [
+          {
+            name: "activity_count",
+            slot: contextPlan.outputs[4]!.fields[0]!.slot,
+          },
+        ],
+      );
+      const ownerContextRows = rawObservationActivityRows(
+        db,
+        siteAPk,
+        READ_RANGE,
+        "required",
+      );
+      const ownerContextBag = observationRawIdentityBag(ownerContextRows);
+      expect(observationIdentityBag(contextIdentityOnly)).toEqual(
+        ownerContextBag,
+      );
+      expect(observationIdentityBag(contextIdentityAndVisitor)).toEqual(
+        ownerContextBag,
+      );
+      expect(contextVisitorOnly).toHaveLength(ownerContextRows.length);
+      expect(contextTitleOnly).toHaveLength(ownerContextRows.length);
+      expect(Number(contextCountRows[0]?.activity_count)).toBe(
+        ownerContextRows.length,
+      );
+      expect(
+        contextIdentityAndVisitor.some(
+          (row) =>
+            row.entity_id === "a-read-cross-site-owner-event" ||
+            row.entity_id === "z-read-without-owner",
+        ),
+      ).toBe(false);
+      expect(
+        visitorIdentityBag(contextVisitorOnly, "visitor_site_pk", "visitor_id"),
+      ).toEqual(
+        rawActivityVisitorRows(db, siteAPk, READ_RANGE, "required")
+          .map(encodeIdentity)
+          .sort(),
+      );
     } finally {
       db.close();
     }

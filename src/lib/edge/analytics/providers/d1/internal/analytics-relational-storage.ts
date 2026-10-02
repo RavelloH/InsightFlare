@@ -533,6 +533,16 @@ export class AnalyticsRelationalStorage {
     const needsOwnerJoin = relationships.some(
       (binding) => binding.relationship === "observation.session",
     );
+    const declaresVisitorRelation = relationships.some(
+      (binding) => binding.relationship === "observation.visitor",
+    );
+    const declaresReportOwnerContext =
+      declaredReportAttributes.length > 0 &&
+      this.#reportOwnerColumns(declaredReportAttributes, false, false).length >
+        0;
+    const optionalVisitorOwner = declaresVisitorRelation && !needsOwnerJoin;
+    const optionalReportOwner =
+      optionalVisitorOwner && !declaresReportOwnerContext;
     const includesOccurrenceTime = node.values.some(
       (binding) =>
         binding.kind === "occurrence-time" && requiredSlots.has(binding.slot),
@@ -659,7 +669,7 @@ export class AnalyticsRelationalStorage {
           includeSession: needsSessionRelation,
           includeVisitor: needsVisitorRelation,
           includeOccurrenceTime: includesOccurrenceTime,
-          optionalOwner: needsVisitorRelation && !needsOwnerJoin,
+          optionalOwner: optionalReportOwner,
         });
       } else if (fieldActivity === undefined) {
         if (node.temporalDomain !== "candidate")
@@ -671,8 +681,8 @@ export class AnalyticsRelationalStorage {
           includeIdentity: selfRequired,
           includeSession: needsSessionRelation,
           includeVisitor: needsVisitorRelation,
-          optionalOwner: needsVisitorRelation && !needsOwnerJoin,
-          requiresOwnerJoin: needsOwnerJoin,
+          optionalOwner: optionalVisitorOwner,
+          requiresOwnerJoin: needsOwnerJoin || !declaresVisitorRelation,
           identityAttributes,
         });
       } else if (fieldActivity === "page") {
@@ -688,7 +698,6 @@ export class AnalyticsRelationalStorage {
           needsVisitorRelation,
         );
         const includeOwner = needsOwnerJoin || ownerIdentityColumns.length > 0;
-        const optionalOwner = needsVisitorRelation && !needsOwnerJoin;
         const needsName = declaredContracts.some(
           ({ binding }) => binding.attribute === "event.name",
         );
@@ -697,7 +706,7 @@ export class AnalyticsRelationalStorage {
             ? this.#eventsWithNameAndOwner(
                 node.temporalDomain,
                 ownerIdentityColumns,
-                optionalOwner,
+                optionalVisitorOwner,
               )
             : this.#eventsWithName(node.temporalDomain)
           : includeOwner
@@ -705,7 +714,7 @@ export class AnalyticsRelationalStorage {
                 node.temporalDomain,
                 ownerIdentityColumns,
                 false,
-                optionalOwner,
+                optionalVisitorOwner,
               )
             : this.#events(node.temporalDomain);
       }
@@ -1709,15 +1718,16 @@ export class AnalyticsRelationalStorage {
       input.includeSession,
       input.includeVisitor,
     );
-    const optionalOwner =
-      input.optionalOwner &&
-      ownerColumns.every((ownerColumn) => ownerColumn === "visitor_id");
-    let events = this.#eventsWithOwner(
-      input.domain,
-      ownerColumns,
-      true,
-      optionalOwner,
-    );
+    const canSkipOptionalOwnerLookup =
+      input.optionalOwner && ownerColumns.length === 0;
+    let events = canSkipOptionalOwnerLookup
+      ? this.#events(input.domain, true)
+      : this.#eventsWithOwner(
+          input.domain,
+          ownerColumns,
+          true,
+          input.optionalOwner,
+        );
     if (attributes.includes("observation.eventName"))
       events = this.#attachReportName(events);
     if (attributes.includes("observation.sameSiteEventName"))
