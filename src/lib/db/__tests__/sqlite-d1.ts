@@ -6,6 +6,15 @@ export interface SqliteD1Trace {
   readonly batchStatements?: string[][];
 }
 
+function sqliteBindings(values: readonly SQLInputValue[]): SQLInputValue[] {
+  // D1 treats booleans as SQLite INTEGER values, while node:sqlite rejects
+  // JavaScript booleans as bind inputs. Translate only at this adapter edge.
+  return values.map((value) => {
+    const candidate: unknown = value;
+    return typeof candidate === "boolean" ? (candidate ? 1 : 0) : value;
+  });
+}
+
 export function createSqliteD1Database(
   database: DatabaseSync,
   trace?: SqliteD1Trace,
@@ -23,16 +32,19 @@ export function createSqliteD1Database(
           return prepared;
         },
         async first<Row>() {
-          return (statement.get(...bindings) as Row | undefined) ?? null;
+          return (
+            (statement.get(...sqliteBindings(bindings)) as Row | undefined) ??
+            null
+          );
         },
         async all<Row>() {
           return {
             success: true,
-            results: statement.all(...bindings) as Row[],
+            results: statement.all(...sqliteBindings(bindings)) as Row[],
           } as D1Result<Row>;
         },
         async run() {
-          const result = statement.run(...bindings);
+          const result = statement.run(...sqliteBindings(bindings));
           return {
             success: true,
             meta: { changes: Number(result.changes) },

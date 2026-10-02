@@ -1972,7 +1972,10 @@ export class AnalyticsLogicalToDbLowerer {
           (binding?.kind === "self" && node.entity === "observation") ||
           (binding?.kind === "related-entity" &&
             node.entity === "event" &&
-            binding.relationship === "event.observation")
+            binding.relationship === "event.observation") ||
+          (binding?.kind === "related-entity" &&
+            node.entity === "page" &&
+            binding.relationship === "page.observation")
         );
       }
       case "filter":

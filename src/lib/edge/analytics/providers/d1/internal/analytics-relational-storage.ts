@@ -374,6 +374,21 @@ function requireStorageTextColumn(
   >;
 }
 
+function requireNativePrimitiveStorageColumn(
+  expression: AnyExpression,
+  contract: NativePrimitiveFieldContract,
+  path: string,
+): void {
+  if (
+    expression.resultType.affinity !== "text" ||
+    expression.resultType.nullable !== contract.storageNullable
+  ) {
+    throw new Error(
+      `${path}.values: Registered field ${contract.id} no longer maps to a D1 TEXT column with the declared storage nullability.`,
+    );
+  }
+}
+
 /** D1-only physical carrier catalog for the currently proven Page/Event subset. */
 export class AnalyticsRelationalStorage {
   readonly #siteIds: readonly string[];
@@ -536,7 +551,11 @@ export class AnalyticsRelationalStorage {
         throw new Error(
           `${path}.values: A Page source cannot bind Event fields.`,
         );
-      this.#requireRelationships(relationships, ["page.session"], path);
+      this.#requireRelationships(
+        relationships,
+        ["page.observation", "page.session"],
+        path,
+      );
       activity = "page";
       carrier = this.#pages(
         node.temporalDomain,
@@ -710,6 +729,24 @@ export class AnalyticsRelationalStorage {
         });
       } else if (binding.kind === "related-entity") {
         switch (binding.relationship) {
+          case "page.observation":
+            if (node.entity !== "page")
+              throw new Error(
+                `${path}.values: page.observation is only valid on Page.`,
+              );
+            values.set(binding.slot, {
+              kind: "entity",
+              entity: "observation",
+              keys: [
+                column(carrier, "site_pk"),
+                param("page"),
+                column(carrier, "visit_id"),
+              ],
+              present: isNotNull(column(carrier, "visit_id")),
+              nullable: false,
+              candidateBounded: node.temporalDomain === "candidate",
+            });
+            break;
           case "page.session":
             if (node.entity !== "page")
               throw new Error(
@@ -852,7 +889,6 @@ export class AnalyticsRelationalStorage {
           contract.compilerStrategy,
           path,
         );
-        requireStorageTextColumn(fieldColumn, binding.attribute);
         values.set(binding.slot, {
           kind: "scalar",
           value: fieldColumn,
@@ -1282,7 +1318,14 @@ export class AnalyticsRelationalStorage {
     if (
       node.values.some(
         (binding) => binding.kind === "self" && requiredSlots.has(binding.slot),
-      )
+      ) ||
+      (node.entity === "page" &&
+        node.values.some(
+          (binding) =>
+            binding.kind === "related-entity" &&
+            binding.relationship === "page.observation" &&
+            requiredSlots.has(binding.slot),
+        ))
     )
       columns.add("visit_id");
     if (
@@ -1315,22 +1358,7 @@ export class AnalyticsRelationalStorage {
     for (const { binding, contract } of contracts) {
       if (!requiredSlots.has(binding.slot) || contract.activity !== "page")
         continue;
-      switch (contract.compilerStrategy) {
-        case "column.pathname":
-          columns.add("pathname");
-          break;
-        case "column.title":
-          columns.add("title");
-          break;
-        case "column.query_string":
-          columns.add("query_string");
-          break;
-        case "column.hash_fragment":
-          columns.add("hash_fragment");
-          break;
-        default:
-          break;
-      }
+      columns.add(contract.storageColumn);
     }
     return [...columns];
   }
@@ -1708,9 +1736,16 @@ export class AnalyticsRelationalStorage {
     const range =
       domain === "candidate"
         ? this.#time.candidate
-        : domain === "read" && this.#time.read.kind === "bounded"
-          ? this.#time.read.range
-          : undefined;
+        : domain === "filter" &&
+            this.#time.filter?.startMs !== undefined &&
+            this.#time.filter.endExclusiveMs !== undefined
+          ? {
+              startMs: this.#time.filter.startMs,
+              endExclusiveMs: this.#time.filter.endExclusiveMs,
+            }
+          : domain === "read" && this.#time.read.kind === "bounded"
+            ? this.#time.read.range
+            : undefined;
     if (!range || !this.#safeRange(range))
       throw new Error(
         `Source temporal domain ${domain} is not a safe bounded D1 range.`,
@@ -1808,24 +1843,8 @@ export class AnalyticsRelationalStorage {
       throw new Error(
         `${path}.values: Field ${fieldId} has no matching registered D1 storage strategy.`,
       );
-    const name =
-      strategy === "column.pathname"
-        ? "pathname"
-        : strategy === "column.title"
-          ? "title"
-          : strategy === "column.query_string"
-            ? "query_string"
-            : strategy === "column.hash_fragment"
-              ? "hash_fragment"
-              : strategy === "event.name"
-                ? "event_name"
-                : undefined;
-    if (!name)
-      throw new Error(
-        `${path}.values: Unsupported field strategy ${strategy}.`,
-      );
-    const expression = column(source, name);
-    requireStorageTextColumn(expression, fieldId);
+    const expression = column(source, contract.storageColumn);
+    requireNativePrimitiveStorageColumn(expression, contract, path);
     return expression;
   }
 
