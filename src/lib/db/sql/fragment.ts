@@ -24,12 +24,17 @@ export function join(
   parts: readonly SqlFragment[],
   separator: SqlFragment = text(", "),
 ): SqlFragment {
-  const result: SqlFragment[] = [];
+  const sql: string[] = [];
+  const bindings: DatabaseBinding[] = [];
   parts.forEach((part, index) => {
-    if (index > 0) result.push(separator);
-    result.push(part);
+    if (index > 0) {
+      sql.push(separator.text);
+      for (const binding of separator.bindings) bindings.push(binding);
+    }
+    sql.push(part.text);
+    for (const binding of part.bindings) bindings.push(binding);
   });
-  return concat(...result);
+  return { text: sql.join(""), bindings };
 }
 
 export function parenthesize(part: SqlFragment): SqlFragment {

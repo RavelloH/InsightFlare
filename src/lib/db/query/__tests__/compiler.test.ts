@@ -1431,23 +1431,15 @@ describe("typed D1 query compiler", () => {
       expect(hundredNative.sql).not.toContain("json_each");
 
       const numericSites = scan(schema.visits);
-      expect(() =>
-        compileD1Query(
-          filter(
-            numericSites,
-            inList(
-              numericSites.columns.started_at,
-              Array.from({ length: 101 }, (_, index) => index),
-            ),
-          ),
+      const numericValues = Array.from({ length: 101 }, (_, index) => index);
+      const numericPacked = compileD1Query(
+        filter(
+          numericSites,
+          inList(numericSites.columns.started_at, numericValues),
         ),
-      ).toThrowError(
-        expect.objectContaining({
-          code: "d1_statement_budget_exceeded",
-          item: "bindings",
-          actual: 101,
-        }),
       );
+      expect(numericPacked.sql).toContain("json_each(?)");
+      expect(numericPacked.bindings).toEqual([JSON.stringify(numericValues)]);
 
       const mixedList = compileD1Query(
         filter(sites, inList(sites.columns.site_id, ["text", 1] as never)),

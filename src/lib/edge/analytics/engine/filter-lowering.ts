@@ -105,13 +105,6 @@ const SUPPORTED_COMPARISONS = new Set<FilterOperator>([
   "lt",
   "lte",
 ]);
-const NUMERIC_SCOPE_COUNT_FACTS = new Set([
-  "session.views",
-  "session.events",
-  "visitor.sessions",
-  "visitor.views",
-  "visitor.events",
-]);
 const SUPPORTED_SET_OPERATORS = new Set<FilterOperator>(["in", "notIn"]);
 const SUPPORTED_STRING_MATCHES = new Set<FilterOperator>([
   "contains",
@@ -204,7 +197,7 @@ export function preparePrimitiveFieldCondition(
   if (!field || !attribute) return invalid("unknown_field");
   if (
     condition.operator === "between" &&
-    (!NUMERIC_SCOPE_COUNT_FACTS.has(field.id) ||
+    (!field.operators.has("between") ||
       field.valueKind !== "number" ||
       attribute.valueType.kind !== "scalar" ||
       attribute.valueType.scalar !== "number")
@@ -221,7 +214,6 @@ export function preparePrimitiveFieldCondition(
   const loweredCondition = normalized.root;
   const isNumericBetween =
     loweredCondition.operator === "between" &&
-    NUMERIC_SCOPE_COUNT_FACTS.has(field.id) &&
     field.valueKind === "number" &&
     attribute.valueType.kind === "scalar" &&
     attribute.valueType.scalar === "number" &&
@@ -315,7 +307,6 @@ export function primitivePredicateForSource(
   if (condition.operator === "between") {
     if (
       field.valueKind !== "number" ||
-      !NUMERIC_SCOPE_COUNT_FACTS.has(field.id) ||
       attribute.valueType.kind !== "scalar" ||
       attribute.valueType.scalar !== "number" ||
       !Array.isArray(condition.value) ||

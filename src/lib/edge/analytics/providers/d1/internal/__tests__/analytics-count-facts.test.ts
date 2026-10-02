@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import { compileD1Query, createD1DatabaseClient } from "@/lib/db";
 import { createSqliteD1Database } from "@/lib/db/__tests__/sqlite-d1";
+import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import {
   LogicalPlanBuilder,
   lowerFilterDocumentToScope,
@@ -468,8 +469,42 @@ function buildFilterSelectionPlan(input: {
   return { logicalPlan, lowerer };
 }
 
-function compileFieldSelection(
-  plan: ReturnType<typeof buildFieldSelectionPlan>,
+function buildDirectCountMembershipPlan(input: {
+  readonly entity: FactEntity;
+  readonly siteIds: readonly string[];
+  readonly attribute: CountFactAttribute;
+  readonly values: readonly number[];
+  readonly negated: boolean;
+}) {
+  const builder = new LogicalPlanBuilder(
+    createPlanContext(input.entity, input.siteIds),
+  );
+  const source = builder.source(input.entity, {
+    temporalDomain: "candidate",
+    attributes: [input.attribute],
+  });
+  const value = builder.slot(source, `attribute:${input.attribute}`);
+  const membership = builder.in(
+    value,
+    input.values.map((item) =>
+      builder.literal(item, { kind: "scalar", scalar: "number" }),
+    ),
+    input.negated,
+  );
+  const filtered = builder.filter(source, membership);
+  builder.output("matches", filtered, [{ name: "identity", slot: "entity" }]);
+  const logicalPlan = builder.finish();
+  const lowerer = new AnalyticsLogicalToDbLowerer(logicalPlan, {
+    siteIds: input.siteIds,
+    time: logicalPlan.context.time,
+  });
+  return { logicalPlan, lowerer };
+}
+
+function fieldSelectionRelation(
+  plan:
+    | ReturnType<typeof buildFieldSelectionPlan>
+    | ReturnType<typeof buildDirectCountMembershipPlan>,
   scope: FactEntity | "observation",
 ) {
   const output = plan.logicalPlan.outputs[0];
@@ -492,7 +527,16 @@ function compileFieldSelection(
           { name: "entity_id", slot: identity.slot, component: 1 as const },
         ];
   const lowered = plan.lowerer.lower(output);
-  return compileD1Query(plan.lowerer.projectOutput(lowered, columns));
+  return plan.lowerer.projectOutput(lowered, columns);
+}
+
+function compileFieldSelection(
+  plan:
+    | ReturnType<typeof buildFieldSelectionPlan>
+    | ReturnType<typeof buildDirectCountMembershipPlan>,
+  scope: FactEntity | "observation",
+) {
+  return compileD1Query(fieldSelectionRelation(plan, scope));
 }
 
 async function executeFieldSelection(
@@ -1059,6 +1103,12 @@ describe("typed Session and Visitor canonical count-fact Sources", () => {
     try {
       const sites = seedNormalActivityScenario(db);
       const siteIds = sites.map((site) => site.id);
+      const wideNumericSet = [
+        0,
+        1,
+        3,
+        ...Array.from({ length: 97 }, (_, index) => index + 100),
+      ];
       const cases = [
         {
           entity: "session",
@@ -1084,13 +1134,13 @@ describe("typed Session and Visitor canonical count-fact Sources", () => {
         { operator: "lte", value: 2, matches: (value) => value <= 2 },
         {
           operator: "in",
-          value: [1, 3],
-          matches: (value) => value === 1 || value === 3,
+          value: wideNumericSet,
+          matches: (value) => wideNumericSet.includes(value),
         },
         {
           operator: "notIn",
-          value: [1, 3],
-          matches: (value) => value !== 1 && value !== 3,
+          value: wideNumericSet,
+          matches: (value) => !wideNumericSet.includes(value),
         },
         { operator: "exists", matches: () => true },
         { operator: "notExists", matches: () => false },
@@ -1136,6 +1186,26 @@ describe("typed Session and Visitor canonical count-fact Sources", () => {
               ? {}
               : { value: predicate.value }),
           });
+          if (
+            (predicate.operator === "in" || predicate.operator === "notIn") &&
+            Array.isArray(predicate.value) &&
+            predicate.value.length === 100
+          ) {
+            const query = compileFieldSelection(nativePlan, item.entity);
+            expect(query.sql).toContain("json_each(?)");
+            expect(query.bindings?.length ?? 0).toBeLessThanOrEqual(100);
+            expect(() =>
+              compileD1QueryUnoptimizedForTest(
+                fieldSelectionRelation(nativePlan, item.entity),
+              ),
+            ).toThrow(
+              expect.objectContaining({
+                code: "d1_statement_budget_exceeded",
+                item: "bindings",
+                limit: 100,
+              }),
+            );
+          }
           expect(
             await executeFieldSelection(db, nativePlan, item.entity),
           ).toEqual(expectedNative);
@@ -1169,6 +1239,15 @@ describe("typed Session and Visitor canonical count-fact Sources", () => {
               ? {}
               : { value: predicate.value }),
           });
+          if (
+            (predicate.operator === "in" || predicate.operator === "notIn") &&
+            Array.isArray(predicate.value) &&
+            predicate.value.length === 100
+          ) {
+            const query = compileFieldSelection(observationPlan, "observation");
+            expect(query.sql).toContain("json_each(?)");
+            expect(query.bindings?.length ?? 0).toBeLessThanOrEqual(100);
+          }
           expect(
             await executeFieldSelection(db, observationPlan, "observation"),
           ).toEqual(sortObservationRows(expectedObservations));
@@ -1192,21 +1271,52 @@ describe("typed Session and Visitor canonical count-fact Sources", () => {
         ),
       ).toThrow(/Operator is not allowed for this field/u);
       expect(unsupportedBuilder.finish().nodes).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
 
-      const largeNumericSet = buildFieldSelectionPlan({
-        targetScope: "session",
-        siteIds,
-        attribute: "session.views",
-        operator: "in",
-        value: Array.from({ length: 100 }, (_, index) => index),
-      });
-      expect(() => compileFieldSelection(largeNumericSet, "session")).toThrow(
-        expect.objectContaining({
-          code: "d1_statement_budget_exceeded",
-          item: "bindings",
-          limit: 100,
-        }),
-      );
+  it("packs 1200-item safe integer membership on direct count Sources", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const sites = seedNormalActivityScenario(db);
+      const siteIds = sites.map((site) => site.id);
+      const values = Array.from({ length: 1200 }, (_, index) => index);
+      values[2] = 10_000;
+
+      for (const entity of ["session", "visitor"] as const) {
+        const attributes = entity === "session" ? SESSION_FACTS : VISITOR_FACTS;
+        const attribute = attributes[0]!;
+        const candidates = canonicalExpectedRows(db, sites, entity, attributes);
+        const selectedValues = new Set(values);
+
+        for (const negated of [false, true] as const) {
+          const expected = sortRows(
+            candidates
+              .filter(
+                (fact) =>
+                  selectedValues.has(Number(fact[attribute])) !== negated,
+              )
+              .map(({ site_pk, entity_id }) => ({ site_pk, entity_id })),
+          );
+          const plan = buildDirectCountMembershipPlan({
+            entity,
+            siteIds,
+            attribute,
+            values,
+            negated,
+          });
+          const query = compileFieldSelection(plan, entity);
+          expect(query.sql).toContain("json_each(?)");
+          expect(query.bindings?.length ?? 0).toBeLessThanOrEqual(100);
+          const result = await createD1DatabaseClient(
+            createSqliteD1Database(db),
+          ).all(query);
+          expect(sortRows([...(result.results as FactResult[])])).toEqual(
+            expected,
+          );
+        }
+      }
     } finally {
       db.close();
     }
@@ -1427,6 +1537,29 @@ describe("typed Session and Visitor canonical count-fact Sources", () => {
       time: durationPlan.context.time,
     });
     expect(() => durationLowerer.lower(durationPlan.outputs[0]!)).toThrow();
+
+    const pageDurationBuilder = new LogicalPlanBuilder(
+      createPlanContext("session", [SITE_A]),
+    );
+    const pageDurationSource = pageDurationBuilder.source("page", {
+      temporalDomain: "candidate",
+      attributes: ["page.durationMs"],
+    });
+    pageDurationBuilder.output(
+      "unsupported-page-duration",
+      pageDurationSource,
+      [{ name: "duration", slot: "attribute:page.durationMs" }],
+    );
+    const pageDurationPlan = pageDurationBuilder.finish();
+    const pageDurationLowerer = new AnalyticsLogicalToDbLowerer(
+      pageDurationPlan,
+      { siteIds: [SITE_A], time: pageDurationPlan.context.time },
+    );
+    expect(() =>
+      pageDurationLowerer.lower(pageDurationPlan.outputs[0]!),
+    ).toThrow(
+      /No registered D1 primitive storage mapping exists for page\.durationMs/u,
+    );
 
     const relationshipBuilder = new LogicalPlanBuilder(
       createPlanContext("session", [SITE_A]),

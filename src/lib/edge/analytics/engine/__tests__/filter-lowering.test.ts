@@ -862,13 +862,21 @@ describe("primitive Filter v1 condition lowering", () => {
     const between = lowerToPlan(
       analyzedCondition("page.durationMs", "between", [100, 500]),
     );
-    expect(between.result).toEqual({
-      kind: "unsupported",
-      code: "unsupported-operator",
-      fieldId: "page.durationMs",
-      operator: "between",
+    expect(between.result.kind).toBe("supported");
+    const durationFilter = between.plan?.nodes.find(
+      (node) => node.kind === "filter",
+    );
+    expect(durationFilter).toMatchObject({
+      kind: "filter",
+      predicate: {
+        kind: "boolean",
+        operator: "and",
+        terms: [
+          { kind: "comparison", operator: "gte" },
+          { kind: "comparison", operator: "lte" },
+        ],
+      },
     });
-    expect(between.builder.finish().nodes).toEqual([]);
 
     const payload = analyzedPayloadCondition();
     const payloadResult = lowerFilterCondition(

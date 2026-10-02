@@ -92,17 +92,37 @@ function hasWellFormedUtf16(value: string): boolean {
   return true;
 }
 
-function encodedTextValues(
+function everyDenseMembershipValue(
+  values: readonly unknown[],
+  predicate: (value: unknown) => boolean,
+): boolean {
+  for (let index = 0; index < values.length; index++) {
+    if (
+      !Object.prototype.hasOwnProperty.call(values, index) ||
+      !predicate(values[index])
+    )
+      return false;
+  }
+  return true;
+}
+
+function encodedJsonMembershipValues(
   expression: AnyInListExpression,
 ): { jsonText: string; jsonUtf8Bytes: number } | undefined {
-  if (
-    expression.values.length < 2 ||
-    expression.expression.resultType.affinity !== "text" ||
-    !expression.values.every(
-      (value): value is string =>
-        typeof value === "string" && hasWellFormedUtf16(value),
-    )
-  )
+  const affinity = expression.expression.resultType.affinity;
+  const isTextList =
+    affinity === "text" &&
+    everyDenseMembershipValue(
+      expression.values,
+      (value) => typeof value === "string" && hasWellFormedUtf16(value),
+    );
+  const isSafeIntegerList =
+    (affinity === "integer" || affinity === "real" || affinity === "numeric") &&
+    everyDenseMembershipValue(
+      expression.values,
+      (value) => typeof value === "number" && Number.isSafeInteger(value),
+    );
+  if (expression.values.length < 2 || (!isTextList && !isSafeIntegerList))
     return undefined;
   const jsonText = JSON.stringify(expression.values);
   const jsonUtf8Bytes = new TextEncoder().encode(jsonText).byteLength;
@@ -163,7 +183,7 @@ export function optimizePhysicalMembershipBudget<Row extends object>(
       if (remaining <= bindingLimit) break;
       let encoding = encodingByExpression.get(candidate.expression);
       if (!encoding && !encodingByExpression.has(candidate.expression)) {
-        encoding = encodedTextValues(candidate.expression);
+        encoding = encodedJsonMembershipValues(candidate.expression);
         encodingByExpression.set(candidate.expression, encoding);
       }
       if (!encoding) continue;
