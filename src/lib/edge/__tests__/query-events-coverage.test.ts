@@ -405,7 +405,7 @@ describe("edge query events summary coverage", () => {
   });
 
   it("computes event type overview fallbacks for sparse summary rows", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputSetMock.mockResolvedValueOnce([
       {
         events: null,
         eventTypes: undefined,
@@ -472,7 +472,7 @@ describe("edge query events summary coverage", () => {
   });
 
   it("uses zero ratios when event type overview has no rows", async () => {
-    queryD1AllMock.mockResolvedValueOnce([]);
+    reportOutputSetMock.mockResolvedValueOnce([]);
 
     await expect(
       queryEventTypeOverviewFromD1(

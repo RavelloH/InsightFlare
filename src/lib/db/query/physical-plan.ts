@@ -1468,14 +1468,16 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
     node: LogicalQueryNode,
     inheritedForbidden: boolean,
     underWindow: boolean,
-    underBranchTopN: boolean,
+    branchOperandPath: boolean,
+    topNSearchBlocked: boolean,
+    licensedTopNSort: boolean,
   ): void => {
     let contexts = visited.get(node);
     if (!contexts) {
       contexts = new Set();
       visited.set(node, contexts);
     }
-    const context = `${inheritedForbidden}:${underWindow}`;
+    const context = `${inheritedForbidden}:${underWindow}:${branchOperandPath}:${topNSearchBlocked}:${licensedTopNSort}`;
     if (contexts.has(context)) return;
     contexts.add(context);
     if (inheritedForbidden || node.kind === "window") forbidden.add(node);
@@ -1484,27 +1486,52 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
 
     const terminalRootSort = node === root && node.kind === "sort";
     const branchTopN =
-      node !== root &&
+      branchOperandPath &&
+      !topNSearchBlocked &&
       !inheritedForbidden &&
       node.kind === "limit" &&
       nodeChildren(node).some((child) => child.node.kind === "sort");
-    const safeBranchTopN = underBranchTopN || branchTopN;
+    const isLicensedTopNSort = node.kind === "sort" && licensedTopNSort;
     const selectionBoundary =
       inheritedForbidden ||
-      (node.kind === "sort" && !terminalRootSort && !safeBranchTopN) ||
+      (node.kind === "sort" && !terminalRootSort && !isLicensedTopNSort) ||
       node.kind === "recursive-closure" ||
       (node.kind === "limit" && !branchTopN);
-    for (const child of nodeChildren(node))
+    for (const child of nodeChildren(node)) {
+      const startsUnionOperandPath =
+        node.kind === "union" &&
+        node.all &&
+        !inheritedForbidden &&
+        !topNSearchBlocked;
+      const followsProjectOnUnionPath =
+        node.kind === "project" && branchOperandPath;
+      const isLicensedTopNSortInput = branchTopN && child.node.kind === "sort";
+      const childBranchOperandPath =
+        startsUnionOperandPath ||
+        (followsProjectOnUnionPath && !topNSearchBlocked);
+      const childTopNSearchBlocked =
+        isLicensedTopNSort || isLicensedTopNSortInput
+          ? false
+          : topNSearchBlocked ||
+            (node.kind === "union" && !startsUnionOperandPath) ||
+            (node.kind !== "project" &&
+              node.kind !== "union" &&
+              node.kind !== "scan" &&
+              node.kind !== "values-relation" &&
+              node.kind !== "json-scalar-array");
       visit(
         child.node,
         selectionBoundary,
         underWindow || node.kind === "window",
-        safeBranchTopN,
+        childBranchOperandPath,
+        childTopNSearchBlocked,
+        isLicensedTopNSortInput,
       );
+    }
     for (const query of nodeExpressions(node).flatMap(expressionSources))
-      visit(query.node, true, false, false);
+      visit(query.node, true, false, false, true, false);
   };
-  visit(root, false, false, false);
+  visit(root, false, false, false, false, false);
   return { forbidden, windowInput };
 }
 
@@ -1548,8 +1575,9 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
           current.kind === "unixepoch" ||
           current.kind === "scalar-subquery" ||
           current.kind === "in-subquery"
-        )
+        ) {
           facts.forbidden = true;
+        }
         switch (current.kind) {
           case "binary":
           case "distinct-from":

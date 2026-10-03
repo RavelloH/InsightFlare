@@ -595,7 +595,10 @@ function applyNameGate(
 ): AnalyticsLegacyEventRow {
   const gate = selection.eventNameGate;
   if (!gate) return rows;
-  if (gate.semantics === "prepared-trimmed-label-v1") {
+  if (
+    gate.semantics === "prepared-trimmed-label-v1" ||
+    gate.semantics === "prepared-defined-raw-value-v1"
+  ) {
     const relation = filter(
       rows.relation,
       eq(trimSpaces(coalesce(rows.eventName, constant(""))), param(gate.value)),
@@ -641,13 +644,15 @@ function observationEventMatches(
       selection.preparedMatches.identities,
       "event",
     );
-    const eventRows = eventIdentityRows(dataset.readEvents);
-    matched = joinMembership(
-      eventRows,
+    const gatedIds = eventIdentityRows(
+      applyNameGate(dataset.readEvents, dataset, selection),
+    );
+    return joinMembership(
+      gatedIds,
       explicit,
       and(
-        eq(eventRows.columns.site_pk!, explicit.columns.site_pk!),
-        eq(eventRows.columns.event_id!, explicit.columns.entity_id!),
+        eq(gatedIds.columns.site_pk!, explicit.columns.site_pk!),
+        eq(gatedIds.columns.event_id!, explicit.columns.entity_id!),
       ),
     );
   } else {
@@ -902,9 +907,19 @@ export class AnalyticsLegacyScopedStorage {
         eq(inLegacyReportDomain.columns.event_id!, matches.columns.event_id!),
       ),
     );
+    const preparedIdentitySet =
+      selection.profile === "prepared-scoped-v1" &&
+      selection.preparedMatches !== undefined;
+    // Prepared identity matches are a set. Keep one row per Event for the
+    // overview's name-gated numerator and slotless scalar denominator.
+    const preservePreparedEventSet =
+      preparedIdentitySet &&
+      (selection.eventNameGate?.semantics === "prepared-defined-raw-value-v1" ||
+        Object.keys(source.values).length === 0);
+    const reportRows = preservePreparedEventSet ? distinct(selected) : selected;
     return {
-      relation: selected,
-      values: remapEventSourceValues(node, selected, source.values),
+      relation: reportRows,
+      values: remapEventSourceValues(node, reportRows, source.values),
     };
   }
 }

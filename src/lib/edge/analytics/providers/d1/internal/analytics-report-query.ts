@@ -59,10 +59,9 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]) {
 function validateMultiOutputSelection(
   selection: AnalyticsReportMultiOutputSelection,
 ): void {
-  if (
-    !isRecord(selection) ||
-    !exactKeys(selection, ["outputIds", "fields", "orderBy"])
-  )
+  if (!isRecord(selection))
+    throw new Error("analytics_report_multi_output_selection_invalid");
+  if (!exactKeys(selection, ["outputIds", "fields", "orderBy"]))
     throw new Error("analytics_report_multi_output_selection_invalid");
   if (
     !Array.isArray(selection.outputIds) ||
@@ -87,7 +86,6 @@ function validateMultiOutputSelection(
     throw new Error("analytics_report_multi_output_fields_duplicate");
   if (
     !Array.isArray(selection.orderBy) ||
-    selection.orderBy.length === 0 ||
     selection.orderBy.some(
       (key) =>
         !isRecord(key) ||
@@ -268,5 +266,8 @@ export async function queryAnalyticsReportOutputSetRowsFromD1(
       { expression, direction },
     ];
   });
-  return executeReportRelation(env, sort(combined, sortKeys));
+  return executeReportRelation(
+    env,
+    sortKeys.length > 0 ? sort(combined, sortKeys) : combined,
+  );
 }

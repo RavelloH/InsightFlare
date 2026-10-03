@@ -2495,11 +2495,13 @@ export class AnalyticsLogicalToDbLowerer {
     const leftNode = this.#logicalNode(node.left);
     const rightNode = this.#logicalNode(node.right);
     if (!leftNode || !rightNode) reject(path, "A join input node is missing.");
-    const keylessScalarInner =
+    const keylessScalarBroadcast =
       node.joinType === "inner" &&
       node.keys.length === 0 &&
-      node.grain.kind === "scalar";
-    if (!keylessScalarInner) {
+      rightNode.grain.kind === "scalar";
+    const keylessScalarInner =
+      keylessScalarBroadcast && node.grain.kind === "scalar";
+    if (!keylessScalarBroadcast) {
       if (
         (node.joinType !== "inner" && node.joinType !== "left") ||
         node.keys.length === 0 ||
@@ -2552,7 +2554,7 @@ export class AnalyticsLogicalToDbLowerer {
     }
     const left = this.#lowerNode(node.left);
     const right = this.#lowerNode(node.right);
-    const predicate = keylessScalarInner
+    const predicate = keylessScalarBroadcast
       ? eq(param(1), param(1))
       : combinePredicates(
           "and",

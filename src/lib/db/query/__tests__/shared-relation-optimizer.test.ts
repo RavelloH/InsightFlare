@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
   compileD1Query,
+  eq,
   filter,
   gt,
   limit,
@@ -39,6 +40,22 @@ function selectedProjection(width: number, selective = true) {
   for (let index = 0; index < width; index += 1)
     projections[`field${index}`] = available[index % available.length]!;
   return project(filtered, projections);
+}
+
+function nullablePageProjection() {
+  const pages = scan(schema.visits);
+  const selected = filter(pages, eq(pages.columns.status, param("complete")));
+  return project(selected, {
+    field0: selected.columns.ended_at,
+    field1: selected.columns.duration_ms,
+    field2: selected.columns.duration_source,
+    field3: selected.columns.session_id,
+    field4: selected.columns.pathname,
+  });
+}
+
+function rowBag(rows: readonly Record<string, unknown>[]) {
+  return rows.map((row) => JSON.stringify(row)).sort();
 }
 
 afterEach(() => {
@@ -330,6 +347,142 @@ describe("shared relation physical selection", () => {
       2,
     );
     expect(lowerLogicalPlan(globalLimit).sharedRelations).toEqual([]);
+  });
+
+  it("keeps Top-N sharing independent of branch traversal order", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+      .run("top-n-null-site");
+    const { site_pk: sitePk } = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get("top-n-null-site") as { site_pk: number };
+    const inserts = database.prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, ended_at, duration_ms, duration_source, exit_reason,
+        pathname, hostname, site_pk
+      ) VALUES (?, 'top-n-null-site', ?, ?, 'complete', ?, ?, ?, ?, ?, ?, '/', 'example.test', ?)`,
+    );
+    inserts.run(
+      "row-a",
+      "visitor-a",
+      "session-a",
+      1,
+      1,
+      null,
+      null,
+      null,
+      null,
+      sitePk,
+    );
+    inserts.run(
+      "row-b",
+      "visitor-b",
+      "session-b",
+      2,
+      2,
+      null,
+      null,
+      "same",
+      null,
+      sitePk,
+    );
+    inserts.run(
+      "row-c",
+      "visitor-c",
+      "session-c",
+      3,
+      3,
+      10,
+      20,
+      "duration",
+      "same",
+      sitePk,
+    );
+    inserts.run(
+      "row-d",
+      "visitor-d",
+      "session-d",
+      4,
+      4,
+      10,
+      20,
+      "duration",
+      "same",
+      sitePk,
+    );
+
+    for (const safeFirst of [true, false]) {
+      const source = nullablePageProjection();
+      const sharedSort = sort(source, [
+        { expression: source.columns.field0, direction: "ASC" },
+      ]);
+      const topN = limit(sharedSort, 2);
+      const ordinarySort = sharedSort;
+      const combined = safeFirst
+        ? union(
+            union(union(topN, ordinarySort, true), source, true),
+            source,
+            true,
+          )
+        : union(
+            union(union(ordinarySort, topN, true), source, true),
+            source,
+            true,
+          );
+      const physical = lowerLogicalPlan(combined);
+      expect(
+        physical.sharedRelations.find(({ node }) => node === source.node),
+      ).toBeUndefined();
+
+      const optimized = compileD1Query(physical);
+      const mechanical = compileD1QueryUnoptimizedForTest(combined);
+      const optimizedRows = database
+        .prepare(optimized.sql)
+        .all(...(optimized.bindings as SQLInputValue[]));
+      const mechanicalRows = database
+        .prepare(mechanical.sql)
+        .all(...(mechanical.bindings as SQLInputValue[]));
+      expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+      expect(
+        optimizedRows.some((row) => Object.values(row).includes(null)),
+      ).toBe(true);
+    }
+
+    const globalSource = selectedProjection(5);
+    const globalLimit = limit(
+      union(union(globalSource, globalSource, true), globalSource, true),
+      2,
+    );
+    const wrappedGlobalLimit = project(globalLimit, {
+      field0: globalLimit.columns.field0,
+      field1: globalLimit.columns.field1,
+      field2: globalLimit.columns.field2,
+      field3: globalLimit.columns.field3,
+      field4: globalLimit.columns.field4,
+    });
+    expect(lowerLogicalPlan(wrappedGlobalLimit).sharedRelations).toEqual([]);
+
+    const nestedSource = selectedProjection(5);
+    const innerSort = sort(nestedSource, [
+      { expression: nestedSource.columns.field0, direction: "ASC" },
+    ]);
+    const outerSort = sort(innerSort, [
+      { expression: innerSort.columns.field1, direction: "DESC" },
+    ]);
+    const nestedTopN = limit(outerSort, 1);
+    const nestedSelection = union(
+      union(union(nestedTopN, nestedSource, true), nestedSource, true),
+      nestedSource,
+      true,
+    );
+    expect(
+      lowerLogicalPlan(nestedSelection).sharedRelations.find(
+        ({ node }) => node === nestedSource.node,
+      ),
+    ).toBeUndefined();
   });
 
   it("allows a terminal root sort and preserves UNION ALL order and multiplicity", () => {

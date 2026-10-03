@@ -1,6 +1,7 @@
 import {
   and,
   coalesce,
+  distinct,
   eq,
   filter,
   gte,
@@ -365,13 +366,36 @@ function buildEvents(
             param(nameGate.value),
           ),
     );
-    const matchingNameId = scalar(
-      project(matchingNames, { value: matchingNames.columns.id! }),
-    );
-    authorized = filter(
-      authorized,
-      eq(authorized.columns.event_event_name_id!, matchingNameId),
-    );
+    if (selection.profile === "direct-event-records-v1") {
+      const matchingNameId = scalar(
+        project(matchingNames, { value: matchingNames.columns.id! }),
+      );
+      authorized = filter(
+        authorized,
+        eq(authorized.columns.event_event_name_id!, matchingNameId),
+      );
+    } else {
+      const matchingNameIds = distinct(
+        project(matchingNames, { id: matchingNames.columns.id! }),
+      );
+      const matchedEvents = join(
+        matchingNameIds,
+        authorized,
+        eq(
+          matchingNameIds.columns.id!,
+          authorized.columns.event_event_name_id!,
+        ),
+      );
+      authorized = project(matchedEvents, {
+        site_pk: matchedEvents.columns.right_site_pk!,
+        ...Object.fromEntries(
+          Object.keys(eventColumnSource).map((name) => [
+            `event_${name}`,
+            matchedEvents.columns[`right_event_${name}`]!,
+          ]),
+        ),
+      });
+    }
   }
   const range = selection.time.candidate;
   const ranged = filter(

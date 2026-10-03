@@ -1,22 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
-import type * as QueryCore from "@/lib/edge/analytics/providers/d1/internal/core";
+import type * as AnalyticsReportQuery from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import type { Env } from "@/lib/edge/types";
 
-const queryD1AllMock = vi.hoisted(() => vi.fn());
+const reportOutputSetMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/edge/analytics/providers/d1/internal/core", async () => {
-  const actual = await vi.importActual<typeof QueryCore>(
-    "@/lib/edge/analytics/providers/d1/internal/core",
-  );
-  return {
-    ...actual,
-    queryD1All: queryD1AllMock,
-  };
-});
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/analytics-report-query",
+  async () => {
+    const actual = await vi.importActual<typeof AnalyticsReportQuery>(
+      "@/lib/edge/analytics/providers/d1/internal/analytics-report-query",
+    );
+    return {
+      ...actual,
+      queryAnalyticsReportOutputSetRowsFromD1: reportOutputSetMock,
+    };
+  },
+);
 
 const env = {} as Env;
 const siteId = "site-1";
@@ -29,11 +32,11 @@ const window: QueryWindow = {
 
 describe("edge query event type overview branch coverage", () => {
   beforeEach(() => {
-    queryD1AllMock.mockReset();
+    reportOutputSetMock.mockReset();
   });
 
   it("computes positive average events per session and share of scoped events", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputSetMock.mockResolvedValueOnce([
       {
         events: 6,
         eventTypes: 1,
@@ -100,7 +103,7 @@ describe("edge query event type overview branch coverage", () => {
   });
 
   it("normalizes nullable event overview metrics to zero", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputSetMock.mockResolvedValueOnce([
       {
         events: null,
         eventTypes: null,
@@ -139,7 +142,7 @@ describe("edge query event type overview branch coverage", () => {
   });
 
   it("normalizes missing summary fields and empty breakdown values", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputSetMock.mockResolvedValueOnce([
       {
         cardType: "summary",
         value: null,
@@ -180,7 +183,7 @@ describe("edge query event type overview branch coverage", () => {
   });
 
   it("keeps positive summary denominators safe when the event count is missing", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputSetMock.mockResolvedValueOnce([
       {
         cardType: "summary",
         value: null,

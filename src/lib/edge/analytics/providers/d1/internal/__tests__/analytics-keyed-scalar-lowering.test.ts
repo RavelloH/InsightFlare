@@ -202,6 +202,20 @@ function createPlan() {
     userId: builder.slot(matched, "userId"),
     rightCount: builder.slot(matched, "right.rightCount"),
   });
+  const totalPagesSource = builder.source("page", {
+    temporalDomain: "read",
+    attributes: ["page.report.localId"],
+  });
+  const totalPages = builder.aggregate(totalPagesSource, {}, [
+    { name: "totalPages", kind: "count-rows" },
+  ]);
+  const leftWithTotal = builder.join(left, totalPages, [], "inner");
+  const leftWithTotalRows = builder.project(leftWithTotal, {
+    visitorId: builder.slot(leftWithTotal, "visitorId"),
+    userId: builder.slot(leftWithTotal, "userId"),
+    leftCount: builder.slot(leftWithTotal, "leftCount"),
+    totalPages: builder.slot(leftWithTotal, "right.totalPages"),
+  });
 
   builder.output("left-all", allRows, [
     { name: "visitorId", slot: "visitorId" },
@@ -229,6 +243,12 @@ function createPlan() {
   ]);
   builder.output("left-a-again", leftOnly, [
     { name: "leftCount", slot: "leftCount" },
+  ]);
+  builder.output("left-with-total", leftWithTotalRows, [
+    { name: "visitorId", slot: "visitorId" },
+    { name: "userId", slot: "userId" },
+    { name: "leftCount", slot: "leftCount" },
+    { name: "totalPages", slot: "totalPages" },
   ]);
   return builder.finish();
 }
@@ -343,6 +363,40 @@ describe("keyed scalar join D1 lowering", () => {
 
     expect(await readOutput(database, createLowerer(plan), output)).toEqual([
       { localId: "a-left" },
+    ]);
+  });
+
+  it("broadcasts one scalar denominator onto each keyed group", async () => {
+    const database = createFixture();
+    seedFixture(database);
+    const plan = createPlan();
+    const output = plan.outputs.find((item) => item.id === "left-with-total")!;
+
+    expect(await readOutput(database, createLowerer(plan), output)).toEqual([
+      {
+        visitorId: "visitor-a",
+        userId: "user-a",
+        leftCount: 2,
+        totalPages: 10,
+      },
+      {
+        visitorId: "visitor-b",
+        userId: "user-b",
+        leftCount: 1,
+        totalPages: 10,
+      },
+      {
+        visitorId: "visitor-c",
+        userId: null,
+        leftCount: 1,
+        totalPages: 10,
+      },
+      {
+        visitorId: "visitor-d",
+        userId: "user-d",
+        leftCount: 1,
+        totalPages: 10,
+      },
     ]);
   });
 });

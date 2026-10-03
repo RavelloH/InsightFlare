@@ -7,7 +7,9 @@ import {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
+import type { SemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
@@ -22,7 +24,75 @@ export const EVENT_REPORT_TREND_ATTRIBUTES = [
   "event.report.occurredAt",
 ] as const;
 
-export type EventNameInputSemantics = "trimmed-nonempty" | "legacy-truthy-raw";
+export type EventNameInputSemantics =
+  "trimmed-nonempty" | "legacy-truthy-raw" | "defined-raw-value";
+
+export interface EventReportSourceContext {
+  readonly builder: LogicalPlanBuilder;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly subject: SemanticSubjectDomain;
+  readonly time: SemanticTemporalDomains;
+}
+
+/** Creates one builder/context for Event report Sources with separate gates. */
+export function createEventReportSourceContext(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+}): EventReportSourceContext {
+  const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
+  const subject = createSemanticSubjectDomain({
+    origin: "site",
+    siteIds: [input.siteId as SiteId],
+  });
+  const builder = new LogicalPlanBuilder({
+    subject,
+    time,
+    scope: resolveAnalyticsScope(input.scopePlan?.scope ?? "event"),
+    originOperation: "event-records",
+  });
+  return {
+    builder,
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    subject,
+    time,
+  };
+}
+
+/** Adds one immutable Event Source to a shared report context. */
+export function addEventReportSource(
+  context: EventReportSourceContext,
+  input: {
+    readonly attributes: readonly string[];
+    readonly eventName?: string;
+    readonly eventNameInputSemantics?: EventNameInputSemantics;
+  },
+): LogicalRelationHandle {
+  const selection = createSemanticScopedSourceSelection({
+    profile: context.scopePlan
+      ? "prepared-scoped-v1"
+      : "direct-event-analytics-v1",
+    filters: context.filters,
+    subject: context.subject,
+    time: context.time,
+    ...(context.scopePlan ? { expectedPlan: context.scopePlan } : {}),
+    ...(input.eventName !== undefined
+      ? {
+          eventName: input.eventName,
+          eventNameInputSemantics:
+            input.eventNameInputSemantics ?? "trimmed-nonempty",
+        }
+      : {}),
+  });
+  return context.builder.source("event", {
+    temporalDomain: "candidate",
+    attributes: input.attributes,
+    selection,
+  });
+}
 
 /** Builds a shared value-only Event Source used by event summaries and trends. */
 export function buildEventReportSource(input: {
@@ -37,39 +107,22 @@ export function buildEventReportSource(input: {
   readonly builder: LogicalPlanBuilder;
   readonly events: LogicalRelationHandle;
 } {
-  const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
-  const subject = createSemanticSubjectDomain({
-    origin: "site",
-    siteIds: [input.siteId as SiteId],
-  });
-  const selection = createSemanticScopedSourceSelection({
-    profile: input.scopePlan
-      ? "prepared-scoped-v1"
-      : "direct-event-analytics-v1",
+  const context = createEventReportSourceContext({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
     filters: input.filters,
-    subject,
-    time,
-    ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
-    ...(input.eventName !== undefined
-      ? {
-          eventName: input.eventName,
-          eventNameInputSemantics:
-            input.eventNameInputSemantics ?? "trimmed-nonempty",
-        }
-      : {}),
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
   });
-  const builder = new LogicalPlanBuilder({
-    subject,
-    time,
-    scope: resolveAnalyticsScope(input.scopePlan?.scope ?? "event"),
-    originOperation: "event-records",
-  });
-  const events = builder.source("event", {
-    temporalDomain: "candidate",
-    attributes: input.attributes,
-    selection,
-  });
-  return { builder, events };
+  return {
+    builder: context.builder,
+    events: addEventReportSource(context, {
+      attributes: input.attributes,
+      ...(input.eventName !== undefined ? { eventName: input.eventName } : {}),
+      ...(input.eventNameInputSemantics
+        ? { eventNameInputSemantics: input.eventNameInputSemantics }
+        : {}),
+    }),
+  };
 }
 
 /** Keep nonblank raw identity counting identical across Event summary/trend plans. */

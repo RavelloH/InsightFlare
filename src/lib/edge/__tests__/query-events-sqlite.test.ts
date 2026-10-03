@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
+import { compileD1Query, lowerLogicalPlan, union } from "@/lib/db";
 import {
   analyticsFilterRegistry,
   attachScopedFilterMetadata,
@@ -10,6 +10,7 @@ import {
   type FilterDocument,
   type FunnelConfigV2,
   normalizeFilterDocument,
+  planObservationFilter,
   prepareScopedQuery,
   type QueryAudience,
   type QueryInput,
@@ -26,6 +27,10 @@ import {
   EVENT_TREND_OUTPUTS,
   type EventTrendPlanInput,
 } from "@/lib/edge/analytics/engine/event-trend-plan";
+import {
+  buildEventTypeOverviewPlan,
+  EVENT_TYPE_OVERVIEW_OUTPUTS,
+} from "@/lib/edge/analytics/engine/event-type-overview-plan";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import {
   buildEventFilteredSourceCte,
@@ -63,6 +68,7 @@ import type { FilterExpression } from "@/lib/filter-contract/filters";
 import { sha256Hex } from "@/lib/sha256";
 
 import { filterFixture } from "./filter-fixtures";
+import { queryLegacyEventTypeOverviewFromD1 } from "./query-events-overview-legacy-oracle";
 
 type Binding = string | number | null;
 type D1Row = Record<string, unknown>;
@@ -99,11 +105,11 @@ function compileTrendOutput(
   );
 }
 
-async function trendPhysicalPlanHash(
+async function compiledPhysicalPlanHash(
   query: ReturnType<typeof compileD1Query>,
 ): Promise<string> {
   const shape = query.physicalPlanShape;
-  if (!shape) throw new Error("wave39_missing_physical_plan_shape");
+  if (!shape) throw new Error("wave41_missing_physical_plan_shape");
   const payload =
     shape.version === 1
       ? JSON.stringify([
@@ -125,6 +131,131 @@ async function trendPhysicalPlanHash(
           shape.jsonRowRelationCount,
         ]);
   return `v${shape.version}:${await sha256Hex(payload)}`;
+}
+
+function compileOverviewOutput(input: {
+  readonly filters: FilterDocument;
+  readonly eventName: string;
+  readonly includeBreakdowns?: boolean;
+}) {
+  const metadata = scopedFilterMetadata(input.filters);
+  const includeBreakdowns = input.includeBreakdowns !== false;
+  const plan = buildEventTypeOverviewPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters: input.filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    eventName: input.eventName,
+    includeBreakdowns,
+    denominatorSource: metadata
+      ? "event-report"
+      : planObservationFilter(input.filters.root).event.kind === "all"
+        ? "raw-event-domain"
+        : "event-report",
+  });
+  const outputIds = [
+    EVENT_TYPE_OVERVIEW_OUTPUTS.summary,
+    ...(includeBreakdowns
+      ? [
+          EVENT_TYPE_OVERVIEW_OUTPUTS.page,
+          EVENT_TYPE_OVERVIEW_OUTPUTS.country,
+          EVENT_TYPE_OVERVIEW_OUTPUTS.device,
+          EVENT_TYPE_OVERVIEW_OUTPUTS.browser,
+        ]
+      : []),
+  ];
+  const outputs = outputIds.map((outputId) => {
+    const output = plan.outputs.find((candidate) => candidate.id === outputId);
+    if (!output) throw new Error(`wave41_missing_overview_output:${outputId}`);
+    return output;
+  });
+  const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+    siteId: plan.context.subject.siteIds[0]!,
+    time: plan.context.time,
+  });
+  const loweredOutputs = lowerer.lowerMany(outputs);
+  const branches = outputs.map((output, index) =>
+    lowerer.projectOutput(
+      loweredOutputs[index]!,
+      output.fields.map(({ name, slot }) => ({ name, slot })),
+    ),
+  );
+  let combined = branches[0]!;
+  for (const branch of branches.slice(1))
+    combined = union(combined, branch, true);
+  return compileD1Query(lowerLogicalPlan(combined), {
+    tag: "wave41.event-type-overview-evidence",
+  });
+}
+
+function sqliteExplainEvidence(
+  database: DatabaseSync,
+  statement: { readonly sql: string; readonly bindings: Binding[] },
+) {
+  const details = (
+    database
+      .prepare(`EXPLAIN QUERY PLAN ${statement.sql}`)
+      .all(...statement.bindings) as Array<{ detail: string }>
+  ).map(({ detail }) => detail);
+  return {
+    steps: details.length,
+    searches: details.filter((detail) => detail.includes("SEARCH ")).length,
+    eventTimeSearches: details.filter((detail) =>
+      detail.includes("idx_custom_events_site_pk_time"),
+    ).length,
+    materializations: details.filter((detail) =>
+      detail.includes("MATERIALIZE "),
+    ).length,
+    temporaryBtrees: details.filter((detail) =>
+      detail.includes("USE TEMP B-TREE"),
+    ).length,
+    indexes: [
+      ...new Set(
+        details.flatMap((detail) => {
+          const match = detail.match(
+            /USING (?:COVERING )?(?:INDEX|INTEGER PRIMARY KEY)(.*)$/u,
+          );
+          return match ? [match[0]] : [];
+        }),
+      ),
+    ],
+  };
+}
+
+async function recordOverviewPhysicalEvidence(
+  label: string,
+  input: {
+    readonly filters: FilterDocument;
+    readonly eventName: string;
+    readonly includeBreakdowns?: boolean;
+  },
+  executed: {
+    readonly current: { readonly sql: string; readonly bindings: Binding[] };
+    readonly legacy: { readonly sql: string; readonly bindings: Binding[] };
+  },
+  database: DatabaseSync,
+): Promise<void> {
+  const compiled = compileOverviewOutput(input);
+  expect(compiled.sql, `${label}:compiled SQL`).toBe(executed.current.sql);
+  expect(compiled.bindings, `${label}:compiled bindings`).toEqual(
+    executed.current.bindings,
+  );
+  console.info(
+    `[Wave41 event-type overview physical evidence] ${JSON.stringify({
+      case: label,
+      new: {
+        sqlUtf8Bytes: new TextEncoder().encode(executed.current.sql).byteLength,
+        bindings: executed.current.bindings.length,
+        physicalPlanHash: await compiledPhysicalPlanHash(compiled),
+        explain: sqliteExplainEvidence(database, executed.current),
+      },
+      frozenLegacy: {
+        sqlUtf8Bytes: new TextEncoder().encode(executed.legacy.sql).byteLength,
+        bindings: executed.legacy.bindings.length,
+        explain: sqliteExplainEvidence(database, executed.legacy),
+      },
+    })}`,
+  );
 }
 
 function eventTrendPlanInput(
@@ -164,7 +295,7 @@ async function recordTrendPhysicalEvidence(
         outputId,
         sqlUtf8Bytes: new TextEncoder().encode(actual.sql).byteLength,
         bindings: actual.bindings.length,
-        physicalPlanHash: await trendPhysicalPlanHash(compiled),
+        physicalPlanHash: await compiledPhysicalPlanHash(compiled),
       };
     }),
   );
@@ -977,6 +1108,25 @@ function preparedEventRecordFilters(
   scopePreference: TruthScope,
 ) {
   return prepareScopedQuery("event-records", {
+    context: siteQueryContext(siteId, "private-dashboard"),
+    time: {
+      range: {
+        startMs: window.startMs,
+        endExclusiveMs: window.endExclusiveMs,
+      },
+      reportingTimeZone: "UTC",
+      capturedAtMs: window.nowMs,
+    },
+    filters,
+    scopePreference,
+  } as QueryInput & { time: QueryTime });
+}
+
+function preparedOverviewFilters(
+  filters: FilterDocument,
+  scopePreference: TruthScope,
+) {
+  return prepareScopedQuery("overview", {
     context: siteQueryContext(siteId, "private-dashboard"),
     time: {
       range: {
@@ -2067,22 +2217,20 @@ describe("event detail D1 SQL", () => {
         (cardPlanDetails.match(/MATERIALIZE filtered_events/g) ?? []).length,
       ).toBe(1);
       const overviewQuery = d1.calls.find(({ sql }) =>
-        sql.includes("overview_card_rows AS"),
+        sql.includes('"scopedEvents"'),
       );
       expect(overviewQuery).toBeDefined();
-      expect(
-        d1.calls.filter(({ sql }) => sql.includes("scoped_summary AS")),
-      ).toHaveLength(1);
       expect((overviewQuery?.sql.match(/UNION ALL/g) ?? []).length).toBe(4);
+      expect(overviewQuery!.bindings.length).toBeLessThanOrEqual(100);
+      expect(
+        new TextEncoder().encode(overviewQuery!.sql).byteLength,
+      ).toBeLessThanOrEqual(100_000);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${overviewQuery?.sql ?? "SELECT 1"}`)
         .all(...(overviewQuery?.bindings ?? [])) as Array<{ detail: string }>;
       const planDetails = plan.map((row) => row.detail).join("\n");
-      expect(planDetails).toContain("MATERIALIZE filtered_events");
-      expect(planDetails).toContain("idx_custom_events_site_pk_name_time");
+      expect(planDetails).toContain("MATERIALIZE _d1_shared_");
       expect(planDetails).toContain("idx_custom_events_site_pk_time");
-      expect(planDetails.match(/SEARCH v /g) ?? []).toHaveLength(1);
-      expect(overviewQuery?.sql).not.toContain("scoped_event_source AS");
 
       const entryExitPlan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
@@ -2667,6 +2815,372 @@ describe("event detail D1 SQL", () => {
     }
   });
 
+  it("matches the frozen overview oracle across direct and prepared scopes", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const preparedEvent = preparedOverviewFilters(
+      filterFixture({ path: "/posts/minecraft-meteor-guide" }),
+      "event",
+    );
+    const preparedVisitor = preparedOverviewFilters(
+      filterFixture({ path: "/posts/minecraft-meteor-guide" }),
+      "visitor",
+    );
+    const cases = [
+      {
+        label: "direct-plain",
+        filters: EMPTY_FILTER_DOCUMENT,
+        eventName,
+        includeBreakdowns: true,
+      },
+      {
+        label: "direct-filtered",
+        filters: filterFixture({ path: "/posts/minecraft-meteor-guide" }),
+        eventName,
+        includeBreakdowns: true,
+      },
+      {
+        label: "prepared-observation",
+        filters: preparedEvent.filters!,
+        eventName,
+        includeBreakdowns: true,
+      },
+      {
+        label: "prepared-visitor-entity",
+        filters: preparedVisitor.filters!,
+        eventName,
+        includeBreakdowns: true,
+      },
+      {
+        label: "prepared-empty-name",
+        filters: preparedEvent.filters!,
+        eventName: "",
+        includeBreakdowns: true,
+      },
+      {
+        label: "direct-empty-name",
+        filters: EMPTY_FILTER_DOCUMENT,
+        eventName: "",
+        includeBreakdowns: true,
+      },
+      {
+        label: "breakdowns-disabled",
+        filters: EMPTY_FILTER_DOCUMENT,
+        eventName,
+        includeBreakdowns: false,
+      },
+    ] as const;
+
+    try {
+      for (const testCase of cases) {
+        const before = d1.calls.length;
+        const options = { includeBreakdowns: testCase.includeBreakdowns };
+        const actual = await queryEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          testCase.filters,
+          testCase.eventName,
+          options,
+        );
+        const actualQuery = d1.calls[before];
+        const expected = await queryLegacyEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          testCase.filters,
+          testCase.eventName,
+          options,
+        );
+        const legacyQuery = d1.calls[before + 1];
+
+        expect(actual, testCase.label).toEqual(expected);
+        expect(
+          actualQuery,
+          `${testCase.label}:one typed statement`,
+        ).toBeDefined();
+        expect(
+          legacyQuery,
+          `${testCase.label}:one legacy statement`,
+        ).toBeDefined();
+        expect(d1.calls).toHaveLength(before + 2);
+        for (const query of [actualQuery!, legacyQuery!]) {
+          expect(query.bindings.length, testCase.label).toBeLessThanOrEqual(
+            100,
+          );
+          expect(
+            new TextEncoder().encode(query.sql).byteLength,
+            testCase.label,
+          ).toBeLessThan(100_000);
+        }
+        if (
+          testCase.label === "direct-plain" ||
+          testCase.label === "direct-filtered"
+        ) {
+          await recordOverviewPhysicalEvidence(
+            testCase.label,
+            testCase,
+            { current: actualQuery!, legacy: legacyQuery! },
+            d1.database,
+          );
+        }
+      }
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("preserves raw, empty, and prepared event-name gates", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    d1.database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+      )
+      .run(200, siteId, "   ");
+    d1.database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+      )
+      .run(201, siteId, " outbound_click ");
+    const insert = d1.database.prepare(
+      "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    insert.run(
+      200,
+      "event-blank-name",
+      siteId,
+      "visit-1",
+      200,
+      eventTime,
+      eventTime,
+      3,
+      1,
+      1,
+      null,
+    );
+    insert.run(
+      201,
+      "event-padded-name",
+      siteId,
+      "visit-1",
+      201,
+      eventTime,
+      eventTime,
+      4,
+      1,
+      1,
+      null,
+    );
+    const prepared = preparedOverviewFilters(EMPTY_FILTER_DOCUMENT, "event");
+
+    try {
+      const scenarios = [
+        { filters: EMPTY_FILTER_DOCUMENT, eventName: "" },
+        { filters: EMPTY_FILTER_DOCUMENT, eventName: " outbound_click " },
+        { filters: prepared.filters!, eventName: "" },
+        { filters: prepared.filters!, eventName: " outbound_click " },
+      ] as const;
+      for (const scenario of scenarios) {
+        const actual = await queryEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          scenario.filters,
+          scenario.eventName,
+        );
+        const expected = await queryLegacyEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          scenario.filters,
+          scenario.eventName,
+        );
+        expect(actual).toEqual(expected);
+      }
+
+      expect(
+        await queryEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          "",
+        ),
+      ).toMatchObject({ summary: { events: 4, eventTypes: 4 } });
+      expect(
+        await queryEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          prepared.filters!,
+          "",
+        ),
+      ).toMatchObject({ summary: { events: 1, eventTypes: 1 } });
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps the raw no-filter denominator and 128-identity prepared budget", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    d1.database
+      .prepare(
+        "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        300,
+        "event-without-owner-or-name-row",
+        siteId,
+        "missing-visit",
+        9999,
+        eventTime,
+        eventTime,
+        5,
+        1,
+        1,
+        null,
+      );
+    const overviewIdentityIds = [
+      "event-1",
+      ...Array.from({ length: 127 }, (_, index) => `event-advanced-${index}`),
+    ];
+    const advancedEvents = d1.database.prepare(
+      "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    overviewIdentityIds
+      .slice(1)
+      .forEach((id, index) =>
+        advancedEvents.run(
+          1000 + index,
+          id,
+          siteId,
+          "visit-1",
+          1,
+          eventTime,
+          eventTime,
+          10 + index,
+          1,
+          1,
+          null,
+        ),
+      );
+
+    try {
+      const rawActual = await queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        eventName,
+        { includeBreakdowns: false },
+      );
+      const rawExpected = await queryLegacyEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        eventName,
+        { includeBreakdowns: false },
+      );
+      expect(rawActual).toEqual(rawExpected);
+      expect(rawActual.summary.shareOfAllEvents).toBe(128 / 130);
+
+      const prepared = preparedEventRecordFilters(
+        EMPTY_FILTER_DOCUMENT,
+        "event",
+      );
+      const metadata = scopedFilterMetadata(prepared.filters!)!;
+      const identityFilters = attachScopedFilterMetadata(prepared.filters!, {
+        ...metadata,
+        plan: {
+          ...prepared.scopePlan!,
+          advancedMatches: {
+            eventIds: [...overviewIdentityIds.map((id) => ({ siteId, id }))],
+          },
+        },
+      });
+      const identityStart = d1.calls.length;
+      const identityActual = await queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        identityFilters,
+        eventName,
+        { includeBreakdowns: false },
+      );
+      const identityQuery = d1.calls[identityStart];
+      let legacyIdentityBindings = 0;
+      let legacyIdentityStatement:
+        { sql: string; bindings: Binding[] } | undefined;
+      const identityExpected = await queryLegacyEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        identityFilters,
+        eventName,
+        { includeBreakdowns: false },
+        async (sql, bindings) => {
+          legacyIdentityBindings = bindings.length;
+          legacyIdentityStatement = { sql, bindings: [...bindings] };
+          return d1.database.prepare(sql).all(...bindings) as never;
+        },
+      );
+      expect(identityActual).toEqual(identityExpected);
+      expect(legacyIdentityBindings).toBeGreaterThan(100);
+      expect(identityActual.summary).toMatchObject({
+        events: 128,
+        eventTypes: 1,
+        shareOfAllEvents: 1,
+      });
+      expect(d1.calls).toHaveLength(identityStart + 1);
+      expect(identityQuery?.bindings.length).toBeLessThanOrEqual(100);
+      expect(
+        new TextEncoder().encode(identityQuery!.sql).byteLength,
+      ).toBeLessThan(100_000);
+      expect(legacyIdentityStatement).toBeDefined();
+      await recordOverviewPhysicalEvidence(
+        "prepared-advanced-128-identities",
+        { filters: identityFilters, eventName, includeBreakdowns: false },
+        { current: identityQuery!, legacy: legacyIdentityStatement! },
+        d1.database,
+      );
+
+      const emptyIdentities = attachScopedFilterMetadata(prepared.filters!, {
+        ...metadata,
+        plan: {
+          ...prepared.scopePlan!,
+          advancedMatches: { eventIds: [] },
+        },
+      });
+      const emptyStart = d1.calls.length;
+      const emptyActual = await queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        emptyIdentities,
+        eventName,
+        { includeBreakdowns: false },
+      );
+      const emptyQuery = d1.calls[emptyStart];
+      const emptyExpected = await queryLegacyEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        emptyIdentities,
+        eventName,
+        { includeBreakdowns: false },
+      );
+      expect(emptyActual).toEqual(emptyExpected);
+      expect(emptyActual.summary).toMatchObject({
+        events: 0,
+        shareOfAllEvents: 0,
+      });
+      expect(d1.calls).toHaveLength(emptyStart + 2);
+      expect(emptyQuery?.bindings.length).toBeLessThanOrEqual(100);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("keeps the scoped event source when overview filters affect share metrics", async () => {
     const { env, d1 } = createSqliteEventEnv();
 
@@ -2681,8 +3195,10 @@ describe("event detail D1 SQL", () => {
       );
 
       const query = d1.calls.at(-1);
-      expect(query?.sql).toContain("scoped_event_source AS");
-      expect(query?.sql).toContain("TRIM(COALESCE(es.pathname, '')) = ?");
+      expect(query?.sql).toContain('"scopedEvents"');
+      expect(query?.bindings).toEqual(
+        expect.arrayContaining(["/posts/minecraft-meteor-guide"]),
+      );
     } finally {
       d1.close();
     }

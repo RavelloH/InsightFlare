@@ -185,6 +185,35 @@ describe("semantic scoped source selection", () => {
     });
   });
 
+  it("keeps an explicitly defined empty prepared Event name as a gate", () => {
+    const prepared = preparedSelectionInput();
+    expect(
+      createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: TIME,
+        expectedPlan: prepared.plan,
+        eventName: "",
+        eventNameInputSemantics: "defined-raw-value",
+      }).eventNameGate,
+    ).toEqual({
+      value: "",
+      semantics: "prepared-defined-raw-value-v1",
+    });
+
+    expect(
+      createSemanticScopedSourceSelection({
+        profile: "direct-event-analytics-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        subject: SUBJECT,
+        time: TIME,
+        eventName: "",
+        eventNameInputSemantics: "defined-raw-value",
+      }).eventNameGate,
+    ).toBeUndefined();
+  });
+
   it("rejects malformed descriptors and mismatched logical context", () => {
     const direct = directSelection();
     const context = { subject: SUBJECT, time: TIME };

@@ -43,7 +43,9 @@ export interface SemanticPreparedMatches {
 export interface SemanticEventNameGate {
   readonly value: string;
   readonly semantics:
-    "prepared-trimmed-label-v1" | "direct-subject-local-exact-name-v1";
+    | "prepared-trimmed-label-v1"
+    | "prepared-defined-raw-value-v1"
+    | "direct-subject-local-exact-name-v1";
 }
 
 /**
@@ -74,7 +76,8 @@ export interface CreateSemanticScopedSourceSelectionInput {
   readonly expectedPlan?: ScopedFilterPlan;
   readonly eventName?: string;
   /** Event analytics preserves the legacy truthy raw value; record detail trims. */
-  readonly eventNameInputSemantics?: "trimmed-nonempty" | "legacy-truthy-raw";
+  readonly eventNameInputSemantics?:
+    "trimmed-nonempty" | "legacy-truthy-raw" | "defined-raw-value";
 }
 
 function fail(reason: string): never {
@@ -287,22 +290,34 @@ export function createSemanticScopedSourceSelection(
   if (
     input.eventNameInputSemantics !== undefined &&
     input.eventNameInputSemantics !== "trimmed-nonempty" &&
-    input.eventNameInputSemantics !== "legacy-truthy-raw"
+    input.eventNameInputSemantics !== "legacy-truthy-raw" &&
+    input.eventNameInputSemantics !== "defined-raw-value"
   )
     return fail("invalid_event_name_input_semantics");
+  const eventNameSemantics =
+    input.eventNameInputSemantics ?? "trimmed-nonempty";
   const normalizedEventName =
-    input.eventNameInputSemantics === "legacy-truthy-raw"
-      ? input.eventName || undefined
-      : input.eventName?.trim() || undefined;
-  const eventNameGate = normalizedEventName
-    ? {
-        value: normalizedEventName,
-        semantics:
-          input.profile === "prepared-scoped-v1"
-            ? ("prepared-trimmed-label-v1" as const)
-            : ("direct-subject-local-exact-name-v1" as const),
-      }
-    : undefined;
+    eventNameSemantics === "trimmed-nonempty"
+      ? input.eventName?.trim() || undefined
+      : input.eventName || undefined;
+  const shouldGateDefinedRawValue =
+    eventNameSemantics === "defined-raw-value" &&
+    input.profile === "prepared-scoped-v1" &&
+    input.eventName !== undefined;
+  const eventNameGate =
+    normalizedEventName || shouldGateDefinedRawValue
+      ? {
+          value: shouldGateDefinedRawValue
+            ? input.eventName!
+            : normalizedEventName!,
+          semantics:
+            input.profile === "prepared-scoped-v1"
+              ? shouldGateDefinedRawValue
+                ? ("prepared-defined-raw-value-v1" as const)
+                : ("prepared-trimmed-label-v1" as const)
+              : ("direct-subject-local-exact-name-v1" as const),
+        }
+      : undefined;
 
   return deepFreeze({
     version: 1 as const,
@@ -386,14 +401,18 @@ export function validateSemanticScopedSourceSelection(
     (selection.entityKind === "session" || selection.entityKind === "visitor")
   )
     fail("invalid_entity_kind");
-  if (
-    selection.eventNameGate &&
-    selection.eventNameGate.semantics !==
-      (selection.profile === "prepared-scoped-v1"
-        ? "prepared-trimmed-label-v1"
-        : "direct-subject-local-exact-name-v1")
-  )
-    fail("event_name_profile_mismatch");
+  if (selection.eventNameGate) {
+    if (typeof selection.eventNameGate.value !== "string")
+      fail("invalid_event_name_gate_value");
+    if (
+      selection.profile === "prepared-scoped-v1"
+        ? selection.eventNameGate.semantics !== "prepared-trimmed-label-v1" &&
+          selection.eventNameGate.semantics !== "prepared-defined-raw-value-v1"
+        : selection.eventNameGate.semantics !==
+          "direct-subject-local-exact-name-v1"
+    )
+      fail("event_name_profile_mismatch");
+  }
   for (const identity of selection.preparedMatches?.identities ?? []) {
     if (
       !identity ||
