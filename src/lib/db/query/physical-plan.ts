@@ -6,6 +6,8 @@ import type {
   SqlExpression,
 } from "./expression";
 import type {
+  FilterNode,
+  JoinNode,
   LogicalQueryNode,
   OutputField,
   ProjectNode,
@@ -40,6 +42,7 @@ export interface PhysicalMembershipOptimization {
   readonly selectedBindingCount: number;
   readonly strategies: readonly PhysicalMembershipStrategy[];
   readonly rowStrategies?: readonly PhysicalTextRowStrategy[];
+  readonly tupleMemberships?: readonly PositiveTupleMembershipCandidate[];
 }
 
 export interface PhysicalMembershipOptimizationFacts {
@@ -66,6 +69,17 @@ export interface PhysicalTextRowStrategy {
   readonly nativeBindingsSaved: number;
 }
 
+/** A left-only Project over an exactly-keyed, finite positive Join. */
+export interface PositiveTupleMembershipCandidate {
+  readonly project: ProjectNode;
+  readonly join: JoinNode;
+  readonly valuesRelation: ValuesRelationNode;
+  /** Left Join input indexes, in the corresponding RHS output-key order. */
+  readonly leftKeyIndexes: readonly number[];
+  /** Complete RHS output-key indexes, in tuple comparison order. */
+  readonly rightKeyIndexes: readonly number[];
+}
+
 export interface SharedRelationDefinition {
   readonly name: string;
   readonly node: LogicalQueryNode;
@@ -84,6 +98,20 @@ export interface DirectScanProjectionChoice {
   readonly sqlColumnNames: readonly string[];
 }
 
+/** A parent Project may skip a pure column-only Project whose scope it does not read. */
+export interface PassthroughProjectFusion {
+  readonly project: ProjectNode;
+  readonly input: QuerySource;
+}
+
+/** Join outputs needed by a filter whose only visible projection is constant. */
+export interface ConstantFilterJoinProjection {
+  readonly project: ProjectNode;
+  readonly filter: FilterNode;
+  readonly join: JoinNode;
+  readonly referencedOutputColumns: readonly number[];
+}
+
 export interface PhysicalQueryPlan<
   Row extends object = Record<string, unknown>,
 > {
@@ -94,6 +122,12 @@ export interface PhysicalQueryPlan<
   readonly sharedRelations: readonly SharedRelationDefinition[];
   /** Safe Project(Scan) column selections chosen by the physical planner. */
   readonly directScanProjections: readonly DirectScanProjectionChoice[];
+  /** Safe parent Projects that can bypass an unused pure passthrough Project. */
+  readonly passthroughProjectFusions: readonly PassthroughProjectFusion[];
+  /** Safe sparse Join outputs for constant Project(Filter(Join)) shapes. */
+  readonly constantFilterJoinProjections: readonly ConstantFilterJoinProjection[];
+  /** Canonical structural candidates; enabled only when the RHS rows are packed. */
+  readonly positiveTupleMembershipCandidates: readonly PositiveTupleMembershipCandidate[];
   /** Backend physical choice, populated after final-shape cost analysis. */
   readonly membershipOptimization?: PhysicalMembershipOptimization;
   readonly __rowType?: Row;
@@ -339,6 +373,14 @@ export function optimizePhysicalMembershipBudget<Row extends object>(
       nativeBindingsSaved,
     };
   });
+  const packedRows = new Set(
+    rowStrategies
+      .filter((strategy) => strategy.strategy === "json-rows")
+      .map((strategy) => strategy.node),
+  );
+  const tupleMemberships = (
+    plan.positiveTupleMembershipCandidates ?? []
+  ).filter((candidate) => packedRows.has(candidate.valuesRelation));
 
   return {
     ...plan,
@@ -347,6 +389,7 @@ export function optimizePhysicalMembershipBudget<Row extends object>(
       selectedBindingCount: remaining,
       strategies,
       rowStrategies,
+      tupleMemberships,
     },
   };
 }
@@ -357,6 +400,8 @@ export function hasSamePhysicalMembershipOptimization(
 ): boolean {
   const actualRowStrategies = actual?.rowStrategies ?? [];
   const expectedRowStrategies = expected.rowStrategies ?? [];
+  const actualTupleMemberships = actual?.tupleMemberships ?? [];
+  const expectedTupleMemberships = expected.tupleMemberships ?? [];
   if (
     !actual ||
     actual.nativeBindingCount !== expected.nativeBindingCount ||
@@ -364,7 +409,9 @@ export function hasSamePhysicalMembershipOptimization(
     !Array.isArray(actual.strategies) ||
     actual.strategies.length !== expected.strategies.length ||
     !Array.isArray(actualRowStrategies) ||
-    actualRowStrategies.length !== expectedRowStrategies.length
+    actualRowStrategies.length !== expectedRowStrategies.length ||
+    !Array.isArray(actualTupleMemberships) ||
+    actualTupleMemberships.length !== expectedTupleMemberships.length
   )
     return false;
   return (
@@ -405,6 +452,26 @@ export function hasSamePhysicalMembershipOptimization(
               segment.jsonUtf8Bytes === expectedSegment.jsonUtf8Bytes
             );
           },
+        )
+      );
+    }) &&
+    actualTupleMemberships.every((item, index) => {
+      const canonical = expectedTupleMemberships[index];
+      return (
+        !!item &&
+        !!canonical &&
+        item.project === canonical.project &&
+        item.join === canonical.join &&
+        item.valuesRelation === canonical.valuesRelation &&
+        item.leftKeyIndexes.length === canonical.leftKeyIndexes.length &&
+        item.leftKeyIndexes.every(
+          (column: number, columnIndex: number) =>
+            column === canonical.leftKeyIndexes[columnIndex],
+        ) &&
+        item.rightKeyIndexes.length === canonical.rightKeyIndexes.length &&
+        item.rightKeyIndexes.every(
+          (column: number, columnIndex: number) =>
+            column === canonical.rightKeyIndexes[columnIndex],
         )
       );
     })
@@ -598,6 +665,789 @@ function sameDirectScanProjectionChoices(
         choice.sqlColumnNames.length === canonical.sqlColumnNames.length &&
         choice.sqlColumnNames.every(
           (name, columnIndex) => name === canonical.sqlColumnNames[columnIndex],
+        )
+      );
+    })
+  );
+}
+
+function expressionReferencesScope(
+  expression: SqlExpression,
+  target: RelationScope,
+  visitedNodes: Set<LogicalQueryNode>,
+): boolean {
+  const inspectNode = (node: LogicalQueryNode): boolean => {
+    if (visitedNodes.has(node)) return false;
+    visitedNodes.add(node);
+    return (
+      nodeExpressions(node).some((child) =>
+        expressionReferencesScope(child, target, visitedNodes),
+      ) || nodeChildren(node).some((source) => inspectNode(source.node))
+    );
+  };
+  const inspect = (current: SqlExpression): boolean => {
+    if (current.kind === "column" && current.scope === target) return true;
+    switch (current.kind) {
+      case "binary":
+      case "distinct-from":
+        if (inspect(current.left) || inspect(current.right)) return true;
+        break;
+      case "boolean":
+        if (current.expressions.some(inspect)) return true;
+        break;
+      case "not":
+      case "null-check":
+      case "cast-integer":
+      case "cast-text":
+      case "in-list":
+        if (inspect(current.expression)) return true;
+        break;
+      case "text-position":
+        if (inspect(current.text) || inspect(current.needle)) return true;
+        break;
+      case "text-substring":
+        if (
+          inspect(current.text) ||
+          inspect(current.start) ||
+          (current.length && inspect(current.length))
+        )
+          return true;
+        break;
+      case "text-like":
+        if (inspect(current.text) || inspect(current.pattern)) return true;
+        break;
+      case "in-subquery":
+        if (inspect(current.expression)) return true;
+        break;
+      case "function":
+        if (current.arguments.some(inspect)) return true;
+        break;
+      case "aggregate":
+        if (current.expression && inspect(current.expression)) return true;
+        break;
+      case "coalesce":
+        if (current.expressions.some(inspect)) return true;
+        break;
+      case "case":
+        if (
+          current.branches.some(
+            (branch) => inspect(branch.when) || inspect(branch.then),
+          ) ||
+          (current.else && inspect(current.else))
+        )
+          return true;
+        break;
+      case "scalar-subquery":
+        break;
+      case "column":
+      case "parameter":
+      case "excluded":
+      case "unixepoch":
+      case "constant":
+        break;
+    }
+    return expressionSources(current).some((source) =>
+      inspectNode(source.node),
+    );
+  };
+  return inspect(expression);
+}
+
+function passthroughProjectFusions(
+  root: LogicalQueryNode,
+  sharedNodes: ReadonlySet<LogicalQueryNode>,
+): readonly PassthroughProjectFusion[] {
+  const postorder: LogicalQueryNode[] = [];
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const source of nodeSources(node)) visit(source.node);
+    postorder.push(node);
+  };
+  visit(root);
+
+  const choices: PassthroughProjectFusion[] = [];
+  for (const node of postorder) {
+    if (node.kind !== "project" || node.input.node.kind !== "project") continue;
+    const passthrough = node.input.node;
+    // This is the relational identity Project(parent, Project(columns, R))
+    // = Project(parent, R) only when the inner Project has no computed values
+    // and the parent does not read its scope. Keep shared nodes intact so
+    // bypassing one reference cannot change CTE reuse/evaluation behavior.
+    if (
+      passthrough.input.node.kind === "scan" ||
+      sharedNodes.has(passthrough) ||
+      !passthrough.projections.every(
+        ({ expression }) =>
+          expression.kind === "column" &&
+          expression.scope === passthrough.input.scope &&
+          Number.isInteger(expression.index) &&
+          expression.index >= 0 &&
+          expression.index < passthrough.input.fields.length,
+      ) ||
+      node.projections.some(({ expression }) =>
+        expressionReferencesScope(expression, passthrough.scope, new Set()),
+      )
+    )
+      continue;
+    choices.push({ project: node, input: passthrough.input });
+  }
+  return choices;
+}
+
+function samePassthroughProjectFusions(
+  actual: readonly PassthroughProjectFusion[],
+  expected: readonly PassthroughProjectFusion[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((choice, index) => {
+      const canonical = expected[index];
+      return (
+        !!canonical &&
+        choice.project === canonical.project &&
+        choice.input.node === canonical.input.node &&
+        choice.input.scope === canonical.input.scope &&
+        sameFields(choice.input.fields, canonical.input.fields)
+      );
+    })
+  );
+}
+
+function expressionColumnIndexes(
+  expression: SqlExpression,
+  target: RelationScope,
+): readonly number[] | undefined {
+  const indexes = new Set<number>();
+  const visit = (current: SqlExpression): boolean => {
+    switch (current.kind) {
+      case "column":
+        if (current.scope === target) indexes.add(current.index);
+        return true;
+      case "binary":
+      case "distinct-from":
+        return visit(current.left) && visit(current.right);
+      case "boolean":
+        return current.expressions.every(visit);
+      case "not":
+      case "null-check":
+      case "cast-integer":
+      case "cast-text":
+      case "in-list":
+        return visit(current.expression);
+      case "text-position":
+        return visit(current.text) && visit(current.needle);
+      case "text-substring":
+        return (
+          visit(current.text) &&
+          visit(current.start) &&
+          (!current.length || visit(current.length))
+        );
+      case "text-like":
+        return visit(current.text) && visit(current.pattern);
+      case "function":
+        return current.arguments.every(visit);
+      case "aggregate":
+        return !current.expression || visit(current.expression);
+      case "coalesce":
+        return current.expressions.every(visit);
+      case "case":
+        return (
+          current.branches.every(
+            (branch) => visit(branch.when) && visit(branch.then),
+          ) &&
+          (!current.else || visit(current.else))
+        );
+      // Query expressions may refer to the Join output from a correlated
+      // subquery, so this narrow projection rule leaves them untouched.
+      case "in-subquery":
+      case "scalar-subquery":
+        return false;
+      case "parameter":
+      case "excluded":
+      case "unixepoch":
+      case "constant":
+        return true;
+    }
+  };
+  return visit(expression)
+    ? [...indexes].sort((left, right) => left - right)
+    : undefined;
+}
+
+function incomingNodeCounts(
+  root: LogicalQueryNode,
+): Map<LogicalQueryNode, number> {
+  const incoming = new Map<LogicalQueryNode, number>([[root, 1]]);
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const source of nodeSources(node)) {
+      incoming.set(source.node, (incoming.get(source.node) ?? 0) + 1);
+      visit(source.node);
+    }
+  };
+  visit(root);
+  return incoming;
+}
+
+function directColumnIndex(
+  expression: SqlExpression,
+  scope: RelationScope,
+): number | undefined {
+  return expression.kind === "column" && expression.scope === scope
+    ? expression.index
+    : undefined;
+}
+
+function expressionUsesOnlyScope(
+  expression: SqlExpression,
+  scope: RelationScope,
+): boolean {
+  switch (expression.kind) {
+    case "column":
+      return expression.scope === scope;
+    case "binary":
+    case "distinct-from":
+      return (
+        expressionUsesOnlyScope(expression.left, scope) &&
+        expressionUsesOnlyScope(expression.right, scope)
+      );
+    case "boolean":
+      return expression.expressions.every((item) =>
+        expressionUsesOnlyScope(item, scope),
+      );
+    case "not":
+    case "null-check":
+    case "cast-integer":
+    case "cast-text":
+    case "in-list":
+      return expressionUsesOnlyScope(expression.expression, scope);
+    case "text-position":
+      return (
+        expressionUsesOnlyScope(expression.text, scope) &&
+        expressionUsesOnlyScope(expression.needle, scope)
+      );
+    case "text-substring":
+      return (
+        expressionUsesOnlyScope(expression.text, scope) &&
+        expressionUsesOnlyScope(expression.start, scope) &&
+        (!expression.length ||
+          expressionUsesOnlyScope(expression.length, scope))
+      );
+    case "text-like":
+      return (
+        expressionUsesOnlyScope(expression.text, scope) &&
+        expressionUsesOnlyScope(expression.pattern, scope)
+      );
+    case "function":
+      return expression.arguments.every((item) =>
+        expressionUsesOnlyScope(item, scope),
+      );
+    case "aggregate":
+      return (
+        !expression.expression ||
+        expressionUsesOnlyScope(expression.expression, scope)
+      );
+    case "coalesce":
+      return expression.expressions.every((item) =>
+        expressionUsesOnlyScope(item, scope),
+      );
+    case "case":
+      return (
+        expression.branches.every(
+          (branch) =>
+            expressionUsesOnlyScope(branch.when, scope) &&
+            expressionUsesOnlyScope(branch.then, scope),
+        ) &&
+        (!expression.else || expressionUsesOnlyScope(expression.else, scope))
+      );
+    case "in-subquery":
+    case "scalar-subquery":
+      return false;
+    case "parameter":
+    case "excluded":
+    case "unixepoch":
+    case "constant":
+      return true;
+  }
+}
+
+function equalityPairs(
+  expression: SqlExpression,
+  leftScope: RelationScope,
+  rightScope: RelationScope,
+): { readonly left: number; readonly right: number }[] | undefined {
+  if (
+    expression.kind === "boolean" &&
+    expression.operator === "AND" &&
+    expression.expressions.length > 0
+  ) {
+    const pairs: { readonly left: number; readonly right: number }[] = [];
+    for (const child of expression.expressions) {
+      const nested = equalityPairs(child, leftScope, rightScope);
+      if (!nested) return undefined;
+      pairs.push(...nested);
+    }
+    return pairs;
+  }
+  if (expression.kind !== "binary" || expression.operator !== "=")
+    return undefined;
+  const leftIndex = directColumnIndex(expression.left, leftScope);
+  const rightIndex = directColumnIndex(expression.right, rightScope);
+  return leftIndex === undefined || rightIndex === undefined
+    ? undefined
+    : [{ left: leftIndex, right: rightIndex }];
+}
+
+function safeFinitePredicate(expression: SqlExpression): boolean {
+  switch (expression.kind) {
+    case "binary":
+      return (
+        ["=", "<>", ">", ">=", "<", "<="].includes(expression.operator) &&
+        (expression.left.kind === "column" ||
+          expression.left.kind === "parameter" ||
+          expression.left.kind === "constant") &&
+        (expression.right.kind === "column" ||
+          expression.right.kind === "parameter" ||
+          expression.right.kind === "constant")
+      );
+    case "boolean":
+      return (
+        expression.operator === "AND" &&
+        expression.expressions.length > 0 &&
+        expression.expressions.every(safeFinitePredicate)
+      );
+    case "in-list":
+      return (
+        expression.expression.kind === "column" &&
+        Array.isArray(expression.values) &&
+        Reflect.ownKeys(expression.values).length ===
+          expression.values.length + 1 &&
+        expression.values.every(
+          (value, index) =>
+            Object.prototype.hasOwnProperty.call(expression.values, index) &&
+            (value === null ||
+              typeof value === "string" ||
+              typeof value === "number" ||
+              typeof value === "boolean"),
+        )
+      );
+    case "column":
+    case "parameter":
+    case "constant":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function safeEqualityCondition(
+  expression: SqlExpression,
+  leftScope: RelationScope,
+  rightScope: RelationScope,
+  leftFields: readonly OutputField[],
+  rightFields: readonly OutputField[],
+): boolean {
+  const pairs = equalityPairs(expression, leftScope, rightScope);
+  return (
+    !!pairs &&
+    pairs.length > 0 &&
+    pairs.every(
+      ({ left, right }) =>
+        left >= 0 &&
+        left < leftFields.length &&
+        right >= 0 &&
+        right < rightFields.length,
+    )
+  );
+}
+
+/**
+ * Shared inputs remain CTE references; inspect only to prove they are pure,
+ * local, read-only generated-schema lookups before treating them as a boundary.
+ */
+function isSafeSharedLookup(root: LogicalQueryNode): boolean {
+  const visited = new Set<LogicalQueryNode>();
+  let hasGeneratedScan = false;
+  const visit = (node: LogicalQueryNode): boolean => {
+    if (visited.has(node)) return true;
+    visited.add(node);
+    switch (node.kind) {
+      case "scan":
+        hasGeneratedScan = true;
+        return true;
+      case "filter":
+        return (
+          safeFinitePredicate(node.predicate) &&
+          expressionUsesOnlyScope(node.predicate, node.input.scope) &&
+          visit(node.input.node)
+        );
+      case "project":
+        return (
+          node.projections.every(({ expression }) => {
+            const index = directColumnIndex(expression, node.input.scope);
+            return (
+              index !== undefined &&
+              index >= 0 &&
+              index < node.input.fields.length
+            );
+          }) && visit(node.input.node)
+        );
+      case "join":
+        return (
+          node.joinType === "inner" &&
+          safeEqualityCondition(
+            node.condition,
+            node.left.scope,
+            node.right.scope,
+            node.left.fields,
+            node.right.fields,
+          ) &&
+          visit(node.left.node) &&
+          visit(node.right.node)
+        );
+      default:
+        return false;
+    }
+  };
+  return visit(root) && hasGeneratedScan;
+}
+
+/**
+ * The current generated catalog and ValuesRelation have only default BINARY
+ * columns; the validated expression algebra has no COLLATE or raw-SQL node.
+ * Trace direct fields only, so future/unknown computed sources opt out.
+ */
+function hasKnownBinaryColumnSource(
+  source: QuerySource,
+  index: number,
+  visited = new Set<LogicalQueryNode>(),
+): boolean {
+  if (index < 0 || index >= source.fields.length || visited.has(source.node))
+    return false;
+  const node = source.node;
+  visited.add(node);
+  switch (node.kind) {
+    case "scan":
+    case "values-relation":
+      return true;
+    case "filter":
+    case "distinct":
+      return hasKnownBinaryColumnSource(node.input, index, visited);
+    case "project": {
+      const inputIndex = directColumnIndex(
+        node.projections[index]!.expression,
+        node.input.scope,
+      );
+      return (
+        inputIndex !== undefined &&
+        hasKnownBinaryColumnSource(node.input, inputIndex, visited)
+      );
+    }
+    case "join": {
+      if (index < node.left.fields.length)
+        return hasKnownBinaryColumnSource(node.left, index, visited);
+      return hasKnownBinaryColumnSource(
+        node.right,
+        index - node.left.fields.length,
+        visited,
+      );
+    }
+    default:
+      return false;
+  }
+}
+
+function hasSafeFiniteValuesAncestor(
+  root: QuerySource,
+  incoming: ReadonlyMap<LogicalQueryNode, number>,
+  sharedNodes: ReadonlySet<LogicalQueryNode>,
+): ValuesRelationNode | undefined {
+  const visited = new Set<LogicalQueryNode>();
+  const values = new Set<ValuesRelationNode>();
+  const visit = (node: LogicalQueryNode): boolean => {
+    const incomingCount = incoming.get(node) ?? 0;
+    // A repeated CTE reference and a repeated non-CTE DAG node are both
+    // boundaries only after proving the complete subtree is a safe lookup.
+    if (sharedNodes.has(node) || incomingCount > 1)
+      return incomingCount > 1 && isSafeSharedLookup(node);
+    if (visited.has(node) || incomingCount !== 1) return false;
+    visited.add(node);
+    switch (node.kind) {
+      case "values-relation":
+        values.add(node);
+        return true;
+      case "scan":
+        return true;
+      case "filter":
+        return (
+          safeFinitePredicate(node.predicate) &&
+          expressionUsesOnlyScope(node.predicate, node.input.scope) &&
+          visit(node.input.node)
+        );
+      case "project":
+        return (
+          node.projections.every(
+            ({ expression }) =>
+              expression.kind === "column" &&
+              expression.scope === node.input.scope,
+          ) && visit(node.input.node)
+        );
+      case "join":
+        return (
+          node.joinType === "inner" &&
+          safeEqualityCondition(
+            node.condition,
+            node.left.scope,
+            node.right.scope,
+            node.left.fields,
+            node.right.fields,
+          ) &&
+          visit(node.left.node) &&
+          visit(node.right.node)
+        );
+      default:
+        return false;
+    }
+  };
+  return visit(root.node) && values.size === 1
+    ? values.values().next().value
+    : undefined;
+}
+
+function positiveTupleMembershipCandidates(
+  root: LogicalQueryNode,
+  sharedNodes: ReadonlySet<LogicalQueryNode>,
+): readonly PositiveTupleMembershipCandidate[] {
+  const incoming = incomingNodeCounts(root);
+  const postorder: LogicalQueryNode[] = [];
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const source of nodeSources(node)) visit(source.node);
+    postorder.push(node);
+  };
+  visit(root);
+
+  const candidates: PositiveTupleMembershipCandidate[] = [];
+  for (const node of postorder) {
+    if (
+      node.kind !== "project" ||
+      node.input.node.kind !== "join" ||
+      node.projections.length === 0
+    )
+      continue;
+    const join = node.input.node;
+    if (
+      join.joinType !== "inner" ||
+      sharedNodes.has(node) ||
+      sharedNodes.has(join) ||
+      incoming.get(node) !== 1 ||
+      incoming.get(join) !== 1 ||
+      !node.projections.every(({ expression }) => {
+        const index = directColumnIndex(expression, join.scope);
+        return index !== undefined && index < join.left.fields.length;
+      }) ||
+      join.right.node.kind !== "distinct"
+    )
+      continue;
+
+    const distinct = join.right.node;
+    if (distinct.input.node.kind !== "project") continue;
+    const keyProjection = distinct.input.node;
+    const keyCount = distinct.fields.length;
+    if (
+      keyCount === 0 ||
+      distinct.fields.length !== distinct.input.fields.length ||
+      keyProjection.projections.length !== keyCount ||
+      sharedNodes.has(distinct) ||
+      sharedNodes.has(keyProjection) ||
+      incoming.get(distinct) !== 1 ||
+      incoming.get(keyProjection) !== 1
+    )
+      continue;
+
+    const rightKeyIndexes: number[] = [];
+    const uniqueSourceIndexes = new Set<number>();
+    let validKeys = true;
+    for (let index = 0; index < keyCount; index++) {
+      const expression = keyProjection.projections[index]!.expression;
+      const sourceIndex = directColumnIndex(
+        expression,
+        keyProjection.input.scope,
+      );
+      if (
+        sourceIndex === undefined ||
+        sourceIndex < 0 ||
+        sourceIndex >= keyProjection.input.fields.length ||
+        uniqueSourceIndexes.has(sourceIndex) ||
+        !hasKnownBinaryColumnSource(keyProjection.input, sourceIndex)
+      ) {
+        validKeys = false;
+        break;
+      }
+      uniqueSourceIndexes.add(sourceIndex);
+      rightKeyIndexes.push(index);
+    }
+    if (!validKeys) continue;
+
+    const pairs = equalityPairs(
+      join.condition,
+      join.left.scope,
+      join.right.scope,
+    );
+    if (
+      !pairs ||
+      pairs.length !== keyCount ||
+      new Set(pairs.map(({ right }) => right)).size !== keyCount ||
+      pairs.some(({ right }) => right < 0 || right >= keyCount)
+    )
+      continue;
+    const leftKeyIndexes: number[] = [];
+    for (const right of rightKeyIndexes) {
+      const pair = pairs.find((item) => item.right === right);
+      if (
+        !pair ||
+        pair.left < 0 ||
+        pair.left >= join.left.fields.length ||
+        join.left.fields[pair.left]!.affinity === "unknown" ||
+        join.right.fields[right]!.affinity === "unknown" ||
+        join.left.fields[pair.left]!.affinity !==
+          join.right.fields[right]!.affinity ||
+        !hasKnownBinaryColumnSource(join.left, pair.left)
+      ) {
+        validKeys = false;
+        break;
+      }
+      leftKeyIndexes.push(pair.left);
+    }
+    if (!validKeys) continue;
+
+    const valuesRelation = hasSafeFiniteValuesAncestor(
+      distinct.input,
+      incoming,
+      sharedNodes,
+    );
+    if (!valuesRelation) continue;
+    candidates.push({
+      project: node,
+      join,
+      valuesRelation,
+      leftKeyIndexes,
+      rightKeyIndexes,
+    });
+  }
+  return candidates;
+}
+
+function constantFilterJoinProjections(
+  root: LogicalQueryNode,
+  sharedNodes: ReadonlySet<LogicalQueryNode>,
+  fusions: readonly PassthroughProjectFusion[],
+): readonly ConstantFilterJoinProjection[] {
+  const incoming = incomingNodeCounts(root);
+  const fusedInputs = new Map(
+    fusions.map((fusion) => [fusion.project, fusion.input] as const),
+  );
+  const postorder: LogicalQueryNode[] = [];
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const source of nodeSources(node)) visit(source.node);
+    postorder.push(node);
+  };
+  visit(root);
+
+  const choices: ConstantFilterJoinProjection[] = [];
+  for (const node of postorder) {
+    if (
+      node.kind !== "project" ||
+      node.projections.length === 0 ||
+      !node.projections.every(
+        ({ expression }) => expression.kind === "constant",
+      )
+    )
+      continue;
+    const input = fusedInputs.get(node) ?? node.input;
+    if (input.node.kind !== "filter") continue;
+    const filter = input.node;
+    if (filter.input.node.kind !== "join") continue;
+    const join = filter.input.node;
+    if (
+      sharedNodes.has(node) ||
+      sharedNodes.has(filter) ||
+      sharedNodes.has(join) ||
+      incoming.get(filter) !== 1 ||
+      incoming.get(join) !== 1
+    )
+      continue;
+    const referencedOutputColumns = expressionColumnIndexes(
+      filter.predicate,
+      join.scope,
+    );
+    if (
+      referencedOutputColumns === undefined ||
+      referencedOutputColumns.some(
+        (index) => index < 0 || index >= join.fields.length,
+      )
+    )
+      continue;
+    choices.push({ project: node, filter, join, referencedOutputColumns });
+  }
+  return choices;
+}
+
+function sameConstantFilterJoinProjections(
+  actual: readonly ConstantFilterJoinProjection[],
+  expected: readonly ConstantFilterJoinProjection[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((choice, index) => {
+      const canonical = expected[index];
+      return (
+        !!canonical &&
+        choice.project === canonical.project &&
+        choice.filter === canonical.filter &&
+        choice.join === canonical.join &&
+        choice.referencedOutputColumns.length ===
+          canonical.referencedOutputColumns.length &&
+        choice.referencedOutputColumns.every(
+          (column, columnIndex) =>
+            column === canonical.referencedOutputColumns[columnIndex],
+        )
+      );
+    })
+  );
+}
+
+function samePositiveTupleMembershipCandidates(
+  actual: readonly PositiveTupleMembershipCandidate[],
+  expected: readonly PositiveTupleMembershipCandidate[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((candidate, index) => {
+      const canonical = expected[index];
+      return (
+        !!canonical &&
+        candidate.project === canonical.project &&
+        candidate.join === canonical.join &&
+        candidate.valuesRelation === canonical.valuesRelation &&
+        candidate.leftKeyIndexes.length === canonical.leftKeyIndexes.length &&
+        candidate.leftKeyIndexes.every(
+          (column, columnIndex) =>
+            column === canonical.leftKeyIndexes[columnIndex],
+        ) &&
+        candidate.rightKeyIndexes.length === canonical.rightKeyIndexes.length &&
+        candidate.rightKeyIndexes.every(
+          (column, columnIndex) =>
+            column === canonical.rightKeyIndexes[columnIndex],
         )
       );
     })
@@ -911,6 +1761,20 @@ export function validatePhysicalQueryPlan<Row extends object>(
     );
   const expected = sharedRelationDefinitions(plan.root);
   const expectedDirectScanProjections = directScanProjectionChoices(plan.root);
+  const expectedPassthroughProjectFusions = passthroughProjectFusions(
+    plan.root,
+    new Set(expected.map(({ node }) => node)),
+  );
+  const expectedConstantFilterJoinProjections = constantFilterJoinProjections(
+    plan.root,
+    new Set(expected.map(({ node }) => node)),
+    expectedPassthroughProjectFusions,
+  );
+  const expectedPositiveTupleMembershipCandidates =
+    positiveTupleMembershipCandidates(
+      plan.root,
+      new Set(expected.map(({ node }) => node)),
+    );
   if (
     !Array.isArray(plan.directScanProjections) ||
     !sameDirectScanProjectionChoices(
@@ -921,6 +1785,39 @@ export function validatePhysicalQueryPlan<Row extends object>(
     throw new DatabaseCompilerError(
       "invalid_plan",
       "Physical direct scan projection choices are inconsistent",
+    );
+  if (
+    !Array.isArray(plan.passthroughProjectFusions) ||
+    !samePassthroughProjectFusions(
+      plan.passthroughProjectFusions,
+      expectedPassthroughProjectFusions,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical passthrough projection fusions are inconsistent",
+    );
+  if (
+    !Array.isArray(plan.constantFilterJoinProjections) ||
+    !sameConstantFilterJoinProjections(
+      plan.constantFilterJoinProjections,
+      expectedConstantFilterJoinProjections,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical constant filter Join projections are inconsistent",
+    );
+  if (
+    !Array.isArray(plan.positiveTupleMembershipCandidates) ||
+    !samePositiveTupleMembershipCandidates(
+      plan.positiveTupleMembershipCandidates,
+      expectedPositiveTupleMembershipCandidates,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical tuple membership candidates are inconsistent",
     );
   const actualDefinitions = plan.sharedRelations;
   let inconsistent =
@@ -974,13 +1871,26 @@ export function lowerLogicalQuerySource<Row extends object>(
       "invalid_plan",
       "Query source metadata does not match its logical node",
     );
+  const sharedRelations = sharedRelationDefinitions(source.node);
+  const sharedNodes = new Set(sharedRelations.map(({ node }) => node));
+  const projectFusions = passthroughProjectFusions(source.node, sharedNodes);
   return {
     kind: "physical-query",
     root: source.node,
     scope: source.scope,
     fields: source.fields,
-    sharedRelations: sharedRelationDefinitions(source.node),
+    sharedRelations,
     directScanProjections: directScanProjectionChoices(source.node),
+    passthroughProjectFusions: projectFusions,
+    constantFilterJoinProjections: constantFilterJoinProjections(
+      source.node,
+      sharedNodes,
+      projectFusions,
+    ),
+    positiveTupleMembershipCandidates: positiveTupleMembershipCandidates(
+      source.node,
+      sharedNodes,
+    ),
   };
 }
 

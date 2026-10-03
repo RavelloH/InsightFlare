@@ -25,18 +25,22 @@ import type {
   SqlExpression,
 } from "./expression";
 import {
+  type ConstantFilterJoinProjection,
   hasSamePhysicalMembershipOptimization,
   lowerLogicalPlan,
   optimizePhysicalMembershipBudget,
+  type PassthroughProjectFusion,
   type PhysicalMembershipUsage,
   type PhysicalQueryPlan,
   type PhysicalTextRowStrategy,
   type PhysicalTextRowUsage,
+  type PositiveTupleMembershipCandidate,
   recursiveClosureCount,
   type SharedRelationDefinition,
   validatePhysicalQueryPlan,
 } from "./physical-plan";
 import type {
+  JoinNode,
   JsonScalarArrayNode,
   LogicalQueryNode,
   QuerySource,
@@ -61,6 +65,19 @@ interface RenderContext {
   readonly directScanProjections: ReadonlyMap<
     ProjectNode,
     PhysicalQueryPlan<object>["directScanProjections"][number]
+  >;
+  readonly passthroughProjectFusions: ReadonlyMap<
+    ProjectNode,
+    PassthroughProjectFusion
+  >;
+  readonly constantFilterJoinProjections: ReadonlyMap<
+    ProjectNode,
+    ConstantFilterJoinProjection
+  >;
+  readonly sparseJoinOutputs: ReadonlyMap<JoinNode, ReadonlySet<number>>;
+  readonly positiveTupleMemberships: ReadonlyMap<
+    ProjectNode,
+    PositiveTupleMembershipCandidate
   >;
   readonly membershipStrategies?: ReadonlyMap<
     AnyInListExpression,
@@ -661,9 +678,94 @@ function compileNode(
           identifier(alias),
         );
       }
-      const source = compileNode(node.input.node, context, outerScopes);
+      const constantFilterJoin =
+        context.constantFilterJoinProjections.get(node);
+      if (constantFilterJoin) {
+        const source = compileNode(
+          constantFilterJoin.join,
+          context,
+          outerScopes,
+        );
+        const alias = nextAlias(context, "q");
+        const scopes = extendScopes(outerScopes, [
+          [constantFilterJoin.filter.input.scope, { alias }],
+        ]);
+        return concat(
+          text("SELECT "),
+          join(
+            node.projections.map((projection, index) =>
+              concat(
+                compileD1Expression(projection.expression, scopes, context),
+                text(` AS "_c${index}"`),
+              ),
+            ),
+          ),
+          text(" FROM "),
+          parenthesize(source),
+          text(" AS "),
+          identifier(alias),
+          text(" WHERE "),
+          compileD1Expression(
+            constantFilterJoin.filter.predicate,
+            scopes,
+            context,
+          ),
+        );
+      }
+      const positiveTupleMembership =
+        context.positiveTupleMemberships.get(node);
+      if (positiveTupleMembership) {
+        const joinNode = positiveTupleMembership.join;
+        const leftSource = compileNode(
+          joinNode.left.node,
+          context,
+          outerScopes,
+        );
+        const rightSource = compileNode(
+          joinNode.right.node,
+          context,
+          outerScopes,
+        );
+        const leftAlias = nextAlias(context, "q");
+        const rightAlias = nextAlias(context, "q");
+        const leftScopes = extendScopes(outerScopes, [
+          [joinNode.scope, { alias: leftAlias }],
+        ]);
+        const leftTuple = positiveTupleMembership.leftKeyIndexes.map((index) =>
+          column(index, leftAlias),
+        );
+        const rightTuple = positiveTupleMembership.rightKeyIndexes.map(
+          (index) => column(index, rightAlias),
+        );
+        const selections = node.projections.map((projection, index) =>
+          concat(
+            compileD1Expression(projection.expression, leftScopes, context),
+            text(` AS "_c${index}"`),
+          ),
+        );
+        return concat(
+          text("SELECT "),
+          join(selections),
+          text(" FROM "),
+          parenthesize(leftSource),
+          text(" AS "),
+          identifier(leftAlias),
+          text(" WHERE "),
+          parenthesize(join(leftTuple)),
+          text(" IN (SELECT "),
+          join(rightTuple),
+          text(" FROM "),
+          parenthesize(rightSource),
+          text(" AS "),
+          identifier(rightAlias),
+          text(")"),
+        );
+      }
+      const fusedInput = context.passthroughProjectFusions.get(node)?.input;
+      const input = fusedInput ?? node.input;
+      const source = compileNode(input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
-      const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
+      const scopes = extendScopes(outerScopes, [[input.scope, { alias }]]);
       const selections = node.projections.map((projection, index) =>
         concat(
           compileD1Expression(projection.expression, scopes, context),
@@ -688,14 +790,25 @@ function compileNode(
         [node.left.scope, { alias: leftAlias }],
         [node.right.scope, { alias: rightAlias }],
       ]);
-      const selections = [
-        ...outputList(node.left.fields.length, leftAlias),
-        ...outputList(
-          node.right.fields.length,
-          rightAlias,
-          node.left.fields.length,
-        ),
-      ];
+      const sparseOutputs = context.sparseJoinOutputs.get(node);
+      const selections = sparseOutputs
+        ? node.fields.map((_field, index) => {
+            if (!sparseOutputs.has(index)) return text(`NULL AS "_c${index}"`);
+            return index < node.left.fields.length
+              ? concat(column(index, leftAlias), text(` AS "_c${index}"`))
+              : concat(
+                  column(index - node.left.fields.length, rightAlias),
+                  text(` AS "_c${index}"`),
+                );
+          })
+        : [
+            ...outputList(node.left.fields.length, leftAlias),
+            ...outputList(
+              node.right.fields.length,
+              rightAlias,
+              node.left.fields.length,
+            ),
+          ];
       return concat(
         text("SELECT "),
         join(selections),
@@ -989,6 +1102,10 @@ function renderContext(
   reservedIdentifiers: ReadonlySet<string> = new Set(),
   textRowStrategies?: RenderContext["textRowStrategies"],
   textRowUsage?: RenderContext["textRowUsage"],
+  passthroughProjectFusions: RenderContext["passthroughProjectFusions"] = new Map(),
+  constantFilterJoinProjections: RenderContext["constantFilterJoinProjections"] = new Map(),
+  sparseJoinOutputs: RenderContext["sparseJoinOutputs"] = new Map(),
+  positiveTupleMemberships: RenderContext["positiveTupleMemberships"] = new Map(),
 ): RenderContext {
   return {
     scanAlias: 0,
@@ -999,6 +1116,10 @@ function renderContext(
     reservedIdentifiers: new Set(reservedIdentifiers),
     sharedRelations,
     directScanProjections,
+    passthroughProjectFusions,
+    constantFilterJoinProjections,
+    sparseJoinOutputs,
+    positiveTupleMemberships,
     ...(membershipStrategies ? { membershipStrategies } : {}),
     ...(membershipUsage ? { membershipUsage } : {}),
     ...(textRowStrategies ? { textRowStrategies } : {}),
@@ -1175,20 +1296,38 @@ export function compileD1QueryUnoptimizedForTest(
   return compileD1QueryInternal(plan, options, false);
 }
 
+/** Exercise the defensive non-tuple renderer for final-choice tests. */
+export function compileD1QueryTupleMembershipFallbackForTest(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+  options: D1CompileOptions = {},
+): CompiledQuery<object> {
+  return compileD1QueryInternal(plan, options, true, true, true, true);
+}
+
 function compileD1QueryInternal(
   plan:
     | Relation<object, Readonly<Record<string, AnyExpression>>>
     | PhysicalQueryPlan<object>,
   options: D1CompileOptions,
   includeSharedRelations: boolean,
+  includePassthroughProjectFusions = includeSharedRelations,
+  includeConstantFilterJoinProjections = includeSharedRelations,
+  forceTupleMembershipFallbackForTest = false,
 ): CompiledQuery<object> {
   const physical: PhysicalQueryPlan<object> =
     "kind" in plan && plan.kind === "physical-query"
       ? plan
       : lowerLogicalPlan(plan);
   validatePhysicalQueryPlan(physical);
-  const { physical: canonicalPhysical, nativeQuery } =
-    optimizeForFinalShape(physical);
+  const { physical: canonicalPhysical, nativeQuery } = optimizeForFinalShape(
+    physical,
+    includePassthroughProjectFusions,
+    includeConstantFilterJoinProjections,
+    includeSharedRelations,
+    forceTupleMembershipFallbackForTest,
+  );
   if (
     physical.membershipOptimization !== undefined &&
     !hasSamePhysicalMembershipOptimization(
@@ -1224,13 +1363,30 @@ function compileD1QueryInternal(
       membershipOptimization.strategies,
       membershipOptimization.selectedBindingCount,
       membershipOptimization.rowStrategies ?? [],
+      includePassthroughProjectFusions,
+      includeConstantFilterJoinProjections,
     );
   }
 
-  return renderAndBudget(physical, options, false);
+  return renderAndBudget(
+    physical,
+    options,
+    false,
+    undefined,
+    undefined,
+    [],
+    includePassthroughProjectFusions,
+    includeConstantFilterJoinProjections,
+  );
 }
 
-function optimizeForFinalShape(physical: PhysicalQueryPlan<object>): {
+function optimizeForFinalShape(
+  physical: PhysicalQueryPlan<object>,
+  includePassthroughProjectFusions: boolean,
+  includeConstantFilterJoinProjections: boolean,
+  includePositiveTupleMemberships = true,
+  forceTupleMembershipFallbackForTest = false,
+): {
   readonly physical: PhysicalQueryPlan<object>;
   readonly nativeQuery: SqlFragment;
 } {
@@ -1248,48 +1404,118 @@ function optimizeForFinalShape(physical: PhysicalQueryPlan<object>): {
       (choice) => [choice.project, choice] as const,
     ),
   );
-  const membershipUsage = new Map<AnyInListExpression, number>();
-  const textRowUsage = new Map<ValuesRelationNode, number>();
-  const context = renderContext(
-    sharedNames,
-    undefined,
-    membershipUsage,
-    directScanProjections,
-    reservePlanIdentifiers(physical),
-    undefined,
-    textRowUsage,
+  const passthroughProjectFusions = new Map(
+    includePassthroughProjectFusions
+      ? physical.passthroughProjectFusions.map(
+          (choice) => [choice.project, choice] as const,
+        )
+      : [],
   );
-  const definitions = sharedRelations.map((shared) => {
-    context.bypassSharedNode = shared.node;
-    const body = compileNode(shared.node, context, new Map());
-    context.bypassSharedNode = undefined;
-    return compileSharedRelationDefinition(shared, body);
-  });
-  const main = compileQuerySource(source, context, new Map());
-  const query =
-    definitions.length === 0
-      ? main
-      : concat(text("WITH "), join(definitions, text(", ")), text(" "), main);
-  return {
-    physical: optimizePhysicalMembershipBudget(
-      physical,
-      {
+  const constantFilterJoinProjections = new Map(
+    includeConstantFilterJoinProjections
+      ? physical.constantFilterJoinProjections.map(
+          (choice) => [choice.project, choice] as const,
+        )
+      : [],
+  );
+  const sparseJoinOutputs = new Map(
+    includeConstantFilterJoinProjections
+      ? physical.constantFilterJoinProjections.map(
+          ({ join, referencedOutputColumns }) =>
+            [join, new Set(referencedOutputColumns)] as const,
+        )
+      : [],
+  );
+  const renderNative = (
+    tupleMemberships: readonly PositiveTupleMembershipCandidate[] = [],
+  ) => {
+    const membershipUsage = new Map<AnyInListExpression, number>();
+    const textRowUsage = new Map<ValuesRelationNode, number>();
+    const context = renderContext(
+      sharedNames,
+      undefined,
+      membershipUsage,
+      directScanProjections,
+      reservePlanIdentifiers(physical),
+      undefined,
+      textRowUsage,
+      passthroughProjectFusions,
+      constantFilterJoinProjections,
+      sparseJoinOutputs,
+      new Map(tupleMemberships.map((item) => [item.project, item] as const)),
+    );
+    const definitions = sharedRelations.map((shared) => {
+      context.bypassSharedNode = shared.node;
+      const body = compileNode(shared.node, context, new Map());
+      context.bypassSharedNode = undefined;
+      return compileSharedRelationDefinition(shared, body);
+    });
+    const main = compileQuerySource(source, context, new Map());
+    const query =
+      definitions.length === 0
+        ? main
+        : concat(text("WITH "), join(definitions, text(", ")), text(" "), main);
+    return {
+      query,
+      facts: {
         nativeBindingCount: query.bindings.length,
         usage: [...membershipUsage].map(
           ([expression, occurrences]) =>
-            ({
-              expression,
-              occurrences,
-            }) satisfies PhysicalMembershipUsage,
+            ({ expression, occurrences }) satisfies PhysicalMembershipUsage,
         ),
         rowUsage: [...textRowUsage].map(
           ([node, occurrences]) =>
             ({ node, occurrences }) satisfies PhysicalTextRowUsage,
         ),
       },
-      D1_MAX_BOUND_PARAMETERS,
-    ),
-    nativeQuery: query,
+    };
+  };
+
+  const budgetPhysical = includePositiveTupleMemberships
+    ? physical
+    : { ...physical, positiveTupleMembershipCandidates: [] };
+  const unselected = renderNative();
+  const firstChoice = optimizePhysicalMembershipBudget(
+    budgetPhysical,
+    unselected.facts,
+    D1_MAX_BOUND_PARAMETERS,
+  );
+  const tupleMemberships =
+    firstChoice.membershipOptimization?.tupleMemberships ?? [];
+  if (tupleMemberships.length === 0)
+    return { physical: firstChoice, nativeQuery: unselected.query };
+
+  // Re-measure the selected relational shape before finalizing packing metadata.
+  const selected = renderNative(tupleMemberships);
+  const finalChoice = optimizePhysicalMembershipBudget(
+    budgetPhysical,
+    selected.facts,
+    D1_MAX_BOUND_PARAMETERS,
+  );
+  if (
+    !forceTupleMembershipFallbackForTest &&
+    hasSamePhysicalMembershipOptimization(
+      finalChoice.membershipOptimization,
+      firstChoice.membershipOptimization!,
+    )
+  )
+    return { physical: finalChoice, nativeQuery: selected.query };
+
+  // If a structural rewrite changes packed-choice costs, keep the measured
+  // original Join plan rather than allowing choices to oscillate. The
+  // test-only seam forces this path to verify final SQL and budget metadata.
+  const fallbackOptimization = firstChoice.membershipOptimization;
+  if (!fallbackOptimization)
+    return { physical: firstChoice, nativeQuery: unselected.query };
+  return {
+    physical: {
+      ...firstChoice,
+      membershipOptimization: {
+        ...fallbackOptimization,
+        tupleMemberships: [],
+      },
+    },
+    nativeQuery: unselected.query,
   };
 }
 
@@ -1302,6 +1528,8 @@ function renderAndBudget(
   >["strategies"],
   expectedBindingCount?: number,
   rowStrategies: readonly PhysicalTextRowStrategy[] = [],
+  includePassthroughProjectFusions = true,
+  includeConstantFilterJoinProjections = true,
 ): CompiledQuery<object> {
   const source: QuerySource = {
     node: physical.root,
@@ -1318,6 +1546,28 @@ function renderAndBudget(
     physical.directScanProjections.map(
       (choice) => [choice.project, choice] as const,
     ),
+  );
+  const passthroughProjectFusions = new Map(
+    includePassthroughProjectFusions
+      ? physical.passthroughProjectFusions.map(
+          (choice) => [choice.project, choice] as const,
+        )
+      : [],
+  );
+  const constantFilterJoinProjections = new Map(
+    includeConstantFilterJoinProjections
+      ? physical.constantFilterJoinProjections.map(
+          (choice) => [choice.project, choice] as const,
+        )
+      : [],
+  );
+  const sparseJoinOutputs = new Map(
+    includeConstantFilterJoinProjections
+      ? physical.constantFilterJoinProjections.map(
+          ({ join, referencedOutputColumns }) =>
+            [join, new Set(referencedOutputColumns)] as const,
+        )
+      : [],
   );
   const membershipStrategies = strategies
     ? new Map(
@@ -1356,6 +1606,11 @@ function renderAndBudget(
               ] as const,
           ),
         );
+  const positiveTupleMemberships = new Map(
+    (physical.membershipOptimization?.tupleMemberships ?? []).map(
+      (item) => [item.project, item] as const,
+    ),
+  );
   const context = includeSharedRelations
     ? renderContext(
         sharedNames,
@@ -1364,6 +1619,11 @@ function renderAndBudget(
         directScanProjections,
         reservePlanIdentifiers(physical),
         textRowStrategies,
+        undefined,
+        passthroughProjectFusions,
+        constantFilterJoinProjections,
+        sparseJoinOutputs,
+        positiveTupleMemberships,
       )
     : renderContext(
         sharedNames,
@@ -1372,6 +1632,11 @@ function renderAndBudget(
         new Map(),
         reservePlanIdentifiers(physical),
         textRowStrategies,
+        undefined,
+        passthroughProjectFusions,
+        constantFilterJoinProjections,
+        sparseJoinOutputs,
+        positiveTupleMemberships,
       );
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;

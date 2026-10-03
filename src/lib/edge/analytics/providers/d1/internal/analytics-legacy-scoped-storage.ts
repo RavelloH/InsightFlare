@@ -6,12 +6,9 @@ import {
   distinct,
   eq,
   filter,
-  inSubquery,
   isNotNull,
   join,
-  jsonScalarArray,
   neq,
-  or,
   param,
   type Predicate,
   project,
@@ -51,7 +48,6 @@ import {
 import type {
   AnalyticsLegacyEventRow,
   AnalyticsLegacyFactRelation,
-  AnalyticsLegacyNumber,
   AnalyticsLegacyPageRow,
   AnalyticsLegacyScopedPredicateContext,
   AnalyticsLegacyText,
@@ -547,9 +543,9 @@ function explicitIdentityRelation(
       entity_id: { affinity: "text", nullable: false },
     },
     identities.map((identity) => ({
-      site_id: identity.siteId,
-      kind: identity.kind,
-      entity_id: identity.id,
+      site_id: sqliteBoundText(identity.siteId),
+      kind: sqliteBoundText(identity.kind),
+      entity_id: sqliteBoundText(identity.id),
     })),
   );
   const selected = filter(input, eq(input.columns.kind, param(kind)));
@@ -564,6 +560,32 @@ function explicitIdentityRelation(
       entity_id: scoped.columns.left_entity_id,
     }),
   );
+}
+
+/** Match SQLite's text binding replacement for isolated UTF-16 surrogates. */
+function sqliteBoundText(value: string): string {
+  let result: string | undefined;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        if (result !== undefined) result += value.slice(index, index + 2);
+        index += 1;
+        continue;
+      }
+      result ??= value.slice(0, index);
+      result += "\ufffd";
+      continue;
+    }
+    if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      result ??= value.slice(0, index);
+      result += "\ufffd";
+      continue;
+    }
+    if (result !== undefined) result += value[index];
+  }
+  return result ?? value;
 }
 
 function applyNameGate(
@@ -670,49 +692,29 @@ function entityEventMatches(
   const kind = selection.entityKind;
   if (!kind) throw new TypeError("Scoped entity mode requires an entity kind.");
   if (selection.preparedMatches) {
-    const identitiesBySite = new Map<string, Set<string>>();
-    for (const identity of selection.preparedMatches.identities) {
-      if (identity.kind !== kind) continue;
-      const siteIdentities =
-        identitiesBySite.get(identity.siteId) ?? new Set<string>();
-      siteIdentities.add(identity.id);
-      identitiesBySite.set(identity.siteId, siteIdentities);
-    }
-    const events = dataset.readEvents;
-    const gatedEvents = applyNameGate(events, dataset, selection);
-    const entityIdColumn = gatedEvents.relation.columns[
-      entityColumnName(events, kind)
-    ] as AnalyticsLegacyText;
-    const sitePredicates = [...identitiesBySite].map(([siteId, ids]) => {
-      const selectedSite = filter(
-        dataset.sites,
-        eq(
-          dataset.sites.columns.site_id as AnalyticsLegacyText,
-          param(siteId) as AnalyticsLegacyText,
-        ),
-      );
-      const canonicalSitePks = project(selectedSite, {
-        site_pk: selectedSite.columns.site_pk as AnalyticsLegacyNumber,
-      });
-      return and(
-        inSubquery(
-          gatedEvents.relation.columns.site_pk as AnalyticsLegacyNumber,
-          canonicalSitePks,
-        ),
-        inSubquery(entityIdColumn, jsonScalarArray("text", [...ids])),
-      );
-    });
-    const preparedMembership =
-      sitePredicates.length === 0
-        ? eq(constant(1), constant(0))
-        : sitePredicates.length === 1
-          ? sitePredicates[0]!
-          : sitePredicates
-              .slice(1)
-              .reduce((left, right) => or(left, right), sitePredicates[0]!);
-    const matches = filter(
+    const explicit = explicitIdentityRelation(
+      dataset,
+      selection.preparedMatches.identities,
+      kind,
+    );
+    const gatedEvents = applyNameGate(dataset.readEvents, dataset, selection);
+    const entityColumn = entityColumnName(dataset.readEvents, kind);
+    const eligibleEvents = filter(
       gatedEvents.relation,
-      and(nonBlank(entityIdColumn), preparedMembership),
+      nonBlank(
+        gatedEvents.relation.columns[entityColumn]! as AnalyticsLegacyText,
+      ),
+    );
+    const eventEntityId = eligibleEvents.columns[
+      entityColumn
+    ] as AnalyticsLegacyText;
+    const matches = joinMembership(
+      eligibleEvents,
+      explicit,
+      and(
+        eq(eligibleEvents.columns.site_pk!, explicit.columns.site_pk!),
+        eq(eventEntityId, explicit.columns.entity_id!),
+      ),
     );
     return eventIdentityRows({ ...gatedEvents, relation: matches });
   }

@@ -40,6 +40,7 @@ import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engin
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import { queryEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import {
@@ -1168,15 +1169,13 @@ interface QueryMetrics {
   readonly sqlBytes: number;
   readonly bindings: number;
   readonly physicalPlanHash: string | null;
-  readonly packingSegments: readonly {
-    readonly itemCount: number;
-    readonly utf8Bytes: number;
-  }[];
+  readonly nativeRowRelations: number;
+  readonly jsonRowRelations: number;
 }
 
 interface ScopedPageEvidence {
   readonly label: string;
-  readonly frozenLegacy: {
+  readonly frozenCompiledPage: {
     readonly sqlBytes: number;
     readonly bindings: number;
     readonly statementCount: number;
@@ -1240,29 +1239,14 @@ function queryMetrics(query: ReturnType<typeof compileD1Query>): QueryMetrics {
             ],
       )
     : undefined;
-  const packingSegments = (query.bindings ?? []).flatMap((binding) => {
-    if (typeof binding !== "string" || !binding.startsWith("[")) return [];
-    try {
-      const value: unknown = JSON.parse(binding);
-      return Array.isArray(value)
-        ? [
-            {
-              itemCount: value.length,
-              utf8Bytes: new TextEncoder().encode(binding).byteLength,
-            },
-          ]
-        : [];
-    } catch {
-      return [];
-    }
-  });
   return {
     sqlBytes: new TextEncoder().encode(query.sql).byteLength,
     bindings: query.bindings?.length ?? 0,
     physicalPlanHash: payload
       ? `v${shape!.version}:${createHash("sha256").update(payload, "utf8").digest("hex")}`
       : null,
-    packingSegments,
+    nativeRowRelations: shape?.version === 2 ? shape.nativeRowRelationCount : 0,
+    jsonRowRelations: shape?.version === 2 ? shape.jsonRowRelationCount : 0,
   };
 }
 
@@ -1273,10 +1257,6 @@ function recordScopedPageEvidence(input: {
   readonly filters: FilterDocument;
   readonly queryTime: QueryTime;
   readonly scopePlan?: ScopedFilterPlan;
-  readonly predicate: {
-    readonly sql: string;
-    readonly bindings: readonly unknown[];
-  };
   readonly search?: string;
   readonly eventName?: string;
   readonly statementCount: number;
@@ -1295,15 +1275,15 @@ function recordScopedPageEvidence(input: {
     options,
   });
   const scopedQuery = compileOutput(plan, "event-record-page");
-  const legacyQuery = buildFrozenLegacyPageQuery(
-    input.database,
-    input.siteId,
-    "occurredAt",
-    "desc",
-    input.search,
-    input.predicate,
-    options.limit + 1,
-  );
+  const legacyQuery = buildCompiledLegacyPageQuery({
+    database: input.database,
+    siteId: input.siteId,
+    filters: input.filters,
+    queryTime: input.queryTime,
+    scopePlan: input.scopePlan,
+    eventName: input.eventName,
+    limit: options.limit + 1,
+  });
   const scopedExplain = explainQueryPlan(
     input.database,
     scopedQuery.sql,
@@ -1319,7 +1299,7 @@ function recordScopedPageEvidence(input: {
   expect(legacyExplain.indexedSearches, input.label).not.toHaveLength(0);
   scopedPageEvidence.push({
     label: input.label,
-    frozenLegacy: {
+    frozenCompiledPage: {
       sqlBytes: new TextEncoder().encode(legacyQuery.sql).byteLength,
       bindings: legacyQuery.bindings.length,
       statementCount: 1,
@@ -1331,6 +1311,65 @@ function recordScopedPageEvidence(input: {
       explain: compactExplainEvidence(scopedExplain),
     },
   });
+}
+
+function buildCompiledLegacyPageQuery(input: {
+  readonly database: DatabaseSync;
+  readonly siteId: string;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly eventName?: string;
+  readonly limit: number;
+}): { readonly sql: string; readonly bindings: SQLInputValue[] } {
+  const scopePlan =
+    input.scopePlan ?? scopedFilterMetadata(input.filters)?.plan;
+  if (!scopePlan) throw new Error("wave37b_legacy_scope_plan_missing");
+  const dataset = compileScopedDatasetSql({
+    filters: input.filters,
+    plan: scopePlan,
+    siteIds: [input.siteId],
+    window: {
+      startMs: input.queryTime.range.startMs,
+      endExclusiveMs: input.queryTime.range.endExclusiveMs,
+      nowMs: input.queryTime.capturedAtMs,
+      timeZone: input.queryTime.reportingTimeZone,
+    },
+  });
+  const eventNameClause = input.eventName?.trim()
+    ? "AND TRIM(COALESCE(event_name, '')) = ?"
+    : "";
+  return {
+    sql: `WITH ${dataset.ctes}
+       SELECT event_pk AS eventPk, event_id AS eventId,
+              event_name AS eventName, occurred_at AS occurredAt,
+              pathname AS pathname
+       FROM ${dataset.eventRelation}
+       WHERE site_pk = ? ${eventNameClause}
+       ORDER BY occurred_at DESC, event_id DESC, event_pk DESC
+       LIMIT ?`,
+    bindings: [
+      ...dataset.bindings.map(({ value }) => value),
+      sitePrimaryKey(input.database, input.siteId),
+      ...(input.eventName?.trim() ? [input.eventName.trim()] : []),
+      input.limit,
+    ],
+  };
+}
+
+function compiledLegacyPageRows(input: {
+  readonly database: DatabaseSync;
+  readonly siteId: string;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly eventName?: string;
+  readonly limit: number;
+}): FrozenPageSortRow[] {
+  const query = buildCompiledLegacyPageQuery(input);
+  return input.database
+    .prepare(query.sql)
+    .all(...query.bindings) as unknown as FrozenPageSortRow[];
 }
 
 let fixture: Fixture;
@@ -1453,27 +1492,6 @@ describe("Wave37A event record scoped Source regressions", () => {
       queryTime: prepared.queryTime,
       scopePlan: prepared.scopePlan,
       eventName: " target_event ",
-      predicate: {
-        sql: `TRIM(COALESCE(cen.name, '')) = ? AND (
-          SELECT COUNT(*)
-          FROM custom_events session_event
-          INNER JOIN custom_event_names session_name
-            ON session_name.id = session_event.event_name_id
-          INNER JOIN visits session_owner
-            ON session_owner.site_pk = session_event.site_pk
-           AND session_owner.visit_id = session_event.visit_id
-          WHERE session_owner.site_pk = v.site_pk
-            AND session_owner.session_id = v.session_id
-            AND session_event.occurred_at >= ?
-            AND session_event.occurred_at < ?
-        ) >= ?`,
-        bindings: [
-          "target_event",
-          EVENT_RANGE.startMs,
-          EVENT_RANGE.endExclusiveMs,
-          2,
-        ],
-      },
       statementCount: trace.preparedSql.length,
     });
   });
@@ -1669,6 +1687,79 @@ describe("Wave37A event record scoped Source regressions", () => {
       "count+page:count": [{ count: 2 }],
       "count+page:page": expected,
     });
+  });
+
+  it("matches prepared identities using SQLite's replacement for isolated UTF-16 surrogates", async () => {
+    const identities = [
+      {
+        id: "wave37a-high-surrogate-\uD800",
+        storedSessionId: "wave37a-high-surrogate-\uFFFD",
+        eventId: "wave37a-surrogate-high-event",
+      },
+      {
+        id: "wave37a-low-surrogate-\uDC00",
+        storedSessionId: "wave37a-low-surrogate-\uFFFD",
+        eventId: "wave37a-surrogate-low-event",
+      },
+      {
+        id: "wave37a-valid-pair-😀",
+        storedSessionId: "wave37a-valid-pair-😀",
+        eventId: "wave37a-surrogate-pair-event",
+      },
+    ] as const;
+    for (const [index, identity] of identities.entries()) {
+      const visitId = `wave37a-surrogate-visit-${index}`;
+      addVisit(fixture.db, fixture.sites.a, {
+        id: visitId,
+        sessionId: identity.storedSessionId,
+      });
+      addEvent(fixture.db, fixture.sites.a, {
+        id: identity.eventId,
+        visitId,
+        nameId: fixture.names.a,
+      });
+    }
+
+    const prepared = makePreparedSelection({
+      authorizationSites: [fixture.sites.a],
+      filters: filtersFor(fieldCondition("session.events", "gte", 1)),
+      scopePreference: "session",
+      eventName: "target_event",
+      advancedMatches: {
+        entityIds: identities.map(({ id }) => ({ siteId: SITE_A, id })),
+      },
+    });
+    expect(
+      prepared.selection.preparedMatches?.identities.map(({ id }) => id),
+    ).toEqual(identities.map(({ id }) => id));
+
+    const builder = new LogicalPlanBuilder(createDomainContext(prepared));
+    const events = builder.source("event", {
+      temporalDomain: "candidate",
+      selection: prepared.selection,
+    });
+    builder.output("event-self", events, [{ name: "event", slot: "entity" }]);
+    const plan = builder.finish();
+    const output = plan.outputs.find(
+      (candidate) => candidate.id === "event-self",
+    )!;
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteIds: plan.context.subject.siteIds,
+      time: plan.context.time,
+    });
+    const lowered = lowerer.lower(output);
+    const relation = lowerer.projectOutput(lowered, [
+      { name: "sitePk", slot: output.fields[0]!.slot, component: 0 },
+      { name: "eventId", slot: output.fields[0]!.slot, component: 1 },
+    ]);
+    const rows = await executeCompiledOutput(
+      fixture.db,
+      compileD1Query(lowerLogicalPlan(relation)),
+    );
+    expect(rows.map((row) => row.eventId).sort()).toEqual(
+      identities.map(({ eventId }) => eventId).sort(),
+    );
+    expect(rows.every((row) => row.sitePk === fixture.sites.a.pk)).toBe(true);
   });
 
   it("keeps CORE count unpaged and isolates A/B/A selections from mutable inputs", async () => {
@@ -2292,7 +2383,6 @@ describe("Wave37A event record scoped Source regressions", () => {
           filters: prepared.filters,
           queryTime: prepared.queryTime,
           scopePlan: prepared.scopePlan,
-          predicate: oldPredicate,
           statementCount: trace?.preparedSql.length ?? 0,
         });
       }
@@ -2484,6 +2574,156 @@ describe("Wave37A event record scoped Source regressions", () => {
         },
       );
     }
+  });
+
+  it("keeps 48 payload predicates within budget and preserves cross-event Session membership", async () => {
+    const site = addSite(fixture.db, "wave37b-payload-budget-site");
+    const nameId = 7380;
+    const sessionId = "wave37b-payload-budget-session";
+    const eventIds = {
+      complete: "wave37b-payload-budget-complete-event",
+      missing: "wave37b-payload-budget-missing-event",
+    } as const;
+    addName(fixture.db, site, nameId, "target_event");
+    for (const [suffix, eventId] of Object.entries(eventIds)) {
+      const visitId = `wave37b-payload-budget-${suffix}-visit`;
+      addVisit(fixture.db, site, { id: visitId, sessionId });
+      addEvent(fixture.db, site, { id: eventId, visitId, nameId });
+    }
+
+    const paths = Array.from(
+      { length: 48 },
+      (_unused, index) => `/wave37b-budget-${index}`,
+    );
+    for (const [index, path] of paths.entries()) {
+      addJsonScalarFact(fixture.db, site, eventIds.complete, path, true);
+      if (index < paths.length - 1)
+        addJsonScalarFact(fixture.db, site, eventIds.missing, path, true);
+    }
+    addJsonScalarFact(fixture.db, site, eventIds.complete, "/split-a", true);
+    addJsonScalarFact(fixture.db, site, eventIds.missing, "/split-b", true);
+
+    const payloadExists = (path: string): FilterExpression => ({
+      kind: "condition",
+      target: { kind: "event-payload", path: path as never },
+      operator: "exists",
+    });
+    const wideFilters = filtersFor({
+      kind: "and",
+      children: paths.map(payloadExists),
+    });
+    const wideSelection = makePreparedSelection({
+      authorizationSites: [site],
+      filters: wideFilters,
+      scopePreference: "event",
+    });
+    const wideLegacyRows = compiledLegacyPageRows({
+      database: fixture.db,
+      siteId: site.id,
+      filters: wideSelection.filters,
+      queryTime: wideSelection.queryTime,
+      scopePlan: wideSelection.scopePlan,
+      limit: 51,
+    });
+    expect(wideLegacyRows.map((row) => row.eventId)).toEqual([
+      eventIds.complete,
+    ]);
+    const widePlan = buildEventRecordPagePlan({
+      siteId: site.id,
+      queryTime: wideSelection.queryTime,
+      filters: wideSelection.filters,
+      scopePlan: wideSelection.scopePlan,
+      options: {
+        limit: 50,
+        sort: { key: "occurredAt", direction: "desc" },
+      },
+    });
+    const wideOutput = widePlan.outputs.find(
+      (output) => output.id === "event-record-page",
+    );
+    if (!wideOutput) throw new Error("wave37b_wide_page_output_missing");
+    const wideTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const widePage = await queryEventRecordPageFromD1(
+      {
+        DB: createSqliteD1Database(fixture.db, wideTrace),
+      } as unknown as Env,
+      site.id,
+      WINDOW,
+      wideSelection.filters,
+      {
+        limit: 50,
+        sort: { key: "occurredAt", direction: "desc" },
+        scopePlan: wideSelection.scopePlan,
+        queryTime: wideSelection.queryTime,
+      },
+    );
+    expect(widePage.rows.map((row) => row.eventId)).toEqual(
+      wideLegacyRows.map((row) => row.eventId),
+    );
+    expect(wideTrace.preparedSql).toHaveLength(1);
+    const wideQuery = compileOutput(widePlan, "event-record-page");
+    const wideMetrics = queryMetrics(wideQuery);
+    expect(wideMetrics.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+    expect(wideMetrics.bindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+    recordScopedPageEvidence({
+      label: "payload-exists-48",
+      database: fixture.db,
+      siteId: site.id,
+      filters: wideSelection.filters,
+      queryTime: wideSelection.queryTime,
+      scopePlan: wideSelection.scopePlan,
+      statementCount: wideTrace.preparedSql.length,
+    });
+
+    const splitFilters = filtersFor({
+      kind: "and",
+      children: [payloadExists("/split-a"), payloadExists("/split-b")],
+    });
+    const splitSelection = makePreparedSelection({
+      authorizationSites: [site],
+      filters: splitFilters,
+      scopePreference: "session",
+    });
+    const splitLegacyRows = compiledLegacyPageRows({
+      database: fixture.db,
+      siteId: site.id,
+      filters: splitSelection.filters,
+      queryTime: splitSelection.queryTime,
+      scopePlan: splitSelection.scopePlan,
+      limit: 51,
+    });
+    expect(splitLegacyRows.map((row) => row.eventId)).toEqual([
+      eventIds.missing,
+      eventIds.complete,
+    ]);
+    const splitTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const splitPage = await queryEventRecordPageFromD1(
+      {
+        DB: createSqliteD1Database(fixture.db, splitTrace),
+      } as unknown as Env,
+      site.id,
+      WINDOW,
+      splitSelection.filters,
+      {
+        limit: 50,
+        sort: { key: "occurredAt", direction: "desc" },
+        scopePlan: splitSelection.scopePlan,
+        queryTime: splitSelection.queryTime,
+      },
+    );
+    expect(splitPage.rows.map((row) => row.eventId)).toEqual(
+      splitLegacyRows.map((row) => row.eventId),
+    );
+    expect(splitTrace.preparedSql).toHaveLength(1);
+    recordScopedPageEvidence({
+      label: "payload-cross-event-session-membership",
+      database: fixture.db,
+      siteId: site.id,
+      filters: splitSelection.filters,
+      queryTime: splitSelection.queryTime,
+      scopePlan: splitSelection.scopePlan,
+      statementCount: splitTrace.preparedSql.length,
+    });
   });
 
   it("matches old prepared Event, Session, and Visitor identity filtering including weak owners", async () => {
@@ -2729,6 +2969,29 @@ describe("Wave37A event record scoped Source regressions", () => {
       expect(page.rows.map((row) => row.eventId)).toEqual(expected);
       expect(page.nextCursor).toBeNull();
       if (evidenceLabel) {
+        if (evidenceLabel === "prepared-session-small-row-identities") {
+          expect(trace?.preparedSql[0]).not.toMatch(/json_each/u);
+          const productionPlan = buildEventRecordPagePlan({
+            siteId: site.id,
+            queryTime: selection.queryTime,
+            filters: selection.filters,
+            scopePlan: selection.scopePlan,
+            options: {
+              limit: 50,
+              sort: { key: "occurredAt", direction: "desc" },
+            },
+          });
+          const compiled = compileOutput(productionPlan, "event-record-page");
+          expect(compiled.physicalPlanShape).toMatchObject({
+            version: 2,
+            jsonRowRelationCount: 0,
+          });
+          expect(compiled.physicalPlanShape?.version).toBe(2);
+          if (compiled.physicalPlanShape?.version === 2)
+            expect(
+              compiled.physicalPlanShape.nativeRowRelationCount,
+            ).toBeGreaterThan(0);
+        }
         recordScopedPageEvidence({
           label: evidenceLabel,
           database: fixture.db,
@@ -2736,7 +2999,6 @@ describe("Wave37A event record scoped Source regressions", () => {
           filters: selection.filters,
           queryTime: selection.queryTime,
           scopePlan: selection.scopePlan,
-          predicate: empty ? { sql: "0", bindings: [] } : identityPredicate,
           statementCount: trace?.preparedSql.length ?? 0,
         });
       }
@@ -2778,7 +3040,11 @@ describe("Wave37A event record scoped Source regressions", () => {
           a,
           false,
           kind === "visit" ? eventObservationIdsForVisits : [],
-          kind === "event" ? "advanced-prepared-event-identities" : undefined,
+          kind === "event"
+            ? "advanced-prepared-event-identities"
+            : kind === "session"
+              ? "prepared-session-small-row-identities"
+              : undefined,
         ),
       ).toEqual(kind === "visit" ? expectedPreparedVisitsA : expectedA);
       expect(
@@ -2803,6 +3069,26 @@ describe("Wave37A event record scoped Source regressions", () => {
         ),
       ).toEqual([]);
     }
+
+    const replacementSessionVisit = "wave37a-unpaired-session-owner";
+    const replacementSessionEvent = "wave37a-unpaired-session-event";
+    addVisit(fixture.db, a, {
+      id: replacementSessionVisit,
+      sessionId: "\ufffd",
+    });
+    addEvent(fixture.db, a, {
+      id: replacementSessionEvent,
+      visitId: replacementSessionVisit,
+      nameId: names.a,
+    });
+    expect(
+      await runPublicPage(
+        "session",
+        "session",
+        [{ siteId: a.id, id: "\ud800" }],
+        a,
+      ),
+    ).toEqual([replacementSessionEvent]);
 
     // The same visit local ID under B's site identity must not match A's
     // actual visit, even when both IDs appear in the prepared identity list.
@@ -2914,20 +3200,59 @@ describe("Wave37A event record scoped Source regressions", () => {
       const stressPrefixC = "wave37a-stress-c";
 
       const expectedPairs: Array<{ siteId: string; id: string }> = [];
-      const insertVisit = stressDb.prepare(
+      const insertVisits = stressDb.prepare(
+        `WITH RECURSIVE sequence(n) AS (
+           SELECT 0 UNION ALL SELECT n + 1 FROM sequence WHERE n < 9999
+         )
+         INSERT INTO visits (
+          visit_id, site_id, site_pk, visitor_id, session_id, status,
+          started_at, last_activity_at, pathname, title, hostname
+         )
+         SELECT
+           ? || '-visit-' || n, ?, ?, ? || '-visitor-' || n,
+           CASE WHEN n = 0 THEN ? ELSE ? || '-session-' || n END,
+           'closed', 125, 125, '/stress', 'Stress', 'events.test'
+         FROM sequence`,
+      );
+      const insertEvents = stressDb.prepare(
+        `WITH RECURSIVE sequence(n) AS (
+           SELECT 0 UNION ALL SELECT n + 1 FROM sequence WHERE n < 9999
+         )
+         INSERT INTO custom_events (
+          event_id, site_id, site_pk, visit_id, event_name_id,
+          occurred_at, received_at, sequence, node_count, value_count
+         )
+         SELECT
+           ? || '-event-' || n, ?, ?, ? || '-visit-' || n, ?,
+           125, 777, 1, 1, 1
+         FROM sequence`,
+      );
+      const insertForeignVisit = stressDb.prepare(
         `INSERT INTO visits (
           visit_id, site_id, site_pk, visitor_id, session_id, status,
           started_at, last_activity_at, pathname, title, hostname
         ) VALUES (?, ?, ?, ?, ?, 'closed', 125, 125, '/stress', 'Stress', 'events.test')`,
       );
-      const insertEvent = stressDb.prepare(
+      const insertForeignEvent = stressDb.prepare(
         `INSERT INTO custom_events (
           event_id, site_id, site_pk, visit_id, event_name_id,
           occurred_at, received_at, sequence, node_count, value_count
         ) VALUES (?, ?, ?, ?, ?, 125, 777, 1, 1, 1)`,
       );
-      stressDb.exec("BEGIN");
+      const stressIndexes = stressDb
+        .prepare(
+          `SELECT name, sql FROM sqlite_master
+           WHERE type = 'index'
+             AND tbl_name IN ('custom_events', 'visits')
+             AND sql IS NOT NULL
+           ORDER BY name`,
+        )
+        .all() as { readonly name: string; readonly sql: string }[];
+      for (const { name } of stressIndexes) {
+        stressDb.exec(`DROP INDEX "${name.replaceAll('"', '""')}"`);
+      }
       try {
+        stressDb.exec("BEGIN");
         for (const [site, nameId, prefix] of [
           [a, fixture.names.a, stressPrefixA],
           [b, fixture.names.b, stressPrefixB],
@@ -2937,27 +3262,26 @@ describe("Wave37A event record scoped Source regressions", () => {
               index === 0
                 ? "wave37a-stress-session-local-id-collision"
                 : `${prefix}-session-${index}`;
-            const visitId = `${prefix}-visit-${index}`;
-            const eventId = `${prefix}-event-${index}`;
-            insertVisit.run(
-              visitId,
-              site.id,
-              site.pk,
-              `${prefix}-visitor-${index}`,
-              localSessionId,
-            );
-            insertEvent.run(eventId, site.id, site.pk, visitId, nameId);
             expectedPairs.push({ siteId: site.id, id: localSessionId });
           }
+          insertVisits.run(
+            prefix,
+            site.id,
+            site.pk,
+            prefix,
+            "wave37a-stress-session-local-id-collision",
+            prefix,
+          );
+          insertEvents.run(prefix, site.id, site.pk, prefix, nameId);
         }
-        insertVisit.run(
+        insertForeignVisit.run(
           `${stressPrefixC}-foreign-visit`,
           c.id,
           c.pk,
           `${stressPrefixC}-foreign-visitor`,
           "wave37a-stress-session-local-id-collision",
         );
-        insertEvent.run(
+        insertForeignEvent.run(
           `${stressPrefixC}-foreign-event`,
           c.id,
           c.pk,
@@ -2968,6 +3292,8 @@ describe("Wave37A event record scoped Source regressions", () => {
       } catch (error) {
         stressDb.exec("ROLLBACK");
         throw error;
+      } finally {
+        for (const { sql } of stressIndexes) stressDb.exec(sql);
       }
 
       stressDb.exec(`
@@ -2978,18 +3304,30 @@ describe("Wave37A event record scoped Source regressions", () => {
         ) WITHOUT ROWID;
       `);
       const insertExpected = stressDb.prepare(
-        "INSERT INTO expected_session_identity (site_pk, session_id) VALUES (?, ?)",
+        `WITH RECURSIVE sequence(n) AS (
+           SELECT 0 UNION ALL SELECT n + 1 FROM sequence WHERE n < 9999
+         )
+         INSERT INTO expected_session_identity (site_pk, session_id)
+         SELECT ?, CASE WHEN n = 0 THEN ? ELSE ? || '-session-' || n END
+         FROM sequence
+         UNION ALL
+         SELECT ?, CASE WHEN n = 0 THEN ? ELSE ? || '-session-' || n END
+         FROM sequence`,
       );
-      const sitePks = new Map([
-        [a.id, a.pk],
-        [b.id, b.pk],
-        [c.id, c.pk],
-      ]);
-      for (const item of expectedPairs) {
-        const sitePk = sitePks.get(item.siteId);
-        if (sitePk === undefined)
-          throw new Error(`Missing fixture site PK for ${item.siteId}`);
-        insertExpected.run(sitePk, item.id);
+      try {
+        stressDb.exec("BEGIN");
+        insertExpected.run(
+          a.pk,
+          "wave37a-stress-session-local-id-collision",
+          stressPrefixA,
+          b.pk,
+          "wave37a-stress-session-local-id-collision",
+          stressPrefixB,
+        );
+        stressDb.exec("COMMIT");
+      } catch (error) {
+        stressDb.exec("ROLLBACK");
+        throw error;
       }
       // Duplicate and foreign authorized identities must not change the set.
       const matches = {
@@ -3010,6 +3348,10 @@ describe("Wave37A event record scoped Source regressions", () => {
         eventName: "target_event",
         advancedMatches: matches,
       });
+      expect(matches.entityIds).toHaveLength(20_002);
+      const countIdentitySnapshot =
+        selection.selection.preparedMatches?.identities ?? [];
+      expect(countIdentitySnapshot).toHaveLength(20_000);
       const countPlan = buildSourceDomainProbe(selection, "count");
       let countQuery: ReturnType<typeof compileOutput> | undefined;
       let countCompileFailure: string | undefined;
@@ -3018,14 +3360,9 @@ describe("Wave37A event record scoped Source regressions", () => {
       } catch (error) {
         countCompileFailure = String(error);
       }
-      let coreCountExplain: ReturnType<typeof explainQueryPlan> | undefined;
-      if (countQuery) {
-        coreCountExplain = explainQueryPlan(
-          stressDb,
-          countQuery.sql,
-          countQuery.bindings ?? [],
-        );
-      }
+      const coreCountExplain = countQuery
+        ? explainQueryPlan(stressDb, countQuery.sql, countQuery.bindings ?? [])
+        : undefined;
       const countTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
       let countRows: Record<string, unknown>[] | undefined;
       let countExecutionFailure: string | undefined;
@@ -3087,7 +3424,7 @@ describe("Wave37A event record scoped Source regressions", () => {
         emptyCountFailure = String(error);
       }
 
-      const frozenPageSql = `SELECT ce.event_id AS eventId, ce.event_pk AS eventPk, ce.occurred_at AS occurredAt
+      const tempIdentityOracleSql = `SELECT ce.event_id AS eventId, ce.event_pk AS eventPk, ce.occurred_at AS occurredAt
            FROM expected_session_identity identity
            INNER JOIN visits owner
              ON owner.site_pk = identity.site_pk
@@ -3101,22 +3438,15 @@ describe("Wave37A event record scoped Source regressions", () => {
              AND TRIM(COALESCE(cen.name, '')) = 'target_event'
            ORDER BY ce.occurred_at DESC, ce.event_id DESC, ce.event_pk DESC
            LIMIT ?`;
-      const frozenPageBindings = [a.pk, 120, 130, 8];
-      const frozenPageExplain = explainQueryPlan(
+      const tempIdentityOracleBindings = [a.pk, 120, 130, 8];
+      const tempIdentityOracleExplain = explainQueryPlan(
         stressDb,
-        frozenPageSql,
-        frozenPageBindings,
+        tempIdentityOracleSql,
+        tempIdentityOracleBindings,
       );
-      const frozenPageBudget = {
-        sqlBytes: new TextEncoder().encode(frozenPageSql).byteLength,
-        bindings: frozenPageBindings.length,
-        statementCount: 1,
-        physicalPlanHash: null,
-        packingSegments: [],
-      } as const;
       const expectedPage = stressDb
-        .prepare(frozenPageSql)
-        .all(...frozenPageBindings) as {
+        .prepare(tempIdentityOracleSql)
+        .all(...tempIdentityOracleBindings) as {
         readonly eventId: string;
         readonly eventPk: number;
         readonly occurredAt: number;
@@ -3132,6 +3462,22 @@ describe("Wave37A event record scoped Source regressions", () => {
           sort: { key: "occurredAt", direction: "desc" },
         },
       });
+      const pageSelectionSnapshot = createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-v1",
+        filters: selection.filters,
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [a.id as never],
+        }),
+        time: semanticTemporalDomainsFromQueryTime(selection.queryTime),
+        expectedPlan: selection.scopePlan,
+      });
+      const pageIdentitySnapshot =
+        pageSelectionSnapshot.preparedMatches?.identities ?? [];
+      expect(pageIdentitySnapshot).toHaveLength(10_000);
+      expect(
+        pageIdentitySnapshot.every((identity) => identity.siteId === a.id),
+      ).toBe(true);
       let pageQuery: ReturnType<typeof compileOutput> | undefined;
       let pageMetrics: QueryMetrics | undefined;
       let pageCompileFailure: string | undefined;
@@ -3191,6 +3537,52 @@ describe("Wave37A event record scoped Source regressions", () => {
         .slice(0, 7)
         .map((row) => row.eventId);
       const countMetrics = countQuery ? queryMetrics(countQuery) : undefined;
+      expect(countMetrics?.jsonRowRelations).toBeGreaterThan(0);
+      expect(pageMetrics?.jsonRowRelations).toBeGreaterThan(0);
+      const packedRowSegments = (pageQuery?.bindings ?? []).filter(
+        (binding): binding is string =>
+          typeof binding === "string" && binding.startsWith("[["),
+      );
+      const decodePackedIdentityRows = (
+        query: ReturnType<typeof compileOutput> | undefined,
+      ): unknown[][] => {
+        const segments = (query?.bindings ?? []).filter(
+          (binding): binding is string =>
+            typeof binding === "string" && binding.startsWith("[["),
+        );
+        expect(segments.length).toBeGreaterThan(0);
+        return segments.flatMap((segment) => {
+          expect(
+            new TextEncoder().encode(segment).byteLength,
+          ).toBeLessThanOrEqual(1_000_000);
+          return JSON.parse(segment) as unknown[][];
+        });
+      };
+      const countPackedIdentityRows = decodePackedIdentityRows(countQuery);
+      const pagePackedIdentityRows = decodePackedIdentityRows(pageQuery);
+      const packedRowsFor = (
+        identities: readonly {
+          readonly siteId: string;
+          readonly kind: string;
+          readonly id: string;
+        }[],
+      ) => identities.map(({ siteId, kind, id }) => [siteId, kind, id]);
+      expect(countPackedIdentityRows).toHaveLength(20_000);
+      expect(pagePackedIdentityRows).toHaveLength(10_000);
+      expect(countPackedIdentityRows).toEqual(
+        packedRowsFor(countIdentitySnapshot),
+      );
+      expect(pagePackedIdentityRows).toEqual(
+        packedRowsFor(pageIdentitySnapshot),
+      );
+      expect(
+        [...countPackedIdentityRows, ...pagePackedIdentityRows].every(
+          (tuple) => tuple.length === 3 && tuple[1] === "session",
+        ),
+      ).toBe(true);
+      expect(pagePackedIdentityRows.every((tuple) => tuple[0] === a.id)).toBe(
+        true,
+      );
       console.info(
         `[wave37a 20K] ${JSON.stringify({
           coreCount: countMetrics
@@ -3211,9 +3603,10 @@ describe("Wave37A event record scoped Source regressions", () => {
             rows: emptyCount,
             failure: emptyCountFailure,
           },
-          frozenPage: {
-            ...frozenPageBudget,
-            explain: frozenPageExplain,
+          tempIdentityOracle: {
+            description: "temporary-table semantic oracle; not old page SQL",
+            rows: expectedPage.length,
+            explain: tempIdentityOracleExplain,
           },
           productionPage: pageMetrics
             ? {
@@ -3265,8 +3658,10 @@ describe("Wave37A event record scoped Source regressions", () => {
       expect(pageTrace.preparedSql[0]).toBe(pageQuery?.sql);
       expect(pageTrace.bindings[0]?.length).toBe(pageMetrics?.bindings);
       expect(pageMetrics?.physicalPlanHash).toMatch(/^v[12]:[a-f0-9]{64}$/u);
-      expect(frozenPageExplain.operationCount).toBeGreaterThan(0);
-      expect(frozenPageExplain.indexedSearches.length).toBeGreaterThan(0);
+      expect(tempIdentityOracleExplain.operationCount).toBeGreaterThan(0);
+      expect(tempIdentityOracleExplain.indexedSearches.length).toBeGreaterThan(
+        0,
+      );
       expect(productionPageExplain?.operationCount).toBeGreaterThan(0);
       expect(productionPageExplain?.indexedSearches.length).toBeGreaterThan(0);
       expect(pageMetrics?.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
