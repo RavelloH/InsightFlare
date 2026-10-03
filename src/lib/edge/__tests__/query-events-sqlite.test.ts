@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
+import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
 import {
   analyticsFilterRegistry,
   attachScopedFilterMetadata,
@@ -16,7 +17,27 @@ import {
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
-import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildEventTrendOtherPlan,
+  buildEventTrendPointsPlan,
+  buildEventTrendSeriesPlan,
+  buildEventTypeTrendPlan,
+  EVENT_TREND_OUTPUTS,
+  type EventTrendPlanInput,
+} from "@/lib/edge/analytics/engine/event-trend-plan";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import {
+  buildEventFilteredSourceCte,
+  buildTimeBuckets,
+  type Interval,
+  type QueryWindow,
+  SHARE_TREND_OTHER_KEY,
+  SHARE_TREND_OTHER_LABEL,
+  SHARE_TREND_OTHER_TOKEN,
+  shareTrendSeriesKey,
+  timeBucketCase,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import { queryEventFieldsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
@@ -39,11 +60,161 @@ import {
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 import type { FilterExpression } from "@/lib/filter-contract/filters";
+import { sha256Hex } from "@/lib/sha256";
 
 import { filterFixture } from "./filter-fixtures";
 
 type Binding = string | number | null;
 type D1Row = Record<string, unknown>;
+
+interface TrendEvidenceResult {
+  readonly series: readonly {
+    readonly eventName: string;
+    readonly isOther?: boolean;
+  }[];
+}
+
+function compileTrendOutput(
+  plan: ReturnType<typeof buildEventTrendSeriesPlan>,
+  outputId: string,
+) {
+  const output = plan.outputs.find((candidate) => candidate.id === outputId);
+  if (!output) throw new Error(`wave39_missing_trend_output:${outputId}`);
+  const siteIds = plan.context.subject.siteIds;
+  if (siteIds.length !== 1)
+    throw new Error(`wave39_unsupported_trend_subject:${siteIds.length}`);
+  const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+    siteId: siteIds[0]!,
+    time: plan.context.time,
+  });
+  const lowered = lowerer.lower(output);
+  return compileD1Query(
+    lowerLogicalPlan(
+      lowerer.projectOutput(
+        lowered,
+        output.fields.map((field) => ({ name: field.name, slot: field.slot })),
+      ),
+    ),
+    { tag: `wave39.${outputId}` },
+  );
+}
+
+async function trendPhysicalPlanHash(
+  query: ReturnType<typeof compileD1Query>,
+): Promise<string> {
+  const shape = query.physicalPlanShape;
+  if (!shape) throw new Error("wave39_missing_physical_plan_shape");
+  const payload =
+    shape.version === 1
+      ? JSON.stringify([
+          "d1-query-shape-v1",
+          query.sql,
+          shape.cteCount,
+          shape.directScanProjectionCount,
+          shape.nativeMembershipCount,
+          shape.jsonMembershipCount,
+        ])
+      : JSON.stringify([
+          "d1-query-shape-v2",
+          query.sql,
+          shape.cteCount,
+          shape.directScanProjectionCount,
+          shape.nativeMembershipCount,
+          shape.jsonMembershipCount,
+          shape.nativeRowRelationCount,
+          shape.jsonRowRelationCount,
+        ]);
+  return `v${shape.version}:${await sha256Hex(payload)}`;
+}
+
+function eventTrendPlanInput(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  eventName?: string,
+): EventTrendPlanInput {
+  const metadata = scopedFilterMetadata(filters);
+  return {
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(eventName !== undefined ? { eventName } : {}),
+  };
+}
+
+async function recordTrendPhysicalEvidence(
+  label: string,
+  plans: readonly {
+    readonly plan: ReturnType<typeof buildEventTrendSeriesPlan>;
+    readonly outputId: string;
+  }[],
+  executed: readonly { readonly sql: string; readonly bindings: Binding[] }[],
+): Promise<void> {
+  expect(executed, label).toHaveLength(plans.length);
+  const statements = await Promise.all(
+    plans.map(async ({ plan, outputId }, index) => {
+      const compiled = compileTrendOutput(plan, outputId);
+      const actual = executed[index]!;
+      expect(compiled.sql, `${label}:${outputId}:sql`).toBe(actual.sql);
+      expect(compiled.bindings, `${label}:${outputId}:bindings`).toEqual(
+        actual.bindings,
+      );
+      return {
+        outputId,
+        sqlUtf8Bytes: new TextEncoder().encode(actual.sql).byteLength,
+        bindings: actual.bindings.length,
+        physicalPlanHash: await trendPhysicalPlanHash(compiled),
+      };
+    }),
+  );
+  console.info(
+    `[Wave39 trend physical evidence] ${JSON.stringify({
+      entrypoint: label,
+      statementCount: executed.length,
+      statements,
+    })}`,
+  );
+}
+
+function eventTrendOutputPlans(
+  input: EventTrendPlanInput,
+  limit: number,
+  interval: Interval,
+  result: TrendEvidenceResult,
+) {
+  const seriesNames = result.series
+    .filter((series) => !series.isOther)
+    .map((series) => series.eventName);
+  const plans: Array<{
+    readonly plan: ReturnType<typeof buildEventTrendSeriesPlan>;
+    readonly outputId: string;
+  }> = [
+    {
+      plan: buildEventTrendSeriesPlan({ ...input, limit }),
+      outputId: EVENT_TREND_OUTPUTS.series,
+    },
+    {
+      plan: buildEventTrendPointsPlan({
+        ...input,
+        interval,
+        seriesNames,
+        otherToken: SHARE_TREND_OTHER_TOKEN,
+      }),
+      outputId: EVENT_TREND_OUTPUTS.points,
+    },
+  ];
+  if (result.series.some((series) => series.isOther))
+    plans.push({
+      plan: buildEventTrendOtherPlan({
+        ...input,
+        seriesNames,
+        otherLabel: SHARE_TREND_OTHER_LABEL,
+      }),
+      outputId: EVENT_TREND_OUTPUTS.other,
+    });
+  return plans;
+}
 
 class SqliteStatement {
   constructor(
@@ -316,6 +487,236 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
     },
     d1,
   } as { env: Env; d1: SqliteD1Database };
+}
+
+function insertTrendEvent(
+  database: DatabaseSync,
+  id: number,
+  occurredAt: number,
+  eventNameId = 1,
+): void {
+  database
+    .prepare(
+      `INSERT INTO custom_events (
+        event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+        received_at, sequence, node_count, value_count, ae_synced_at
+      ) VALUES (?, ?, ?, 'visit-1', ?, ?, ?, ?, 1, 1, NULL)`,
+    )
+    .run(
+      1000 + id,
+      `calendar-event-${id}`,
+      siteId,
+      eventNameId,
+      occurredAt,
+      occurredAt,
+      id,
+    );
+}
+
+function allowNullableEventNames(database: DatabaseSync): void {
+  database.exec(`
+    ALTER TABLE custom_event_names RENAME TO custom_event_names_required;
+    CREATE TABLE custom_event_names (
+      id INTEGER PRIMARY KEY,
+      site_id TEXT NOT NULL,
+      site_pk INTEGER GENERATED ALWAYS AS (1) STORED,
+      name TEXT,
+      UNIQUE(site_id, name)
+    );
+    INSERT INTO custom_event_names (id, site_id, name)
+      SELECT id, site_id, name FROM custom_event_names_required;
+    DROP TABLE custom_event_names_required;
+  `);
+}
+
+function frozenCalendarTypeTrend(
+  database: DatabaseSync,
+  window: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument = EMPTY_FILTER_DOCUMENT,
+  selectedEventName = eventName,
+) {
+  const source = buildEventFilteredSourceCte(
+    siteId,
+    window,
+    filters,
+    selectedEventName,
+  );
+  const buckets = buildTimeBuckets(window, interval);
+  const bucketCase = timeBucketCase(buckets, "occurred_at");
+  const rows = database
+    .prepare(
+      `${source.cte}
+       SELECT ${bucketCase.sql} AS bucket, count(*) AS events,
+         count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+       FROM filtered_events
+       GROUP BY bucket
+       HAVING bucket IS NOT NULL
+       ORDER BY bucket ASC`,
+    )
+    .all(...source.bindings, ...bucketCase.bindings) as Array<{
+    readonly bucket: number;
+    readonly events: number;
+    readonly visitors: number;
+  }>;
+  const data = buckets.map((bucket) => ({
+    bucket: bucket.index,
+    timestampMs: bucket.timestampMs,
+    events: 0,
+    visitors: 0,
+  }));
+  for (const row of rows) {
+    const point = data[Number(row.bucket)];
+    if (!point) continue;
+    point.events = Number(row.events);
+    point.visitors = Number(row.visitors);
+  }
+  return data;
+}
+
+function frozenLegacyEventTrend(
+  database: DatabaseSync,
+  queryWindow: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument,
+  limit: number,
+  selectedEventName?: string,
+) {
+  const source = buildEventFilteredSourceCte(
+    siteId,
+    queryWindow,
+    filters,
+    selectedEventName,
+  );
+  const seriesRows = database
+    .prepare(
+      `${source.cte}
+       SELECT event_name AS eventName, count(*) AS events,
+         count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+         count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+       FROM filtered_events
+       GROUP BY event_name
+       ORDER BY events DESC, sessions DESC, eventName ASC
+       LIMIT ?`,
+    )
+    .all(...source.bindings, limit) as Array<{
+    readonly eventName: string;
+    readonly events: number;
+    readonly sessions: number;
+    readonly visitors: number;
+  }>;
+  const buckets = buildTimeBuckets(queryWindow, interval);
+  const bucket = timeBucketCase(buckets, "occurred_at");
+  const seriesNames = seriesRows.map((row) => row.eventName);
+  const namesClause =
+    seriesNames.length > 0
+      ? `CASE WHEN event_name IN (${seriesNames.map(() => "?").join(", ")}) THEN event_name ELSE ? END`
+      : "?";
+  const trendRows = database
+    .prepare(
+      `${source.cte}, bucketed AS (
+         SELECT ${bucket.sql} AS bucket, ${namesClause} AS seriesName, count(*) AS events
+         FROM filtered_events
+         GROUP BY bucket, seriesName
+       )
+       SELECT bucket, seriesName AS seriesKey, events
+       FROM bucketed
+       WHERE bucket IS NOT NULL
+       ORDER BY bucket ASC`,
+    )
+    .all(
+      ...source.bindings,
+      ...bucket.bindings,
+      ...seriesNames,
+      SHARE_TREND_OTHER_TOKEN,
+    ) as Array<{
+    readonly bucket: number | null;
+    readonly seriesKey: string | null;
+    readonly events: number;
+  }>;
+  const hasOther = trendRows.some(
+    (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
+  );
+  const [otherRow] = hasOther
+    ? (database
+        .prepare(
+          `${source.cte}
+           SELECT ? AS eventName, count(*) AS events,
+             count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+             count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+           FROM filtered_events
+           ${seriesNames.length > 0 ? `WHERE event_name NOT IN (${seriesNames.map(() => "?").join(", ")})` : ""}`,
+        )
+        .all(
+          ...source.bindings,
+          SHARE_TREND_OTHER_LABEL,
+          ...seriesNames,
+        ) as Array<{
+        readonly eventName: string;
+        readonly events: number;
+        readonly sessions: number;
+        readonly visitors: number;
+      }>)
+    : [];
+
+  const seriesKeyByName = new Map<string, string>();
+  const usedKeys = new Set<string>();
+  for (const row of seriesRows)
+    seriesKeyByName.set(
+      row.eventName,
+      shareTrendSeriesKey(row.eventName, usedKeys, "event"),
+    );
+  const series: Array<{
+    key: string;
+    eventName: string;
+    label: string;
+    events: number;
+    sessions: number;
+    visitors: number;
+    isOther?: boolean;
+  }> = seriesRows.map((row) => ({
+    key: seriesKeyByName.get(row.eventName)!,
+    eventName: row.eventName,
+    label: row.eventName,
+    events: row.events,
+    sessions: row.sessions,
+    visitors: row.visitors,
+  }));
+  if (hasOther) {
+    series.push({
+      key: SHARE_TREND_OTHER_KEY,
+      eventName: SHARE_TREND_OTHER_LABEL,
+      label: SHARE_TREND_OTHER_LABEL,
+      events:
+        Number(otherRow?.events ?? 0) ||
+        trendRows
+          .filter((row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN)
+          .reduce((sum, row) => sum + Number(row.events ?? 0), 0),
+      sessions: Number(otherRow?.sessions ?? 0),
+      visitors: Number(otherRow?.visitors ?? 0),
+      isOther: true,
+    });
+  }
+  const data = buckets.map((item) => ({
+    bucket: item.index,
+    timestampMs: item.timestampMs,
+    totalEvents: 0,
+    eventsBySeries: {} as Record<string, number>,
+  }));
+  for (const row of trendRows) {
+    const bucketIndex = Number(row.bucket ?? -1);
+    const point = data[bucketIndex];
+    if (!point) continue;
+    const rawSeries = String(row.seriesKey ?? "");
+    const key =
+      rawSeries === SHARE_TREND_OTHER_TOKEN
+        ? SHARE_TREND_OTHER_KEY
+        : (seriesKeyByName.get(rawSeries) ?? rawSeries);
+    const events = Number(row.events ?? 0);
+    point.eventsBySeries[key] = events;
+    point.totalEvents += events;
+  }
+  return { series, data };
 }
 
 type TruthScope = "event" | "session" | "visitor";
@@ -942,27 +1343,619 @@ describe("event detail D1 SQL", () => {
     }
   });
 
-  it("uses the event-name index for the all-events trend source", async () => {
+  it("executes the all-events trend through compiled relational queries", async () => {
     const { env, d1 } = createSqliteEventEnv();
 
     try {
-      await queryEventsTrendFromD1(
+      const result = await queryEventsTrendFromD1(
         env,
         siteId,
         window,
         "hour",
         EMPTY_FILTER_DOCUMENT,
-        5,
+        1,
         eventName,
       );
-      const query = d1.calls[0];
-      const plan = d1.database
-        .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
-        .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
-      expect(query?.sql).toContain("target_event_name AS");
-      expect(query?.sql).not.toContain("TRIM(COALESCE(es.event_name");
-      expect(plan.map((row) => row.detail).join("\n")).toContain(
-        "idx_custom_events_site_pk_name_time",
+      expect(d1.calls.length).toBeGreaterThanOrEqual(2);
+      for (const query of d1.calls) {
+        expect(query.sql).toContain('"custom_events"');
+        expect(query.sql).not.toContain("target_event_name AS");
+        expect(query.bindings.length).toBeLessThanOrEqual(100);
+        expect(new TextEncoder().encode(query.sql).byteLength).toBeLessThan(
+          100_000,
+        );
+      }
+      expect(d1.calls[0]?.bindings).toContain(eventName);
+      await recordTrendPhysicalEvidence(
+        "queryEventsTrendFromD1.direct",
+        eventTrendOutputPlans(
+          eventTrendPlanInput(siteId, window, EMPTY_FILTER_DOCUMENT, eventName),
+          1,
+          "hour",
+          result,
+        ),
+        d1.calls,
+      );
+      expect(d1.calls.length).toBeLessThanOrEqual(3);
+
+      d1.calls.length = 0;
+      await queryEventTypeTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        eventName,
+      );
+      await recordTrendPhysicalEvidence(
+        "queryEventTypeTrendFromD1.direct",
+        [
+          {
+            plan: buildEventTypeTrendPlan({
+              ...eventTrendPlanInput(
+                siteId,
+                window,
+                EMPTY_FILTER_DOCUMENT,
+                eventName,
+              ),
+              interval: "hour",
+            }),
+            outputId: EVENT_TREND_OUTPUTS.typePoints,
+          },
+        ],
+        d1.calls,
+      );
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("matches the frozen trend SQL for prepared filters and explicit identities", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    try {
+      const preparedPath = preparedEventRecordFilters(
+        filterFixture({ path: "/posts/minecraft-meteor-guide" }),
+        "event",
+      );
+      const pathFilters = preparedPath.filters!;
+      const preparedTrend = await queryEventsTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        pathFilters,
+        1,
+      );
+      expect(preparedTrend).toEqual(
+        frozenLegacyEventTrend(d1.database, window, "hour", pathFilters, 1),
+      );
+      await recordTrendPhysicalEvidence(
+        "queryEventsTrendFromD1.prepared",
+        eventTrendOutputPlans(
+          eventTrendPlanInput(siteId, window, pathFilters),
+          1,
+          "hour",
+          preparedTrend,
+        ),
+        d1.calls,
+      );
+      expect(d1.calls.length).toBeLessThanOrEqual(3);
+
+      const prepared = preparedEventRecordFilters(
+        EMPTY_FILTER_DOCUMENT,
+        "event",
+      );
+      const metadata = scopedFilterMetadata(prepared.filters!);
+      if (!metadata || !prepared.scopePlan)
+        throw new Error("prepared_trend_scope_metadata_missing");
+      const filters = attachScopedFilterMetadata(prepared.filters!, {
+        ...metadata,
+        plan: {
+          ...prepared.scopePlan,
+          advancedMatches: {
+            visitIds: [{ siteId, id: "visit-1" }],
+            eventIds: [
+              { siteId, id: "event-1" },
+              { siteId, id: "event-other-name" },
+              { siteId, id: "event-1" },
+            ],
+          },
+        },
+      });
+      d1.calls.length = 0;
+      const advancedTrend = await queryEventsTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        filters,
+        5,
+      );
+      expect(advancedTrend).toEqual(
+        frozenLegacyEventTrend(d1.database, window, "hour", filters, 5),
+      );
+      expect(d1.calls).toHaveLength(2);
+      expect(d1.calls.every((query) => query.bindings.length <= 100)).toBe(
+        true,
+      );
+
+      d1.calls.length = 0;
+      const typeTrend = await queryEventTypeTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        filters,
+        eventName,
+      );
+      expect(typeTrend.data).toEqual(
+        frozenCalendarTypeTrend(
+          d1.database,
+          window,
+          "hour",
+          filters,
+          eventName,
+        ),
+      );
+      expect(d1.calls).toHaveLength(1);
+      await recordTrendPhysicalEvidence(
+        "queryEventTypeTrendFromD1.prepared",
+        [
+          {
+            plan: buildEventTypeTrendPlan({
+              ...eventTrendPlanInput(siteId, window, filters, eventName),
+              interval: "hour",
+            }),
+            outputId: EVENT_TREND_OUTPUTS.typePoints,
+          },
+        ],
+        d1.calls,
+      );
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps the Event-record trimmed gate distinct from direct raw Event analytics", async () => {
+    const paddedName = ` ${eventName} `;
+
+    const recordFixture = createSqliteEventEnv();
+    try {
+      const records = await queryEventRecordPageFromD1(
+        recordFixture.env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        {
+          limit: 10,
+          sort: { key: "occurredAt", direction: "desc" },
+          eventName: paddedName,
+        },
+      );
+      expect(records.rows.map((row) => row.eventId)).toEqual(["event-1"]);
+    } finally {
+      recordFixture.d1.close();
+    }
+
+    const analyticsFixture = createSqliteEventEnv();
+    try {
+      const typeTrend = await queryEventTypeTrendFromD1(
+        analyticsFixture.env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        paddedName,
+      );
+      expect(typeTrend.data.every((point) => point.events === 0)).toBe(true);
+      expect(analyticsFixture.d1.calls).toHaveLength(1);
+
+      analyticsFixture.d1.calls.length = 0;
+      const allEventsTrend = await queryEventsTrendFromD1(
+        analyticsFixture.env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        5,
+        paddedName,
+      );
+      expect(allEventsTrend.series).toEqual([]);
+      expect(
+        allEventsTrend.data.every((point) => point.totalEvents === 0),
+      ).toBe(true);
+      expect(analyticsFixture.d1.calls).toHaveLength(2);
+    } finally {
+      analyticsFixture.d1.close();
+    }
+  });
+
+  it("keeps Other identity totals distinct across calendar buckets", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    try {
+      d1.database
+        .prepare(
+          "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+        )
+        .run(100, siteId, "other-trend");
+      insertTrendEvent(d1.database, 20, eventTime - 30 * 60_000, 99);
+      insertTrendEvent(d1.database, 21, eventTime + 30 * 60_000, 99);
+      insertTrendEvent(d1.database, 22, eventTime - 20 * 60_000, 100);
+      insertTrendEvent(d1.database, 23, eventTime + 45 * 60_000, 100);
+
+      const result = await queryEventsTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        1,
+      );
+      expect(result).toEqual(
+        frozenLegacyEventTrend(
+          d1.database,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          1,
+        ),
+      );
+      expect(result.series).toEqual([
+        {
+          key: "purchase",
+          eventName: "purchase",
+          label: "purchase",
+          events: 3,
+          sessions: 1,
+          visitors: 1,
+        },
+        {
+          key: SHARE_TREND_OTHER_KEY,
+          eventName: SHARE_TREND_OTHER_LABEL,
+          label: SHARE_TREND_OTHER_LABEL,
+          events: 3,
+          sessions: 1,
+          visitors: 1,
+          isOther: true,
+        },
+      ]);
+      expect(
+        result.data.map((point) => point.eventsBySeries[SHARE_TREND_OTHER_KEY]),
+      ).toEqual([1, 2]);
+      expect(d1.calls).toHaveLength(3);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("preserves raw series names, key collisions, NULL NOT IN, and Other-token collisions", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    try {
+      allowNullableEventNames(d1.database);
+      const insertName = d1.database.prepare(
+        "INSERT INTO custom_event_names (id, site_id, name) VALUES (?, ?, ?)",
+      );
+      insertName.run(100, siteId, "a b");
+      insertName.run(101, siteId, "a-b");
+      insertName.run(102, siteId, " ");
+      insertName.run(103, siteId, SHARE_TREND_OTHER_TOKEN);
+      insertName.run(104, siteId, null);
+      insertTrendEvent(d1.database, 30, eventTime, 99);
+      insertTrendEvent(d1.database, 31, eventTime, 99);
+      insertTrendEvent(d1.database, 32, eventTime, 100);
+      insertTrendEvent(d1.database, 33, eventTime + 1, 100);
+      insertTrendEvent(d1.database, 34, eventTime, 101);
+      insertTrendEvent(d1.database, 35, eventTime + 1, 101);
+      insertTrendEvent(d1.database, 36, eventTime, 102);
+      insertTrendEvent(d1.database, 37, eventTime, 103);
+      insertTrendEvent(d1.database, 38, eventTime, 104);
+
+      const result = await queryEventsTrendFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        3,
+      );
+      expect(result).toEqual(
+        frozenLegacyEventTrend(
+          d1.database,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          3,
+        ),
+      );
+      expect(
+        result.series.slice(0, 3).map((item) => [item.eventName, item.key]),
+      ).toEqual([
+        ["purchase", "purchase"],
+        ["a b", "a-b"],
+        ["a-b", "a-b-2"],
+      ]);
+      expect(result.series.at(-1)).toMatchObject({
+        key: SHARE_TREND_OTHER_KEY,
+        events: 3,
+        sessions: 1,
+        visitors: 1,
+      });
+      expect(result.data[1]?.eventsBySeries[SHARE_TREND_OTHER_KEY]).toBe(4);
+      expect(d1.calls).toHaveLength(3);
+
+      d1.calls.length = 0;
+      await expect(
+        queryEventsTrendFromD1(
+          env,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          20,
+        ),
+      ).rejects.toThrow(TypeError);
+      expect(d1.calls).toHaveLength(1);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("matches the legacy timeBucketCase at calendar boundaries", async () => {
+    const cases: Array<{
+      readonly label: string;
+      readonly interval: Interval;
+      readonly window: QueryWindow;
+      readonly eventTimes: readonly number[];
+      readonly expectedStarts: readonly number[];
+      readonly expectedDurations?: readonly number[];
+    }> = [
+      {
+        label: "minute",
+        interval: "minute",
+        window: {
+          startMs: Date.parse("2024-01-01T00:00:30Z"),
+          endExclusiveMs: Date.parse("2024-01-01T00:02:00Z"),
+          nowMs: Date.parse("2024-01-01T00:02:00Z"),
+          timeZone: "UTC",
+        },
+        eventTimes: [
+          Date.parse("2024-01-01T00:00:00Z"),
+          Date.parse("2024-01-01T00:00:30Z"),
+          Date.parse("2024-01-01T00:01:00Z"),
+          Date.parse("2024-01-01T00:02:00Z"),
+        ],
+        expectedStarts: [
+          Date.parse("2024-01-01T00:00:00Z"),
+          Date.parse("2024-01-01T00:01:00Z"),
+        ],
+      },
+      {
+        label: "hour",
+        interval: "hour",
+        window: {
+          startMs: Date.parse("2024-01-01T10:30:00Z"),
+          endExclusiveMs: Date.parse("2024-01-01T12:00:00Z"),
+          nowMs: Date.parse("2024-01-01T12:00:00Z"),
+          timeZone: "UTC",
+        },
+        eventTimes: [
+          Date.parse("2024-01-01T10:00:00Z"),
+          Date.parse("2024-01-01T10:30:00Z"),
+          Date.parse("2024-01-01T11:00:00Z"),
+          Date.parse("2024-01-01T12:00:00Z"),
+        ],
+        expectedStarts: [
+          Date.parse("2024-01-01T10:00:00Z"),
+          Date.parse("2024-01-01T11:00:00Z"),
+        ],
+      },
+      {
+        label: "non-hour-zone-day",
+        interval: "day",
+        window: {
+          startMs: Date.parse("2025-01-01T12:00:00+05:45"),
+          endExclusiveMs: Date.parse("2025-01-02T12:00:00+05:45"),
+          nowMs: Date.parse("2025-01-02T12:00:00+05:45"),
+          timeZone: "Asia/Kathmandu",
+        },
+        eventTimes: [
+          Date.parse("2025-01-01T00:00:00+05:45"),
+          Date.parse("2025-01-01T12:00:00+05:45"),
+          Date.parse("2025-01-02T00:00:00+05:45"),
+          Date.parse("2025-01-02T12:00:00+05:45"),
+        ],
+        expectedStarts: [
+          Date.parse("2025-01-01T00:00:00+05:45"),
+          Date.parse("2025-01-02T00:00:00+05:45"),
+        ],
+      },
+      {
+        label: "week",
+        interval: "week",
+        window: {
+          startMs: Date.parse("2024-01-10T12:00:00Z"),
+          endExclusiveMs: Date.parse("2024-01-16T12:00:00Z"),
+          nowMs: Date.parse("2024-01-16T12:00:00Z"),
+          timeZone: "UTC",
+        },
+        eventTimes: [
+          Date.parse("2024-01-08T00:00:00Z"),
+          Date.parse("2024-01-10T12:00:00Z"),
+          Date.parse("2024-01-15T00:00:00Z"),
+          Date.parse("2024-01-16T12:00:00Z"),
+        ],
+        expectedStarts: [
+          Date.parse("2024-01-08T00:00:00Z"),
+          Date.parse("2024-01-15T00:00:00Z"),
+        ],
+      },
+      {
+        label: "month",
+        interval: "month",
+        window: {
+          startMs: Date.parse("2024-02-15T00:00:00Z"),
+          endExclusiveMs: Date.parse("2024-03-15T00:00:00Z"),
+          nowMs: Date.parse("2024-03-15T00:00:00Z"),
+          timeZone: "UTC",
+        },
+        eventTimes: [
+          Date.parse("2024-02-01T00:00:00Z"),
+          Date.parse("2024-02-15T00:00:00Z"),
+          Date.parse("2024-03-01T00:00:00Z"),
+          Date.parse("2024-03-15T00:00:00Z"),
+        ],
+        expectedStarts: [
+          Date.parse("2024-02-01T00:00:00Z"),
+          Date.parse("2024-03-01T00:00:00Z"),
+        ],
+      },
+      {
+        label: "dst-day",
+        interval: "day",
+        window: {
+          startMs: Date.parse("2026-03-08T00:00:00-05:00"),
+          endExclusiveMs: Date.parse("2026-03-10T00:00:00-04:00"),
+          nowMs: Date.parse("2026-03-10T00:00:00-04:00"),
+          timeZone: "America/New_York",
+        },
+        eventTimes: [
+          Date.parse("2026-03-08T00:00:00-05:00"),
+          Date.parse("2026-03-09T00:00:00-04:00"),
+          Date.parse("2026-03-10T00:00:00-04:00"),
+        ],
+        expectedStarts: [
+          Date.parse("2026-03-08T00:00:00-05:00"),
+          Date.parse("2026-03-09T00:00:00-04:00"),
+        ],
+        expectedDurations: [23 * 60 * 60 * 1000, 24 * 60 * 60 * 1000],
+      },
+    ];
+
+    for (const [caseIndex, testCase] of cases.entries()) {
+      const { env, d1 } = createSqliteEventEnv();
+      try {
+        testCase.eventTimes.forEach((time, index) =>
+          insertTrendEvent(d1.database, caseIndex * 10 + index, time),
+        );
+        const buckets = buildTimeBuckets(testCase.window, testCase.interval);
+        expect(
+          buckets.map((bucket) => bucket.startMs),
+          testCase.label,
+        ).toEqual(testCase.expectedStarts);
+        if (testCase.expectedDurations)
+          expect(
+            buckets.map((bucket) => bucket.endExclusiveMs - bucket.startMs),
+            testCase.label,
+          ).toEqual(testCase.expectedDurations);
+
+        const result = await queryEventTypeTrendFromD1(
+          env,
+          siteId,
+          testCase.window,
+          testCase.interval,
+          EMPTY_FILTER_DOCUMENT,
+          eventName,
+        );
+        expect(result.data, testCase.label).toEqual(
+          frozenCalendarTypeTrend(
+            d1.database,
+            testCase.window,
+            testCase.interval,
+          ),
+        );
+        expect(d1.calls).toHaveLength(1);
+        expect(d1.calls[0]?.bindings.length).toBeLessThanOrEqual(100);
+      } finally {
+        d1.close();
+      }
+    }
+  });
+
+  it("keeps long-window bucket SQL within the D1 budget and caps at 2000 buckets", async () => {
+    const startMs = Date.UTC(2024, 0, 1);
+    const { env, d1 } = createSqliteEventEnv();
+    try {
+      const evidence: Array<Record<string, unknown>> = [];
+      for (const bucketCount of [360, 480, 600, 720, 900, 1200, 1500, 2001]) {
+        const longWindow: QueryWindow = {
+          startMs,
+          endExclusiveMs: startMs + bucketCount * 60_000,
+          nowMs: startMs + bucketCount * 60_000,
+          timeZone: "UTC",
+        };
+        const legacySource = buildEventFilteredSourceCte(
+          siteId,
+          longWindow,
+          EMPTY_FILTER_DOCUMENT,
+          eventName,
+        );
+        const legacyBucketCase = timeBucketCase(
+          buildTimeBuckets(longWindow, "minute"),
+          "occurred_at",
+        );
+        const legacySql = `${legacySource.cte}
+          SELECT ${legacyBucketCase.sql} AS bucket, count(*) AS events
+          FROM filtered_events
+          GROUP BY bucket HAVING bucket IS NOT NULL ORDER BY bucket ASC`;
+        const legacyBytes = new TextEncoder().encode(legacySql).byteLength;
+        const callsBefore = d1.calls.length;
+        let compileFailure: string | null = null;
+        try {
+          const result = await queryEventTypeTrendFromD1(
+            env,
+            siteId,
+            longWindow,
+            "minute",
+            EMPTY_FILTER_DOCUMENT,
+            eventName,
+          );
+          expect(result.data).toHaveLength(Math.min(bucketCount, 2000));
+        } catch (error) {
+          compileFailure = String(error);
+        }
+        const compiled = d1.calls[callsBefore];
+        const compiledBytes = compiled
+          ? new TextEncoder().encode(compiled.sql).byteLength
+          : null;
+        evidence.push({
+          bucketCount,
+          legacySqlUtf8Bytes: legacyBytes,
+          legacyBindings:
+            legacySource.bindings.length + legacyBucketCase.bindings.length,
+          compiledSqlUtf8Bytes: compiledBytes,
+          compiledBindings: compiled?.bindings.length ?? null,
+          compileFailure,
+        });
+        if (legacyBytes <= 100_000) {
+          expect(
+            compileFailure,
+            `new query for ${bucketCount} buckets`,
+          ).toBeNull();
+          expect(compiledBytes).toBeLessThan(100_000);
+          expect(compiled?.bindings.length).toBeLessThanOrEqual(100);
+        }
+        if (compiled) expect(d1.calls).toHaveLength(callsBefore + 1);
+      }
+      console.info(
+        `[Wave39 long-window SQL comparison] ${JSON.stringify(evidence)}`,
+      );
+
+      const capped = buildTimeBuckets(
+        {
+          startMs,
+          endExclusiveMs: startMs + 2001 * 60_000,
+          nowMs: startMs + 2001 * 60_000,
+          timeZone: "UTC",
+        },
+        "minute",
+      );
+      expect(capped).toHaveLength(2000);
+      expect(capped.at(-1)).toMatchObject({ index: 1999 });
+      console.info(
+        `[Wave39 time-bucket SQL budget] ${JSON.stringify({
+          interval: "minute",
+          cappedBucketCount: capped.length,
+        })}`,
       );
     } finally {
       d1.close();
@@ -981,16 +1974,16 @@ describe("event detail D1 SQL", () => {
       );
       expect(summary.events).toBe(2);
       const query = d1.calls.at(-1);
-      expect(query?.sql).toContain("visit_source AS");
+      expect(query?.sql).toContain('"custom_events"');
       expect(query?.sql).toContain("ROW_NUMBER() OVER");
-      expect(query?.bindings.slice(0, 6)).toEqual([
-        siteId,
-        window.startMs,
-        window.endExclusiveMs,
-        siteId,
-        window.startMs,
-        window.endExclusiveMs,
-      ]);
+      expect(query?.bindings).toEqual(
+        expect.arrayContaining([
+          siteId,
+          window.startMs,
+          window.endExclusiveMs,
+          "/entry",
+        ]),
+      );
     } finally {
       d1.close();
     }

@@ -10,12 +10,17 @@ import {
   type SqliteD1Trace,
 } from "@/lib/db/__tests__/sqlite-d1";
 import {
+  attachScopedFilterMetadata,
   prepareScopedQuery,
   type QueryInput,
   type QueryTime,
+  scopedFilterMetadata,
   siteQueryContext,
+  teamQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import { buildEventFilteredSourceCte } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   decodeEventTypeCursor,
   type EventTypeAggregateCursor,
@@ -33,6 +38,9 @@ import {
 } from "@/lib/filter-contract/filters";
 
 const SITE_ID = "wave38-event-types";
+const SITE_B = "wave38-event-types-sibling";
+const TEAM_ID = "wave38-event-types-team";
+const FOREIGN_SITE = "wave38-event-types-foreign";
 const WINDOW = {
   startMs: 120,
   endExclusiveMs: 130,
@@ -115,7 +123,11 @@ function recordExecutionEvidence(label: string, trace: SqliteD1Trace): void {
     bindingTail: bindings
       .slice(-9)
       .map((value) =>
-        value === null || typeof value === "number" ? value : String(value),
+        value === null || typeof value === "number"
+          ? value
+          : String(value).length > 120
+            ? `${String(value).slice(0, 96)}…[${String(value).length} chars]`
+            : String(value),
       ),
     explain,
   });
@@ -147,6 +159,35 @@ function addName(
        VALUES (?, ?, ?, 1, ?)`,
     )
     .run(id, SITE_ID, name, sitePk);
+}
+
+function preparedIdentityFilters(
+  scopePreference: "event" | "session" | "visitor",
+  advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+  authorizationSiteIds: readonly string[] = [SITE_ID, SITE_B],
+): FilterDocument {
+  const context = teamQueryContext(
+    TEAM_ID,
+    "private-dashboard",
+    authorizationSiteIds,
+  );
+  const prepared = prepareScopedQuery("event-records", {
+    context,
+    time: QUERY_TIME,
+    filters: plainFilters(),
+    scopePreference,
+  } as QueryInput & { readonly time: QueryTime }) as QueryInput & {
+    readonly filters?: FilterDocument;
+    readonly scopePlan?: ScopedFilterPlan;
+  };
+  if (!prepared.filters || !prepared.scopePlan)
+    throw new Error("wave39_advanced_identity_preparation_failed");
+  const metadata = scopedFilterMetadata(prepared.filters);
+  if (!metadata) throw new Error("wave39_advanced_identity_metadata_missing");
+  return attachScopedFilterMetadata(prepared.filters, {
+    ...metadata,
+    plan: { ...prepared.scopePlan, advancedMatches },
+  });
 }
 
 function addVisit(
@@ -249,6 +290,9 @@ function createFixture(): DatabaseSync {
     DROP TABLE custom_event_names_not_null;
   `);
   const sitePk = addSite(database);
+  database
+    .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+    .run(SITE_B);
   addName(database, sitePk, 1, "alpha");
   addName(database, sitePk, 2, "beta");
   addName(database, sitePk, 3, "Needle %_\\ suffix");
@@ -454,6 +498,139 @@ function frozenLegacySummary(
     sessions: Number(row["sessions"]),
     visitors: Number(row["visitors"]),
   };
+}
+
+/** Frozen pre-Logical rollup with the original scoped source compiler. */
+function frozenLegacyScopedEventTypeRows(
+  database: DatabaseSync,
+  siteId: string,
+  filters: FilterDocument,
+  options: FrozenQueryOptions,
+): FrozenEventTypeRow[] {
+  const source = buildEventFilteredSourceCte(siteId, WINDOW, filters);
+  const searchPattern =
+    options.kind === "list"
+      ? options.search
+        ? escapedLegacyPattern(options.search)
+        : null
+      : options.search?.trim()
+        ? escapedLegacyPattern(options.search)
+        : null;
+  const sql = `${source.cte}, event_rollup AS (
+    SELECT COALESCE(event_name, '') AS value, count(*) AS views,
+      count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+      count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+    FROM filtered_events
+    GROUP BY value
+  )
+  SELECT value, views, sessions, visitors
+  FROM event_rollup
+  WHERE TRIM(value) != ''
+    ${searchPattern === null ? "" : "AND LOWER(value) LIKE ? ESCAPE '\\'"}
+    ${
+      options.kind === "page" && options.cursor
+        ? `AND (
+      views < ? OR (views = ? AND sessions < ?)
+      OR (views = ? AND sessions = ? AND value > ?)
+    )`
+        : ""
+    }
+  ORDER BY views DESC, sessions DESC, value ASC
+    ${options.kind === "page" || options.limit > 0 ? "LIMIT ?" : ""}`;
+  const bindings: SQLInputValue[] = [
+    ...source.bindings,
+    ...(searchPattern === null ? [] : [searchPattern]),
+    ...(options.kind === "page" && options.cursor
+      ? [
+          options.cursor.views,
+          options.cursor.views,
+          options.cursor.sessions,
+          options.cursor.views,
+          options.cursor.sessions,
+          options.cursor.value,
+        ]
+      : []),
+    ...(options.kind === "page"
+      ? [options.limit + 1]
+      : options.limit > 0
+        ? [options.limit]
+        : []),
+  ];
+  return database
+    .prepare(sql)
+    .all(...bindings) as unknown as FrozenEventTypeRow[];
+}
+
+function frozenLegacyScopedSummary(
+  database: DatabaseSync,
+  siteId: string,
+  filters: FilterDocument,
+): FrozenSummary {
+  const source = buildEventFilteredSourceCte(siteId, WINDOW, filters);
+  const row = database
+    .prepare(
+      `${source.cte}
+      SELECT count(*) AS events, count(DISTINCT event_name) AS eventTypes,
+        count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+        count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+      FROM filtered_events`,
+    )
+    .get(...source.bindings);
+  if (!row) throw new Error("wave39_legacy_scoped_summary_row_missing");
+  return {
+    events: Number(row["events"]),
+    eventTypes: Number(row["eventTypes"]),
+    sessions: Number(row["sessions"]),
+    visitors: Number(row["visitors"]),
+  };
+}
+
+async function expectPublicOutputsMatchLegacySource(
+  siteId: string,
+  filters: FilterDocument,
+  label: string,
+): Promise<void> {
+  const listTrace = newTrace();
+  const list = await queryEventTypeAggregate(
+    testEnv(database, listTrace),
+    siteId,
+    WINDOW,
+    filters,
+    0,
+  );
+  expect(list).toEqual(
+    frozenLegacyScopedEventTypeRows(database, siteId, filters, {
+      kind: "list",
+      limit: 0,
+    }),
+  );
+  recordExecutionEvidence(`${label}-list`, listTrace);
+
+  const pageTrace = newTrace();
+  const page = await queryEventTypePageFromD1(
+    testEnv(database, pageTrace),
+    siteId,
+    WINDOW,
+    filters,
+    20,
+  );
+  expect(page.items).toEqual(
+    frozenLegacyScopedEventTypeRows(database, siteId, filters, {
+      kind: "page",
+      limit: 20,
+    }).slice(0, 20),
+  );
+  recordExecutionEvidence(`${label}-page`, pageTrace);
+
+  const summaryTrace = newTrace();
+  const summary = await queryEventSummaryMetricsFromD1(
+    testEnv(database, summaryTrace),
+    siteId,
+    WINDOW,
+    filters,
+  );
+  expect(summary).toEqual(frozenLegacyScopedSummary(database, siteId, filters));
+  recordExecutionEvidence(`${label}-summary`, summaryTrace);
 }
 
 function plainFilters(root: FilterExpression | null = null): FilterDocument {
@@ -812,5 +989,240 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
       visitors: 1,
     });
     recordExecutionEvidence("prepared-summary", summaryTrace);
+  });
+
+  it("matches the frozen scoped compiler for prepared Page/Event identities", async () => {
+    const filters = preparedIdentityFilters("event", {
+      visitIds: [
+        { siteId: SITE_ID, id: "visit-alpha-1" },
+        { siteId: SITE_ID, id: "visit-alpha-1" },
+      ],
+      eventIds: [
+        { siteId: SITE_ID, id: "event-alpha-1" },
+        { siteId: SITE_ID, id: "event-alpha-2" },
+        // The authorized sibling has the same local ID, but the subject below
+        // is SITE_ID. Identity matching must keep the site component.
+        { siteId: SITE_B, id: "event-alpha-1" },
+      ],
+    });
+    await expectPublicOutputsMatchLegacySource(
+      SITE_ID,
+      filters,
+      "prepared-observation-identities",
+    );
+
+    const siblingSubjectFilters = preparedIdentityFilters(
+      "event",
+      {
+        eventIds: [
+          { siteId: SITE_ID, id: "event-alpha-1" },
+          { siteId: SITE_B, id: "event-alpha-1" },
+        ],
+      },
+      [SITE_ID, SITE_B],
+    );
+    await expectPublicOutputsMatchLegacySource(
+      SITE_B,
+      siblingSubjectFilters,
+      "prepared-sibling-subject-isolation",
+    );
+    await expect(
+      queryEventTypeAggregate(
+        testEnv(database, newTrace()),
+        FOREIGN_SITE,
+        WINDOW,
+        filters,
+        0,
+      ),
+    ).rejects.toThrow(
+      "invalid_semantic_scoped_source_selection:subject_outside_prepared_authorization",
+    );
+  });
+
+  it("matches prepared Session/Visitor identities and empty identity sets", async () => {
+    const sessionFilters = preparedIdentityFilters("session", {
+      entityIds: [{ siteId: SITE_ID, id: "session-alpha" }],
+    });
+    await expectPublicOutputsMatchLegacySource(
+      SITE_ID,
+      sessionFilters,
+      "prepared-session-identities",
+    );
+
+    const visitorFilters = preparedIdentityFilters("visitor", {
+      entityIds: [{ siteId: SITE_ID, id: "visitor-alpha-1" }],
+    });
+    await expectPublicOutputsMatchLegacySource(
+      SITE_ID,
+      visitorFilters,
+      "prepared-visitor-identities",
+    );
+
+    const emptyObservationFilters = preparedIdentityFilters("event", {
+      visitIds: [],
+      eventIds: [],
+    });
+    await expectPublicOutputsMatchLegacySource(
+      SITE_ID,
+      emptyObservationFilters,
+      "prepared-empty-observation-identities",
+    );
+    const emptySessionFilters = preparedIdentityFilters("session", {
+      entityIds: [],
+    });
+    await expectPublicOutputsMatchLegacySource(
+      SITE_ID,
+      emptySessionFilters,
+      "prepared-empty-session-identities",
+    );
+    const emptyVisitorFilters = preparedIdentityFilters("visitor", {
+      entityIds: [],
+    });
+    await expectPublicOutputsMatchLegacySource(
+      SITE_ID,
+      emptyVisitorFilters,
+      "prepared-empty-visitor-identities",
+    );
+  });
+
+  it("packs a >100-binding prepared identity set through the shared optimizer", async () => {
+    const eventIds = Array.from({ length: 126 }, (_, index) => ({
+      siteId: SITE_ID,
+      id: `missing-event-${index}`,
+    }));
+    eventIds.push(
+      { siteId: SITE_ID, id: "event-alpha-1" },
+      { siteId: SITE_B, id: "event-alpha-1" },
+      { siteId: SITE_ID, id: "event-alpha-1" },
+    );
+    const filters = preparedIdentityFilters("event", { eventIds });
+    const frozenSource = buildEventFilteredSourceCte(SITE_ID, WINDOW, filters);
+    expect(frozenSource.bindings.length).toBeGreaterThan(100);
+
+    const trace = newTrace();
+    const rows = await queryEventTypeAggregate(
+      testEnv(database, trace),
+      SITE_ID,
+      WINDOW,
+      filters,
+      0,
+    );
+    expect(rows).toEqual(
+      frozenLegacyScopedEventTypeRows(database, SITE_ID, filters, {
+        kind: "list",
+        limit: 0,
+      }),
+    );
+    expect(trace.preparedSql).toHaveLength(1);
+    expect(trace.bindings[0]?.length).toBeLessThanOrEqual(100);
+    expect(trace.preparedSql[0]?.toLowerCase()).toContain("json_each");
+    recordExecutionEvidence("prepared-native-bindings-packed", trace);
+  });
+
+  it("returns a real zero summary for an empty database", async () => {
+    const emptyDatabase = createMigratedDatabase();
+    databases.add(emptyDatabase);
+    const trace = newTrace();
+    const summary = await queryEventSummaryMetricsFromD1(
+      testEnv(emptyDatabase, trace),
+      FOREIGN_SITE,
+      WINDOW,
+      plainFilters(),
+    );
+    expect(summary).toEqual({
+      events: 0,
+      eventTypes: 0,
+      sessions: 0,
+      visitors: 0,
+    });
+    expect(summary).toEqual(frozenLegacySummary(emptyDatabase));
+    recordExecutionEvidence("empty-database-summary", trace);
+  });
+
+  it("preserves Unicode and NUL substring-search behavior", async () => {
+    const searchDatabase = createFixture();
+    databases.add(searchDatabase);
+    const sitePk = Number(
+      (
+        searchDatabase
+          .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+          .get(SITE_ID) as { readonly site_pk: number }
+      ).site_pk,
+    );
+    addName(searchDatabase, sitePk, 8, "雪花 🚀");
+    addName(searchDatabase, sitePk, 9, "nul\u0000suffix");
+    addObservation(searchDatabase, sitePk, {
+      id: "unicode-search",
+      nameId: 8,
+      sessionId: "session-unicode",
+      visitorId: "visitor-unicode",
+    });
+    addObservation(searchDatabase, sitePk, {
+      id: "nul-search",
+      nameId: 9,
+      sessionId: "session-nul",
+      visitorId: "visitor-nul",
+    });
+
+    for (const [label, search] of [
+      ["unicode", "雪"],
+      ["nul", "\u0000"],
+    ] as const) {
+      const trace = newTrace();
+      const rows = await queryEventTypeAggregate(
+        testEnv(searchDatabase, trace),
+        SITE_ID,
+        WINDOW,
+        plainFilters(),
+        0,
+        search,
+      );
+      expect(rows).toEqual(
+        frozenLegacyEventTypeRows(searchDatabase, {
+          kind: "list",
+          limit: 0,
+          search,
+        }),
+      );
+      expect(trace.bindings[0]).toContain(escapedLegacyPattern(search));
+      recordExecutionEvidence(`direct-list-search-${label}`, trace);
+    }
+  });
+
+  it("keeps a direct page/event composition as one direct predicate", async () => {
+    const filters = plainFilters({
+      kind: "and",
+      children: [
+        {
+          kind: "condition",
+          target: { kind: "field", field: "page.path" as FilterFieldId },
+          operator: "eq",
+          value: SCOPED_PATH,
+        },
+        {
+          kind: "condition",
+          target: { kind: "field", field: "event.name" as FilterFieldId },
+          operator: "eq",
+          value: "alpha",
+        },
+      ],
+    });
+    const trace = newTrace();
+    const summary = await queryEventSummaryMetricsFromD1(
+      testEnv(database, trace),
+      SITE_ID,
+      WINDOW,
+      filters,
+    );
+    expect(summary).toEqual(
+      frozenLegacyScopedSummary(database, SITE_ID, filters),
+    );
+    expect(summary).toEqual({
+      events: 1,
+      eventTypes: 1,
+      sessions: 1,
+      visitors: 1,
+    });
+    recordExecutionEvidence("direct-page-event-composition", trace);
   });
 });

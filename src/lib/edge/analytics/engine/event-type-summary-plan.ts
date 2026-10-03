@@ -1,14 +1,13 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
-import type { QueryTime, SiteId } from "@/lib/edge/analytics/contract/types";
+import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import {
-  LogicalPlanBuilder,
-  type LogicalRelationHandle,
-} from "@/lib/edge/analytics/engine/logical/builder";
+  buildEventReportSource,
+  EVENT_REPORT_BASE_ATTRIBUTES,
+  nonEmptyDistinctValue,
+} from "@/lib/edge/analytics/engine/event-source-plan";
+import type { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
+import { type LogicalRelationHandle } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
-import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
-import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
-import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
-import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -36,12 +35,6 @@ export type EventTypeSummaryQuery =
     }
   | { readonly kind: "summary" };
 
-const EVENT_SUMMARY_ATTRIBUTES = [
-  "event.report.eventName",
-  "event.report.ownerSessionId",
-  "event.report.ownerVisitorId",
-] as const;
-
 function eventAttribute(
   builder: LogicalPlanBuilder,
   relation: LogicalRelationHandle,
@@ -50,53 +43,19 @@ function eventAttribute(
   return builder.slot(relation, `attribute:event.report.${name}`);
 }
 
-function nonEmptyDistinctValue(
-  builder: LogicalPlanBuilder,
-  value: ReturnType<typeof eventAttribute>,
-) {
-  return builder.caseWhen(
-    [
-      {
-        when: builder.compare("neq", value, builder.literal("", STRING)),
-        then: value,
-      },
-    ],
-    builder.literal(null, STRING),
-  );
-}
-
 function eventSummarySource(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
 }) {
-  const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
-  const subject = createSemanticSubjectDomain({
-    origin: "site",
-    siteIds: [input.siteId as SiteId],
-  });
-  const selection = createSemanticScopedSourceSelection({
-    profile: input.scopePlan
-      ? "prepared-scoped-v1"
-      : "direct-event-analytics-v1",
+  return buildEventReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
     filters: input.filters,
-    subject,
-    time,
-    ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    attributes: EVENT_REPORT_BASE_ATTRIBUTES,
   });
-  const builder = new LogicalPlanBuilder({
-    subject,
-    time,
-    scope: resolveAnalyticsScope(input.scopePlan?.scope ?? "event"),
-    originOperation: "event-records",
-  });
-  const events = builder.source("event", {
-    temporalDomain: "candidate",
-    attributes: EVENT_SUMMARY_ATTRIBUTES,
-    selection,
-  });
-  return { builder, events };
 }
 
 function eventRollup(

@@ -338,7 +338,8 @@ function buildEvents(
   const nameGate = selection.eventNameGate;
   if (
     nameGate &&
-    selection.profile === "direct-event-records-v1" &&
+    (selection.profile === "direct-event-records-v1" ||
+      selection.profile === "direct-event-analytics-v1") &&
     selection.subject.siteIds.length === 1
   ) {
     const matchingNames = filter(

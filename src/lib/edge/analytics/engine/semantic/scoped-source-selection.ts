@@ -73,6 +73,8 @@ export interface CreateSemanticScopedSourceSelectionInput {
   /** Required for prepared-scoped-v1 and must be the exact prepared plan. */
   readonly expectedPlan?: ScopedFilterPlan;
   readonly eventName?: string;
+  /** Event analytics preserves the legacy truthy raw value; record detail trims. */
+  readonly eventNameInputSemantics?: "trimmed-nonempty" | "legacy-truthy-raw";
 }
 
 function fail(reason: string): never {
@@ -282,7 +284,16 @@ export function createSemanticScopedSourceSelection(
     return fail("unknown_profile");
   }
 
-  const normalizedEventName = input.eventName?.trim() || undefined;
+  if (
+    input.eventNameInputSemantics !== undefined &&
+    input.eventNameInputSemantics !== "trimmed-nonempty" &&
+    input.eventNameInputSemantics !== "legacy-truthy-raw"
+  )
+    return fail("invalid_event_name_input_semantics");
+  const normalizedEventName =
+    input.eventNameInputSemantics === "legacy-truthy-raw"
+      ? input.eventName || undefined
+      : input.eventName?.trim() || undefined;
   const eventNameGate = normalizedEventName
     ? {
         value: normalizedEventName,

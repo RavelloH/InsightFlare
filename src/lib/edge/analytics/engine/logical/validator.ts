@@ -663,7 +663,9 @@ function infer(
           },
         ]);
       }
-      return { type: { kind: "bucket" }, nullable: input.nullable };
+      // Calendar bucketing can return NULL outside the candidate range or
+      // after the shared 2000-bucket cap, even when its input is non-null.
+      return { type: { kind: "bucket" }, nullable: true };
     }
   }
 }

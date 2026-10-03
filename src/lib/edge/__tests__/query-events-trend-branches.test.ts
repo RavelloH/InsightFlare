@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
-import type * as QueryCore from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   type QueryWindow,
   SHARE_TREND_OTHER_KEY,
@@ -14,17 +13,14 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import type { Env } from "@/lib/edge/types";
 
-const queryD1AllMock = vi.hoisted(() => vi.fn());
+const queryOutputRowsMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/edge/analytics/providers/d1/internal/core", async () => {
-  const actual = await vi.importActual<typeof QueryCore>(
-    "@/lib/edge/analytics/providers/d1/internal/core",
-  );
-  return {
-    ...actual,
-    queryD1All: queryD1AllMock,
-  };
-});
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/analytics-report-query",
+  () => ({
+    queryAnalyticsReportOutputRowsFromD1: queryOutputRowsMock,
+  }),
+);
 
 const env = {} as Env;
 const siteId = "site-1";
@@ -37,17 +33,21 @@ const window: QueryWindow = {
 
 describe("edge query events trend defensive branches", () => {
   beforeEach(() => {
-    queryD1AllMock.mockReset();
+    queryOutputRowsMock.mockReset();
   });
 
   it("falls back to trend-row totals when Other series aggregate values are empty", async () => {
-    queryD1AllMock
+    queryOutputRowsMock
       .mockResolvedValueOnce([{ eventName: "signup", events: 1 }])
       .mockResolvedValueOnce([
-        { bucket: null, seriesKey: "signup", events: 100 },
-        { bucket: 0, seriesKey: null, events: null },
-        { bucket: 1, seriesKey: SHARE_TREND_OTHER_TOKEN, events: undefined },
-        { bucket: 1, seriesKey: SHARE_TREND_OTHER_TOKEN, events: 3 },
+        { bucket: null, seriesName: "signup", events: 100 },
+        { bucket: 0, seriesName: null, events: null },
+        {
+          bucket: 1,
+          seriesName: SHARE_TREND_OTHER_TOKEN,
+          events: undefined,
+        },
+        { bucket: 1, seriesName: SHARE_TREND_OTHER_TOKEN, events: 3 },
       ])
       .mockResolvedValueOnce([
         {
@@ -73,8 +73,8 @@ describe("edge query events trend defensive branches", () => {
         eventName: "signup",
         label: "signup",
         events: 1,
-        sessions: undefined,
-        visitors: undefined,
+        sessions: 0,
+        visitors: 0,
       },
       {
         key: SHARE_TREND_OTHER_KEY,
@@ -97,8 +97,7 @@ describe("edge query events trend defensive branches", () => {
   });
 
   it("normalizes sparse event type trend rows to zeroes", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
-      { bucket: null, events: 7, visitors: 7 },
+    queryOutputRowsMock.mockResolvedValueOnce([
       { bucket: 0, events: null, visitors: undefined },
     ]);
 

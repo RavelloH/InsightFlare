@@ -6,6 +6,7 @@ import {
   callFunction,
   caseWhen,
   coalesce,
+  constant,
   count,
   countDistinct,
   DatabaseCompilerError,
@@ -47,6 +48,7 @@ import type {
   SqlExpression,
 } from "@/lib/db/query/expression";
 import type { WindowOrderKey } from "@/lib/db/query/plan";
+import { buildCalendarBucketPlan } from "@/lib/edge/analytics/contract";
 import type { LogicalExpr } from "@/lib/edge/analytics/engine/logical/expression";
 import type {
   RelationId,
@@ -76,6 +78,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/slots";
 import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
 import { AnalyticsLegacyScopedStorage } from "./analytics-legacy-scoped-storage";
 import {
@@ -330,9 +333,15 @@ function scalarAggregateValue(
   value: LoweredValue,
   path: string,
 ): Extract<LoweredValue, { readonly kind: "scalar" }> & {
-  readonly type: Extract<LogicalValueType, { readonly kind: "scalar" }>;
+  readonly type: Extract<
+    LogicalValueType,
+    { readonly kind: "scalar" | "bucket" }
+  >;
 } {
-  if (value.kind !== "scalar" || value.type.kind !== "scalar")
+  if (
+    value.kind !== "scalar" ||
+    (value.type.kind !== "scalar" && value.type.kind !== "bucket")
+  )
     reject(path, "Scalar aggregation requires a scalar Logical value.");
   return { ...value, type: value.type };
 }
@@ -342,7 +351,7 @@ function numericAggregateExpression(
   path: string,
 ): SqlExpression<number | null> {
   const scalar = scalarAggregateValue(value, path);
-  if (scalar.type.scalar !== "number")
+  if (scalar.type.kind !== "scalar" || scalar.type.scalar !== "number")
     reject(path, "SUM and AVG require numeric scalar values.");
   return scalar.expression as SqlExpression<number | null>;
 }
@@ -354,13 +363,18 @@ function comparableAggregateValue(
   readonly type: Extract<LogicalValueType, { readonly kind: "scalar" }>;
 } {
   const scalar = scalarAggregateValue(value, path);
+  if (scalar.type.kind !== "scalar")
+    reject(path, "MIN and MAX require a comparable scalar value.");
   if (
     !["string", "number", "boolean", "date", "datetime"].includes(
       scalar.type.scalar,
     )
   )
     reject(path, "MIN and MAX require a comparable scalar value.");
-  return scalar;
+  return {
+    ...scalar,
+    type: scalar.type as Extract<LogicalValueType, { readonly kind: "scalar" }>,
+  };
 }
 
 function applyTrim(
@@ -435,6 +449,7 @@ function lowerExpression(
   logicalSlots: ReadonlyMap<SlotId, LogicalSlot>,
   visible: ReadonlyMap<SlotId, SlotLayout>,
   path: string,
+  time: SemanticTemporalDomains,
 ): LoweredValue {
   switch (expression.kind) {
     case "slot": {
@@ -455,6 +470,7 @@ function lowerExpression(
         logicalSlots,
         visible,
         `${path}.left`,
+        time,
       );
       const right = lowerExpression(
         expression.right,
@@ -462,6 +478,7 @@ function lowerExpression(
         logicalSlots,
         visible,
         `${path}.right`,
+        time,
       );
       if (left.kind === "entity" || right.kind === "entity") {
         if (expression.stringNormalization !== undefined)
@@ -570,6 +587,7 @@ function lowerExpression(
           logicalSlots,
           visible,
           `${path}.terms[${index}]`,
+          time,
         ),
       );
       const terms = loweredTerms.map((term, index) =>
@@ -593,6 +611,7 @@ function lowerExpression(
         logicalSlots,
         visible,
         `${path}.input`,
+        time,
       );
       const input = scalarValue(loweredInput, `${path}.input`);
       return {
@@ -610,6 +629,7 @@ function lowerExpression(
         logicalSlots,
         visible,
         `${path}.input`,
+        time,
       );
       const predicate =
         input.kind === "entity"
@@ -634,6 +654,7 @@ function lowerExpression(
         logicalSlots,
         visible,
         `${path}.input`,
+        time,
       );
       const inputExpression = scalarValue(input, `${path}.input`);
       const inputType =
@@ -682,6 +703,7 @@ function lowerExpression(
           logicalSlots,
           visible,
           `${path}.values[${index}]`,
+          time,
         ),
       );
       if (loweredValues.length === 0)
@@ -712,6 +734,7 @@ function lowerExpression(
           logicalSlots,
           visible,
           `${path}.branches[${index}].when`,
+          time,
         );
         const then = lowerExpression(
           branch.then,
@@ -719,6 +742,7 @@ function lowerExpression(
           logicalSlots,
           visible,
           `${path}.branches[${index}].then`,
+          time,
         );
         if (
           when.kind !== "scalar" ||
@@ -746,6 +770,7 @@ function lowerExpression(
         logicalSlots,
         visible,
         `${path}.otherwise`,
+        time,
       );
       if (otherwise.kind !== "scalar")
         reject(path, "CASE fallback cannot return an entity value.");
@@ -770,6 +795,7 @@ function lowerExpression(
         logicalSlots,
         visible,
         `${path}.input`,
+        time,
       );
       if (
         input.kind !== "scalar" ||
@@ -855,6 +881,7 @@ function lowerExpression(
         logicalSlots,
         visible,
         `${path}.input`,
+        time,
       );
       if (
         input.kind !== "scalar" ||
@@ -873,11 +900,72 @@ function lowerExpression(
         candidateBounded: input.candidateBounded,
       };
     }
+    case "time-bucket": {
+      const input = lowerExpression(
+        expression.input,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.input`,
+        time,
+      );
+      if (
+        input.kind !== "scalar" ||
+        input.type.kind !== "scalar" ||
+        !["date", "datetime", "number"].includes(input.type.scalar)
+      )
+        reject(path, "Time bucketing requires a temporal or epoch scalar.");
+      if (expression.reportingTimeZone !== time.reportingTimeZone)
+        reject(path, "Time buckets must use the Semantic reporting time zone.");
+      const calendar = buildCalendarBucketPlan({
+        range: time.candidate,
+        granularity: expression.granularity,
+        reportingTimeZone: expression.reportingTimeZone,
+        maxBuckets: 2000,
+      });
+      if (calendar.buckets.length === 0)
+        reject(path, "The candidate range has no calendar buckets.");
+      const value = input.expression as SqlExpression<
+        number | null,
+        ExpressionResultType<"integer" | "real" | "numeric", boolean>
+      >;
+      const first = calendar.buckets[0]!;
+      const last = calendar.buckets.at(-1)!;
+      // Calendar buckets are adjacent and ordered. Bound the whole CASE once,
+      // then test each exclusive end; repeating both bounds in every branch
+      // makes long, otherwise-valid windows exceed D1's SQL size budget.
+      const branches: Array<{ when: Predicate; then: AnyExpression }> = [
+        {
+          when: lt(value, constant(Number(first.startMs))),
+          then: constant(null),
+        },
+        {
+          when: gte(value, constant(Number(last.endExclusiveMs))),
+          then: constant(null),
+        },
+        ...calendar.buckets.map((bucket) => ({
+          when: lt(value, constant(Number(bucket.endExclusiveMs))),
+          then: constant(bucket.index),
+        })),
+      ];
+      return {
+        kind: "scalar",
+        expression: caseWhen(
+          branches as [
+            { when: Predicate; then: AnyExpression },
+            ...{ when: Predicate; then: AnyExpression }[],
+          ],
+          constant(null),
+        ),
+        type: { kind: "bucket" },
+        nullable: true,
+        candidateBounded: input.candidateBounded,
+      };
+    }
     case "elapsed-duration-literal":
     case "calendar-period-literal":
     case "arithmetic":
     case "round":
-    case "time-bucket":
       reject(
         path,
         `Expression kind ${expression.kind} is outside the current D1 capability set.`,
@@ -1212,6 +1300,7 @@ export class AnalyticsLogicalToDbLowerer {
               this.#logicalSlots,
               visible,
               `${path}.predicate`,
+              this.#plan.context.time,
             ),
             `${path}.predicate`,
           ),
@@ -1275,8 +1364,8 @@ export class AnalyticsLogicalToDbLowerer {
             key.slot,
             `${keyPath}.slot`,
           );
-          if (logical.type.kind !== "scalar")
-            reject(keyPath, "Sort keys must be scalar values.");
+          if (logical.type.kind !== "scalar" && logical.type.kind !== "bucket")
+            reject(keyPath, "Sort keys must be scalar or bucket values.");
           const value = readValue(
             input.relation,
             input.slots,
@@ -1485,6 +1574,7 @@ export class AnalyticsLogicalToDbLowerer {
           this.#logicalSlots,
           visible,
           `${path}.projections[${index}].expression`,
+          this.#plan.context.time,
         );
         const outputMeta = logicalSlot(
           this.#logicalSlots,
@@ -2190,6 +2280,7 @@ export class AnalyticsLogicalToDbLowerer {
           this.#logicalSlots,
           visible,
           groupPath,
+          this.#plan.context.time,
         ),
         groupPath,
       );
@@ -2199,13 +2290,14 @@ export class AnalyticsLogicalToDbLowerer {
         `${path}.groups[${index}].slot`,
       );
       if (
-        outputSlot.type.kind !== "scalar" ||
+        (outputSlot.type.kind !== "scalar" &&
+          outputSlot.type.kind !== "bucket") ||
         !isSameLogicalValueType(outputSlot.type, value.type) ||
         outputSlot.nullable !== value.nullable
       )
         reject(
           `${path}.groups[${index}]`,
-          "Group output metadata must match its scalar expression.",
+          "Group output metadata must match its scalar or bucket expression.",
         );
 
       const valueColumn = slotColumn(index, "g");
@@ -2245,6 +2337,7 @@ export class AnalyticsLogicalToDbLowerer {
           this.#logicalSlots,
           visible,
           measurePath,
+          this.#plan.context.time,
         );
         if (measure.kind === "count-distinct") {
           const scalar = scalarAggregateValue(value, measurePath);

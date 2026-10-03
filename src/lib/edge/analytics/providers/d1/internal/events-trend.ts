@@ -1,23 +1,56 @@
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildEventTrendOtherPlan,
+  buildEventTrendPointsPlan,
+  buildEventTrendSeriesPlan,
+  buildEventTypeTrendPlan,
+  EVENT_TREND_OUTPUTS,
+} from "@/lib/edge/analytics/engine/event-trend-plan";
 import type { Env } from "@/lib/edge/types";
 
-import type {
-  EventTrendPointRow,
-  EventTrendSeriesRow,
-  EventTypeTrendPointRow,
-  FilterDocument,
-  Interval,
-  QueryWindow,
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
+import {
+  type EventTrendPointRow,
+  type EventTrendSeriesRow,
+  type EventTypeTrendPointRow,
+  type FilterDocument,
+  type Interval,
+  type QueryWindow,
 } from "./core";
 import {
-  buildEventFilteredSourceCte,
   buildTimeBuckets,
-  queryD1All,
   SHARE_TREND_OTHER_KEY,
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
   shareTrendSeriesKey,
-  timeBucketCase,
 } from "./core";
+
+function trendPlanInput(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+) {
+  const metadata = scopedFilterMetadata(filters);
+  return {
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+  };
+}
+
+function seriesRow(row: Record<string, unknown>): EventTrendSeriesRow {
+  return {
+    // Event names are non-NULL in the deployed schema. Keep an anomalous NULL
+    // as-is at runtime so the existing series-label path retains its failure
+    // behavior instead of silently inventing an empty name.
+    eventName: row.eventName as string,
+    events: Number(row.events ?? 0),
+    sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  };
+}
 
 export async function queryEventsTrendFromD1(
   env: Env,
@@ -28,30 +61,16 @@ export async function queryEventsTrendFromD1(
   limit: number,
   eventName?: string,
 ) {
-  const source = buildEventFilteredSourceCte(
-    siteId,
-    window,
-    filters,
-    eventName,
-  );
-  const baseCte = source.cte;
-  const seriesRows = await queryD1All<EventTrendSeriesRow>(
-    env,
-    `${baseCte}
-SELECT
-  event_name AS eventName,
-  count(*) AS events,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM filtered_events
-GROUP BY event_name
-ORDER BY events DESC, sessions DESC, eventName ASC
-LIMIT ?
-`,
-    [...source.bindings, limit],
-  );
+  const source = trendPlanInput(siteId, window, filters);
+  const eventFilter = eventName !== undefined ? { eventName } : {};
+  const seriesRows = (
+    await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      buildEventTrendSeriesPlan({ ...source, ...eventFilter, limit }),
+      EVENT_TREND_OUTPUTS.series,
+    )
+  ).map(seriesRow);
   const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "occurred_at");
   const seriesKeyByName = new Map<string, string>();
   const usedKeys = new Set<string>();
   for (const row of seriesRows) {
@@ -61,48 +80,39 @@ LIMIT ?
     );
   }
   const seriesNames = seriesRows.map((row) => row.eventName);
-  const namesClause =
-    seriesNames.length > 0
-      ? `CASE WHEN event_name IN (${seriesNames.map(() => "?").join(", ")}) THEN event_name ELSE ? END`
-      : "?";
-  const trendRows = await queryD1All<EventTrendPointRow>(
-    env,
-    `${baseCte},
-bucketed AS (
-  SELECT
-    ${bucket.sql} AS bucket,
-    ${namesClause} AS seriesName,
-    count(*) AS events
-  FROM filtered_events
-  GROUP BY bucket, seriesName
-)
-SELECT
-  bucket,
-  seriesName AS seriesKey,
-  events
-FROM bucketed
-WHERE bucket IS NOT NULL
-ORDER BY bucket ASC
-`,
-    [...source.bindings, ...seriesNames, SHARE_TREND_OTHER_TOKEN],
-  );
+  const trendRows = (
+    await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      buildEventTrendPointsPlan({
+        ...source,
+        ...eventFilter,
+        interval,
+        seriesNames,
+        otherToken: SHARE_TREND_OTHER_TOKEN,
+      }),
+      EVENT_TREND_OUTPUTS.points,
+    )
+  ).map((row): EventTrendPointRow => ({
+    bucket: Number(row.bucket ?? -1),
+    seriesKey: String(row.seriesName ?? ""),
+    events: Number(row.events ?? 0),
+  }));
   const hasOther = trendRows.some(
     (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
   );
-  const [otherSeriesRow] = hasOther
-    ? await queryD1All<EventTrendSeriesRow>(
-        env,
-        `${baseCte}
-SELECT
-  ? AS eventName,
-  count(*) AS events,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM filtered_events
-${seriesNames.length > 0 ? `WHERE event_name NOT IN (${seriesNames.map(() => "?").join(", ")})` : ""}
-`,
-        [...source.bindings, SHARE_TREND_OTHER_LABEL, ...seriesNames],
-      )
+  const [otherRow] = hasOther
+    ? (
+        await queryAnalyticsReportOutputRowsFromD1(
+          env,
+          buildEventTrendOtherPlan({
+            ...source,
+            ...eventFilter,
+            seriesNames,
+            otherLabel: SHARE_TREND_OTHER_LABEL,
+          }),
+          EVENT_TREND_OUTPUTS.other,
+        )
+      ).map(seriesRow)
     : [];
   const series: Array<{
     key: string;
@@ -126,12 +136,12 @@ ${seriesNames.length > 0 ? `WHERE event_name NOT IN (${seriesNames.map(() => "?"
       eventName: SHARE_TREND_OTHER_LABEL,
       label: SHARE_TREND_OTHER_LABEL,
       events:
-        Number(otherSeriesRow?.events ?? 0) ||
+        Number(otherRow?.events ?? 0) ||
         trendRows
           .filter((row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN)
           .reduce((sum, row) => sum + Number(row.events ?? 0), 0),
-      sessions: Number(otherSeriesRow?.sessions ?? 0),
-      visitors: Number(otherSeriesRow?.visitors ?? 0),
+      sessions: Number(otherRow?.sessions ?? 0),
+      visitors: Number(otherRow?.visitors ?? 0),
       isOther: true,
     });
   }
@@ -165,35 +175,19 @@ export async function queryEventTypeTrendFromD1(
   filters: FilterDocument,
   eventName: string,
 ) {
-  const source = buildEventFilteredSourceCte(
-    siteId,
-    window,
-    filters,
-    eventName,
-  );
+  const source = trendPlanInput(siteId, window, filters);
+  const rows = (
+    await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      buildEventTypeTrendPlan({ ...source, eventName, interval }),
+      EVENT_TREND_OUTPUTS.typePoints,
+    )
+  ).map((row): EventTypeTrendPointRow => ({
+    bucket: Number(row.bucket ?? -1),
+    events: Number(row.events ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
   const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "occurred_at");
-  const rows = await queryD1All<EventTypeTrendPointRow>(
-    env,
-    `${source.cte},
-bucketed AS (
-  SELECT
-    ${bucket.sql} AS bucket,
-    count(*) AS events,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_events
-  GROUP BY bucket
-)
-SELECT
-  bucket,
-  events,
-  visitors
-FROM bucketed
-WHERE bucket IS NOT NULL
-ORDER BY bucket ASC
-`,
-    source.bindings,
-  );
   const data = buckets.map((item) => ({
     bucket: item.index,
     timestampMs: item.timestampMs,

@@ -70,6 +70,19 @@ function directSelection(): SemanticScopedSourceSelection {
   });
 }
 
+function directAnalyticsSelection(
+  eventName: string,
+): SemanticScopedSourceSelection {
+  return createSemanticScopedSourceSelection({
+    profile: "direct-event-analytics-v1",
+    filters: EMPTY_FILTER_DOCUMENT,
+    subject: SUBJECT,
+    time: TIME,
+    eventName,
+    eventNameInputSemantics: "legacy-truthy-raw",
+  });
+}
+
 function withPreparedMatches(
   scope: "event" | "session",
   advancedMatches: NonNullable<
@@ -139,6 +152,37 @@ describe("semantic scoped source selection", () => {
     });
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(snapshot).toEqual(prepared);
+  });
+
+  it("preserves raw-truthy Event analytics names while records keep trimming", () => {
+    expect(directSelection().eventNameGate).toEqual({
+      value: "signup",
+      semantics: "direct-subject-local-exact-name-v1",
+    });
+    expect(directAnalyticsSelection(" signup ").eventNameGate).toEqual({
+      value: " signup ",
+      semantics: "direct-subject-local-exact-name-v1",
+    });
+    expect(directAnalyticsSelection("  ").eventNameGate).toEqual({
+      value: "  ",
+      semantics: "direct-subject-local-exact-name-v1",
+    });
+    expect(directAnalyticsSelection("").eventNameGate).toBeUndefined();
+
+    const preparedInput = preparedSelectionInput();
+    const preparedAnalytics = createSemanticScopedSourceSelection({
+      profile: "prepared-scoped-v1",
+      filters: preparedInput.filters,
+      subject: SUBJECT,
+      time: TIME,
+      expectedPlan: preparedInput.plan,
+      eventName: " signup ",
+      eventNameInputSemantics: "legacy-truthy-raw",
+    });
+    expect(preparedAnalytics.eventNameGate).toEqual({
+      value: " signup ",
+      semantics: "prepared-trimmed-label-v1",
+    });
   });
 
   it("rejects malformed descriptors and mismatched logical context", () => {
