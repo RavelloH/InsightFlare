@@ -277,4 +277,126 @@ describe("Analytics report multi-output adapter", () => {
       database.close();
     }
   });
+
+  it("rejects malformed selection and projection contracts before execution", async () => {
+    const { database } = createDatabase();
+    try {
+      const plan = createPlan();
+      const pathOutput = plan.outputs.find((output) => output.id === "paths")!;
+      const duplicateDeclaredPlan = {
+        ...plan,
+        outputs: plan.outputs.map((output) =>
+          output.id === "paths"
+            ? {
+                ...output,
+                fields: [
+                  ...output.fields,
+                  {
+                    name: output.fields[0]!.name,
+                    slot: output.fields[0]!.slot,
+                  },
+                ],
+              }
+            : output,
+        ),
+      } as ValidatedLogicalPlan;
+      const missingSlotPlan = {
+        ...plan,
+        slots: plan.slots.filter(
+          (slot) =>
+            slot.id !==
+            pathOutput.fields.find((field) => field.name === "label")!.slot,
+        ),
+      } as ValidatedLogicalPlan;
+      const invalidSelections: Array<{
+        readonly selection: AnalyticsReportMultiOutputSelection;
+        readonly plan?: ValidatedLogicalPlan;
+        readonly message: string;
+      }> = [
+        {
+          selection: null as unknown as AnalyticsReportMultiOutputSelection,
+          message: "analytics_report_multi_output_selection_invalid",
+        },
+        {
+          selection: {
+            ...PATH_SELECTION,
+            extra: true,
+          } as unknown as AnalyticsReportMultiOutputSelection,
+          message: "analytics_report_multi_output_selection_invalid",
+        },
+        {
+          selection: {
+            ...PATH_SELECTION,
+            outputIds: [],
+          },
+          message: "analytics_report_multi_output_ids_invalid",
+        },
+        {
+          selection: {
+            ...PATH_SELECTION,
+            fields: [],
+          },
+          message: "analytics_report_multi_output_fields_invalid",
+        },
+        {
+          selection: {
+            ...PATH_SELECTION,
+            fields: ["label", "label"],
+          },
+          message: "analytics_report_multi_output_fields_duplicate",
+        },
+        {
+          selection: {
+            ...PATH_SELECTION,
+            orderBy: [
+              { field: "label", direction: "asc", nulls: "first" },
+              { field: "label", direction: "desc", nulls: "last" },
+            ],
+          },
+          message: "analytics_report_multi_output_order_duplicate",
+        },
+        {
+          plan: duplicateDeclaredPlan,
+          selection: {
+            ...PATH_SELECTION,
+            outputIds: ["paths"],
+          },
+          message: "analytics_report_multi_output_declared_fields_duplicate",
+        },
+        {
+          selection: {
+            ...PATH_SELECTION,
+            outputIds: ["paths"],
+            fields: ["missing"],
+            orderBy: [],
+          },
+          message: "analytics_report_multi_output_field_missing:missing",
+        },
+        {
+          plan: missingSlotPlan,
+          selection: {
+            ...PATH_SELECTION,
+            outputIds: ["paths"],
+            fields: ["label"],
+            orderBy: [],
+          },
+          message: "analytics_report_multi_output_slot_missing:",
+        },
+      ];
+
+      for (const invalid of invalidSelections) {
+        const queryTrace = trace();
+        await expect(
+          queryAnalyticsReportOutputSetRowsFromD1(
+            createEnv(database, queryTrace),
+            invalid.plan ?? plan,
+            invalid.selection,
+          ),
+        ).rejects.toThrow(invalid.message);
+        expect(queryTrace.preparedSql).toHaveLength(0);
+      }
+    } finally {
+      database.close();
+    }
+  });
 });

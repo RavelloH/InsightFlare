@@ -214,6 +214,37 @@ describe("semantic scoped source selection", () => {
     ).toBeUndefined();
   });
 
+  it("rejects malformed Event-name gate contracts", () => {
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-event-analytics-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        subject: SUBJECT,
+        time: TIME,
+        eventName: "signup",
+        eventNameInputSemantics: "unknown" as "trimmed-nonempty",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:invalid_event_name_input_semantics",
+    );
+
+    const direct = directSelection();
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        {
+          ...direct,
+          eventNameGate: {
+            ...direct.eventNameGate!,
+            value: null as unknown as string,
+          },
+        },
+        { subject: SUBJECT, time: TIME },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:invalid_event_name_gate_value",
+    );
+  });
+
   it("rejects malformed descriptors and mismatched logical context", () => {
     const direct = directSelection();
     const context = { subject: SUBJECT, time: TIME };
