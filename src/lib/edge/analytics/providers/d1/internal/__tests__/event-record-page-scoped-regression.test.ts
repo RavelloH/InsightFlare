@@ -40,6 +40,7 @@ import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engin
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import { queryEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import { queryEventSummaryMetricsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
@@ -1452,6 +1453,35 @@ describe("Wave37A event record scoped Source regressions", () => {
     );
     expect(actualAvailable).toEqual(expectedAvailable);
     expect(actualUnavailable).toEqual(expectedUnavailable);
+  });
+
+  it("uses the complete direct Event analytics projection and keeps Event records narrow", async () => {
+    fixture.db
+      .prepare("UPDATE visits SET screen_width = 1440 WHERE visit_id = ?")
+      .run("visit-a-one");
+    const env = {
+      DB: createSqliteD1Database(fixture.db),
+    } as unknown as Env;
+    const screenFilter = filtersFor(
+      fieldCondition("client.screenWidth", "eq", 1440),
+    );
+
+    await expect(
+      queryEventSummaryMetricsFromD1(env, SITE_A, WINDOW, screenFilter),
+    ).resolves.toMatchObject({ events: 1 });
+    await expect(
+      queryEventRecordPageFromD1(env, SITE_A, WINDOW, screenFilter, {
+        limit: 20,
+        sort: { key: "occurredAt", direction: "desc" },
+      }),
+    ).rejects.toThrow(/missing_dependency|not supplied by the current scope/u);
+
+    const entryBoundary = filtersFor(
+      fieldCondition("session.entryPath", "eq", "/landing"),
+    );
+    await expect(
+      queryEventSummaryMetricsFromD1(env, SITE_A, WINDOW, entryBoundary),
+    ).resolves.toMatchObject({ events: 2 });
   });
 
   it("keeps a prepared name gate out of the Session fact universe", async () => {

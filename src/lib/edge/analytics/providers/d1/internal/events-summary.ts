@@ -3,9 +3,16 @@ import {
   effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
+  scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildEventTypeSummaryPlan,
+  EVENT_TYPE_SUMMARY_OUTPUTS,
+} from "@/lib/edge/analytics/engine/event-type-summary-plan";
 import type { Env } from "@/lib/edge/types";
 
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   DimensionRow,
   EventSummaryCards,
@@ -62,13 +69,6 @@ function eventTypeCursorBinding(
   ]);
 }
 
-function searchPattern(search?: string): string | null {
-  const normalized = search?.trim().toLowerCase();
-  return normalized
-    ? `%${normalized.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
-    : null;
-}
-
 async function queryCustomEventNamesFromD1(
   env: Env,
   siteId: string,
@@ -77,42 +77,20 @@ async function queryCustomEventNamesFromD1(
   limit: number,
   search?: string,
 ): Promise<DimensionRow[]> {
-  const source = buildEventFilteredSourceCte(siteId, window, filters);
-  const limitClause = limit > 0 ? "\nLIMIT ?" : "";
-  const sql = `
-${source.cte},
-event_rollup AS (
-  SELECT
-    COALESCE(event_name, '') AS value,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_events
-  GROUP BY value
-)
-SELECT value, views, sessions, visitors
-FROM event_rollup
-WHERE TRIM(value) != ''
-${search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
-ORDER BY views DESC, sessions DESC, value ASC
-${limitClause}
-`;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...source.bindings,
-      ...(search
-        ? [
-            `%${search
-              .trim()
-              .toLowerCase()
-              .replaceAll("\\", "\\\\")
-              .replaceAll("%", "\\%")
-              .replaceAll("_", "\\_")}%`,
-          ]
-        : []),
-      ...(limit > 0 ? [limit] : []),
-    ])
-  ).map((row) => ({
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildEventTypeSummaryPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    query: { kind: "list", limit, ...(search !== undefined ? { search } : {}) },
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    EVENT_TYPE_SUMMARY_OUTPUTS.list,
+  );
+  return rows.map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),
@@ -148,51 +126,24 @@ export async function queryEventTypePageFromD1(
   cursor?: EventTypeAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<DimensionRow>> {
-  const source = buildEventFilteredSourceCte(siteId, window, filters);
-  const pattern = searchPattern(search);
-  const cursorClause = cursor
-    ? `
-AND (
-  views < ?
-  OR (views = ? AND sessions < ?)
-  OR (views = ? AND sessions = ? AND value > ?)
-)`
-    : "";
-  const sql = `
-${source.cte},
-event_rollup AS (
-  SELECT
-    COALESCE(event_name, '') AS value,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_events
-  GROUP BY value
-)
-SELECT value, views, sessions, visitors
-FROM event_rollup
-WHERE TRIM(value) != ''
-${pattern ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
-${cursorClause}
-ORDER BY views DESC, sessions DESC, value ASC
-LIMIT ?
-`;
-  const cursorBindings = cursor
-    ? [
-        cursor.views,
-        cursor.views,
-        cursor.sessions,
-        cursor.views,
-        cursor.sessions,
-        cursor.value,
-      ]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...source.bindings,
-    ...(pattern ? [pattern] : []),
-    ...cursorBindings,
-    limit + 1,
-  ]);
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildEventTypeSummaryPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    query: {
+      kind: "page",
+      limit,
+      ...(search !== undefined ? { search } : {}),
+      ...(cursor ? { cursor } : {}),
+    },
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    EVENT_TYPE_SUMMARY_OUTPUTS.page,
+  );
   const mapped = rows.map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
@@ -250,27 +201,27 @@ export async function queryEventSummaryMetricsFromD1(
   window: QueryWindow,
   filters: FilterDocument,
 ): Promise<EventSummaryRow> {
-  const source = buildEventFilteredSourceCte(siteId, window, filters);
-  const [summaryRow] = await queryD1All<EventSummaryRow>(
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildEventTypeSummaryPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    query: { kind: "summary" },
+  });
+  const [summaryRow] = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    `${source.cte}
-SELECT
-  count(*) AS events,
-  count(DISTINCT event_name) AS eventTypes,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM filtered_events
-`,
-    source.bindings,
+    plan,
+    EVENT_TYPE_SUMMARY_OUTPUTS.summary,
   );
-  return (
-    summaryRow ?? {
-      events: 0,
-      eventTypes: 0,
-      sessions: 0,
-      visitors: 0,
-    }
-  );
+  return summaryRow
+    ? {
+        events: Number(summaryRow.events ?? 0),
+        eventTypes: Number(summaryRow.eventTypes ?? 0),
+        sessions: Number(summaryRow.sessions ?? 0),
+        visitors: Number(summaryRow.visitors ?? 0),
+      }
+    : { events: 0, eventTypes: 0, sessions: 0, visitors: 0 };
 }
 
 export async function queryEventsSummaryFromD1(

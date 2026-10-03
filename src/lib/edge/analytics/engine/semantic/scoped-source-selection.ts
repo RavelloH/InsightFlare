@@ -23,7 +23,9 @@ import {
 import type { FilterScope } from "@/lib/filter-contract/scope-preference";
 
 export type SemanticScopedSourceProfile =
-  "prepared-scoped-v1" | "direct-event-records-v1";
+  | "prepared-scoped-v1"
+  | "direct-event-records-v1"
+  | "direct-event-analytics-v1";
 
 export type SemanticScopedIdentityKind =
   "page" | "event" | "session" | "visitor";
@@ -265,7 +267,10 @@ export function createSemanticScopedSourceSelection(
       authorized,
       subjectSites,
     );
-  } else if (input.profile === "direct-event-records-v1") {
+  } else if (
+    input.profile === "direct-event-records-v1" ||
+    input.profile === "direct-event-analytics-v1"
+  ) {
     if (metadata || input.expectedPlan)
       return fail("direct_profile_has_prepared_metadata");
     if (filters.root && filterDocumentUsesAdvancedExpressions(filters))
@@ -314,9 +319,11 @@ export function validateSemanticScopedSourceSelection(
     !selection ||
     typeof selection !== "object" ||
     selection.version !== 1 ||
-    !["prepared-scoped-v1", "direct-event-records-v1"].includes(
-      selection.profile,
-    ) ||
+    ![
+      "prepared-scoped-v1",
+      "direct-event-records-v1",
+      "direct-event-analytics-v1",
+    ].includes(selection.profile) ||
     !["event", "session", "visitor"].includes(selection.scope) ||
     !["observation", "entity"].includes(selection.mode)
   )
@@ -355,7 +362,7 @@ export function validateSemanticScopedSourceSelection(
       fail("prepared_advanced_matches_missing");
   }
   if (
-    selection.profile === "direct-event-records-v1" &&
+    selection.profile !== "prepared-scoped-v1" &&
     (selection.scope !== "event" ||
       selection.mode !== "observation" ||
       selection.entityKind !== undefined ||

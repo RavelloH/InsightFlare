@@ -888,10 +888,12 @@ export class AnalyticsLegacyScopedStorage {
       throw new Error(
         `${path}.selection: The report carrier is missing a legacy owner/name dependency.`,
       );
-    const inLegacyReportDomain = filter(
-      report,
-      and(isNotNull(ownerPresent), isNotNull(eventName)),
-    );
+    // The legacy Event source inner-joins the event-name dictionary, but it
+    // does not require the stored label itself to be non-NULL. Keep owner
+    // presence here; consumers such as summaries need raw NULL labels to
+    // remain in the row domain for COUNT(*) while applying their own
+    // COALESCE/TRIM behavior.
+    const inLegacyReportDomain = filter(report, isNotNull(ownerPresent));
     const selected = joinMembership(
       inLegacyReportDomain,
       matches,
