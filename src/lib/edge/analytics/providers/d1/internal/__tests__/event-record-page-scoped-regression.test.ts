@@ -597,7 +597,34 @@ function frozenLegacyPageRows(
     readonly sql: string;
     readonly bindings: readonly unknown[];
   },
+  limit?: number,
 ): FrozenPageSortRow[] {
+  const query = buildFrozenLegacyPageQuery(
+    database,
+    siteId,
+    sortKey,
+    direction,
+    search,
+    predicate,
+    limit,
+  );
+  return database
+    .prepare(query.sql)
+    .all(...query.bindings) as unknown as FrozenPageSortRow[];
+}
+
+function buildFrozenLegacyPageQuery(
+  database: DatabaseSync,
+  siteId: string,
+  sortKey: FrozenPageSortKey,
+  direction: FrozenPageSortDirection,
+  search?: string,
+  predicate?: {
+    readonly sql: string;
+    readonly bindings: readonly unknown[];
+  },
+  limit?: number,
+): { readonly sql: string; readonly bindings: SQLInputValue[] } {
   const primarySort =
     sortKey === "eventName"
       ? `cen.name ${direction.toUpperCase()}`
@@ -638,9 +665,9 @@ function frozenLegacyPageRows(
     bindings.push(token, token, token, token, token, token, token, token);
   }
   if (predicate) bindings.push(...sqliteBindings(predicate.bindings));
-  return database
-    .prepare(
-      `SELECT
+  const limitClause = limit === undefined ? "" : " LIMIT ?";
+  if (limit !== undefined) bindings.push(limit);
+  const sql = `SELECT
          ce.event_pk AS eventPk,
          ce.event_id AS eventId,
          cen.name AS eventName,
@@ -652,9 +679,8 @@ function frozenLegacyPageRows(
          ON v.site_pk = ce.site_pk AND v.visit_id = ce.visit_id
        WHERE ce.site_pk = ?
          AND ce.occurred_at >= ? AND ce.occurred_at < ?${searchClause}${predicateClause}
-       ORDER BY ${orderBy}`,
-    )
-    .all(...bindings) as unknown as FrozenPageSortRow[];
+       ORDER BY ${orderBy}${limitClause}`;
+  return { sql, bindings };
 }
 
 function addJsonScalarFact(
@@ -1148,6 +1174,47 @@ interface QueryMetrics {
   }[];
 }
 
+interface ScopedPageEvidence {
+  readonly label: string;
+  readonly frozenLegacy: {
+    readonly sqlBytes: number;
+    readonly bindings: number;
+    readonly statementCount: number;
+    readonly explain: ExplainIndexEvidence;
+  };
+  readonly scopedPage: QueryMetrics & {
+    readonly statementCount: number;
+    readonly explain: ExplainIndexEvidence;
+  };
+}
+
+interface ExplainIndexEvidence {
+  readonly operationCount: number;
+  readonly indexedSearches: readonly string[];
+  readonly scans: readonly string[];
+  readonly rowsRead: null;
+  readonly rowsReadNote: string;
+}
+
+const scopedPageEvidence: ScopedPageEvidence[] = [];
+
+function compactExplainEvidence(
+  explain: ReturnType<typeof explainQueryPlan>,
+): ExplainIndexEvidence {
+  const indexedByName = new Map<string, string>();
+  for (const detail of explain.indexedSearches) {
+    const name = detail.match(/\bUSING (?:COVERING )?INDEX ([^ (]+)/u)?.[1];
+    if (name && !indexedByName.has(name)) indexedByName.set(name, detail);
+  }
+  return {
+    operationCount: explain.operationCount,
+    indexedSearches: [...indexedByName.values()],
+    scans: [...new Set(explain.scans)],
+    rowsRead: null,
+    rowsReadNote: explain.rowsReadNote,
+  };
+}
+
 function queryMetrics(query: ReturnType<typeof compileD1Query>): QueryMetrics {
   const shape = query.physicalPlanShape;
   const payload = shape
@@ -1199,6 +1266,73 @@ function queryMetrics(query: ReturnType<typeof compileD1Query>): QueryMetrics {
   };
 }
 
+function recordScopedPageEvidence(input: {
+  readonly label: string;
+  readonly database: DatabaseSync;
+  readonly siteId: string;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly predicate: {
+    readonly sql: string;
+    readonly bindings: readonly unknown[];
+  };
+  readonly search?: string;
+  readonly eventName?: string;
+  readonly statementCount: number;
+}): void {
+  const options = {
+    limit: 50,
+    sort: { key: "occurredAt", direction: "desc" } as const,
+    ...(input.search === undefined ? {} : { search: input.search }),
+    ...(input.eventName === undefined ? {} : { eventName: input.eventName }),
+  };
+  const plan = buildEventRecordPagePlan({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    options,
+  });
+  const scopedQuery = compileOutput(plan, "event-record-page");
+  const legacyQuery = buildFrozenLegacyPageQuery(
+    input.database,
+    input.siteId,
+    "occurredAt",
+    "desc",
+    input.search,
+    input.predicate,
+    options.limit + 1,
+  );
+  const scopedExplain = explainQueryPlan(
+    input.database,
+    scopedQuery.sql,
+    scopedQuery.bindings ?? [],
+  );
+  const legacyExplain = explainQueryPlan(
+    input.database,
+    legacyQuery.sql,
+    legacyQuery.bindings,
+  );
+  expect(input.statementCount, input.label).toBe(1);
+  expect(scopedExplain.indexedSearches, input.label).not.toHaveLength(0);
+  expect(legacyExplain.indexedSearches, input.label).not.toHaveLength(0);
+  scopedPageEvidence.push({
+    label: input.label,
+    frozenLegacy: {
+      sqlBytes: new TextEncoder().encode(legacyQuery.sql).byteLength,
+      bindings: legacyQuery.bindings.length,
+      statementCount: 1,
+      explain: compactExplainEvidence(legacyExplain),
+    },
+    scopedPage: {
+      ...queryMetrics(scopedQuery),
+      statementCount: input.statementCount,
+      explain: compactExplainEvidence(scopedExplain),
+    },
+  });
+}
+
 let fixture: Fixture;
 
 beforeAll(() => {
@@ -1206,6 +1340,11 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  if (scopedPageEvidence.length > 0) {
+    console.info(
+      `[wave37a scoped page query evidence] ${JSON.stringify(scopedPageEvidence)}`,
+    );
+  }
   fixture.db.close();
 });
 
@@ -1290,9 +1429,10 @@ describe("Wave37A event record scoped Source regressions", () => {
       2,
     );
     expect(expected).toEqual(["event-a-target"]);
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
     await expect(
       queryEventRecordPageFromD1(
-        { DB: createSqliteD1Database(fixture.db) } as unknown as Env,
+        { DB: createSqliteD1Database(fixture.db, trace) } as unknown as Env,
         SITE_A,
         WINDOW,
         prepared.filters,
@@ -1305,6 +1445,37 @@ describe("Wave37A event record scoped Source regressions", () => {
         },
       ),
     ).resolves.toMatchObject({ rows: [{ eventId: expected[0] }] });
+    recordScopedPageEvidence({
+      label: "prepared-name-gate-after-session-fact",
+      database: fixture.db,
+      siteId: SITE_A,
+      filters: prepared.filters,
+      queryTime: prepared.queryTime,
+      scopePlan: prepared.scopePlan,
+      eventName: " target_event ",
+      predicate: {
+        sql: `TRIM(COALESCE(cen.name, '')) = ? AND (
+          SELECT COUNT(*)
+          FROM custom_events session_event
+          INNER JOIN custom_event_names session_name
+            ON session_name.id = session_event.event_name_id
+          INNER JOIN visits session_owner
+            ON session_owner.site_pk = session_event.site_pk
+           AND session_owner.visit_id = session_event.visit_id
+          WHERE session_owner.site_pk = v.site_pk
+            AND session_owner.session_id = v.session_id
+            AND session_event.occurred_at >= ?
+            AND session_event.occurred_at < ?
+        ) >= ?`,
+        bindings: [
+          "target_event",
+          EVENT_RANGE.startMs,
+          EVENT_RANGE.endExclusiveMs,
+          2,
+        ],
+      },
+      statementCount: trace.preparedSql.length,
+    });
   });
 
   it.each([
@@ -2069,6 +2240,7 @@ describe("Wave37A event record scoped Source regressions", () => {
         readonly bindings: readonly unknown[];
       },
       scopePreference: "event" | "session" | "visitor" = "event",
+      evidenceLabel?: string,
     ) => {
       const prepared = makePreparedSelection({
         authorizationSites: [site],
@@ -2082,12 +2254,18 @@ describe("Wave37A event record scoped Source regressions", () => {
         "desc",
         undefined,
         oldPredicate,
+        51,
       ).map((row) => row.eventId);
       expect(expected, name).not.toHaveLength(0);
       let actual: Awaited<ReturnType<typeof queryEventRecordPageFromD1>>;
+      const trace: SqliteD1Trace | undefined = evidenceLabel
+        ? { preparedSql: [], bindings: [] }
+        : undefined;
       try {
         actual = await queryEventRecordPageFromD1(
-          { DB: createSqliteD1Database(fixture.db) } as unknown as Env,
+          {
+            DB: createSqliteD1Database(fixture.db, trace),
+          } as unknown as Env,
           site.id,
           WINDOW,
           prepared.filters,
@@ -2106,6 +2284,18 @@ describe("Wave37A event record scoped Source regressions", () => {
         name,
       ).toEqual(expected);
       expect(actual.nextCursor, name).toBeNull();
+      if (evidenceLabel) {
+        recordScopedPageEvidence({
+          label: evidenceLabel,
+          database: fixture.db,
+          siteId: site.id,
+          filters: prepared.filters,
+          queryTime: prepared.queryTime,
+          scopePlan: prepared.scopePlan,
+          predicate: oldPredicate,
+          statementCount: trace?.preparedSql.length ?? 0,
+        });
+      }
       return expected;
     };
 
@@ -2166,6 +2356,7 @@ describe("Wave37A event record scoped Source regressions", () => {
         fieldCondition(field, operator, value),
         frozenAggregateFactPredicate(field, operator, value),
         scopePreference,
+        field === "session.events" ? "fact-session.events" : undefined,
       );
       expect(expected).not.toHaveLength(0);
       expect(expected).toEqual(
@@ -2184,6 +2375,7 @@ describe("Wave37A event record scoped Source regressions", () => {
       { kind: "and", children: sevenFactExpressions },
       frozenSessionMembershipPredicate(sevenFactOracle),
       "session",
+      "payload-seven-facts",
     );
 
     const planPro = frozenPayloadPredicate("/plan", "eq", "pro");
@@ -2235,6 +2427,7 @@ describe("Wave37A event record scoped Source regressions", () => {
       fieldCondition("session.entryPath", "eq", "/entry"),
       entryPath,
       "session",
+      "boundary-session.entryPath",
     );
     const exitPath = frozenSessionBoundaryPredicate("exit", "/exit");
     await runCase(
@@ -2490,6 +2683,7 @@ describe("Wave37A event record scoped Source regressions", () => {
         readonly siteId: string;
         readonly id: string;
       }[] = [],
+      evidenceLabel?: string,
     ) => {
       const oracleKind = kind === "visit" ? "event" : kind;
       const oracleIdentities =
@@ -2506,6 +2700,7 @@ describe("Wave37A event record scoped Source regressions", () => {
         "desc",
         undefined,
         empty ? { sql: "0", bindings: [] } : identityPredicate,
+        51,
       ).map((row) => row.eventId);
       const advancedMatches =
         kind === "event"
@@ -2514,8 +2709,13 @@ describe("Wave37A event record scoped Source regressions", () => {
             ? { visitIds: identities, eventIds: eventObservationIds }
             : { entityIds: identities };
       const selection = makeSelection(scopePreference, advancedMatches);
+      const trace: SqliteD1Trace | undefined = evidenceLabel
+        ? { preparedSql: [], bindings: [] }
+        : undefined;
       const page = await queryEventRecordPageFromD1(
-        { DB: createSqliteD1Database(fixture.db) } as unknown as Env,
+        {
+          DB: createSqliteD1Database(fixture.db, trace),
+        } as unknown as Env,
         site.id,
         WINDOW,
         selection.filters,
@@ -2528,6 +2728,18 @@ describe("Wave37A event record scoped Source regressions", () => {
       );
       expect(page.rows.map((row) => row.eventId)).toEqual(expected);
       expect(page.nextCursor).toBeNull();
+      if (evidenceLabel) {
+        recordScopedPageEvidence({
+          label: evidenceLabel,
+          database: fixture.db,
+          siteId: site.id,
+          filters: selection.filters,
+          queryTime: selection.queryTime,
+          scopePlan: selection.scopePlan,
+          predicate: empty ? { sql: "0", bindings: [] } : identityPredicate,
+          statementCount: trace?.preparedSql.length ?? 0,
+        });
+      }
       return expected;
     };
 
@@ -2566,6 +2778,7 @@ describe("Wave37A event record scoped Source regressions", () => {
           a,
           false,
           kind === "visit" ? eventObservationIdsForVisits : [],
+          kind === "event" ? "advanced-prepared-event-identities" : undefined,
         ),
       ).toEqual(kind === "visit" ? expectedPreparedVisitsA : expectedA);
       expect(
@@ -2578,9 +2791,17 @@ describe("Wave37A event record scoped Source regressions", () => {
           kind === "visit" ? eventObservationIdsForVisits : [],
         ),
       ).toEqual(kind === "visit" ? expectedPreparedVisitsB : expectedB);
-      expect(await runPublicPage(kind, scopePreference, [], a, true)).toEqual(
-        [],
-      );
+      expect(
+        await runPublicPage(
+          kind,
+          scopePreference,
+          [],
+          a,
+          true,
+          [],
+          kind === "session" ? "empty-prepared-session-identities" : undefined,
+        ),
+      ).toEqual([]);
     }
 
     // The same visit local ID under B's site identity must not match A's
