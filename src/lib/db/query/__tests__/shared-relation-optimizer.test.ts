@@ -282,6 +282,56 @@ describe("shared relation physical selection", () => {
     ).toEqual([]);
   });
 
+  it("shares selective inputs below independent branch-local top-N sorts", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)")
+      .run("top-n-site-b", "top-n-site-a");
+
+    const source = selectedProjection(5);
+    const branches = [0, 1, 2].map((index) =>
+      limit(
+        sort(source, [
+          {
+            expression: source.columns[`field${index}`]!,
+            direction: index === 1 ? "DESC" : "ASC",
+          },
+        ]),
+        1,
+      ),
+    );
+    const combined = union(
+      union(branches[0]!, branches[1]!, true),
+      branches[2]!,
+      true,
+    );
+    const physical = lowerLogicalPlan(combined);
+    expect(
+      physical.sharedRelations.find(({ node }) => node === source.node),
+    ).toMatchObject({
+      materialization: "materialized",
+      fields: [{}, {}, {}, {}, {}],
+    });
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(combined);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(optimized.sql).toContain("AS MATERIALIZED (");
+    expect(optimizedRows).toEqual(mechanicalRows);
+
+    const globalLimit = limit(
+      union(union(source, source, true), source, true),
+      2,
+    );
+    expect(lowerLogicalPlan(globalLimit).sharedRelations).toEqual([]);
+  });
+
   it("allows a terminal root sort and preserves UNION ALL order and multiplicity", () => {
     const database = createMigratedDatabase();
     databases.add(database);

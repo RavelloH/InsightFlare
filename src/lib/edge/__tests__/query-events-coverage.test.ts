@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { siteQueryResponse } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
+import type * as AnalyticsReportQuery from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type * as QueryCore from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   addDimensionValue,
@@ -40,6 +41,8 @@ import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
 const queryD1AllMock = vi.hoisted(() => vi.fn());
+const reportOutputMock = vi.hoisted(() => vi.fn());
+const reportOutputSetMock = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/edge/analytics/providers/d1/internal/core", async () => {
   const actual = await vi.importActual<typeof QueryCore>(
     "@/lib/edge/analytics/providers/d1/internal/core",
@@ -49,6 +52,19 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/core", async () => {
     queryD1All: queryD1AllMock,
   };
 });
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/analytics-report-query",
+  async () => {
+    const actual = await vi.importActual<typeof AnalyticsReportQuery>(
+      "@/lib/edge/analytics/providers/d1/internal/analytics-report-query",
+    );
+    return {
+      ...actual,
+      queryAnalyticsReportOutputRowsFromD1: reportOutputMock,
+      queryAnalyticsReportOutputSetRowsFromD1: reportOutputSetMock,
+    };
+  },
+);
 const env = {} as Env;
 const siteId = "site_123";
 const window: QueryWindow = {
@@ -60,10 +76,12 @@ const window: QueryWindow = {
 describe("edge query events summary coverage", () => {
   beforeEach(() => {
     queryD1AllMock.mockReset();
+    reportOutputMock.mockReset();
+    reportOutputSetMock.mockReset();
   });
 
   it("returns zero summary metrics when D1 has no aggregate row", async () => {
-    queryD1AllMock.mockResolvedValueOnce([]);
+    reportOutputMock.mockResolvedValueOnce([]);
 
     await expect(
       queryEventSummaryMetricsFromD1(
@@ -79,11 +97,11 @@ describe("edge query events summary coverage", () => {
       visitors: 0,
     });
 
-    expect(queryD1AllMock).toHaveBeenCalledOnce();
+    expect(reportOutputMock).toHaveBeenCalledOnce();
   });
 
   it("keeps an absent D1 card collection from reaching array operations", async () => {
-    queryD1AllMock.mockResolvedValueOnce(undefined);
+    reportOutputSetMock.mockResolvedValueOnce(undefined);
 
     await expect(
       queryEventsSummaryFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT),
@@ -97,7 +115,7 @@ describe("edge query events summary coverage", () => {
   });
 
   it("reads event summary cards from each dimension query", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputSetMock.mockResolvedValueOnce([
       {
         cardType: "__summary__",
         views: 8,
@@ -153,13 +171,32 @@ describe("edge query events summary coverage", () => {
       },
     });
 
-    expect(queryD1AllMock).toHaveBeenCalledOnce();
-    expect(queryD1AllMock.mock.calls[0][1]).toContain(
-      "filtered_events AS MATERIALIZED",
-    );
-    expect(queryD1AllMock.mock.calls[0][2]).toEqual(
-      expect.arrayContaining([siteId, window.startMs, window.endExclusiveMs]),
-    );
+    expect(reportOutputSetMock).toHaveBeenCalledOnce();
+    const [, plan, selection] = reportOutputSetMock.mock.calls[0]!;
+    expect(plan.outputs.map((output: { id: string }) => output.id)).toEqual([
+      "event-summary-cards-summary",
+      "event-summary-cards-event",
+      "event-summary-cards-path",
+      "event-summary-cards-title",
+      "event-summary-cards-hostname",
+    ]);
+    expect(selection).toMatchObject({
+      fields: [
+        "cardType",
+        "value",
+        "views",
+        "eventTypes",
+        "sessions",
+        "visitors",
+      ],
+      orderBy: [
+        { field: "cardType", direction: "asc", nulls: "first" },
+        { field: "views", direction: "desc", nulls: "last" },
+        { field: "sessions", direction: "desc", nulls: "last" },
+        { field: "visitors", direction: "desc", nulls: "last" },
+        { field: "value", direction: "asc", nulls: "first" },
+      ],
+    });
   });
 
   it("builds all event context cards within D1 compound SELECT limits", async () => {
@@ -239,7 +276,7 @@ describe("edge query events summary coverage", () => {
   });
 
   it("maps empty combined summary results without a synthetic row", async () => {
-    queryD1AllMock.mockResolvedValueOnce([]);
+    reportOutputSetMock.mockResolvedValueOnce([]);
 
     await expect(
       queryEventsSummaryFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT),
@@ -324,7 +361,7 @@ describe("edge query events summary coverage", () => {
   });
 
   it("queries custom event type aggregates with visit context filters", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputMock.mockResolvedValueOnce([
       {
         value: "signup",
         views: "9",
@@ -348,24 +385,12 @@ describe("edge query events summary coverage", () => {
       { value: "signup", views: 9, sessions: 4, visitors: 3 },
     ]);
 
-    expect(queryD1AllMock).toHaveBeenCalledOnce();
-    const [, sql, bindings] = queryD1AllMock.mock.calls[0];
-    expect(sql).not.toContain("LEFT JOIN visit_source vs");
-    expect(sql).toContain("FROM event_rollup");
-    expect(sql).toContain("LOWER(TRIM(COALESCE(es.referrer_host, ''))) = ?");
-    expect(sql).toContain("LOWER(TRIM(COALESCE(es.device_type, ''))) = ?");
-    expect(bindings).toEqual([
-      siteId,
-      window.startMs,
-      window.endExclusiveMs,
-      "mobile",
-      "ref.example",
-      3,
-    ]);
+    expect(reportOutputMock).toHaveBeenCalledOnce();
+    expect(reportOutputMock.mock.calls[0]?.[2]).toBe("event-type-list");
   });
 
   it("normalizes sparse custom event aggregate rows", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputMock.mockResolvedValueOnce([
       {
         value: null,
         views: undefined,
@@ -478,10 +503,12 @@ describe("edge query events summary coverage", () => {
 describe("edge query events trend coverage", () => {
   beforeEach(() => {
     queryD1AllMock.mockReset();
+    reportOutputMock.mockReset();
+    reportOutputSetMock.mockReset();
   });
 
   it("maps event trend rows, collisions, other series, and invalid buckets", async () => {
-    queryD1AllMock
+    reportOutputMock
       .mockResolvedValueOnce([
         {
           eventName: "Signup Complete",
@@ -497,9 +524,9 @@ describe("edge query events trend coverage", () => {
         },
       ])
       .mockResolvedValueOnce([
-        { bucket: 0, seriesKey: "Signup Complete", events: 3 },
-        { bucket: 1, seriesKey: SHARE_TREND_OTHER_TOKEN, events: 4 },
-        { bucket: 99, seriesKey: "Signup Complete", events: 100 },
+        { bucket: 0, seriesName: "Signup Complete", events: 3 },
+        { bucket: 1, seriesName: SHARE_TREND_OTHER_TOKEN, events: 4 },
+        { bucket: 99, seriesName: "Signup Complete", events: 100 },
       ])
       .mockResolvedValueOnce([]);
 
@@ -549,16 +576,19 @@ describe("edge query events trend coverage", () => {
       totalEvents: 4,
       eventsBySeries: { [SHARE_TREND_OTHER_KEY]: 4 },
     });
-    expect(queryD1AllMock.mock.calls[2][1]).toContain(
-      "WHERE event_name NOT IN (?, ?)",
-    );
+    expect(reportOutputMock).toHaveBeenCalledTimes(3);
+    expect(reportOutputMock.mock.calls.map((call) => call[2])).toEqual([
+      "event-trend-series",
+      "event-trend-points",
+      "event-trend-other",
+    ]);
   });
 
   it("uses the other token when no top event series are selected", async () => {
-    queryD1AllMock
+    reportOutputMock
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { bucket: 0, seriesKey: SHARE_TREND_OTHER_TOKEN, events: 2 },
+        { bucket: 0, seriesName: SHARE_TREND_OTHER_TOKEN, events: 2 },
       ])
       .mockResolvedValueOnce([
         {
@@ -589,14 +619,16 @@ describe("edge query events trend coverage", () => {
         isOther: true,
       },
     ]);
-    expect(queryD1AllMock.mock.calls[1][2]).toContain(SHARE_TREND_OTHER_TOKEN);
-    expect(queryD1AllMock.mock.calls[2][1]).not.toContain(
-      "WHERE event_name NOT IN",
-    );
+    expect(reportOutputMock).toHaveBeenCalledTimes(3);
+    expect(reportOutputMock.mock.calls.map((call) => call[2])).toEqual([
+      "event-trend-series",
+      "event-trend-points",
+      "event-trend-other",
+    ]);
   });
 
   it("maps event type trend rows and ignores out-of-range buckets", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    reportOutputMock.mockResolvedValueOnce([
       { bucket: 0, events: 3, visitors: 2 },
       { bucket: -1, events: 100, visitors: 100 },
     ]);
@@ -612,6 +644,8 @@ describe("edge query events trend coverage", () => {
 
     expect(result.data[0]).toMatchObject({ bucket: 0, events: 3, visitors: 2 });
     expect(result.data[1]).toMatchObject({ bucket: 1, events: 0, visitors: 0 });
+    expect(reportOutputMock).toHaveBeenCalledOnce();
+    expect(reportOutputMock.mock.calls[0]?.[2]).toBe("event-type-trend-points");
   });
 });
 describe("edge query core event helper coverage", () => {

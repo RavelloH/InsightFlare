@@ -1142,7 +1142,18 @@ export class AnalyticsLogicalToDbLowerer {
   }
 
   lower(output: LogicalOutput): LoweredAnalyticsLogicalOutput {
-    const selectedNodes = this.#reachableNodeIds([output.relation]);
+    return this.lowerMany([output])[0]!;
+  }
+
+  /** Lowers related outputs with one required-slot analysis and shared memo. */
+  lowerMany(
+    outputs: readonly LogicalOutput[],
+  ): readonly LoweredAnalyticsLogicalOutput[] {
+    if (outputs.length === 0)
+      reject("outputs", "At least one Logical output is required.");
+    const selectedNodes = this.#reachableNodeIds(
+      outputs.map((output) => output.relation),
+    );
     const declaredOutputNodes = this.#reachableNodeIds(
       this.#plan.outputs.map((candidate) => candidate.relation),
     );
@@ -1155,11 +1166,11 @@ export class AnalyticsLogicalToDbLowerer {
         "Every relational and Boolean node must be reachable from a declared output.",
       );
 
-    // Required slots are output-specific. Reusing a previous result after
-    // lowering another output could omit fields required by this output.
+    // A multi-output caller needs the union of required slots on shared nodes.
+    // Lower all roots after that union is known so they share one source graph.
     this.#memo.clear();
-    this.#prepareRequiredSlots(output, selectedNodes);
-    const root = this.#lowerNode(output.relation);
+    this.#prepareRequiredSlots(outputs, selectedNodes);
+    const roots = outputs.map((output) => this.#lowerNode(output.relation));
     if (this.#memo.size !== selectedNodes.size) {
       const unreachable = this.#plan.nodes.find(
         (node) => selectedNodes.has(node.id) && !this.#memo.has(node.id),
@@ -1169,25 +1180,28 @@ export class AnalyticsLogicalToDbLowerer {
         "Every relation in the selected output dependency graph must be lowered.",
       );
     }
-    const outputNode = this.#nodes.get(output.relation);
-    const outputValue = output.fields[0]
-      ? root.slots.get(output.fields[0].slot)
-      : undefined;
-    return {
-      relation: root.relation,
-      slots: root.slots,
-      output,
-      candidateBounded:
-        output.fields.length === 1 &&
-        outputValue?.kind === "entity" &&
-        outputValue.type.entity === "session" &&
-        outputValue.candidateBounded,
-      candidateActivity: root.candidateActivity,
-      candidateActivitySessionRelation: root.candidateActivitySessionRelation,
-      candidateActivitySessionRestricted:
-        root.candidateActivitySessionRestricted,
-      relationId: outputNode?.id ?? output.relation,
-    };
+    return outputs.map((output, index) => {
+      const root = roots[index]!;
+      const outputNode = this.#nodes.get(output.relation);
+      const outputValue = output.fields[0]
+        ? root.slots.get(output.fields[0].slot)
+        : undefined;
+      return {
+        relation: root.relation,
+        slots: root.slots,
+        output,
+        candidateBounded:
+          output.fields.length === 1 &&
+          outputValue?.kind === "entity" &&
+          outputValue.type.entity === "session" &&
+          outputValue.candidateBounded,
+        candidateActivity: root.candidateActivity,
+        candidateActivitySessionRelation: root.candidateActivitySessionRelation,
+        candidateActivitySessionRestricted:
+          root.candidateActivitySessionRestricted,
+        relationId: outputNode?.id ?? output.relation,
+      };
+    });
   }
 
   #reachableNodeIds(roots: readonly RelationId[]): Set<RelationId> {
@@ -2666,14 +2680,15 @@ export class AnalyticsLogicalToDbLowerer {
   }
 
   #prepareRequiredSlots(
-    output: LogicalOutput,
+    outputs: readonly LogicalOutput[],
     reachable: ReadonlySet<RelationId>,
   ): void {
     this.#requiredSlots.clear();
-    this.#addRequiredSlots(
-      output.relation,
-      output.fields.map((field) => field.slot),
-    );
+    for (const output of outputs)
+      this.#addRequiredSlots(
+        output.relation,
+        output.fields.map((field) => field.slot),
+      );
     let changed = true;
     while (changed) {
       changed = false;

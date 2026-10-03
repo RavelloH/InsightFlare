@@ -1468,6 +1468,7 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
     node: LogicalQueryNode,
     inheritedForbidden: boolean,
     underWindow: boolean,
+    underBranchTopN: boolean,
   ): void => {
     let contexts = visited.get(node);
     if (!contexts) {
@@ -1482,21 +1483,28 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
       windowInput.add(node);
 
     const terminalRootSort = node === root && node.kind === "sort";
+    const branchTopN =
+      node !== root &&
+      !inheritedForbidden &&
+      node.kind === "limit" &&
+      nodeChildren(node).some((child) => child.node.kind === "sort");
+    const safeBranchTopN = underBranchTopN || branchTopN;
     const selectionBoundary =
       inheritedForbidden ||
-      (node.kind === "sort" && !terminalRootSort) ||
+      (node.kind === "sort" && !terminalRootSort && !safeBranchTopN) ||
       node.kind === "recursive-closure" ||
-      node.kind === "limit";
+      (node.kind === "limit" && !branchTopN);
     for (const child of nodeChildren(node))
       visit(
         child.node,
         selectionBoundary,
         underWindow || node.kind === "window",
+        safeBranchTopN,
       );
     for (const query of nodeExpressions(node).flatMap(expressionSources))
-      visit(query.node, true, false);
+      visit(query.node, true, false, false);
   };
-  visit(root, false, false);
+  visit(root, false, false, false);
   return { forbidden, windowInput };
 }
 

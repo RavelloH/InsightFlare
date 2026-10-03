@@ -7,12 +7,19 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import {
+  buildEventSummaryCardsPlan,
+  EVENT_SUMMARY_CARD_OUTPUTS,
+} from "@/lib/edge/analytics/engine/event-summary-cards-plan";
+import {
   buildEventTypeSummaryPlan,
   EVENT_TYPE_SUMMARY_OUTPUTS,
 } from "@/lib/edge/analytics/engine/event-type-summary-plan";
 import type { Env } from "@/lib/edge/types";
 
-import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
+import {
+  queryAnalyticsReportOutputRowsFromD1,
+  queryAnalyticsReportOutputSetRowsFromD1,
+} from "./analytics-report-query";
 import type {
   DimensionRow,
   EventSummaryCards,
@@ -20,7 +27,6 @@ import type {
   FilterDocument,
   QueryWindow,
 } from "./core";
-import { buildEventFilteredSourceCte, queryD1All } from "./core";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -233,85 +239,38 @@ export async function queryEventsSummaryFromD1(
   summary: EventSummaryRow;
   cards: EventSummaryCards;
 }> {
-  const source = buildEventFilteredSourceCte(
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildEventSummaryCardsPlan({
     siteId,
-    window,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
     filters,
-    undefined,
-    {
-      materialize: true,
-    },
-  );
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+  });
   const rows =
-    (await queryD1All<{
-      cardType: string;
-      value: string | null;
-      views: number;
-      eventTypes: number;
-      sessions: number;
-      visitors: number;
-    }>(
-      env,
-      `${source.cte},
-card_rows AS (
-  SELECT
-    '__summary__' AS cardType,
-    NULL AS value,
-    count(*) AS views,
-    count(DISTINCT event_name) AS eventTypes,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_events
-  UNION ALL
-  SELECT 'event', event_name, count(*), 0,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
-  FROM filtered_events
-  WHERE TRIM(COALESCE(event_name, '')) != ''
-  GROUP BY event_name
-  UNION ALL
-  SELECT 'path', pathname, count(*), 0,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
-  FROM filtered_events
-  WHERE TRIM(COALESCE(pathname, '')) != ''
-  GROUP BY pathname
-  UNION ALL
-  SELECT 'title', title, count(*), 0,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
-  FROM filtered_events
-  WHERE TRIM(COALESCE(title, '')) != ''
-  GROUP BY title
-  UNION ALL
-  SELECT 'hostname', hostname, count(*), 0,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
-  FROM filtered_events
-  WHERE TRIM(COALESCE(hostname, '')) != ''
-  GROUP BY hostname
-),
-ranked_cards AS (
-  SELECT
-    cardType,
-    value,
-    views,
-    eventTypes,
-    sessions,
-    visitors,
-    ROW_NUMBER() OVER (
-      PARTITION BY cardType
-      ORDER BY views DESC, sessions DESC, visitors DESC, value ASC
-    ) AS card_rank
-  FROM card_rows
-)
-SELECT cardType, value, views, eventTypes, sessions, visitors
-FROM ranked_cards
-WHERE cardType = '__summary__' OR card_rank <= 100
-ORDER BY cardType ASC, card_rank ASC
-`,
-      source.bindings,
-    )) ?? [];
+    (await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+      outputIds: [
+        EVENT_SUMMARY_CARD_OUTPUTS.summary,
+        EVENT_SUMMARY_CARD_OUTPUTS.event,
+        EVENT_SUMMARY_CARD_OUTPUTS.path,
+        EVENT_SUMMARY_CARD_OUTPUTS.title,
+        EVENT_SUMMARY_CARD_OUTPUTS.hostname,
+      ],
+      fields: [
+        "cardType",
+        "value",
+        "views",
+        "eventTypes",
+        "sessions",
+        "visitors",
+      ],
+      orderBy: [
+        { field: "cardType", direction: "asc", nulls: "first" },
+        { field: "views", direction: "desc", nulls: "last" },
+        { field: "sessions", direction: "desc", nulls: "last" },
+        { field: "visitors", direction: "desc", nulls: "last" },
+        { field: "value", direction: "asc", nulls: "first" },
+      ],
+    })) ?? [];
   const summaryRow = rows.find((row) => row.cardType === "__summary__");
   const summary: EventSummaryRow = summaryRow
     ? {
