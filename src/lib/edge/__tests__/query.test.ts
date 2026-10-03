@@ -473,9 +473,13 @@ function commonQueryMatches(): SqlMatch[] {
       [{ value: "US", views: 1, sessions: 1, visitors: 1 }],
     ),
     allMatch(["dimension_rollup AS"], dimensionRows),
-    allMatch(
-      ["card_rows AS", "ranked_cards AS", "__summary__"],
-      [
+    {
+      match: (sql, bindings) =>
+        sql.includes('"custom_events"') &&
+        sql.includes('"custom_event_names"') &&
+        (sql.match(/UNION ALL/g) ?? []).length === 4 &&
+        bindings.includes("__summary__"),
+      all: [
         {
           cardType: "__summary__",
           views: 12,
@@ -491,22 +495,29 @@ function commonQueryMatches(): SqlMatch[] {
           visitors: 3,
         },
       ],
-    ),
+    },
     allMatch(
       ["event_with_context AS", "event_rollup AS"],
       [{ value: "Signup", views: 8, sessions: 5, visitors: 4 }],
     ),
-    allMatch(
-      ["event_name AS eventName", "GROUP BY event_name", "LIMIT ?"],
-      [{ eventName: "Signup", events: 7, sessions: 4, visitors: 3 }],
-    ),
-    allMatch(
-      ["seriesName AS seriesKey"],
-      [{ bucket: 0, seriesKey: "Signup", events: 2 }],
-    ),
-    allMatch(
-      ["overview_card_rows AS", "ranked_overview_cards AS"],
-      [
+    {
+      match: (sql, bindings) =>
+        sql.includes('"custom_event_names"') &&
+        sql.includes('AS "eventName"') &&
+        sql.includes("GROUP BY") &&
+        sql.includes("LIMIT ?") &&
+        bindings.includes("Signup"),
+      all: [{ eventName: "Signup", events: 7, sessions: 4, visitors: 3 }],
+    },
+    {
+      match: (sql, bindings) =>
+        sql.includes('AS "seriesName"') && bindings.includes("Signup"),
+      all: [{ bucket: 0, seriesName: "Signup", events: 2 }],
+    },
+    {
+      match: (sql) =>
+        sql.includes('"scopedEvents"') && sql.includes("UNION ALL"),
+      all: [
         {
           cardType: "summary",
           value: null,
@@ -545,7 +556,7 @@ function commonQueryMatches(): SqlMatch[] {
           visitors: 3,
         },
       ],
-    ),
+    },
     allMatch(
       ["count(*) AS events", "count(DISTINCT event_name)"],
       [{ events: 12, eventTypes: 3, sessions: 5, visitors: 4 }],

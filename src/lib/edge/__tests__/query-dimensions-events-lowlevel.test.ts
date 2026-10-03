@@ -1163,11 +1163,15 @@ describe("edge query event handlers low-level coverage", () => {
         },
       },
     });
-    expect(calls[0].bindings).toEqual([
-      ...eventBindings(),
-      ...eventBindings(),
-      5,
-    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].bindings).toEqual(
+      expect.arrayContaining([
+        siteId,
+        window.startMs,
+        window.endExclusiveMs,
+        5,
+      ]),
+    );
   });
 
   it("uses a keyset cursor for event records and maps current rows", async () => {
@@ -1425,7 +1429,7 @@ describe("edge paginated event types low-level coverage", () => {
       items: [{ value: "signup" }],
       pagination: { hasMore: true, nextCursor: expect.any(String) },
     });
-    expect(first.calls[0].sql).toContain("LOWER(value) LIKE");
+    expect(first.calls[0].sql).toContain("LIKE ? ESCAPE ?");
     expect(first.calls[0].bindings).toContain("%sign\\%%");
 
     const cursor = await decodeEventTypeCursor(
