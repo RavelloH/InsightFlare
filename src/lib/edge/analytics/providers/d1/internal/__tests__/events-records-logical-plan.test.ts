@@ -11,6 +11,7 @@ import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
 } from "@/lib/edge/analytics/contract";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { queryEventRecordPageOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/event-record-page-output";
 import { queryEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import type { Env } from "@/lib/edge/types";
@@ -88,5 +89,20 @@ describe("event record page typed query", () => {
         ]),
       }),
     );
+
+    const selectedSource = plan.nodes.find(
+      (node) => node.kind === "source" && node.selection,
+    );
+    const output = plan.outputs.find(
+      (candidate) => candidate.id === "event-record-page",
+    );
+    if (!selectedSource || selectedSource.kind !== "source" || !output)
+      throw new Error("selected_event_record_source_missing");
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: "site-event-records",
+      time: plan.context.time,
+    });
+    lowerer.lower(output);
+    expect(lowerer.candidateActivity(selectedSource.id)).toBeUndefined();
   });
 });

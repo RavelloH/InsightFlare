@@ -97,10 +97,17 @@ function legacyBoundaryPredicate(
     );
 
   const direction = kind === "entry" ? "ASC" : "DESC";
+  const pageRows = project(candidatePages.relation, {
+    site_pk: candidatePages.sitePk,
+    session_id: candidatePages.sessionId,
+    visit_id: candidatePages.visitId,
+    started_at: candidatePages.startedAt,
+    pathname: candidatePages.pathname,
+  });
   const validPages = filter(
-    candidatePages.relation,
+    pageRows,
     neq(
-      trimSpaces(coalesce(candidatePages.sessionId, constant(""))),
+      trimSpaces(coalesce(pageRows.columns.session_id, constant(""))),
       constant(""),
     ),
   );

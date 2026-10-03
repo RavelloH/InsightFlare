@@ -36,7 +36,7 @@ describe("legacy scoped Event storage guards", () => {
     expect(storage.lowerEventReportSource(node, "source", source)).toBe(source);
   });
 
-  it("rejects unsupported entities and sources missing the hidden key", () => {
+  it("rejects unsupported entities", () => {
     expect(() =>
       storage.lowerEventReportSource(
         { ...eventSource, entity: "page" } as unknown as SourceNode,
@@ -46,22 +46,17 @@ describe("legacy scoped Event storage guards", () => {
     ).toThrow(
       "source.selection: Scoped selection is currently supported only on Event report Sources.",
     );
+  });
 
+  it("rejects selected Sources outside the candidate temporal domain", () => {
     expect(() =>
       storage.lowerEventReportSource(
-        {
-          ...eventSource,
-          values: eventSource.values.filter(
-            (binding) =>
-              binding.kind !== "attribute" ||
-              binding.attribute !== "event.report.internalPk",
-          ),
-        },
+        { ...eventSource, temporalDomain: "read" },
         "source",
         source,
       ),
     ).toThrow(
-      "source.selection: Scoped Event report Sources require the hidden internal primary key.",
+      "source.temporalDomain: Scoped Event report Sources currently require the candidate domain.",
     );
   });
 });

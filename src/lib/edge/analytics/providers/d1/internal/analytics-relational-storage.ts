@@ -634,7 +634,10 @@ export class AnalyticsRelationalStorage {
         throw new Error(
           `${path}.values: Internal Event report attributes cannot be mixed with native primitive fields.`,
         );
-      if (declaredEventReportAttributes.length > 0) {
+      if (
+        declaredEventReportAttributes.length > 0 ||
+        node.selection !== undefined
+      ) {
         const ownerPageAttributes = [
           ...new Set(
             requiredEventReportAttributes.flatMap((attributeId) => {
@@ -658,11 +661,16 @@ export class AnalyticsRelationalStorage {
           domain: node.temporalDomain,
           attributes: requiredEventReportAttributes,
           ownerPageAttributes,
-          includeName: requiredEventReportAttributes.includes(
-            "event.report.eventName",
-          ),
-          includeOwner: needsOwner,
+          // A selected Event report has a fixed legacy row domain even when
+          // the output demand is only a count or a narrow identity projection.
+          // Keep the ID-only name and same-site owner carriers inside the
+          // Source relation without exposing them as required output slots.
+          includeName:
+            node.selection !== undefined ||
+            requiredEventReportAttributes.includes("event.report.eventName"),
+          includeOwner: node.selection !== undefined || needsOwner,
           includeIdentity:
+            node.selection !== undefined ||
             selfRequired ||
             relationships.some(
               (binding) =>

@@ -1434,6 +1434,7 @@ export class AnalyticsLogicalToDbLowerer {
           ),
         ),
         candidateActivity:
+          node.selection === undefined &&
           node.temporalDomain === "candidate" &&
           (node.entity === "page" ||
             node.entity === "event" ||
@@ -1461,6 +1462,7 @@ export class AnalyticsLogicalToDbLowerer {
     return {
       ...result,
       candidateActivity:
+        node.selection === undefined &&
         node.temporalDomain === "candidate" &&
         (node.entity === "page" ||
           node.entity === "event" ||

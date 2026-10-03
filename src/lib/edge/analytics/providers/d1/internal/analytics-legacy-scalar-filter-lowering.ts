@@ -75,6 +75,14 @@ export interface LegacyScalarFilterContext {
   >;
   readonly eventName?: SqlExpression;
   readonly facts?: Readonly<Partial<Record<FactStrategy, SqlExpression>>>;
+  readonly assertFieldAvailable?: (
+    field: RegisteredFilterField,
+    location: string,
+  ) => void;
+  readonly resolveTypedCondition?: (
+    condition: FilterCondition,
+    location: string,
+  ) => Predicate | undefined;
 }
 
 export type LegacyScalarFilterLoweringErrorCode =
@@ -774,6 +782,7 @@ function resolveConditionValue(
   readonly expression: SqlExpression;
 } {
   const field = fieldForCondition(condition, location, mode);
+  context.assertFieldAvailable?.(field, `${location}.target.field`);
   const strategy = field.compilerStrategy;
   const expression = resolveStrategy(
     strategy,
@@ -874,6 +883,15 @@ function isTextVectorCondition(
   );
 }
 
+/** Stable grouping key shared by row and entity-set OR lowering. */
+export function legacyTextVectorConditionGroupKey(
+  expression: FilterExpression,
+): string | undefined {
+  if (!isTextVectorCondition(expression) || expression.target.kind !== "field")
+    return undefined;
+  return `${expression.target.field}\u0000${expression.operator}`;
+}
+
 function lowerOrGroup(
   expression: FilterGroup & { readonly kind: "or" },
   context: LegacyScalarFilterContext,
@@ -883,9 +901,9 @@ function lowerOrGroup(
     isTextVectorCondition(child) ? child : undefined,
   );
   const groups = new Map<string, number[]>();
-  for (const [index, vector] of vectors.entries()) {
-    if (!vector || vector.target.kind !== "field") continue;
-    const key = `${vector.target.field}\u0000${vector.operator}`;
+  for (const index of vectors.keys()) {
+    const key = legacyTextVectorConditionGroupKey(expression.children[index]!);
+    if (!key) continue;
     const indices = groups.get(key) ?? [];
     indices.push(index);
     groups.set(key, indices);
@@ -899,10 +917,8 @@ function lowerOrGroup(
   for (const [index, child] of expression.children.entries()) {
     if (groupedIndexes.has(index)) continue;
     const vector = vectors[index];
-    const indices =
-      vector && vector.target.kind === "field"
-        ? groups.get(`${vector.target.field}\u0000${vector.operator}`)
-        : undefined;
+    const key = legacyTextVectorConditionGroupKey(child);
+    const indices = key ? groups.get(key) : undefined;
     if (vector && indices && indices.length > 1) {
       clauses.push(
         groupedTextVector(
@@ -926,6 +942,8 @@ function lowerExpression(
   location: string,
 ): Predicate {
   if (expression.kind === "condition") {
+    const typed = context.resolveTypedCondition?.(expression, location);
+    if (typed !== undefined) return typed;
     const { field, expression: resolvedValue } = resolveConditionValue(
       expression,
       context,

@@ -6,15 +6,15 @@ import {
   distinct,
   eq,
   filter,
+  inSubquery,
   isNotNull,
   join,
+  jsonScalarArray,
   neq,
-  not,
   or,
   param,
   type Predicate,
   project,
-  semiJoin,
   trimSpaces,
   union,
   valuesRelation,
@@ -37,17 +37,21 @@ import type {
 import { lowerLegacyRelationalPredicate } from "./analytics-legacy-relational-predicates";
 import {
   type LegacyScalarFilterContext,
-  lowerLegacyScalarContextCondition,
+  LegacyScalarFilterLoweringError,
+  legacyTextVectorConditionGroupKey,
+  lowerLegacyScalarFilterDocument,
   lowerLegacyScalarValueCondition,
 } from "./analytics-legacy-scalar-filter-lowering";
 import { buildLegacyScopeFactRelation } from "./analytics-legacy-scope-facts";
 import {
   type AnalyticsLegacyScopedDataset,
   buildLegacyScopedDataset,
+  LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS,
 } from "./analytics-legacy-scoped-dataset";
 import type {
   AnalyticsLegacyEventRow,
   AnalyticsLegacyFactRelation,
+  AnalyticsLegacyNumber,
   AnalyticsLegacyPageRow,
   AnalyticsLegacyScopedPredicateContext,
   AnalyticsLegacyText,
@@ -61,6 +65,9 @@ import type {
 
 type EntityKind = "session" | "visitor";
 type IdentityRelation = AnalyticsDbRelation;
+const legacyDirectEventRecordVisitColumnSet = new Set<string>(
+  LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS,
+);
 
 function nonBlank(value: AnyExpression): Predicate {
   const text = value as SqlExpression<
@@ -77,6 +84,24 @@ function matchingIdentity(
   return and(
     eq(left.columns.site_pk!, right.columns.site_pk!),
     eq(left.columns.entity_id!, right.columns.entity_id!),
+  );
+}
+
+/** Join a row bag to a unique membership set without multiplying source rows. */
+function joinMembership(
+  left: AnalyticsDbRelation,
+  right: AnalyticsDbRelation,
+  on: Predicate,
+): AnalyticsDbRelation {
+  const joined = join(left, right, on);
+  return project(
+    joined,
+    Object.fromEntries(
+      Object.keys(left.columns).map((name) => [
+        name,
+        joined.columns[`left_${name}`]!,
+      ]),
+    ),
   );
 }
 
@@ -152,86 +177,78 @@ function entityUniverse(
 function scalarContext(
   selection: SemanticScopedSourceSelection,
   row: AnalyticsLegacyPageRow | AnalyticsLegacyEventRow,
+  relationalContext: AnalyticsLegacyScopedPredicateContext,
 ): LegacyScalarFilterContext {
   const visitColumns: Record<string, AnyExpression> = {};
   for (const [name, expression] of Object.entries(
     "eventPk" in row ? row.ownerVisitColumns : row.visitColumns,
   )) {
     if (!expression) continue;
-    // The legacy direct reader's projection omitted performance values. Keep
-    // that located missing-dependency behavior while prepared Sources expose
-    // the registered schema fields.
     if (
       selection.profile === "direct-event-records-v1" &&
-      name.startsWith("perf_")
+      !legacyDirectEventRecordVisitColumnSet.has(name)
     )
       continue;
     visitColumns[name] = expression;
   }
   return {
     visitColumns,
+    assertFieldAvailable: (field, location) => {
+      if (
+        selection.profile === "direct-event-records-v1" &&
+        (field.id === "client.screenWidth" ||
+          field.id === "client.screenHeight")
+      )
+        throw new LegacyScalarFilterLoweringError(
+          "missing_dependency",
+          location,
+          `The visit column ${field.compilerStrategy.slice("column.".length)} was not supplied by the current scope.`,
+        );
+    },
     ...("eventPk" in row ? { eventName: row.eventName } : {}),
+    resolveTypedCondition: (condition) => {
+      if (condition.target.kind === "event-payload") {
+        if (!("eventPk" in row))
+          throw new TypeError(
+            "Event-payload predicates require an Event source.",
+          );
+        return lowerLegacyRelationalPredicate({
+          condition,
+          context: relationalContext,
+          source: row,
+        });
+      }
+      if (condition.target.kind !== "field")
+        throw new TypeError(
+          "The Filter condition requires prepared Advanced matches.",
+        );
+      const definition = analyticsFilterDefinition(condition.target.field);
+      if (!definition)
+        throw new TypeError(
+          `Unknown legacy Filter field ${condition.target.field}.`,
+        );
+      if (
+        selection.profile === "direct-event-records-v1" &&
+        (definition.compilerStrategy === "session.boundary.entry" ||
+          definition.compilerStrategy === "session.boundary.exit")
+      )
+        throw new LegacyScalarFilterLoweringError(
+          "missing_dependency",
+          `${location}.target.field`,
+          `The legacy direct Event source did not project ${condition.target.field}.`,
+        );
+      if (
+        definition.compilerStrategy === "session.boundary.entry" ||
+        definition.compilerStrategy === "session.boundary.exit"
+      )
+        return lowerLegacyRelationalPredicate({
+          condition,
+          context: relationalContext,
+          source: row,
+        });
+      return undefined;
+    },
   };
-}
-
-function lowerCondition(
-  condition: FilterCondition,
-  input: {
-    readonly selection: SemanticScopedSourceSelection;
-    readonly context: AnalyticsLegacyScopedPredicateContext;
-    readonly source: AnalyticsLegacyPageRow | AnalyticsLegacyEventRow;
-  },
-): Predicate {
-  if (condition.target.kind === "event-payload") {
-    if (!("eventPk" in input.source))
-      throw new TypeError("Event-payload predicates require an Event source.");
-    return lowerLegacyRelationalPredicate({
-      condition,
-      context: input.context,
-      source: input.source,
-    });
-  }
-  if (condition.target.kind !== "field")
-    throw new TypeError(
-      "The Filter condition requires prepared Advanced matches.",
-    );
-  const definition = analyticsFilterDefinition(condition.target.field);
-  if (!definition)
-    throw new TypeError(
-      `Unknown legacy Filter field ${condition.target.field}.`,
-    );
-  if (
-    definition.compilerStrategy === "session.boundary.entry" ||
-    definition.compilerStrategy === "session.boundary.exit"
-  )
-    return lowerLegacyRelationalPredicate({
-      condition,
-      context: input.context,
-      source: input.source,
-    });
-  return lowerLegacyScalarContextCondition(
-    condition,
-    scalarContext(input.selection, input.source),
-  );
-}
-
-function lowerExpression(
-  expression: FilterExpression,
-  input: {
-    readonly selection: SemanticScopedSourceSelection;
-    readonly context: AnalyticsLegacyScopedPredicateContext;
-    readonly source: AnalyticsLegacyPageRow | AnalyticsLegacyEventRow;
-  },
-): Predicate {
-  if (expression.kind === "condition") return lowerCondition(expression, input);
-  if (expression.kind === "not")
-    return not(lowerExpression(expression.child, input));
-  const children = expression.children.map((child) =>
-    lowerExpression(child, input),
-  );
-  return expression.kind === "and"
-    ? children.slice(1).reduce((left, right) => and(left, right), children[0]!)
-    : children.slice(1).reduce((left, right) => or(left, right), children[0]!);
 }
 
 function filterExpression(
@@ -242,10 +259,12 @@ function filterExpression(
     readonly context: AnalyticsLegacyScopedPredicateContext;
   },
 ): AnalyticsDbRelation {
-  return filter(
-    row.relation,
-    lowerExpression(expression, { ...input, source: row }),
+  const predicate = lowerLegacyScalarFilterDocument(
+    { version: 1, root: expression },
+    scalarContext(input.selection, row, input.context),
   );
+  if (!predicate) return row.relation;
+  return filter(row.relation, predicate);
 }
 
 function selectedPageOrEventEntities(
@@ -261,10 +280,27 @@ function selectedPageOrEventEntities(
     candidatePages: dataset.candidatePages,
     readEvents: dataset.readEvents,
   };
+  const vectorGroupDefinition =
+    expression.kind === "or" && expression.children.length > 1
+      ? (() => {
+          const first = expression.children[0]!;
+          const key = legacyTextVectorConditionGroupKey(first);
+          if (
+            !key ||
+            expression.children.some(
+              (child) => legacyTextVectorConditionGroupKey(child) !== key,
+            ) ||
+            first.kind !== "condition" ||
+            first.target.kind !== "field"
+          )
+            return undefined;
+          return analyticsFilterDefinition(first.target.field);
+        })()
+      : undefined;
   const definition =
     expression.kind === "condition" && expression.target.kind === "field"
       ? analyticsFilterDefinition(expression.target.field)
-      : undefined;
+      : vectorGroupDefinition;
   const boundary =
     definition?.compilerStrategy === "session.boundary.entry" ||
     definition?.compilerStrategy === "session.boundary.exit";
@@ -274,12 +310,12 @@ function selectedPageOrEventEntities(
   const pageApplicable =
     boundary ||
     (definition?.observationKinds.has("visit") ?? false) ||
-    expression.kind !== "condition";
+    (definition === undefined && expression.kind !== "condition");
   const eventApplicable =
     payload ||
     boundary ||
     (definition?.observationKinds.has("event") ?? false) ||
-    expression.kind !== "condition";
+    (definition === undefined && expression.kind !== "condition");
   const parts: IdentityRelation[] = [];
   if (pageApplicable) {
     const matchedPages = filterExpression(dataset.readPages, expression, {
@@ -348,7 +384,7 @@ function bridgeFactMatches(
       and(nonBlank(nativeId), nonBlank(targetId)),
     );
     const validNativeId = valid.columns[entityColumnName(row, nativeKind)]!;
-    const matched = semiJoin(
+    const matched = joinMembership(
       valid,
       fact.relation,
       and(
@@ -442,18 +478,56 @@ function lowerEntityExpression(
       antiJoin(universe, excluded, matchingIdentity(universe, excluded)),
     );
   }
-  const children = expression.children.map((child) =>
-    lowerEntityExpression(child, dataset, selection, kind, universe),
-  );
-  if (expression.kind === "or")
+  if (expression.kind === "or") {
+    const groups = new Map<string, number[]>();
+    for (const [index, child] of expression.children.entries()) {
+      const key = legacyTextVectorConditionGroupKey(child);
+      if (!key) continue;
+      const indexes = groups.get(key) ?? [];
+      indexes.push(index);
+      groups.set(key, indexes);
+    }
+    const consumed = new Set<string>();
+    const children: IdentityRelation[] = [];
+    for (const child of expression.children) {
+      const key = legacyTextVectorConditionGroupKey(child);
+      const indexes = key ? groups.get(key) : undefined;
+      if (key && indexes && indexes.length > 1) {
+        if (consumed.has(key)) continue;
+        consumed.add(key);
+        children.push(
+          selectedPageOrEventEntities(
+            dataset,
+            selection,
+            {
+              kind: "or",
+              children: indexes.map(
+                (groupIndex) => expression.children[groupIndex]!,
+              ),
+            },
+            kind,
+          ),
+        );
+        continue;
+      }
+      children.push(
+        lowerEntityExpression(child, dataset, selection, kind, universe),
+      );
+    }
     return distinct(
       children
         .slice(1)
         .reduce((left, right) => union(left, right), children[0]!),
     );
+  }
+  const children = expression.children.map((child) =>
+    lowerEntityExpression(child, dataset, selection, kind, universe),
+  );
   let result = children[0]!;
   for (const next of children.slice(1))
-    result = distinct(semiJoin(result, next, matchingIdentity(result, next)));
+    result = distinct(
+      joinMembership(result, next, matchingIdentity(result, next)),
+    );
   return result;
 }
 
@@ -519,7 +593,7 @@ function applyNameGate(
   const localIds = distinct(
     project(localNames, { id: localNames.columns.id! }),
   );
-  const relation = semiJoin(
+  const relation = joinMembership(
     rows.relation,
     localIds,
     eq(rows.nameId, localIds.columns.id!),
@@ -546,7 +620,7 @@ function observationEventMatches(
       "event",
     );
     const eventRows = eventIdentityRows(dataset.readEvents);
-    matched = semiJoin(
+    matched = joinMembership(
       eventRows,
       explicit,
       and(
@@ -579,7 +653,7 @@ function observationEventMatches(
   const gated = applyNameGate(dataset.readEvents, dataset, selection);
   const gatedIds = eventIdentityRows(gated);
   const identityRelation = matched;
-  return semiJoin(
+  return joinMembership(
     identityRelation,
     gatedIds,
     and(
@@ -595,27 +669,66 @@ function entityEventMatches(
 ): IdentityRelation {
   const kind = selection.entityKind;
   if (!kind) throw new TypeError("Scoped entity mode requires an entity kind.");
+  if (selection.preparedMatches) {
+    const identitiesBySite = new Map<string, Set<string>>();
+    for (const identity of selection.preparedMatches.identities) {
+      if (identity.kind !== kind) continue;
+      const siteIdentities =
+        identitiesBySite.get(identity.siteId) ?? new Set<string>();
+      siteIdentities.add(identity.id);
+      identitiesBySite.set(identity.siteId, siteIdentities);
+    }
+    const events = dataset.readEvents;
+    const gatedEvents = applyNameGate(events, dataset, selection);
+    const entityIdColumn = gatedEvents.relation.columns[
+      entityColumnName(events, kind)
+    ] as AnalyticsLegacyText;
+    const sitePredicates = [...identitiesBySite].map(([siteId, ids]) => {
+      const selectedSite = filter(
+        dataset.sites,
+        eq(
+          dataset.sites.columns.site_id as AnalyticsLegacyText,
+          param(siteId) as AnalyticsLegacyText,
+        ),
+      );
+      const canonicalSitePks = project(selectedSite, {
+        site_pk: selectedSite.columns.site_pk as AnalyticsLegacyNumber,
+      });
+      return and(
+        inSubquery(
+          gatedEvents.relation.columns.site_pk as AnalyticsLegacyNumber,
+          canonicalSitePks,
+        ),
+        inSubquery(entityIdColumn, jsonScalarArray("text", [...ids])),
+      );
+    });
+    const preparedMembership =
+      sitePredicates.length === 0
+        ? eq(constant(1), constant(0))
+        : sitePredicates.length === 1
+          ? sitePredicates[0]!
+          : sitePredicates
+              .slice(1)
+              .reduce((left, right) => or(left, right), sitePredicates[0]!);
+    const matches = filter(
+      gatedEvents.relation,
+      and(nonBlank(entityIdColumn), preparedMembership),
+    );
+    return eventIdentityRows({ ...gatedEvents, relation: matches });
+  }
+
   const universe = entityUniverse(dataset, kind);
-  const explicit = selection.preparedMatches
-    ? explicitIdentityRelation(
+  const selected = selection.filter.root
+    ? lowerEntityExpression(
+        selection.filter.root,
         dataset,
-        selection.preparedMatches.identities,
+        selection,
         kind,
+        universe,
       )
-    : undefined;
-  const selected = explicit
-    ? semiJoin(universe, explicit, matchingIdentity(universe, explicit))
-    : selection.filter.root
-      ? lowerEntityExpression(
-          selection.filter.root,
-          dataset,
-          selection,
-          kind,
-          universe,
-        )
-      : universe;
+    : universe;
   const events = dataset.readEvents;
-  const matchingEventRows = semiJoin(
+  const matchingEventRows = joinMembership(
     events.relation,
     selected,
     and(
@@ -634,7 +747,7 @@ function entityEventMatches(
       event_id: matchingEventRows.columns.event_id!,
     }),
   );
-  return semiJoin(
+  return joinMembership(
     selectedEventIds,
     gatedIds,
     and(
@@ -752,17 +865,10 @@ export class AnalyticsLegacyScopedStorage {
       throw new Error(
         `${path}.selection: Scoped selection is currently supported only on Event report Sources.`,
       );
-    if (
-      !node.values.some(
-        (binding) =>
-          binding.kind === "attribute" &&
-          binding.attribute === "event.report.internalPk",
-      )
-    )
+    if (node.temporalDomain !== "candidate")
       throw new Error(
-        `${path}.selection: Scoped Event report Sources require the hidden internal primary key.`,
+        `${path}.temporalDomain: Scoped Event report Sources currently require the candidate domain.`,
       );
-
     const dataset = buildLegacyScopedDataset({
       selection,
       storage: this.#storage,
@@ -784,7 +890,7 @@ export class AnalyticsLegacyScopedStorage {
       report,
       and(isNotNull(ownerPresent), isNotNull(eventName)),
     );
-    const selected = semiJoin(
+    const selected = joinMembership(
       inLegacyReportDomain,
       matches,
       and(

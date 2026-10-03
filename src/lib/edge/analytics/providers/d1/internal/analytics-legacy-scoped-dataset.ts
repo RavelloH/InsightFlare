@@ -73,6 +73,42 @@ export interface AnalyticsLegacyScopedDataset {
   readonly storage: AnalyticsRelationalStorageContext;
 }
 
+/** Visit columns exposed by the legacy Event-page source and its Filter-only projection. */
+export const LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS = Object.freeze([
+  "visit_id",
+  "visitor_id",
+  "session_id",
+  "pathname",
+  "hostname",
+  "title",
+  "referrer_host",
+  "country",
+  "region",
+  "city",
+  "browser",
+  "browser_version",
+  "os",
+  "os_version",
+  "device_type",
+  "query_string",
+  "hash_fragment",
+  "referrer_url",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "language",
+  "screen_width",
+  "screen_height",
+  "continent",
+  "timezone",
+  "as_organization",
+] as const);
+const legacyDirectEventRecordVisitColumnSet = new Set<string>(
+  LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS,
+);
+
 function requiredLegacyVisitColumnNames(
   selection: SemanticScopedSourceSelection,
 ): readonly string[] {
@@ -87,6 +123,11 @@ function requiredLegacyVisitColumnNames(
     "pathname",
   ]);
   const addColumn = (name: string): void => {
+    if (
+      selection.profile === "direct-event-records-v1" &&
+      !legacyDirectEventRecordVisitColumnSet.has(name)
+    )
+      return;
     if (
       selection.profile === "direct-event-records-v1" &&
       name.startsWith("perf_")
@@ -295,7 +336,11 @@ function buildEvents(
     ),
   });
   const nameGate = selection.eventNameGate;
-  if (nameGate && selection.subject.siteIds.length === 1) {
+  if (
+    nameGate &&
+    selection.profile === "direct-event-records-v1" &&
+    selection.subject.siteIds.length === 1
+  ) {
     const matchingNames = filter(
       subjectEventNames,
       nameGate.semantics === "prepared-trimmed-label-v1"
