@@ -9059,38 +9059,29 @@ describe("edge overview D1 queries and handlers", () => {
   });
 
   it("uses filtered visits to select retention visitors, then counts their later visits", async () => {
-    const database = new DatabaseSync(":memory:");
-    for (const migration of [
-      "migrations/0008_rebuild_analytics.sql",
-      "migrations/0013_add_visit_performance_metrics.sql",
-      "migrations/0019_add_user_identity.sql",
-    ]) {
-      database.exec(readFileSync(migration, "utf8"));
-    }
-    installVisitSiteIdentityFixture(database);
-    installDirectEventFilterTables(database);
-    const env = {
-      DB: {
-        prepare: (sql: string) => ({
-          bind: (...bindings: QueryBinding[]) => ({
-            all: async () => ({
-              results: database.prepare(sql).all(...bindings) as D1Row[],
-            }),
-          }),
-        }),
-      } as unknown as D1Database,
-    } as Env;
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+      .run(siteId);
+    const sitePk = Number(
+      (
+        database
+          .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+          .get(siteId) as { site_pk: number }
+      ).site_pk,
+    );
     const insert = database.prepare(`
       INSERT INTO visits (
-        visit_id, site_id, visitor_id, session_id, status, started_at,
+        visit_id, site_id, site_pk, visitor_id, session_id, status, started_at,
         last_activity_at, pathname, hostname
-      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test')
+      ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test')
     `);
 
     try {
       insert.run(
         "retention-match",
         siteId,
+        sitePk,
         "visitor-match",
         "retention-session",
         baseMs + 100,
@@ -9100,6 +9091,7 @@ describe("edge overview D1 queries and handlers", () => {
       insert.run(
         "retention-return",
         siteId,
+        sitePk,
         "visitor-match",
         "retention-session",
         baseMs + 60 * 60 * 1000 + 100,
@@ -9109,6 +9101,7 @@ describe("edge overview D1 queries and handlers", () => {
       insert.run(
         "retention-other",
         siteId,
+        sitePk,
         "visitor-other",
         "other-session",
         baseMs + 100,
@@ -9137,8 +9130,9 @@ describe("edge overview D1 queries and handlers", () => {
           },
         ],
       });
+      expect(calls).toHaveLength(1);
     } finally {
-      database.close();
+      close();
     }
   });
 
