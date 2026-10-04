@@ -109,6 +109,33 @@ describe("logical relational IR", () => {
     ).toThrow("Literal value does not match its declared scalar type.");
   });
 
+  it("rejects nonboolean and nonvisible filter predicates", () => {
+    expect(() =>
+      validateLogicalPlan(
+        planWithForgedFilter(scalarLiteral("text", "string")),
+      ),
+    ).toThrow("Filter predicate must be boolean.");
+
+    const invisibleSlotPredicate: LogicalExpr = {
+      kind: "comparison",
+      operator: "eq",
+      left: { kind: "slot", slot: slotId(999) },
+      right: scalarLiteral("text", "string"),
+    };
+    let error: unknown;
+    try {
+      validateLogicalPlan(planWithForgedFilter(invisibleSlotPredicate));
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(LogicalPlanError);
+    expect((error as LogicalPlanError).issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "invisible-slot" }),
+      ]),
+    );
+  });
+
   it("reports malformed inherited page dimension IDs as logical plan errors", () => {
     const builder = createBuilder();
     const pages = builder.source("page", {
@@ -157,6 +184,169 @@ describe("logical relational IR", () => {
       expect.arrayContaining([
         expect.objectContaining({ code: "invalid-expression" }),
       ]),
+    );
+  });
+
+  it("rejects malformed string search and normalization expressions", () => {
+    const reportSearchBuilder = createBuilder();
+    const reportPages = reportSearchBuilder.source("page", {
+      attributes: ["page.path"],
+    });
+    const reportSearch = reportSearchBuilder.stringMatch(
+      "contains",
+      reportSearchBuilder.slot(reportPages, "attribute:page.path"),
+      "search",
+      false,
+      undefined,
+      "legacy-report-search-v1",
+    );
+    const reportFiltered = reportSearchBuilder.filter(
+      reportPages,
+      reportSearch,
+    );
+    reportSearchBuilder.output("report-search", reportFiltered, [
+      { name: "page", slot: "entity" },
+    ]);
+    const reportPlan = reportSearchBuilder.finish();
+    const malformedReportPlan: LogicalPlan = {
+      ...reportPlan,
+      nodes: reportPlan.nodes.map((node) =>
+        node.kind === "filter"
+          ? {
+              ...node,
+              predicate: { ...node.predicate, value: " Search " } as never,
+            }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(malformedReportPlan)).toThrow(
+      "Legacy search semantics require case-insensitive, unnormalized contains with a normalized report search value.",
+    );
+
+    const numericSearchBuilder = createBuilder();
+    const numericPages = numericSearchBuilder.source("page", {
+      attributes: ["page.durationMs"],
+    });
+    expect(() =>
+      numericSearchBuilder.stringMatch(
+        "contains",
+        numericSearchBuilder.slot(numericPages, "attribute:page.durationMs"),
+        "1",
+        true,
+      ),
+    ).toThrow("String matching requires a string scalar expression.");
+
+    const invalidNormalizationBuilder = createBuilder();
+    const stringPages = invalidNormalizationBuilder.source("page", {
+      attributes: ["page.path"],
+    });
+    expect(() =>
+      invalidNormalizationBuilder.normalizeString(
+        invalidNormalizationBuilder.slot(stringPages, "attribute:page.path"),
+        "ascii-case-fold" as never,
+      ),
+    ).toThrow("String normalization mode is invalid.");
+
+    const numericNormalizationBuilder = createBuilder();
+    const numericSource = numericNormalizationBuilder.source("page", {
+      attributes: ["page.durationMs"],
+    });
+    expect(() =>
+      numericNormalizationBuilder.normalizeString(
+        numericNormalizationBuilder.slot(
+          numericSource,
+          "attribute:page.durationMs",
+        ),
+        "trim-ascii-space",
+      ),
+    ).toThrow("String normalization requires a string scalar value.");
+  });
+
+  it("validates finite page-dimension dependency contracts", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: ["page.report.browser", "page.report.os", "page.durationMs"],
+    });
+    expect(() => builder.pageDimension("unregistered" as never, {})).toThrow(
+      "logical_builder_invalid_page_dimension:unregistered",
+    );
+
+    const dimension = builder.pageDimension("browserEngine", {
+      "page.report.browser": builder.slot(
+        pages,
+        "attribute:page.report.browser",
+      ),
+      "page.report.os": builder.slot(pages, "attribute:page.report.os"),
+    });
+    const projected = builder.project(pages, { value: dimension });
+    builder.output("browser-engine", projected, [
+      { name: "value", slot: "value" },
+    ]);
+    const plan = builder.finish();
+    const project = plan.nodes.find(
+      (node) => node.kind === "project" && node.id === projected.id,
+    );
+    if (!project || project.kind !== "project")
+      throw new Error("expected_project_node");
+
+    const missingDependency: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "project"
+          ? {
+              ...node,
+              projections: node.projections.map((projection) =>
+                projection.expression.kind === "page-dimension"
+                  ? {
+                      ...projection,
+                      expression: {
+                        ...projection.expression,
+                        dependencies:
+                          projection.expression.dependencies.slice(1),
+                      },
+                    }
+                  : projection,
+              ),
+            }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(missingDependency)).toThrow(
+      "Page dimension dependencies must exactly match the finite semantic definition.",
+    );
+
+    const numericSlot = builder.slot(
+      pages,
+      "attribute:page.durationMs",
+    ).expression;
+    const wrongDependencyType: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "project"
+          ? {
+              ...node,
+              projections: node.projections.map((projection) =>
+                projection.expression.kind === "page-dimension"
+                  ? {
+                      ...projection,
+                      expression: {
+                        ...projection.expression,
+                        dependencies: projection.expression.dependencies.map(
+                          (dependency) =>
+                            dependency.attribute === "page.report.os"
+                              ? { ...dependency, expression: numericSlot }
+                              : dependency,
+                        ),
+                      },
+                    }
+                  : projection,
+              ),
+            }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(wrongDependencyType)).toThrow(
+      "Page dimension dependency type does not match its semantic attribute.",
     );
   });
 

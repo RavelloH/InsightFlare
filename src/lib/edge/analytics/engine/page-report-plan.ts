@@ -9,6 +9,7 @@ import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/enti
 import {
   createSemanticScopedSourceSelection,
   type SemanticScopedSourceSelection,
+  snapshotSemanticScopedSourceSelection,
 } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
@@ -16,6 +17,36 @@ import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
 const NUMBER = { kind: "scalar", scalar: "number" } as const;
+
+function sameSelectionValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (
+    left === null ||
+    right === null ||
+    typeof left !== "object" ||
+    typeof right !== "object"
+  )
+    return false;
+  if (Array.isArray(left) || Array.isArray(right))
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => sameSelectionValue(value, right[index]))
+    );
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord).sort();
+  const rightKeys = Object.keys(rightRecord).sort();
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key, index) =>
+        key === rightKeys[index] &&
+        sameSelectionValue(leftRecord[key], rightRecord[key]),
+    )
+  );
+}
 
 export interface PageAggregateCursor {
   readonly views: number;
@@ -49,9 +80,36 @@ export function createPageReportSource(input: {
       time,
       ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
     });
+  if (input.sourceSelection) {
+    if (input.scopePlan)
+      throw new Error(
+        "invalid_page_report_source_selection:override_with_prepared_scope_plan",
+      );
+    if (selection.profile !== "direct-page-session-compat-v1")
+      throw new Error(
+        "invalid_page_report_source_selection:override_profile_not_allowed",
+      );
+    const expectedSelection = createSemanticScopedSourceSelection({
+      profile: "direct-page-session-compat-v1",
+      filters: input.filters,
+      subject,
+      time,
+    });
+    const normalizedSelection = snapshotSemanticScopedSourceSelection(
+      selection,
+      {
+        subject,
+        time,
+        scope: resolveAnalyticsScope(expectedSelection.scope),
+        originOperation: "pages",
+      },
+    );
+    if (!sameSelectionValue(normalizedSelection, expectedSelection))
+      throw new Error("invalid_page_report_source_selection:override_mismatch");
+  }
   const builder = new LogicalPlanBuilder({
-    subject: selection.subject,
-    time: selection.time,
+    subject,
+    time,
     scope: resolveAnalyticsScope(selection.scope),
     originOperation: "pages",
   });

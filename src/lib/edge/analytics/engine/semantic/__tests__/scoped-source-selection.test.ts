@@ -19,7 +19,10 @@ import {
   snapshotSemanticScopedSourceSelection,
   validateSemanticScopedSourceSelection,
 } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
-import { semanticSubjectFromQuerySubject } from "@/lib/edge/analytics/engine/semantic/subject";
+import {
+  createSemanticSubjectDomain,
+  semanticSubjectFromQuerySubject,
+} from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
@@ -81,6 +84,21 @@ function directAnalyticsSelection(
     eventName,
     eventNameInputSemantics: "legacy-truthy-raw",
   });
+}
+
+function simpleSessionFilter(country: string) {
+  return normalizeFilterDocument(
+    {
+      version: 1,
+      root: {
+        kind: "condition",
+        target: { kind: "field", field: "geo.country" },
+        operator: "eq",
+        value: country,
+      },
+    },
+    analyticsFilterRegistry,
+  );
 }
 
 function withPreparedMatches(
@@ -627,6 +645,169 @@ describe("semantic scoped source selection", () => {
       ),
     ).toThrow(
       "invalid_semantic_scoped_source_selection:invalid_prepared_identity_snapshot",
+    );
+  });
+
+  it("enforces direct Page profile metadata, expression, and name gates", () => {
+    const prepared = preparedSelectionInput();
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-analytics-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:direct_profile_has_prepared_metadata",
+    );
+
+    const advancedFilters = normalizeFilterDocument(
+      parseFilterDsl(
+        "session { session.views gte 1 } exists",
+        analyticsFilterRegistry,
+      ),
+      analyticsFilterRegistry,
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-analytics-v1",
+        filters: advancedFilters,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:direct_profile_requires_prepared_advanced_matches",
+    );
+
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-analytics-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        subject: SUBJECT,
+        time: TIME,
+        eventName: "signup",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:page_selection_event_name_unsupported",
+    );
+  });
+
+  it("rejects compatibility selections with prepared or event-name metadata", () => {
+    const prepared = preparedSelectionInput();
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-session-compat-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:direct_profile_has_prepared_metadata",
+    );
+
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-session-compat-v1",
+        filters: simpleSessionFilter("US"),
+        subject: SUBJECT,
+        time: TIME,
+        eventName: "signup",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:session_compatibility_event_name_unsupported",
+    );
+
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-session-compat-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:session_compatibility_requires_filter",
+    );
+
+    const advancedFilters = normalizeFilterDocument(
+      parseFilterDsl(
+        "session { session.views gte 1 } exists",
+        analyticsFilterRegistry,
+      ),
+      analyticsFilterRegistry,
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-session-compat-v1",
+        filters: advancedFilters,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:session_compatibility_requires_prepared_advanced_matches",
+    );
+
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-session-compat-v1",
+        filters: simpleSessionFilter("US"),
+        subject: createSemanticSubjectDomain({
+          origin: "team",
+          teamId: "compat-team" as never,
+          siteIds: [SITE_ID as never, "another-site" as never],
+        }),
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:session_compatibility_requires_single_site",
+    );
+  });
+
+  it("rejects tampered compatibility authorization and direct Page name gates", () => {
+    const compatibility = createSemanticScopedSourceSelection({
+      profile: "direct-page-session-compat-v1",
+      filters: simpleSessionFilter("US"),
+      subject: SUBJECT,
+      time: TIME,
+    });
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        {
+          ...compatibility,
+          authorizedSiteIds: ["another-site", SITE_ID],
+        },
+        { subject: SUBJECT, time: TIME },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:invalid_session_compatibility_profile",
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        { ...compatibility, scope: "event" },
+        { subject: SUBJECT, time: TIME },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:invalid_session_compatibility_profile",
+    );
+
+    const page = createSemanticScopedSourceSelection({
+      profile: "direct-page-analytics-v1",
+      filters: EMPTY_FILTER_DOCUMENT,
+      subject: SUBJECT,
+      time: TIME,
+    });
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        {
+          ...page,
+          eventNameGate: {
+            value: "signup",
+            semantics: "direct-subject-local-exact-name-v1",
+          },
+        },
+        { subject: SUBJECT, time: TIME },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:page_selection_event_name_unsupported",
     );
   });
 });
