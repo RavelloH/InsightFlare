@@ -22,6 +22,7 @@ import type {
   ExpressionResultType,
   SqlExpression,
 } from "@/lib/db/query/expression";
+import { factEntityKindsForFilter } from "@/lib/edge/analytics/contract";
 import { planObservationFilter } from "@/lib/edge/analytics/contract/observation-planner";
 import type { SourceNode } from "@/lib/edge/analytics/engine/logical/nodes";
 import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
@@ -1154,6 +1155,46 @@ function directPageRows(
   );
 }
 
+/**
+ * Legacy unprepared Session-boundary filters first matched candidate Page
+ * rows, then expanded the selected raw Session IDs back to the candidate Page
+ * bag. This compatibility profile is deliberately distinct from canonical
+ * entity filtering, where separate Page facts may satisfy an AND.
+ */
+function compatibilitySessionPageRows(
+  dataset: AnalyticsLegacyScopedDataset,
+  selection: SemanticScopedSourceSelection,
+): AnalyticsDbRelation {
+  const candidatePages = dataset.candidatePages;
+  const sessionColumn = entityColumnName(candidatePages, "session");
+  const selectedPageBag = directPageRows(dataset, selection);
+  const matchingPages = filter(
+    selectedPageBag,
+    nonBlank(selectedPageBag.columns[sessionColumn]! as AnalyticsLegacyText),
+  );
+  const matchingSessions: IdentityRelation = distinct(
+    project(matchingPages, {
+      site_pk: matchingPages.columns.site_pk!,
+      entity_id: matchingPages.columns[sessionColumn]!,
+    }),
+  );
+  const candidateSessions = filter(
+    candidatePages.relation,
+    nonBlank(candidatePages.sessionId),
+  );
+  return joinMembership(
+    candidateSessions,
+    matchingSessions,
+    and(
+      eq(candidateSessions.columns.site_pk!, matchingSessions.columns.site_pk!),
+      eq(
+        candidateSessions.columns[sessionColumn]!,
+        matchingSessions.columns.entity_id!,
+      ),
+    ),
+  );
+}
+
 function eventAttributeColumn(
   attributeId: string,
   relation: AnalyticsDbRelation,
@@ -1335,6 +1376,7 @@ export class AnalyticsLegacyScopedStorage {
       );
     if (
       selection.profile !== "direct-page-analytics-v1" &&
+      selection.profile !== "direct-page-session-compat-v1" &&
       selection.profile !== "prepared-scoped-v1"
     )
       throw new Error(`${path}.selection: Invalid Page source profile.`);
@@ -1354,12 +1396,16 @@ export class AnalyticsLegacyScopedStorage {
     const relation =
       selection.profile === "direct-page-analytics-v1"
         ? directPageRows(dataset, selection)
-        : selection.mode === "observation"
-          ? pageRowsForVisitIds(
-              dataset.candidatePages,
-              observationPagePairMatches(dataset, selection),
-            )
-          : entityPageRows(dataset, selection);
+        : selection.profile === "direct-page-session-compat-v1"
+          ? factEntityKindsForFilter(selection.filter.root).size === 0
+            ? compatibilitySessionPageRows(dataset, selection)
+            : entityPageRows(dataset, selection)
+          : selection.mode === "observation"
+            ? pageRowsForVisitIds(
+                dataset.candidatePages,
+                observationPagePairMatches(dataset, selection),
+              )
+            : entityPageRows(dataset, selection);
     return {
       relation,
       values: remapPageSourceValues(node, relation, source.values),

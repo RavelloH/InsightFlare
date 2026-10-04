@@ -6,7 +6,10 @@ import {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
-import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
+import {
+  createSemanticScopedSourceSelection,
+  type SemanticScopedSourceSelection,
+} from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
@@ -27,6 +30,7 @@ export function createPageReportSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly sourceSelection?: SemanticScopedSourceSelection;
   readonly attributes: readonly string[];
 }) {
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
@@ -34,19 +38,21 @@ export function createPageReportSource(input: {
     origin: "site",
     siteIds: [input.siteId as SiteId],
   });
-  const selection = createSemanticScopedSourceSelection({
-    profile: input.scopePlan
-      ? "prepared-scoped-v1"
-      : "direct-page-analytics-v1",
-    filters: input.filters,
-    subject,
-    time,
-    ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
-  });
+  const selection =
+    input.sourceSelection ??
+    createSemanticScopedSourceSelection({
+      profile: input.scopePlan
+        ? "prepared-scoped-v1"
+        : "direct-page-analytics-v1",
+      filters: input.filters,
+      subject,
+      time,
+      ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
+    });
   const builder = new LogicalPlanBuilder({
-    subject,
-    time,
-    scope: resolveAnalyticsScope(input.scopePlan?.scope ?? "event"),
+    subject: selection.subject,
+    time: selection.time,
+    scope: resolveAnalyticsScope(selection.scope),
     originOperation: "pages",
   });
   const pages = builder.source("page", {

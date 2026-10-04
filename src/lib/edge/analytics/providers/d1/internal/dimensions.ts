@@ -15,6 +15,11 @@ import {
   validatePageDimensionSelection,
 } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { buildTopReferrersPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
+import {
+  buildSessionPathPagePlan,
+  buildSessionPathTopPlan,
+  sessionPathCursorBinding,
+} from "@/lib/edge/analytics/engine/session-path-report-plan";
 import type { Env } from "@/lib/edge/types";
 
 import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
@@ -389,100 +394,24 @@ export async function querySessionPathDimensionFromD1(
   sortBy: DimensionPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
 ): Promise<DimensionRow[]> {
-  const scopedDataset =
-    scopedVisitDataset(siteId, window, filters) ??
-    scopedDatasetForUnpreparedReader(
-      "dimension",
-      siteId,
-      window,
-      filters,
-      "session",
-    );
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const effectiveSortBy = dimensionSortKey(sortBy);
-  const effectiveSortDirection = sortDirection === "asc" ? "asc" : "desc";
-  const primary = effectiveSortBy;
-  const secondary = effectiveSortBy === "visitors" ? "views" : null;
-  const limitClause = limit > 0 ? "\nLIMIT ?" : "";
-  const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
-  const visitSource = buildVisitSourceCte().replace(
-    "visit_source AS (",
-    "visit_source AS MATERIALIZED (",
-  );
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? visitSource},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    visitor_id,
-    session_id,
-    started_at,
-    visit_id,
-    TRIM(COALESCE(pathname, '')) AS pathname
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-ranked_session_visits AS (
-  SELECT
-    vs.session_id,
-    vs.visitor_id,
-    TRIM(COALESCE(vs.pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at ASC, vs.visit_id ASC
-    ) AS first_rank,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at DESC, vs.visit_id DESC
-    ) AS latest_rank
-  FROM filtered_visits vs
-  WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
-),
-session_edges AS (
-  SELECT
-    session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
-    MAX(CASE WHEN ${boundaryRank} = 1 THEN pathname END) AS value
-  FROM ranked_session_visits
-  GROUP BY session_id
-)
-SELECT
-  value,
-  count(*) AS views,
-  count(*) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM session_edges
-WHERE TRIM(value) != ''
-${search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
-GROUP BY value
-ORDER BY ${primary} ${effectiveSortDirection}, ${secondary ? `${secondary} ${effectiveSortDirection}, ` : ""}value ASC
-${limitClause}
-`;
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildSessionPathTopPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+    kind,
+    search,
+    sortBy: dimensionSortKey(sortBy),
+    sortDirection: dimensionSortDirection(sortDirection),
+  });
   return (
-    await queryD1All<Record<string, unknown>>(
+    await queryAnalyticsReportOutputRowsFromD1(
       env,
-      sql,
-      [
-        ...(scopedDataset
-          ? scopedDataset.bindings.map((binding) => binding.value)
-          : [
-              ...visitSourceBindings(siteId, window),
-              ...(filter?.bindings ?? []),
-            ]),
-        ...(search
-          ? [
-              `%${search
-                .trim()
-                .toLowerCase()
-                .replaceAll("\\", "\\\\")
-                .replaceAll("%", "\\%")
-                .replaceAll("_", "\\_")}%`,
-            ]
-          : []),
-        ...(limit > 0 ? [limit] : []),
-      ],
+      plan,
+      "session-path-top",
+      undefined,
       diagnostics,
     )
   ).map((row) => ({
@@ -507,132 +436,26 @@ export async function querySessionPathDimensionPageFromD1(
   sortBy: DimensionPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
 ): Promise<PageResult<DimensionRow>> {
-  const scopedDataset =
-    scopedVisitDataset(siteId, window, filters) ??
-    scopedDatasetForUnpreparedReader(
-      "dimension",
-      siteId,
-      window,
-      filters,
-      "session",
-    );
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
   const effectiveSortBy = dimensionSortKey(sortBy);
   const effectiveSortDirection = sortDirection === "asc" ? "asc" : "desc";
-  const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
-  const visitSource = buildVisitSourceCte().replace(
-    "visit_source AS (",
-    "visit_source AS MATERIALIZED (",
-  );
-  const searchClause = search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : "";
-  const operator = effectiveSortDirection === "asc" ? ">" : "<";
-  const cursorClause = cursor
-    ? effectiveSortBy === "visitors"
-      ? `
-AND (
-  visitors ${operator} ?
-  OR (visitors = ? AND views ${operator} ?)
-  OR (visitors = ? AND views = ? AND value > ?)
-)`
-      : `AND (${effectiveSortBy} ${operator} ? OR (${effectiveSortBy} = ? AND value > ?))`
-    : "";
-  const orderBy =
-    effectiveSortBy === "visitors"
-      ? `ORDER BY visitors ${effectiveSortDirection}, views ${effectiveSortDirection}, value ASC`
-      : `ORDER BY ${effectiveSortBy} ${effectiveSortDirection}, value ASC`;
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? visitSource},
-filtered_visits AS MATERIALIZED (
-  SELECT visitor_id, session_id, started_at, visit_id,
-    TRIM(COALESCE(pathname, '')) AS pathname
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-ranked_session_visits AS (
-  SELECT
-    vs.session_id,
-    vs.visitor_id,
-    TRIM(COALESCE(vs.pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at ASC, vs.visit_id ASC
-    ) AS first_rank,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at DESC, vs.visit_id DESC
-    ) AS latest_rank
-  FROM filtered_visits vs
-  WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
-),
-session_edges AS (
-  SELECT
-    session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
-    MAX(CASE WHEN ${boundaryRank} = 1 THEN pathname END) AS value
-  FROM ranked_session_visits
-  GROUP BY session_id
-),
-session_path_rollup AS (
-  SELECT
-    value,
-    count(*) AS views,
-    count(*) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM session_edges
-  WHERE TRIM(value) != ''
-  GROUP BY value
-)
-SELECT
-  value,
-  views,
-  sessions,
-  visitors
-FROM session_path_rollup
-WHERE 1 = 1
-${searchClause}
-${cursorClause}
-${orderBy}
-LIMIT ?
-`;
-  const searchBindings = search
-    ? [
-        `%${search
-          .trim()
-          .toLowerCase()
-          .replaceAll("\\", "\\\\")
-          .replaceAll("%", "\\%")
-          .replaceAll("_", "\\_")}%`,
-      ]
-    : [];
-  const cursorBindings = cursor
-    ? effectiveSortBy === "visitors"
-      ? [
-          cursor.visitors ?? cursor.views,
-          cursor.visitors ?? cursor.views,
-          cursor.views,
-          cursor.visitors ?? cursor.views,
-          cursor.views,
-          cursor.value,
-        ]
-      : [cursor.views, cursor.views, cursor.value]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildSessionPathPagePlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+    kind,
+    search,
+    sortBy: effectiveSortBy,
+    sortDirection: effectiveSortDirection,
+    cursor,
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    sql,
-    [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...(filter?.bindings ?? []),
-          ]),
-      ...searchBindings,
-      ...cursorBindings,
-      limit + 1,
-    ],
+    plan,
+    "session-path-page",
+    undefined,
     diagnostics,
   );
   const mapped = rows.map((row) => ({
@@ -642,19 +465,19 @@ LIMIT ?
     visitors: Number(row.visitors ?? 0),
   }));
   const page = pageResult(mapped, limit);
-  const binding = await paginationBindingForWindow(window, [
-    `analytics-session-${kind}-v1`,
-    siteId,
-    window.startMs,
-    window.endExclusiveMs,
-    window.timeZone,
-    filterFingerprint(filters, analyticsFilterRegistry),
-    effectiveScopeForPagination(filters),
-    search?.trim().toLowerCase() ?? "",
-    audience,
-    effectiveSortBy,
-    effectiveSortDirection,
-  ]);
+  const binding = await paginationBindingForWindow(
+    window,
+    sessionPathCursorBinding({
+      operation: kind,
+      siteId,
+      window,
+      filters,
+      search,
+      audience,
+      sortBy: effectiveSortBy,
+      sortDirection: effectiveSortDirection,
+    }),
+  );
   const nextCursor =
     page.hasMore && page.last
       ? await encodePageCursor(
@@ -666,7 +489,13 @@ LIMIT ?
                 visitors: page.last.visitors,
                 value: page.last.value,
               }
-            : { views: page.last.views, value: page.last.value },
+            : {
+                views:
+                  effectiveSortBy === "sessions"
+                    ? page.last.sessions
+                    : page.last.views,
+                value: page.last.value,
+              },
         )
       : null;
   return {
@@ -696,19 +525,19 @@ export async function decodeSessionPathDimensionCursor(
   const effectiveSortDirection = sortDirection === "asc" ? "asc" : "desc";
   const decoded = await decodePageCursor<SessionPathDimensionCursor>(
     env,
-    await paginationBindingForWindow(window, [
-      `analytics-session-${kind}-v1`,
-      siteId,
-      window.startMs,
-      window.endExclusiveMs,
-      window.timeZone,
-      filterFingerprint(filters, analyticsFilterRegistry),
-      effectiveScopeForPagination(filters),
-      search?.trim().toLowerCase() ?? "",
-      audience,
-      effectiveSortBy,
-      effectiveSortDirection,
-    ]),
+    await paginationBindingForWindow(
+      window,
+      sessionPathCursorBinding({
+        operation: kind,
+        siteId,
+        window,
+        filters,
+        search,
+        audience,
+        sortBy: effectiveSortBy,
+        sortDirection: effectiveSortDirection,
+      }),
+    ),
     cursor,
     "session-dimension",
     sessionPathDimensionCursor,

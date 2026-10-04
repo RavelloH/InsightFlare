@@ -58,6 +58,7 @@ export type SemanticPageDimensionId = keyof typeof SEMANTIC_PAGE_DIMENSIONS;
 export function semanticPageDimension(
   id: string,
 ): (typeof SEMANTIC_PAGE_DIMENSIONS)[SemanticPageDimensionId] | undefined {
+  if (!Object.hasOwn(SEMANTIC_PAGE_DIMENSIONS, id)) return undefined;
   return SEMANTIC_PAGE_DIMENSIONS[id as SemanticPageDimensionId] as
     (typeof SEMANTIC_PAGE_DIMENSIONS)[SemanticPageDimensionId] | undefined;
 }

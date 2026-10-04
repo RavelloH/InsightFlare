@@ -26,7 +26,8 @@ export type SemanticScopedSourceProfile =
   | "prepared-scoped-v1"
   | "direct-event-records-v1"
   | "direct-event-analytics-v1"
-  | "direct-page-analytics-v1";
+  | "direct-page-analytics-v1"
+  | "direct-page-session-compat-v1";
 
 export type SemanticScopedIdentityKind =
   "page" | "event" | "session" | "visitor";
@@ -294,6 +295,36 @@ export function createSemanticScopedSourceSelection(
     scope = "event";
     mode = "observation";
     authorizedSiteIds = canonicalSiteIds(subject.siteIds);
+  } else if (input.profile === "direct-page-session-compat-v1") {
+    if (metadata || input.expectedPlan)
+      return fail("direct_profile_has_prepared_metadata");
+    if (!filters.root) return fail("session_compatibility_requires_filter");
+    if (filterDocumentUsesAdvancedExpressions(filters))
+      return fail("session_compatibility_requires_prepared_advanced_matches");
+    if (
+      input.eventName !== undefined ||
+      input.eventNameInputSemantics !== undefined
+    )
+      return fail("session_compatibility_event_name_unsupported");
+    if (subject.siteIds.length !== 1)
+      return fail("session_compatibility_requires_single_site");
+    const compatibilityPlan = createScopedFilterPlan(
+      "dimension",
+      filters,
+      "session",
+    );
+    if (
+      !compatibilityPlan ||
+      compatibilityPlan.scope !== "session" ||
+      compatibilityPlan.mode !== "entity" ||
+      compatibilityPlan.membership.kind !== "entity" ||
+      compatibilityPlan.membership.entityKind !== "session"
+    )
+      return fail("session_compatibility_plan_mismatch");
+    scope = compatibilityPlan.scope;
+    mode = compatibilityPlan.mode;
+    entityKind = compatibilityPlan.membership.entityKind;
+    authorizedSiteIds = canonicalSiteIds(subject.siteIds);
   } else {
     return fail("unknown_profile");
   }
@@ -361,6 +392,7 @@ export function validateSemanticScopedSourceSelection(
       "direct-event-records-v1",
       "direct-event-analytics-v1",
       "direct-page-analytics-v1",
+      "direct-page-session-compat-v1",
     ].includes(selection.profile) ||
     !["event", "session", "visitor"].includes(selection.scope) ||
     !["observation", "entity"].includes(selection.mode)
@@ -400,7 +432,9 @@ export function validateSemanticScopedSourceSelection(
       fail("prepared_advanced_matches_missing");
   }
   if (
-    selection.profile !== "prepared-scoped-v1" &&
+    (selection.profile === "direct-event-records-v1" ||
+      selection.profile === "direct-event-analytics-v1" ||
+      selection.profile === "direct-page-analytics-v1") &&
     (selection.scope !== "event" ||
       selection.mode !== "observation" ||
       selection.entityKind !== undefined ||
@@ -408,6 +442,27 @@ export function validateSemanticScopedSourceSelection(
       filterDocumentUsesAdvancedExpressions(selection.filter))
   )
     fail("invalid_direct_profile");
+  if (selection.profile === "direct-page-session-compat-v1") {
+    const compatibilityPlan = createScopedFilterPlan(
+      "dimension",
+      selection.filter,
+      "session",
+    );
+    if (
+      !compatibilityPlan ||
+      selection.filter.root === null ||
+      selection.scope !== "session" ||
+      selection.mode !== "entity" ||
+      selection.entityKind !== "session" ||
+      selection.preparedMatches !== undefined ||
+      selection.eventNameGate !== undefined ||
+      selection.subject.siteIds.length !== 1 ||
+      !sameJsonValue(selection.authorizedSiteIds, selection.subject.siteIds) ||
+      filterDocumentUsesAdvancedExpressions(selection.filter) ||
+      !sameResolvedSelection(compatibilityPlan, selection)
+    )
+      fail("invalid_session_compatibility_profile");
+  }
   if (
     selection.profile === "direct-page-analytics-v1" &&
     selection.eventNameGate !== undefined

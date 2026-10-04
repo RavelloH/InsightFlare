@@ -29,6 +29,7 @@ import {
   isSameLogicalValueType,
   type LogicalValueType,
 } from "@/lib/edge/analytics/engine/logical/slots";
+import { LogicalPlanError } from "@/lib/edge/analytics/engine/logical/validator";
 import type { ResolvedAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
@@ -106,6 +107,57 @@ describe("logical relational IR", () => {
         scalar: "datetime",
       }),
     ).toThrow("Literal value does not match its declared scalar type.");
+  });
+
+  it("reports malformed inherited page dimension IDs as logical plan errors", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: ["page.report.os", "page.report.osVersion"],
+    });
+    const dimension = builder.pageDimension("osVersion", {
+      "page.report.os": builder.slot(pages, "attribute:page.report.os"),
+      "page.report.osVersion": builder.slot(
+        pages,
+        "attribute:page.report.osVersion",
+      ),
+    });
+    const projected = builder.project(pages, { value: dimension });
+    builder.output("dimension", projected, [{ name: "value", slot: "value" }]);
+    const plan = builder.finish();
+    const malformed: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "project"
+          ? {
+              ...node,
+              projections: node.projections.map((projection) =>
+                projection.expression.kind === "page-dimension"
+                  ? {
+                      ...projection,
+                      expression: {
+                        ...projection.expression,
+                        dimension: "toString" as never,
+                      },
+                    }
+                  : projection,
+              ),
+            }
+          : node,
+      ),
+    };
+
+    let error: unknown;
+    try {
+      validateLogicalPlan(malformed);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(LogicalPlanError);
+    expect((error as LogicalPlanError).issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "invalid-expression" }),
+      ]),
+    );
   });
 
   it("provides data-only logical scalar and entity values", () => {

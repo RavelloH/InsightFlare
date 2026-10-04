@@ -42,6 +42,7 @@ import {
   buildVisitSourceCte,
   queryD1All,
   scopedDatasetFor,
+  scopedDatasetForUnpreparedReader,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
@@ -51,10 +52,14 @@ import {
   resolveCrossBreakdownDimension,
   utmDimensionDefinition,
 } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
+import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import {
   decodeDimensionCursor,
+  decodeSessionPathDimensionCursor,
   queryDimensionFromD1,
   queryDimensionPageFromD1,
+  querySessionPathDimensionFromD1,
+  querySessionPathDimensionPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
 import { queryRetentionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import {
@@ -414,37 +419,42 @@ function insertPageRow(
     sessionId: string;
     pathname: string;
     country: string;
+    siteId?: string;
+    startedAt?: number;
+    browser?: string;
     query?: string;
     hash?: string;
   },
 ): void {
+  const targetSiteId = input.siteId ?? siteId;
   database
     .prepare("INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)")
-    .run(siteId);
+    .run(targetSiteId);
   const siteIdentity = database
     .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
-    .get(siteId) as { site_pk: number };
+    .get(targetSiteId) as { site_pk: number };
   database
     .prepare(
       `
       INSERT INTO visits (
         visit_id, site_id, visitor_id, session_id, status, started_at,
         last_activity_at, pathname, hostname, title, query_string,
-        hash_fragment, country, site_pk
-      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', '', ?, ?, ?, ?)
+        hash_fragment, country, browser, site_pk
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', '', ?, ?, ?, ?, ?)
     `,
     )
     .run(
       input.visitId,
-      siteId,
+      targetSiteId,
       input.visitorId,
       input.sessionId,
-      baseMs,
-      baseMs,
+      input.startedAt ?? baseMs,
+      input.startedAt ?? baseMs,
       input.pathname,
       input.query ?? "",
       input.hash ?? "",
       input.country,
+      input.browser ?? "",
       siteIdentity.site_pk,
     );
 }
@@ -614,6 +624,149 @@ ${limitClause}
     visitors: Number(row.visitors ?? 0),
   }));
 }
+
+interface LegacySessionPathCursor {
+  views: number;
+  value: string;
+  visitors?: number;
+}
+
+interface LegacySessionPathOracleOptions {
+  kind: "entry" | "exit";
+  search?: string;
+  sortBy?: DimensionSortKey;
+  sortDirection?: "asc" | "desc";
+  cursor?: LegacySessionPathCursor | null;
+  limit?: number;
+  paginated?: boolean;
+}
+
+/** Frozen pre-Logical Session Path SQL, including the legacy scoped source. */
+function legacySessionPathRowsOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  filters: FilterDocument,
+  options: LegacySessionPathOracleOptions,
+) {
+  const scoped =
+    scopedDatasetFor(targetSiteId, targetWindow, filters) ??
+    scopedDatasetForUnpreparedReader(
+      "dimension",
+      targetSiteId,
+      targetWindow,
+      filters,
+      "session",
+    );
+  const filter = scoped
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window: targetWindow });
+  const sortBy = options.sortBy ?? "views";
+  const direction = options.sortDirection === "asc" ? "ASC" : "DESC";
+  const operator = direction === "ASC" ? ">" : "<";
+  const boundary = options.kind === "entry" ? "first_rank" : "latest_rank";
+  const predicates: string[] = [];
+  const bindings: QueryBinding[] = scoped
+    ? scoped.bindings.map((binding) => binding.value)
+    : [
+        ...visitSourceBindings(targetSiteId, targetWindow),
+        ...(filter?.bindings ?? []),
+      ];
+  if (options.search) {
+    predicates.push("LOWER(value) LIKE ? ESCAPE '\\'");
+    bindings.push(
+      `%${options.search
+        .trim()
+        .toLowerCase()
+        .replace(/[\\%_]/g, "\\$&")}%`,
+    );
+  }
+  if (options.cursor) {
+    if (sortBy === "visitors") {
+      predicates.push(
+        `(visitors ${operator} ? OR (visitors = ? AND views ${operator} ?) OR (visitors = ? AND views = ? AND value > ?))`,
+      );
+      bindings.push(
+        options.cursor.visitors ?? options.cursor.views,
+        options.cursor.visitors ?? options.cursor.views,
+        options.cursor.views,
+        options.cursor.visitors ?? options.cursor.views,
+        options.cursor.views,
+        options.cursor.value,
+      );
+    } else {
+      predicates.push(
+        `(${sortBy} ${operator} ? OR (${sortBy} = ? AND value > ?))`,
+      );
+      bindings.push(
+        options.cursor.views,
+        options.cursor.views,
+        options.cursor.value,
+      );
+    }
+  }
+  const where = predicates.length ? `WHERE ${predicates.join(" AND ")}` : "";
+  const limit = options.limit;
+  const limitClause =
+    limit === undefined || (limit <= 0 && !options.paginated) ? "" : "LIMIT ?";
+  if (limitClause) bindings.push(options.paginated ? limit! + 1 : limit!);
+  const sql = `
+WITH
+${scoped?.ctes ?? buildVisitSourceCte()},
+filtered_visits AS MATERIALIZED (
+  SELECT visitor_id, session_id, started_at, visit_id,
+    TRIM(COALESCE(pathname, '')) AS pathname
+  FROM ${scoped?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
+),
+ranked_session_visits AS (
+  SELECT
+    vs.session_id,
+    vs.visitor_id,
+    TRIM(COALESCE(vs.pathname, '')) AS pathname,
+    ROW_NUMBER() OVER (
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at ASC, vs.visit_id ASC
+    ) AS first_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at DESC, vs.visit_id DESC
+    ) AS latest_rank
+  FROM filtered_visits vs
+  WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
+),
+session_edges AS (
+  SELECT
+    session_id,
+    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
+    MAX(CASE WHEN ${boundary} = 1 THEN pathname END) AS value
+  FROM ranked_session_visits
+  GROUP BY session_id
+),
+session_path_rollup AS (
+  SELECT
+    value,
+    count(*) AS views,
+    count(*) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM session_edges
+  WHERE TRIM(value) != ''
+  GROUP BY value
+)
+SELECT value, views, sessions, visitors
+FROM session_path_rollup
+${where}
+ORDER BY ${sortBy} ${direction}${sortBy === "visitors" ? `, views ${direction}` : ""}, value ASC
+${limitClause}
+`;
+  return (database.prepare(sql).all(...bindings) as D1Row[]).map((row) => ({
+    value: String(row.value ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
+}
+
 function seedDimensionReportFixture(database: DatabaseSync): void {
   const records = [
     {
@@ -838,6 +991,202 @@ function seedDimensionReportFixture(database: DatabaseSync): void {
     );
   }
 }
+
+function seedSessionPathFixture(database: DatabaseSync): void {
+  const sessions = [
+    {
+      id: "path-session-a",
+      firstVisitor: "visitor-a",
+      lastVisitor: "visitor-last-a",
+      firstPath: " /shared ",
+      lastPath: "/exit-shared",
+      firstCountry: "US",
+      lastCountry: "CA",
+      firstBrowser: "Chrome",
+      lastBrowser: "Firefox",
+    },
+    {
+      id: "path-session-b",
+      firstVisitor: "visitor-a",
+      lastVisitor: "visitor-last-b",
+      firstPath: "/shared",
+      lastPath: "/exit-alpha",
+      firstCountry: "US",
+      lastCountry: "CA",
+      firstBrowser: "Chrome",
+      lastBrowser: "Firefox",
+    },
+    {
+      id: "path-session-c",
+      firstVisitor: "visitor-c",
+      lastVisitor: "visitor-c-last",
+      firstPath: "/alpha",
+      lastPath: "/exit-beta",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-d",
+      firstVisitor: "",
+      lastVisitor: "visitor-d-last",
+      firstPath: "/beta",
+      lastPath: "/exit-shared",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-e",
+      firstVisitor: " ",
+      lastVisitor: "visitor-e-last",
+      firstPath: "/beta",
+      lastPath: "/exit-gamma",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-f",
+      firstVisitor: "visitor-f",
+      lastVisitor: "visitor-f-last",
+      firstPath: "/delta",
+      lastPath: "/exit-gamma",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-g",
+      firstVisitor: "visitor-g",
+      lastVisitor: "visitor-g-last",
+      firstPath: "/alpha",
+      lastPath: "/exit-delta",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-h",
+      firstVisitor: "visitor-h",
+      lastVisitor: "visitor-h-last",
+      firstPath: "/zeta",
+      lastPath: "/exit-zeta",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-i",
+      firstVisitor: "visitor-i",
+      lastVisitor: "visitor-i-last",
+      firstPath: "/search%/_\\value",
+      lastPath: "/nul-path",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-j",
+      firstVisitor: "visitor-j",
+      lastVisitor: "visitor-j-last",
+      firstPath: " \t ",
+      lastPath: "/after-empty",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-k",
+      firstVisitor: "visitor-k",
+      lastVisitor: "visitor-k-last",
+      firstPath: "/nul-entry",
+      lastPath: "/after-nul",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+    {
+      id: "path-session-unicode",
+      firstVisitor: "visitor-unicode",
+      lastVisitor: "visitor-unicode-last",
+      firstPath: "/café-東京",
+      lastPath: "/exit-café-東京",
+      firstCountry: "CA",
+      lastCountry: "CA",
+    },
+  ] as const;
+  for (const [index, session] of sessions.entries()) {
+    const startedAt = baseMs + index * 10_000;
+    insertPageRow(database, {
+      visitId: `${session.id}-first`,
+      visitorId: session.firstVisitor,
+      sessionId: session.id,
+      pathname: session.firstPath,
+      country: session.firstCountry,
+      browser: "firstBrowser" in session ? session.firstBrowser : undefined,
+      startedAt,
+    });
+    if (session.id === "path-session-a") {
+      insertPageRow(database, {
+        visitId: `${session.id}-middle-blank`,
+        visitorId: "visitor-middle",
+        sessionId: session.id,
+        pathname: " \t ",
+        country: "CA",
+        browser: "Safari",
+        startedAt: startedAt + 1_000,
+      });
+    }
+    insertPageRow(database, {
+      visitId: `${session.id}-last`,
+      visitorId: session.lastVisitor,
+      sessionId: session.id,
+      pathname: session.lastPath,
+      country: session.lastCountry,
+      browser: "lastBrowser" in session ? session.lastBrowser : undefined,
+      startedAt: startedAt + 2_000,
+    });
+  }
+  insertPageRow(database, {
+    visitId: "path-other-site",
+    visitorId: "other-site-visitor",
+    sessionId: "other-site-session",
+    pathname: "/ignored-other-site",
+    country: "US",
+    siteId: "site-other",
+  });
+  insertPageRow(database, {
+    visitId: "path-outside-window",
+    visitorId: "outside-window-visitor",
+    sessionId: "outside-window-session",
+    pathname: "/ignored-outside-window",
+    country: "US",
+    startedAt: window.endExclusiveMs,
+  });
+  insertPageRow(database, {
+    visitId: "path-whitespace-session",
+    visitorId: "visitor-whitespace-session",
+    sessionId: " ",
+    pathname: "/whitespace-session",
+    country: "CA",
+  });
+  insertPageRow(database, {
+    visitId: "path-empty-session",
+    visitorId: "visitor-empty-session",
+    sessionId: "",
+    pathname: "/ignored-empty-session",
+    country: "CA",
+  });
+  insertPageRow(database, {
+    visitId: null,
+    visitorId: "visitor-null-id-first",
+    sessionId: "path-session-null-id-tie",
+    pathname: "/null-id-first",
+    country: "CA",
+    startedAt: baseMs + 50_000,
+  });
+  insertPageRow(database, {
+    visitId: "path-session-null-id-tie-z",
+    visitorId: "visitor-null-id-last",
+    sessionId: "path-session-null-id-tie",
+    pathname: "/nonnull-id-last",
+    country: "CA",
+    startedAt: baseMs + 50_000,
+  });
+}
+
 function url(path: string, params: Record<string, string | number | boolean>) {
   const parsed = new URL(`https://edge.test${path}`);
   for (const [key, value] of Object.entries(params)) {
@@ -845,6 +1194,901 @@ function url(path: string, params: Record<string, string | number | boolean>) {
   }
   return parsed;
 }
+
+describe("edge Session Path D1 reports", () => {
+  it("matches frozen SQL for entry and exit TopN and all six paginated sort orders", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    seedSessionPathFixture(database);
+    try {
+      for (const kind of ["entry", "exit"] as const) {
+        for (const [sortBy, sortDirection] of [
+          ["views", "asc"],
+          ["views", "desc"],
+          ["sessions", "asc"],
+          ["sessions", "desc"],
+          ["visitors", "asc"],
+          ["visitors", "desc"],
+        ] as const) {
+          const expectedAll = legacySessionPathRowsOracle(
+            database,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            { kind, sortBy, sortDirection },
+          );
+          await expect(
+            querySessionPathDimensionFromD1(
+              env,
+              siteId,
+              window,
+              EMPTY_FILTER_DOCUMENT,
+              0,
+              kind,
+              undefined,
+              undefined,
+              sortBy,
+              sortDirection,
+            ),
+          ).resolves.toEqual(expectedAll);
+          if (sortBy === "views" && sortDirection === "asc") {
+            await expect(
+              querySessionPathDimensionFromD1(
+                env,
+                siteId,
+                window,
+                EMPTY_FILTER_DOCUMENT,
+                -1,
+                kind,
+                undefined,
+                undefined,
+                sortBy,
+                sortDirection,
+              ),
+            ).resolves.toEqual(expectedAll);
+          }
+
+          let cursor: LegacySessionPathCursor | null = null;
+          const actualAll: Array<{
+            value: string;
+            views: number;
+            sessions: number;
+            visitors: number;
+          }> = [];
+          for (let pageIndex = 0; pageIndex < 10; pageIndex += 1) {
+            const expectedWithLookahead = legacySessionPathRowsOracle(
+              database,
+              siteId,
+              window,
+              EMPTY_FILTER_DOCUMENT,
+              {
+                kind,
+                sortBy,
+                sortDirection,
+                cursor,
+                limit: 2,
+                paginated: true,
+              },
+            );
+            const actual = await querySessionPathDimensionPageFromD1(
+              env,
+              siteId,
+              window,
+              EMPTY_FILTER_DOCUMENT,
+              2,
+              kind,
+              undefined,
+              undefined,
+              cursor,
+              "private-dashboard",
+              sortBy,
+              sortDirection,
+            );
+            expect(
+              actual.items,
+              `${kind}/${sortBy}/${sortDirection}/${pageIndex}`,
+            ).toEqual(expectedWithLookahead.slice(0, 2));
+            expect(actual.pagination.hasMore).toBe(
+              expectedWithLookahead.length > 2,
+            );
+            actualAll.push(...actual.items);
+            if (!actual.pagination.nextCursor) break;
+            cursor = await decodeSessionPathDimensionCursor(
+              env,
+              siteId,
+              window,
+              EMPTY_FILTER_DOCUMENT,
+              kind,
+              undefined,
+              actual.pagination.nextCursor,
+              "private-dashboard",
+              sortBy,
+              sortDirection,
+            );
+            expect(
+              cursor,
+              `${kind}/${sortBy}/${sortDirection}/${pageIndex} cursor`,
+            ).not.toBeNull();
+          }
+          expect(
+            actualAll,
+            `${kind}/${sortBy}/${sortDirection} full traversal`,
+          ).toEqual(expectedAll);
+        }
+      }
+    } finally {
+      close();
+    }
+  });
+
+  it("preserves unprepared session expansion, prepared scopes, fact filters, and legacy search", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    seedSessionPathFixture(database);
+    const countryFilter = filterFixture({ country: "US" });
+    const prepared = prepareScopedQuery("dimension", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: countryFilter,
+      scopePreference: "session",
+    } as never);
+    const preparedVisitor = prepareScopedQuery("dimension", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: countryFilter,
+      scopePreference: "visitor",
+    } as never);
+    const preparedEvent = prepareScopedQuery("dimension", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: countryFilter,
+      scopePreference: "event",
+    } as never);
+    const preparedMetadata = scopedFilterMetadata(prepared.filters!);
+    if (!preparedMetadata)
+      throw new Error("wave46_prepared_session_scope_missing");
+    const preparedIdentity = attachScopedFilterMetadata(prepared.filters!, {
+      ...preparedMetadata,
+      plan: {
+        ...preparedMetadata.plan,
+        advancedMatches: {
+          entityIds: [{ siteId, id: "path-session-a" }],
+        },
+      },
+    });
+    const preparedEventMetadata = scopedFilterMetadata(preparedEvent.filters!);
+    if (!preparedEventMetadata)
+      throw new Error("wave46_prepared_event_scope_missing");
+    const preparedPageIdentity = attachScopedFilterMetadata(
+      preparedEvent.filters!,
+      {
+        ...preparedEventMetadata,
+        plan: {
+          ...preparedEventMetadata.plan,
+          advancedMatches: {
+            visitIds: [{ siteId, id: "path-session-a-first" }],
+          },
+        },
+      },
+    );
+    const preparedEmptyIdentity = attachScopedFilterMetadata(
+      preparedEvent.filters!,
+      {
+        ...preparedEventMetadata,
+        plan: {
+          ...preparedEventMetadata.plan,
+          advancedMatches: { visitIds: [] },
+        },
+      },
+    );
+    const splitPageFilter = filterFixture({
+      country: "US",
+      browser: "Firefox",
+    });
+    const preparedSplitPageFilter = prepareScopedQuery("dimension", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: splitPageFilter,
+      scopePreference: "session",
+    } as never);
+    const sessionFactFilter = normalizedFilters({
+      kind: "condition",
+      target: { kind: "field", field: "session.views" },
+      operator: "gte",
+      value: 3,
+    });
+    const visitorFactFilter = normalizedFilters({
+      kind: "condition",
+      target: { kind: "field", field: "visitor.sessions" },
+      operator: "gte",
+      value: 2,
+    });
+    const siteIdentity = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get(siteId) as { site_pk: number };
+    const otherSiteIdentity = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get("site-other") as { site_pk: number };
+    database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name, last_seen_at, site_pk) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(70, siteId, "purchase", baseMs, siteIdentity.site_pk);
+    database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name, last_seen_at, site_pk) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(71, "site-other", "purchase", baseMs, otherSiteIdentity.site_pk);
+    database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name, last_seen_at, site_pk) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(72, siteId, "refund", baseMs, siteIdentity.site_pk);
+    const insertEvent = database.prepare(`
+      INSERT INTO custom_events (
+        event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+        received_at, sequence, node_count, value_count, site_pk
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0, ?)
+    `);
+    insertEvent.run(
+      70,
+      "path-session-a-event",
+      siteId,
+      "path-session-a-first",
+      70,
+      baseMs + 10,
+      baseMs + 10,
+      siteIdentity.site_pk,
+    );
+    insertEvent.run(
+      71,
+      "path-session-b-outside-event-time",
+      siteId,
+      "path-session-b-first",
+      70,
+      window.endExclusiveMs,
+      window.endExclusiveMs,
+      siteIdentity.site_pk,
+    );
+    insertEvent.run(
+      72,
+      "other-site-event",
+      "site-other",
+      "path-other-site",
+      71,
+      baseMs + 10,
+      baseMs + 10,
+      otherSiteIdentity.site_pk,
+    );
+    insertEvent.run(
+      73,
+      "path-session-c-refund",
+      siteId,
+      "path-session-c-first",
+      72,
+      baseMs + 20,
+      baseMs + 20,
+      siteIdentity.site_pk,
+    );
+    insertEvent.run(
+      74,
+      "path-outside-window-in-window-event",
+      siteId,
+      "path-outside-window",
+      70,
+      baseMs + 30,
+      baseMs + 30,
+      siteIdentity.site_pk,
+    );
+    database
+      .prepare(
+        "INSERT INTO custom_event_json_paths (id, site_id, path, last_seen_at, site_pk) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(73, siteId, "/session-path-plan", baseMs, siteIdentity.site_pk);
+    database
+      .prepare(
+        `
+        INSERT INTO custom_event_json_nodes (
+          event_pk, node_id, parent_node_id, key_id, path_id, value_type,
+          member_order, array_index, depth
+        ) VALUES (70, 700, NULL, NULL, 73, 1, NULL, NULL, 1)
+      `,
+      )
+      .run();
+    database
+      .prepare(
+        `
+        INSERT INTO custom_event_json_values (
+          event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+          value_type, string_value, number_value, boolean_value, site_pk
+        ) VALUES (70, 700, ?, 70, 73, ?, 1, 'yes', NULL, NULL, ?)
+      `,
+      )
+      .run(siteId, baseMs + 10, siteIdentity.site_pk);
+    const eventFilter = normalizedFilters(
+      filterCondition({ kind: "field", field: "event.name" }, "purchase"),
+    );
+    const eventPayloadOrPageFilter = normalizedFilters({
+      kind: "or",
+      children: [
+        filterCondition({ kind: "field", field: "geo.country" }, "US"),
+        {
+          kind: "condition",
+          target: { kind: "event-payload", path: "/session-path-plan" },
+          operator: "exists",
+        },
+      ],
+    });
+    const notRefundFilter = normalizedFilters({
+      kind: "not",
+      child: filterCondition({ kind: "field", field: "event.name" }, "refund"),
+    });
+    try {
+      for (const filters of [
+        countryFilter,
+        prepared.filters!,
+        preparedVisitor.filters!,
+        preparedEvent.filters!,
+        preparedIdentity,
+        preparedPageIdentity,
+        preparedEmptyIdentity,
+      ]) {
+        const expected = legacySessionPathRowsOracle(
+          database,
+          siteId,
+          window,
+          filters,
+          { kind: "exit" },
+        );
+        await expect(
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            filters,
+            0,
+            "exit",
+          ),
+        ).resolves.toEqual(expected);
+      }
+      await expect(
+        querySessionPathDimensionFromD1(
+          env,
+          siteId,
+          window,
+          sessionFactFilter,
+          0,
+          "entry",
+        ),
+      ).resolves.toEqual(
+        legacySessionPathRowsOracle(
+          database,
+          siteId,
+          window,
+          sessionFactFilter,
+          { kind: "entry" },
+        ),
+      );
+      await expect(
+        querySessionPathDimensionFromD1(
+          env,
+          siteId,
+          window,
+          visitorFactFilter,
+          0,
+          "entry",
+        ),
+      ).resolves.toEqual(
+        legacySessionPathRowsOracle(
+          database,
+          siteId,
+          window,
+          visitorFactFilter,
+          { kind: "entry" },
+        ),
+      );
+
+      await expect(
+        querySessionPathDimensionFromD1(
+          env,
+          siteId,
+          window,
+          eventFilter,
+          0,
+          "exit",
+        ),
+      ).resolves.toEqual(
+        legacySessionPathRowsOracle(database, siteId, window, eventFilter, {
+          kind: "exit",
+        }),
+      );
+      await expect(
+        querySessionPathDimensionFromD1(
+          env,
+          siteId,
+          window,
+          eventFilter,
+          0,
+          "exit",
+        ),
+      ).resolves.toEqual([
+        { value: "/exit-shared", views: 1, sessions: 1, visitors: 1 },
+      ]);
+      for (const filters of [eventPayloadOrPageFilter, notRefundFilter]) {
+        await expect(
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            filters,
+            0,
+            "entry",
+          ),
+        ).resolves.toEqual(
+          legacySessionPathRowsOracle(database, siteId, window, filters, {
+            kind: "entry",
+          }),
+        );
+      }
+      const unpreparedAdvancedFilter = parseFilterDsl(
+        "session { session.views gte 3 } exists",
+        analyticsFilterRegistry,
+      );
+      await expect(
+        querySessionPathDimensionFromD1(
+          env,
+          siteId,
+          window,
+          unpreparedAdvancedFilter,
+          0,
+          "entry",
+        ),
+      ).rejects.toThrow("invalid_semantic_scoped_source_selection");
+      await expect(
+        querySessionPathDimensionFromD1(
+          env,
+          siteId,
+          window,
+          splitPageFilter,
+          0,
+          "entry",
+        ),
+      ).resolves.toEqual([]);
+      const preparedSplitRows = await querySessionPathDimensionFromD1(
+        env,
+        siteId,
+        window,
+        preparedSplitPageFilter.filters!,
+        0,
+        "entry",
+      );
+      expect(preparedSplitRows).toEqual(
+        legacySessionPathRowsOracle(
+          database,
+          siteId,
+          window,
+          preparedSplitPageFilter.filters!,
+          { kind: "entry" },
+        ),
+      );
+      expect(preparedSplitRows).toContainEqual({
+        value: "/shared",
+        views: 2,
+        sessions: 2,
+        visitors: 1,
+      });
+
+      for (const [kind, search] of [
+        ["entry", "%/_\\"],
+        ["entry", " CAFÉ-東京 "],
+        ["entry", "\u0000"],
+        ["exit", "\u0000"],
+      ] as const) {
+        await expect(
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            0,
+            kind,
+            undefined,
+            search,
+          ),
+        ).resolves.toEqual(
+          legacySessionPathRowsOracle(
+            database,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            { kind, search },
+          ),
+        );
+      }
+    } finally {
+      close();
+    }
+  });
+
+  it("decodes signed legacy cursors and rejects the incomplete visitor shape", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    seedSessionPathFixture(database);
+    const audience = "private-dashboard" as const;
+    const viewsBinding = await paginationBindingForWindow(window, [
+      "analytics-session-entry-v1",
+      siteId,
+      window.startMs,
+      window.endExclusiveMs,
+      window.timeZone,
+      filterFingerprint(EMPTY_FILTER_DOCUMENT, analyticsFilterRegistry),
+      effectiveScopeForPagination(EMPTY_FILTER_DOCUMENT),
+      "",
+      audience,
+      "views",
+      "desc",
+    ]);
+    const visitorBinding = await paginationBindingForWindow(window, [
+      "analytics-session-entry-v1",
+      siteId,
+      window.startMs,
+      window.endExclusiveMs,
+      window.timeZone,
+      filterFingerprint(EMPTY_FILTER_DOCUMENT, analyticsFilterRegistry),
+      effectiveScopeForPagination(EMPTY_FILTER_DOCUMENT),
+      "",
+      audience,
+      "visitors",
+      "desc",
+    ]);
+    try {
+      const legacyCursor = await encodePageCursor(env, viewsBinding, {
+        views: 2,
+        value: "/shared",
+      });
+      await expect(
+        decodeSessionPathDimensionCursor(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          "entry",
+          undefined,
+          legacyCursor,
+          audience,
+        ),
+      ).resolves.toEqual({ views: 2, value: "/shared" });
+      const page = await querySessionPathDimensionPageFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        "entry",
+        undefined,
+        undefined,
+        { views: 2, value: "/shared" },
+      );
+      expect(page.items).toEqual(
+        legacySessionPathRowsOracle(
+          database,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          {
+            kind: "entry",
+            cursor: { views: 2, value: "/shared" },
+            limit: 2,
+            paginated: true,
+          },
+        ).slice(0, 2),
+      );
+
+      const incompleteVisitorCursor = await encodePageCursor(
+        env,
+        visitorBinding,
+        { views: 2, value: "/shared" },
+      );
+      await expect(
+        decodeSessionPathDimensionCursor(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          "entry",
+          undefined,
+          incompleteVisitorCursor,
+          audience,
+          "visitors",
+          "desc",
+        ),
+      ).resolves.toBeNull();
+    } finally {
+      close();
+    }
+  });
+
+  it("reports Session Path D1 rows-read availability through the shared adapter", async () => {
+    const success = createD1Env([[]], 7);
+    const successDiagnostics = createD1ReadDiagnostics();
+    await querySessionPathDimensionFromD1(
+      success.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      5,
+      "entry",
+      successDiagnostics,
+    );
+    expect(success.calls).toHaveLength(1);
+    expect(successDiagnostics).toMatchObject({
+      rowsRead: 7,
+      rowsReadAvailable: true,
+    });
+
+    const unavailable = createD1Env([[]]);
+    const unavailableDiagnostics = createD1ReadDiagnostics();
+    await querySessionPathDimensionFromD1(
+      unavailable.env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      5,
+      "exit",
+      unavailableDiagnostics,
+    );
+    expect(unavailable.calls).toHaveLength(1);
+    expect(unavailableDiagnostics.rowsReadAvailable).toBe(false);
+  });
+
+  it("keeps Session Path readers within one statement and the query budgets", async () => {
+    const countryFilter = filterFixture({ country: "US" });
+    const prepared = prepareScopedQuery("dimension", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: countryFilter,
+      scopePreference: "session",
+    } as never);
+    if (!prepared.filters)
+      throw new Error("wave46_budget_prepared_scope_missing");
+    const preparedMetadata = scopedFilterMetadata(prepared.filters);
+    if (!preparedMetadata)
+      throw new Error("wave46_budget_prepared_metadata_missing");
+    const advancedPrepared = attachScopedFilterMetadata(prepared.filters, {
+      ...preparedMetadata,
+      plan: {
+        ...preparedMetadata.plan,
+        advancedMatches: {
+          entityIds: Array.from({ length: 128 }, (_, index) => ({
+            siteId,
+            id: `budget-session-${index}`,
+          })),
+        },
+      },
+    });
+    const payloadForty = normalizedFilters({
+      kind: "and",
+      children: Array.from({ length: 40 }, (_, index) => ({
+        kind: "condition",
+        target: {
+          kind: "event-payload",
+          path: `/session-path-budget/${index}`,
+        },
+        operator: "exists",
+      })),
+    });
+    const sessionFacts = normalizedFilters({
+      kind: "condition",
+      target: { kind: "field", field: "session.views" },
+      operator: "gte",
+      value: 2,
+    });
+    const visitorFacts = normalizedFilters({
+      kind: "condition",
+      target: { kind: "field", field: "visitor.sessions" },
+      operator: "gte",
+      value: 2,
+    });
+    const requests = [
+      {
+        name: "plain-entry",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            "entry",
+          ),
+      },
+      {
+        name: "plain-exit",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            "exit",
+          ),
+      },
+      {
+        name: "searched-top",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            "entry",
+            undefined,
+            "%/_\\",
+          ),
+      },
+      {
+        name: "cursor-page",
+        run: (env: Env) =>
+          querySessionPathDimensionPageFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            "exit",
+            undefined,
+            "exit",
+            { views: 2, value: "/cursor" },
+          ),
+      },
+      {
+        name: "event-payload-40",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            payloadForty,
+            10,
+            "entry",
+          ),
+      },
+      {
+        name: "session-facts",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            sessionFacts,
+            10,
+            "entry",
+          ),
+      },
+      {
+        name: "visitor-facts",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            visitorFacts,
+            10,
+            "entry",
+          ),
+      },
+      {
+        name: "prepared-session-scope",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            prepared.filters!,
+            10,
+            "exit",
+          ),
+      },
+      {
+        name: "prepared-128-session-identities",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            advancedPrepared,
+            10,
+            "entry",
+          ),
+      },
+      {
+        name: "empty-result",
+        run: (env: Env) =>
+          querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            filterFixture({ country: "ZZ" }),
+            10,
+            "entry",
+          ),
+      },
+    ];
+    const metrics: Array<{
+      name: string;
+      statements: number;
+      sqlBytes: number;
+      bindings: number;
+    }> = [];
+    let explainSql: QueryCall | undefined;
+    for (const request of requests) {
+      const captured = createD1Env([[]]);
+      try {
+        await request.run(captured.env);
+      } catch (error) {
+        throw new Error(
+          `wave46_session_path_budget_compile_failed:${request.name}`,
+          {
+            cause: error,
+          },
+        );
+      }
+      expect(captured.calls, request.name).toHaveLength(1);
+      const call = captured.calls[0]!;
+      const sqlBytes = new TextEncoder().encode(call.sql).byteLength;
+      expect(sqlBytes, `${request.name} SQL bytes`).toBeLessThanOrEqual(
+        100_000,
+      );
+      expect(
+        call.bindings.length,
+        `${request.name} bindings`,
+      ).toBeLessThanOrEqual(100);
+      metrics.push({
+        name: request.name,
+        statements: captured.calls.length,
+        sqlBytes,
+        bindings: call.bindings.length,
+      });
+      if (request.name === "plain-entry") explainSql = call;
+    }
+    if (!explainSql) throw new Error("wave46_session_path_eqp_query_missing");
+    const { database, close } = createMigratedPagesSqliteEnv();
+    try {
+      const explain = database
+        .prepare(`EXPLAIN QUERY PLAN ${explainSql.sql}`)
+        .all(...explainSql.bindings) as Array<{ detail?: string }>;
+      expect(explain.length).toBeGreaterThan(0);
+      console.info("wave46_session_path_query_budget", JSON.stringify(metrics));
+    } finally {
+      close();
+    }
+  });
+});
+
 describe("edge pages D1 queries", () => {
   it("queries top pages with details, filters, numeric mapping, and limit binding", async () => {
     const { env, calls } = createD1Env([
