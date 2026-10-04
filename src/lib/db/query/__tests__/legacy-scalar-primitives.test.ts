@@ -4,7 +4,9 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import {
+  add,
   and,
+  castReal,
   castText,
   compileD1Mutation,
   compileD1Query,
@@ -12,6 +14,7 @@ import {
   D1StatementBudgetError,
   deleteFrom,
   distinct,
+  div,
   eq,
   filter,
   insertFromQuery,
@@ -19,11 +22,14 @@ import {
   join,
   jsonScalarArray,
   limit,
+  mul,
   param,
   project,
   recursiveClosure,
+  scalar,
   scan,
   sort,
+  sub,
   textLike,
   textPosition,
   textSubstring,
@@ -66,6 +72,91 @@ const seed = valuesRelation({ seed: { affinity: "text", nullable: false } }, [
 ]);
 
 describe("legacy scalar SQL primitives", () => {
+  it("casts numeric values to REAL and retains correlated scope traversal", () => {
+    const db = database();
+    try {
+      db.exec(
+        "CREATE TABLE sites (id TEXT PRIMARY KEY, team_id TEXT NOT NULL, name TEXT NOT NULL, domain TEXT NOT NULL, public_enabled INTEGER NOT NULL, public_slug TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+      );
+      db.exec(
+        "INSERT INTO sites (id, team_id, name, domain, public_enabled, public_slug, created_at, updated_at) VALUES ('site-2', 'team', 'Two', 'two.test', 0, NULL, 2, 2), ('site-3', 'team', 'Three', 'three.test', 0, NULL, 3, 3)",
+      );
+      const outer = scan(schema.sites);
+      const inner = scan(schema.sites);
+      const matching = filter(
+        inner,
+        eq(
+          castReal(inner.columns.created_at),
+          castReal(outer.columns.created_at),
+        ),
+      );
+      const correlated = scalar(
+        project(matching, { value: matching.columns.created_at }),
+      );
+      const compiled = compileD1Query(
+        project(outer, {
+          id: outer.columns.id,
+          outerValue: outer.columns.created_at,
+          countRatio: div(castReal(param(1)), param(2)),
+          durationRatio: div(castReal(param(5)), param(2)),
+          zeroDenominator: div(castReal(param(1)), param(0)),
+          nullNumerator: div(castReal(param(null)), param(2)),
+          added: add(param(1), param(2)),
+          subtracted: sub(param(5), param(2)),
+          multiplied: mul(param(3), param(2)),
+          correlated,
+        }),
+      );
+
+      expect(compiled.sql).toContain("CAST(");
+      expect(all(db, compiled)).toEqual([
+        {
+          id: "site-2",
+          outerValue: 2,
+          countRatio: 0.5,
+          durationRatio: 2.5,
+          zeroDenominator: null,
+          nullNumerator: null,
+          added: 3,
+          subtracted: 3,
+          multiplied: 6,
+          correlated: 2,
+        },
+        {
+          id: "site-3",
+          outerValue: 3,
+          countRatio: 0.5,
+          durationRatio: 2.5,
+          zeroDenominator: null,
+          nullNumerator: null,
+          added: 3,
+          subtracted: 3,
+          multiplied: 6,
+          correlated: 3,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects text, boolean, and forged REAL cast metadata", () => {
+    expect(() =>
+      compileD1Query(project(seed, { value: castReal(param("2") as never) })),
+    ).toThrow(/CAST AS REAL/u);
+    expect(() =>
+      compileD1Query(project(seed, { value: castReal(param(true) as never) })),
+    ).toThrow(/CAST AS REAL/u);
+
+    const wrongMetadata = {
+      ...castReal(param(1)),
+      resultType: { affinity: "integer", nullable: false },
+    } as never;
+    expect(() =>
+      compileD1Query(project(seed, { value: wrongMetadata })),
+    ).toThrow(/result metadata/u);
+  });
+
   it("matches fixed SQLite CAST, INSTR, SUBSTR, and LIKE results", () => {
     const db = database();
     try {

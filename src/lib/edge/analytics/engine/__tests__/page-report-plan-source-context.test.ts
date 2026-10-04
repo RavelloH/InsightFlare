@@ -136,6 +136,65 @@ describe("page report source context binding", () => {
     );
   });
 
+  it("keeps prepared proof time separate from a Page reader window", () => {
+    const prepared = prepareScopedQuery("event-records", {
+      context: siteQueryContext(SITE_ID, "private-dashboard"),
+      time: QUERY_TIME,
+      filters: filter("US"),
+      scopePreference: "session",
+    } as QueryInput & { time: QueryTime });
+    const readerTime = createQueryTime(100, 200, "UTC", 200);
+    const { builder, pages } = createPageReportSource({
+      siteId: SITE_ID,
+      queryTime: readerTime,
+      filters: prepared.filters!,
+      scopePlan: prepared.scopePlan!,
+      preparedTimePolicy: "reader-window-v1",
+      attributes: [],
+    });
+    const count = builder.aggregate(pages, {}, [
+      { name: "rows", kind: "count-rows" },
+    ]);
+    builder.output("rows", count, [{ name: "rows", slot: "rows" }]);
+    const plan = builder.finish();
+    const source = plan.nodes.find((node) => node.kind === "source");
+    expect(plan.context.time).toEqual(
+      semanticTemporalDomainsFromQueryTime(readerTime),
+    );
+    expect(source).toMatchObject({
+      kind: "source",
+      selection: {
+        profile: "prepared-page-reader-window-v1",
+        time: semanticTemporalDomainsFromQueryTime(readerTime),
+        preparationTime: semanticTemporalDomainsFromQueryTime(QUERY_TIME),
+        scope: "session",
+      },
+    });
+
+    expect(() =>
+      createPageReportSource({
+        siteId: SITE_ID,
+        queryTime: readerTime,
+        filters: prepared.filters!,
+        scopePlan: prepared.scopePlan!,
+        attributes: [],
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_time_mismatch",
+    );
+    expect(() =>
+      createPageReportSource({
+        siteId: SITE_ID,
+        queryTime: readerTime,
+        filters: filter("US"),
+        preparedTimePolicy: "reader-window-v1",
+        attributes: [],
+      }),
+    ).toThrow(
+      "invalid_page_report_source_selection:reader_window_requires_prepared_scope_plan",
+    );
+  });
+
   it("accepts the matching direct session compatibility selection", () => {
     const { builder, pages } = createPageReportSource({
       siteId: SITE_ID,

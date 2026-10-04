@@ -76,6 +76,7 @@ function isPredicateExpression(expression: SqlExpression): boolean {
     case "function":
     case "aggregate":
     case "cast-integer":
+    case "cast-real":
     case "cast-text":
     case "text-position":
     case "text-substring":

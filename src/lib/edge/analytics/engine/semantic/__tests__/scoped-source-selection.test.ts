@@ -149,6 +149,217 @@ describe("semantic scoped source selection", () => {
     ]);
   });
 
+  it("preserves prepared proof while validating the actual Page reader window", () => {
+    const prepared = preparedSelectionInput(
+      "session",
+      simpleSessionFilter("US"),
+    );
+    const readerTime = createQueryTime(100, 200, "UTC", 200);
+    const readerDomains = semanticTemporalDomainsFromQueryTime(readerTime);
+    const readerSelection = createSemanticScopedSourceSelection({
+      profile: "prepared-page-reader-window-v1",
+      filters: prepared.filters,
+      subject: SUBJECT,
+      time: readerDomains,
+      expectedPlan: prepared.plan,
+    });
+
+    expect(readerSelection).toMatchObject({
+      profile: "prepared-page-reader-window-v1",
+      scope: "session",
+      mode: "entity",
+      time: readerDomains,
+      preparationTime: TIME,
+    });
+    expect(Object.isFrozen(readerSelection.preparationTime)).toBe(true);
+    validateSemanticScopedSourceSelection(readerSelection, {
+      subject: SUBJECT,
+      time: readerDomains,
+    });
+    const readerContext = {
+      subject: SUBJECT,
+      time: readerDomains,
+      scope: resolveAnalyticsScope("session"),
+      originOperation: "pages" as const,
+    };
+    expect(
+      snapshotSemanticScopedSourceSelection(readerSelection, {
+        ...readerContext,
+      }).preparationTime,
+    ).toEqual(TIME);
+
+    expect(() => selectionFromPrepared(prepared)).not.toThrow();
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: readerDomains,
+        expectedPlan: prepared.plan,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_time_mismatch",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-page-reader-window-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        subject: SUBJECT,
+        time: readerDomains,
+        expectedPlan: prepared.plan,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_plan_identity_mismatch",
+    );
+    const unauthorizedFilters = attachScopedFilterMetadata(prepared.filters, {
+      ...prepared.metadata,
+      siteIds: ["other-site"],
+    });
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-page-reader-window-v1",
+        filters: unauthorizedFilters,
+        subject: SUBJECT,
+        time: readerDomains,
+        expectedPlan: prepared.plan,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:subject_outside_prepared_authorization",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-page-reader-window-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: readerDomains,
+        expectedPlan: prepared.plan,
+        eventName: "purchase",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:page_reader_window_event_name_unsupported",
+    );
+    const advancedFilters = normalizeFilterDocument(
+      parseFilterDsl(
+        "session { session.views gte 1 } exists",
+        analyticsFilterRegistry,
+      ),
+      analyticsFilterRegistry,
+    );
+    const advancedPrepared = preparedSelectionInput("session", advancedFilters);
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-page-reader-window-v1",
+        filters: advancedPrepared.filters,
+        subject: SUBJECT,
+        time: readerDomains,
+        expectedPlan: advancedPrepared.plan,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_advanced_matches_missing",
+    );
+    const advancedPlan = {
+      ...advancedPrepared.plan,
+      advancedMatches: {
+        entityIds: [{ siteId: SITE_ID, id: "session-1" }],
+      },
+    };
+    const advancedWithMatches = attachScopedFilterMetadata(
+      advancedPrepared.filters,
+      { ...advancedPrepared.metadata, plan: advancedPlan },
+    );
+    const invalidAdvancedPlan = {
+      ...advancedPrepared.plan,
+      advancedMatches: {
+        entityIds: [{ siteId: "other-site", id: "session-1" }],
+      },
+    };
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-page-reader-window-v1",
+        filters: attachScopedFilterMetadata(advancedPrepared.filters, {
+          ...advancedPrepared.metadata,
+          plan: invalidAdvancedPlan,
+        }),
+        subject: SUBJECT,
+        time: readerDomains,
+        expectedPlan: invalidAdvancedPlan,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_identity_outside_authorization",
+    );
+    const advancedSelection = createSemanticScopedSourceSelection({
+      profile: "prepared-page-reader-window-v1",
+      filters: advancedWithMatches,
+      subject: SUBJECT,
+      time: readerDomains,
+      expectedPlan: advancedPlan,
+    });
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        {
+          ...advancedSelection,
+          preparedMatches: {
+            identities: [
+              {
+                ...advancedSelection.preparedMatches!.identities[0]!,
+                kind: "visitor",
+              },
+            ],
+          },
+        },
+        { subject: SUBJECT, time: readerDomains },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:invalid_entity_identity_kind",
+    );
+
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        { ...readerSelection, preparationTime: undefined },
+        { subject: SUBJECT, time: readerDomains },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_time_snapshot_missing",
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        {
+          ...readerSelection,
+          preparationTime: {
+            ...readerSelection.preparationTime!,
+            candidate: {
+              startMs: 200 as never,
+              endExclusiveMs: 100 as never,
+            },
+          },
+        },
+        { subject: SUBJECT, time: readerDomains },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:preparation_time_snapshot_invalid",
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        { ...readerSelection, profile: "prepared-scoped-v1" },
+        { subject: SUBJECT, time: readerDomains },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:unexpected_preparation_time",
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        {
+          ...readerSelection,
+          profile: "prepared-scoped-v1",
+          preparationTime: undefined,
+        },
+        { subject: SUBJECT, time: readerDomains },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:unexpected_preparation_time",
+    );
+  });
+
   it("validates and snapshots direct and prepared descriptors", () => {
     const direct = directSelection();
     const context = { subject: SUBJECT, time: TIME };

@@ -1,19 +1,28 @@
-import type { DatabaseSync } from "node:sqlite";
-import { type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
   add,
+  aggregate,
   and,
+  castReal,
+  coalesce,
   compileD1Query,
   constant,
+  count,
+  countDistinct,
+  div,
   eq,
   filter,
   gt,
   isNotNull,
+  join,
   limit,
+  lt,
+  neq,
+  or,
   param,
   project,
   rowNumber,
@@ -22,6 +31,7 @@ import {
   sort,
   union,
   unixepoch,
+  valuesRelation,
   window,
 } from "@/lib/db";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
@@ -74,6 +84,120 @@ function repeatedThree<
   Columns extends Readonly<Record<string, AnyExpression>>,
 >(relation: Relation<Row, Columns>) {
   return union(union(relation, relation, true), relation, true);
+}
+
+function buildAggregateRankingQuery(
+  input: {
+    readonly limit?: number;
+    readonly cursor?: {
+      readonly bounceRate: number;
+      readonly views: number;
+      readonly pathname: string;
+    };
+    readonly volatile?: boolean;
+  } = {},
+) {
+  const pages = valuesRelation(
+    {
+      pathname: { affinity: "text", nullable: false },
+      sessionId: { affinity: "text", nullable: false },
+      visitorId: { affinity: "text", nullable: false },
+      durationKey: { affinity: "text", nullable: false },
+    },
+    [
+      { pathname: "/a", sessionId: "s-a", visitorId: "v-a", durationKey: "5" },
+      { pathname: "/a", sessionId: "s-a", visitorId: "v-a", durationKey: "5" },
+      { pathname: "/a", sessionId: "s-b", visitorId: "v-b", durationKey: "9" },
+      { pathname: "/b", sessionId: "s-c", visitorId: "v-c", durationKey: "1" },
+      { pathname: "/c", sessionId: "s-d", visitorId: "v-d", durationKey: "1" },
+      { pathname: "/d", sessionId: "s-e", visitorId: "v-e", durationKey: "2" },
+      { pathname: "/d", sessionId: "s-e", visitorId: "v-e", durationKey: "3" },
+    ],
+  );
+  const selectedPages = filter(
+    pages,
+    input.volatile
+      ? and(neq(pages.columns.pathname, param("")), gt(unixepoch(), param(0)))
+      : neq(pages.columns.pathname, param("")),
+  );
+  const pathRows = aggregate(selectedPages, {
+    groupBy: { pathname: selectedPages.columns.pathname },
+    aggregates: {
+      views: count(),
+      sessions: countDistinct(selectedPages.columns.sessionId),
+      visitors: countDistinct(selectedPages.columns.visitorId),
+      durationKeys: countDistinct(selectedPages.columns.durationKey),
+    },
+  });
+  const sessionPages = filter(
+    selectedPages,
+    neq(selectedPages.columns.sessionId, param("")),
+  );
+  const pathSessionRows = aggregate(sessionPages, {
+    groupBy: {
+      pathname: sessionPages.columns.pathname,
+      sessionId: sessionPages.columns.sessionId,
+    },
+    aggregates: { visitCount: count() },
+  });
+  const singleVisitRows = filter(
+    pathSessionRows,
+    eq(pathSessionRows.columns.visitCount, param(1)),
+  );
+  const bounceRows = aggregate(singleVisitRows, {
+    groupBy: { pathname: singleVisitRows.columns.pathname },
+    aggregates: { bounces: count() },
+  });
+  const joined = join(
+    pathRows,
+    bounceRows,
+    eq(pathRows.columns.pathname, bounceRows.columns.pathname),
+    "left",
+  );
+  const bounces = coalesce(joined.columns.right_bounces, constant(0));
+  const metrics = project(joined, {
+    pathname: joined.columns.left_pathname,
+    views: joined.columns.left_views,
+    sessions: joined.columns.left_sessions,
+    visitors: joined.columns.left_visitors,
+    durationKeys: joined.columns.left_durationKeys,
+    bounces,
+    bounceRate: div(castReal(bounces), joined.columns.left_sessions),
+  });
+  const selectedMetrics = input.cursor
+    ? filter(
+        metrics,
+        or(
+          lt(metrics.columns.bounceRate, param(input.cursor.bounceRate)),
+          and(
+            eq(metrics.columns.bounceRate, param(input.cursor.bounceRate)),
+            lt(metrics.columns.views, param(input.cursor.views)),
+          ),
+          and(
+            eq(metrics.columns.bounceRate, param(input.cursor.bounceRate)),
+            eq(metrics.columns.views, param(input.cursor.views)),
+            gt(metrics.columns.pathname, param(input.cursor.pathname)),
+          ),
+        ),
+      )
+    : metrics;
+  const sorted = sort(selectedMetrics, [
+    { expression: selectedMetrics.columns.bounceRate, direction: "DESC" },
+    { expression: selectedMetrics.columns.views, direction: "DESC" },
+    { expression: selectedMetrics.columns.pathname, direction: "ASC" },
+  ]);
+  const limited =
+    input.limit === undefined ? sorted : limit(sorted, input.limit);
+  const output = project(limited, {
+    pathname: limited.columns.pathname,
+    views: limited.columns.views,
+    sessions: limited.columns.sessions,
+    visitors: limited.columns.visitors,
+    durationKeys: limited.columns.durationKeys,
+    bounces: limited.columns.bounces,
+    bounceRate: limited.columns.bounceRate,
+  });
+  return { output, selectedPages, pathRows, bounceRows, metrics, sorted };
 }
 
 describe("shared relation physical selection", () => {
@@ -129,6 +253,307 @@ describe("shared relation physical selection", () => {
     expect(
       lowerLogicalPlan(repeatedThree(selectiveWideFilter)).sharedRelations,
     ).toEqual([]);
+  });
+
+  it("shares a repeated four-column aggregate ranking input without changing rows", () => {
+    const database = new DatabaseSync(":memory:");
+    databases.add(database);
+    const fullRows = [
+      {
+        pathname: "/b",
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+        durationKeys: 1,
+        bounces: 1,
+        bounceRate: 1,
+      },
+      {
+        pathname: "/c",
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+        durationKeys: 1,
+        bounces: 1,
+        bounceRate: 1,
+      },
+      {
+        pathname: "/a",
+        views: 3,
+        sessions: 2,
+        visitors: 2,
+        durationKeys: 2,
+        bounces: 1,
+        bounceRate: 0.5,
+      },
+      {
+        pathname: "/d",
+        views: 2,
+        sessions: 1,
+        visitors: 1,
+        durationKeys: 2,
+        bounces: 0,
+        bounceRate: 0,
+      },
+    ];
+    const cases = [
+      { input: {}, expected: fullRows },
+      { input: { limit: 0 }, expected: [] },
+      { input: { limit: 2 }, expected: fullRows.slice(0, 2) },
+      {
+        input: {
+          limit: 2,
+          cursor: { bounceRate: 1, views: 1, pathname: "/b" },
+        },
+        expected: [fullRows[1]!, fullRows[2]!],
+      },
+    ] as const;
+
+    for (const { input, expected } of cases) {
+      const { output, selectedPages } = buildAggregateRankingQuery(input);
+      const physical = lowerLogicalPlan(output);
+      const shared = physical.sharedRelations.find(
+        ({ node }) => node === selectedPages.node,
+      );
+      expect(shared).toMatchObject({
+        materialization: "auto",
+        fields: [{}, {}, {}, {}],
+      });
+      expect(shared?.fields).toHaveLength(4);
+
+      const optimized = compileD1Query(physical);
+      const mechanical = compileD1QueryUnoptimizedForTest(output);
+      const optimizedRows = database
+        .prepare(optimized.sql)
+        .all(...(optimized.bindings as SQLInputValue[]));
+      const mechanicalRows = database
+        .prepare(mechanical.sql)
+        .all(...(mechanical.bindings as SQLInputValue[]));
+      expect(optimizedRows).toEqual(mechanicalRows);
+      expect(optimizedRows).toEqual(expected);
+      expect(optimized.physicalPlanShape?.cteCount).toBeGreaterThanOrEqual(1);
+      expect(optimized.sql).toContain("_d1_shared_");
+    }
+  });
+
+  it("rejects aggregate ranking shapes outside the local wrapper and closed aggregate graph", () => {
+    const base = buildAggregateRankingQuery();
+    const assertNotShared = (query: Parameters<typeof lowerLogicalPlan>[0]) => {
+      expect(
+        lowerLogicalPlan(query).sharedRelations.some(
+          ({ node }) => node === base.selectedPages.node,
+        ),
+      ).toBe(false);
+    };
+
+    const computedRoot = project(base.output, {
+      pathname: base.output.columns.pathname,
+      views: add(base.output.columns.views, constant(0)),
+    });
+    assertNotShared(computedRoot);
+
+    const offsetLimited = limit(base.sorted, 3, 1);
+    const offsetOutput = project(offsetLimited, {
+      pathname: offsetLimited.columns.pathname,
+      views: offsetLimited.columns.views,
+    });
+    assertNotShared(offsetOutput);
+
+    const unionedMetrics = union(base.metrics, base.metrics, true);
+    const globalUnionLimit = limit(unionedMetrics, 3);
+    const unionSorted = sort(globalUnionLimit, [
+      {
+        expression: globalUnionLimit.columns.bounceRate,
+        direction: "DESC",
+      },
+    ]);
+    const unionOutput = project(unionSorted, {
+      pathname: unionSorted.columns.pathname,
+      views: unionSorted.columns.views,
+    });
+    assertNotShared(unionOutput);
+
+    const mixedAggregateRawJoin = join(
+      base.pathRows,
+      base.selectedPages,
+      eq(base.pathRows.columns.pathname, base.selectedPages.columns.pathname),
+      "left",
+    );
+    const mixedSorted = sort(mixedAggregateRawJoin, [
+      {
+        expression: mixedAggregateRawJoin.columns.left_views,
+        direction: "DESC",
+      },
+    ]);
+    const mixedOutput = project(mixedSorted, {
+      pathname: mixedSorted.columns.left_pathname,
+      views: mixedSorted.columns.left_views,
+    });
+    assertNotShared(mixedOutput);
+
+    const nestedSort = sort(base.sorted, [
+      { expression: base.sorted.columns.bounceRate, direction: "DESC" },
+    ]);
+    const nestedSortOutput = project(nestedSort, {
+      pathname: nestedSort.columns.pathname,
+      views: nestedSort.columns.views,
+    });
+    assertNotShared(nestedSortOutput);
+
+    const nestedLimit = limit(base.sorted, 2);
+    const nestedLimitSort = sort(nestedLimit, [
+      { expression: nestedLimit.columns.bounceRate, direction: "DESC" },
+    ]);
+    const nestedLimitOutput = project(nestedLimitSort, {
+      pathname: nestedLimitSort.columns.pathname,
+      views: nestedLimitSort.columns.views,
+    });
+    assertNotShared(nestedLimitOutput);
+
+    const windowedMetrics = window(base.metrics, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: base.metrics.columns.views, direction: "DESC" },
+        ],
+      }),
+    });
+    const windowSorted = sort(windowedMetrics, [
+      { expression: windowedMetrics.columns.bounceRate, direction: "DESC" },
+    ]);
+    const windowOutput = project(windowSorted, {
+      pathname: windowSorted.columns.pathname,
+      rank: windowSorted.columns.rank,
+    });
+    assertNotShared(windowOutput);
+
+    const scalarSource = project(scan(schema.site_identities), {
+      value: constant(1),
+    });
+    const scalarMetrics = project(base.metrics, {
+      pathname: base.metrics.columns.pathname,
+      views: base.metrics.columns.views,
+      bounceRate: base.metrics.columns.bounceRate,
+      lookupValue: scalar(scalarSource),
+    });
+    const scalarSorted = sort(scalarMetrics, [
+      { expression: scalarMetrics.columns.bounceRate, direction: "DESC" },
+    ]);
+    const scalarOutput = project(scalarSorted, {
+      pathname: scalarSorted.columns.pathname,
+      views: scalarSorted.columns.views,
+      lookupValue: scalarSorted.columns.lookupValue,
+    });
+    assertNotShared(scalarOutput);
+
+    const correlatedIdentities = scan(schema.site_identities);
+    const correlatedIdentity = filter(
+      correlatedIdentities,
+      eq(correlatedIdentities.columns.site_id, base.metrics.columns.pathname),
+    );
+    const correlatedLookup = project(correlatedIdentity, {
+      sitePk: correlatedIdentity.columns.site_pk,
+    });
+    const correlatedMetrics = project(base.metrics, {
+      pathname: base.metrics.columns.pathname,
+      views: base.metrics.columns.views,
+      bounceRate: base.metrics.columns.bounceRate,
+      sitePk: scalar(correlatedLookup),
+    });
+    const correlatedSorted = sort(correlatedMetrics, [
+      {
+        expression: correlatedMetrics.columns.bounceRate,
+        direction: "DESC",
+      },
+    ]);
+    const correlatedOutput = project(correlatedSorted, {
+      pathname: correlatedSorted.columns.pathname,
+      views: correlatedSorted.columns.views,
+      sitePk: correlatedSorted.columns.sitePk,
+    });
+    assertNotShared(correlatedOutput);
+
+    const volatile = buildAggregateRankingQuery({ volatile: true });
+    expect(
+      lowerLogicalPlan(volatile.output).sharedRelations.some(
+        ({ node }) => node === volatile.selectedPages.node,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps a shared relation forbidden when a scalar-query edge reaches it in either join order", () => {
+    const pages = valuesRelation(
+      {
+        pathname: { affinity: "text", nullable: false },
+        sessionId: { affinity: "text", nullable: false },
+        visitorId: { affinity: "text", nullable: false },
+        durationKey: { affinity: "text", nullable: false },
+      },
+      [
+        {
+          pathname: "/a",
+          sessionId: "s-a",
+          visitorId: "v-a",
+          durationKey: "1",
+        },
+        {
+          pathname: "/a",
+          sessionId: "s-b",
+          visitorId: "v-b",
+          durationKey: "2",
+        },
+      ],
+    );
+    const selectedPages = filter(pages, neq(pages.columns.pathname, param("")));
+    const querySource = project(selectedPages, {
+      pathname: selectedPages.columns.pathname,
+    });
+    const pageAggregate = aggregate(selectedPages, {
+      groupBy: { pathname: selectedPages.columns.pathname },
+      aggregates: {
+        views: count(),
+        scalarVisits: count(scalar(querySource)),
+        sessions: countDistinct(selectedPages.columns.sessionId),
+      },
+    });
+    const sessionAggregate = aggregate(selectedPages, {
+      groupBy: { pathname: selectedPages.columns.pathname },
+      aggregates: {
+        views: count(),
+        scalarVisits: count(scalar(querySource)),
+        sessions: countDistinct(selectedPages.columns.sessionId),
+      },
+    });
+
+    for (const reverse of [false, true]) {
+      const left = reverse ? sessionAggregate : pageAggregate;
+      const right = reverse ? pageAggregate : sessionAggregate;
+      const joined = join(
+        left,
+        right,
+        eq(left.columns.pathname, right.columns.pathname),
+      );
+      const sessions = reverse
+        ? joined.columns.left_sessions
+        : joined.columns.right_sessions;
+      const metrics = project(joined, {
+        pathname: joined.columns.left_pathname,
+        views: joined.columns.left_views,
+        sessions,
+      });
+      const sorted = sort(metrics, [
+        { expression: metrics.columns.views, direction: "DESC" },
+      ]);
+      const limited = limit(sorted, 1);
+      const output = project(limited, {
+        pathname: limited.columns.pathname,
+        views: limited.columns.views,
+      });
+      expect(
+        lowerLogicalPlan(output).sharedRelations.some(
+          ({ node }) => node === selectedPages.node,
+        ),
+      ).toBe(false);
+    }
   });
 
   it("requires selective deterministic input and rejects scope barriers", () => {

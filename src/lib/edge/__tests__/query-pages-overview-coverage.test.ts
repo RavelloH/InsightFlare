@@ -41,6 +41,7 @@ import {
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
+  appendSqlConditions,
   buildVisitFilterSql,
   buildVisitSourceCte,
   queryD1All,
@@ -736,6 +737,104 @@ ORDER BY rowType ASC, cardType ASC, rowRank ASC, value ASC
   };
 }
 
+/** Frozen pre-Logical full page-card query used for Wave50 differentials. */
+function legacyPageCardMetricsOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  filters: FilterDocument,
+  options: {
+    sort?:
+      | "views"
+      | "visitors"
+      | "sessions"
+      | "bounceRate"
+      | "pagesPerSession"
+      | "avgDurationMs";
+    direction?: "asc" | "desc";
+    cursor?: { primary: number; secondary: number; pathname: string };
+    limit?: number;
+  } = {},
+) {
+  const scopedDataset = scopedDatasetFor(targetSiteId, targetWindow, filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window: targetWindow });
+  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
+    "TRIM(COALESCE(pathname, '')) != ''",
+  ]);
+  const sort = options.sort ?? "views";
+  const direction = options.direction ?? "desc";
+  const secondary =
+    sort === "views" || sort === "bounceRate" ? "sessions" : "views";
+  const cursorOperator = direction === "asc" ? ">" : "<";
+  const cursorClause = options.cursor
+    ? `WHERE pr.${sort} ${cursorOperator} ?
+        OR (pr.${sort} = ? AND pr.${secondary} ${cursorOperator} ?)
+        OR (pr.${sort} = ? AND pr.${secondary} = ? AND pr.pathname > ?)`
+    : "";
+  const sql = `
+WITH
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
+filtered_visits AS MATERIALIZED (
+  SELECT pathname, session_id AS sessionId, visitor_id AS visitorId, duration_ms AS durationMs
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${filteredClause}
+),
+path_rollup AS (
+  SELECT pathname, count(*) AS views,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    COALESCE(sum(CASE WHEN durationMs IS NOT NULL AND durationMs >= 0 THEN durationMs ELSE 0 END), 0) AS totalDuration
+  FROM filtered_visits GROUP BY pathname
+),
+path_session_rollup AS (
+  SELECT pathname, sessionId, count(*) AS visitCount FROM filtered_visits
+  WHERE sessionId != '' GROUP BY pathname, sessionId
+),
+path_bounce_rollup AS (
+  SELECT pathname, count(*) AS bounces FROM path_session_rollup
+  WHERE visitCount = 1 GROUP BY pathname
+),
+path_metrics AS (
+  SELECT pr.pathname AS pathname, pr.views AS views, pr.sessions AS sessions,
+    pr.visitors AS visitors, COALESCE(pb.bounces, 0) AS bounces,
+    pr.totalDuration AS totalDuration, 0 AS durationViews,
+    CASE WHEN pr.sessions <= 0 THEN 0.0 ELSE COALESCE(pb.bounces, 0) * 1.0 / pr.sessions END AS bounceRate,
+    CASE WHEN pr.sessions <= 0 THEN 0.0 ELSE pr.views * 1.0 / pr.sessions END AS pagesPerSession,
+    CASE WHEN pr.sessions <= 0 THEN 0.0 ELSE pr.totalDuration * 1.0 / pr.sessions END AS avgDurationMs
+  FROM path_rollup pr LEFT JOIN path_bounce_rollup pb ON pb.pathname = pr.pathname
+)
+SELECT pr.pathname AS pathname, pr.views AS views, pr.sessions AS sessions,
+  pr.visitors AS visitors, pr.bounces AS bounces, pr.totalDuration AS totalDuration,
+  pr.durationViews AS durationViews
+FROM path_metrics pr
+${cursorClause ? `${cursorClause}\n` : ""}ORDER BY pr.${sort} ${direction}, pr.${secondary} ${direction}, pr.pathname ASC
+LIMIT ?
+`;
+  const bindings = [
+    ...(scopedDataset
+      ? scopedDataset.bindings.map((binding) => binding.value)
+      : [
+          ...visitSourceBindings(targetSiteId, targetWindow),
+          ...(filter?.bindings ?? []),
+        ]),
+    ...(options.cursor
+      ? [
+          options.cursor.primary,
+          options.cursor.primary,
+          options.cursor.secondary,
+          options.cursor.primary,
+          options.cursor.secondary,
+          options.cursor.pathname,
+        ]
+      : []),
+    options.limit ?? 20,
+  ] as QueryBinding[];
+  const rows = database.prepare(sql).all(...bindings) as D1Row[];
+  return { sql, bindings, rows };
+}
+
 function normalizedFilters(root: unknown): FilterDocument {
   return normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
 }
@@ -777,6 +876,7 @@ function insertPageRow(
     siteId?: string;
     startedAt?: number;
     browser?: string;
+    durationMs?: number | null;
     query?: string;
     hash?: string;
   },
@@ -794,8 +894,8 @@ function insertPageRow(
       INSERT INTO visits (
         visit_id, site_id, visitor_id, session_id, status, started_at,
         last_activity_at, pathname, hostname, title, query_string,
-        hash_fragment, country, browser, site_pk
-      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', '', ?, ?, ?, ?, ?)
+        hash_fragment, country, browser, site_pk, duration_ms
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', '', ?, ?, ?, ?, ?, ?)
     `,
     )
     .run(
@@ -811,6 +911,7 @@ function insertPageRow(
       input.country,
       input.browser ?? "",
       siteIdentity.site_pk,
+      input.durationMs ?? null,
     );
 }
 function visitBindings(targetWindow = window): QueryBinding[] {
@@ -5157,20 +5258,17 @@ describe("edge pages D1 queries", () => {
       },
     ]);
 
-    expect(calls[0].sql).toContain("path_bounce_rollup AS");
-    expect(calls[0].sql).toContain("TRIM(COALESCE(pathname, '')) IN (?, ?)");
+    expect(calls[0].sql).toContain("TRIM(COALESCE(");
+    expect(calls[0].sql).toContain("IN (?, ?)");
     expect(calls[0].sql).toContain("LIMIT ?");
     expect(calls[0].sql).not.toContain("OFFSET");
-    expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
-      "Chrome",
-      window.startMs,
-      window.endExclusiveMs,
-      "Chrome",
-      "/pricing",
-      "/docs",
-      10,
-    ]);
+    expect(calls[0].bindings.slice(0, visitBindings().length)).toEqual(
+      visitBindings(),
+    );
+    expect(calls[0].bindings).toContain("Chrome");
+    expect(calls[0].bindings).toContain("/pricing");
+    expect(calls[0].bindings).toContain("/docs");
+    expect(calls[0].bindings.at(-1)).toBe(10);
   });
 
   it("maps sparse page card rows without pagination options", async () => {
@@ -5208,10 +5306,719 @@ describe("edge pages D1 queries", () => {
       },
     ]);
     expect(calls[0].sql).not.toContain("LIMIT ? OFFSET ?");
-    expect(calls[0].bindings).toEqual(visitBindings());
+    expect(calls[0].bindings.slice(0, visitBindings().length)).toEqual(
+      visitBindings(),
+    );
   });
 
-  it("materializes page-card visits once while preserving path-level bounces", async () => {
+  it("compiles the Wave50 Page card metric budget probes", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    const payloadPaths = Array.from(
+      { length: 40 },
+      (_, index) => `/wave50/${index}`,
+    );
+    insertPageRow(database, {
+      visitId: "wave50-hit",
+      visitorId: "wave50-visitor",
+      sessionId: "wave50-session",
+      pathname: "/hit",
+      country: "US",
+    });
+    seedCombinedPayloadEvent(database, "wave50-hit", payloadPaths);
+    const preparedSession = prepareScopedQuery("pages", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        window.timeZone,
+        window.nowMs,
+      ),
+      filters: filterFixture({ country: "US" }),
+      scopePreference: "session",
+    } as never);
+    const preparedSessionMetadata = scopedFilterMetadata(
+      preparedSession.filters,
+    );
+    if (!preparedSession.filters || !preparedSessionMetadata)
+      throw new Error("wave50_prepared_session_budget_missing");
+    const preparedSession128 = attachScopedFilterMetadata(
+      preparedSession.filters,
+      {
+        ...preparedSessionMetadata,
+        plan: {
+          ...preparedSessionMetadata.plan,
+          advancedMatches: {
+            entityIds: Array.from({ length: 128 }, (_, index) => ({
+              siteId,
+              id:
+                index === 0
+                  ? "wave50-budget-session"
+                  : `wave50-budget-${index}`,
+            })),
+          },
+        },
+      },
+    );
+    const longRequestedPaths = Array.from(
+      { length: 128 },
+      (_, index) =>
+        `/wave50/requested/${String(index).padStart(3, "0")}/${"x".repeat(96)}`,
+    );
+    const legacyForty = legacyPageCardMetricsOracle(
+      database,
+      siteId,
+      window,
+      combinedPayloadFilter(payloadPaths),
+    );
+    expect(legacyForty.rows).toEqual([
+      {
+        pathname: "/hit",
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+        bounces: 1,
+        totalDuration: 0,
+        durationViews: 0,
+      },
+    ]);
+    expect(Buffer.byteLength(legacyForty.sql, "utf8")).toBe(20_368);
+    expect(legacyForty.bindings).toHaveLength(46);
+    const probes = [
+      {
+        name: "plain-limited",
+        filters: EMPTY_FILTER_DOCUMENT,
+        options: { limit: 20 } as const,
+      },
+      {
+        name: "ratio-cursor",
+        filters: EMPTY_FILTER_DOCUMENT,
+        options: {
+          limit: 20,
+          cursor: { primary: 0.5, secondary: 2, pathname: "/a" },
+          sort: "bounceRate" as const,
+          direction: "desc" as const,
+        },
+      },
+      {
+        name: "event-payload-40-limited",
+        filters: combinedPayloadFilter(payloadPaths),
+        options: { limit: 20 } as const,
+      },
+      {
+        name: "event-payload-40-no-limit",
+        filters: combinedPayloadFilter(payloadPaths),
+        options: {} as const,
+      },
+      {
+        name: "event-payload-40-negative-limit",
+        filters: combinedPayloadFilter(payloadPaths),
+        options: { limit: -1 } as const,
+      },
+      {
+        name: "event-payload-40-ratio-cursor",
+        filters: combinedPayloadFilter(payloadPaths),
+        options: {
+          limit: 20,
+          cursor: { primary: 0.5, secondary: 2, pathname: "/a" },
+          sort: "bounceRate" as const,
+          direction: "desc" as const,
+        },
+      },
+      {
+        name: "prepared-session-128",
+        filters: preparedSession128,
+        options: {} as const,
+      },
+      {
+        name: "long-requested-paths-128",
+        filters: EMPTY_FILTER_DOCUMENT,
+        options: { pathnames: longRequestedPaths, limit: 20 },
+      },
+    ];
+    try {
+      const metrics: Array<{
+        name: string;
+        sqlBytes: number;
+        bindings: number;
+        sha256: string;
+      }> = [];
+      for (const probe of probes) {
+        const start = calls.length;
+        const rows = await queryPageCardMetricsFromD1(
+          env,
+          siteId,
+          window,
+          probe.filters,
+          probe.options,
+        );
+        const call = calls[start];
+        if (!call) throw new Error("wave50_probe_statement_missing");
+        expect(calls.length - start).toBe(1);
+        if (probe.name === "event-payload-40-limited")
+          expect(rows).toEqual(legacyForty.rows);
+        metrics.push({
+          name: probe.name,
+          sqlBytes: Buffer.byteLength(call.sql, "utf8"),
+          bindings: call.bindings.length,
+          sha256: createHash("sha256").update(call.sql, "utf8").digest("hex"),
+        });
+      }
+      expect(metrics).toEqual([
+        {
+          name: "plain-limited",
+          sqlBytes: 4_201,
+          bindings: 10,
+          sha256:
+            "30db2681030bf2c9e24021339be44c0e33906a286813acd29885ab506cbd069f",
+        },
+        {
+          name: "ratio-cursor",
+          sqlBytes: 4_889,
+          bindings: 19,
+          sha256:
+            "1edeec909d1c2255e18a347692fad8afabaf99e8e3238f9917b37c32c40bb629",
+        },
+        {
+          name: "event-payload-40-limited",
+          sqlBytes: 61_756,
+          bindings: 52,
+          sha256:
+            "86f694587a2159d3046eb1e5ffd1025e552ea4717d6b43ed3f707701338b52e5",
+        },
+        {
+          name: "event-payload-40-no-limit",
+          sqlBytes: 61_564,
+          bindings: 51,
+          sha256:
+            "4d4e7a08afa6e8b5069400eac6e452da7b23012947b520a8ad9cec45413622ca",
+        },
+        {
+          name: "event-payload-40-negative-limit",
+          sqlBytes: 61_564,
+          bindings: 51,
+          sha256:
+            "4d4e7a08afa6e8b5069400eac6e452da7b23012947b520a8ad9cec45413622ca",
+        },
+        {
+          name: "event-payload-40-ratio-cursor",
+          sqlBytes: 62_473,
+          bindings: 61,
+          sha256:
+            "a711d14dfeb7248ca8725b854d695920911d45891f2fbf7cb329d77489ba591e",
+        },
+        {
+          name: "prepared-session-128",
+          sqlBytes: 5_662,
+          bindings: 11,
+          sha256:
+            "550e7432b3e82c45c82d85d58bda3f21369e0d6d390a2c14366ab32a7be63cee",
+        },
+        {
+          name: "long-requested-paths-128",
+          sqlBytes: 4_274,
+          bindings: 11,
+          sha256:
+            "3baa435508947dd65dbee72b60f6a3c10e168a0453591a39dd3fbe20fc2c87f9",
+        },
+      ]);
+      expect(
+        metrics.every(
+          ({ sqlBytes, bindings }) =>
+            sqlBytes <= D1_MAX_SQL_UTF8_BYTES &&
+            bindings <= D1_MAX_BOUND_PARAMETERS,
+        ),
+      ).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
+  it("uses each actual reader window with prepared observation and session proofs", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    const duration = window.endExclusiveMs - window.startMs;
+    const previousWindow: QueryWindow = {
+      startMs: window.startMs - duration,
+      endExclusiveMs: window.startMs,
+      nowMs: window.nowMs,
+      timeZone: window.timeZone,
+    };
+    const prepare = (
+      targetWindow: QueryWindow,
+      filters: FilterDocument,
+      scopePreference: "event" | "session" | "visitor",
+    ) =>
+      prepareScopedQuery("pages", {
+        context: siteQueryContext(siteId, "private-dashboard"),
+        time: createQueryTime(
+          targetWindow.startMs,
+          targetWindow.endExclusiveMs,
+          targetWindow.timeZone,
+          targetWindow.nowMs,
+        ),
+        filters,
+        scopePreference,
+      } as never);
+    const actualMetrics = async (
+      targetWindow: QueryWindow,
+      filters: FilterDocument,
+    ) => {
+      const start = calls.length;
+      const rows = await queryPageCardMetricsFromD1(
+        env,
+        siteId,
+        targetWindow,
+        filters,
+      );
+      expect(calls.length - start).toBe(1);
+      return rows;
+    };
+
+    try {
+      insertPageRow(database, {
+        visitId: "window-observation-previous",
+        visitorId: "window-observation-previous-visitor",
+        sessionId: "window-observation-previous-session",
+        pathname: "/pricing",
+        country: "US",
+        startedAt: previousWindow.startMs + 100,
+      });
+      insertPageRow(database, {
+        visitId: "window-observation-current-a",
+        visitorId: "window-observation-current-visitor-a",
+        sessionId: "window-observation-current-session-a",
+        pathname: "/pricing",
+        country: "US",
+        startedAt: window.startMs + 100,
+      });
+      insertPageRow(database, {
+        visitId: "window-observation-current-b",
+        visitorId: "window-observation-current-visitor-b",
+        sessionId: "window-observation-current-session-b",
+        pathname: "/pricing",
+        country: "US",
+        startedAt: window.startMs + 200,
+      });
+      insertPageRow(database, {
+        visitId: "window-observation-current-outside-path",
+        visitorId: "window-observation-outside-path-visitor",
+        sessionId: "window-observation-outside-path-session",
+        pathname: "/docs",
+        country: "US",
+        startedAt: window.startMs + 300,
+      });
+      insertPageRow(database, {
+        visitId: "window-observation-cross-site",
+        visitorId: "window-observation-cross-site-visitor",
+        sessionId: "window-observation-cross-site-session",
+        pathname: "/pricing",
+        country: "US",
+        siteId: "another-site",
+        startedAt: window.startMs + 400,
+      });
+      insertPageRow(database, {
+        visitId: "window-observation-outside-range",
+        visitorId: "window-observation-outside-range-visitor",
+        sessionId: "window-observation-outside-range-session",
+        pathname: "/pricing",
+        country: "US",
+        startedAt: window.endExclusiveMs + 1,
+      });
+
+      const observationPrepared = prepare(
+        window,
+        filterFixture({ path: "/pricing" }),
+        "event",
+      );
+      const observationPreviousLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        previousWindow,
+        observationPrepared.filters!,
+      );
+      const observationCurrentLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        window,
+        observationPrepared.filters!,
+      );
+      expect(observationPreviousLegacy.rows.map((row) => row.views)).toEqual([
+        1,
+      ]);
+      expect(observationCurrentLegacy.rows.map((row) => row.views)).toEqual([
+        2,
+      ]);
+      expect(
+        await actualMetrics(previousWindow, observationPrepared.filters!),
+      ).toEqual(observationPreviousLegacy.rows);
+      expect(await actualMetrics(window, observationPrepared.filters!)).toEqual(
+        observationCurrentLegacy.rows,
+      );
+
+      const dashboard = await queryPagesDashboard(env, siteId, {
+        window,
+        filters: observationPrepared.filters!,
+        interval: "hour",
+        page: { limit: 20, cursor: null },
+      });
+      expect(dashboard.items).toContainEqual(
+        expect.objectContaining({
+          pathname: "/pricing",
+          metrics: expect.objectContaining({ views: 2 }),
+          changeRates: expect.objectContaining({ views: 100 }),
+        }),
+      );
+
+      insertPageRow(database, {
+        visitId: "window-session-previous-match",
+        visitorId: "window-session-previous-visitor",
+        sessionId: "window-session-shared",
+        pathname: "/match",
+        country: "US",
+        startedAt: previousWindow.startMs + 200,
+      });
+      insertPageRow(database, {
+        visitId: "window-session-previous-expansion",
+        visitorId: "window-session-previous-visitor",
+        sessionId: "window-session-shared",
+        pathname: "/expanded-previous",
+        country: "CA",
+        startedAt: previousWindow.startMs + 300,
+      });
+      insertPageRow(database, {
+        visitId: "window-session-current-match",
+        visitorId: "window-session-current-visitor",
+        sessionId: "window-session-shared",
+        pathname: "/match",
+        country: "US",
+        startedAt: window.startMs + 500,
+      });
+      insertPageRow(database, {
+        visitId: "window-session-current-expansion",
+        visitorId: "window-session-current-visitor",
+        sessionId: "window-session-shared",
+        pathname: "/expanded-current",
+        country: "CA",
+        startedAt: window.startMs + 600,
+      });
+      insertPageRow(database, {
+        visitId: "window-session-cross-site",
+        visitorId: "window-session-cross-site-visitor",
+        sessionId: "window-session-cross-site-session",
+        pathname: "/match",
+        country: "US",
+        siteId: "another-site",
+        startedAt: window.startMs + 700,
+      });
+
+      const entityPrepared = prepare(
+        window,
+        filterFixture({ country: "US" }),
+        "session",
+      );
+      const entityPreviousLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        previousWindow,
+        entityPrepared.filters!,
+      );
+      const entityCurrentLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        window,
+        entityPrepared.filters!,
+      );
+      expect(
+        entityPreviousLegacy.rows.map((row) => row.pathname).sort(),
+      ).toEqual(["/expanded-previous", "/match", "/pricing"]);
+      expect(
+        entityCurrentLegacy.rows.map((row) => row.pathname).sort(),
+      ).toEqual(["/docs", "/expanded-current", "/match", "/pricing"]);
+      expect(
+        await actualMetrics(previousWindow, entityPrepared.filters!),
+      ).toEqual(entityPreviousLegacy.rows);
+      expect(await actualMetrics(window, entityPrepared.filters!)).toEqual(
+        entityCurrentLegacy.rows,
+      );
+
+      insertPageRow(database, {
+        visitId: "window-visitor-previous-match",
+        visitorId: "window-visitor-shared",
+        sessionId: "window-visitor-previous-session-a",
+        pathname: "/visitor-previous-match",
+        country: "US",
+        startedAt: previousWindow.startMs + 400,
+      });
+      insertPageRow(database, {
+        visitId: "window-visitor-previous-expansion",
+        visitorId: "window-visitor-shared",
+        sessionId: "window-visitor-previous-session-b",
+        pathname: "/visitor-previous-expansion",
+        country: "CA",
+        startedAt: previousWindow.startMs + 500,
+      });
+      insertPageRow(database, {
+        visitId: "window-visitor-current-match",
+        visitorId: "window-visitor-shared",
+        sessionId: "window-visitor-current-session-a",
+        pathname: "/visitor-current-match",
+        country: "US",
+        startedAt: window.startMs + 800,
+      });
+      insertPageRow(database, {
+        visitId: "window-visitor-current-expansion",
+        visitorId: "window-visitor-shared",
+        sessionId: "window-visitor-current-session-b",
+        pathname: "/visitor-current-expansion",
+        country: "CA",
+        startedAt: window.startMs + 900,
+      });
+
+      const preparedWithMatches = (
+        scopePreference: "event" | "session" | "visitor",
+        matches: NonNullable<
+          NonNullable<
+            ReturnType<typeof scopedFilterMetadata>
+          >["plan"]["advancedMatches"]
+        >,
+      ) => {
+        const base = prepare(
+          window,
+          filterFixture({ country: "US" }),
+          scopePreference,
+        );
+        const metadata = scopedFilterMetadata(base.filters);
+        if (!base.filters || !metadata)
+          throw new Error("wave50_reader_window_prepared_matches_missing");
+        return attachScopedFilterMetadata(base.filters, {
+          ...metadata,
+          plan: { ...metadata.plan, advancedMatches: matches },
+        });
+      };
+      const observationMatchFilters = preparedWithMatches("event", {
+        visitIds: [{ siteId, id: "window-observation-current-a" }],
+        eventIds: [],
+      });
+      const observationMatchPreviousLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        previousWindow,
+        observationMatchFilters,
+      );
+      const observationMatchCurrentLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        window,
+        observationMatchFilters,
+      );
+      expect(observationMatchPreviousLegacy.rows).toEqual([]);
+      expect(
+        observationMatchCurrentLegacy.rows.map((row) => row.views),
+      ).toEqual([1]);
+      expect(
+        await actualMetrics(previousWindow, observationMatchFilters),
+      ).toEqual(observationMatchPreviousLegacy.rows);
+      expect(await actualMetrics(window, observationMatchFilters)).toEqual(
+        observationMatchCurrentLegacy.rows,
+      );
+
+      const sessionMatchFilters = preparedWithMatches("session", {
+        entityIds: [{ siteId, id: "window-session-shared" }],
+      });
+      const sessionMatchPreviousLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        previousWindow,
+        sessionMatchFilters,
+      );
+      const sessionMatchCurrentLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        window,
+        sessionMatchFilters,
+      );
+      expect(
+        sessionMatchPreviousLegacy.rows.map((row) => row.pathname).sort(),
+      ).toEqual(["/expanded-previous", "/match"]);
+      expect(
+        sessionMatchCurrentLegacy.rows.map((row) => row.pathname).sort(),
+      ).toEqual(["/expanded-current", "/match"]);
+      expect(await actualMetrics(previousWindow, sessionMatchFilters)).toEqual(
+        sessionMatchPreviousLegacy.rows,
+      );
+      expect(await actualMetrics(window, sessionMatchFilters)).toEqual(
+        sessionMatchCurrentLegacy.rows,
+      );
+
+      const visitorMatchFilters = preparedWithMatches("visitor", {
+        entityIds: [{ siteId, id: "window-visitor-shared" }],
+      });
+      const visitorMatchPreviousLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        previousWindow,
+        visitorMatchFilters,
+      );
+      const visitorMatchCurrentLegacy = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        window,
+        visitorMatchFilters,
+      );
+      expect(
+        visitorMatchPreviousLegacy.rows.map((row) => row.pathname).sort(),
+      ).toEqual(["/visitor-previous-expansion", "/visitor-previous-match"]);
+      expect(
+        visitorMatchCurrentLegacy.rows.map((row) => row.pathname).sort(),
+      ).toEqual(["/visitor-current-expansion", "/visitor-current-match"]);
+      expect(await actualMetrics(previousWindow, visitorMatchFilters)).toEqual(
+        visitorMatchPreviousLegacy.rows,
+      );
+      expect(await actualMetrics(window, visitorMatchFilters)).toEqual(
+        visitorMatchCurrentLegacy.rows,
+      );
+      expect(calls.length).toBeGreaterThanOrEqual(7);
+    } finally {
+      close();
+    }
+  });
+
+  it("matches the frozen metric sort matrix and accepts its signed dashboard cursor", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    let rowIndex = 0;
+    const visit = (
+      pathname: string,
+      sessionId: string,
+      visitorId: string,
+      durationMs: number | null,
+    ) => {
+      rowIndex += 1;
+      insertPageRow(database, {
+        visitId: `wave50-sort-${rowIndex}`,
+        visitorId,
+        sessionId,
+        pathname,
+        country: "US",
+        startedAt: window.startMs + rowIndex * 100,
+        durationMs,
+      });
+    };
+
+    try {
+      visit("/a", "a-many", "a-many", 100);
+      visit("/a", "a-many", "a-many", 100);
+      visit("/a", "a-many", "a-many", 100);
+      visit("/a", "a-single", "a-single", 100);
+      for (let sessionIndex = 0; sessionIndex < 3; sessionIndex += 1) {
+        visit(
+          "/b",
+          `b-session-${sessionIndex}`,
+          `b-visitor-${sessionIndex}-a`,
+          25,
+        );
+        visit(
+          "/b",
+          `b-session-${sessionIndex}`,
+          `b-visitor-${sessionIndex}-b`,
+          25,
+        );
+      }
+      for (let index = 0; index < 3; index += 1)
+        visit("/fractional", "fractional-a", "fractional-visitor", 1);
+      for (let index = 0; index < 2; index += 1)
+        visit("/fractional", "fractional-b", "fractional-visitor", 1);
+      visit("/high-duration", "duration-a", "duration-visitor-a", 250);
+      visit("/high-duration", "duration-b", "duration-visitor-b", 250);
+      visit("/d", "d-session", "d-visitor", 100);
+      visit("/tie-a", "tie-a-session", "tie-a-visitor", 0);
+      visit("/tie-b", "tie-b-session", "tie-b-visitor", 0);
+
+      const metrics = [
+        "views",
+        "visitors",
+        "sessions",
+        "bounceRate",
+        "pagesPerSession",
+        "avgDurationMs",
+      ] as const;
+      for (const sort of metrics) {
+        for (const direction of ["asc", "desc"] as const) {
+          const oldRows = legacyPageCardMetricsOracle(
+            database,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            { sort, direction },
+          ).rows;
+          const start = calls.length;
+          const actualRows = await queryPageCardMetricsFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            { sort, direction },
+          );
+          expect(calls.length - start).toBe(1);
+          expect(actualRows).toEqual(oldRows);
+        }
+      }
+
+      const cursor = { primary: 1, secondary: 1, pathname: "/tie-a" };
+      const oldCursorRows = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        { sort: "views", direction: "desc", cursor, limit: 1 },
+      ).rows;
+      const cursorStart = calls.length;
+      await expect(
+        queryPageCardMetricsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, {
+          sort: "views",
+          direction: "desc",
+          cursor,
+          limit: 1,
+        }),
+      ).resolves.toEqual(oldCursorRows);
+      expect(calls.length - cursorStart).toBe(1);
+      expect(oldCursorRows.map((row) => row.pathname)).toEqual(["/tie-b"]);
+
+      const expectedDashboardOrder = legacyPageCardMetricsOracle(
+        database,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        { sort: "views", direction: "desc" },
+      ).rows.map((row) => row.pathname);
+      const dashboardInput = {
+        window,
+        filters: EMPTY_FILTER_DOCUMENT,
+        interval: "day" as const,
+        sort: { key: "views" as const, direction: "desc" as const },
+      };
+      const firstPage = await queryPagesDashboard(env, siteId, {
+        ...dashboardInput,
+        page: { limit: 6, cursor: null },
+      });
+      expect(firstPage.pagination.nextCursor).toEqual(expect.any(String));
+      const secondPage = await queryPagesDashboard(env, siteId, {
+        ...dashboardInput,
+        page: {
+          limit: 6,
+          cursor: firstPage.pagination.nextCursor,
+        },
+      });
+      expect([
+        ...firstPage.items.map((item) => item.pathname),
+        ...secondPage.items.map((item) => item.pathname),
+      ]).toEqual(expectedDashboardOrder);
+      expect(firstPage.items.map((item) => item.pathname)).toHaveLength(6);
+      expect(secondPage.items.map((item) => item.pathname)).toHaveLength(1);
+    } finally {
+      close();
+    }
+  });
+
+  it("shares the Page-card visit definition while preserving path-level bounces", async () => {
     const database = new DatabaseSync(":memory:");
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
@@ -5327,13 +6134,18 @@ describe("edge pages D1 queries", () => {
       ]);
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+      expect(calls[0]?.sql).toContain('"_d1_shared_0" AS (');
+      expect(calls[0]?.sql.match(/FROM "_d1_shared_0" AS/gu)).toHaveLength(2);
+      expect(calls[0]?.sql).not.toContain("AS MATERIALIZED");
       const plan = database
         .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
         .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
       expect(
-        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
-      ).toHaveLength(1);
+        plan.filter((row) =>
+          row.detail.includes("USING INDEX idx_visits_site_pk_started_at"),
+        ),
+        JSON.stringify(plan.map((row) => row.detail)),
+      ).toHaveLength(2);
       expect(
         plan.some((row) =>
           row.detail.includes("idx_visits_site_pk_started_at"),
@@ -6225,7 +7037,8 @@ describe("edge paginated page and referrer readers", () => {
       items: [{ pathname: "/second" }],
       pagination: { hasMore: false, nextCursor: null },
     });
-    expect(second.calls[0].sql).toContain("pathname > ?");
+    expect(second.calls).toHaveLength(3);
+    expect(second.calls[0].bindings).toContain("/first");
   });
 
   it("aggregates current and comparison page rows in one dashboard request", async () => {
@@ -6438,8 +7251,11 @@ describe("edge paginated page and referrer readers", () => {
         sort: { key, direction: "asc" },
         page: { limit: 1, cursor: null },
       });
-      expect(normal.calls[0].sql).toContain("LOWER(pr.pathname) LIKE");
-      expect(normal.calls[0].sql).toContain(`ORDER BY pr.${key} asc`);
+      expect(normal.calls).toHaveLength(3);
+      expect(normal.calls[0].sql).toContain("LOWER(");
+      expect(normal.calls[0].sql).toContain("LIKE");
+      expect(normal.calls[0].sql).toContain("ORDER BY");
+      expect(normal.calls[0].bindings).toContain("%docs%");
     }
   });
 });
@@ -6720,7 +7536,10 @@ describe("edge pages handlers", () => {
 
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
-    expect(calls[0].sql).toContain("scope_final_visits");
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain(window.startMs);
+    expect(calls[0].bindings).toContain(window.endExclusiveMs);
+    expect(calls[0].bindings).toContain("/pricing");
     expect(calls[0].bindings.length).toBeGreaterThan(4);
   });
 
@@ -6787,7 +7606,8 @@ describe("edge pages handlers", () => {
       ),
     );
     expect(response.status).toBe(200);
-    expect(calls[0]?.sql).toContain("path_metrics");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.sql).toContain("ORDER BY");
     expect(calls[0]?.sql).not.toContain("current_metrics");
   });
 
@@ -6960,10 +7780,20 @@ describe("edge pages handlers", () => {
       },
     });
     expect(calls).toHaveLength(3);
-    expect(calls[0].bindings.slice(-2)).toEqual([window.endExclusiveMs, 3]);
-    expect(calls[1].bindings.slice(-2)).toEqual(["/pricing", "/docs"]);
-    expect(calls[2].bindings.slice(-3)).toEqual(["/pricing", "/docs", 3]);
-    expect(calls[2].sql).toContain("filtered_visits AS MATERIALIZED");
+    expect(calls[0].bindings).toContain(window.endExclusiveMs);
+    expect(calls[0].bindings).toContain(3);
+    const pageDashboardBindings = calls.flatMap((call) => call.bindings);
+    const pageDashboardBindingText = pageDashboardBindings
+      .map((binding) => String(binding))
+      .join("|");
+    expect(
+      pageDashboardBindingText,
+      JSON.stringify(pageDashboardBindings),
+    ).toContain("/pricing");
+    expect(
+      pageDashboardBindingText,
+      JSON.stringify(pageDashboardBindings),
+    ).toContain("/docs");
   });
 });
 describe("edge overview D1 queries and handlers", () => {

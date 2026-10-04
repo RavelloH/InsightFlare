@@ -80,6 +80,22 @@ function planWithForgedFilter(predicate: LogicalExpr): LogicalPlan {
 }
 
 describe("logical relational IR", () => {
+  it("marks zero-denominator division nullable", () => {
+    const builder = createBuilder();
+    const value = builder.arithmetic(
+      "divide",
+      builder.literal(1, { kind: "scalar", scalar: "number" }),
+      builder.literal(0, { kind: "scalar", scalar: "number" }),
+    );
+
+    expect(value.type).toEqual({
+      kind: "scalar",
+      scalar: "number",
+      unit: "ratio",
+    });
+    expect(value.nullable).toBe(true);
+  });
+
   it("accepts finite epoch-millisecond datetime literals", () => {
     const builder = createBuilder();
     const pages = builder.source("page", { includeOccurrenceTime: true });
@@ -544,6 +560,36 @@ describe("logical relational IR", () => {
 
     expect(() => validateLogicalPlan(builder.finish())).toThrow(
       "page_selection_event_name_unsupported",
+    );
+  });
+
+  it("allows prepared reader-window selections only on Page Sources", () => {
+    const time = createQueryTime(0, 10_000, "UTC", 10_000);
+    const prepared = prepareScopedQuery("event-records", {
+      context: siteQueryContext("site-a", "private-dashboard"),
+      time,
+      filters: EMPTY_FILTER_DOCUMENT,
+      scopePreference: "event",
+    } as QueryInput & { time: QueryTime });
+    const pageContext = createBuilder();
+    const selection = createSemanticScopedSourceSelection({
+      profile: "prepared-page-reader-window-v1",
+      filters: prepared.filters!,
+      subject: pageContext.context.subject,
+      time: pageContext.context.time,
+      expectedPlan: prepared.scopePlan!,
+    });
+
+    const pageBuilder = createBuilder();
+    const pages = pageBuilder.source("page", { selection });
+    pageBuilder.output("pages", pages, [{ name: "page", slot: "entity" }]);
+    expect(() => validateLogicalPlan(pageBuilder.finish())).not.toThrow();
+
+    const eventBuilder = createBuilder();
+    const events = eventBuilder.source("event", { selection });
+    eventBuilder.output("events", events, [{ name: "event", slot: "entity" }]);
+    expect(() => validateLogicalPlan(eventBuilder.finish())).toThrow(
+      "The scoped selection profile does not match its Source entity.",
     );
   });
 

@@ -1439,7 +1439,8 @@ export class AnalyticsLegacyScopedStorage {
     if (
       selection.profile !== "direct-page-analytics-v1" &&
       selection.profile !== "direct-page-session-compat-v1" &&
-      selection.profile !== "prepared-scoped-v1"
+      selection.profile !== "prepared-scoped-v1" &&
+      selection.profile !== "prepared-page-reader-window-v1"
     )
       throw new Error(`${path}.selection: Invalid Page source profile.`);
     if (selection.eventNameGate)
@@ -1492,6 +1493,10 @@ export class AnalyticsLegacyScopedStorage {
     if (node.entity !== "event")
       throw new Error(
         `${path}.selection: Scoped selection is currently supported only on Event report Sources.`,
+      );
+    if (selection.profile === "prepared-page-reader-window-v1")
+      throw new Error(
+        `${path}.selection: Page reader-window selections are unsupported on Event report Sources.`,
       );
     if (node.temporalDomain !== "candidate")
       throw new Error(

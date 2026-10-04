@@ -511,7 +511,8 @@ function infer(
       }
       const left = infer(expression.left, resolveSlot, `${path}.left`);
       const right = infer(expression.right, resolveSlot, `${path}.right`);
-      const nullable = left.nullable || right.nullable;
+      const nullable =
+        left.nullable || right.nullable || expression.operator === "divide";
       if (
         expression.operator === "subtract" &&
         left.type.kind === "scalar" &&
@@ -1098,10 +1099,12 @@ function validateNode(
         if (
           (node.entity === "page" &&
             node.selection.profile !== "prepared-scoped-v1" &&
+            node.selection.profile !== "prepared-page-reader-window-v1" &&
             node.selection.profile !== "direct-page-analytics-v1" &&
             node.selection.profile !== "direct-page-session-compat-v1") ||
           (node.entity === "event" &&
-            node.selection.profile === "direct-page-analytics-v1")
+            (node.selection.profile === "direct-page-analytics-v1" ||
+              node.selection.profile === "prepared-page-reader-window-v1"))
         )
           fail(
             "invalid-source",
@@ -1110,7 +1113,8 @@ function validateNode(
           );
         if (
           node.entity === "page" &&
-          node.selection.profile === "prepared-scoped-v1" &&
+          (node.selection.profile === "prepared-scoped-v1" ||
+            node.selection.profile === "prepared-page-reader-window-v1") &&
           node.selection.eventNameGate !== undefined
         )
           fail(

@@ -530,6 +530,7 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
       case "not":
       case "null-check":
       case "cast-integer":
+      case "cast-real":
       case "cast-text":
         visit(current.expression);
         break;
@@ -698,6 +699,7 @@ function expressionReferencesScope(
       case "not":
       case "null-check":
       case "cast-integer":
+      case "cast-real":
       case "cast-text":
       case "in-list":
         if (inspect(current.expression)) return true;
@@ -833,6 +835,7 @@ function expressionColumnIndexes(
       case "not":
       case "null-check":
       case "cast-integer":
+      case "cast-real":
       case "cast-text":
       case "in-list":
         return visit(current.expression);
@@ -922,6 +925,7 @@ function expressionUsesOnlyScope(
     case "not":
     case "null-check":
     case "cast-integer":
+    case "cast-real":
     case "cast-text":
     case "in-list":
       return expressionUsesOnlyScope(expression.expression, scope);
@@ -1459,10 +1463,111 @@ interface HoistEligibility {
   readonly windowInput: Set<LogicalQueryNode>;
 }
 
-/** Keep selection-sensitive barriers while permitting safe inputs below Window. */
+interface TerminalAggregateRanking {
+  readonly sort: LogicalQueryNode & { readonly kind: "sort" };
+  readonly limit?: LogicalQueryNode & { readonly kind: "limit" };
+}
+
+function isPureLocalColumnProject(
+  node: LogicalQueryNode,
+): node is LogicalQueryNode & { readonly kind: "project" } {
+  return (
+    node.kind === "project" &&
+    node.projections.length > 0 &&
+    node.projections.every(
+      ({ expression }) =>
+        expression.kind === "column" &&
+        expression.scope === node.input.scope &&
+        Number.isInteger(expression.index) &&
+        expression.index >= 0 &&
+        expression.index < node.input.fields.length,
+    )
+  );
+}
+
+function isAggregateRankingInput(root: LogicalQueryNode): boolean {
+  const memo = new Map<LogicalQueryNode, boolean>();
+  const active = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): boolean => {
+    const cached = memo.get(node);
+    if (cached !== undefined) return cached;
+    if (active.has(node)) return false;
+    active.add(node);
+    let result: boolean;
+    switch (node.kind) {
+      case "aggregate":
+        result = true;
+        break;
+      case "project":
+      case "filter":
+        result =
+          nodeExpressions(node).every(
+            (expression) => expressionSources(expression).length === 0,
+          ) && visit(node.input.node);
+        break;
+      case "join":
+        result =
+          (node.joinType === "inner" || node.joinType === "left") &&
+          nodeExpressions(node).every(
+            (expression) => expressionSources(expression).length === 0,
+          ) &&
+          visit(node.left.node) &&
+          visit(node.right.node);
+        break;
+      case "scan":
+      case "values-relation":
+      case "json-scalar-array":
+      case "semi-join":
+      case "anti-join":
+      case "distinct":
+      case "window":
+      case "sort":
+      case "limit":
+      case "union":
+      case "recursive-closure":
+        result = false;
+        break;
+    }
+    active.delete(node);
+    memo.set(node, result);
+    return result;
+  };
+  return visit(root);
+}
+
+function terminalAggregateRanking(
+  root: LogicalQueryNode,
+): TerminalAggregateRanking | undefined {
+  let source = root;
+  const wrappers = new Set<LogicalQueryNode>();
+  while (isPureLocalColumnProject(source)) {
+    if (wrappers.has(source)) return undefined;
+    wrappers.add(source);
+    source = source.input.node;
+  }
+
+  let sort: LogicalQueryNode & { readonly kind: "sort" };
+  let limit: (LogicalQueryNode & { readonly kind: "limit" }) | undefined;
+  if (source.kind === "sort") sort = source;
+  else if (
+    source.kind === "limit" &&
+    source.offset === undefined &&
+    source.input.node.kind === "sort"
+  ) {
+    limit = source;
+    sort = source.input.node;
+  } else return undefined;
+
+  return isAggregateRankingInput(sort.input.node)
+    ? { sort, ...(limit ? { limit } : {}) }
+    : undefined;
+}
+
+/** Keep selection-sensitive barriers while permitting proven ranking inputs. */
 function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
   const forbidden = new Set<LogicalQueryNode>();
   const windowInput = new Set<LogicalQueryNode>();
+  const aggregateRanking = terminalAggregateRanking(root);
   const visited = new Map<LogicalQueryNode, Set<string>>();
   const visit = (
     node: LogicalQueryNode,
@@ -1485,6 +1590,8 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
       windowInput.add(node);
 
     const terminalRootSort = node === root && node.kind === "sort";
+    const terminalAggregateRankingSort = node === aggregateRanking?.sort;
+    const terminalAggregateRankingLimit = node === aggregateRanking?.limit;
     const branchTopN =
       branchOperandPath &&
       !topNSearchBlocked &&
@@ -1494,9 +1601,12 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
     const isLicensedTopNSort = node.kind === "sort" && licensedTopNSort;
     const selectionBoundary =
       inheritedForbidden ||
-      (node.kind === "sort" && !terminalRootSort && !isLicensedTopNSort) ||
+      (node.kind === "sort" &&
+        !terminalRootSort &&
+        !isLicensedTopNSort &&
+        !terminalAggregateRankingSort) ||
       node.kind === "recursive-closure" ||
-      (node.kind === "limit" && !branchTopN);
+      (node.kind === "limit" && !branchTopN && !terminalAggregateRankingLimit);
     for (const child of nodeChildren(node)) {
       const startsUnionOperandPath =
         node.kind === "union" &&
@@ -1510,7 +1620,9 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
         startsUnionOperandPath ||
         (followsProjectOnUnionPath && !topNSearchBlocked);
       const childTopNSearchBlocked =
-        isLicensedTopNSort || isLicensedTopNSortInput
+        isLicensedTopNSort ||
+        isLicensedTopNSortInput ||
+        terminalAggregateRankingSort
           ? false
           : topNSearchBlocked ||
             (node.kind === "union" && !startsUnionOperandPath) ||
@@ -1618,6 +1730,7 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
             inspect(current.pattern);
             break;
           case "cast-integer":
+          case "cast-real":
             inspect(current.expression);
             break;
           case "in-subquery":

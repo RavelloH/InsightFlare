@@ -1,10 +1,12 @@
 import {
+  add,
   aggregate,
   and,
   antiJoin,
   avg,
   callFunction,
   caseWhen,
+  castReal,
   castText,
   coalesce,
   concatText,
@@ -13,6 +15,7 @@ import {
   countDistinct,
   DatabaseCompilerError,
   distinct,
+  div,
   eq,
   filter,
   gt,
@@ -26,6 +29,7 @@ import {
   lte,
   max,
   min,
+  mul,
   neq,
   not,
   or,
@@ -34,6 +38,7 @@ import {
   rowNumber,
   semiJoin,
   sort as sortRelation,
+  sub,
   sum,
   textContains,
   textEndsWith,
@@ -79,6 +84,10 @@ import type {
   LogicalValueType,
 } from "@/lib/edge/analytics/engine/logical/slots";
 import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
+import {
+  inferLogicalExpression,
+  LogicalPlanError,
+} from "@/lib/edge/analytics/engine/logical/validator";
 import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
 import { semanticPageDimension } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
@@ -1170,6 +1179,87 @@ function lowerExpression(
         candidateBounded: input.candidateBounded,
       };
     }
+    case "arithmetic": {
+      if (
+        !["add", "subtract", "multiply", "divide"].includes(expression.operator)
+      )
+        reject(path, "The arithmetic operator is unsupported.");
+      if (
+        expression.operator === "divide" &&
+        expression.zeroDenominator !== "null"
+      )
+        reject(path, "Division must map a zero denominator to NULL.");
+      let inferred;
+      try {
+        inferred = inferLogicalExpression(
+          expression,
+          (id, slotPath) => {
+            if (!visible.has(id))
+              reject(slotPath, "Arithmetic references a hidden Logical slot.");
+            return logicalSlot(logicalSlots, id, slotPath);
+          },
+          path,
+        );
+      } catch (error) {
+        if (error instanceof AnalyticsRelationalLoweringError) throw error;
+        if (error instanceof LogicalPlanError)
+          reject(path, "Arithmetic operand type or unit is unsupported.");
+        throw error;
+      }
+      const left = lowerExpression(
+        expression.left,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.left`,
+        time,
+      );
+      const right = lowerExpression(
+        expression.right,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.right`,
+        time,
+      );
+      if (
+        left.kind !== "scalar" ||
+        right.kind !== "scalar" ||
+        left.type.kind !== "scalar" ||
+        right.type.kind !== "scalar" ||
+        left.type.scalar !== "number" ||
+        right.type.scalar !== "number"
+      )
+        reject(path, "Arithmetic requires numeric scalar expressions.");
+      const leftExpression = scalarValue(left, `${path}.left`);
+      const rightExpression = scalarValue(right, `${path}.right`);
+      if (
+        !["integer", "real", "numeric", "unknown"].includes(
+          leftExpression.resultType.affinity,
+        ) ||
+        !["integer", "real", "numeric", "unknown"].includes(
+          rightExpression.resultType.affinity,
+        )
+      )
+        reject(path, "Arithmetic requires numeric SQL affinities.");
+      const numericLeft = leftExpression as SqlExpression<number | null>;
+      const numericRight = rightExpression as SqlExpression<number | null>;
+      const result =
+        expression.operator === "add"
+          ? add(numericLeft, numericRight)
+          : expression.operator === "subtract"
+            ? sub(numericLeft, numericRight)
+            : expression.operator === "multiply"
+              ? mul(numericLeft, numericRight)
+              : div(castReal(numericLeft), numericRight);
+      return {
+        kind: "scalar",
+        expression: result,
+        type: inferred.type,
+        nullable: inferred.nullable,
+        candidateBounded: false,
+      };
+    }
     case "time-bucket": {
       const input = lowerExpression(
         expression.input,
@@ -1234,7 +1324,6 @@ function lowerExpression(
     }
     case "elapsed-duration-literal":
     case "calendar-period-literal":
-    case "arithmetic":
     case "round":
       reject(
         path,

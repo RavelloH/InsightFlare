@@ -280,6 +280,25 @@ function validateExpression(
         expression.expression.resultType.nullable,
       );
       return;
+    case "cast-real": {
+      validateExpression(
+        expression.expression,
+        scopes,
+        activeSources,
+        allowExcluded,
+      );
+      const source = expression.expression;
+      if (
+        !isNumeric(source.resultType.affinity) ||
+        booleanValueExpression(source) ||
+        (source.kind === "parameter" &&
+          typeof source.value !== "number" &&
+          source.value !== null)
+      )
+        invalid("CAST AS REAL requires a numeric expression");
+      validateResultType(expression, "real", source.resultType.nullable);
+      return;
+    }
     case "cast-text": {
       validateExpression(
         expression.expression,
@@ -752,6 +771,7 @@ function closureExpressionSources(expression: SqlExpression): QuerySource[] {
     case "not":
     case "null-check":
     case "cast-integer":
+    case "cast-real":
     case "cast-text":
       return closureExpressionSources(expression.expression);
     case "text-position":
@@ -904,6 +924,9 @@ function validateClosurePredicateShape(expression: SqlExpression): void {
       validateClosurePredicateShape(expression.expression);
       break;
     case "cast-text":
+      validateClosurePredicateShape(expression.expression);
+      break;
+    case "cast-real":
       validateClosurePredicateShape(expression.expression);
       break;
     case "text-position":
@@ -1520,6 +1543,7 @@ function validateSource(
             case "not":
             case "null-check":
             case "cast-integer":
+            case "cast-real":
             case "in-list":
               validateLocalColumnNames(expression.expression);
               return;

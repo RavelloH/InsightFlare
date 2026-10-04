@@ -10,6 +10,10 @@ import {
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
+  buildPageCardMetricsPlan,
+  PAGE_CARD_METRICS_OUTPUT_ID,
+} from "@/lib/edge/analytics/engine/page-card-metrics-report-plan";
+import {
   buildPagesPagePlan,
   buildTopPagesPlan,
   type PageAggregateCursor,
@@ -372,10 +376,7 @@ export async function queryPageCardMetricsFromD1(
     direction?: SortDirection;
   },
 ): Promise<PageCardAggregateRow[]> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
+  const metadata = scopedFilterMetadata(filters);
   const requestedPathnames = Array.from(
     new Set(
       (options?.pathnames ?? [])
@@ -383,146 +384,26 @@ export async function queryPageCardMetricsFromD1(
         .filter((pathname) => pathname.length > 0),
     ),
   );
-  const pathnameCondition =
-    requestedPathnames.length > 0
-      ? `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`
-      : "";
-  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
-    `TRIM(COALESCE(pathname, '')) != ''`,
-    pathnameCondition,
-  ]);
-  const hasLimit = typeof options?.limit === "number";
-  const cursor = options?.cursor;
-  const sort = options?.sort ?? "views";
-  const direction = options?.direction ?? "desc";
-  const sortColumns: Record<
-    PagesDashboardMetric,
-    { primary: string; secondary: string }
-  > = {
-    views: { primary: "views", secondary: "sessions" },
-    visitors: { primary: "visitors", secondary: "views" },
-    sessions: { primary: "sessions", secondary: "views" },
-    bounceRate: { primary: "bounceRate", secondary: "sessions" },
-    pagesPerSession: { primary: "pagesPerSession", secondary: "views" },
-    avgDurationMs: { primary: "avgDurationMs", secondary: "views" },
-  };
-  const { primary, secondary } = sortColumns[sort];
-  const operator = direction === "asc" ? ">" : "<";
-  const searchClause = options?.search?.trim()
-    ? `AND LOWER(pr.pathname) LIKE ? ESCAPE '\\'`
-    : "";
-  const cursorClause = cursor
-    ? `AND (
-        pr.${primary} ${operator} ?
-        OR (pr.${primary} = ? AND pr.${secondary} ${operator} ?)
-        OR (pr.${primary} = ? AND pr.${secondary} = ? AND pr.pathname > ?)
-      )`
-    : "";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    pathname,
-    session_id AS sessionId,
-    visitor_id AS visitorId,
-    duration_ms AS durationMs
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filteredClause}
-),
-path_rollup AS (
-  SELECT
-    pathname,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-    COALESCE(sum(CASE WHEN durationMs IS NOT NULL AND durationMs >= 0 THEN durationMs ELSE 0 END), 0) AS totalDuration
-  FROM filtered_visits
-  GROUP BY pathname
-),
-path_session_rollup AS (
-  SELECT
-    pathname,
-    sessionId,
-    count(*) AS visitCount
-  FROM filtered_visits
-  WHERE sessionId != ''
-  GROUP BY pathname, sessionId
-),
-path_bounce_rollup AS (
-  SELECT
-    pathname,
-    count(*) AS bounces
-  FROM path_session_rollup
-  WHERE visitCount = 1
-  GROUP BY pathname
-),
-path_metrics AS (
-  SELECT
-    pr.pathname AS pathname,
-    pr.views AS views,
-    pr.sessions AS sessions,
-    pr.visitors AS visitors,
-    COALESCE(pb.bounces, 0) AS bounces,
-    pr.totalDuration AS totalDuration,
-    0 AS durationViews,
-    CASE WHEN pr.sessions <= 0 THEN 0.0
-      ELSE COALESCE(pb.bounces, 0) * 1.0 / pr.sessions END AS bounceRate,
-    CASE WHEN pr.sessions <= 0 THEN 0.0
-      ELSE pr.views * 1.0 / pr.sessions END AS pagesPerSession,
-    CASE WHEN pr.sessions <= 0 THEN 0.0
-      ELSE pr.totalDuration * 1.0 / pr.sessions END AS avgDurationMs
-  FROM path_rollup pr
-  LEFT JOIN path_bounce_rollup pb ON pb.pathname = pr.pathname
-)
-SELECT
-  pr.pathname AS pathname,
-  pr.views AS views,
-  pr.sessions AS sessions,
-  pr.visitors AS visitors,
-  pr.bounces AS bounces,
-  pr.totalDuration AS totalDuration,
-  pr.durationViews AS durationViews
-FROM path_metrics pr
-WHERE 1 = 1
-${searchClause}
-${cursorClause}
-ORDER BY pr.${primary} ${direction}, pr.${secondary} ${direction}, pr.pathname ASC
-${hasLimit ? "LIMIT ?" : ""}
-`;
-  const searchBindings = options?.search?.trim()
-    ? [
-        `%${options.search
-          .trim()
-          .toLowerCase()
-          .replaceAll("\\", "\\\\")
-          .replaceAll("%", "\\%")
-          .replaceAll("_", "\\_")}%`,
-      ]
-    : [];
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...(filter?.bindings ?? []),
-          ]),
-      ...requestedPathnames,
-      ...searchBindings,
-      ...(cursor
-        ? [
-            cursor.primary,
-            cursor.primary,
-            cursor.secondary,
-            cursor.primary,
-            cursor.secondary,
-            cursor.pathname,
-          ]
-        : []),
-      ...(hasLimit ? [options?.limit ?? 0] : []),
-    ])
-  ).map((row) => ({
+  const search = options?.search?.trim();
+  const plan = buildPageCardMetricsPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(metadata ? { preparedTimePolicy: "reader-window-v1" as const } : {}),
+    ...(requestedPathnames.length > 0 ? { pathnames: requestedPathnames } : {}),
+    ...(typeof options?.limit === "number" ? { limit: options.limit } : {}),
+    ...(options?.cursor ? { cursor: options.cursor } : {}),
+    ...(search ? { search: search.toLowerCase() } : {}),
+    sort: options?.sort ?? "views",
+    direction: options?.direction ?? "desc",
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    PAGE_CARD_METRICS_OUTPUT_ID,
+  );
+  return rows.map((row) => ({
     pathname: String(row.pathname ?? ""),
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),

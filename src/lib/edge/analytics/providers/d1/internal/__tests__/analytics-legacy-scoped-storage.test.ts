@@ -7,7 +7,10 @@ import {
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { buildEventRecordPagePlan } from "@/lib/edge/analytics/engine/event-record-page-plan";
 import type { SourceNode } from "@/lib/edge/analytics/engine/logical/nodes";
-import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
+import {
+  createSemanticScopedSourceSelection,
+  type SemanticScopedSourceSelection,
+} from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import {
@@ -131,6 +134,23 @@ describe("legacy scoped Event storage guards", () => {
       ),
     ).toThrow(
       "source.temporalDomain: Scoped Event report Sources currently require the candidate domain.",
+    );
+  });
+
+  it("rejects Page reader-window selections on Event Sources", () => {
+    const pageReaderSelection = {
+      ...selection("direct-page-analytics-v1"),
+      profile: "prepared-page-reader-window-v1",
+      preparationTime: TIME,
+    } as SemanticScopedSourceSelection;
+    expect(() =>
+      storage.lowerEventReportSource(
+        { ...eventSource, selection: pageReaderSelection },
+        "source",
+        source,
+      ),
+    ).toThrow(
+      "source.selection: Page reader-window selections are unsupported on Event report Sources.",
     );
   });
 

@@ -61,10 +61,19 @@ export function createPageReportSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1";
   readonly sourceSelection?: SemanticScopedSourceSelection;
   readonly attributes: readonly string[];
 }) {
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
+  if (input.preparedTimePolicy && !input.scopePlan)
+    throw new Error(
+      "invalid_page_report_source_selection:reader_window_requires_prepared_scope_plan",
+    );
+  if (input.preparedTimePolicy && input.sourceSelection)
+    throw new Error(
+      "invalid_page_report_source_selection:reader_window_disallows_selection_override",
+    );
   const subject = createSemanticSubjectDomain({
     origin: "site",
     siteIds: [input.siteId as SiteId],
@@ -73,7 +82,9 @@ export function createPageReportSource(input: {
     input.sourceSelection ??
     createSemanticScopedSourceSelection({
       profile: input.scopePlan
-        ? "prepared-scoped-v1"
+        ? input.preparedTimePolicy === "reader-window-v1"
+          ? "prepared-page-reader-window-v1"
+          : "prepared-scoped-v1"
         : "direct-page-analytics-v1",
       filters: input.filters,
       subject,

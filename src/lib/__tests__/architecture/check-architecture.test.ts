@@ -572,6 +572,61 @@ describe("architecture checker", () => {
     ).toEqual(["queryD1All", "<raw SQL literal>"]);
   });
 
+  it("protects the Page card metrics provider and pure Logical plan", () => {
+    const root = fixture();
+    const providerPath = path.join(
+      root,
+      "src/lib/edge/analytics/providers/d1/internal/pages.ts",
+    );
+    const planPath = path.join(
+      root,
+      "src/lib/edge/analytics/engine/page-card-metrics-report-plan.ts",
+    );
+    mkdirSync(path.dirname(providerPath), { recursive: true });
+    mkdirSync(path.dirname(planPath), { recursive: true });
+    writeFileSync(
+      providerPath,
+      [
+        "export async function queryPageCardMetricsFromD1() {",
+        '  return queryD1All("SELECT 1", []);',
+        "}",
+        "export async function queryPagesAggregate() {",
+        '  return queryD1All("SELECT 2", []);',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      planPath,
+      [
+        'import { queryD1All as run } from "@/lib/db";',
+        'export function buildPageCardMetricsPlan() { return run("SELECT 1", []); }',
+        "",
+      ].join("\n"),
+    );
+
+    expect(
+      collectArchitectureViolations(root)
+        .filter(
+          ({ source, rule }) =>
+            source ===
+              "src/lib/edge/analytics/providers/d1/internal/pages.ts" &&
+            rule === "typed-query-function-forbidden",
+        )
+        .map(({ specifier }) => specifier),
+    ).toEqual(["queryD1All", "raw-sql"]);
+    expect(
+      collectArchitectureViolations(root)
+        .filter(
+          ({ source, rule }) =>
+            source ===
+              "src/lib/edge/analytics/engine/page-card-metrics-report-plan.ts" &&
+            rule === "typed-dal-runtime-forbidden",
+        )
+        .map(({ specifier }) => specifier),
+    ).toEqual(["queryD1All", "<raw SQL literal>"]);
+  });
+
   it("keeps hourly rollup query and mutation builders free of execution APIs", () => {
     const root = fixture();
     const sourcePath = path.join(

@@ -88,6 +88,14 @@ export interface CastIntegerExpression<
   readonly expression: SqlExpression;
 }
 
+export interface CastRealExpression<
+  T = number | null,
+  Result extends ExpressionResultType = ExpressionResultType<"real", true>,
+> extends ExpressionNode<T, Result> {
+  readonly kind: "cast-real";
+  readonly expression: SqlExpression;
+}
+
 export interface CastTextExpression<
   T = string | null,
   Result extends ExpressionResultType = ExpressionResultType<"text", true>,
@@ -276,6 +284,7 @@ export type SqlExpression<
   | BinaryExpression<T, Result>
   | DistinctFromExpression<T, Result>
   | CastIntegerExpression<T, Result>
+  | CastRealExpression<T, Result>
   | CastTextExpression<T, Result>
   | TextPositionExpression<T, Result>
   | TextSubstringExpression<T, Result>
@@ -600,6 +609,23 @@ export function castInteger<E extends SqlExpression<number | null>>(
       affinity: "integer",
       nullable: expression.resultType.nullable,
     } as ExpressionResultType<"integer", ExpressionResultOf<E>["nullable"]>,
+  };
+}
+
+/** SQLite CAST AS REAL; preserve the input's NULL behavior and scope. */
+export function castReal<E extends SqlExpression<number | null>>(
+  expression: E,
+): CastRealExpression<
+  true extends ExpressionResultOf<E>["nullable"] ? number | null : number,
+  ExpressionResultType<"real", ExpressionResultOf<E>["nullable"]>
+> {
+  return {
+    kind: "cast-real",
+    expression,
+    resultType: {
+      affinity: "real",
+      nullable: expression.resultType.nullable,
+    } as ExpressionResultType<"real", ExpressionResultOf<E>["nullable"]>,
   };
 }
 

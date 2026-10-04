@@ -24,6 +24,7 @@ import type { FilterScope } from "@/lib/filter-contract/scope-preference";
 
 export type SemanticScopedSourceProfile =
   | "prepared-scoped-v1"
+  | "prepared-page-reader-window-v1"
   | "direct-event-records-v1"
   | "direct-event-analytics-v1"
   | "direct-page-analytics-v1"
@@ -67,6 +68,8 @@ export interface SemanticScopedSourceSelection {
   /** Upstream authorization proof; subject sites may be a subset. */
   readonly authorizedSiteIds: readonly string[];
   readonly time: SemanticTemporalDomains;
+  /** Original prepared time, retained as proof when a Page reader selects a different window. */
+  readonly preparationTime?: SemanticTemporalDomains;
 }
 
 export interface CreateSemanticScopedSourceSelectionInput {
@@ -229,8 +232,12 @@ export function createSemanticScopedSourceSelection(
   let entityKind: "session" | "visitor" | undefined;
   let authorizedSiteIds: readonly string[];
   let preparedMatches: SemanticPreparedMatches | undefined;
+  let preparationTime: SemanticTemporalDomains | undefined;
 
-  if (input.profile === "prepared-scoped-v1") {
+  if (
+    input.profile === "prepared-scoped-v1" ||
+    input.profile === "prepared-page-reader-window-v1"
+  ) {
     if (
       !metadata ||
       !input.expectedPlan ||
@@ -240,8 +247,17 @@ export function createSemanticScopedSourceSelection(
     if (metadata.resolvedScope !== metadata.plan.scope)
       return fail("prepared_scope_mismatch");
     const resolvedTime = snapshotQueryTime(metadata.time);
-    if (!sameJsonValue(resolvedTime, time))
-      return fail("prepared_time_mismatch");
+    if (input.profile === "prepared-scoped-v1") {
+      if (!sameJsonValue(resolvedTime, time))
+        return fail("prepared_time_mismatch");
+    } else {
+      if (
+        input.eventName !== undefined ||
+        input.eventNameInputSemantics !== undefined
+      )
+        return fail("page_reader_window_event_name_unsupported");
+      preparationTime = resolvedTime;
+    }
     authorizedSiteIds = canonicalSiteIds(metadata.siteIds);
     const authorized = new Set(authorizedSiteIds);
     const subjectSites = new Set(subject.siteIds);
@@ -373,6 +389,7 @@ export function createSemanticScopedSourceSelection(
     subject,
     authorizedSiteIds,
     time,
+    ...(preparationTime ? { preparationTime } : {}),
   });
 }
 
@@ -389,6 +406,7 @@ export function validateSemanticScopedSourceSelection(
     selection.version !== 1 ||
     ![
       "prepared-scoped-v1",
+      "prepared-page-reader-window-v1",
       "direct-event-records-v1",
       "direct-event-analytics-v1",
       "direct-page-analytics-v1",
@@ -417,6 +435,8 @@ export function validateSemanticScopedSourceSelection(
   if (context.subject.siteIds.some((siteId) => !authorizedSet.has(siteId)))
     fail("subject_outside_prepared_authorization");
   if (selection.profile === "prepared-scoped-v1") {
+    if (Object.prototype.hasOwnProperty.call(selection, "preparationTime"))
+      fail("unexpected_preparation_time");
     const resolved = createScopedFilterPlan(
       "event-records",
       selection.filter,
@@ -430,6 +450,36 @@ export function validateSemanticScopedSourceSelection(
       selection.preparedMatches === undefined
     )
       fail("prepared_advanced_matches_missing");
+  }
+  if (selection.profile === "prepared-page-reader-window-v1") {
+    if (!selection.preparationTime) fail("prepared_time_snapshot_missing");
+    let normalizedPreparationTime: SemanticTemporalDomains;
+    try {
+      normalizedPreparationTime = snapshotTime(selection.preparationTime);
+    } catch {
+      return fail("preparation_time_snapshot_invalid");
+    }
+    if (!sameJsonValue(normalizedPreparationTime, selection.preparationTime))
+      fail("preparation_time_snapshot_invalid");
+    const resolved = createScopedFilterPlan(
+      "event-records",
+      selection.filter,
+      selection.scope,
+    );
+    if (!resolved || !sameResolvedSelection(resolved, selection))
+      fail("prepared_plan_mismatch");
+    if (
+      selection.filter.root &&
+      filterDocumentUsesAdvancedExpressions(selection.filter) &&
+      selection.preparedMatches === undefined
+    )
+      fail("prepared_advanced_matches_missing");
+    if (selection.eventNameGate !== undefined)
+      fail("page_reader_window_event_name_unsupported");
+  } else if (
+    Object.prototype.hasOwnProperty.call(selection, "preparationTime")
+  ) {
+    fail("unexpected_preparation_time");
   }
   if (
     (selection.profile === "direct-event-records-v1" ||
@@ -477,7 +527,8 @@ export function validateSemanticScopedSourceSelection(
     if (typeof selection.eventNameGate.value !== "string")
       fail("invalid_event_name_gate_value");
     if (
-      selection.profile === "prepared-scoped-v1"
+      selection.profile === "prepared-scoped-v1" ||
+      selection.profile === "prepared-page-reader-window-v1"
         ? selection.eventNameGate.semantics !== "prepared-trimmed-label-v1" &&
           selection.eventNameGate.semantics !== "prepared-defined-raw-value-v1"
         : selection.eventNameGate.semantics !==
@@ -519,6 +570,9 @@ export function snapshotSemanticScopedSourceSelection(
     subject: snapshotSubject(selection.subject),
     authorizedSiteIds: canonicalSiteIds(selection.authorizedSiteIds),
     time: snapshotTime(selection.time),
+    ...(selection.preparationTime
+      ? { preparationTime: snapshotTime(selection.preparationTime) }
+      : {}),
     ...(selection.preparedMatches
       ? {
           preparedMatches: {
