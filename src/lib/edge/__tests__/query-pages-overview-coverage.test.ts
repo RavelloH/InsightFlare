@@ -606,6 +606,20 @@ describe("edge pages D1 queries", () => {
       country: "US",
     });
     insertPageRow(database, {
+      visitId: "same-session-page",
+      visitorId: "selected-visitor",
+      sessionId: "selected-session",
+      pathname: "/same-session-ca",
+      country: "CA",
+    });
+    insertPageRow(database, {
+      visitId: "same-visitor-page",
+      visitorId: "selected-visitor",
+      sessionId: "other-session",
+      pathname: "/same-visitor-ca",
+      country: "CA",
+    });
+    insertPageRow(database, {
       visitId: "event-owner-page",
       visitorId: "event-owner-visitor",
       sessionId: "event-owner-session",
@@ -663,24 +677,35 @@ describe("edge pages D1 queries", () => {
         },
       },
     );
-    const preparedSession = prepareScopedQuery("pages", {
-      context,
-      time,
-      filters: baseFilters,
-      scopePreference: "session",
-    } as never) as { filters?: FilterDocument };
-    const sessionMetadata = scopedFilterMetadata(preparedSession.filters);
-    if (!preparedSession.filters || !sessionMetadata)
-      throw new Error("wave43_prepared_session_incomplete");
-    const sessionFilters = attachScopedFilterMetadata(preparedSession.filters, {
-      ...sessionMetadata,
-      plan: {
-        ...sessionMetadata.plan,
-        advancedMatches: {
-          entityIds: [{ siteId, id: "event-owner-session" }],
-        },
-      },
-    });
+    const makeEntityFilters = (
+      scopePreference: "session" | "visitor",
+      entityId?: string,
+    ): FilterDocument => {
+      const preparedEntity = prepareScopedQuery("pages", {
+        context,
+        time,
+        filters: baseFilters,
+        scopePreference,
+      } as never) as { filters?: FilterDocument };
+      const metadata = scopedFilterMetadata(preparedEntity.filters);
+      if (!preparedEntity.filters || !metadata)
+        throw new Error(`wave43_prepared_${scopePreference}_incomplete`);
+      return entityId
+        ? attachScopedFilterMetadata(preparedEntity.filters, {
+            ...metadata,
+            plan: {
+              ...metadata.plan,
+              advancedMatches: {
+                entityIds: [{ siteId, id: entityId }],
+              },
+            },
+          })
+        : preparedEntity.filters;
+    };
+    const ordinarySessionFilters = makeEntityFilters("session");
+    const ordinaryVisitorFilters = makeEntityFilters("visitor");
+    const sessionFilters = makeEntityFilters("session", "event-owner-session");
+    const visitorFilters = makeEntityFilters("visitor", "event-owner-visitor");
 
     try {
       const observationRows = await queryTopPagesFromD1(
@@ -705,6 +730,53 @@ describe("edge pages D1 queries", () => {
         "/selected-page",
       ]);
 
+      const ordinarySessionRows = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        ordinarySessionFilters,
+      );
+      expect(ordinarySessionRows).toEqual(
+        await legacyTopPagesOracle(
+          env,
+          siteId,
+          window,
+          10,
+          false,
+          ordinarySessionFilters,
+        ),
+      );
+      expect(ordinarySessionRows.map((row) => row.pathname)).toEqual([
+        "/same-session-ca",
+        "/selected-page",
+      ]);
+
+      const ordinaryVisitorRows = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        ordinaryVisitorFilters,
+      );
+      expect(ordinaryVisitorRows).toEqual(
+        await legacyTopPagesOracle(
+          env,
+          siteId,
+          window,
+          10,
+          false,
+          ordinaryVisitorFilters,
+        ),
+      );
+      expect(ordinaryVisitorRows.map((row) => row.pathname)).toEqual([
+        "/same-session-ca",
+        "/same-visitor-ca",
+        "/selected-page",
+      ]);
+
       const sessionRows = await queryTopPagesFromD1(
         env,
         siteId,
@@ -724,6 +796,26 @@ describe("edge pages D1 queries", () => {
         ),
       );
       expect(sessionRows.map((row) => row.pathname)).toEqual(["/event-owner"]);
+
+      const visitorRows = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        visitorFilters,
+      );
+      expect(visitorRows).toEqual(
+        await legacyTopPagesOracle(
+          env,
+          siteId,
+          window,
+          10,
+          false,
+          visitorFilters,
+        ),
+      );
+      expect(visitorRows.map((row) => row.pathname)).toEqual(["/event-owner"]);
     } finally {
       close();
     }
@@ -827,6 +919,86 @@ describe("edge pages D1 queries", () => {
       await expect(
         queryTopPagesFromD1(env, siteId, window, 10, true, payloadOnly),
       ).resolves.toMatchObject([{ pathname: "/event-owner", views: 1 }]);
+    } finally {
+      close();
+    }
+  });
+
+  it("preserves NULL Page row bags when an in-window Event belongs to an out-of-window Page", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    insertPageRow(database, {
+      visitId: null,
+      visitorId: "null-or-visitor",
+      sessionId: "null-or-session",
+      pathname: "/null-or-match",
+      country: "CA",
+    });
+    insertPageRow(database, {
+      visitId: "outside-window-event-owner",
+      visitorId: "outside-owner-visitor",
+      sessionId: "outside-owner-session",
+      pathname: "/outside-window-owner",
+      country: "US",
+    });
+    database
+      .prepare("UPDATE visits SET started_at = ? WHERE visit_id = ?")
+      .run(window.endExclusiveMs, "outside-window-event-owner");
+    const siteIdentity = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get(siteId) as { site_pk: number };
+    database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name, last_seen_at, site_pk) VALUES (42, ?, 'purchase', ?, ?)",
+      )
+      .run(siteId, baseMs, siteIdentity.site_pk);
+    database
+      .prepare(
+        `
+        INSERT INTO custom_events (
+          event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+          received_at, sequence, node_count, value_count, site_pk
+        ) VALUES (42, 'outside-owner-event', ?, 'outside-window-event-owner', 42, ?, ?, 1, 1, 1, ?)
+      `,
+      )
+      .run(siteId, baseMs + 10, baseMs + 10, siteIdentity.site_pk);
+
+    const filters = normalizedFilters({
+      kind: "or",
+      children: [
+        filterCondition({ kind: "field", field: "geo.country" }, "CA"),
+        filterCondition({ kind: "field", field: "event.name" }, "purchase"),
+      ],
+    });
+
+    try {
+      const rows = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        filters,
+      );
+      expect(rows).toEqual(
+        await legacyTopPagesOracle(env, siteId, window, 10, false, filters),
+      );
+      expect(rows).toMatchObject([
+        { pathname: "/null-or-match", views: 1, sessions: 1 },
+      ]);
+      expect(
+        database
+          .prepare(
+            "SELECT count(*) AS count FROM custom_events WHERE event_id = 'outside-owner-event' AND occurred_at >= ? AND occurred_at < ?",
+          )
+          .get(window.startMs, window.endExclusiveMs),
+      ).toEqual({ count: 1 });
+      expect(
+        database
+          .prepare(
+            "SELECT count(*) AS count FROM visits WHERE visit_id = 'outside-window-event-owner' AND started_at >= ? AND started_at < ?",
+          )
+          .get(window.startMs, window.endExclusiveMs),
+      ).toEqual({ count: 0 });
     } finally {
       close();
     }

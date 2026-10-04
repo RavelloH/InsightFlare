@@ -1025,6 +1025,16 @@ function validateNode(
             path + ".selection",
             "The scoped selection profile does not match its Source entity.",
           );
+        if (
+          node.entity === "page" &&
+          node.selection.profile === "prepared-scoped-v1" &&
+          node.selection.eventNameGate !== undefined
+        )
+          fail(
+            "invalid-source",
+            path + ".selection",
+            "page_selection_event_name_unsupported",
+          );
         try {
           validateSemanticScopedSourceSelection(node.selection, plan.context);
         } catch (error) {

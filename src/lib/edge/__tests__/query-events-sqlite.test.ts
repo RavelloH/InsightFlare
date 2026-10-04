@@ -3237,6 +3237,41 @@ describe("event detail D1 SQL", () => {
         }
       }
 
+      const payloadAndSessionBoundary = truthFilters({
+        kind: "and",
+        children: [
+          {
+            kind: "condition",
+            target: { kind: "event-payload", path: "/href" as never },
+            operator: "eq",
+            value: "https://example.test/next",
+          },
+          recordFieldFilter("session.entryPath", "eq", "/entry").root!,
+        ],
+      });
+      const actualPayloadAndSessionBoundary =
+        await queryEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          payloadAndSessionBoundary,
+          eventName,
+          { includeBreakdowns: false },
+        );
+      const expectedPayloadAndSessionBoundary =
+        await queryLegacyEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          payloadAndSessionBoundary,
+          eventName,
+          { includeBreakdowns: false },
+        );
+      expect(actualPayloadAndSessionBoundary).toEqual(
+        expectedPayloadAndSessionBoundary,
+      );
+      expect(actualPayloadAndSessionBoundary.summary.events).toBe(1);
+
       const preparedFacts = preparedOverviewFilters(
         recordFieldFilter("session.events", "gte", 2),
         "event",

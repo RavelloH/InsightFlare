@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  EMPTY_FILTER_DOCUMENT,
+  prepareScopedQuery,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
+import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import type {
   EpochMs,
+  QueryInput,
+  QueryTime,
   ReportingTimeZone,
   SiteId,
 } from "@/lib/edge/analytics/contract/types";
@@ -23,6 +31,7 @@ import {
 } from "@/lib/edge/analytics/engine/logical/slots";
 import type { ResolvedAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
@@ -268,6 +277,32 @@ describe("logical relational IR", () => {
     expect(() =>
       duplicateBuilder.relationshipLookup(linkedSessions, "session.visitor"),
     ).toThrow("logical_builder_duplicate_name");
+  });
+
+  it("rejects prepared event-name gates on Page Sources at logical validation", () => {
+    const contextBuilder = createBuilder();
+    const time = createQueryTime(0, 10_000, "UTC", 10_000);
+    const prepared = prepareScopedQuery("event-records", {
+      context: siteQueryContext("site-a", "private-dashboard"),
+      time,
+      filters: EMPTY_FILTER_DOCUMENT,
+      scopePreference: "event",
+    } as QueryInput & { time: QueryTime });
+    const selection = createSemanticScopedSourceSelection({
+      profile: "prepared-scoped-v1",
+      filters: prepared.filters!,
+      subject: contextBuilder.context.subject,
+      time: contextBuilder.context.time,
+      expectedPlan: prepared.scopePlan!,
+      eventName: "purchase",
+    });
+    const builder = createBuilder();
+    const pages = builder.source("page", { selection });
+    builder.output("pages", pages, [{ name: "page", slot: "entity" }]);
+
+    expect(() => validateLogicalPlan(builder.finish())).toThrow(
+      "page_selection_event_name_unsupported",
+    );
   });
 
   it("authors typed scalar, boolean, case, and time expressions", () => {
