@@ -18,6 +18,10 @@ export const SEMANTIC_PAGE_DIMENSIONS = {
     dependencies: ["page.report.os", "page.report.osVersion"],
     nullableFromDependencies: false,
   },
+  overviewOsVersion: {
+    dependencies: ["page.report.os", "page.report.osVersion"],
+    nullableFromDependencies: false,
+  },
   screenSize: {
     dependencies: ["page.report.screenWidth", "page.report.screenHeight"],
     nullableFromDependencies: false,

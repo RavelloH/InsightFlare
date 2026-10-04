@@ -8,6 +8,13 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import {
+  buildOverviewClientDimensionsPlan,
+  buildOverviewGeoDimensionsPlan,
+  OVERVIEW_CARD_OUTPUT_FIELDS,
+  OVERVIEW_CLIENT_DIMENSION_OUTPUTS,
+  OVERVIEW_GEO_DIMENSION_OUTPUTS,
+} from "@/lib/edge/analytics/engine/channel-client-geo-report-plan";
+import {
   buildDimensionPagePlan,
   buildDimensionTopPlan,
   type PageDimensionSelection,
@@ -22,7 +29,10 @@ import {
 } from "@/lib/edge/analytics/engine/session-path-report-plan";
 import type { Env } from "@/lib/edge/types";
 
-import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
+import {
+  queryAnalyticsReportOutputRowsFromD1,
+  queryAnalyticsReportOutputSetRowsFromD1,
+} from "./analytics-report-query";
 import type {
   ClientDimensionTabs,
   DimensionRow,
@@ -821,71 +831,24 @@ export async function queryOverviewClientDimensionsFromD1(
   filters: FilterDocument,
   limit: number,
 ): Promise<ClientDimensionTabs> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    session_id,
-    TRIM(COALESCE(browser, '')) AS browser,
-    TRIM(CASE
-      WHEN TRIM(COALESCE(os, '')) != '' AND TRIM(COALESCE(os_version, '')) != ''
-        THEN TRIM(os) || ' ' || TRIM(os_version)
-      WHEN TRIM(COALESCE(os, '')) != '' THEN TRIM(os)
-      ELSE TRIM(COALESCE(os_version, ''))
-    END) AS osVersion,
-    TRIM(COALESCE(device_type, '')) AS deviceType,
-    TRIM(COALESCE(language, '')) AS language,
-    CASE
-      WHEN screen_width > 0 AND screen_height > 0
-        THEN CAST(screen_width AS INTEGER) || 'x' || CAST(screen_height AS INTEGER)
-      ELSE ''
-    END AS screenSize
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-card_rows AS (
-  SELECT 'browser' AS card_type, browser AS value, COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
-  FROM filtered_visits WHERE browser != '' GROUP BY browser
-  UNION ALL
-  SELECT 'osVersion', osVersion, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
-  FROM filtered_visits WHERE osVersion != '' GROUP BY osVersion
-  UNION ALL
-  SELECT 'deviceType', deviceType, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
-  FROM filtered_visits WHERE deviceType != '' GROUP BY deviceType
-  UNION ALL
-  SELECT 'language', language, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
-  FROM filtered_visits WHERE language != '' GROUP BY language
-  UNION ALL
-  SELECT 'screenSize', screenSize, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
-  FROM filtered_visits WHERE screenSize != '' GROUP BY screenSize
-),
-ranked_cards AS (
-  SELECT *, ROW_NUMBER() OVER (
-    PARTITION BY card_type ORDER BY views DESC, sessions DESC, value ASC
-  ) AS card_rank
-  FROM card_rows
-)
-SELECT card_type AS cardType, value, views, sessions
-FROM ranked_cards
-WHERE card_rank <= ?
-ORDER BY card_type ASC, card_rank ASC
-`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...(scopedDataset
-      ? scopedDataset.bindings.map((binding) => binding.value)
-      : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])]),
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildOverviewClientDimensionsPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
     limit,
-  ]);
+  });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+    outputIds: OVERVIEW_CLIENT_DIMENSION_OUTPUTS,
+    fields: OVERVIEW_CARD_OUTPUT_FIELDS.client,
+    orderBy: [
+      { field: "cardType", direction: "asc", nulls: "first" },
+      { field: "views", direction: "desc", nulls: "last" },
+      { field: "sessions", direction: "desc", nulls: "last" },
+      { field: "value", direction: "asc", nulls: "first" },
+    ],
+  });
   const byCard = new Map<string, DimensionRow[]>();
   for (const row of rows) {
     const values = byCard.get(String(row.cardType ?? "")) ?? [];
@@ -913,91 +876,35 @@ export async function queryOverviewGeoDimensionsFromD1(
   filters: FilterDocument,
   limit: number,
 ): Promise<GeoDimensionTabs> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const cardSources = [
-    `SELECT 'country' AS card_type, country AS value, COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM filtered_visits WHERE country != '' GROUP BY country`,
-    `SELECT 'region', region, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE region != '' GROUP BY region`,
-    `SELECT 'city', city, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE city != '' GROUP BY city`,
-    `SELECT 'continent', continent, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE continent != '' GROUP BY continent`,
-    `SELECT 'timezone', timezone, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE timezone != '' GROUP BY timezone`,
-    `SELECT 'organization', organization, COUNT(*),
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
-  FROM filtered_visits WHERE organization != '' GROUP BY organization`,
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildOverviewGeoDimensionsPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+  });
+  const fields = OVERVIEW_CARD_OUTPUT_FIELDS.geo;
+  const orderBy = [
+    { field: "cardType", direction: "asc" as const, nulls: "first" as const },
+    { field: "views", direction: "desc" as const, nulls: "last" as const },
+    { field: "sessions", direction: "desc" as const, nulls: "last" as const },
+    { field: "visitors", direction: "desc" as const, nulls: "last" as const },
+    { field: "value", direction: "asc" as const, nulls: "first" as const },
   ];
-  // D1 currently rejects compound SELECT statements with more than five terms.
-  const maxCompoundTerms = 5;
-  const rows = (
-    await Promise.all(
-      Array.from(
-        { length: Math.ceil(cardSources.length / maxCompoundTerms) },
-        (_, index) =>
-          queryD1All<Record<string, unknown>>(
-            env,
-            `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    session_id,
-    visitor_id,
-    TRIM(COALESCE(country, '')) AS country,
-    ${regionValueExpr()} AS region,
-    ${cityValueExpr()} AS city,
-    TRIM(COALESCE(continent, '')) AS continent,
-    TRIM(COALESCE(timezone, '')) AS timezone,
-    TRIM(COALESCE(as_organization, '')) AS organization
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-card_rows AS (
-${cardSources
-  .slice(index * maxCompoundTerms, (index + 1) * maxCompoundTerms)
-  .join("\n  UNION ALL\n")}
-),
-ranked_cards AS (
-  SELECT *, ROW_NUMBER() OVER (
-    PARTITION BY card_type
-    ORDER BY views DESC, sessions DESC, visitors DESC, value ASC
-  ) AS card_rank
-  FROM card_rows
-)
-SELECT card_type AS cardType, value, views, sessions, visitors
-FROM ranked_cards
-WHERE card_rank <= ?
-ORDER BY card_type ASC, card_rank ASC
-`,
-            [
-              ...(scopedDataset
-                ? scopedDataset.bindings.map((binding) => binding.value)
-                : [
-                    ...visitSourceBindings(siteId, window),
-                    ...(filter?.bindings ?? []),
-                  ]),
-              limit,
-            ],
-          ),
-      ),
-    )
-  ).flat();
+  const [firstGeoCards, organizationCard] = await Promise.all([
+    queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+      outputIds: OVERVIEW_GEO_DIMENSION_OUTPUTS.slice(0, 5),
+      fields,
+      orderBy,
+    }),
+    queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+      outputIds: OVERVIEW_GEO_DIMENSION_OUTPUTS.slice(5),
+      fields,
+      orderBy,
+    }),
+  ]);
+  const rows = [...firstGeoCards, ...organizationCard];
   const byCard = new Map<string, GeoTabRow[]>();
   for (const row of rows) {
     const card = String(row.cardType ?? "");

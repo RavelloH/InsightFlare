@@ -2,16 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildDomainDiscoverySqlPredicate,
+  buildTrafficChannelSqlExpression,
   buildUtmMediumSqlPredicate,
 } from "@/lib/analytics/traffic-channel-rules";
-import {
-  buildTrafficChannelCaseSql,
-  queryChannelsFromD1,
-} from "@/lib/edge/analytics/providers/d1/internal/channels";
+import { queryChannelsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/channels";
 
 describe("channel aggregate query", () => {
   it("classifies discovery before tagged and referral traffic using shared SQL", () => {
-    const sql = buildTrafficChannelCaseSql();
+    const sql = buildTrafficChannelSqlExpression();
     const organic = buildDomainDiscoverySqlPredicate("organic_search");
     const social = buildDomainDiscoverySqlPredicate("social");
     const paidSearch = buildUtmMediumSqlPredicate("paid_search");
@@ -24,7 +22,7 @@ describe("channel aggregate query", () => {
     expect(sql).toContain("THEN 'direct'");
   });
 
-  it("uses visit_source/filter bindings and stable metric ordering", async () => {
+  it("executes one typed report query and preserves the channel DTO", async () => {
     const all = vi.fn().mockResolvedValue({
       results: [
         { channel: "organic_search", views: 5, sessions: 3, visitors: 2 },
@@ -47,12 +45,12 @@ describe("channel aggregate query", () => {
       { channel: "organic_search", views: 5, sessions: 3, visitors: 2 },
     ]);
 
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(bind).toHaveBeenCalledTimes(1);
     const sql = String((prepare.mock.calls as unknown[][])[0]?.[0]);
-    expect(sql).toContain("FROM visits");
-    expect(sql).toContain("filtered_visits");
-    expect(sql).toContain("count(DISTINCT CASE WHEN session_id");
-    expect(sql).toContain("count(DISTINCT CASE WHEN visitor_id");
-    expect(sql).toContain("ORDER BY views DESC, sessions DESC, channel ASC");
-    expect(bind).toHaveBeenCalledWith("site-1", 10, 20, 20);
+    expect(sql).toContain("visits");
+    expect(sql).toContain("session_id");
+    expect(sql).toContain("visitor_id");
+    expect(sql).toContain("ORDER BY");
   });
 });

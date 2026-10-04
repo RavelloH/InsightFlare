@@ -33,7 +33,9 @@ import {
   handlePagesDashboardContract as handlePagesDashboard,
   handleReferrersContract as handleReferrers,
 } from "@/lib/edge/analytics/interfaces/dashboard/protocol/pages";
+import { queryChannelsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/channels";
 import {
+  geoTabLabel,
   mapDimensionRows,
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -58,6 +60,8 @@ import {
   decodeSessionPathDimensionCursor,
   queryDimensionFromD1,
   queryDimensionPageFromD1,
+  queryOverviewClientDimensionsFromD1,
+  queryOverviewGeoDimensionsFromD1,
   querySessionPathDimensionFromD1,
   querySessionPathDimensionPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
@@ -224,23 +228,28 @@ function createScopedOverviewSqliteEnv(): {
 function createMigratedPagesSqliteEnv(): {
   env: Env;
   database: DatabaseSync;
+  calls: QueryCall[];
   close: () => void;
 } {
   const database = createMigratedDatabase();
+  const calls: QueryCall[] = [];
   const env = {
     DB: {
       prepare: (sql: string) => ({
         bind: (...bindings: QueryBinding[]) => ({
-          all: async () => ({
-            results: database.prepare(sql).all(...bindings) as D1Row[],
-          }),
+          all: async () => {
+            calls.push({ sql, bindings });
+            return {
+              results: database.prepare(sql).all(...bindings) as D1Row[],
+            };
+          },
         }),
       }),
     },
     DAILY_SALT_SECRET: "test-secret",
     INGEST_DO: {} as DurableObjectNamespace,
   } as unknown as Env;
-  return { env, database, close: () => database.close() };
+  return { env, database, calls, close: () => database.close() };
 }
 interface LegacyPageAggregateRow {
   pathname: unknown;
@@ -990,6 +999,258 @@ function seedDimensionReportFixture(database: DatabaseSync): void {
       record.visitId,
     );
   }
+}
+
+function overviewOracleSource(
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  filters: FilterDocument,
+) {
+  const scopedDataset = scopedDatasetFor(targetSiteId, targetWindow, filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window: targetWindow });
+  return {
+    ctes: scopedDataset?.ctes ?? buildVisitSourceCte(),
+    visitRelation: scopedDataset?.visitRelation ?? "visit_source",
+    filterClause: filter?.clause ?? "",
+    bindings: (limit: number) => [
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(targetSiteId, targetWindow),
+            ...(filter?.bindings ?? []),
+          ]),
+      limit,
+    ],
+  };
+}
+
+function legacyOverviewChannelsOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  limit: number,
+  filters: FilterDocument = EMPTY_FILTER_DOCUMENT,
+) {
+  const source = overviewOracleSource(targetSiteId, targetWindow, filters);
+  const sql = `
+WITH
+${source.ctes},
+filtered_visits AS (
+  SELECT * FROM ${source.visitRelation}
+  ${source.filterClause}
+),
+channel_rollup AS (
+  SELECT
+    ${buildTrafficChannelSqlExpression()} AS channel,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM filtered_visits
+  GROUP BY channel
+)
+SELECT channel, views, sessions, visitors
+FROM channel_rollup
+ORDER BY views DESC, sessions DESC, channel ASC
+LIMIT ?
+`;
+  return (database.prepare(sql).all(...source.bindings(limit)) as D1Row[]).map(
+    (row) => ({
+      channel: String(row.channel ?? "other"),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: Number(row.visitors ?? 0),
+    }),
+  );
+}
+
+function legacyOverviewClientOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  limit: number,
+  filters: FilterDocument = EMPTY_FILTER_DOCUMENT,
+) {
+  const source = overviewOracleSource(targetSiteId, targetWindow, filters);
+  const sql = `
+WITH
+${source.ctes},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    session_id,
+    TRIM(COALESCE(browser, '')) AS browser,
+    TRIM(CASE
+      WHEN TRIM(COALESCE(os, '')) != '' AND TRIM(COALESCE(os_version, '')) != ''
+        THEN TRIM(os) || ' ' || TRIM(os_version)
+      WHEN TRIM(COALESCE(os, '')) != '' THEN TRIM(os)
+      ELSE TRIM(COALESCE(os_version, ''))
+    END) AS osVersion,
+    TRIM(COALESCE(device_type, '')) AS deviceType,
+    TRIM(COALESCE(language, '')) AS language,
+    CASE
+      WHEN screen_width > 0 AND screen_height > 0
+        THEN CAST(screen_width AS INTEGER) || 'x' || CAST(screen_height AS INTEGER)
+      ELSE ''
+    END AS screenSize
+  FROM ${source.visitRelation}
+  ${source.filterClause}
+),
+card_rows AS (
+  SELECT 'browser' AS card_type, browser AS value, COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
+  FROM filtered_visits WHERE browser != '' GROUP BY browser
+  UNION ALL
+  SELECT 'osVersion', osVersion, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+  FROM filtered_visits WHERE osVersion != '' GROUP BY osVersion
+  UNION ALL
+  SELECT 'deviceType', deviceType, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+  FROM filtered_visits WHERE deviceType != '' GROUP BY deviceType
+  UNION ALL
+  SELECT 'language', language, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+  FROM filtered_visits WHERE language != '' GROUP BY language
+  UNION ALL
+  SELECT 'screenSize', screenSize, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END)
+  FROM filtered_visits WHERE screenSize != '' GROUP BY screenSize
+),
+ranked_cards AS (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY card_type ORDER BY views DESC, sessions DESC, value ASC
+  ) AS card_rank
+  FROM card_rows
+)
+SELECT card_type AS cardType, value, views, sessions
+FROM ranked_cards
+WHERE card_rank <= ?
+ORDER BY card_type ASC, card_rank ASC
+`;
+  const rows = database.prepare(sql).all(...source.bindings(limit)) as D1Row[];
+  const byCard = new Map<string, D1Row[]>();
+  for (const row of rows) {
+    const card = String(row.cardType ?? "");
+    byCard.set(card, [...(byCard.get(card) ?? []), row]);
+  }
+  const read = (cardType: string) =>
+    (byCard.get(cardType) ?? []).map((row) => ({
+      value: String(row.value ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: 0,
+    }));
+  return {
+    browser: read("browser"),
+    osVersion: read("osVersion"),
+    deviceType: read("deviceType"),
+    language: read("language"),
+    screenSize: read("screenSize"),
+  };
+}
+
+function legacyOverviewGeoOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  limit: number,
+  filters: FilterDocument = EMPTY_FILTER_DOCUMENT,
+) {
+  const source = overviewOracleSource(targetSiteId, targetWindow, filters);
+  const cardSources = [
+    `SELECT 'country' AS card_type, country AS value, COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits WHERE country != '' GROUP BY country`,
+    `SELECT 'region', region, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE region != '' GROUP BY region`,
+    `SELECT 'city', city, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE city != '' GROUP BY city`,
+    `SELECT 'continent', continent, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE continent != '' GROUP BY continent`,
+    `SELECT 'timezone', timezone, COUNT(*),
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END),
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END)
+  FROM filtered_visits WHERE timezone != '' GROUP BY timezone`,
+    // The legacy one-card organization query omitted these aliases, making
+    // its ranked_cards references invalid in SQLite. Name its intended DTO
+    // columns explicitly in the frozen semantic oracle.
+    `SELECT 'organization' AS card_type, organization AS value, COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits WHERE organization != '' GROUP BY organization`,
+  ];
+  const cardRows: D1Row[] = [];
+  for (const sources of [cardSources.slice(0, 5), cardSources.slice(5)]) {
+    const sql = `
+WITH
+${source.ctes},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    session_id,
+    visitor_id,
+    TRIM(COALESCE(country, '')) AS country,
+    ${regionValueExpr()} AS region,
+    ${cityValueExpr()} AS city,
+    TRIM(COALESCE(continent, '')) AS continent,
+    TRIM(COALESCE(timezone, '')) AS timezone,
+    TRIM(COALESCE(as_organization, '')) AS organization
+  FROM ${source.visitRelation}
+  ${source.filterClause}
+),
+card_rows AS (
+${sources.join("\n  UNION ALL\n")}
+),
+ranked_cards AS (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY card_type
+    ORDER BY views DESC, sessions DESC, visitors DESC, value ASC
+  ) AS card_rank
+  FROM card_rows
+)
+SELECT card_type AS cardType, value, views, sessions, visitors
+FROM ranked_cards
+WHERE card_rank <= ?
+ORDER BY card_type ASC, card_rank ASC
+`;
+    cardRows.push(
+      ...(database.prepare(sql).all(...source.bindings(limit)) as D1Row[]),
+    );
+  }
+  const byCard = new Map<string, D1Row[]>();
+  for (const row of cardRows) {
+    const card = String(row.cardType ?? "");
+    byCard.set(card, [...(byCard.get(card) ?? []), row]);
+  }
+  const read = (cardType: string) =>
+    (byCard.get(cardType) ?? []).map((row) => {
+      const value = String(row.value ?? "");
+      return {
+        value,
+        label: geoTabLabel(
+          value,
+          cardType as Parameters<typeof geoTabLabel>[1],
+        ),
+        views: Number(row.views ?? 0),
+        sessions: Number(row.sessions ?? 0),
+        visitors: Number(row.visitors ?? 0),
+      };
+    });
+  return {
+    country: read("country"),
+    region: read("region"),
+    city: read("city"),
+    continent: read("continent"),
+    timezone: read("timezone"),
+    organization: read("organization"),
+  };
 }
 
 function seedSessionPathFixture(database: DatabaseSync): void {
@@ -2782,6 +3043,389 @@ describe("edge pages D1 queries", () => {
     } finally {
       close();
     }
+  });
+
+  it("matches frozen channel, client, and geo overview SQL with bounded typed reads", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    seedDimensionReportFixture(database);
+    insertPageRow(database, {
+      visitId: "dimension-start-boundary",
+      visitorId: "visitor-start-boundary",
+      sessionId: "session-start-boundary",
+      pathname: "/start-boundary",
+      country: "US",
+      startedAt: window.startMs,
+    });
+    insertPageRow(database, {
+      visitId: "dimension-end-boundary",
+      visitorId: "visitor-end-boundary",
+      sessionId: "session-end-boundary",
+      pathname: "/end-boundary",
+      country: "US",
+      startedAt: window.endExclusiveMs,
+    });
+    insertPageRow(database, {
+      visitId: "dimension-other-site",
+      visitorId: "visitor-other-site",
+      sessionId: "session-other-site",
+      pathname: "/other-site",
+      country: "US",
+      siteId: "site-pages-other",
+      startedAt: window.startMs,
+    });
+    try {
+      const channelRows = await queryChannelsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        -1,
+      );
+      expect(channelRows.reduce((total, row) => total + row.views, 0)).toBe(7);
+      expect(channelRows.find((row) => row.channel === "direct")).toMatchObject(
+        {
+          views: 2,
+          sessions: 2,
+          visitors: 2,
+        },
+      );
+
+      for (const limit of [2, 0, -1]) {
+        calls.length = 0;
+        await expect(
+          queryChannelsFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            limit,
+          ),
+        ).resolves.toEqual(
+          legacyOverviewChannelsOracle(database, siteId, window, limit),
+        );
+        expect(calls).toHaveLength(1);
+
+        calls.length = 0;
+        await expect(
+          queryOverviewClientDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            limit,
+          ),
+        ).resolves.toEqual(
+          legacyOverviewClientOracle(database, siteId, window, limit),
+        );
+        expect(calls).toHaveLength(1);
+
+        calls.length = 0;
+        await expect(
+          queryOverviewGeoDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            limit,
+          ),
+        ).resolves.toEqual(
+          legacyOverviewGeoOracle(database, siteId, window, limit),
+        );
+        expect(calls).toHaveLength(2);
+        for (const call of calls) {
+          const sqlBytes = Buffer.byteLength(call.sql, "utf8");
+          expect(sqlBytes).toBeLessThanOrEqual(100_000);
+          expect(call.bindings.length).toBeLessThanOrEqual(100);
+        }
+      }
+
+      await expect(
+        queryChannelsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 1.5),
+      ).rejects.toThrow("channel_limit_must_be_integer");
+      expect(() =>
+        legacyOverviewChannelsOracle(database, siteId, window, 1.5),
+      ).toThrow();
+
+      calls.length = 0;
+      await expect(
+        queryOverviewClientDimensionsFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          1.5,
+        ),
+      ).resolves.toEqual(
+        legacyOverviewClientOracle(database, siteId, window, 1.5),
+      );
+      expect(calls).toHaveLength(1);
+      calls.length = 0;
+      await expect(
+        queryOverviewGeoDimensionsFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          1.5,
+        ),
+      ).resolves.toEqual(
+        legacyOverviewGeoOracle(database, siteId, window, 1.5),
+      );
+      expect(calls).toHaveLength(2);
+    } finally {
+      close();
+    }
+  });
+
+  it("matches prepared observation, advanced identity, empty identity, and Event payload scopes", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    seedDimensionReportFixture(database);
+    const prepared = prepareScopedQuery("overview", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: filterFixture({ path: "/alpha" }),
+      scopePreference: "event",
+    } as never) as { filters?: FilterDocument };
+    if (!prepared.filters)
+      throw new Error("wave47_prepared_observation_scope_missing");
+    const metadata = scopedFilterMetadata(prepared.filters);
+    if (!metadata) throw new Error("wave47_prepared_metadata_missing");
+    const advancedPrepared = (count: number) =>
+      attachScopedFilterMetadata(prepared.filters!, {
+        ...metadata,
+        plan: {
+          ...metadata.plan,
+          advancedMatches: {
+            visitIds: Array.from({ length: count }, (_, index) => ({
+              siteId,
+              id: index < 6 ? `dimension-${index + 1}` : `missing-${index}`,
+            })),
+          },
+        },
+      });
+    const payloadForty = normalizedFilters({
+      kind: "and",
+      children: Array.from({ length: 40 }, (_, index) => ({
+        kind: "condition",
+        target: {
+          kind: "event-payload",
+          path: `/overview-diff/${index}`,
+        },
+        operator: "exists",
+      })),
+    });
+    const cases = [
+      { name: "prepared-observation", filters: prepared.filters },
+      { name: "advanced-128-visit-ids", filters: advancedPrepared(128) },
+      { name: "advanced-empty-visit-ids", filters: advancedPrepared(0) },
+      { name: "event-payload-40", filters: payloadForty },
+    ];
+    try {
+      for (const testCase of cases) {
+        calls.length = 0;
+        await expect(
+          queryChannelsFromD1(env, siteId, window, testCase.filters, 3),
+        ).resolves.toEqual(
+          legacyOverviewChannelsOracle(
+            database,
+            siteId,
+            window,
+            3,
+            testCase.filters,
+          ),
+        );
+        expect(calls, `${testCase.name}/channels`).toHaveLength(1);
+
+        calls.length = 0;
+        await expect(
+          queryOverviewClientDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            testCase.filters,
+            3,
+          ),
+        ).resolves.toEqual(
+          legacyOverviewClientOracle(
+            database,
+            siteId,
+            window,
+            3,
+            testCase.filters,
+          ),
+        );
+        expect(calls, `${testCase.name}/client`).toHaveLength(1);
+
+        calls.length = 0;
+        await expect(
+          queryOverviewGeoDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            testCase.filters,
+            3,
+          ),
+        ).resolves.toEqual(
+          legacyOverviewGeoOracle(
+            database,
+            siteId,
+            window,
+            3,
+            testCase.filters,
+          ),
+        );
+        expect(calls, `${testCase.name}/geo`).toHaveLength(2);
+      }
+    } finally {
+      close();
+    }
+  });
+
+  it("keeps public overview statement shapes within D1 SQL and binding budgets", async () => {
+    const payloadForty = normalizedFilters({
+      kind: "and",
+      children: Array.from({ length: 40 }, (_, index) => ({
+        kind: "condition",
+        target: {
+          kind: "event-payload",
+          path: `/overview-budget/${index}`,
+        },
+        operator: "exists",
+      })),
+    });
+    const prepared = prepareScopedQuery("overview", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: filterFixture({ country: "US" }),
+      scopePreference: "event",
+    } as never) as { filters?: FilterDocument };
+    if (!prepared.filters)
+      throw new Error("wave47_budget_prepared_scope_missing");
+    const metadata = scopedFilterMetadata(prepared.filters);
+    if (!metadata) throw new Error("wave47_budget_metadata_missing");
+    const advancedPrepared = attachScopedFilterMetadata(prepared.filters, {
+      ...metadata,
+      plan: {
+        ...metadata.plan,
+        advancedMatches: {
+          visitIds: Array.from({ length: 128 }, (_, index) => ({
+            siteId,
+            id: `overview-budget-visit-${index}`,
+          })),
+        },
+      },
+    });
+    const readers = [
+      {
+        name: "channels-plain",
+        expectedStatements: 1,
+        run: (env: Env) =>
+          queryChannelsFromD1(env, siteId, window, EMPTY_FILTER_DOCUMENT, 10),
+      },
+      {
+        name: "client-plain",
+        expectedStatements: 1,
+        run: (env: Env) =>
+          queryOverviewClientDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+          ),
+      },
+      {
+        name: "geo-plain",
+        expectedStatements: 2,
+        run: (env: Env) =>
+          queryOverviewGeoDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+          ),
+      },
+      {
+        name: "channels-event-payload-40",
+        expectedStatements: 1,
+        run: (env: Env) =>
+          queryChannelsFromD1(env, siteId, window, payloadForty, 10),
+      },
+      {
+        name: "client-event-payload-40",
+        expectedStatements: 1,
+        run: (env: Env) =>
+          queryOverviewClientDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            payloadForty,
+            10,
+          ),
+      },
+      {
+        name: "geo-event-payload-40",
+        expectedStatements: 2,
+        run: (env: Env) =>
+          queryOverviewGeoDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            payloadForty,
+            10,
+          ),
+      },
+      {
+        name: "client-prepared-128-visit-ids",
+        expectedStatements: 1,
+        run: (env: Env) =>
+          queryOverviewClientDimensionsFromD1(
+            env,
+            siteId,
+            window,
+            advancedPrepared,
+            10,
+          ),
+      },
+    ];
+    const evidence: Array<Record<string, unknown>> = [];
+    for (const reader of readers) {
+      const captured = createD1Env([[], []]);
+      await reader.run(captured.env);
+      expect(captured.calls, reader.name).toHaveLength(
+        reader.expectedStatements,
+      );
+      for (const [index, call] of captured.calls.entries()) {
+        const sqlBytes = Buffer.byteLength(call.sql, "utf8");
+        expect(sqlBytes, `${reader.name}/${index}`).toBeLessThanOrEqual(
+          100_000,
+        );
+        expect(
+          call.bindings.length,
+          `${reader.name}/${index}`,
+        ).toBeLessThanOrEqual(100);
+        evidence.push({
+          name: reader.name,
+          statement: index + 1,
+          statements: captured.calls.length,
+          sqlBytes,
+          bindings: call.bindings.length,
+          sha256: createHash("sha256").update(call.sql).digest("hex"),
+        });
+      }
+    }
+    console.info("wave47_overview_query_budget", JSON.stringify(evidence));
   });
 
   it("preserves typed dimension grouping, search, and six keyset sort orders", async () => {

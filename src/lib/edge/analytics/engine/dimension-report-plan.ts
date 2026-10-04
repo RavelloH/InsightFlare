@@ -374,7 +374,7 @@ function pageReportAttribute(
   return builder.slot(pages, `attribute:${attribute}`);
 }
 
-function selectedDimension(
+export function selectedPageDimension(
   builder: LogicalPlanBuilder,
   pages: LogicalRelationHandle,
   selection: PageDimensionSelection,
@@ -414,6 +414,34 @@ function distinctNonempty(
   );
 }
 
+export function pageDimensionReportSource(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly selections: readonly PageDimensionSelection[];
+  readonly includeVisitors?: boolean;
+}) {
+  const attributes = new Set<string>(["page.report.sessionId"]);
+  if (input.includeVisitors !== false) attributes.add("page.report.visitorId");
+  for (const selection of input.selections) {
+    const definition =
+      selection.kind === "derived"
+        ? semanticPageDimension(selection.dimension)
+        : null;
+    if (selection.kind === "derived" && !definition)
+      throw new Error(`unsupported-page-dimension:${selection.dimension}`);
+    for (const attribute of selection.kind === "stored"
+      ? [selection.attribute]
+      : (definition?.dependencies ?? []))
+      attributes.add(attribute);
+  }
+  return createPageReportSource({
+    ...input,
+    attributes: [...attributes],
+  });
+}
+
 function pageDimensionSource(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
@@ -421,56 +449,47 @@ function pageDimensionSource(input: {
   readonly scopePlan?: ScopedFilterPlan;
   readonly selection: PageDimensionSelection;
 }) {
-  const definition =
-    input.selection.kind === "derived"
-      ? semanticPageDimension(input.selection.dimension)
-      : null;
-  if (input.selection.kind === "derived" && !definition)
-    throw new Error(`unsupported-page-dimension:${input.selection.dimension}`);
-  const attributes = new Set<string>([
-    "page.report.sessionId",
-    "page.report.visitorId",
-    ...(input.selection.kind === "stored"
-      ? [input.selection.attribute]
-      : (definition?.dependencies ?? [])),
-  ]);
-  return createPageReportSource({
+  return pageDimensionReportSource({
     ...input,
-    attributes: [...attributes],
+    selections: [input.selection],
   });
 }
 
-function dimensionRollup(
+export function dimensionRollup(
   builder: LogicalPlanBuilder,
   pages: LogicalRelationHandle,
   value: LogicalExpressionHandle,
+  options: { readonly includeVisitors?: boolean } = {},
 ): LogicalRelationHandle {
   const sessionId = pageReportAttribute(
     builder,
     pages,
     "page.report.sessionId",
   );
-  const visitorId = pageReportAttribute(
-    builder,
-    pages,
-    "page.report.visitorId",
-  );
+  const measures = [
+    { name: "views", kind: "count-rows" as const },
+    {
+      name: "sessions",
+      kind: "count-distinct" as const,
+      expression: distinctNonempty(builder, sessionId),
+    },
+  ];
+  if (options.includeVisitors !== false) {
+    const visitorId = pageReportAttribute(
+      builder,
+      pages,
+      "page.report.visitorId",
+    );
+    measures.push({
+      name: "visitors",
+      kind: "count-distinct",
+      expression: distinctNonempty(builder, visitorId),
+    });
+  }
   return builder.aggregate(
     pages,
     { value: builder.coalesce(value, builder.literal("", STRING)) },
-    [
-      { name: "views", kind: "count-rows" },
-      {
-        name: "sessions",
-        kind: "count-distinct",
-        expression: distinctNonempty(builder, sessionId),
-      },
-      {
-        name: "visitors",
-        kind: "count-distinct",
-        expression: distinctNonempty(builder, visitorId),
-      },
-    ],
+    measures,
   );
 }
 
@@ -585,7 +604,7 @@ export function buildDimensionTopPlan(input: {
   let result = dimensionRollup(
     builder,
     pages,
-    selectedDimension(builder, pages, input.selection),
+    selectedPageDimension(builder, pages, input.selection),
   );
   result = filterDimension(builder, result, input);
   result = sortedDimensions(builder, result, input.sortBy, input.sortDirection);
@@ -620,7 +639,7 @@ export function buildDimensionPagePlan(input: {
   let result = dimensionRollup(
     builder,
     pages,
-    selectedDimension(builder, pages, input.selection),
+    selectedPageDimension(builder, pages, input.selection),
   );
   result = filterDimension(builder, result, input);
   if (input.cursor)

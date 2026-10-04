@@ -621,15 +621,20 @@ describe("edge query dimensions low-level coverage", () => {
       continent: [{ value: "NA", label: "NA" }],
       organization: [{ value: "Example ISP", label: "Example ISP" }],
     });
-    expect(calls[0].bindings).toEqual([...visitBindings(), 10]);
-    expect(calls[1].bindings).toEqual([...visitBindings(), 10]);
-    expect(calls[2].bindings).toEqual([...visitBindings(), 10]);
-    expect(calls[0].sql).toContain("filtered_visits AS MATERIALIZED");
-    expect(calls[1].sql).toContain("filtered_visits AS MATERIALIZED");
-    expect(calls[2].sql).toContain("filtered_visits AS MATERIALIZED");
-    expect(calls[0].sql).toContain("ranked_cards AS");
-    expect(calls[1].sql).toContain("ranked_cards AS");
-    expect(calls[2].sql).toContain("ranked_cards AS");
+    expect(calls[0].bindings).toEqual(expect.arrayContaining(visitBindings()));
+    expect(calls[0].bindings.filter((binding) => binding === 10)).toHaveLength(
+      5,
+    );
+    expect(calls[1].bindings).toEqual(expect.arrayContaining(visitBindings()));
+    expect(calls[1].bindings.filter((binding) => binding === 10)).toHaveLength(
+      5,
+    );
+    expect(calls[2].bindings).toEqual(expect.arrayContaining(visitBindings()));
+    expect(calls[2].bindings.filter((binding) => binding === 10)).toHaveLength(
+      1,
+    );
+    expect(calls[0].sql).toContain("UNION ALL");
+    expect(calls[1].sql).toContain("UNION ALL");
     expect(calls.slice(1)).toHaveLength(2);
     for (const call of calls.slice(1)) {
       expect((call.sql.match(/UNION ALL/g) ?? []).length).toBeLessThan(5);
@@ -666,7 +671,7 @@ describe("edge query dimensions low-level coverage", () => {
     );
 
     expect(calls).toHaveLength(3);
-    expect(calls.every((call) => call.sql.includes("scope_final_visits"))).toBe(
+    expect(calls.every((call) => call.bindings.includes("/pricing"))).toBe(
       true,
     );
     expect(calls.every((call) => call.bindings.length > 3)).toBe(true);

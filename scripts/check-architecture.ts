@@ -496,6 +496,13 @@ function analyticsPhysicalPredicatePlacementViolations(
 }
 
 const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
+  "src/lib/edge/analytics/providers/d1/internal/channels.ts": [
+    "queryChannelsFromD1",
+  ],
+  "src/lib/edge/analytics/providers/d1/internal/dimensions.ts": [
+    "queryOverviewClientDimensionsFromD1",
+    "queryOverviewGeoDimensionsFromD1",
+  ],
   "src/lib/edge/analytics/providers/d1/internal/core-sources.ts": [
     "queryD1CompiledAll",
   ],

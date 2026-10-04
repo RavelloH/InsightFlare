@@ -1026,6 +1026,24 @@ function lowerExpression(
             get("page.report.osVersion"),
           );
           break;
+        case "overviewOsVersion": {
+          const os = trimSpaces(coalesce(text("page.report.os"), constant("")));
+          const version = trimSpaces(
+            coalesce(text("page.report.osVersion"), constant("")),
+          );
+          result = caseWhen(
+            [
+              {
+                when: and(neq(os, constant("")), neq(version, constant(""))),
+                then: concatText(os, constant(" "), version),
+              },
+              { when: neq(os, constant("")), then: os },
+              { when: neq(version, constant("")), then: version },
+            ],
+            constant(""),
+          );
+          break;
+        }
         case "screenSize": {
           const width = get("page.report.screenWidth") as SqlExpression<
             number | null,
