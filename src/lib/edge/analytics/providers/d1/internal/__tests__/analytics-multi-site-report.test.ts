@@ -641,9 +641,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           window: WINDOW,
         }),
         output: "journey-pageview-detail",
-        bytes: 26674,
-        bindings: 12,
-        hash: "v1:055d6cca1029cf053475305482e18dac586be1aadcd87d04ac88ee5a3d8dc573",
+        bytes: 26679,
+        bindings: 7,
+        hash: "v1:a028fe9fdafc3b3ff41afa3ccf0d528cc2641e90b83b2b467f9803ea932ffb73",
       },
       {
         plan: buildEventRecordDetailPlan({
@@ -657,9 +657,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           },
         }),
         output: "event-record-detail",
-        bytes: 28825,
-        bindings: 12,
-        hash: "v1:b3f16aa0a44bdf0146488b9a8a4256e1488df370d9ab735ec7a366fb60035dd8",
+        bytes: 28830,
+        bindings: 7,
+        hash: "v1:ed37fb8f348bff056511dfa8780551fe8f35127b3661e3245a82c7073f9fd179",
       },
       {
         plan: buildJourneyObservationPlan({

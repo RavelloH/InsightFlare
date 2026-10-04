@@ -489,6 +489,47 @@ function commonQueryMatches(): SqlMatch[] {
     {
       match: (sql) =>
         isLogicalPageAggregate(sql) &&
+        !sql.includes("rowKind") &&
+        sql.includes('AS "pathname"') &&
+        !sql.includes('"query_string"') &&
+        !sql.includes('"referrer_host"') &&
+        !sql.includes('"referrer_url"') &&
+        !sql.includes('"browser"') &&
+        !sql.includes('"country"'),
+      all: [
+        {
+          pathname: "/pricing",
+          views: 12,
+          sessions: 8,
+          visitors: 6,
+          bounces: 2,
+          totalDuration: 16_000,
+          durationViews: 0,
+        },
+        {
+          pathname: "/docs",
+          views: 4,
+          sessions: 3,
+          visitors: 2,
+          bounces: 1,
+          totalDuration: 3_000,
+          durationViews: 0,
+        },
+        {
+          pathname: "/blog",
+          views: 2,
+          sessions: 2,
+          visitors: 2,
+          bounces: 2,
+          totalDuration: 1_000,
+          durationViews: 0,
+        },
+      ],
+    },
+    {
+      match: (sql) =>
+        isLogicalPageAggregate(sql) &&
+        !sql.includes("rowKind") &&
         sql.includes('"pathname"') &&
         !sql.includes('"query_string"') &&
         !sql.includes('"referrer_host"') &&
@@ -1015,7 +1056,7 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
-      ["ranked_titles AS", "trend_rollup AS", "'title' AS rowKind"],
+      ["rowKind", "rowOrder"],
       [
         {
           rowKind: "title",
@@ -1277,7 +1318,7 @@ describe("edge query handlers", () => {
   });
 
   it("returns overview metrics, comparison, detail trend, and normalized filter bindings", async () => {
-    const { env, statements } = createEnv({
+    const { env } = createEnv({
       matches: [...authMatches(), ...commonQueryMatches()],
     });
 
@@ -1754,7 +1795,7 @@ describe("edge query handlers", () => {
   });
 
   it("routes visitor, session, retention, and page dashboard handlers", async () => {
-    const { env } = createEnv({
+    const { env, statements } = createEnv({
       matches: [...authMatches(), ...commonQueryMatches()],
     });
 
@@ -1777,7 +1818,6 @@ describe("edge query handlers", () => {
       privatePath("pages-dashboard", "limit=2&interval=hour"),
       env,
     );
-
     expect(await visitors.json()).toMatchObject({
       ok: true,
       data: {

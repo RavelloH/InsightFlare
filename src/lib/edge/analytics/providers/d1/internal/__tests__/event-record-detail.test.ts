@@ -477,7 +477,7 @@ describe("Event record detail report D1 lowering", () => {
       "analytics.custom_events.first",
       "analytics.custom_event_json_nodes.all",
     ]);
-    expect(trace.bindings[0]).toHaveLength(12);
+    expect(trace.bindings[0]).toHaveLength(7);
     expect(trace.bindings[0]).toEqual(
       expect.arrayContaining([SITE_A, "event-main", 120, 130]),
     );
@@ -495,10 +495,10 @@ describe("Event record detail report D1 lowering", () => {
     expect(mainQueryLog?.data).toMatchObject({
       operation: "all",
       status: "success",
-      sqlBytes: 28_825,
-      bindings: 12,
+      sqlBytes: 28_830,
+      bindings: 7,
       physicalPlanHash:
-        "v1:b3f16aa0a44bdf0146488b9a8a4256e1488df370d9ab735ec7a366fb60035dd8",
+        "v1:ed37fb8f348bff056511dfa8780551fe8f35127b3661e3245a82c7073f9fd179",
     });
     expect(
       new TextEncoder().encode(LEGACY_EVENT_DETAIL_SQL).byteLength,
