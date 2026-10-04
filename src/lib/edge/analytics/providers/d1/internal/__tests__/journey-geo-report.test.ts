@@ -28,7 +28,11 @@ import type {
   GeoPointAggregate,
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  buildVisitFilterSql,
+  buildVisitSourceCte,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { queryGeoPointsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-geo-queries";
 import { mapGeoPointRow } from "@/lib/edge/analytics/providers/d1/internal/journey-helpers";
@@ -72,6 +76,11 @@ interface GeoFixture {
   readonly city?: string | null;
 }
 
+interface CapturedSqlStatement {
+  readonly sql: string;
+  readonly bindings: readonly unknown[];
+}
+
 let db: DatabaseSync;
 let site: Site;
 let otherSite: Site;
@@ -112,6 +121,102 @@ function addVisit(database: DatabaseSync, fixture: GeoFixture): void {
 
 function sqliteEnv(database: DatabaseSync, trace?: SqliteD1Trace): Env {
   return { DB: createSqliteD1Database(database, trace) } as unknown as Env;
+}
+
+function capturedSqlEnv(statements: CapturedSqlStatement[]): Env {
+  return {
+    DB: {
+      prepare: (sql: string) => ({
+        bind: (...bindings: unknown[]) => ({
+          all: async () => {
+            statements.push({ sql, bindings });
+            return { results: [] };
+          },
+        }),
+      }),
+    },
+  } as unknown as Env;
+}
+
+function addDirectPayloadEvents(database: DatabaseSync): void {
+  const eventTime = WINDOW.startMs + 40;
+  database
+    .prepare(
+      "INSERT INTO custom_event_names (site_id, name, last_seen_at, site_pk) VALUES (?, ?, ?, ?)",
+    )
+    .run(SITE, "wave52-direct-payload", eventTime, site.pk);
+  const eventName = database
+    .prepare("SELECT id FROM custom_event_names WHERE site_pk = ? AND name = ?")
+    .get(site.pk, "wave52-direct-payload") as { readonly id: number };
+  const paths = Array.from({ length: 40 }, (_unused, index) => {
+    const path = `/field-${index}`;
+    database
+      .prepare(
+        "INSERT INTO custom_event_json_paths (site_id, site_pk, path, last_seen_at) VALUES (?, ?, ?, ?)",
+      )
+      .run(SITE, site.pk, path, eventTime);
+    const pathRow = database
+      .prepare(
+        "SELECT id FROM custom_event_json_paths WHERE site_pk = ? AND path = ?",
+      )
+      .get(site.pk, path) as { readonly id: number };
+    return { pathId: Number(pathRow.id), value: `value-${index}` };
+  });
+  const events = [
+    { eventId: "wave52-direct-40-match", visitId: "geo-sf-1", pathCount: 40 },
+    {
+      eventId: "wave52-direct-40-partial",
+      visitId: "geo-sf-2",
+      pathCount: 39,
+    },
+  ] as const;
+  const insertEvent = database.prepare(`
+    INSERT INTO custom_events (
+      event_id, site_id, site_pk, visit_id, event_name_id, occurred_at,
+      received_at, sequence, node_count, value_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `);
+  const insertNode = database.prepare(`
+    INSERT INTO custom_event_json_nodes (
+      event_pk, node_id, path_id, value_type, depth
+    ) VALUES (?, ?, ?, 1, 1)
+  `);
+  const insertValue = database.prepare(`
+    INSERT INTO custom_event_json_values (
+      event_pk, node_id, site_id, site_pk, event_name_id, path_id,
+      occurred_at, value_type, string_value
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+  `);
+  for (const event of events) {
+    insertEvent.run(
+      event.eventId,
+      SITE,
+      site.pk,
+      event.visitId,
+      eventName.id,
+      eventTime,
+      eventTime,
+      event.pathCount,
+      event.pathCount,
+    );
+    const eventRow = database
+      .prepare("SELECT event_pk FROM custom_events WHERE event_id = ?")
+      .get(event.eventId) as { readonly event_pk: number };
+    for (const [index, path] of paths.slice(0, event.pathCount).entries()) {
+      const nodeId = index + 1;
+      insertNode.run(eventRow.event_pk, nodeId, path.pathId);
+      insertValue.run(
+        eventRow.event_pk,
+        nodeId,
+        SITE,
+        site.pk,
+        eventName.id,
+        path.pathId,
+        eventTime,
+        path.value,
+      );
+    }
+  }
 }
 
 function filters(
@@ -325,6 +430,90 @@ function legacyAggregate(
       })
       .filter((row): row is NonNullable<typeof row> => Boolean(row)),
   };
+}
+
+function legacyParentCountryAggregate(
+  document: FilterDocument,
+  limit: number,
+  window: QueryWindow,
+  statementObserver: (statement: CapturedSqlStatement) => void,
+): GeoPointAggregate {
+  const filter = buildVisitFilterSql(document, "visit_source", { window });
+  const coordinateClause = filter.clause ? "AND" : "WHERE";
+  const pointsSql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    ROUND(latitude, 3) AS lat_bucket,
+    ROUND(longitude, 3) AS lon_bucket,
+    country,
+    region,
+    region_code AS regionCode,
+    city,
+    MAX(started_at) AS latest_at,
+    COUNT(*) AS point_count
+  FROM visit_source
+  ${filter.clause}
+  ${coordinateClause}
+    latitude IS NOT NULL
+    AND longitude IS NOT NULL
+    AND ABS(latitude) <= 90
+    AND ABS(longitude) <= 180
+  GROUP BY lat_bucket, lon_bucket, country, region, region_code, city
+)
+SELECT
+  lat_bucket AS latitude,
+  lon_bucket AS longitude,
+  latest_at AS timestampMs,
+  country,
+  region,
+  regionCode,
+  city,
+  point_count AS pointCount
+FROM filtered_visits
+ORDER BY timestampMs DESC
+LIMIT ?
+`;
+  const countrySql = `
+WITH
+${buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT
+    country,
+    session_id AS sessionId,
+    visitor_id AS visitorId
+  FROM visit_source
+  ${filter.clause}
+)
+SELECT
+  country,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
+FROM filtered_visits
+GROUP BY country
+ORDER BY views DESC, sessions DESC, country ASC
+LIMIT 300
+`;
+  const sourceBindings = [
+    ...visitSourceBindings(SITE, window),
+    ...filter.bindings,
+  ];
+  const queryRows = (sql: string, bindings: readonly (string | number)[]) => {
+    statementObserver({ sql, bindings });
+    return db.prepare(sql).all(...bindings) as Record<string, unknown>[];
+  };
+  const points = queryRows(pointsSql, [...sourceBindings, limit]).map(
+    mapGeoPointRow,
+  );
+  const countryCounts = queryRows(countrySql, sourceBindings).map((row) => ({
+    country: String(row.country ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
+  return { points, countryCounts, regionCounts: [], cityCounts: [] };
 }
 
 function sortedPoints(points: GeoPointAggregate["points"]) {
@@ -856,9 +1045,207 @@ describe("Journey Geo Page report D1 migration", () => {
     }
   });
 
-  it("records two tagged, budget-bounded public reads for plain and 40-payload inputs", async () => {
+  it("matches direct 40-payload filters and records country, region, and city budgets", async () => {
+    addDirectPayloadEvents(db);
+    const payloadConditions = Array.from({ length: 40 }, (_unused, index) => ({
+      kind: "condition" as const,
+      target: {
+        kind: "event-payload" as const,
+        path: `/field-${index}`,
+      },
+      operator: "eq" as const,
+      value: `value-${index}`,
+    }));
+    const directPayloadFilters = (
+      geoConditions: readonly {
+        readonly field: string;
+        readonly value: string;
+      }[] = [],
+    ) =>
+      normalizeFilterDocument(
+        {
+          version: 1,
+          root: {
+            kind: "and",
+            children: [
+              ...payloadConditions,
+              ...geoConditions.map(({ field, value }) => ({
+                kind: "condition" as const,
+                target: { kind: "field" as const, field },
+                operator: "eq" as const,
+                value,
+              })),
+            ],
+          },
+        },
+        analyticsFilterRegistry,
+      );
+    const countryFilters = directPayloadFilters();
+    const legacyStatements: CapturedSqlStatement[] = [];
+    const expected = legacyParentCountryAggregate(
+      countryFilters,
+      100,
+      WINDOW,
+      (statement) => legacyStatements.push(statement),
+    );
+    expect(legacyStatements).toHaveLength(2);
+    expect(expected.points).toHaveLength(1);
+    expect(expected.points[0]!.pointCount).toBe(1);
+    expect(expected.countryCounts).toEqual([
+      { country: "US", views: 1, sessions: 1, visitors: 1 },
+    ]);
+
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const diagnostics = createD1ReadDiagnostics();
+    const actual = await runWithInvocationLogger(logger, () =>
+      runWithD1Operation(OPERATION, () =>
+        queryGeoPointsFromD1(
+          instrumentEnv(sqliteEnv(db, trace), logger),
+          SITE,
+          WINDOW,
+          countryFilters,
+          100,
+          diagnostics,
+        ),
+      ),
+    );
+    expect(sortedPoints(actual.points)).toEqual(sortedPoints(expected.points));
+    expect(actual.countryCounts).toEqual(expected.countryCounts);
+    expect(actual.regionCounts).toEqual(expected.regionCounts);
+    expect(actual.cityCounts).toEqual(expected.cityCounts);
+    expect(actual.points[0]!.pointCount).toBe(1);
+    const record = await logger.emitWhenComplete();
+    const observations = record.logs.filter((entry) =>
+      entry.message.startsWith("db.query.v1.all.success"),
+    );
+    expect(record.performance.d1Statements).toBe(2);
+    expect(trace.preparedSql).toHaveLength(2);
+    expect(trace.bindings).toHaveLength(2);
+    expect(observations).toHaveLength(2);
+    const encodeBudget = (statement: CapturedSqlStatement) => ({
+      sqlBytes: new TextEncoder().encode(statement.sql).byteLength,
+      bindings: statement.bindings.length,
+    });
+    const legacyBudgets = legacyStatements.map(encodeBudget);
+    const countryBudgets = trace.preparedSql.map((sql, index) => {
+      const sqlBytes = new TextEncoder().encode(sql).byteLength;
+      const bindings = trace.bindings[index]!.length;
+      expect(sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(bindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+      expect(observations[index]!.data).toMatchObject({
+        tag: OPERATION,
+        operation: "all",
+        status: "success",
+        sqlBytes,
+        bindings,
+        physicalPlanHash: expect.stringMatching(/^v\d+:/u),
+      });
+      return {
+        sqlBytes,
+        bindings,
+        physicalPlanHash: observations[index]!.data.physicalPlanHash,
+      };
+    });
+    expect(diagnostics.rowsReadAvailable).toBe(false);
+
+    const summaryBudgets: Array<{
+      readonly level: "region" | "city";
+      readonly statements: number;
+      readonly reads: readonly {
+        readonly sqlBytes: number;
+        readonly bindings: number;
+        readonly physicalPlanHash: unknown;
+      }[];
+      readonly compileOnly: true;
+    }> = [];
+    // Country is the real SQLite differential; the added geography predicates
+    // only probe the exact public-reader SQL emitted for region and city.
+    for (const { level, filters: scopedFilters } of [
+      {
+        level: "region" as const,
+        filters: directPayloadFilters([{ field: "geo.country", value: "US" }]),
+      },
+      {
+        level: "city" as const,
+        filters: directPayloadFilters([
+          { field: "geo.country", value: "US" },
+          { field: "geo.region", value: "California" },
+        ]),
+      },
+    ]) {
+      const statements: CapturedSqlStatement[] = [];
+      const compileLogger = createInvocationLogger({
+        source: "worker",
+        trigger: "request",
+      });
+      const compileDiagnostics = createD1ReadDiagnostics();
+      await runWithInvocationLogger(compileLogger, () =>
+        runWithD1Operation(OPERATION, () =>
+          queryGeoPointsFromD1(
+            instrumentEnv(capturedSqlEnv(statements), compileLogger),
+            SITE,
+            WINDOW,
+            scopedFilters,
+            100,
+            compileDiagnostics,
+          ),
+        ),
+      );
+      const compileRecord = await compileLogger.emitWhenComplete();
+      const compileObservations = compileRecord.logs.filter((entry) =>
+        entry.message.startsWith("db.query.v1.all.success"),
+      );
+      expect(compileRecord.performance.d1Statements).toBe(2);
+      expect(statements).toHaveLength(2);
+      expect(compileObservations).toHaveLength(2);
+      const reads = statements.map((statement, index) => {
+        const sqlBytes = new TextEncoder().encode(statement.sql).byteLength;
+        const bindings = statement.bindings.length;
+        expect(sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(bindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+        expect(compileObservations[index]!.data).toMatchObject({
+          tag: OPERATION,
+          operation: "all",
+          status: "success",
+          sqlBytes,
+          bindings,
+          physicalPlanHash: expect.stringMatching(/^v\d+:/u),
+        });
+        return {
+          sqlBytes,
+          bindings,
+          physicalPlanHash: compileObservations[index]!.data.physicalPlanHash,
+        };
+      });
+      summaryBudgets.push({
+        level,
+        statements: compileRecord.performance.d1Statements,
+        reads,
+        compileOnly: true,
+      });
+    }
+
+    expect(legacyBudgets).toHaveLength(2);
+    expect(countryBudgets).toHaveLength(2);
+    expect(summaryBudgets.map(({ level }) => level)).toEqual([
+      "region",
+      "city",
+    ]);
+    expect(
+      summaryBudgets.every(
+        ({ statements, reads, compileOnly }) =>
+          statements === 2 && reads.length === 2 && compileOnly,
+      ),
+    ).toBe(true);
+  });
+
+  it("records public-reader budgets for plain and prepared payload identity inputs", async () => {
     const plain = filters([]);
-    const fortyPayload = normalizeFilterDocument(
+    const fortyPayloadFilters = normalizeFilterDocument(
       {
         version: 1,
         root: {
@@ -883,14 +1270,14 @@ describe("Journey Geo Page report D1 migration", () => {
         (_unused, index) => `missing-payload-page-${index}`,
       ),
     ];
-    const preparedPayload = prepareFilters(fortyPayload, "event");
+    const preparedPayload = prepareFilters(fortyPayloadFilters, "event");
     const preparedFortyPayload = attachAdvancedMatches(preparedPayload, {
       visitIds: fortyPageIds.map((id) => ({ siteId: SITE, id })),
       eventIds: [],
     });
     for (const [label, document] of [
       ["plain", plain],
-      ["forty-payload", preparedFortyPayload],
+      ["prepared-payload-identity", preparedFortyPayload],
     ] as const) {
       const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
       const logger = createInvocationLogger({
@@ -910,7 +1297,7 @@ describe("Journey Geo Page report D1 migration", () => {
           ),
         ),
       );
-      if (label === "forty-payload") {
+      if (label === "prepared-payload-identity") {
         const expected = legacyAggregate(plain, 100, WINDOW, {
           column: "visit_id",
           ids: fortyPageIds,
