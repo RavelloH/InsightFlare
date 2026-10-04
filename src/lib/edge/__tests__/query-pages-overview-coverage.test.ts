@@ -7292,6 +7292,19 @@ describe("edge pages D1 queries", () => {
   });
 });
 describe("edge paginated page and referrer readers", () => {
+  it("rejects signed page cursors with malformed aggregate keys", async () => {
+    const { env } = createD1Env([]);
+    const filters = EMPTY_FILTER_DOCUMENT;
+    const binding = await pageCursorBinding("pages", siteId, window, filters, [
+      true,
+    ]);
+    const cursor = await encodePageCursor(env, binding, "not-a-page-cursor");
+
+    await expect(
+      decodePagesCursor(env, siteId, window, filters, true, cursor),
+    ).rejects.toThrow("invalid-cursor");
+  });
+
   it("returns a signed page cursor and accepts it on the next request", async () => {
     const filters = EMPTY_FILTER_DOCUMENT;
     const first = createD1Env([

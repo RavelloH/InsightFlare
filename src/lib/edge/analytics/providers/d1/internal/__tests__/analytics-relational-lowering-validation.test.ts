@@ -6,9 +6,11 @@ import { createMigratedDatabase } from "@/../scripts/schema/database";
 import { compileD1Query } from "@/lib/db";
 import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
 import type { LogicalComparisonExpression } from "@/lib/edge/analytics/engine/logical/expression";
-import type {
-  RelationId,
-  SlotId,
+import {
+  type RelationId,
+  relationId,
+  type SlotId,
+  slotId,
 } from "@/lib/edge/analytics/engine/logical/ids";
 import type { LogicalNode } from "@/lib/edge/analytics/engine/logical/nodes";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
@@ -840,6 +842,99 @@ describe("relational lowerer validation guards", () => {
     expect(() => lower(incompleteRanking)).toThrow(
       "Ranked-member keys must cover and preserve input grain.",
     );
+
+    const rankedNode = rankedPlan.nodes.find((node) => node.id === ranked.id);
+    if (!rankedNode || rankedNode.kind !== "ranked-members")
+      throw new Error("Expected ranked-members node");
+    expect(() =>
+      lower(
+        withNode(rankedPlan, ranked.id, (node) =>
+          node.kind === "ranked-members"
+            ? { ...node, input: relationId(-1) }
+            : node,
+        ),
+      ),
+    ).toThrow("references a missing node");
+
+    const rollupNode = rankedPlan.nodes.find((node) => node.id === rollup.id);
+    if (!rollupNode || rollupNode.kind !== "aggregate")
+      throw new Error("Expected aggregate node");
+    const grainKey =
+      rollupNode.grain.kind === "keyed"
+        ? rollupNode.grain.keys[0]!
+        : slotId(-1);
+    expect(() =>
+      lower(
+        withNode(rankedPlan, rollup.id, (node) =>
+          node.kind === "aggregate"
+            ? { ...node, grain: { kind: "keyed", keys: [grainKey, grainKey] } }
+            : node,
+        ),
+      ),
+    ).toThrow("unique keyed grain");
+    expect(() =>
+      lower(
+        withNode(rankedPlan, ranked.id, (node) =>
+          node.kind === "ranked-members"
+            ? { ...node, groups: [node.groups[0]!, node.groups[0]!] }
+            : node,
+        ),
+      ),
+    ).toThrow("grouping and ordering keys are invalid");
+    expect(() =>
+      lower(
+        withNode(rankedPlan, ranked.id, (node) =>
+          node.kind === "ranked-members"
+            ? { ...node, groups: [slotId(-1)] }
+            : node,
+        ),
+      ),
+    ).toThrow("key is not visible in its input");
+    expect(() =>
+      lower(
+        withSlotType(rankedPlan, rankedNode.groups[0]!, {
+          kind: "entity",
+          entity: "page",
+        }),
+      ),
+    ).toThrow("Ranked-member keys must be scalar");
+    expect(() =>
+      lower(
+        withNode(rankedPlan, ranked.id, (node) =>
+          node.kind === "ranked-members"
+            ? {
+                ...node,
+                order: [{ ...node.order[0]!, nulls: "middle" as never }],
+              }
+            : node,
+        ),
+      ),
+    ).toThrow("ordering metadata is invalid");
+    expect(() =>
+      lower(
+        withNode(rankedPlan, ranked.id, (node) =>
+          node.kind === "ranked-members"
+            ? { ...node, output: [...node.output, node.rankSlot] }
+            : node,
+        ),
+      ),
+    ).toThrow("append exactly one new rank slot");
+    expect(() =>
+      lower(withSlotType(rankedPlan, ranked.slots.rank, STRING)),
+    ).toThrow(
+      "Rank output must be a new non-null unitless numeric derived slot",
+    );
+
+    const withoutRankOutput = {
+      ...rankedPlan,
+      outputs: rankedPlan.outputs.map((output) => ({
+        ...output,
+        fields: output.fields.filter(
+          (field) => field.slot !== ranked.slots.rank,
+        ),
+      })),
+    } as ValidatedLogicalPlan;
+    expect(() => lower(withoutRankOutput)).not.toThrow();
 
     const bucketBuilder = createBuilder();
     const bucketPages = bucketBuilder.source("page", {

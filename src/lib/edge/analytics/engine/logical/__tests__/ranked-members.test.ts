@@ -115,7 +115,21 @@ describe("logical ranked-members and bucket-index", () => {
   it("rejects invalid rank grain, ordering, output, and rank slot declarations", () => {
     const { plan, ranked } = rankedPlan();
     const index = plan.nodes.findIndex((node) => node.id === ranked.id);
-    const node = plan.nodes[index]!;
+    const node = plan.nodes[index];
+    if (!node || node.kind !== "ranked-members")
+      throw new Error("Expected ranked-members node");
+    const withRankedNode = (
+      patch: Partial<
+        Extract<LogicalPlan["nodes"][number], { kind: "ranked-members" }>
+      >,
+    ): LogicalPlan => ({
+      ...plan,
+      nodes: plan.nodes.map((item, itemIndex) =>
+        itemIndex === index && item.kind === "ranked-members"
+          ? { ...item, ...patch }
+          : item,
+      ),
+    });
 
     const forgedOrder = {
       ...plan,
@@ -165,7 +179,170 @@ describe("logical ranked-members and bucket-index", () => {
     expect(() => validateLogicalPlan(forgedRank as LogicalPlan)).toThrow(
       "Rank output must be a new non-null unitless numeric derived slot",
     );
+
+    expect(() => validateLogicalPlan(withRankedNode({ groups: [] }))).toThrow(
+      "at least one partition key",
+    );
+    expect(() =>
+      validateLogicalPlan(
+        withRankedNode({ groups: [node.groups[0]!, node.groups[0]!] }),
+      ),
+    ).toThrow("partition keys must not repeat");
+    expect(() =>
+      validateLogicalPlan(withRankedNode({ groups: [slotId(-1)] })),
+    ).toThrow("not visible from this relation");
+    expect(() => validateLogicalPlan(withRankedNode({ order: [] }))).toThrow(
+      "at least one order key",
+    );
+    expect(() =>
+      validateLogicalPlan(
+        withRankedNode({
+          order: [node.order[0]!, node.order[0]!],
+        }),
+      ),
+    ).toThrow("order keys must not repeat");
+    expect(() =>
+      validateLogicalPlan(
+        withRankedNode({
+          order: [
+            {
+              ...node.order[0]!,
+              slot: slotId(-1),
+            },
+          ],
+        }),
+      ),
+    ).toThrow("not visible from this relation");
+    expect(() =>
+      validateLogicalPlan(
+        withRankedNode({
+          order: [
+            {
+              ...node.order[0]!,
+              nulls: "middle" as never,
+            },
+          ],
+        }),
+      ),
+    ).toThrow("null ordering is invalid");
+    expect(() =>
+      validateLogicalPlan(withRankedNode({ rankSlot: slotId(-1) })),
+    ).toThrow(
+      "Rank output must be a new non-null unitless numeric derived slot",
+    );
+
+    const source = plan.nodes.find((item) => item.kind === "source");
+    if (!source || source.kind !== "source")
+      throw new Error("Expected source node");
+    expect(() =>
+      validateLogicalPlan(withRankedNode({ input: source.id })),
+    ).toThrow("non-empty keyed grain");
+    expect(() =>
+      validateLogicalPlan(
+        withRankedNode({
+          grain: { kind: "keyed", keys: [node.order[0]!.slot] },
+        }),
+      ),
+    ).toThrow("Declared grain does not match node semantics");
     expect(node.kind).toBe("ranked-members");
+  });
+
+  it("rejects invalid ranked-member builder selections", () => {
+    const assertBuilderRejects = (
+      selection: {
+        readonly groups: readonly string[];
+        readonly order: readonly {
+          readonly slot: string;
+          readonly direction: string;
+          readonly nulls: string;
+        }[];
+      },
+      message: string,
+    ) => {
+      const { builder, grouped } = rankedPlan();
+      expect(() => builder.rankedMembers(grouped, selection as never)).toThrow(
+        message,
+      );
+    };
+
+    const validOrder = [{ slot: "views", direction: "desc", nulls: "last" }];
+    assertBuilderRejects({ groups: [], order: validOrder }, "requires_groups");
+    assertBuilderRejects({ groups: ["pathname"], order: [] }, "requires_order");
+    assertBuilderRejects(
+      { groups: ["missing"], order: validOrder },
+      "group_not_visible",
+    );
+    assertBuilderRejects(
+      { groups: ["pathname", "pathname"], order: validOrder },
+      "duplicate_group",
+    );
+    assertBuilderRejects(
+      { groups: ["pathname"], order: [{ ...validOrder[0]!, slot: "missing" }] },
+      "order_not_visible",
+    );
+    assertBuilderRejects(
+      {
+        groups: ["pathname"],
+        order: [validOrder[0]!, validOrder[0]!],
+      },
+      "duplicate_order_key",
+    );
+    assertBuilderRejects(
+      {
+        groups: ["pathname"],
+        order: [{ ...validOrder[0]!, direction: "sideways" }],
+      },
+      "invalid_direction",
+    );
+    assertBuilderRejects(
+      {
+        groups: ["pathname"],
+        order: [{ ...validOrder[0]!, nulls: "middle" }],
+      },
+      "invalid_nulls",
+    );
+    assertBuilderRejects(
+      { groups: ["title"], order: [{ ...validOrder[0]!, slot: "views" }] },
+      "incomplete_grain_order",
+    );
+
+    const { builder, grouped } = rankedPlan();
+    const rankedNameCollision = builder.project(grouped, {
+      rank: builder.literal(1, { kind: "scalar", scalar: "number" }),
+    });
+    expect(() =>
+      builder.rankedMembers(rankedNameCollision, {
+        groups: ["pathname"],
+        order: [{ slot: "views", direction: "desc", nulls: "last" }],
+      }),
+    ).toThrow("output_name_collision");
+
+    const entityBuilder = createBuilder();
+    const pages = entityBuilder.source("page", {
+      attributes: ["page.report.pathname"],
+    });
+    const keyedEntities = entityBuilder.distinct(pages, [
+      { input: "entity" },
+      { input: "attribute:page.report.pathname" },
+    ]);
+    expect(() =>
+      entityBuilder.rankedMembers(keyedEntities, {
+        groups: ["entity"],
+        order: [
+          {
+            slot: "attribute:page.report.pathname",
+            direction: "asc",
+            nulls: "last",
+          },
+        ],
+      }),
+    ).toThrow("requires_scalar_slots");
+    expect(() =>
+      entityBuilder.rankedMembers(keyedEntities, {
+        groups: ["attribute:page.report.pathname"],
+        order: [{ slot: "entity", direction: "asc", nulls: "last" }],
+      }),
+    ).toThrow("requires_scalar_slots");
   });
 
   it("exposes calendar bucket indexes as nullable unitless numbers only", () => {
@@ -194,6 +371,40 @@ describe("logical ranked-members and bucket-index", () => {
         invalidBuilder.literal(0, { kind: "scalar", scalar: "number" }),
       ),
     ).toThrow("Bucket indexes require a calendar bucket expression");
+  });
+
+  it("prints normalized page paths and semantic page dimensions", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: [
+        "page.report.pathname",
+        "page.report.browser",
+        "page.report.os",
+      ],
+    });
+    const normalizedPath = builder.normalizeString(
+      builder.slot(pages, "attribute:page.report.pathname"),
+      "trim-ascii-space",
+    );
+    const browserEngine = builder.pageDimension("browserEngine", {
+      "page.report.browser": builder.slot(
+        pages,
+        "attribute:page.report.browser",
+      ),
+      "page.report.os": builder.slot(pages, "attribute:page.report.os"),
+    });
+    const projected = builder.project(pages, {
+      path: normalizedPath,
+      browserEngine,
+    });
+    builder.output("page-dimensions", projected, [
+      { name: "path", slot: "path" },
+      { name: "browserEngine", slot: "browserEngine" },
+    ]);
+
+    const printed = printLogicalPlan(builder.finish());
+    expect(printed).toContain("NORMALIZE_STRING<trim-ascii-space>");
+    expect(printed).toContain("PAGE_DIMENSION<browserEngine>");
   });
 
   it("rejects source rows as ranked-member keyed inputs", () => {
