@@ -485,8 +485,15 @@ export class LogicalPlanBuilder {
     });
   }
 
-  round(input: LogicalExpressionHandle): LogicalExpressionHandle {
-    return this.#expression({ kind: "round", input: input.expression });
+  round(
+    input: LogicalExpressionHandle,
+    decimalPlaces?: number,
+  ): LogicalExpressionHandle {
+    return this.#expression({
+      kind: "round",
+      input: input.expression,
+      ...(decimalPlaces === undefined ? {} : { decimalPlaces }),
+    });
   }
 
   absolute(input: LogicalExpressionHandle): LogicalExpressionHandle {

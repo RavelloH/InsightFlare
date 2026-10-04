@@ -241,6 +241,43 @@ function createPageDimensionPlan(): {
 }
 
 describe("relational lowerer validation guards", () => {
+  it("rechecks forged ROUND precision at the D1 lowering boundary", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: ["page.report.latitude"],
+    });
+    const rounded = builder.round(
+      builder.slot(pages, "attribute:page.report.latitude"),
+      3,
+    );
+    const projected = builder.project(pages, { rounded });
+    builder.output("rounded-latitude", projected, [
+      { name: "rounded", slot: "rounded" },
+    ]);
+    const plan = builder.finish();
+    const forged = withNode(plan, projected.id, (node) =>
+      node.kind === "project"
+        ? {
+            ...node,
+            projections: node.projections.map((projection) =>
+              projection.expression.kind === "round"
+                ? {
+                    ...projection,
+                    expression: {
+                      ...projection.expression,
+                      decimalPlaces: 16,
+                    },
+                  }
+                : projection,
+            ),
+          }
+        : node,
+    );
+    expect(() => lower(forged)).toThrow(
+      "ROUND precision must be a static integer from 0 through 15.",
+    );
+  });
+
   it("rejects normalization metadata on non-string and ordered comparisons", () => {
     const numericPlan = createComparisonPlan(true);
     const numericFilter = numericPlan.nodes.find(

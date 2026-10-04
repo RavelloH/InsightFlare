@@ -80,6 +80,33 @@ function planWithForgedFilter(predicate: LogicalExpr): LogicalPlan {
 }
 
 describe("logical relational IR", () => {
+  it("prints bounded ROUND precision and rejects forged precision", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: ["page.durationMs"],
+    });
+    const duration = builder.slot(pages, "attribute:page.durationMs");
+    const rounded = builder.round(duration, 3);
+    const output = builder.project(pages, { rounded });
+    builder.output("rounded-duration", output, [
+      { name: "rounded", slot: "rounded" },
+    ]);
+    const plan = builder.finish();
+    expect(printLogicalPlan(plan)).toContain("ROUND(");
+    expect(printLogicalPlan(plan)).toContain(", 3)");
+    expect(rounded.type).toEqual(duration.type);
+    const invalidPrecisionBuilder = createBuilder();
+    expect(() =>
+      invalidPrecisionBuilder.round(
+        invalidPrecisionBuilder.literal(1, {
+          kind: "scalar",
+          scalar: "number",
+        }),
+        1.5,
+      ),
+    ).toThrowError(LogicalPlanError);
+  });
+
   it("marks zero-denominator division nullable", () => {
     const builder = createBuilder();
     const value = builder.arithmetic(

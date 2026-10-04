@@ -596,13 +596,36 @@ function validateExpression(
           `Unsupported SQL function: ${String(expression.name)}`,
         );
       }
-      if (expression.arguments.length !== 1)
-        invalid(`${expression.name}() requires exactly one argument`);
+      if (
+        (expression.name === "round" &&
+          expression.arguments.length !== 1 &&
+          expression.arguments.length !== 2) ||
+        (expression.name !== "round" && expression.arguments.length !== 1)
+      )
+        invalid(
+          expression.name === "round"
+            ? "ROUND() requires one argument and an optional static precision"
+            : `${expression.name}() requires exactly one argument`,
+        );
       expression.arguments.forEach((child) =>
         validateExpression(child, scopes, activeSources, allowExcluded),
       );
       {
         const argument = expression.arguments[0]!;
+        const precision = expression.arguments[1];
+        if (
+          precision &&
+          (precision.kind !== "constant" ||
+            typeof precision.value !== "number" ||
+            !Number.isInteger(precision.value) ||
+            precision.value < 0 ||
+            precision.value > 15 ||
+            precision.resultType.affinity !== "integer" ||
+            precision.resultType.nullable)
+        )
+          invalid(
+            "ROUND() precision must be a static integer from 0 through 15",
+          );
         const affinity = argument.resultType.affinity;
         if (
           ((expression.name === "lower" ||

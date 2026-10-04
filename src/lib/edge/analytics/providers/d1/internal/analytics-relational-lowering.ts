@@ -1343,9 +1343,50 @@ function lowerExpression(
         candidateBounded: input.candidateBounded,
       };
     }
+    case "round": {
+      const input = lowerExpression(
+        expression.input,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.input`,
+        time,
+      );
+      if (
+        input.kind !== "scalar" ||
+        input.type.kind !== "scalar" ||
+        input.type.scalar !== "number"
+      )
+        reject(path, "ROUND requires a lowered numeric scalar.");
+      const decimalPlaces = expression.decimalPlaces;
+      if (
+        decimalPlaces !== undefined &&
+        (!Number.isInteger(decimalPlaces) ||
+          decimalPlaces < 0 ||
+          decimalPlaces > 15)
+      )
+        reject(
+          path,
+          "ROUND precision must be a static integer from 0 through 15.",
+        );
+      // The validated logical scalar type is the source of truth here; the
+      // generic SQL expression node has intentionally erased its value type.
+      const numericExpression = input.expression as SqlExpression<
+        number | null
+      >;
+      return {
+        kind: "scalar",
+        expression:
+          decimalPlaces === undefined
+            ? callFunction("round", numericExpression)
+            : callFunction("round", numericExpression, constant(decimalPlaces)),
+        type: input.type,
+        nullable: input.nullable,
+        candidateBounded: input.candidateBounded,
+      };
+    }
     case "elapsed-duration-literal":
     case "calendar-period-literal":
-    case "round":
       reject(
         path,
         `Expression kind ${expression.kind} is outside the current D1 capability set.`,

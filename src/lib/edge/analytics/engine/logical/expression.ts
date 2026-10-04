@@ -112,6 +112,8 @@ export interface LogicalArithmeticExpression {
 export interface LogicalRoundExpression {
   readonly kind: "round";
   readonly input: LogicalExpr;
+  /** Fixed decimal precision; omitted precision keeps SQLite's one-argument form. */
+  readonly decimalPlaces?: number;
 }
 
 export interface LogicalAbsoluteExpression {

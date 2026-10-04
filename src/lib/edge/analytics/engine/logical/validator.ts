@@ -653,6 +653,20 @@ function infer(
           },
         ]);
       }
+      if (
+        expression.decimalPlaces !== undefined &&
+        (!Number.isInteger(expression.decimalPlaces) ||
+          expression.decimalPlaces < 0 ||
+          expression.decimalPlaces > 15)
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message: "ROUND precision must be an integer from 0 through 15.",
+          },
+        ]);
+      }
       return input;
     }
     case "coalesce": {

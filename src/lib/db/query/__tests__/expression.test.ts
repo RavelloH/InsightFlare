@@ -40,7 +40,7 @@ import {
   union,
   unixepoch,
 } from "@/lib/db";
-import { expressionResultType } from "@/lib/db/query/expression";
+import { constant, expressionResultType } from "@/lib/db/query/expression";
 import { schema } from "@/lib/db/schema";
 
 describe("typed SQL expressions", () => {
@@ -71,6 +71,17 @@ describe("typed SQL expressions", () => {
       affinity: "numeric",
       nullable: false,
     });
+    expect(callFunction("round", param(2.5), constant(3)).resultType).toEqual({
+      affinity: "numeric",
+      nullable: false,
+    });
+    expect(callFunction("round", param(null), constant(3)).resultType).toEqual({
+      affinity: "numeric",
+      nullable: true,
+    });
+    expect(() => callFunction("round", param(2.5), constant(16))).toThrow(
+      "ROUND() precision must be a static integer from 0 through 15",
+    );
     expect(eq(sites.columns.public_slug, param("slug")).resultType).toEqual({
       affinity: "integer",
       nullable: true,

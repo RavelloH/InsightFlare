@@ -18,6 +18,7 @@ import {
   compileD1Mutation,
   compileD1Query,
   concatText,
+  constant,
   count,
   countDistinct,
   D1StatementBudgetError,
@@ -84,6 +85,91 @@ function executeRun(
 }
 
 describe("typed D1 query compiler", () => {
+  it("compiles only static bounded ROUND precision and matches SQLite values", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "round-test-site",
+      );
+      const sites = scan(schema.site_identities);
+      const rounded = project(sites, {
+        roundZero: callFunction("round", param(1.5), constant(0)),
+        roundPositive: callFunction("round", param(1.2345), constant(3)),
+        roundNegative: callFunction("round", param(-1.2345), constant(3)),
+        roundFifteen: callFunction(
+          "round",
+          param(1.123456789012345),
+          constant(15),
+        ),
+        roundNull: callFunction("round", param(null), constant(3)),
+      });
+      const query = compileD1Query(rounded);
+      expect(query.sql.match(/ROUND\(/gu)).toHaveLength(5);
+      expect(query.bindings).toEqual([
+        1.5,
+        1.2345,
+        -1.2345,
+        1.123456789012345,
+        null,
+      ]);
+      expect(executeAll(db, query)).toEqual([
+        {
+          roundZero: 2,
+          roundPositive: 1.234,
+          roundNegative: -1.234,
+          roundFifteen: 1.123456789012345,
+          roundNull: null,
+        },
+      ]);
+
+      const malformed = project(sites, {
+        rounded: {
+          kind: "function",
+          name: "round",
+          arguments: [param(1), param(3)],
+          resultType: { affinity: "numeric", nullable: false },
+        } as never,
+      });
+      expect(() => compileD1Query(malformed)).toThrowError(
+        /ROUND\(\) precision must be a static integer/u,
+      );
+      for (const precision of [
+        sites.columns.site_id,
+        constant(null),
+        constant("3"),
+        {
+          kind: "constant",
+          value: 3.5,
+          resultType: { affinity: "real", nullable: false },
+        },
+        constant(16),
+      ]) {
+        const malformedPrecision = project(sites, {
+          rounded: {
+            kind: "function",
+            name: "round",
+            arguments: [param(1), precision],
+            resultType: { affinity: "numeric", nullable: false },
+          } as never,
+        });
+        expect(() => compileD1Query(malformedPrecision)).toThrow();
+      }
+      const excessArguments = project(sites, {
+        rounded: {
+          kind: "function",
+          name: "round",
+          arguments: [param(1), constant(3), constant(2)],
+          resultType: { affinity: "numeric", nullable: false },
+        } as never,
+      });
+      expect(() => compileD1Query(excessArguments)).toThrowError(
+        /ROUND\(\) requires one argument and an optional static precision/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("attaches bounded value-free metadata for the selected final emission", () => {
     const sites = scan(schema.site_identities);
     const native = compileD1Query(

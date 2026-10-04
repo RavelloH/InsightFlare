@@ -1130,10 +1130,42 @@ export function callFunction<
   NullableValue<E, number>,
   ExpressionResultType<"numeric", NullableOf<E>>
 >;
+export function callFunction<
+  E extends SqlExpression<number | null>,
+  Result extends ExpressionResultType,
+  Places extends number,
+>(
+  name: "round",
+  expression: SqlExpression<ExpressionValue<E>, Result> & E,
+  decimalPlaces: ConstantExpression<
+    Places,
+    ExpressionResultType<"integer", false>
+  >,
+): FunctionExpression<
+  NullableValue<E, number>,
+  ExpressionResultType<"numeric", NullableOf<E>>
+>;
 export function callFunction(
   name: SqlFunctionName,
   expression: SqlExpression,
+  decimalPlaces?: SqlExpression,
 ): FunctionExpression {
+  if (decimalPlaces !== undefined) {
+    if (
+      name !== "round" ||
+      decimalPlaces.kind !== "constant" ||
+      typeof decimalPlaces.value !== "number" ||
+      !Number.isInteger(decimalPlaces.value) ||
+      decimalPlaces.value < 0 ||
+      decimalPlaces.value > 15 ||
+      decimalPlaces.resultType.affinity !== "integer" ||
+      decimalPlaces.resultType.nullable
+    )
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "ROUND() precision must be a static integer from 0 through 15",
+      );
+  }
   let affinity: ExpressionAffinity;
   switch (name) {
     case "lower":
@@ -1159,7 +1191,8 @@ export function callFunction(
   return {
     kind: "function",
     name,
-    arguments: [expression],
+    arguments:
+      decimalPlaces === undefined ? [expression] : [expression, decimalPlaces],
     resultType: {
       affinity,
       nullable: expression.resultType.nullable,
