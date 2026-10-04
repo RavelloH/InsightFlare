@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
+import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
 import {
   attachScopedFilterMetadata,
   createQueryTime,
@@ -73,6 +74,7 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import {
   decodePagesCursor,
+  pageCursorBinding,
   queryDimensionAggregate,
   queryPageCardMetricsFromD1,
   queryPageCardTitlesFromD1,
@@ -87,6 +89,7 @@ import {
 import { queryPagesDashboard } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard";
 import {
   encodePageCursor,
+  pageResult,
   paginationBindingForWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/pagination";
 import {
@@ -176,9 +179,11 @@ function installDirectEventFilterTables(database: DatabaseSync): void {
 function createScopedOverviewSqliteEnv(): {
   env: Env;
   database: DatabaseSync;
+  calls: QueryCall[];
   close: () => void;
 } {
   const database = new DatabaseSync(":memory:");
+  const calls: QueryCall[] = [];
   for (const migration of [
     "migrations/0008_rebuild_analytics.sql",
     "migrations/0013_add_visit_performance_metrics.sql",
@@ -214,16 +219,19 @@ function createScopedOverviewSqliteEnv(): {
     DB: {
       prepare: (sql: string) => ({
         bind: (...bindings: QueryBinding[]) => ({
-          all: async () => ({
-            results: database.prepare(sql).all(...bindings) as D1Row[],
-          }),
+          all: async () => {
+            calls.push({ sql, bindings });
+            return {
+              results: database.prepare(sql).all(...bindings) as D1Row[],
+            };
+          },
         }),
       }),
     },
     DAILY_SALT_SECRET: "test-secret",
     INGEST_DO: {} as DurableObjectNamespace,
   } as unknown as Env;
-  return { env, database, close: () => database.close() };
+  return { env, database, calls, close: () => database.close() };
 }
 function createMigratedPagesSqliteEnv(): {
   env: Env;
@@ -401,8 +409,346 @@ LIMIT ?
   ]);
   return rows.map(legacyPageAggregateRow);
 }
+interface LegacyCombinedPagesRow {
+  readonly rowType: unknown;
+  readonly cardType?: unknown;
+  readonly pathname?: unknown;
+  readonly queryValue?: unknown;
+  readonly hashValue?: unknown;
+  readonly value?: unknown;
+  readonly views?: unknown;
+  readonly sessions?: unknown;
+  readonly visitors?: unknown;
+}
+
+/** Frozen complete pre-Logical pages-with-tabs SQL and response oracle. */
+async function legacyPagesWithTabsOracle(
+  env: Env,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  includeDetails: boolean,
+  cursor?: {
+    readonly views: number;
+    readonly sessions: number;
+    readonly pathname: string;
+    readonly query: string;
+    readonly hash: string;
+  } | null,
+) {
+  const preparedDataset = scopedDatasetFor(targetSiteId, targetWindow, filters);
+  const expandedDataset =
+    preparedDataset ??
+    scopedDatasetForUnpreparedReader(
+      "pages",
+      targetSiteId,
+      targetWindow,
+      filters,
+      "session",
+    );
+  const scopedDataset = preparedDataset ?? expandedDataset;
+  const filter = preparedDataset
+    ? null
+    : buildVisitFilterSql(filters, "rv", { window: targetWindow });
+  const observationVisitRelation = preparedDataset
+    ? preparedDataset.visitRelation
+    : expandedDataset
+      ? "scope_raw_visits"
+      : "visit_source";
+  const edgeVisitRelation =
+    preparedDataset || !expandedDataset
+      ? "filtered_visits"
+      : expandedDataset.visitRelation;
+  const queryExpr = includeDetails ? "query_string" : "''";
+  const hashExpr = includeDetails ? "hash_fragment" : "''";
+  const visitSource = buildVisitSourceCte().replace(
+    "visit_source AS (",
+    "visit_source AS MATERIALIZED (",
+  );
+  const cursorClause = cursor
+    ? `
+WHERE views < ?
+   OR (views = ? AND sessions < ?)
+   OR (views = ? AND sessions = ? AND pathname > ?)
+   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue > ?)
+   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue = ? AND hashValue > ?)`
+    : "";
+  const sql = `
+WITH
+${scopedDataset?.ctes ?? visitSource},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    pathname,
+    ${queryExpr} AS queryValue,
+    ${hashExpr} AS hashValue,
+    TRIM(COALESCE(pathname, '')) AS pathValue,
+    session_id,
+    visitor_id,
+    started_at,
+    visit_id,
+    TRIM(COALESCE(title, '')) AS title,
+    TRIM(COALESCE(hostname, '')) AS hostname
+  FROM ${observationVisitRelation} rv
+  ${filter?.clause ?? ""}
+),
+page_rollup AS (
+  SELECT
+    pathname,
+    queryValue,
+    hashValue,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
+  FROM filtered_visits
+  GROUP BY pathname, queryValue, hashValue
+),
+page_candidates AS (
+  SELECT
+    pathname,
+    queryValue,
+    hashValue,
+    views,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY views DESC, sessions DESC, pathname ASC, queryValue ASC, hashValue ASC
+    ) AS pageRank
+  FROM page_rollup
+  ${cursorClause}
+),
+page_rows AS (
+  SELECT
+    'page' AS rowType,
+    '' AS cardType,
+    pathname,
+    queryValue,
+    hashValue,
+    '' AS value,
+    views,
+    sessions,
+    0 AS visitors,
+    pageRank AS rowRank
+  FROM page_candidates
+  ORDER BY pageRank ASC
+  LIMIT ?
+),
+ranked_session_visits AS (
+  SELECT
+    vs.session_id,
+    vs.visitor_id,
+    TRIM(COALESCE(vs.pathname, '')) AS pathname,
+    ROW_NUMBER() OVER (
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at ASC, vs.visit_id ASC
+    ) AS first_rank,
+    ROW_NUMBER() OVER (
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at DESC, vs.visit_id DESC
+    ) AS latest_rank
+  FROM ${edgeVisitRelation} vs
+  WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
+),
+session_edges AS (
+  SELECT
+    session_id,
+    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
+    MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entry,
+    MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exit
+  FROM ranked_session_visits
+  GROUP BY session_id
+),
+card_rows AS (
+  SELECT
+    'path' AS card_type,
+    pathValue AS value,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits
+  WHERE pathValue != ''
+  GROUP BY pathValue
+  UNION ALL
+  SELECT
+    'title' AS card_type,
+    title AS value,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits
+  WHERE title != ''
+  GROUP BY title
+  UNION ALL
+  SELECT
+    'hostname' AS card_type,
+    hostname AS value,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM filtered_visits
+  WHERE hostname != ''
+  GROUP BY hostname
+  UNION ALL
+  SELECT
+    'entry' AS card_type,
+    entry AS value,
+    COUNT(*) AS views,
+    COUNT(*) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM session_edges
+  WHERE entry != ''
+  GROUP BY entry
+  UNION ALL
+  SELECT
+    'exit' AS card_type,
+    exit AS value,
+    COUNT(*) AS views,
+    COUNT(*) AS sessions,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM session_edges
+  WHERE exit != ''
+  GROUP BY exit
+),
+ranked_cards AS (
+  SELECT
+    card_type,
+    value,
+    views,
+    sessions,
+    visitors,
+    ROW_NUMBER() OVER (
+      PARTITION BY card_type
+      ORDER BY views DESC, sessions DESC, value ASC
+    ) AS cardRank
+  FROM card_rows
+)
+SELECT rowType, cardType, pathname, queryValue, hashValue, value,
+  views, sessions, visitors, rowRank
+FROM page_rows
+UNION ALL
+SELECT
+  'tab' AS rowType,
+  card_type AS cardType,
+  '' AS pathname,
+  '' AS queryValue,
+  '' AS hashValue,
+  value,
+  views,
+  sessions,
+  visitors,
+  cardRank AS rowRank
+FROM ranked_cards
+WHERE cardRank <= ?
+ORDER BY rowType ASC, cardType ASC, rowRank ASC, value ASC
+`;
+  const cursorBindings = cursor
+    ? [
+        cursor.views,
+        cursor.views,
+        cursor.sessions,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.query,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.query,
+        cursor.hash,
+      ]
+    : [];
+  const bindings = [
+    ...(scopedDataset
+      ? scopedDataset.bindings.map((binding) => binding.value)
+      : [...visitSourceBindings(targetSiteId, targetWindow)]),
+    ...(filter?.bindings ?? []),
+    ...cursorBindings,
+    limit + 1,
+    limit,
+  ];
+  // The frozen pre-migration SQL is a test oracle, so execute it directly
+  // against SQLite. Some legacy shapes intentionally exceed today's D1
+  // statement budget and must remain measurable as the before-state.
+  const result = await env.DB.prepare(sql)
+    .bind(...bindings)
+    .all<LegacyCombinedPagesRow>();
+  const rows = result.results ?? [];
+  const pageRows = rows
+    .filter((row) => row.rowType === "page")
+    .map((row) => ({
+      pathname: String(row.pathname ?? ""),
+      query: String(row.queryValue ?? ""),
+      hash: String(row.hashValue ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+    }));
+  const page = pageResult(pageRows, limit);
+  const binding = await pageCursorBinding(
+    "pages",
+    targetSiteId,
+    targetWindow,
+    filters,
+    [includeDetails],
+  );
+  const nextCursor =
+    page.hasMore && page.last
+      ? await encodePageCursor(env, binding, {
+          views: page.last.views,
+          sessions: page.last.sessions,
+          pathname: page.last.pathname,
+          query: page.last.query,
+          hash: page.last.hash,
+        })
+      : null;
+  const byCard = new Map<
+    string,
+    { value: string; views: number; sessions: number; visitors: number }[]
+  >();
+  for (const row of rows.filter((item) => item.rowType === "tab")) {
+    const card = String(row.cardType ?? "");
+    const values = byCard.get(card) ?? [];
+    values.push({
+      value: String(row.value ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: Number(row.visitors ?? 0),
+    });
+    byCard.set(card, values);
+  }
+  return {
+    pages: {
+      items: page.rows,
+      pagination: {
+        limit,
+        returned: page.rows.length,
+        hasMore: page.hasMore,
+        nextCursor,
+      },
+    },
+    tabs: {
+      path: byCard.get("path") ?? [],
+      title: byCard.get("title") ?? [],
+      hostname: byCard.get("hostname") ?? [],
+      entry: byCard.get("entry") ?? [],
+      exit: byCard.get("exit") ?? [],
+    },
+  };
+}
+
 function normalizedFilters(root: unknown): FilterDocument {
   return normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
+}
+
+function combinedPayloadFilter(paths: readonly string[]): FilterDocument {
+  return normalizedFilters({
+    kind: "and",
+    children: paths.map((path) => ({
+      kind: "condition",
+      target: { kind: "event-payload", path },
+      operator: "exists",
+    })),
+  });
 }
 function filterCondition(
   target:
@@ -1063,6 +1409,83 @@ LIMIT ?
       visitors: Number(row.visitors ?? 0),
     }),
   );
+}
+
+function seedCombinedPayloadEvent(
+  database: DatabaseSync,
+  ownerVisitId: string,
+  paths: readonly string[],
+): void {
+  const siteIdentity = database
+    .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+    .get(siteId) as { readonly site_pk: number };
+  const sitePk = Number(siteIdentity.site_pk);
+  database
+    .prepare(
+      "INSERT INTO custom_event_names (site_id, name, last_seen_at, site_pk) VALUES (?, 'combined-payload', ?, ?)",
+    )
+    .run(siteId, baseMs, sitePk);
+  const eventName = database
+    .prepare(
+      "SELECT id FROM custom_event_names WHERE site_pk = ? AND name = 'combined-payload'",
+    )
+    .get(sitePk) as { readonly id: number };
+  const eventNameId = Number(eventName.id);
+  database
+    .prepare(
+      `INSERT INTO custom_events (
+        event_id, site_id, site_pk, visit_id, event_name_id, occurred_at,
+        received_at, sequence, node_count, value_count
+      ) VALUES ('combined-payload-event', ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    )
+    .run(
+      siteId,
+      sitePk,
+      ownerVisitId,
+      eventNameId,
+      baseMs + 2,
+      baseMs + 2,
+      paths.length,
+      paths.length,
+    );
+  const event = database
+    .prepare("SELECT event_pk FROM custom_events WHERE event_id = ?")
+    .get("combined-payload-event") as { readonly event_pk: number };
+  const insertPath = database.prepare(`
+    INSERT INTO custom_event_json_paths (site_id, site_pk, path, last_seen_at)
+    VALUES (?, ?, ?, ?)
+  `);
+  const insertNode = database.prepare(`
+    INSERT INTO custom_event_json_nodes (
+      event_pk, node_id, path_id, value_type, depth
+    ) VALUES (?, ?, ?, 1, 1)
+  `);
+  const insertValue = database.prepare(`
+    INSERT INTO custom_event_json_values (
+      event_pk, node_id, site_id, site_pk, event_name_id, path_id,
+      occurred_at, value_type, string_value
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'present')
+  `);
+  for (const [index, path] of paths.entries()) {
+    insertPath.run(siteId, sitePk, path, baseMs);
+    const pathRow = database
+      .prepare(
+        "SELECT id FROM custom_event_json_paths WHERE site_pk = ? AND path = ?",
+      )
+      .get(sitePk, path) as { readonly id: number };
+    const pathId = Number(pathRow.id);
+    const nodeId = index + 1;
+    insertNode.run(event.event_pk, nodeId, pathId);
+    insertValue.run(
+      event.event_pk,
+      nodeId,
+      siteId,
+      sitePk,
+      eventNameId,
+      pathId,
+      baseMs + 2,
+    );
+  }
 }
 
 function legacyOverviewClientOracle(
@@ -3015,6 +3438,456 @@ describe("edge pages D1 queries", () => {
     }
   });
 
+  it("continues an existing five-key Page cursor without changing tab cutoffs", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    const rows = [
+      ["combo-a-1", "session-a", "/same", "plan=a", "x"],
+      ["combo-a-2", "session-a", "/same", "plan=a", "x"],
+      ["combo-b-1", "session-b1", "/same", "plan=b", "x"],
+      ["combo-b-2", "session-b2", "/same", "plan=b", "x"],
+      ["combo-next", "session-next", "/next", "", ""],
+      ["combo-other", "session-other", "/other", "", ""],
+    ] as const;
+    for (const [visitId, sessionId, pathname, query, hash] of rows)
+      insertPageRow(database, {
+        visitId,
+        visitorId: `visitor-${sessionId}`,
+        sessionId,
+        pathname,
+        country: "US",
+        query,
+        hash,
+      });
+
+    try {
+      const firstLegacyPageRows = await legacyPagesPageRowsOracle(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        true,
+      );
+      const allLegacyPageRows = await legacyPagesPageRowsOracle(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+        true,
+      );
+      const firstLegacyPage = pageResult(firstLegacyPageRows, 2);
+      const last = firstLegacyPage.last;
+      if (!last) throw new Error("combined_page_cursor_seed_missing");
+      const binding = await pageCursorBinding(
+        "pages",
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        [true],
+      );
+      const oldCursor = await encodePageCursor(env, binding, {
+        views: last.views,
+        sessions: last.sessions,
+        pathname: last.pathname,
+        query: last.query,
+        hash: last.hash,
+      });
+      const decodedOldCursor = await decodePagesCursor(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        true,
+        oldCursor,
+      );
+      if (!decodedOldCursor)
+        throw new Error("combined_existing_page_cursor_not_decoded");
+
+      const first = await queryPagesWithTabsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        true,
+      );
+      expect(first).toEqual(
+        await legacyPagesWithTabsOracle(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          2,
+          true,
+        ),
+      );
+      expect(first.pages.pagination.hasMore).toBe(true);
+      expect(first.pages.pagination.nextCursor).toBe(oldCursor);
+
+      const second = await queryPagesWithTabsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        true,
+        decodedOldCursor,
+      );
+      expect(second).toEqual(
+        await legacyPagesWithTabsOracle(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          2,
+          true,
+          {
+            views: last.views,
+            sessions: last.sessions,
+            pathname: last.pathname,
+            query: last.query,
+            hash: last.hash,
+          },
+        ),
+      );
+      expect(second.tabs).toEqual(first.tabs);
+      expect(second.pages.pagination).toMatchObject({
+        returned: 2,
+        hasMore: false,
+        nextCursor: null,
+      });
+      expect(
+        [...first.pages.items, ...second.pages.items].map(
+          ({ pathname, query, hash }) => `${pathname}|${query}|${hash}`,
+        ),
+      ).toEqual(
+        allLegacyPageRows.map(
+          ({ pathname, query, hash }) => `${pathname}|${query}|${hash}`,
+        ),
+      );
+      expect(first.tabs.path).toHaveLength(2);
+    } finally {
+      close();
+    }
+  });
+
+  it("keeps the combined reader within one-statement D1 budgets", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    const pageRows = [
+      ["budget-a-1", "session-a", "/a", "q=1", "h"],
+      ["budget-a-2", "session-a", "/a", "q=1", "h"],
+      ["budget-b", "session-b", "/b", "", ""],
+      ["budget-c", "session-c", "/c", "", ""],
+      ["budget-payload-start", "session-payload", "/start", "", ""],
+      ["budget-payload-hit", "session-payload", "/hit", "", ""],
+      ["budget-payload-finish", "session-payload", "/finish", "", ""],
+    ] as const;
+    for (const [visitId, sessionId, pathname, query, hash] of pageRows)
+      insertPageRow(database, {
+        visitId,
+        visitorId: `visitor-${sessionId}`,
+        sessionId,
+        pathname,
+        country: "US",
+        query,
+        hash,
+        ...(pathname === "/start"
+          ? { startedAt: baseMs }
+          : pathname === "/hit"
+            ? { startedAt: baseMs + 1 }
+            : pathname === "/finish"
+              ? { startedAt: baseMs + 2 }
+              : {}),
+      });
+    const payloadPaths = Array.from(
+      { length: 40 },
+      (_, index) => `/wave49/${index}`,
+    );
+    seedCombinedPayloadEvent(database, "budget-payload-hit", payloadPaths);
+
+    const queryTime = createQueryTime(
+      window.startMs,
+      window.endExclusiveMs,
+      "UTC",
+      window.nowMs,
+    );
+    const baseFilters = filterFixture({ country: "US" });
+    const prepare = (scopePreference: "event" | "session") => {
+      const prepared = prepareScopedQuery("pages", {
+        context: siteQueryContext(siteId, "private-dashboard"),
+        time: queryTime,
+        filters: baseFilters,
+        scopePreference,
+      } as never) as { readonly filters?: FilterDocument };
+      const metadata = scopedFilterMetadata(prepared.filters);
+      if (!prepared.filters || !metadata)
+        throw new Error(`combined_budget_${scopePreference}_missing`);
+      return { filters: prepared.filters, metadata };
+    };
+    const preparedObservation = prepare("event");
+    const preparedObservationFilters = attachScopedFilterMetadata(
+      preparedObservation.filters,
+      {
+        ...preparedObservation.metadata,
+        plan: {
+          ...preparedObservation.metadata.plan,
+          advancedMatches: {
+            visitIds: [{ siteId, id: "budget-a-1" }],
+            eventIds: [],
+          },
+        },
+      },
+    );
+    const preparedSession = prepare("session");
+    const preparedSessionFilters = attachScopedFilterMetadata(
+      preparedSession.filters,
+      {
+        ...preparedSession.metadata,
+        plan: {
+          ...preparedSession.metadata.plan,
+          advancedMatches: {
+            entityIds: Array.from({ length: 128 }, (_, index) => ({
+              siteId,
+              id: index === 0 ? "session-a" : `wave49-budget-${index}`,
+            })),
+          },
+        },
+      },
+    );
+    const preparedEmptyFilters = attachScopedFilterMetadata(
+      preparedSession.filters,
+      {
+        ...preparedSession.metadata,
+        plan: {
+          ...preparedSession.metadata.plan,
+          advancedMatches: { entityIds: [] },
+        },
+      },
+    );
+    const pageOracleRows = await legacyPagesPageRowsOracle(
+      env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      2,
+      true,
+    );
+    const cursorPage = pageResult(pageOracleRows, 2).last;
+    if (!cursorPage) throw new Error("combined_budget_cursor_missing");
+    const requests: Array<{
+      readonly name: string;
+      readonly filters: FilterDocument;
+      readonly includeDetails: boolean;
+      readonly cursor?: {
+        readonly views: number;
+        readonly sessions: number;
+        readonly pathname: string;
+        readonly query: string;
+        readonly hash: string;
+      };
+    }> = [
+      {
+        name: "plain-details-off",
+        filters: EMPTY_FILTER_DOCUMENT,
+        includeDetails: false,
+      },
+      {
+        name: "plain-details-on",
+        filters: EMPTY_FILTER_DOCUMENT,
+        includeDetails: true,
+      },
+      {
+        name: "cursor-details-on",
+        filters: EMPTY_FILTER_DOCUMENT,
+        includeDetails: true,
+        cursor: cursorPage,
+      },
+      {
+        name: "prepared-observation",
+        filters: preparedObservationFilters,
+        includeDetails: false,
+      },
+      {
+        name: "prepared-session-128",
+        filters: preparedSessionFilters,
+        includeDetails: true,
+      },
+      {
+        name: "prepared-session-empty",
+        filters: preparedEmptyFilters,
+        includeDetails: false,
+      },
+      {
+        name: "event-payload-40",
+        filters: combinedPayloadFilter(payloadPaths),
+        includeDetails: true,
+      },
+    ];
+    const budgets: Array<{
+      readonly name: string;
+      readonly legacy: {
+        readonly sqlBytes: number;
+        readonly bindings: number;
+      };
+      readonly logical: {
+        readonly sqlBytes: number;
+        readonly bindings: number;
+        readonly statements: number;
+        readonly sha256: string;
+      };
+    }> = [];
+
+    try {
+      for (const request of requests) {
+        const expected = await legacyPagesWithTabsOracle(
+          env,
+          siteId,
+          window,
+          request.filters,
+          2,
+          request.includeDetails,
+          request.cursor,
+        );
+        const legacyCall = calls.at(-1);
+        if (!legacyCall) throw new Error("combined_budget_legacy_sql_missing");
+        const publicCallStart = calls.length;
+        const actual = await queryPagesWithTabsFromD1(
+          env,
+          siteId,
+          window,
+          request.filters,
+          2,
+          request.includeDetails,
+          request.cursor,
+        );
+        expect(actual).toEqual(expected);
+        const logicalCalls = calls.slice(publicCallStart);
+        expect(logicalCalls).toHaveLength(1);
+        const logicalCall = logicalCalls[0]!;
+        budgets.push({
+          name: request.name,
+          legacy: {
+            sqlBytes: Buffer.byteLength(legacyCall.sql, "utf8"),
+            bindings: legacyCall.bindings.length,
+          },
+          logical: {
+            sqlBytes: Buffer.byteLength(logicalCall.sql, "utf8"),
+            bindings: logicalCall.bindings.length,
+            statements: logicalCalls.length,
+            sha256: createHash("sha256")
+              .update(logicalCall.sql, "utf8")
+              .digest("hex"),
+          },
+        });
+        expect(Buffer.byteLength(logicalCall.sql, "utf8")).toBeLessThanOrEqual(
+          D1_MAX_SQL_UTF8_BYTES,
+        );
+        expect(logicalCall.bindings.length).toBeLessThanOrEqual(
+          D1_MAX_BOUND_PARAMETERS,
+        );
+      }
+      const payloadResult = await queryPagesWithTabsFromD1(
+        env,
+        siteId,
+        window,
+        combinedPayloadFilter(payloadPaths),
+        2,
+        true,
+      );
+      expect(payloadResult.pages.items.map(({ pathname }) => pathname)).toEqual(
+        ["/hit"],
+      );
+      expect(payloadResult.tabs.entry.map(({ value }) => value)).toEqual([
+        "/start",
+      ]);
+      expect(payloadResult.tabs.exit.map(({ value }) => value)).toEqual([
+        "/finish",
+      ]);
+      expect(budgets).toEqual([
+        {
+          name: "plain-details-off",
+          legacy: { sqlBytes: 4798, bindings: 5 },
+          logical: {
+            sqlBytes: 16312,
+            bindings: 24,
+            statements: 1,
+            sha256:
+              "e716bc4d72e6e0270bf94f2abd63bff1eca5944930796484aca8ce09fe3105aa",
+          },
+        },
+        {
+          name: "plain-details-on",
+          legacy: { sqlBytes: 4819, bindings: 5 },
+          logical: {
+            sqlBytes: 17027,
+            bindings: 24,
+            statements: 1,
+            sha256:
+              "cfa40873458736317db16a105c9796f8559b3a14ad3f0f96b03c64b2e0c06c60",
+          },
+        },
+        {
+          name: "cursor-details-on",
+          legacy: { sqlBytes: 5082, bindings: 20 },
+          logical: {
+            sqlBytes: 17617,
+            bindings: 36,
+            statements: 1,
+            sha256:
+              "d768821fdc7e95f3a63e9b48d695171a33aed20da82ab5c6663695cc2b09903d",
+          },
+        },
+        {
+          name: "prepared-observation",
+          legacy: { sqlBytes: 7446, bindings: 10 },
+          logical: {
+            sqlBytes: 18039,
+            bindings: 28,
+            statements: 1,
+            sha256:
+              "d695339038535825bcdb86092c5706f8cb0505bc67129b840aa6bef2b1dfd8aa",
+          },
+        },
+        {
+          name: "prepared-session-128",
+          legacy: { sqlBytes: 18372, bindings: 264 },
+          logical: {
+            sqlBytes: 18892,
+            bindings: 26,
+            statements: 1,
+            sha256:
+              "d8d09be8c9052cd2207ad126e35a0d12c1c0d82636a17fa260454e1d50331a08",
+          },
+        },
+        {
+          name: "prepared-session-empty",
+          legacy: { sqlBytes: 7558, bindings: 8 },
+          logical: {
+            sqlBytes: 18270,
+            bindings: 25,
+            statements: 1,
+            sha256:
+              "d65573acbe4a6a17c432759716653e4ab3e4c25cb00fabf8948ee3318ed0e5b1",
+          },
+        },
+        {
+          name: "event-payload-40",
+          legacy: { sqlBytes: 43342, bindings: 89 },
+          logical: {
+            sqlBytes: 91633,
+            bindings: 84,
+            statements: 1,
+            sha256:
+              "e6fb72e77eac9b58418226c19e2daa660e74db9140c1e1e87abe9453f5833d8c",
+          },
+        },
+      ]);
+    } finally {
+      close();
+    }
+  });
+
   it("matches frozen pre-migration SQL for every finite Page dimension selector", async () => {
     const { env, database, close } = createMigratedPagesSqliteEnv();
     seedDimensionReportFixture(database);
@@ -3931,20 +4804,31 @@ describe("edge pages D1 queries", () => {
       tabs: { path: [], title: [], hostname: [], entry: [], exit: [] },
     });
     expect(empty.calls).toHaveLength(1);
-    expect(empty.calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
-    expect(empty.calls[0]?.sql).toContain("'' AS queryValue");
-    expect(empty.calls[0]?.sql).toContain("'' AS hashValue");
+    expect(empty.calls[0]?.sql).not.toMatch(/query_string|hash_fragment/u);
 
     const filtered = createD1Env([[]]);
-    await queryPagesWithTabsFromD1(
-      filtered.env,
-      siteId,
-      window,
-      filterFixture({ browser: "Chrome" }),
-      5,
-      true,
-    );
-    expect(filtered.calls[0]?.sql).not.toContain("matched_sessions");
+    await expect(
+      queryPagesWithTabsFromD1(
+        filtered.env,
+        siteId,
+        window,
+        filterFixture({ browser: "Chrome" }),
+        5,
+        true,
+      ),
+    ).resolves.toEqual({
+      pages: {
+        items: [],
+        pagination: {
+          limit: 5,
+          returned: 0,
+          hasMore: false,
+          nextCursor: null,
+        },
+      },
+      tabs: { path: [], title: [], hostname: [], entry: [], exit: [] },
+    });
+    expect(filtered.calls).toHaveLength(1);
 
     const prepared = prepareScopedQuery("pages", {
       context: siteQueryContext(siteId, "private-dashboard"),
@@ -4000,12 +4884,11 @@ describe("edge pages D1 queries", () => {
       },
     });
     expect(scoped.calls).toHaveLength(1);
-    expect(scoped.calls[0]?.sql).toContain("scope_raw_visits AS MATERIALIZED");
     expect(scoped.calls[0]?.bindings.length).toBeGreaterThan(3);
   });
 
-  it("keeps combined pages and tabs results identical to the legacy readers", async () => {
-    const { env, database, close } = createScopedOverviewSqliteEnv();
+  it("matches the frozen combined SQL while keeping Page and Session bags distinct", async () => {
+    const { env, database, calls, close } = createScopedOverviewSqliteEnv();
     const insert = database.prepare(`
       INSERT INTO visits (
         visit_id, site_id, visitor_id, session_id, status, started_at,
@@ -4067,6 +4950,15 @@ describe("edge pages D1 queries", () => {
         "",
       );
 
+      const expected = await legacyPagesWithTabsOracle(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+        true,
+      );
+      const publicCallStart = calls.length;
       const combined = await queryPagesWithTabsFromD1(
         env,
         siteId,
@@ -4075,24 +4967,9 @@ describe("edge pages D1 queries", () => {
         10,
         true,
       );
-      const legacyPages = await queryPagesPageFromD1(
-        env,
-        siteId,
-        window,
-        EMPTY_FILTER_DOCUMENT,
-        10,
-        true,
-      );
-      const legacyTabs = await queryPageTabsAggregate(
-        env,
-        siteId,
-        window,
-        EMPTY_FILTER_DOCUMENT,
-        10,
-      );
 
-      expect(combined.pages).toEqual(legacyPages);
-      expect(combined.tabs).toEqual(legacyTabs);
+      expect(calls.slice(publicCallStart)).toHaveLength(1);
+      expect(combined).toEqual(expected);
       expect(combined.pages.items).toEqual([
         { pathname: "/pricing", query: "", hash: "", views: 2, sessions: 2 },
         { pathname: "/", query: "", hash: "", views: 1, sessions: 1 },
@@ -4152,6 +5029,14 @@ describe("edge pages D1 queries", () => {
         "",
       );
 
+      const expected = await legacyPagesWithTabsOracle(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+        true,
+      );
       const combined = await queryPagesWithTabsFromD1(
         env,
         siteId,
@@ -4160,15 +5045,7 @@ describe("edge pages D1 queries", () => {
         10,
         true,
       );
-      const legacy = await queryPageTabsAggregate(
-        env,
-        siteId,
-        window,
-        EMPTY_FILTER_DOCUMENT,
-        10,
-      );
-
-      expect(combined.tabs).toEqual(legacy);
+      expect(combined).toEqual(expected);
       expect(combined.tabs.path).toEqual([
         { value: "/trimmed", views: 1, sessions: 1, visitors: 1 },
       ]);
@@ -5707,8 +6584,8 @@ describe("edge pages handlers", () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0].bindings).toContain("us");
-    expect(calls[0].bindings.slice(-2)).toEqual([6, 5]);
-    expect(calls[0].sql).toContain("ranked_cards AS");
+    expect(calls[0].bindings).toContain(6);
+    expect(calls[0].bindings).toContain(5);
   });
 
   it("maps referrer handler rows with full URL mode and filters", async () => {

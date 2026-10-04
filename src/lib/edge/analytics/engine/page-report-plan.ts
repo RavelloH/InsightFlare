@@ -255,6 +255,31 @@ function cursorPredicate(
 }
 
 /** Builds the full keyset predicate, legacy sort and limit+1 Page query. */
+export function buildPaginatedPageRows(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  input: {
+    readonly limit: number;
+    readonly includeDetails: boolean;
+    readonly cursor?: PageAggregateCursor | null;
+  },
+): LogicalRelationHandle {
+  let rolled = pageRollup(builder, pages, input.includeDetails);
+  if (input.cursor)
+    rolled = builder.filter(
+      rolled,
+      cursorPredicate(builder, rolled, input.cursor),
+    );
+  const sorted = builder.sort(rolled, [
+    { slot: "views", direction: "desc", nulls: "last" },
+    { slot: "sessions", direction: "desc", nulls: "last" },
+    { slot: "pathname", direction: "asc", nulls: "first" },
+    { slot: "query", direction: "asc", nulls: "first" },
+    { slot: "hash", direction: "asc", nulls: "first" },
+  ]);
+  return builder.limit(sorted, input.limit + 1);
+}
+
 export function buildPagesPagePlan(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
@@ -274,22 +299,9 @@ export function buildPagesPagePlan(input: {
         : []),
     ],
   });
-  let rolled = pageRollup(builder, pages, input.includeDetails);
-  if (input.cursor)
-    rolled = builder.filter(
-      rolled,
-      cursorPredicate(builder, rolled, input.cursor),
-    );
-  const sorted = builder.sort(rolled, [
-    { slot: "views", direction: "desc", nulls: "last" },
-    { slot: "sessions", direction: "desc", nulls: "last" },
-    { slot: "pathname", direction: "asc", nulls: "first" },
-    { slot: "query", direction: "asc", nulls: "first" },
-    { slot: "hash", direction: "asc", nulls: "first" },
-  ]);
   return finishPageOutput(
     builder,
     "pages-page",
-    builder.limit(sorted, input.limit + 1),
+    buildPaginatedPageRows(builder, pages, input),
   );
 }

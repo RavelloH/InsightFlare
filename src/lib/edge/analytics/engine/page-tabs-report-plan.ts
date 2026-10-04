@@ -29,7 +29,7 @@ const OUTPUT_FIELDS = [
   "sessions",
   "visitors",
 ] as const;
-const PAGE_TAB_CARDS = [
+export const PAGE_TAB_CARDS = [
   {
     cardType: "path",
     selection: PAGE_DIMENSION_SELECTIONS.pagePathTrimmed,
@@ -46,6 +46,57 @@ const PAGE_TAB_CARDS = [
     outputId: "page-tabs-hostname",
   },
 ] as const;
+
+export interface PageTabsSourceInput {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly additionalAttributes?: readonly string[];
+}
+
+export function createPageTabsReportSources(input: PageTabsSourceInput) {
+  const directSessionExpansion =
+    !input.scopePlan && input.filters.root !== null;
+  const { builder, pages } = pageDimensionReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    selections: PAGE_TAB_CARDS.map(({ selection }) => selection),
+    additionalAttributes: [
+      ...(input.additionalAttributes ?? []),
+      ...(!directSessionExpansion
+        ? ["page.report.startedAt", "page.report.localId"]
+        : []),
+    ],
+  });
+  let boundaryPages = pages;
+  if (directSessionExpansion) {
+    const subject = createSemanticSubjectDomain({
+      origin: "site",
+      siteIds: [input.siteId as SiteId],
+    });
+    const selection = createSemanticScopedSourceSelection({
+      profile: "direct-page-session-compat-v1",
+      filters: input.filters,
+      subject,
+      time: semanticTemporalDomainsFromQueryTime(input.queryTime),
+    });
+    boundaryPages = builder.source("page", {
+      temporalDomain: "candidate",
+      attributes: [
+        "page.report.sessionId",
+        "page.report.visitorId",
+        "page.report.startedAt",
+        "page.report.localId",
+        "page.report.pathname",
+      ],
+      selection,
+    });
+  }
+  return { builder, pages, boundaryPages };
+}
 
 function output(
   builder: LogicalPlanBuilder,
@@ -116,6 +167,23 @@ function boundaryCardRows(
   return limit === null ? sorted : builder.limit(sorted, limit);
 }
 
+export function buildPageTabRows(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  boundaryPages: LogicalRelationHandle,
+  requestedLimit: number,
+) {
+  const limit = cardLimit(requestedLimit);
+  const boundaries = selectedSessionBoundaryPair(builder, boundaryPages);
+  return {
+    path: ordinaryCardRows(builder, pages, PAGE_TAB_CARDS[0], limit),
+    title: ordinaryCardRows(builder, pages, PAGE_TAB_CARDS[1], limit),
+    hostname: ordinaryCardRows(builder, pages, PAGE_TAB_CARDS[2], limit),
+    entry: boundaryCardRows(builder, boundaries.entry, "entry", limit),
+    exit: boundaryCardRows(builder, boundaries.exit, "exit", limit),
+  };
+}
+
 /** Builds the five Page cards while keeping observation and session Page bags distinct. */
 export function buildPageTabsPlan(input: {
   readonly siteId: string;
@@ -124,62 +192,12 @@ export function buildPageTabsPlan(input: {
   readonly scopePlan?: ScopedFilterPlan;
   readonly limit: number;
 }): ValidatedLogicalPlan {
-  const directSessionExpansion =
-    !input.scopePlan && input.filters.root !== null;
-  const { builder, pages } = pageDimensionReportSource({
-    siteId: input.siteId,
-    queryTime: input.queryTime,
-    filters: input.filters,
-    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
-    selections: PAGE_TAB_CARDS.map(({ selection }) => selection),
-    additionalAttributes: directSessionExpansion
-      ? []
-      : ["page.report.startedAt", "page.report.localId"],
-  });
-  let boundaryPages = pages;
-  if (directSessionExpansion) {
-    const subject = createSemanticSubjectDomain({
-      origin: "site",
-      siteIds: [input.siteId as SiteId],
-    });
-    const selection = createSemanticScopedSourceSelection({
-      profile: "direct-page-session-compat-v1",
-      filters: input.filters,
-      subject,
-      time: semanticTemporalDomainsFromQueryTime(input.queryTime),
-    });
-    boundaryPages = builder.source("page", {
-      temporalDomain: "candidate",
-      attributes: [
-        "page.report.sessionId",
-        "page.report.visitorId",
-        "page.report.startedAt",
-        "page.report.localId",
-        "page.report.pathname",
-      ],
-      selection,
-    });
-  }
-
-  const limit = cardLimit(input.limit);
-  for (const card of PAGE_TAB_CARDS) {
-    output(
-      builder,
-      card.outputId,
-      ordinaryCardRows(builder, pages, card, limit),
-    );
-  }
-  const boundaries = selectedSessionBoundaryPair(builder, boundaryPages);
-  output(
-    builder,
-    "page-tabs-entry",
-    boundaryCardRows(builder, boundaries.entry, "entry", limit),
-  );
-  output(
-    builder,
-    "page-tabs-exit",
-    boundaryCardRows(builder, boundaries.exit, "exit", limit),
-  );
+  const { builder, pages, boundaryPages } = createPageTabsReportSources(input);
+  const rows = buildPageTabRows(builder, pages, boundaryPages, input.limit);
+  for (const card of PAGE_TAB_CARDS)
+    output(builder, card.outputId, rows[card.cardType]);
+  output(builder, "page-tabs-entry", rows.entry);
+  output(builder, "page-tabs-exit", rows.exit);
   return builder.finish();
 }
 

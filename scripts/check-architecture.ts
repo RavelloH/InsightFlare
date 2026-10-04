@@ -173,6 +173,7 @@ function typedDalConvergenceViolations(
     "src/lib/edge/analytics/engine/journey-target-presence-plan.ts",
     "src/lib/edge/analytics/engine/journey-entity-detail-plan.ts",
     "src/lib/edge/analytics/engine/journey-observation-plan.ts",
+    "src/lib/edge/analytics/engine/pages-with-tabs-report-plan.ts",
     "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-read-plans.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-metric-plan.ts",
     "src/lib/edge/scheduled-tasks/hourly-rollup-persistence.ts",
@@ -502,6 +503,9 @@ const TYPED_QUERY_FUNCTIONS: Readonly<Record<string, readonly string[]>> = {
   "src/lib/edge/analytics/providers/d1/internal/dimensions.ts": [
     "queryOverviewClientDimensionsFromD1",
     "queryOverviewGeoDimensionsFromD1",
+  ],
+  "src/lib/edge/analytics/providers/d1/internal/pages.ts": [
+    "queryPagesWithTabsFromD1",
   ],
   "src/lib/edge/analytics/providers/d1/internal/core-sources.ts": [
     "queryD1CompiledAll",

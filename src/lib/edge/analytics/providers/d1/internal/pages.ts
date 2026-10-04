@@ -14,9 +14,17 @@ import {
   buildTopPagesPlan,
   type PageAggregateCursor,
 } from "@/lib/edge/analytics/engine/page-report-plan";
+import {
+  buildPagesWithTabsPlan,
+  PAGES_WITH_TABS_OUTPUT_FIELDS,
+  PAGES_WITH_TABS_OUTPUT_IDS,
+} from "@/lib/edge/analytics/engine/pages-with-tabs-report-plan";
 import type { Env } from "@/lib/edge/types";
 
-import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
+import {
+  queryAnalyticsReportOutputRowsFromD1,
+  queryAnalyticsReportOutputSetRowsFromD1,
+} from "./analytics-report-query";
 import type {
   DimensionRow,
   FilterDocument,
@@ -48,10 +56,7 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
-import {
-  scopedDatasetFor,
-  scopedDatasetForUnpreparedReader,
-} from "./scoped-dataset";
+import { scopedDatasetFor } from "./scoped-dataset";
 function pageAggregateCursor(value: unknown): PageAggregateCursor | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
@@ -257,9 +262,8 @@ export interface PagesWithTabsResult {
   };
 }
 /**
- * Reads the paginated page rows and the five page tabs from one materialized
- * visits relation. The protocol adapter uses this only when tabs are
- * requested, keeping the regular pages query and its cursor contract intact.
+ * Reads paginated Page rows and all five tabs from one Logical plan and D1
+ * statement, keeping the regular pages query and its cursor contract intact.
  */
 export async function queryPagesWithTabsFromD1(
   env: Env,
@@ -271,236 +275,30 @@ export async function queryPagesWithTabsFromD1(
   cursor?: PageAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PagesWithTabsResult> {
-  const preparedDataset = scopedDatasetFor(siteId, window, filters);
-  const expandedDataset =
-    preparedDataset ??
-    scopedDatasetForUnpreparedReader(
-      "pages",
-      siteId,
-      window,
-      filters,
-      "session",
-    );
-  const scopedDataset = preparedDataset ?? expandedDataset;
-  const filter = preparedDataset
-    ? null
-    : buildVisitFilterSql(filters, "rv", { window });
-  const observationVisitRelation = preparedDataset
-    ? preparedDataset.visitRelation
-    : expandedDataset
-      ? "scope_raw_visits"
-      : "visit_source";
-  const edgeVisitRelation =
-    preparedDataset || !expandedDataset
-      ? "filtered_visits"
-      : expandedDataset.visitRelation;
-  const queryExpr = includeDetails ? "query_string" : "''";
-  const hashExpr = includeDetails ? "hash_fragment" : "''";
-  const visitSource = buildVisitSourceCte().replace(
-    "visit_source AS (",
-    "visit_source AS MATERIALIZED (",
-  );
-  const cursorClause = cursor
-    ? `
-WHERE views < ?
-   OR (views = ? AND sessions < ?)
-   OR (views = ? AND sessions = ? AND pathname > ?)
-   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue > ?)
-   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue = ? AND hashValue > ?)`
-    : "";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? visitSource},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    pathname,
-    ${queryExpr} AS queryValue,
-    ${hashExpr} AS hashValue,
-    TRIM(COALESCE(pathname, '')) AS pathValue,
-    session_id,
-    visitor_id,
-    started_at,
-    visit_id,
-    TRIM(COALESCE(title, '')) AS title,
-    TRIM(COALESCE(hostname, '')) AS hostname
-  FROM ${observationVisitRelation} rv
-  ${filter?.clause ?? ""}
-),
-page_rollup AS (
-  SELECT
-    pathname,
-    queryValue,
-    hashValue,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
-  FROM filtered_visits
-  GROUP BY pathname, queryValue, hashValue
-),
-page_candidates AS (
-  SELECT
-    pathname,
-    queryValue,
-    hashValue,
-    views,
-    sessions,
-    ROW_NUMBER() OVER (
-      ORDER BY views DESC, sessions DESC, pathname ASC, queryValue ASC, hashValue ASC
-    ) AS pageRank
-  FROM page_rollup
-  ${cursorClause}
-),
-page_rows AS (
-  SELECT
-    'page' AS rowType,
-    '' AS cardType,
-    pathname,
-    queryValue,
-    hashValue,
-    '' AS value,
-    views,
-    sessions,
-    0 AS visitors,
-    pageRank AS rowRank
-  FROM page_candidates
-  ORDER BY pageRank ASC
-  LIMIT ?
-),
-ranked_session_visits AS (
-  SELECT
-    vs.session_id,
-    vs.visitor_id,
-    TRIM(COALESCE(vs.pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at ASC, vs.visit_id ASC
-    ) AS first_rank,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at DESC, vs.visit_id DESC
-    ) AS latest_rank
-  FROM ${edgeVisitRelation} vs
-  WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
-),
-session_edges AS (
-  SELECT
-    session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
-    MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entry,
-    MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exit
-  FROM ranked_session_visits
-  GROUP BY session_id
-),
-card_rows AS (
-  SELECT
-    'path' AS card_type,
-    pathValue AS value,
-    COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM filtered_visits
-  WHERE pathValue != ''
-  GROUP BY pathValue
-  UNION ALL
-  SELECT
-    'title' AS card_type,
-    title AS value,
-    COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM filtered_visits
-  WHERE title != ''
-  GROUP BY title
-  UNION ALL
-  SELECT
-    'hostname' AS card_type,
-    hostname AS value,
-    COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM filtered_visits
-  WHERE hostname != ''
-  GROUP BY hostname
-  UNION ALL
-  SELECT
-    'entry' AS card_type,
-    entry AS value,
-    COUNT(*) AS views,
-    COUNT(*) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM session_edges
-  WHERE entry != ''
-  GROUP BY entry
-  UNION ALL
-  SELECT
-    'exit' AS card_type,
-    exit AS value,
-    COUNT(*) AS views,
-    COUNT(*) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM session_edges
-  WHERE exit != ''
-  GROUP BY exit
-),
-ranked_cards AS (
-  SELECT
-    card_type,
-    value,
-    views,
-    sessions,
-    visitors,
-    ROW_NUMBER() OVER (
-      PARTITION BY card_type
-      ORDER BY views DESC, sessions DESC, value ASC
-    ) AS cardRank
-  FROM card_rows
-)
-SELECT rowType, cardType, pathname, queryValue, hashValue, value,
-  views, sessions, visitors, rowRank
-FROM page_rows
-UNION ALL
-SELECT
-  'tab' AS rowType,
-  card_type AS cardType,
-  '' AS pathname,
-  '' AS queryValue,
-  '' AS hashValue,
-  value,
-  views,
-  sessions,
-  visitors,
-  cardRank AS rowRank
-FROM ranked_cards
-WHERE cardRank <= ?
-ORDER BY rowType ASC, cardType ASC, rowRank ASC, value ASC
-`;
-  const cursorBindings = cursor
-    ? [
-        cursor.views,
-        cursor.views,
-        cursor.sessions,
-        cursor.views,
-        cursor.sessions,
-        cursor.pathname,
-        cursor.views,
-        cursor.sessions,
-        cursor.pathname,
-        cursor.query,
-        cursor.views,
-        cursor.sessions,
-        cursor.pathname,
-        cursor.query,
-        cursor.hash,
-      ]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...(scopedDataset
-      ? scopedDataset.bindings.map((binding) => binding.value)
-      : [...visitSourceBindings(siteId, window)]),
-    ...(filter?.bindings ?? []),
-    ...cursorBindings,
-    limit + 1,
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildPagesWithTabsPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
     limit,
-  ]);
+    includeDetails,
+    ...(cursor ? { cursor } : {}),
+  });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+    outputIds: PAGES_WITH_TABS_OUTPUT_IDS,
+    fields: PAGES_WITH_TABS_OUTPUT_FIELDS,
+    orderBy: [
+      { field: "rowType", direction: "asc", nulls: "first" },
+      { field: "cardType", direction: "asc", nulls: "first" },
+      { field: "views", direction: "desc", nulls: "last" },
+      { field: "sessions", direction: "desc", nulls: "last" },
+      { field: "pathname", direction: "asc", nulls: "first" },
+      { field: "queryValue", direction: "asc", nulls: "first" },
+      { field: "hashValue", direction: "asc", nulls: "first" },
+      { field: "value", direction: "asc", nulls: "first" },
+    ],
+  });
   const pageRows = rows
     .filter((row) => row.rowType === "page")
     .map((row) => ({
