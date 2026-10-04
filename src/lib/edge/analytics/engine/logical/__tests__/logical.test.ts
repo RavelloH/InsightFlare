@@ -392,6 +392,58 @@ describe("logical relational IR", () => {
     expect(printed).toContain("TIME_BUCKET");
   });
 
+  it("normalizes ASCII-space strings with nullable propagation", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: ["page.path"],
+    });
+    const path = builder.slot(pages, "attribute:page.path");
+    const trimmed = builder.normalizeString(path, "trim-ascii-space");
+    const nullValue = builder.normalizeString(
+      builder.literal(null, { kind: "scalar", scalar: "string" }),
+      "trim-ascii-space",
+    );
+    const projected = builder.project(pages, {
+      trimmed,
+      nullValue,
+    });
+    builder.output("normalized", projected, [
+      { name: "trimmed", slot: "trimmed" },
+      { name: "nullValue", slot: "nullValue" },
+    ]);
+
+    const plan = builder.finish();
+    const project = plan.nodes.find(
+      (node) => node.kind === "project" && node.id === projected.id,
+    );
+    expect(project?.kind).toBe("project");
+    if (project?.kind !== "project")
+      throw new Error("logical_string_normalize_project_missing");
+    expect(
+      project.projections.slice(0, 2).map((item) => item.expression),
+    ).toEqual([
+      {
+        kind: "string-normalize",
+        input: { kind: "slot", slot: pages.slots["attribute:page.path"] },
+        normalization: "trim-ascii-space",
+      },
+      {
+        kind: "string-normalize",
+        input: {
+          kind: "literal",
+          value: null,
+          valueType: { kind: "scalar", scalar: "string" },
+        },
+        normalization: "trim-ascii-space",
+      },
+    ]);
+    expect(
+      plan.slots.find((slot) => slot.id === projected.slots.nullValue)
+        ?.nullable,
+    ).toBe(true);
+    expect(() => validateLogicalPlan(plan)).not.toThrow();
+  });
+
   it("preserves an upstream concrete scope when auto was requested", () => {
     const scope = {
       requested: "auto",

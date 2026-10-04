@@ -22,7 +22,7 @@ export interface PageAggregateCursor {
   readonly hash: string;
 }
 
-function createPageSource(input: {
+export function createPageReportSource(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
@@ -121,7 +121,7 @@ export function buildTopPagesPlan(input: {
   readonly limit: number;
   readonly includeDetails: boolean;
 }): ValidatedLogicalPlan {
-  const { builder, pages } = createPageSource({
+  const { builder, pages } = createPageReportSource({
     ...input,
     attributes: [
       "page.report.pathname",
@@ -200,7 +200,7 @@ export function buildPagesPagePlan(input: {
   readonly includeDetails: boolean;
   readonly cursor?: PageAggregateCursor | null;
 }): ValidatedLogicalPlan {
-  const { builder, pages } = createPageSource({
+  const { builder, pages } = createPageReportSource({
     ...input,
     attributes: [
       "page.report.pathname",

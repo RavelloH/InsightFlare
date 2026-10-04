@@ -1,17 +1,24 @@
-import { type QueryAudience } from "@/lib/edge/analytics/contract";
+import {
+  type QueryAudience,
+  scopedFilterMetadata,
+} from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildReferrersPagePlan,
+  buildReferrerSummaryPlan,
+  type ReferrerPageSortKey,
+} from "@/lib/edge/analytics/engine/referrer-report-plan";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  queryAnalyticsReportOutputRowsFromD1,
+  queryAnalyticsReportOutputSetRowsFromD1,
+} from "./analytics-report-query";
 import type {
   FilterDocument,
   QueryWindow,
   ReferrerRow,
   ReferrerSummaryRow,
-} from "./core";
-import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  queryD1All,
-  visitSourceBindings,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryReferrersFromD1 } from "./dimensions";
@@ -23,14 +30,13 @@ import {
   type PageResult,
   pageResult,
 } from "./pagination";
-import { scopedDatasetFor } from "./scoped-dataset";
 export interface ReferrerAggregateCursor {
   /** The first two values are the concrete ORDER BY metrics. */
   readonly primary: number;
   readonly secondary: number;
   readonly referrer: string;
 }
-export type ReferrerPageSortKey = "views" | "visitors";
+export type { ReferrerPageSortKey } from "@/lib/edge/analytics/engine/referrer-report-plan";
 function referrerAggregateCursor(
   value: unknown,
 ): ReferrerAggregateCursor | null {
@@ -98,70 +104,35 @@ export async function queryReferrerSummaryFromD1(
   topN: number,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<ReferrerSummaryRow> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const source = scopedDataset?.visitRelation ?? "visit_source";
-  const ctes = scopedDataset?.ctes ?? buildVisitSourceCte();
-  const bindings = scopedDataset
-    ? scopedDataset.bindings.map((binding) => binding.value)
-    : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])];
-  const rows = await queryD1All<Record<string, unknown>>(
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildReferrerSummaryPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    topN,
+  });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
-    `
-WITH
-${ctes},
-filtered_visits AS MATERIALIZED (
-  SELECT referrer_host, referrer_url
-  FROM ${source}
-  ${filter?.clause ?? ""}
-),
-summary_row AS (
-  SELECT
-    'summary' AS rowType,
-    '' AS referrer,
-    count(*) AS totalViews,
-    SUM(CASE WHEN TRIM(COALESCE(referrer_host, '')) = '' THEN 1 ELSE 0 END) AS directViews,
-    SUM(CASE WHEN TRIM(COALESCE(referrer_host, '')) != '' THEN 1 ELSE 0 END) AS externalViews,
-    count(DISTINCT NULLIF(TRIM(COALESCE(referrer_host, '')), '')) AS uniqueDomains,
-    count(DISTINCT NULLIF(TRIM(COALESCE(referrer_url, '')), '')) AS uniqueLinks,
-    0 AS views,
-    0 AS rowRank
-  FROM filtered_visits
-),
-top_rollup AS (
-  SELECT
-    TRIM(COALESCE(referrer_host, '')) AS referrer,
-    count(*) AS views
-  FROM filtered_visits
-  WHERE TRIM(COALESCE(referrer_host, '')) != ''
-  GROUP BY referrer
-),
-top_rows AS (
-  SELECT
-    'top' AS rowType,
-    referrer,
-    NULL AS totalViews,
-    NULL AS directViews,
-    NULL AS externalViews,
-    NULL AS uniqueDomains,
-    NULL AS uniqueLinks,
-    views,
-    ROW_NUMBER() OVER (ORDER BY views DESC, referrer ASC) AS rowRank
-  FROM top_rollup
-)
-SELECT rowType, referrer, totalViews, directViews, externalViews,
-  uniqueDomains, uniqueLinks, views, rowRank
-FROM (
-  SELECT * FROM summary_row
-  UNION ALL
-  SELECT * FROM top_rows
-)
-WHERE rowType = 'summary' OR rowRank <= ?
-ORDER BY CASE rowType WHEN 'summary' THEN 0 ELSE 1 END, rowRank ASC
-`,
-    [...bindings, topN + 1],
+    plan,
+    {
+      outputIds: ["referrer-summary", "referrer-top-sources"],
+      fields: [
+        "rowType",
+        "referrer",
+        "totalViews",
+        "directViews",
+        "externalViews",
+        "uniqueDomains",
+        "uniqueLinks",
+        "views",
+      ],
+      orderBy: [
+        { field: "rowType", direction: "asc", nulls: "first" },
+        { field: "views", direction: "desc", nulls: "last" },
+        { field: "referrer", direction: "asc", nulls: "first" },
+      ],
+    },
     diagnostics,
   );
   const summary = rows.find((row) => row.rowType === "summary") ?? {};
@@ -194,81 +165,24 @@ export async function queryReferrersPageFromD1(
   sortBy: ReferrerPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
 ): Promise<PageResult<ReferrerRow>> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
-  const primary = sortBy === "visitors" ? "visitors" : "views";
-  const secondary = sortBy === "visitors" ? "views" : "sessions";
-  const operator = sortDirection === "asc" ? ">" : "<";
-  const cursorClause = cursor
-    ? `
-WHERE ${primary} ${operator} ?
-   OR (${primary} = ? AND ${secondary} ${operator} ?)
-   OR (${primary} = ? AND ${secondary} = ? AND referrer > ?)`
-    : "";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-rollup AS (
-  SELECT
-    COALESCE(${keyExpr}, '') AS referrer,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_visits
-  GROUP BY referrer
-  ${search ? "HAVING LOWER(referrer) LIKE ? ESCAPE '\\'" : ""}
-)
-SELECT referrer, views, sessions, visitors
-FROM rollup
-${cursorClause}
-  ORDER BY views DESC, sessions DESC, referrer ASC
-LIMIT ?
-`;
-  const orderedSql = sql.replace(
-    "ORDER BY views DESC, sessions DESC, referrer ASC",
-    `ORDER BY ${primary} ${sortDirection}, ${secondary} ${sortDirection}, referrer ASC`,
-  );
-  const cursorBindings = cursor
-    ? [
-        cursor.primary,
-        cursor.primary,
-        cursor.secondary,
-        cursor.primary,
-        cursor.secondary,
-        cursor.referrer,
-      ]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildReferrersPagePlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+    includeFullUrl,
+    ...(search !== undefined ? { search } : {}),
+    sortBy,
+    sortDirection,
+    ...(cursor ? { cursor } : {}),
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    orderedSql,
-    [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...(filter?.bindings ?? []),
-          ]),
-      ...(search
-        ? [
-            `%${search
-              .trim()
-              .toLowerCase()
-              .replaceAll("\\", "\\\\")
-              .replaceAll("%", "\\%")
-              .replaceAll("_", "\\_")}%`,
-          ]
-        : []),
-      ...cursorBindings,
-      limit + 1,
-    ],
+    plan,
+    "referrers-page",
+    undefined,
     diagnostics,
   );
   const mapped = rows.map((row) => ({

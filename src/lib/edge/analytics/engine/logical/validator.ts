@@ -375,19 +375,25 @@ function infer(
       };
     }
     case "string-match": {
-      if (
-        expression.semantics !== undefined &&
-        (expression.semantics !== "legacy-record-search-v1" ||
-          expression.operator !== "contains" ||
-          expression.caseSensitive ||
-          expression.stringNormalization !== undefined)
-      ) {
+      const validLegacySearch =
+        expression.semantics === undefined ||
+        (expression.semantics === "legacy-record-search-v1" &&
+          expression.operator === "contains" &&
+          !expression.caseSensitive &&
+          expression.stringNormalization === undefined) ||
+        (expression.semantics === "legacy-report-search-v1" &&
+          expression.operator === "contains" &&
+          !expression.caseSensitive &&
+          expression.stringNormalization === undefined &&
+          typeof expression.value === "string" &&
+          expression.value === expression.value.trim().toLowerCase());
+      if (!validLegacySearch || typeof expression.value !== "string") {
         throw new LogicalPlanError([
           {
             code: "invalid-expression",
             path: path + ".semantics",
             message:
-              "Legacy record search semantics require case-insensitive, unnormalized contains.",
+              "Legacy search semantics require case-insensitive, unnormalized contains with a normalized report search value.",
           },
         ]);
       }
@@ -409,10 +415,33 @@ function infer(
       return {
         type: scalar("boolean"),
         nullable:
-          expression.semantics === "legacy-record-search-v1"
+          expression.semantics === "legacy-record-search-v1" ||
+          expression.semantics === "legacy-report-search-v1"
             ? false
             : input.nullable,
       };
+    }
+    case "string-normalize": {
+      if (expression.normalization !== "trim-ascii-space") {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path: path + ".normalization",
+            message: "String normalization mode is invalid.",
+          },
+        ]);
+      }
+      const input = infer(expression.input, resolveSlot, `${path}.input`);
+      if (input.type.kind !== "scalar" || input.type.scalar !== "string") {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message: "String normalization requires a string scalar value.",
+          },
+        ]);
+      }
+      return { type: scalar("string"), nullable: input.nullable };
     }
     case "arithmetic": {
       if (

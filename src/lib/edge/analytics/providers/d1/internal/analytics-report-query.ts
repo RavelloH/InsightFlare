@@ -22,6 +22,7 @@ import { currentD1Operation } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 
 import { queryD1CompiledAll } from "./core";
+import type { D1ReadDiagnostics } from "./diagnostics";
 
 export interface AnalyticsReportOutputOrderKey {
   readonly field: string;
@@ -165,11 +166,12 @@ function outputRelation(
 async function executeReportRelation(
   env: Env,
   relation: AnalyticsDbRelation,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<Record<string, unknown>[]> {
   const query = compileD1Query(lowerLogicalPlan(relation), {
     tag: currentD1Operation() ?? "analytics.query.all",
   });
-  const rows = await queryD1CompiledAll<object>(env, query);
+  const rows = await queryD1CompiledAll<object>(env, query, diagnostics);
   return rows.map((row) => Object.fromEntries(Object.entries(row)));
 }
 
@@ -179,6 +181,7 @@ export async function queryAnalyticsReportOutputRowsFromD1(
   plan: ValidatedLogicalPlan,
   outputId: string,
   outputMissingMessage = `analytics_report_output_missing:${outputId}`,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<Record<string, unknown>[]> {
   const output = plan.outputs.find((candidate) => candidate.id === outputId);
   if (!output) throw new Error(outputMissingMessage);
@@ -190,6 +193,7 @@ export async function queryAnalyticsReportOutputRowsFromD1(
       lowerer.lower(output),
       output.fields.map((field) => ({ name: field.name, slot: field.slot })),
     ),
+    diagnostics,
   );
 }
 
@@ -198,6 +202,7 @@ export async function queryAnalyticsReportOutputSetRowsFromD1(
   env: Env,
   plan: ValidatedLogicalPlan,
   selection: AnalyticsReportMultiOutputSelection,
+  diagnostics?: D1ReadDiagnostics,
 ): Promise<Record<string, unknown>[]> {
   validateMultiOutputSelection(selection);
   const outputs = selection.outputIds.map((outputId) => {
@@ -269,5 +274,6 @@ export async function queryAnalyticsReportOutputSetRowsFromD1(
   return executeReportRelation(
     env,
     sortKeys.length > 0 ? sort(combined, sortKeys) : combined,
+    diagnostics,
   );
 }

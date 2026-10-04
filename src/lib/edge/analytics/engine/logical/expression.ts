@@ -78,9 +78,15 @@ export interface LogicalStringMatchExpression {
   readonly input: LogicalExpr;
   readonly value: string;
   readonly caseSensitive: boolean;
-  readonly semantics?: "legacy-record-search-v1";
+  readonly semantics?: "legacy-record-search-v1" | "legacy-report-search-v1";
   /** Storage-independent Filter v1 string normalization semantics. */
   readonly stringNormalization?: LogicalStringNormalization;
+}
+
+export interface LogicalStringNormalizeExpression {
+  readonly kind: "string-normalize";
+  readonly input: LogicalExpr;
+  readonly normalization: "trim-ascii-space";
 }
 
 export interface LogicalArithmeticExpression {
@@ -134,6 +140,7 @@ export type LogicalExpr =
   | LogicalNullTestExpression
   | LogicalSetMembershipExpression
   | LogicalStringMatchExpression
+  | LogicalStringNormalizeExpression
   | LogicalArithmeticExpression
   | LogicalAbsoluteExpression
   | LogicalRoundExpression

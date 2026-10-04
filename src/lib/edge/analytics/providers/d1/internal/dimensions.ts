@@ -3,9 +3,13 @@ import {
   effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
+  scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import { buildTopReferrersPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
 import type { Env } from "@/lib/edge/types";
 
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   ClientDimensionTabs,
   DimensionRow,
@@ -979,56 +983,24 @@ export async function queryReferrersFromD1(
   diagnostics?: D1ReadDiagnostics,
   search?: string,
 ): Promise<ReferrerRow[]> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-)
-SELECT
-  COALESCE(${keyExpr}, '') AS referrer,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM filtered_visits
-GROUP BY referrer
-${search ? "HAVING LOWER(referrer) LIKE ? ESCAPE '\\'" : ""}
-ORDER BY views DESC, sessions DESC, referrer ASC
-LIMIT ?
-`;
-  return (
-    await queryD1All<Record<string, unknown>>(
-      env,
-      sql,
-      [
-        ...(scopedDataset
-          ? scopedDataset.bindings.map((binding) => binding.value)
-          : [
-              ...visitSourceBindings(siteId, window),
-              ...(filter?.bindings ?? []),
-            ]),
-        ...(search
-          ? [
-              `%${search
-                .trim()
-                .toLowerCase()
-                .replaceAll("\\", "\\\\")
-                .replaceAll("%", "\\%")
-                .replaceAll("_", "\\_")}%`,
-            ]
-          : []),
-        limit,
-      ],
-      diagnostics,
-    )
-  ).map((row) => ({
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildTopReferrersPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+    includeFullUrl,
+    ...(search !== undefined ? { search } : {}),
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    "referrers-top",
+    undefined,
+    diagnostics,
+  );
+  return rows.map((row) => ({
     referrer: String(row.referrer ?? ""),
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),

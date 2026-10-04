@@ -14,8 +14,10 @@ import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semanti
 import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 import {
   type AnalyticsReportMultiOutputSelection,
+  queryAnalyticsReportOutputRowsFromD1,
   queryAnalyticsReportOutputSetRowsFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
+import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import type { Env } from "@/lib/edge/types";
 
 const SITE_ID = "report-multi-output-site";
@@ -163,6 +165,33 @@ const PATH_SELECTION: AnalyticsReportMultiOutputSelection = {
 };
 
 describe("Analytics report multi-output adapter", () => {
+  it("keeps single-output missing messages in the fourth argument slot", async () => {
+    const { database } = createDatabase();
+    try {
+      const plan = createPlan();
+      const queryTrace = trace();
+      const diagnostics = createD1ReadDiagnostics();
+      const env = createEnv(database, queryTrace);
+
+      await expect(
+        queryAnalyticsReportOutputRowsFromD1(env, plan, "missing-output"),
+      ).rejects.toThrow("analytics_report_output_missing:missing-output");
+      await expect(
+        queryAnalyticsReportOutputRowsFromD1(
+          env,
+          plan,
+          "missing-output",
+          "caller-output-missing",
+          diagnostics,
+        ),
+      ).rejects.toThrow("caller-output-missing");
+      expect(queryTrace.preparedSql).toHaveLength(0);
+      expect(diagnostics).toEqual({ rowsRead: 0, rowsReadAvailable: true });
+    } finally {
+      database.close();
+    }
+  });
+
   it("aligns aliases, preserves UNION ALL duplicates, sorts nulls, and executes once", async () => {
     const { database } = createDatabase();
     try {

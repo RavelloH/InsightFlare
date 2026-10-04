@@ -2211,7 +2211,8 @@ describe("edge paginated page and referrer readers", () => {
       nextCursor: expect.any(String),
     });
     expect(first.calls[0].sql).toContain("referrer_url");
-    expect(first.calls[0].sql).toContain("HAVING LOWER(referrer) LIKE");
+    expect(first.calls[0].sql).toContain("LOWER(COALESCE(");
+    expect(first.calls[0].sql).toContain("LIKE ? ESCAPE ?");
 
     const cursor = await decodeReferrersCursor(
       first.env,
@@ -2919,8 +2920,10 @@ describe("edge pages handlers", () => {
         },
       },
     });
-    expect(calls[0].sql).toContain("COALESCE(referrer_url, '') AS referrer");
-    expect(calls[0].bindings.slice(-2)).toEqual(["Chrome", 8]);
+    expect(calls[0].sql).toContain("referrer_url");
+    expect(calls[0].sql).toContain("GROUP BY COALESCE(");
+    expect(calls[0].bindings).toContain("Chrome");
+    expect(calls[0].bindings.at(-1)).toBe(8);
   });
 
   it("maps dimension aggregate rows and drops geo filters before querying", async () => {

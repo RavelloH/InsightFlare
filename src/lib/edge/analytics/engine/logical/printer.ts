@@ -94,6 +94,8 @@ function expression(value: LogicalExpr): string {
       return `(${expression(value.input)} ${value.negated ? "NOT " : ""}IN [${value.values.map(expression).join(", ")}]${value.stringNormalization ? ` normalization=${value.stringNormalization}` : ""})`;
     case "string-match":
       return `(${expression(value.input)} ${value.operator}${value.caseSensitive ? " case-sensitive" : " case-insensitive"}${value.stringNormalization ? ` normalization=${value.stringNormalization}` : ""} ${JSON.stringify(value.value)})`;
+    case "string-normalize":
+      return `NORMALIZE_STRING<${value.normalization}>(${expression(value.input)})`;
     case "arithmetic":
       return `(${expression(value.left)} ${value.operator}${value.operator === "divide" ? " NULL_ON_ZERO" : ""} ${expression(value.right)})`;
     case "round":

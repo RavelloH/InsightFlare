@@ -831,6 +831,34 @@ function lowerExpression(
           candidateBounded: false,
         };
       }
+      if (expression.semantics === "legacy-report-search-v1") {
+        if (
+          expression.operator !== "contains" ||
+          expression.caseSensitive ||
+          expression.stringNormalization !== undefined ||
+          expression.value !== expression.value.trim().toLowerCase()
+        )
+          reject(path, "The legacy report-search expression is malformed.");
+        const nullableText = input.expression as SqlExpression<
+          string | null,
+          ExpressionResultType<"text", boolean>
+        >;
+        const normalized = callFunction(
+          "lower",
+          coalesce(nullableText, param("")),
+        );
+        const escaped = expression.value
+          .replaceAll("\\", "\\\\")
+          .replaceAll("%", "\\%")
+          .replaceAll("_", "\\_");
+        return {
+          kind: "scalar",
+          expression: textLike(normalized, param(`%${escaped}%`), "\\"),
+          type: { kind: "scalar", scalar: "boolean" },
+          nullable: false,
+          candidateBounded: false,
+        };
+      }
       if (!expression.caseSensitive)
         reject(
           path,
@@ -873,6 +901,33 @@ function lowerExpression(
         type: { kind: "scalar", scalar: "boolean" },
         nullable: input.nullable,
         candidateBounded: false,
+      };
+    }
+    case "string-normalize": {
+      const input = lowerExpression(
+        expression.input,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.input`,
+        time,
+      );
+      if (
+        input.kind !== "scalar" ||
+        input.type.kind !== "scalar" ||
+        input.type.scalar !== "string"
+      )
+        reject(path, "String normalization requires a string scalar value.");
+      if (expression.normalization !== "trim-ascii-space")
+        reject(path, "The string normalization mode is unsupported.");
+      return {
+        kind: "scalar",
+        expression: trimSpaces(
+          input.expression as SqlExpression<string | null>,
+        ),
+        type: { kind: "scalar", scalar: "string" },
+        nullable: input.nullable,
+        candidateBounded: input.candidateBounded,
       };
     }
     case "absolute": {
@@ -2862,6 +2917,7 @@ export class AnalyticsLogicalToDbLowerer {
       case "not":
       case "null-test":
       case "string-match":
+      case "string-normalize":
       case "absolute":
       case "round":
       case "time-bucket":

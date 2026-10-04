@@ -429,6 +429,17 @@ export class LogicalPlanBuilder {
     });
   }
 
+  normalizeString(
+    input: LogicalExpressionHandle,
+    normalization: "trim-ascii-space",
+  ): LogicalExpressionHandle {
+    return this.#expression({
+      kind: "string-normalize",
+      input: input.expression,
+      normalization,
+    });
+  }
+
   arithmetic(
     operator: "add" | "subtract" | "multiply" | "divide",
     left: LogicalExpressionHandle,
@@ -1190,6 +1201,7 @@ export class LogicalPlanBuilder {
         case "not":
         case "null-test":
         case "string-match":
+        case "string-normalize":
         case "absolute":
         case "round":
         case "time-bucket":
