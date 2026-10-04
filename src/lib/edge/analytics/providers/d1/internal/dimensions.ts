@@ -21,6 +21,12 @@ import {
   type PageDimensionSelectionId,
   validatePageDimensionSelection,
 } from "@/lib/edge/analytics/engine/dimension-report-plan";
+import {
+  buildPageTabsPlan,
+  PAGE_TAB_OUTPUT_FIELDS,
+  PAGE_TAB_OUTPUT_IDS,
+  PAGE_TAB_OUTPUT_ORDER_BY,
+} from "@/lib/edge/analytics/engine/page-tabs-report-plan";
 import { buildTopReferrersPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
 import {
   buildSessionPathPagePlan,
@@ -42,15 +48,7 @@ import type {
   QueryWindow,
   ReferrerRow,
 } from "./core";
-import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  cityValueExpr,
-  geoTabLabel,
-  queryD1All,
-  regionValueExpr,
-  visitSourceBindings,
-} from "./core";
+import { cityValueExpr, geoTabLabel, regionValueExpr } from "./core";
 import {
   clientDimensionDefinition,
   resolveCrossBreakdownDimension,
@@ -65,11 +63,6 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
-import type { ScopedDatasetSql } from "./scoped-dataset";
-import {
-  scopedDatasetFor,
-  scopedDatasetForUnpreparedReader,
-} from "./scoped-dataset";
 
 export interface DimensionAggregateCursor {
   /** The first two values are the concrete ORDER BY metrics. */
@@ -223,14 +216,6 @@ function dimensionCursorBinding(
     sortBy,
     sortDirection,
   ]);
-}
-
-function scopedVisitDataset(
-  siteId: string,
-  window: QueryWindow,
-  filters: FilterDocument,
-): ScopedDatasetSql | null {
-  return scopedDatasetFor(siteId, window, filters);
 }
 
 export async function queryDimensionFromD1(
@@ -625,149 +610,19 @@ export async function queryPageTabsFromD1(
   entry: DimensionRow[];
   exit: DimensionRow[];
 }> {
-  const preparedDataset = scopedVisitDataset(siteId, window, filters);
-  const expandedDataset =
-    preparedDataset ??
-    scopedDatasetForUnpreparedReader(
-      "pages",
-      siteId,
-      window,
-      filters,
-      "session",
-    );
-  const scopedDataset = preparedDataset ?? expandedDataset;
-  const filter = preparedDataset
-    ? null
-    : buildVisitFilterSql(filters, "rv", { window });
-  const observationVisitRelation = preparedDataset
-    ? preparedDataset.visitRelation
-    : expandedDataset
-      ? "scope_raw_visits"
-      : "visit_source";
-  const edgeVisitRelation =
-    preparedDataset || !expandedDataset
-      ? "filtered_visits"
-      : expandedDataset.visitRelation;
-  const visitSource = buildVisitSourceCte().replace(
-    "visit_source AS (",
-    "visit_source AS MATERIALIZED (",
-  );
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? visitSource},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    visitor_id,
-    session_id,
-    started_at,
-    visit_id,
-    TRIM(COALESCE(pathname, '')) AS pathname,
-    TRIM(COALESCE(title, '')) AS title,
-    TRIM(COALESCE(hostname, '')) AS hostname
-  FROM ${observationVisitRelation} rv
-  ${filter?.clause ?? ""}
-),
-ranked_session_visits AS (
-  SELECT
-    vs.session_id,
-    vs.visitor_id,
-    TRIM(COALESCE(vs.pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at ASC, vs.visit_id ASC
-    ) AS first_rank,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at DESC, vs.visit_id DESC
-    ) AS latest_rank
-  FROM ${edgeVisitRelation} vs
-  WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
-),
-session_edges AS (
-  SELECT
-    session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
-    MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entry,
-    MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exit
-  FROM ranked_session_visits
-  GROUP BY session_id
-),
-card_rows AS (
-  SELECT
-    'path' AS card_type,
-    pathname AS value,
-    COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM filtered_visits
-  WHERE pathname != ''
-  GROUP BY pathname
-  UNION ALL
-  SELECT
-    'title' AS card_type,
-    title AS value,
-    COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM filtered_visits
-  WHERE title != ''
-  GROUP BY title
-  UNION ALL
-  SELECT
-    'hostname' AS card_type,
-    hostname AS value,
-    COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM filtered_visits
-  WHERE hostname != ''
-  GROUP BY hostname
-  UNION ALL
-  SELECT
-    'entry' AS card_type,
-    entry AS value,
-    COUNT(*) AS views,
-    COUNT(*) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM session_edges
-  WHERE entry != ''
-  GROUP BY entry
-  UNION ALL
-  SELECT
-    'exit' AS card_type,
-    exit AS value,
-    COUNT(*) AS views,
-    COUNT(*) AS sessions,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
-  FROM session_edges
-  WHERE exit != ''
-  GROUP BY exit
-),
-ranked_cards AS (
-  SELECT
-    card_type,
-    value,
-    views,
-    sessions,
-    visitors,
-    ROW_NUMBER() OVER (
-      PARTITION BY card_type
-      ORDER BY views DESC, sessions DESC, value ASC
-    ) AS card_rank
-  FROM card_rows
-)
-SELECT card_type AS cardType, value, views, sessions, visitors
-FROM ranked_cards
-WHERE card_rank <= ?
-ORDER BY card_type ASC, card_rank ASC
-`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...(scopedDataset
-      ? scopedDataset.bindings.map((binding) => binding.value)
-      : [...visitSourceBindings(siteId, window)]),
-    ...(filter?.bindings ?? []),
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildPageTabsPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
     limit,
-  ]);
+  });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+    outputIds: PAGE_TAB_OUTPUT_IDS,
+    fields: PAGE_TAB_OUTPUT_FIELDS,
+    orderBy: PAGE_TAB_OUTPUT_ORDER_BY,
+  });
   const byCard = new Map<string, DimensionRow[]>();
   for (const row of rows) {
     const card = String(row.cardType ?? "");

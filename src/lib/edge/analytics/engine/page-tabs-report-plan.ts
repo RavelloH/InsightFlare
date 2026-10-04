@@ -1,0 +1,199 @@
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryTime, SiteId } from "@/lib/edge/analytics/contract/types";
+import { cardLimit } from "@/lib/edge/analytics/engine/channel-client-geo-report-plan";
+import {
+  dimensionRollup,
+  PAGE_DIMENSION_SELECTIONS,
+  pageDimensionReportSource,
+  selectedPageDimension,
+} from "@/lib/edge/analytics/engine/dimension-report-plan";
+import type {
+  LogicalPlanBuilder,
+  LogicalRelationHandle,
+} from "@/lib/edge/analytics/engine/logical/builder";
+import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
+import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import {
+  aggregateSessionBoundaries,
+  selectedSessionBoundaryPair,
+} from "@/lib/edge/analytics/engine/session-boundary-plan";
+import type { FilterDocument } from "@/lib/filter-contract/filters";
+
+const STRING = { kind: "scalar", scalar: "string" } as const;
+const OUTPUT_FIELDS = [
+  "cardType",
+  "value",
+  "views",
+  "sessions",
+  "visitors",
+] as const;
+const PAGE_TAB_CARDS = [
+  {
+    cardType: "path",
+    selection: PAGE_DIMENSION_SELECTIONS.pagePathTrimmed,
+    outputId: "page-tabs-path",
+  },
+  {
+    cardType: "title",
+    selection: PAGE_DIMENSION_SELECTIONS.pageTitleTrimmed,
+    outputId: "page-tabs-title",
+  },
+  {
+    cardType: "hostname",
+    selection: PAGE_DIMENSION_SELECTIONS.pageHostnameTrimmed,
+    outputId: "page-tabs-hostname",
+  },
+] as const;
+
+function output(
+  builder: LogicalPlanBuilder,
+  id: string,
+  rows: LogicalRelationHandle,
+): void {
+  builder.output(
+    id,
+    rows,
+    OUTPUT_FIELDS.map((name) => ({ name, slot: name })),
+  );
+}
+
+function ordinaryCardRows(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  card: (typeof PAGE_TAB_CARDS)[number],
+  limit: number | null,
+): LogicalRelationHandle {
+  const rolled = dimensionRollup(
+    builder,
+    pages,
+    selectedPageDimension(builder, pages, card.selection),
+  );
+  const value = builder.slot(rolled, "value");
+  const nonempty = builder.filter(
+    rolled,
+    builder.compare(
+      "neq",
+      builder.normalizeString(value, "trim-ascii-space"),
+      builder.literal("", STRING),
+    ),
+  );
+  const rows = builder.project(nonempty, {
+    cardType: builder.literal(card.cardType, STRING),
+    value: builder.slot(nonempty, "value"),
+    views: builder.slot(nonempty, "views"),
+    sessions: builder.slot(nonempty, "sessions"),
+    visitors: builder.slot(nonempty, "visitors"),
+  });
+  const sorted = builder.sort(rows, [
+    { slot: "views", direction: "desc", nulls: "last" },
+    { slot: "sessions", direction: "desc", nulls: "last" },
+    { slot: "value", direction: "asc", nulls: "first" },
+  ]);
+  return limit === null ? sorted : builder.limit(sorted, limit);
+}
+
+function boundaryCardRows(
+  builder: LogicalPlanBuilder,
+  boundaries: LogicalRelationHandle,
+  cardType: "entry" | "exit",
+  limit: number | null,
+): LogicalRelationHandle {
+  const rolled = aggregateSessionBoundaries(builder, boundaries);
+  const rows = builder.project(rolled, {
+    cardType: builder.literal(cardType, STRING),
+    value: builder.slot(rolled, "value"),
+    views: builder.slot(rolled, "views"),
+    sessions: builder.slot(rolled, "sessions"),
+    visitors: builder.slot(rolled, "visitors"),
+  });
+  const sorted = builder.sort(rows, [
+    { slot: "views", direction: "desc", nulls: "last" },
+    { slot: "sessions", direction: "desc", nulls: "last" },
+    { slot: "value", direction: "asc", nulls: "first" },
+  ]);
+  return limit === null ? sorted : builder.limit(sorted, limit);
+}
+
+/** Builds the five Page cards while keeping observation and session Page bags distinct. */
+export function buildPageTabsPlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly limit: number;
+}): ValidatedLogicalPlan {
+  const directSessionExpansion =
+    !input.scopePlan && input.filters.root !== null;
+  const { builder, pages } = pageDimensionReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    selections: PAGE_TAB_CARDS.map(({ selection }) => selection),
+    additionalAttributes: directSessionExpansion
+      ? []
+      : ["page.report.startedAt", "page.report.localId"],
+  });
+  let boundaryPages = pages;
+  if (directSessionExpansion) {
+    const subject = createSemanticSubjectDomain({
+      origin: "site",
+      siteIds: [input.siteId as SiteId],
+    });
+    const selection = createSemanticScopedSourceSelection({
+      profile: "direct-page-session-compat-v1",
+      filters: input.filters,
+      subject,
+      time: semanticTemporalDomainsFromQueryTime(input.queryTime),
+    });
+    boundaryPages = builder.source("page", {
+      temporalDomain: "candidate",
+      attributes: [
+        "page.report.sessionId",
+        "page.report.visitorId",
+        "page.report.startedAt",
+        "page.report.localId",
+        "page.report.pathname",
+      ],
+      selection,
+    });
+  }
+
+  const limit = cardLimit(input.limit);
+  for (const card of PAGE_TAB_CARDS) {
+    output(
+      builder,
+      card.outputId,
+      ordinaryCardRows(builder, pages, card, limit),
+    );
+  }
+  const boundaries = selectedSessionBoundaryPair(builder, boundaryPages);
+  output(
+    builder,
+    "page-tabs-entry",
+    boundaryCardRows(builder, boundaries.entry, "entry", limit),
+  );
+  output(
+    builder,
+    "page-tabs-exit",
+    boundaryCardRows(builder, boundaries.exit, "exit", limit),
+  );
+  return builder.finish();
+}
+
+export const PAGE_TAB_OUTPUT_IDS: readonly string[] = [
+  ...PAGE_TAB_CARDS.map(({ outputId }) => outputId),
+  "page-tabs-entry",
+  "page-tabs-exit",
+];
+
+export const PAGE_TAB_OUTPUT_FIELDS = OUTPUT_FIELDS;
+
+export const PAGE_TAB_OUTPUT_ORDER_BY = [
+  { field: "cardType", direction: "asc", nulls: "first" },
+  { field: "views", direction: "desc", nulls: "last" },
+  { field: "sessions", direction: "desc", nulls: "last" },
+  { field: "value", direction: "asc", nulls: "first" },
+] as const;

@@ -421,9 +421,12 @@ export function pageDimensionReportSource(input: {
   readonly scopePlan?: ScopedFilterPlan;
   readonly selections: readonly PageDimensionSelection[];
   readonly includeVisitors?: boolean;
+  readonly additionalAttributes?: readonly string[];
 }) {
   const attributes = new Set<string>(["page.report.sessionId"]);
   if (input.includeVisitors !== false) attributes.add("page.report.visitorId");
+  for (const attribute of input.additionalAttributes ?? [])
+    attributes.add(attribute);
   for (const selection of input.selections) {
     const definition =
       selection.kind === "derived"

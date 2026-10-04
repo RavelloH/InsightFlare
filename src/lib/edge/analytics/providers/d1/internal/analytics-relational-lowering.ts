@@ -469,7 +469,11 @@ function lowerExpression(
       return {
         kind: "scalar",
         expression:
-          expression.value === null ? constant(null) : param(expression.value),
+          expression.value === null
+            ? constant(null)
+            : expression.value === ""
+              ? constant("")
+              : param(expression.value),
         type: expression.valueType,
         nullable: expression.value === null,
         candidateBounded: false,

@@ -1,5 +1,9 @@
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+
 import { describe, expect, it } from "vitest";
 
+import { createMigratedDatabase } from "@/../scripts/schema/database";
+import { compileD1Query } from "@/lib/db";
 import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
 import type { LogicalComparisonExpression } from "@/lib/edge/analytics/engine/logical/expression";
 import type {
@@ -838,5 +842,115 @@ describe("relational lowerer validation guards", () => {
     expect(() => lower(incompleteGrain)).toThrow(
       "Join keys must cover the complete scalar or bucket right grain.",
     );
+  });
+
+  it("lowers the empty string sentinel as a typed constant while preserving NULL and bound text", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      temporalDomain: "read",
+      attributes: ["page.report.localId", "page.report.status"],
+    });
+    const status = builder.slot(pages, "attribute:page.report.status");
+    const projected = builder.project(pages, {
+      localId: builder.slot(pages, "attribute:page.report.localId"),
+      status,
+      emptySentinel: builder.literal("", STRING),
+      nullableValue: builder.literal(null, STRING),
+      userText: builder.literal("bounded-user-text", STRING),
+      isEmpty: builder.compare("eq", status, builder.literal("", STRING)),
+    });
+    const sorted = builder.sort(projected, [
+      { slot: "localId", direction: "asc", nulls: "first" },
+    ]);
+    builder.output("literal-sentinels", sorted, [
+      { name: "localId", slot: "localId" },
+      { name: "status", slot: "status" },
+      { name: "emptySentinel", slot: "emptySentinel" },
+      { name: "nullableValue", slot: "nullableValue" },
+      { name: "userText", slot: "userText" },
+      { name: "isEmpty", slot: "isEmpty" },
+    ]);
+    const plan = builder.finish();
+    const output = plan.outputs[0]!;
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_ID,
+      time: plan.context.time,
+    });
+    const lowered = lowerer.lower(output);
+    const query = compileD1Query(
+      lowerer.projectOutput(
+        lowered,
+        output.fields.map(({ name, slot }) => ({ name, slot })),
+      ),
+    );
+    const bindings = (query.bindings ?? []) as SQLInputValue[];
+    expect(bindings).not.toContain("");
+    expect(bindings).not.toContain(null);
+    expect(bindings).toContain("bounded-user-text");
+
+    const database = createMigratedDatabase();
+    try {
+      database
+        .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+        .run(SITE_ID);
+      const sitePk = Number(
+        (
+          database
+            .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+            .get(SITE_ID) as { readonly site_pk: number }
+        ).site_pk,
+      );
+      const insert = database.prepare(`
+        INSERT INTO visits (
+          visit_id, site_id, site_pk, visitor_id, session_id, status,
+          started_at, last_activity_at, pathname, hostname
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'example.test')
+      `);
+      insert.run(
+        "literal-open",
+        SITE_ID,
+        sitePk,
+        "v1",
+        "s1",
+        "open",
+        10,
+        10,
+        "/open",
+      );
+      insert.run(
+        "literal-empty",
+        SITE_ID,
+        sitePk,
+        "v2",
+        "s2",
+        "",
+        11,
+        11,
+        "/empty",
+      );
+      const rows = database.prepare(query.sql).all(...bindings) as Array<
+        Record<string, unknown>
+      >;
+      expect(rows).toEqual([
+        {
+          localId: "literal-empty",
+          status: "",
+          emptySentinel: "",
+          nullableValue: null,
+          userText: "bounded-user-text",
+          isEmpty: 1,
+        },
+        {
+          localId: "literal-open",
+          status: "open",
+          emptySentinel: "",
+          nullableValue: null,
+          userText: "bounded-user-text",
+          isEmpty: 0,
+        },
+      ]);
+    } finally {
+      database.close();
+    }
   });
 });

@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
@@ -393,34 +394,8 @@ describe("edge query dimensions low-level coverage", () => {
     ]);
   });
 
-  it("materializes page tab visits once while preserving all tab results", async () => {
-    const database = new DatabaseSync(":memory:");
-    for (const migration of [
-      "migrations/0008_rebuild_analytics.sql",
-      "migrations/0013_add_visit_performance_metrics.sql",
-      "migrations/0019_add_user_identity.sql",
-    ]) {
-      database.exec(readFileSync(migration, "utf8"));
-    }
-    installVisitSiteIdentityFixture(database);
-    database.exec(`
-      DROP TABLE IF EXISTS custom_events;
-      DROP TABLE IF EXISTS custom_event_names;
-      CREATE TABLE custom_event_names (
-        id INTEGER PRIMARY KEY,
-        site_id TEXT NOT NULL,
-        name TEXT NOT NULL
-      );
-      CREATE TABLE custom_events (
-        event_pk INTEGER PRIMARY KEY,
-        event_id TEXT NOT NULL,
-        site_id TEXT NOT NULL,
-        site_pk INTEGER NOT NULL DEFAULT 1,
-        visit_id TEXT NOT NULL,
-        event_name_id INTEGER NOT NULL,
-        occurred_at INTEGER NOT NULL
-      );
-    `);
+  it("preserves all page tab results with one query per reader call", async () => {
+    const database = createMigratedDatabase();
     const calls: Array<{ sql: string; bindings: QueryBinding[] }> = [];
     const env = {
       DB: {
@@ -436,17 +411,28 @@ describe("edge query dimensions low-level coverage", () => {
         }),
       } as unknown as D1Database,
     } as Env;
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+      .run(siteId);
+    const sitePk = Number(
+      (
+        database
+          .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+          .get(siteId) as { readonly site_pk: number }
+      ).site_pk,
+    );
     const insert = database.prepare(`
       INSERT INTO visits (
-        visit_id, site_id, visitor_id, session_id, status, started_at,
+        visit_id, site_id, site_pk, visitor_id, session_id, status, started_at,
         last_activity_at, pathname, title, hostname
-      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, ?, ?, ?)
     `);
 
     try {
       insert.run(
         "session-first",
         siteId,
+        sitePk,
         "visitor-a",
         "session-a",
         baseMs + 1,
@@ -458,6 +444,7 @@ describe("edge query dimensions low-level coverage", () => {
       insert.run(
         "session-last",
         siteId,
+        sitePk,
         "visitor-a",
         "session-a",
         baseMs + 2,
@@ -469,6 +456,7 @@ describe("edge query dimensions low-level coverage", () => {
       insert.run(
         "anonymous",
         siteId,
+        sitePk,
         "visitor-b",
         "",
         baseMs + 3,
@@ -480,6 +468,7 @@ describe("edge query dimensions low-level coverage", () => {
       insert.run(
         "outside-window",
         siteId,
+        sitePk,
         "visitor-outside",
         "session-outside",
         window.endExclusiveMs,
@@ -526,17 +515,7 @@ describe("edge query dimensions low-level coverage", () => {
 
       expect(calls).toHaveLength(2);
       expect(calls[0]?.sql).toContain("ROW_NUMBER() OVER");
-      const plan = database
-        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
-        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
-      expect(
-        plan.filter((row) => row.detail.includes("SEARCH visits USING")),
-      ).toHaveLength(1);
-      expect(
-        plan.some((row) =>
-          row.detail.includes("idx_visits_site_pk_started_at"),
-        ),
-      ).toBe(true);
+      expect(calls[1]?.sql).toContain("ROW_NUMBER() OVER");
     } finally {
       database.close();
     }

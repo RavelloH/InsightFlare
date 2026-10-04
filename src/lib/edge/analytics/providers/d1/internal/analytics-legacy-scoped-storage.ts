@@ -82,6 +82,8 @@ const rowLocalDerivedStrategies = new Set([
   "derived.osVersion",
   "derived.screenSize",
 ]);
+const PAGE_EVENT_OWNER_PAIR_EQUIVALENCE =
+  "direct-page-row-local-event-owner-pairs-v1";
 const legacyDirectEventRecordVisitColumnSet = new Set<string>(
   LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS,
 );
@@ -127,6 +129,41 @@ function canReuseRowLocalEventMatches(
       selection.eventNameGate.semantics ===
         "direct-subject-local-exact-name-v1")
   );
+}
+
+/** Returns a cache key only for the proven direct Page owner-pair equivalence class. */
+export function pageEventOwnerPairCacheKey(
+  selection: SemanticScopedSourceSelection,
+): string | null {
+  const compatibleProfile =
+    (selection.profile === "direct-page-analytics-v1" &&
+      selection.scope === "event" &&
+      selection.mode === "observation") ||
+    (selection.profile === "direct-page-session-compat-v1" &&
+      selection.scope === "session" &&
+      selection.mode === "entity" &&
+      selection.entityKind === "session");
+  const root = selection.filter.root;
+  if (
+    !compatibleProfile ||
+    selection.preparedMatches !== undefined ||
+    selection.eventNameGate !== undefined ||
+    !root ||
+    selection.subject.siteIds.length !== 1 ||
+    selection.authorizedSiteIds.length !== 1 ||
+    selection.authorizedSiteIds[0] !== selection.subject.siteIds[0] ||
+    factEntityKindsForFilter(root).size !== 0 ||
+    !isRowLocalFilter(root) ||
+    planObservationFilter(root).event.kind === "all"
+  )
+    return null;
+  return JSON.stringify({
+    equivalence: PAGE_EVENT_OWNER_PAIR_EQUIVALENCE,
+    filter: selection.filter,
+    subject: selection.subject,
+    time: selection.time,
+    authorizedSiteIds: selection.authorizedSiteIds,
+  });
 }
 
 function withoutEventNameGate(
@@ -883,8 +920,8 @@ function eventOwnerPairsForObservationFilter(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
   expression: FilterExpression | null,
+  universe = eventOwnerPairIdentityRows(dataset.readEvents),
 ): IdentityRelation {
-  const universe = eventOwnerPairIdentityRows(dataset.readEvents);
   const plan = planObservationFilter(expression).event;
   if (plan.kind === "all") return universe;
   if (plan.kind === "none") return emptyIdentities(universe);
@@ -1087,6 +1124,7 @@ function pageRowWithRelation(
 function directPageRows(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
+  matchingEventOwnerPairs?: IdentityRelation,
 ): AnalyticsDbRelation {
   const pagePlan = planObservationFilter(selection.filter.root).visit;
   const eventPlan = planObservationFilter(selection.filter.root).event;
@@ -1110,13 +1148,14 @@ function directPageRows(
     return filterExpression(pages, pagePlan.expression, { selection, context });
   }
   const eventPairs =
-    eventPlan.kind === "none"
+    matchingEventOwnerPairs ??
+    (eventPlan.kind === "none"
       ? emptyIdentities(pagePairIdentityRows(pages))
       : eventOwnerPairsForObservationFilter(
           dataset,
           selection,
           selection.filter.root,
-        );
+        ));
   if (!pageTerm) return pageRowsForVisitIds(pages, eventPairs);
 
   const joined = join(
@@ -1164,10 +1203,15 @@ function directPageRows(
 function compatibilitySessionPageRows(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
+  matchingEventOwnerPairs?: IdentityRelation,
 ): AnalyticsDbRelation {
   const candidatePages = dataset.candidatePages;
   const sessionColumn = entityColumnName(candidatePages, "session");
-  const selectedPageBag = directPageRows(dataset, selection);
+  const selectedPageBag = directPageRows(
+    dataset,
+    selection,
+    matchingEventOwnerPairs,
+  );
   const matchingPages = filter(
     selectedPageBag,
     nonBlank(selectedPageBag.columns[sessionColumn]! as AnalyticsLegacyText),
@@ -1339,9 +1383,27 @@ function remapEventSourceValues(
 export class AnalyticsLegacyScopedStorage {
   readonly #storage: AnalyticsRelationalStorageContext;
   readonly #rowLocalEventMatches = new Map<string, IdentityRelation>();
+  readonly #pageEventOwnerPairs = new Map<string, IdentityRelation>();
 
   constructor(storage: AnalyticsRelationalStorageContext) {
     this.#storage = storage;
+  }
+
+  #matchingPageEventOwnerPairs(
+    dataset: AnalyticsLegacyScopedDataset,
+    selection: SemanticScopedSourceSelection,
+  ): IdentityRelation | undefined {
+    const key = pageEventOwnerPairCacheKey(selection);
+    if (!key) return undefined;
+    const existing = this.#pageEventOwnerPairs.get(key);
+    if (existing) return existing;
+    const matching = eventOwnerPairsForObservationFilter(
+      dataset,
+      selection,
+      selection.filter.root,
+    );
+    this.#pageEventOwnerPairs.set(key, matching);
+    return matching;
   }
 
   lowerSelectedReportSource(
@@ -1393,12 +1455,20 @@ export class AnalyticsLegacyScopedStorage {
       storage: this.#storage,
       requiredPageAttributes: pageAttributes,
     });
+    const matchingEventOwnerPairs = this.#matchingPageEventOwnerPairs(
+      dataset,
+      selection,
+    );
     const relation =
       selection.profile === "direct-page-analytics-v1"
-        ? directPageRows(dataset, selection)
+        ? directPageRows(dataset, selection, matchingEventOwnerPairs)
         : selection.profile === "direct-page-session-compat-v1"
           ? factEntityKindsForFilter(selection.filter.root).size === 0
-            ? compatibilitySessionPageRows(dataset, selection)
+            ? compatibilitySessionPageRows(
+                dataset,
+                selection,
+                matchingEventOwnerPairs,
+              )
             : entityPageRows(dataset, selection)
           : selection.mode === "observation"
             ? pageRowsForVisitIds(

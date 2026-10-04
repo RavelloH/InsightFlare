@@ -163,7 +163,7 @@ function selectedCardDimension(
   });
 }
 
-function cardLimit(limit: number): number | null {
+export function cardLimit(limit: number): number | null {
   if (Number.isNaN(limit) || limit <= 0) return 0;
   if (limit === Number.POSITIVE_INFINITY) return null;
   if (!Number.isFinite(limit)) return 0;

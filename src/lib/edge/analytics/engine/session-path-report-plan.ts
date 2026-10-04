@@ -17,6 +17,10 @@ import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import {
+  aggregateSessionBoundaries,
+  selectedSessionBoundary,
+} from "@/lib/edge/analytics/engine/session-boundary-plan";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -29,29 +33,6 @@ export interface SessionPathCursor {
   readonly views: number;
   readonly value: string;
   readonly visitors?: number;
-}
-
-function pageAttribute(
-  builder: LogicalPlanBuilder,
-  pages: LogicalRelationHandle,
-  name: "sessionId" | "visitorId" | "startedAt" | "localId" | "pathname",
-): LogicalExpressionHandle {
-  return builder.slot(pages, `attribute:page.report.${name}`);
-}
-
-function nonemptyVisitor(
-  builder: LogicalPlanBuilder,
-  visitorId: LogicalExpressionHandle,
-): LogicalExpressionHandle {
-  return builder.caseWhen(
-    [
-      {
-        when: builder.compare("neq", visitorId, builder.literal("", STRING)),
-        then: visitorId,
-      },
-    ],
-    builder.literal(null, STRING),
-  );
 }
 
 function sessionPathSource(input: {
@@ -84,98 +65,6 @@ function sessionPathSource(input: {
       "page.report.pathname",
     ],
   });
-}
-
-function pathValue(
-  builder: LogicalPlanBuilder,
-  pages: LogicalRelationHandle,
-): LogicalExpressionHandle {
-  return builder.normalizeString(
-    builder.coalesce(
-      pageAttribute(builder, pages, "pathname"),
-      builder.literal("", STRING),
-    ),
-    "trim-ascii-space",
-  );
-}
-
-function selectedSessionBoundaries(
-  builder: LogicalPlanBuilder,
-  pages: LogicalRelationHandle,
-  kind: SessionPathKind,
-): LogicalRelationHandle {
-  const sessionId = pageAttribute(builder, pages, "sessionId");
-  const pathname = pathValue(builder, pages);
-  const eligible = builder.filter(
-    pages,
-    builder.and(
-      builder.compare("neq", sessionId, builder.literal("", STRING)),
-      builder.compare("neq", pathname, builder.literal("", STRING)),
-    ),
-  );
-  const orderedMember = (
-    source: LogicalRelationHandle,
-    direction: "asc" | "desc",
-    nulls: "first" | "last",
-  ) =>
-    builder.orderedMember(source, {
-      groups: ["attribute:page.report.sessionId"],
-      order: [
-        {
-          slot: "attribute:page.report.startedAt",
-          direction,
-          nulls,
-        },
-        {
-          slot: "attribute:page.report.localId",
-          direction,
-          nulls,
-        },
-      ],
-    });
-  const firstMember = orderedMember(eligible, "asc", "first");
-  const first = builder.project(firstMember, {
-    sessionId: pageAttribute(builder, firstMember, "sessionId"),
-    visitorId: pageAttribute(builder, firstMember, "visitorId"),
-    value: pathValue(builder, firstMember),
-  });
-  if (kind === "entry") return first;
-
-  const latestMember = orderedMember(eligible, "desc", "last");
-  const latest = builder.project(latestMember, {
-    sessionId: pageAttribute(builder, latestMember, "sessionId"),
-    value: pathValue(builder, latestMember),
-  });
-  const joined = builder.join(first, latest, [
-    { left: "sessionId", right: "sessionId" },
-  ]);
-  return builder.project(joined, {
-    visitorId: builder.slot(joined, "visitorId"),
-    value: builder.slot(joined, "right.value"),
-  });
-}
-
-function aggregateSessionPaths(
-  builder: LogicalPlanBuilder,
-  boundaries: LogicalRelationHandle,
-): LogicalRelationHandle {
-  const value = builder.slot(boundaries, "value");
-  return builder.aggregate(
-    boundaries,
-    { value: builder.coalesce(value, builder.literal("", STRING)) },
-    [
-      { name: "views", kind: "count-rows" },
-      { name: "sessions", kind: "count-rows" },
-      {
-        name: "visitors",
-        kind: "count-distinct",
-        expression: nonemptyVisitor(
-          builder,
-          builder.slot(boundaries, "visitorId"),
-        ),
-      },
-    ],
-  );
 }
 
 function filterSessionPaths(
@@ -280,8 +169,8 @@ function baseSessionPathPlan(input: {
   readonly sortDirection: "asc" | "desc";
 }) {
   const { builder, pages } = sessionPathSource(input);
-  const boundaries = selectedSessionBoundaries(builder, pages, input.kind);
-  let result = aggregateSessionPaths(builder, boundaries);
+  const boundaries = selectedSessionBoundary(builder, pages, input.kind);
+  let result = aggregateSessionBoundaries(builder, boundaries);
   result = builder.filter(
     result,
     builder.compare(
