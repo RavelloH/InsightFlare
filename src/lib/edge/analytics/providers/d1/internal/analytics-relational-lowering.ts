@@ -43,7 +43,9 @@ import {
   textContains,
   textEndsWith,
   textLike,
+  textPosition,
   textStartsWith,
+  textSubstring,
   trimSpaces,
   union,
   window as windowRelation,
@@ -1056,6 +1058,30 @@ function lowerExpression(
               { when: neq(version, constant("")), then: version },
             ],
             constant(""),
+          );
+          break;
+        }
+        case "browserMajorVersion": {
+          const version = text("page.report.browserVersion") as SqlExpression<
+            string | null,
+            ExpressionResultType<"text", boolean>
+          >;
+          const position = textPosition(version, constant("."));
+          result = trimSpaces(
+            caseWhen(
+              [
+                { when: eq(version, constant("")), then: constant("") },
+                {
+                  when: gt(position, constant(0)),
+                  then: textSubstring(
+                    version,
+                    constant(1),
+                    sub(position, constant(1)),
+                  ),
+                },
+              ],
+              version,
+            ),
           );
           break;
         }

@@ -1,3 +1,10 @@
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  BROWSER_VERSION_BREAKDOWN_OUTPUT,
+  buildBrowserVersionBreakdownPlan,
+} from "@/lib/edge/analytics/engine/browser-version-breakdown-report-plan";
+import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type {
   BrowserCrossAggregateRow,
   BrowserCrossBreakdownDimensionDataRow,
@@ -17,7 +24,6 @@ import {
   BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
   BROWSER_CROSS_UNKNOWN_TOKEN,
   BROWSER_VERSION_UNKNOWN_TOKEN,
-  browserMajorVersionExpr,
   queryD1All,
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
@@ -79,98 +85,19 @@ export async function queryBrowserVersionBreakdownFromD1(
   browserLimit: number,
   versionLimit: number,
 ): Promise<BrowserVersionBreakdownRow[]> {
-  const source = technologyVisitSource(siteId, window, filters);
-  const normalizedBrowserLimit =
-    Number.isFinite(browserLimit) && browserLimit > 0
-      ? Math.max(1, Math.floor(browserLimit))
-      : null;
+  const metadata = scopedFilterMetadata(filters);
   const normalizedVersionLimit = Math.min(Math.max(1, versionLimit), 8);
-  const browserLimitClause = normalizedBrowserLimit
-    ? "WHERE browserRank <= ?"
-    : "WHERE 1 = 1";
-  const sql = `
-WITH
-${source.ctes},
-filtered_visits AS (
-  SELECT
-    TRIM(COALESCE(browser, '')) AS browser,
-    browser_version,
-    visitor_id,
-    session_id
-  FROM ${source.relation}
-  ${source.filterClause}
-),
-browser_rollup AS (
-  SELECT
-    browser,
-    COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
-  FROM filtered_visits
-  WHERE browser != ''
-  GROUP BY browser
-),
-ranked_browsers AS (
-  SELECT
-    browser,
-    views,
-    visitors,
-    sessions,
-    ROW_NUMBER() OVER (
-      ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
-    ) AS browserRank
-  FROM browser_rollup
-),
-top_browsers AS (
-  SELECT browser, views, visitors, sessions, browserRank
-  FROM ranked_browsers
-  ${browserLimitClause}
-),
-versioned_visits AS (
-  SELECT
-    fv.browser,
-    CASE
-      WHEN ${browserMajorVersionExpr("fv")} != ''
-        THEN ${browserMajorVersionExpr("fv")}
-      ELSE '${BROWSER_VERSION_UNKNOWN_TOKEN}'
-    END AS version,
-    fv.visitor_id,
-    fv.session_id
-  FROM filtered_visits fv
-  INNER JOIN top_browsers tb ON tb.browser = fv.browser
-),
-version_rollup AS (
-  SELECT
-    browser,
-    version,
-    COUNT(*) AS views,
-    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors,
-    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
-  FROM versioned_visits
-  GROUP BY browser, version
-  HAVING COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) > 0
-)
-SELECT
-  tb.browser,
-  tb.views,
-  tb.visitors,
-  tb.sessions,
-  tb.browserRank,
-  vr.version,
-  vr.version AS versionLabel,
-  vr.views AS versionViews,
-  vr.visitors AS versionVisitors,
-  vr.sessions AS versionSessions
-FROM top_browsers tb
-LEFT JOIN version_rollup vr ON vr.browser = tb.browser
-ORDER BY tb.browserRank ASC, versionVisitors DESC, versionViews DESC,
-  versionSessions DESC, versionLabel ASC
-`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...source.bindings,
-    ...source.filterBindings,
-    ...(normalizedBrowserLimit ? [normalizedBrowserLimit] : []),
-  ]);
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    buildBrowserVersionBreakdownPlan({
+      siteId,
+      queryTime: queryWindowToTime(window),
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      browserLimit,
+    }),
+    BROWSER_VERSION_BREAKDOWN_OUTPUT,
+  );
   const topBrowsersByName = new Map<string, BrowserVersionAggregateRow>();
   const versionRows: BrowserVersionAggregateRow[] = [];
   for (const row of rows) {

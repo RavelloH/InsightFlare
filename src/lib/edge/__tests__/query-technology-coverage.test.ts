@@ -185,7 +185,12 @@ describe("edge technology query coverage", () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].sql).not.toContain("LIMIT ?");
-    expect(calls[0].bindings).toEqual(visitBindings());
+    expect(calls[0].sql).toContain("ROW_NUMBER() OVER");
+    expect(calls[0].bindings).toEqual([
+      BROWSER_VERSION_UNKNOWN_TOKEN,
+      ...visitBindings(),
+      0,
+    ]);
   });
 
   it("maps browser version slices with unknown and other buckets", async () => {
@@ -271,8 +276,15 @@ describe("edge technology query coverage", () => {
       },
     ]);
 
-    expect(calls[0].sql).toContain("browserRank <= ?");
-    expect(calls[0].bindings.at(-1)).toBe(2);
+    expect(calls[0].sql).toContain("ROW_NUMBER() OVER");
+    expect(calls[0].sql).toContain("<= ?");
+    expect(calls[0].bindings).toEqual([
+      BROWSER_VERSION_UNKNOWN_TOKEN,
+      ...visitBindings(),
+      2,
+      0,
+      2,
+    ]);
     expect(calls).toHaveLength(1);
   });
 

@@ -1064,10 +1064,16 @@ describe("edge query technology D1 mapping", () => {
     ]);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].sql).toContain("WHERE browser != ''");
-    expect(calls[0].sql).toContain("browserRank <= ?");
-    expect(calls[0].bindings).toEqual([...visitBindings(siteId, window), 2]);
-    expect(calls[0].sql).toContain(BROWSER_VERSION_UNKNOWN_TOKEN);
+    expect(calls[0].sql).toContain("ROW_NUMBER() OVER");
+    expect(calls[0].sql).toContain("<= ?");
+    expect(calls[0].bindings).toEqual([
+      BROWSER_VERSION_UNKNOWN_TOKEN,
+      ...visitBindings(siteId, window),
+      2,
+      0,
+      2,
+    ]);
+    expect(calls[0].bindings).toContain(BROWSER_VERSION_UNKNOWN_TOKEN);
   });
 
   it("maps shared trend rows with top labels, other bucket, filters, and time buckets", async () => {

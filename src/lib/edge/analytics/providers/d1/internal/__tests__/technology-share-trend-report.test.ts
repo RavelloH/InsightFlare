@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -26,8 +26,21 @@ import type {
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
 import { buildTechnologyReferrerChannelTrendPlan } from "@/lib/edge/analytics/engine/technology-share-trend-report-plan";
-import type { FilterDocument } from "@/lib/edge/analytics/providers/d1/internal/core";
-import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import type {
+  BrowserVersionAggregateRow,
+  BrowserVersionBreakdownRow,
+  BrowserVersionSliceRow,
+  FilterDocument,
+  QueryWindow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  BROWSER_VERSION_UNKNOWN_TOKEN,
+  browserMajorVersionExpr,
+  SHARE_TREND_OTHER_LABEL,
+  shareTrendSeriesKey,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryBrowserVersionBreakdownFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/browser";
+import { technologyVisitSource } from "@/lib/edge/analytics/providers/d1/internal/technology/scoped-source";
 import {
   queryReferrerAndChannelTrendFromD1,
   queryShareTrendFromD1,
@@ -179,6 +192,7 @@ function seedVisit(
     readonly session: string;
     readonly startedAt: number;
     readonly browser: string;
+    readonly browserVersion?: string;
     readonly pathname: string;
     readonly referrerHost?: string;
     readonly utmSource?: string;
@@ -189,9 +203,9 @@ function seedVisit(
     `
     INSERT INTO visits (
       visit_id, site_id, site_pk, visitor_id, session_id, status,
-      started_at, last_activity_at, pathname, hostname, browser,
+      started_at, last_activity_at, pathname, hostname, browser, browser_version,
       referrer_host, utm_source, utm_medium
-    ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, ?, 'trend.test', ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, ?, 'trend.test', ?, ?, ?, ?, ?)
   `,
   ).run(
     input.id,
@@ -203,10 +217,124 @@ function seedVisit(
     input.startedAt,
     input.pathname,
     input.browser,
+    input.browserVersion ?? "",
     input.referrerHost ?? "",
     input.utmSource ?? "",
     input.utmMedium ?? "",
   );
+}
+
+function seedBrowserVersionFixture(
+  db: DatabaseSync,
+  sitePk: number,
+  startedAt: number,
+): void {
+  const rows = [
+    ["chrome-124-shared", "cross-version", "   ", "Chrome", "124.1"],
+    ["chrome-124-second", "chrome-124-second", "", "Chrome", "124.9"],
+    ["chrome-123-shared", "cross-version", "session-123-a", "Chrome", "123.8"],
+    [
+      "chrome-123-second",
+      "chrome-123-second",
+      "session-123-b",
+      "Chrome",
+      "123.4",
+    ],
+    ["merge-ascii", "merge-ascii", "merge-session-a", "MERGE", "13.2"],
+    ["merge-ascii-second", "merge-ascii", "merge-session-a", "MERGE", "13.9"],
+    ["merge-tabs", "merge-tabs", "merge-session-b", " \tMERGE\t ", "12.4"],
+    ["edge-ascii", "edge-ascii", "edge-session-a", "Edge", "126.3"],
+    ["edge-nbsp", "edge-nbsp", "edge-session-b", " \u00a0Edge\u00a0 ", "127.3"],
+    [
+      "browser-tie-alpha",
+      "browser-tie-alpha",
+      "browser-tie-alpha-session",
+      "TieAlpha",
+      "2.0",
+    ],
+    [
+      "browser-tie-beta",
+      "browser-tie-beta",
+      "browser-tie-beta-session",
+      "TieBeta",
+      "1.0",
+    ],
+    [
+      "version-tie-alpha",
+      "version-tie-alpha",
+      "version-tie-alpha-session",
+      "VersionTie",
+      "alpha.1",
+    ],
+    [
+      "version-tie-beta",
+      "version-tie-beta",
+      "version-tie-beta-session",
+      "VersionTie",
+      "beta.1",
+    ],
+    ["weird-empty", "weird-empty", "weird-session-empty", "Weird", ""],
+    ["weird-dot", "weird-dot", "weird-session-dot", "Weird", ".2"],
+    [
+      "weird-unknown-collision",
+      "weird-unknown-collision",
+      "weird-session-collision",
+      "Weird",
+      `${BROWSER_VERSION_UNKNOWN_TOKEN}.7`,
+    ],
+    ["weird-v-prefix", "weird-v-prefix", "weird-session-v", "Weird", "v1.2"],
+    [
+      "weird-leading-zero",
+      "weird-leading-zero",
+      "weird-session-zero",
+      "Weird",
+      "01.2",
+    ],
+    [
+      "weird-empty-segment",
+      "weird-empty-segment",
+      "weird-session-segment",
+      "Weird",
+      "1..2",
+    ],
+    [
+      "weird-ascii-space",
+      "weird-ascii-space",
+      "weird-session-space",
+      "Weird",
+      " 129.1",
+    ],
+    [
+      "weird-tab-version",
+      "weird-tab-version",
+      "weird-session-tab",
+      "Weird",
+      "\t130.1",
+    ],
+    [
+      "weird-nbsp-version",
+      "weird-nbsp-version",
+      "weird-session-nbsp",
+      "Weird",
+      "\u00a0131.1\u00a0",
+    ],
+    ["zero-visitor", "", "zero-session", "NoVisitor", "10.2"],
+    ["empty-browser", "empty-browser", "empty-browser-session", "", "15.1"],
+  ] as const;
+  for (const [
+    index,
+    [id, visitor, session, browser, browserVersion],
+  ] of rows.entries()) {
+    seedVisit(db, sitePk, {
+      id: `browser-version-${id}`,
+      visitor,
+      session,
+      startedAt: startedAt + index,
+      browser,
+      browserVersion,
+      pathname: "/browser-version-diff",
+    });
+  }
 }
 
 let database: DatabaseSync;
@@ -296,6 +424,243 @@ function sqliteEnv(db: DatabaseSync, trace: SqliteD1Trace): Env {
   return { DB: createSqliteD1Database(db, trace) } as unknown as Env;
 }
 
+function legacyBrowserVersionStatement(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  browserLimit: number,
+) {
+  const source = technologyVisitSource(siteId, window, filters);
+  const normalizedBrowserLimit =
+    Number.isFinite(browserLimit) && browserLimit > 0
+      ? Math.max(1, Math.floor(browserLimit))
+      : null;
+  const browserLimitClause = normalizedBrowserLimit
+    ? "WHERE browserRank <= ?"
+    : "WHERE 1 = 1";
+  const sql = `
+WITH
+${source.ctes},
+filtered_visits AS (
+  SELECT
+    TRIM(COALESCE(browser, '')) AS browser,
+    browser_version,
+    visitor_id,
+    session_id
+  FROM ${source.relation}
+  ${source.filterClause}
+),
+browser_rollup AS (
+  SELECT
+    browser,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
+  FROM filtered_visits
+  WHERE browser != ''
+  GROUP BY browser
+),
+ranked_browsers AS (
+  SELECT
+    browser,
+    views,
+    visitors,
+    sessions,
+    ROW_NUMBER() OVER (
+      ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
+    ) AS browserRank
+  FROM browser_rollup
+),
+top_browsers AS (
+  SELECT browser, views, visitors, sessions, browserRank
+  FROM ranked_browsers
+  ${browserLimitClause}
+),
+versioned_visits AS (
+  SELECT
+    fv.browser,
+    CASE
+      WHEN ${browserMajorVersionExpr("fv")} != ''
+        THEN ${browserMajorVersionExpr("fv")}
+      ELSE '${BROWSER_VERSION_UNKNOWN_TOKEN}'
+    END AS version,
+    fv.visitor_id,
+    fv.session_id
+  FROM filtered_visits fv
+  INNER JOIN top_browsers tb ON tb.browser = fv.browser
+),
+version_rollup AS (
+  SELECT
+    browser,
+    version,
+    COUNT(*) AS views,
+    COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors,
+    COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions
+  FROM versioned_visits
+  GROUP BY browser, version
+  HAVING COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) > 0
+)
+SELECT
+  tb.browser,
+  tb.views,
+  tb.visitors,
+  tb.sessions,
+  tb.browserRank,
+  vr.version,
+  vr.version AS versionLabel,
+  vr.views AS versionViews,
+  vr.visitors AS versionVisitors,
+  vr.sessions AS versionSessions
+FROM top_browsers tb
+LEFT JOIN version_rollup vr ON vr.browser = tb.browser
+ORDER BY tb.browserRank ASC, versionVisitors DESC, versionViews DESC,
+  versionSessions DESC, versionLabel ASC
+`;
+  return {
+    sql,
+    bindings: [
+      ...source.bindings,
+      ...source.filterBindings,
+      ...(normalizedBrowserLimit ? [normalizedBrowserLimit] : []),
+    ],
+  };
+}
+
+function mapLegacyBrowserVersionRows(
+  rows: readonly Record<string, unknown>[],
+  versionLimit: number,
+): BrowserVersionBreakdownRow[] {
+  const normalizedVersionLimit = Math.min(Math.max(1, versionLimit), 8);
+  const topBrowsersByName = new Map<string, BrowserVersionAggregateRow>();
+  const versionRows: BrowserVersionAggregateRow[] = [];
+  for (const row of rows) {
+    const browser = String(row.browser ?? "").trim();
+    const browserVisitors = Number(row.visitors ?? 0);
+    if (!browser || browserVisitors <= 0) continue;
+    if (!topBrowsersByName.has(browser)) {
+      topBrowsersByName.set(browser, {
+        browser,
+        version: "",
+        views: Number(row.views ?? 0),
+        visitors: browserVisitors,
+        sessions: Number(row.sessions ?? 0),
+      });
+    }
+    const version = String(row.version ?? "").trim();
+    const versionVisitors = Number(row.versionVisitors ?? 0);
+    if (version && versionVisitors > 0) {
+      versionRows.push({
+        browser,
+        version,
+        views: Number(row.versionViews ?? 0),
+        visitors: versionVisitors,
+        sessions: Number(row.versionSessions ?? 0),
+      });
+    }
+  }
+  const topBrowsers = [...topBrowsersByName.values()];
+  if (topBrowsers.length === 0) return [];
+
+  const versionsByBrowser = new Map<string, BrowserVersionAggregateRow[]>();
+  for (const row of versionRows) {
+    const bucket = versionsByBrowser.get(row.browser) ?? [];
+    bucket.push(row);
+    versionsByBrowser.set(row.browser, bucket);
+  }
+
+  return topBrowsers.map((browserRow) => {
+    const rows = versionsByBrowser.get(browserRow.browser) ?? [];
+    const usedKeys = new Set<string>(["other", "unknown"]);
+    const versions: BrowserVersionSliceRow[] = [];
+    let otherViews = 0;
+    let otherVisitors = 0;
+    let otherSessions = 0;
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index]!;
+      if (index < normalizedVersionLimit) {
+        if (row.version === BROWSER_VERSION_UNKNOWN_TOKEN) {
+          versions.push({
+            key: "unknown",
+            label: "Unknown",
+            views: row.views,
+            visitors: row.visitors,
+            sessions: row.sessions,
+            isUnknown: true,
+          });
+        } else {
+          versions.push({
+            key: shareTrendSeriesKey(row.version, usedKeys, "version"),
+            label: row.version,
+            views: row.views,
+            visitors: row.visitors,
+            sessions: row.sessions,
+          });
+        }
+        continue;
+      }
+      otherViews += row.views;
+      otherVisitors += row.visitors;
+      otherSessions += row.sessions;
+    }
+
+    if (otherVisitors > 0) {
+      versions.push({
+        key: "other",
+        label: SHARE_TREND_OTHER_LABEL,
+        views: otherViews,
+        visitors: otherVisitors,
+        sessions: otherSessions,
+        isOther: true,
+      });
+    }
+    return {
+      browser: browserRow.browser,
+      views: browserRow.views,
+      visitors: browserRow.visitors,
+      sessions: browserRow.sessions,
+      versions,
+    };
+  });
+}
+
+function legacyBrowserVersionBreakdown(
+  db: DatabaseSync,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  browserLimit: number,
+  versionLimit: number,
+): BrowserVersionBreakdownRow[] {
+  const statement = legacyBrowserVersionStatement(
+    siteId,
+    window,
+    filters,
+    browserLimit,
+  );
+  const rows = db.prepare(statement.sql).all(...statement.bindings) as Record<
+    string,
+    unknown
+  >[];
+  return mapLegacyBrowserVersionRows(rows, versionLimit);
+}
+
+function medianSqlExecutionMs(
+  db: DatabaseSync,
+  sql: string,
+  bindings: readonly SQLInputValue[],
+): number {
+  const statement = db.prepare(sql);
+  const samples: number[] = [];
+  for (let index = 0; index < 7; index += 1) {
+    const startedAt = performance.now();
+    statement.all(...bindings);
+    samples.push(performance.now() - startedAt);
+  }
+  samples.sort((left, right) => left - right);
+  return samples[Math.floor(samples.length / 2)]!;
+}
+
 beforeAll(() => {
   database = createMigratedDatabase();
   database
@@ -309,6 +674,7 @@ beforeAll(() => {
     ).site_pk,
   );
   const baseline = WINDOW.startMs + 20;
+  seedBrowserVersionFixture(database, sitePk, baseline + 20);
   seedVisit(database, sitePk, {
     id: "payload-match",
     visitor: "payload-visitor",
@@ -390,6 +756,7 @@ afterAll(() => {
 async function compileOnly(
   label: string,
   invoke: (env: Env) => Promise<unknown>,
+  tagPrefix = "wave54.technology_share_trend",
 ) {
   const statements: CapturedStatement[] = [];
   const logger = createInvocationLogger({
@@ -399,7 +766,7 @@ async function compileOnly(
   let failure: unknown;
   try {
     await runWithInvocationLogger(logger, () =>
-      runWithD1Operation(`wave54.technology_share_trend.${label}`, () =>
+      runWithD1Operation(`${tagPrefix}.${label}`, () =>
         invoke(instrumentEnv(capturedEnv(statements), logger)),
       ),
     );
@@ -422,7 +789,7 @@ async function compileOnly(
       },
     };
   if (failure) throw failure;
-  const tag = `wave54.technology_share_trend.${label}`;
+  const tag = `${tagPrefix}.${label}`;
   const observation = record.logs.find(
     (entry) =>
       entry.message === "db.query.v1.all.success" && entry.data?.tag === tag,
@@ -796,5 +1163,391 @@ describe("technology share trend Logical report budgets", () => {
       expect(directEq.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
       expect(directEq.bindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
     }
+  });
+});
+
+describe("browser version breakdown Logical report", () => {
+  const browserVersionFilters = pagePathFilter("/browser-version-diff");
+
+  it("matches the frozen full-SQL DTO across labels, versions, ranking, and limits", async () => {
+    const browserLimits = [
+      0.25,
+      2.9,
+      0,
+      -1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ];
+    const versionLimits = [
+      2.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+    ];
+    for (const browserLimit of browserLimits) {
+      for (const versionLimit of versionLimits) {
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const actual = await queryBrowserVersionBreakdownFromD1(
+          sqliteEnv(database, trace),
+          SITE_ID,
+          WINDOW,
+          browserVersionFilters,
+          browserLimit,
+          versionLimit,
+        );
+        expect(
+          trace.preparedSql,
+          `${browserLimit}/${versionLimit}`,
+        ).toHaveLength(1);
+        expect(actual, `${browserLimit}/${versionLimit}`).toEqual(
+          legacyBrowserVersionBreakdown(
+            database,
+            SITE_ID,
+            WINDOW,
+            browserVersionFilters,
+            browserLimit,
+            versionLimit,
+          ),
+        );
+      }
+    }
+
+    const unboundedTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const unbounded = await queryBrowserVersionBreakdownFromD1(
+      sqliteEnv(database, unboundedTrace),
+      SITE_ID,
+      WINDOW,
+      browserVersionFilters,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    );
+    expect(unbounded.map(({ browser }) => browser)).not.toContain("NoVisitor");
+    expect(unbounded.map(({ browser }) => browser)).not.toContain("");
+
+    const chrome = unbounded.find(({ browser }) => browser === "Chrome")!;
+    expect(chrome.versions.map(({ label }) => label)).toContain("123");
+    expect(chrome.versions.map(({ label }) => label)).toContain("124");
+    const chromeTopVersion = await queryBrowserVersionBreakdownFromD1(
+      sqliteEnv(database, { preparedSql: [], bindings: [] }),
+      SITE_ID,
+      WINDOW,
+      browserVersionFilters,
+      Number.NaN,
+      1,
+    );
+    const chromeWithOther = chromeTopVersion.find(
+      ({ browser }) => browser === "Chrome",
+    )!;
+    expect(chromeWithOther.versions.at(-1)).toMatchObject({
+      key: "other",
+      visitors: 2,
+      isOther: true,
+    });
+
+    const weird = unbounded.find(({ browser }) => browser === "Weird")!;
+    expect(weird.versions.find(({ key }) => key === "unknown")).toMatchObject({
+      label: "Unknown",
+      views: 3,
+      visitors: 3,
+      sessions: 3,
+      isUnknown: true,
+    });
+    expect(weird.versions.map(({ label }) => label)).toEqual(
+      expect.arrayContaining(["Unknown", "01", "1", "v1", "129", "130", "131"]),
+    );
+    expect(unbounded.find(({ browser }) => browser === "MERGE")).toMatchObject({
+      views: 2,
+      visitors: 1,
+      sessions: 1,
+    });
+    expect(
+      unbounded.find(({ browser }) => browser === "Edge")?.versions,
+    ).toHaveLength(2);
+    expect(
+      unbounded.findIndex(({ browser }) => browser === "TieAlpha"),
+    ).toBeLessThan(unbounded.findIndex(({ browser }) => browser === "TieBeta"));
+    expect(
+      unbounded
+        .find(({ browser }) => browser === "VersionTie")
+        ?.versions.map(({ label }) => label),
+    ).toEqual(["alpha", "beta"]);
+
+    const parentStatement = legacyBrowserVersionStatement(
+      SITE_ID,
+      WINDOW,
+      browserVersionFilters,
+      Number.NaN,
+    );
+    const newSql = unboundedTrace.preparedSql[0]!;
+    const newBindings = unboundedTrace.bindings[0]!;
+    const parentExplain = database
+      .prepare(`EXPLAIN QUERY PLAN ${parentStatement.sql}`)
+      .all(...parentStatement.bindings) as Array<{ readonly detail: string }>;
+    const newExplain = database
+      .prepare(`EXPLAIN QUERY PLAN ${newSql}`)
+      .all(...newBindings) as Array<{ readonly detail: string }>;
+    const usefulPlanLines = (rows: readonly { readonly detail: string }[]) =>
+      rows
+        .map(({ detail }) => detail)
+        .filter((detail) =>
+          /INDEX|MATERIALIZE|TEMP B-TREE|SCAN visits/iu.test(detail),
+        )
+        .slice(0, 12);
+    console.info(
+      "wave56_browser_version_sql_evidence",
+      JSON.stringify({
+        parent: {
+          sqlBytes: new TextEncoder().encode(parentStatement.sql).byteLength,
+          bindings: parentStatement.bindings.length,
+          medianMs: medianSqlExecutionMs(
+            database,
+            parentStatement.sql,
+            parentStatement.bindings,
+          ),
+          eqp: usefulPlanLines(parentExplain),
+        },
+        new: {
+          sqlBytes: new TextEncoder().encode(newSql).byteLength,
+          bindings: newBindings.length,
+          medianMs: medianSqlExecutionMs(database, newSql, newBindings),
+          eqp: usefulPlanLines(newExplain),
+        },
+      }),
+    );
+  });
+
+  it("keeps the Page reader window, empty selection, Event, Session, and Visitor scopes", async () => {
+    const pagePrepared = prepareTrendFilters(pagePathFilter("/prepared-match"));
+    const page128 = withAdvancedMatches(pagePrepared, {
+      visitIds: [
+        { siteId: SITE_ID, id: "prepared-page-match" },
+        ...Array.from({ length: 127 }, (_unused, index) => ({
+          siteId: SITE_ID,
+          id: `missing-browser-version-page-${index}`,
+        })),
+      ],
+    });
+    const pageTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    await expect(
+      queryBrowserVersionBreakdownFromD1(
+        sqliteEnv(database, pageTrace),
+        SITE_ID,
+        WINDOW,
+        page128,
+        10,
+        8,
+      ),
+    ).resolves.toMatchObject([
+      {
+        browser: "Prepared128",
+        views: 1,
+        visitors: 1,
+        sessions: 1,
+        versions: [{ key: "unknown", views: 1, visitors: 1, sessions: 1 }],
+      },
+    ]);
+    expect(pageTrace.preparedSql).toHaveLength(1);
+    expect(pageTrace.bindings[0]!.length).toBeLessThanOrEqual(
+      D1_MAX_BOUND_PARAMETERS,
+    );
+    const emptyPage128 = withAdvancedMatches(pagePrepared, { visitIds: [] });
+    await expect(
+      queryBrowserVersionBreakdownFromD1(
+        sqliteEnv(database, { preparedSql: [], bindings: [] }),
+        SITE_ID,
+        WINDOW,
+        emptyPage128,
+        10,
+        8,
+      ),
+    ).resolves.toEqual([]);
+
+    const eventPrepared = prepareTrendFilters(directPayloadExistsFilters());
+    const pageAndEvent = withAdvancedMatches(eventPrepared, {
+      visitIds: [{ siteId: SITE_ID, id: "payload-match" }],
+      eventIds: [{ siteId: SITE_ID, id: "technology-share-match-event" }],
+    });
+    const eventResult = await queryBrowserVersionBreakdownFromD1(
+      sqliteEnv(database, { preparedSql: [], bindings: [] }),
+      SITE_ID,
+      WINDOW,
+      pageAndEvent,
+      10,
+      8,
+    );
+    expect(eventResult).toMatchObject([
+      { browser: "Firefox", views: 1, versions: [{ key: "unknown" }] },
+    ]);
+
+    const sessionPrepared = prepareTrendFilters(
+      pagePathFilter("/session-match"),
+      "session",
+    );
+    const sessionResult = await queryBrowserVersionBreakdownFromD1(
+      sqliteEnv(database, { preparedSql: [], bindings: [] }),
+      SITE_ID,
+      WINDOW,
+      withAdvancedMatches(sessionPrepared, {
+        entityIds: [{ siteId: SITE_ID, id: "prepared-session" }],
+      }),
+      10,
+      8,
+    );
+    expect(sessionResult).toMatchObject([
+      {
+        browser: "SessionBrowser",
+        views: 2,
+        visitors: 1,
+        sessions: 1,
+        versions: [{ key: "unknown", views: 2, visitors: 1, sessions: 1 }],
+      },
+    ]);
+
+    const visitorPrepared = prepareTrendFilters(
+      pagePathFilter("/session-match"),
+      "visitor",
+    );
+    const visitorResult = await queryBrowserVersionBreakdownFromD1(
+      sqliteEnv(database, { preparedSql: [], bindings: [] }),
+      SITE_ID,
+      WINDOW,
+      withAdvancedMatches(visitorPrepared, {
+        entityIds: [{ siteId: SITE_ID, id: "prepared-entity-visitor" }],
+      }),
+      10,
+      8,
+    );
+    expect(visitorResult.map(({ browser }) => browser)).toEqual([
+      "SessionBrowser",
+      "VisitorBrowser",
+    ]);
+
+    const outsidePrepared = withAdvancedMatches(
+      prepareTrendFilters(pagePathFilter("/outside-reader-window")),
+      { visitIds: [{ siteId: SITE_ID, id: "outside-reader-window" }] },
+    );
+    await expect(
+      queryBrowserVersionBreakdownFromD1(
+        sqliteEnv(database, { preparedSql: [], bindings: [] }),
+        SITE_ID,
+        WINDOW,
+        outsidePrepared,
+        10,
+        8,
+      ),
+    ).resolves.toEqual([]);
+  });
+
+  it("includes all 40 direct payload predicates and rejects the 39-path visit", async () => {
+    const filters = directPayloadExistsFilters();
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const actual = await queryBrowserVersionBreakdownFromD1(
+      sqliteEnv(database, trace),
+      SITE_ID,
+      WINDOW,
+      filters,
+      10,
+      8,
+    );
+    expect(actual).toEqual(
+      legacyBrowserVersionBreakdown(database, SITE_ID, WINDOW, filters, 10, 8),
+    );
+    expect(actual.map(({ browser }) => browser)).toEqual(["Firefox"]);
+    expect(trace.preparedSql).toHaveLength(1);
+    expect(trace.bindings[0]!.length).toBeLessThanOrEqual(
+      D1_MAX_BOUND_PARAMETERS,
+    );
+  });
+
+  it("records plain, direct-40, prepared-Page128 and frozen-parent budgets", async () => {
+    const direct40 = directPayloadExistsFilters();
+    const preparedPage128 = withAdvancedMatches(
+      prepareTrendFilters(pagePathFilter("/prepared-match")),
+      {
+        visitIds: [
+          { siteId: SITE_ID, id: "prepared-page-match" },
+          ...Array.from({ length: 127 }, (_unused, index) => ({
+            siteId: SITE_ID,
+            id: `missing-browser-version-budget-${index}`,
+          })),
+        ],
+      },
+    );
+    const tag = "wave56.technology_browser_version";
+    const plain = await compileOnly(
+      "plain",
+      (env) =>
+        queryBrowserVersionBreakdownFromD1(
+          env,
+          SITE_ID,
+          WINDOW,
+          EMPTY_FILTER_DOCUMENT,
+          10,
+          8,
+        ),
+      tag,
+    );
+    const direct = await compileOnly(
+      "direct-40-exists",
+      (env) =>
+        queryBrowserVersionBreakdownFromD1(
+          env,
+          SITE_ID,
+          WINDOW,
+          direct40,
+          10,
+          8,
+        ),
+      tag,
+    );
+    const prepared = await compileOnly(
+      "prepared-page-128",
+      (env) =>
+        queryBrowserVersionBreakdownFromD1(
+          env,
+          SITE_ID,
+          WINDOW,
+          preparedPage128,
+          10,
+          8,
+        ),
+      tag,
+    );
+
+    for (const result of [plain, direct, prepared]) {
+      expect(result).not.toHaveProperty("budgetFailure");
+      if ("budgetFailure" in result) continue;
+      expect(result.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(result.bindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+      expect(result.physicalPlanHash).toMatch(/^v\d+:[a-f0-9]{64}$/u);
+    }
+
+    const parent = [EMPTY_FILTER_DOCUMENT, direct40, preparedPage128].map(
+      (filters) => {
+        const statement = legacyBrowserVersionStatement(
+          SITE_ID,
+          WINDOW,
+          filters,
+          10,
+        );
+        return {
+          sqlBytes: new TextEncoder().encode(statement.sql).byteLength,
+          bindings: statement.bindings.length,
+        };
+      },
+    );
+    const parentWithinBudget = parent.map(
+      (entry) =>
+        entry.sqlBytes <= D1_MAX_SQL_UTF8_BYTES &&
+        entry.bindings <= D1_MAX_BOUND_PARAMETERS,
+    );
+    console.info(
+      "wave56_browser_version_budget",
+      JSON.stringify({
+        new: [plain, direct, prepared],
+        parent,
+        parentWithinBudget,
+      }),
+    );
   });
 });
