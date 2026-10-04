@@ -750,6 +750,19 @@ function infer(
       // after the shared 2000-bucket cap, even when its input is non-null.
       return { type: { kind: "bucket" }, nullable: true };
     }
+    case "bucket-index": {
+      const input = infer(expression.input, resolveSlot, `${path}.input`);
+      if (input.type.kind !== "bucket") {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message: "Bucket indexes require a calendar bucket expression.",
+          },
+        ]);
+      }
+      return { type: scalar("number"), nullable: true };
+    }
   }
 }
 
@@ -1692,6 +1705,116 @@ function validateNode(
       expectedGrain = { kind: "keyed", keys: [...node.groups] };
       break;
     }
+    case "ranked-members": {
+      const input = assertRelation(node.input, states, `${path}.input`);
+      if (input.grain.kind !== "keyed" || input.grain.keys.length === 0)
+        fail(
+          "invalid-grain",
+          `${path}.input`,
+          "Ranked members require an input with a non-empty keyed grain.",
+        );
+      if (node.groups.length === 0)
+        fail(
+          "invalid-topology",
+          `${path}.groups`,
+          "Ranked members require at least one partition key.",
+        );
+      if (new Set(node.groups).size !== node.groups.length)
+        fail(
+          "invalid-topology",
+          `${path}.groups`,
+          "Ranked member partition keys must not repeat.",
+        );
+      node.groups.forEach((id, index) => {
+        const group = resolveVisibleSlot(input, id, `${path}.groups[${index}]`);
+        if (group.type.kind !== "scalar")
+          fail(
+            "invalid-expression",
+            `${path}.groups[${index}]`,
+            "Ranked member partition keys must be scalar slots.",
+          );
+      });
+      if (node.order.length === 0)
+        fail(
+          "invalid-topology",
+          `${path}.order`,
+          "Ranked members require at least one order key.",
+        );
+      const orderSlots = node.order.map((key) => key.slot);
+      if (new Set(orderSlots).size !== orderSlots.length)
+        fail(
+          "invalid-topology",
+          `${path}.order`,
+          "Ranked member order keys must not repeat.",
+        );
+      node.order.forEach((key, index) => {
+        const keyPath = `${path}.order[${index}]`;
+        const orderSlot = resolveVisibleSlot(
+          input,
+          key.slot,
+          `${keyPath}.slot`,
+        );
+        if (orderSlot.type.kind !== "scalar")
+          fail(
+            "invalid-expression",
+            `${keyPath}.slot`,
+            "Ranked member order keys must be scalar slots.",
+          );
+        if (key.direction !== "asc" && key.direction !== "desc")
+          fail(
+            "invalid-topology",
+            `${keyPath}.direction`,
+            "Ranked member order direction is invalid.",
+          );
+        if (key.nulls !== "first" && key.nulls !== "last")
+          fail(
+            "invalid-topology",
+            `${keyPath}.nulls`,
+            "Ranked member null ordering is invalid.",
+          );
+      });
+      const rankingKeys = [
+        ...new Set([...node.groups, ...node.order.map((key) => key.slot)]),
+      ];
+      if (
+        new Set(input.grain.keys).size !== input.grain.keys.length ||
+        input.grain.keys.some((key, index) => {
+          const slot = resolveVisibleSlot(
+            input,
+            key,
+            `${path}.input.grain[${index}]`,
+          );
+          return slot.type.kind !== "scalar" || !rankingKeys.includes(key);
+        })
+      )
+        fail(
+          "invalid-grain",
+          `${path}.order`,
+          "Partition and order keys must cover the complete scalar input grain.",
+        );
+      const rank = types.get(node.rankSlot);
+      const expectedLineageInputs = rankingKeys;
+      if (
+        input.node.output.includes(node.rankSlot) ||
+        !rank ||
+        !sameType(rank.type, scalar("number")) ||
+        rank.nullable ||
+        rank.lineage.kind !== "derived" ||
+        rank.lineage.operation !== "ranked-members" ||
+        rank.lineage.inputs.length !== expectedLineageInputs.length ||
+        rank.lineage.inputs.some(
+          (slot, index) => slot !== expectedLineageInputs[index],
+        )
+      )
+        fail(
+          "invalid-expression",
+          `${path}.rankSlot`,
+          "Rank output must be a new non-null unitless numeric derived slot.",
+        );
+      expectedOutput = [...input.node.output, node.rankSlot];
+      expectedGrain = input.grain;
+      break;
+    }
     case "sort": {
       const input = assertRelation(node.input, states, `${path}.input`);
       node.keys.forEach((key, index) => {
@@ -1837,6 +1960,9 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
         case "semi-join":
         case "anti-join":
         case "ordered-member":
+          return [];
+        case "ranked-members":
+          return [node.rankSlot];
         case "sort":
         case "limit":
           return [];

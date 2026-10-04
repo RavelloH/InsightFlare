@@ -140,6 +140,11 @@ export interface TimeBucketExpr {
   readonly reportingTimeZone: ReportingTimeZone;
 }
 
+export interface BucketIndexExpr {
+  readonly kind: "bucket-index";
+  readonly input: LogicalExpr;
+}
+
 export type LogicalExpr =
   | LogicalSlotExpression
   | LogicalLiteralExpression
@@ -158,7 +163,8 @@ export type LogicalExpr =
   | LogicalRoundExpression
   | LogicalCoalesceExpression
   | LogicalCaseExpression
-  | TimeBucketExpr;
+  | TimeBucketExpr
+  | BucketIndexExpr;
 
 export function scalarLiteral(
   value: LogicalLiteralValue,

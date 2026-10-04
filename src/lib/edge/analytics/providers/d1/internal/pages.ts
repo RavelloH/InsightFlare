@@ -10,6 +10,14 @@ import {
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
+  buildPageCardDetailsPlan,
+  buildPageCardTitlesPlan,
+  buildPageCardTrendPlan,
+  PAGE_CARD_DETAILS_MULTI_OUTPUT_FIELDS,
+  PAGE_CARD_DETAILS_MULTI_OUTPUT_IDS,
+  PAGE_CARD_DETAILS_OUTPUT_IDS,
+} from "@/lib/edge/analytics/engine/page-card-details-report-plan";
+import {
   buildPageCardMetricsPlan,
   PAGE_CARD_METRICS_OUTPUT_ID,
 } from "@/lib/edge/analytics/engine/page-card-metrics-report-plan";
@@ -39,16 +47,7 @@ import type {
   PageRow,
   QueryWindow,
 } from "./core";
-import {
-  appendSqlConditions,
-  buildTimeBuckets,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  queryD1All,
-  timeBucketCase,
-  timeBucketTimestamp,
-  visitSourceBindings,
-} from "./core";
+import { buildTimeBuckets, timeBucketTimestamp } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryPageTabsFromD1, queryVisitDimensionFromD1 } from "./dimensions";
 import { type PageDashboardCursor } from "./pages-dashboard";
@@ -60,7 +59,6 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
-import { scopedDatasetFor } from "./scoped-dataset";
 function pageAggregateCursor(value: unknown): PageAggregateCursor | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
@@ -421,67 +419,24 @@ export async function queryPageCardTitlesFromD1(
   pathnames: string[],
   titleLimit: number,
 ): Promise<PageCardTitleRow[]> {
-  const requestedPathnames = Array.from(
-    new Set(
-      pathnames
-        .map((pathname) => String(pathname ?? "").trim())
-        .filter((pathname) => pathname.length > 0),
-    ),
-  );
+  const requestedPathnames = normalizePageCardPathnames(pathnames);
   if (requestedPathnames.length === 0) return [];
 
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
-    `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
-  ]);
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT pathname, title
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filteredClause}
-),
-title_rollup AS (
-  SELECT
-    pathname,
-    TRIM(COALESCE(title, '')) AS title,
-    count(*) AS views
-  FROM filtered_visits
-  WHERE TRIM(COALESCE(title, '')) != ''
-  GROUP BY pathname, TRIM(COALESCE(title, ''))
-),
-ranked_titles AS (
-  SELECT
-    pathname,
-    title,
-    views,
-    ROW_NUMBER() OVER (PARTITION BY pathname ORDER BY views DESC, title ASC) AS titleRank
-  FROM title_rollup
-)
-SELECT
-  pathname,
-  title,
-  views
-FROM ranked_titles
-WHERE titleRank <= ?
-ORDER BY pathname ASC, titleRank ASC
-`;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...(filter?.bindings ?? []),
-          ]),
-      ...requestedPathnames,
-      titleLimit,
-    ])
-  ).map((row) => ({
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildPageCardTitlesPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    pathnames: requestedPathnames,
+    titleLimit,
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    PAGE_CARD_DETAILS_OUTPUT_IDS.titles,
+  );
+  return rows.map((row) => ({
     pathname: String(row.pathname ?? ""),
     title: String(row.title ?? ""),
     views: Number(row.views ?? 0),
@@ -495,56 +450,25 @@ export async function queryPageCardTrendFromD1(
   filters: FilterDocument,
   pathnames: string[],
 ): Promise<PageCardTrendRow[]> {
-  const requestedPathnames = Array.from(
-    new Set(
-      pathnames
-        .map((pathname) => String(pathname ?? "").trim())
-        .filter((pathname) => pathname.length > 0),
-    ),
-  );
+  const requestedPathnames = normalizePageCardPathnames(pathnames);
   if (requestedPathnames.length === 0) return [];
 
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
+  const metadata = scopedFilterMetadata(filters);
   const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "startedAt");
-  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
-    `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
-  ]);
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT
-    pathname,
-    started_at AS startedAt,
-    visitor_id AS visitorId
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filteredClause}
-)
-SELECT
-  pathname,
-  ${bucket.sql} AS bucket,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
-FROM filtered_visits
-GROUP BY pathname, bucket
-ORDER BY pathname ASC, bucket ASC
-`;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...(filter?.bindings ?? []),
-          ]),
-      ...requestedPathnames,
-      ...bucket.bindings,
-    ])
-  ).map((row) => ({
+  const plan = buildPageCardTrendPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    interval,
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    pathnames: requestedPathnames,
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    PAGE_CARD_DETAILS_OUTPUT_IDS.trend,
+  );
+  return rows.map((row) => ({
     pathname: String(row.pathname ?? ""),
     bucket: Number(row.bucket ?? 0),
     timestampMs: timeBucketTimestamp(buckets, Number(row.bucket ?? 0)),
@@ -561,92 +485,29 @@ export async function queryPageCardDetailsFromD1(
   pathnames: string[],
   titleLimit: number,
 ): Promise<{ titles: PageCardTitleRow[]; trend: PageCardTrendRow[] }> {
-  const requestedPathnames = Array.from(
-    new Set(
-      pathnames
-        .map((pathname) => String(pathname ?? "").trim())
-        .filter((pathname) => pathname.length > 0),
-    ),
-  );
+  const requestedPathnames = normalizePageCardPathnames(pathnames);
   if (requestedPathnames.length === 0) return { titles: [], trend: [] };
 
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
+  const metadata = scopedFilterMetadata(filters);
   const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "startedAt");
-  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
-    `TRIM(COALESCE(pathname, '')) IN (${requestedPathnames.map(() => "?").join(", ")})`,
-  ]);
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    pathname,
-    title,
-    started_at AS startedAt,
-    visitor_id AS visitorId
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filteredClause}
-),
-title_rollup AS (
-  SELECT
-    pathname,
-    TRIM(COALESCE(title, '')) AS title,
-    count(*) AS views
-  FROM filtered_visits
-  WHERE TRIM(COALESCE(title, '')) != ''
-  GROUP BY pathname, TRIM(COALESCE(title, ''))
-),
-ranked_titles AS (
-  SELECT
-    pathname,
-    title,
-    views,
-    ROW_NUMBER() OVER (PARTITION BY pathname ORDER BY views DESC, title ASC) AS titleRank
-  FROM title_rollup
-),
-trend_rollup AS (
-  SELECT
-    pathname,
-    ${bucket.sql} AS bucket,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
-  FROM filtered_visits
-  GROUP BY pathname, bucket
-)
-SELECT
-  'title' AS rowKind,
-  pathname,
-  title,
-  views,
-  NULL AS bucket,
-  NULL AS visitors,
-  titleRank AS rowOrder
-FROM ranked_titles
-WHERE titleRank <= ?
-UNION ALL
-SELECT
-  'trend' AS rowKind,
-  pathname,
-  NULL AS title,
-  views,
-  bucket,
-  visitors,
-  bucket AS rowOrder
-FROM trend_rollup
-ORDER BY rowKind ASC, pathname ASC, rowOrder ASC
-`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...(scopedDataset
-      ? scopedDataset.bindings.map((binding) => binding.value)
-      : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])]),
-    ...requestedPathnames,
-    ...bucket.bindings,
+  const plan = buildPageCardDetailsPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    interval,
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    pathnames: requestedPathnames,
     titleLimit,
-  ]);
+  });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+    outputIds: PAGE_CARD_DETAILS_MULTI_OUTPUT_IDS,
+    fields: PAGE_CARD_DETAILS_MULTI_OUTPUT_FIELDS,
+    orderBy: [
+      { field: "rowKind", direction: "asc", nulls: "first" },
+      { field: "pathname", direction: "asc", nulls: "first" },
+      { field: "rowOrder", direction: "asc", nulls: "first" },
+    ],
+  });
   const titles: PageCardTitleRow[] = [];
   const trend: PageCardTrendRow[] = [];
   for (const row of rows) {
@@ -670,6 +531,16 @@ ORDER BY rowKind ASC, pathname ASC, rowOrder ASC
     }
   }
   return { titles, trend };
+}
+
+function normalizePageCardPathnames(pathnames: readonly unknown[]): string[] {
+  return Array.from(
+    new Set(
+      pathnames
+        .map((pathname) => String(pathname ?? "").trim())
+        .filter((pathname) => pathname.length > 0),
+    ),
+  );
 }
 export async function queryDimensionAggregate(
   env: Env,

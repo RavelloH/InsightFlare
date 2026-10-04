@@ -805,6 +805,160 @@ describe("relational lowerer validation guards", () => {
     expect(member.kind).toBe("ordered-member");
   });
 
+  it("rechecks ranked-member grain and bucket-index input during lowering", () => {
+    const rankedBuilder = createBuilder();
+    const pages = rankedBuilder.source("page", {
+      attributes: ["page.report.pathname", "page.report.title"],
+    });
+    const rollup = rankedBuilder.aggregate(
+      pages,
+      {
+        pathname: rankedBuilder.slot(pages, "attribute:page.report.pathname"),
+        title: rankedBuilder.slot(pages, "attribute:page.report.title"),
+      },
+      [{ name: "views", kind: "count-rows" }],
+    );
+    const ranked = rankedBuilder.rankedMembers(rollup, {
+      groups: ["pathname"],
+      order: [
+        { slot: "views", direction: "desc", nulls: "last" },
+        { slot: "title", direction: "asc", nulls: "first" },
+      ],
+    });
+    rankedBuilder.output("ranked", ranked, [
+      { name: "pathname", slot: "pathname" },
+      { name: "title", slot: "title" },
+      { name: "views", slot: "views" },
+      { name: "rank", slot: "rank" },
+    ]);
+    const rankedPlan = rankedBuilder.finish();
+    const incompleteRanking = withNode(rankedPlan, ranked.id, (node) =>
+      node.kind === "ranked-members"
+        ? { ...node, order: [node.order[0]!] }
+        : node,
+    );
+    expect(() => lower(incompleteRanking)).toThrow(
+      "Ranked-member keys must cover and preserve input grain.",
+    );
+
+    const bucketBuilder = createBuilder();
+    const bucketPages = bucketBuilder.source("page", {
+      attributes: ["page.report.startedAt"],
+    });
+    const bucket = bucketBuilder.timeBucket(
+      bucketBuilder.slot(bucketPages, "attribute:page.report.startedAt"),
+      "day",
+    );
+    const bucketIndex = bucketBuilder.bucketIndex(bucket);
+    const bucketProjection = bucketBuilder.project(bucketPages, {
+      index: bucketIndex,
+    });
+    bucketBuilder.output("bucket-index", bucketProjection, [
+      { name: "index", slot: "index" },
+    ]);
+    const bucketPlan = bucketBuilder.finish();
+    const numericInput = bucketBuilder.literal(0, {
+      kind: "scalar",
+      scalar: "number",
+    }).expression;
+    const forgedBucketIndex = withNode(
+      bucketPlan,
+      bucketProjection.id,
+      (node) =>
+        node.kind === "project"
+          ? {
+              ...node,
+              projections: node.projections.map((projection) =>
+                projection.expression.kind === "bucket-index"
+                  ? {
+                      ...projection,
+                      expression: {
+                        ...projection.expression,
+                        input: numericInput,
+                      },
+                    }
+                  : projection,
+              ),
+            }
+          : node,
+    );
+    expect(() => lower(forgedBucketIndex)).toThrow(
+      "Bucket-index requires a lowered calendar bucket.",
+    );
+  });
+
+  it("preserves SQL NULL through a lowered calendar bucket index", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      temporalDomain: "read",
+      attributes: ["page.report.startedAt"],
+    });
+    const index = builder.bucketIndex(
+      builder.timeBucket(
+        builder.slot(pages, "attribute:page.report.startedAt"),
+        "minute",
+      ),
+    );
+    const projected = builder.project(pages, { bucketIndex: index });
+    builder.output("bucket-index", projected, [
+      { name: "bucketIndex", slot: "bucketIndex" },
+    ]);
+    const plan = builder.finish();
+    const output = plan.outputs[0]!;
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_ID,
+      time: plan.context.time,
+    });
+    const lowered = lowerer.lower(output);
+    const query = compileD1Query(
+      lowerer.projectOutput(
+        lowered,
+        output.fields.map(({ name, slot }) => ({ name, slot })),
+      ),
+    );
+    const database = createMigratedDatabase();
+    try {
+      database
+        .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+        .run(SITE_ID);
+      const sitePk = Number(
+        (
+          database
+            .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+            .get(SITE_ID) as { readonly site_pk: number }
+        ).site_pk,
+      );
+      database
+        .prepare(
+          `
+          INSERT INTO visits (
+            visit_id, site_id, site_pk, visitor_id, session_id, status,
+            started_at, last_activity_at, pathname, hostname
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'example.test')
+        `,
+        )
+        .run(
+          "bucket-index-null",
+          SITE_ID,
+          sitePk,
+          "v1",
+          "s1",
+          "open",
+          60_000,
+          60_000,
+          "/null",
+        );
+      const rows = database
+        .prepare(query.sql)
+        .all(...((query.bindings ?? []) as SQLInputValue[])) as Array<
+        Record<string, unknown>
+      >;
+      expect(rows).toEqual([{ bucketIndex: null }]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("rejects missing, mismatched, and incomplete scalar join keys", () => {
     const { plan, joinId } = createKeyedJoinPlan();
     const joinNode = plan.nodes.find(

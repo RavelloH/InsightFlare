@@ -69,9 +69,11 @@ import type {
   LogicalNode,
   OrderedMemberNode,
   ProjectNode,
+  RankedMembersNode,
   RelationshipLookupNode,
   SemiJoinNode,
   SetOperationNode,
+  SortKey,
   SourceNode,
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import type {
@@ -1322,6 +1324,25 @@ function lowerExpression(
         candidateBounded: input.candidateBounded,
       };
     }
+    case "bucket-index": {
+      const input = lowerExpression(
+        expression.input,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.input`,
+        time,
+      );
+      if (input.kind !== "scalar" || input.type.kind !== "bucket")
+        reject(path, "Bucket-index requires a lowered calendar bucket.");
+      return {
+        kind: "scalar",
+        expression: input.expression,
+        type: { kind: "scalar", scalar: "number" },
+        nullable: true,
+        candidateBounded: input.candidateBounded,
+      };
+    }
     case "elapsed-duration-literal":
     case "calendar-period-literal":
     case "round":
@@ -1406,6 +1427,7 @@ function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
     case "aggregate":
     case "distinct":
     case "ordered-member":
+    case "ranked-members":
     case "sort":
     case "limit":
       return [node.input];
@@ -1707,6 +1729,9 @@ export class AnalyticsLogicalToDbLowerer {
         break;
       case "ordered-member":
         result = this.#lowerOrderedMember(node, path);
+        break;
+      case "ranked-members":
+        result = this.#lowerRankedMembers(node, path);
         break;
       case "distinct":
         result = this.#lowerDistinct(node, path);
@@ -2579,6 +2604,15 @@ export class AnalyticsLogicalToDbLowerer {
           slot,
           nextActive,
         );
+      case "ranked-members":
+        return (
+          slot !== node.rankSlot &&
+          this.#hasStorageBackedObservationIdentity(
+            node.input,
+            slot,
+            nextActive,
+          )
+        );
       case "semi-join":
       case "anti-join":
         return this.#hasStorageBackedObservationIdentity(
@@ -2777,9 +2811,12 @@ export class AnalyticsLogicalToDbLowerer {
     return { relation, slots, candidateActivitySessionRestricted: false };
   }
 
-  #lowerOrderedMember(node: OrderedMemberNode, path: string): LoweredRelation {
-    const input = this.#lowerNode(node.input);
-    const partitionBy = node.groups.map((slot, index) => {
+  #windowPartitionBy(
+    groups: readonly SlotId[],
+    input: LoweredRelation,
+    path: string,
+  ): AnyExpression[] {
+    return groups.map((slot, index) => {
       const slotPath = `${path}.groups[${index}]`;
       const logical = logicalSlot(this.#logicalSlots, slot, slotPath);
       if (logical.type.kind !== "scalar")
@@ -2789,8 +2826,15 @@ export class AnalyticsLogicalToDbLowerer {
         reject(slotPath, "Ordered-member groups must be scalar values.");
       return value.expression;
     });
+  }
+
+  #windowOrderBy(
+    keys: readonly SortKey[],
+    input: LoweredRelation,
+    path: string,
+  ): WindowOrderKey[] {
     const orderBy: WindowOrderKey[] = [];
-    node.order.forEach((key, index) => {
+    keys.forEach((key, index) => {
       const keyPath = `${path}.order[${index}]`;
       const logical = logicalSlot(
         this.#logicalSlots,
@@ -2817,6 +2861,13 @@ export class AnalyticsLogicalToDbLowerer {
       }
       orderBy.push({ expression: value.expression, direction });
     });
+    return orderBy;
+  }
+
+  #lowerOrderedMember(node: OrderedMemberNode, path: string): LoweredRelation {
+    const input = this.#lowerNode(node.input);
+    const partitionBy = this.#windowPartitionBy(node.groups, input, path);
+    const orderBy = this.#windowOrderBy(node.order, input, path);
 
     if (partitionBy.length === 0 || orderBy.length === 0)
       reject(path, "Ordered-member requires groups and order keys.");
@@ -2841,6 +2892,154 @@ export class AnalyticsLogicalToDbLowerer {
       }));
     const projected = projectedValues(
       selected,
+      values,
+      this.#logicalSlots,
+      path,
+    );
+    return {
+      ...projected,
+      candidateActivity: input.candidateActivity,
+      candidateActivitySessionRelation: input.candidateActivitySessionRelation,
+      candidateActivitySessionRestricted:
+        input.candidateActivitySessionRestricted,
+    };
+  }
+
+  #lowerRankedMembers(node: RankedMembersNode, path: string): LoweredRelation {
+    const inputNode = this.#logicalNode(node.input);
+    if (!inputNode)
+      reject(`${path}.input`, "The ranked-members input node is missing.");
+    const inputGrain = inputNode.grain;
+    if (
+      inputGrain.kind !== "keyed" ||
+      inputGrain.keys.length === 0 ||
+      new Set(inputGrain.keys).size !== inputGrain.keys.length
+    )
+      reject(
+        `${path}.input.grain`,
+        "Ranked members require a unique keyed grain.",
+      );
+    if (
+      node.groups.length === 0 ||
+      new Set(node.groups).size !== node.groups.length ||
+      node.order.length === 0 ||
+      new Set(node.order.map((key) => key.slot)).size !== node.order.length
+    )
+      reject(path, "Ranked-member grouping and ordering keys are invalid.");
+    for (const [index, slot] of [
+      ...node.groups,
+      ...node.order.map((key) => key.slot),
+    ].entries()) {
+      if (!inputNode.output.includes(slot))
+        reject(
+          `${path}.keys[${index}]`,
+          "Ranked-member key is not visible in its input.",
+        );
+      if (
+        logicalSlot(this.#logicalSlots, slot, `${path}.keys[${index}]`).type
+          .kind !== "scalar"
+      )
+        reject(`${path}.keys[${index}]`, "Ranked-member keys must be scalar.");
+    }
+    for (const [index, key] of node.order.entries()) {
+      if (
+        (key.direction !== "asc" && key.direction !== "desc") ||
+        (key.nulls !== "first" && key.nulls !== "last")
+      )
+        reject(
+          `${path}.order[${index}]`,
+          "Ranked-member ordering metadata is invalid.",
+        );
+    }
+    const rankingKeys = [
+      ...new Set([...node.groups, ...node.order.map((key) => key.slot)]),
+    ];
+    if (
+      inputGrain.keys.some(
+        (key) =>
+          !rankingKeys.includes(key) ||
+          logicalSlot(this.#logicalSlots, key, `${path}.input.grain`).type
+            .kind !== "scalar",
+      ) ||
+      node.grain.kind !== "keyed" ||
+      node.grain.keys.length !== inputGrain.keys.length ||
+      node.grain.keys.some((key, index) => key !== inputGrain.keys[index])
+    )
+      reject(
+        `${path}.grain`,
+        "Ranked-member keys must cover and preserve input grain.",
+      );
+    if (
+      node.output.length !== inputNode.output.length + 1 ||
+      inputNode.output.some((slot, index) => node.output[index] !== slot) ||
+      node.output.at(-1) !== node.rankSlot ||
+      inputNode.output.includes(node.rankSlot)
+    )
+      reject(
+        `${path}.output`,
+        "Ranked members must append exactly one new rank slot.",
+      );
+    const rankSlot = logicalSlot(
+      this.#logicalSlots,
+      node.rankSlot,
+      `${path}.rankSlot`,
+    );
+    if (
+      !isSameLogicalValueType(rankSlot.type, {
+        kind: "scalar",
+        scalar: "number",
+      }) ||
+      rankSlot.nullable ||
+      rankSlot.lineage.kind !== "derived" ||
+      rankSlot.lineage.operation !== "ranked-members" ||
+      rankSlot.lineage.inputs.length !== rankingKeys.length ||
+      rankSlot.lineage.inputs.some((slot, index) => slot !== rankingKeys[index])
+    )
+      reject(
+        `${path}.rankSlot`,
+        "Rank output must be a new non-null unitless numeric derived slot.",
+      );
+
+    const input = this.#lowerNode(node.input);
+    const required = this.#requiredOutput(node);
+    const rankNeeded = required.has(node.rankSlot);
+    let relation = input.relation;
+    if (rankNeeded) {
+      const partitionBy = this.#windowPartitionBy(node.groups, input, path);
+      const orderBy = this.#windowOrderBy(node.order, input, path);
+      if (partitionBy.length === 0 || orderBy.length === 0)
+        reject(path, "Ranked members require groups and order keys.");
+      relation = windowRelation(input.relation, {
+        __analytics_ranked_member_ordinal: rowNumber({
+          partitionBy,
+          orderBy: orderBy as [WindowOrderKey, ...WindowOrderKey[]],
+        }),
+      });
+    }
+    const values = inputNode.output
+      .filter((slot) => required.has(slot))
+      .map((slot) => ({
+        slot,
+        value: readValue(relation, input.slots, slot, path),
+      }));
+    if (rankNeeded) {
+      values.push({
+        slot: node.rankSlot,
+        value: {
+          kind: "scalar",
+          expression: relationColumn(
+            relation,
+            "__analytics_ranked_member_ordinal",
+            `${path}.rankSlot`,
+          ),
+          type: { kind: "scalar", scalar: "number" },
+          nullable: false,
+          candidateBounded: false,
+        },
+      });
+    }
+    const projected = projectedValues(
+      relation,
       values,
       this.#logicalSlots,
       path,
@@ -3086,6 +3285,15 @@ export class AnalyticsLogicalToDbLowerer {
               ...node.order.map((key) => key.slot),
             ]);
             break;
+          case "ranked-members":
+            add(node.input, [
+              ...node.output.filter(
+                (slot) => slot !== node.rankSlot && needed.has(slot),
+              ),
+              ...node.groups,
+              ...node.order.map((key) => key.slot),
+            ]);
+            break;
           case "relationship-lookup":
             add(node.input, [
               ...node.output.filter(
@@ -3224,6 +3432,7 @@ export class AnalyticsLogicalToDbLowerer {
       case "absolute":
       case "round":
       case "time-bucket":
+      case "bucket-index":
         return this.#expressionSlots(expression.input);
       case "page-dimension":
         return expression.dependencies.flatMap((dependency) =>

@@ -171,6 +171,15 @@ export interface OrderedMemberNode extends LogicalNodeBase {
   readonly order: readonly SortKey[];
 }
 
+/** Adds a deterministic one-based ordinal without changing the input bag. */
+export interface RankedMembersNode extends LogicalNodeBase {
+  readonly kind: "ranked-members";
+  readonly input: RelationId;
+  readonly groups: readonly SlotId[];
+  readonly order: readonly SortKey[];
+  readonly rankSlot: SlotId;
+}
+
 export interface LimitNode extends LogicalNodeBase {
   readonly kind: "limit";
   readonly input: RelationId;
@@ -189,5 +198,6 @@ export type LogicalNode =
   | AntiJoinNode
   | JoinNode
   | OrderedMemberNode
+  | RankedMembersNode
   | SortNode
   | LimitNode;

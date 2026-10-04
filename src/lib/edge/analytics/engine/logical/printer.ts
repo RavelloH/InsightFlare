@@ -110,6 +110,8 @@ function expression(value: LogicalExpr): string {
       return `CASE ${value.branches.map((branch) => `WHEN ${expression(branch.when)} THEN ${expression(branch.then)}`).join(" ")} ELSE ${expression(value.otherwise)} END`;
     case "time-bucket":
       return `TIME_BUCKET(${expression(value.input)}, ${value.granularity}, ${JSON.stringify(value.reportingTimeZone)})`;
+    case "bucket-index":
+      return `BUCKET_INDEX(${expression(value.input)})`;
   }
 }
 
@@ -139,6 +141,8 @@ function nodeHeader(node: LogicalNode): string {
       return `${relation(node.id)} Aggregate grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "ordered-member":
       return `${relation(node.id)} OrderedMember grain=${grain(node.grain)} input=${relation(node.input)}`;
+    case "ranked-members":
+      return `${relation(node.id)} RankedMembers grain=${grain(node.grain)} input=${relation(node.input)} rank=${slot(node.rankSlot)}`;
     case "distinct":
       return `${relation(node.id)} Distinct grain=${grain(node.grain)} excludeNull=${node.excludeNull}`;
     case "set-operation":
@@ -209,6 +213,17 @@ function nodeLines(
           `  ORDER ${formatSlot(key.slot, slots)} ${key.direction.toUpperCase()} NULLS ${key.nulls.toUpperCase()}`,
         ),
       );
+      break;
+    case "ranked-members":
+      node.groups.forEach((group) =>
+        lines.push(`  PARTITION ${formatSlot(group, slots)}`),
+      );
+      node.order.forEach((key) =>
+        lines.push(
+          `  ORDER ${formatSlot(key.slot, slots)} ${key.direction.toUpperCase()} NULLS ${key.nulls.toUpperCase()}`,
+        ),
+      );
+      lines.push(`  RANK ${formatSlot(node.rankSlot, slots)}`);
       break;
     case "distinct":
       node.keys.forEach((key) =>

@@ -531,6 +531,13 @@ export class LogicalPlanBuilder {
     });
   }
 
+  bucketIndex(input: LogicalExpressionHandle): LogicalExpressionHandle {
+    return this.#expression({
+      kind: "bucket-index",
+      input: input.expression,
+    });
+  }
+
   filter(
     input: LogicalRelationHandle,
     predicate: LogicalExpressionHandle,
@@ -1033,6 +1040,91 @@ export class LogicalPlanBuilder {
     return this.#addNode(node, input.slots, grain, input.temporalDomains);
   }
 
+  rankedMembers(
+    input: LogicalRelationHandle,
+    selection: {
+      readonly groups: readonly string[];
+      readonly order: readonly {
+        readonly slot: string;
+        readonly direction: "asc" | "desc";
+        readonly nulls: "first" | "last";
+      }[];
+    },
+  ): LogicalRelationHandle {
+    const source = this.#owned(input);
+    if (input.grain.kind !== "keyed" || input.grain.keys.length === 0)
+      throw new Error("logical_builder_ranked_members_requires_keyed_input");
+    if (selection.groups.length === 0)
+      throw new Error("logical_builder_ranked_members_requires_groups");
+    if (selection.order.length === 0)
+      throw new Error("logical_builder_ranked_members_requires_order");
+    if (Object.hasOwn(input.slots, "rank"))
+      throw new Error("logical_builder_ranked_members_output_name_collision");
+
+    const groups = selection.groups.map((name) => {
+      const id = input.slots[name];
+      const slot = id === undefined ? undefined : this.#slotById.get(id);
+      if (!slot || !source.node.output.includes(id))
+        throw new Error("logical_builder_ranked_members_group_not_visible");
+      if (slot.type.kind !== "scalar")
+        throw new Error("logical_builder_ranked_members_requires_scalar_slots");
+      return id;
+    });
+    if (new Set(groups).size !== groups.length)
+      throw new Error("logical_builder_ranked_members_duplicate_group");
+
+    const order: SortKey[] = selection.order.map((key) => {
+      const id = input.slots[key.slot];
+      const slot = id === undefined ? undefined : this.#slotById.get(id);
+      if (!slot || !source.node.output.includes(id))
+        throw new Error("logical_builder_ranked_members_order_not_visible");
+      if (slot.type.kind !== "scalar")
+        throw new Error("logical_builder_ranked_members_requires_scalar_slots");
+      if (key.direction !== "asc" && key.direction !== "desc")
+        throw new Error("logical_builder_ranked_members_invalid_direction");
+      if (key.nulls !== "first" && key.nulls !== "last")
+        throw new Error("logical_builder_ranked_members_invalid_nulls");
+      return { slot: id, direction: key.direction, nulls: key.nulls };
+    });
+    if (new Set(order.map((key) => key.slot)).size !== order.length)
+      throw new Error("logical_builder_ranked_members_duplicate_order_key");
+
+    const rankingKeys = [
+      ...new Set([...groups, ...order.map((key) => key.slot)]),
+    ];
+    if (
+      new Set(input.grain.keys).size !== input.grain.keys.length ||
+      input.grain.keys.some(
+        (key) =>
+          !rankingKeys.includes(key) ||
+          this.#slotById.get(key)?.type.kind !== "scalar",
+      )
+    )
+      throw new Error("logical_builder_ranked_members_incomplete_grain_order");
+
+    const rankSlot = this.#newSlot(
+      { kind: "scalar", scalar: "number" },
+      false,
+      {
+        kind: "derived",
+        operation: "ranked-members",
+        inputs: rankingKeys,
+      },
+    );
+    const slots = { ...input.slots, rank: rankSlot.id };
+    const node = {
+      kind: "ranked-members",
+      id: this.#newRelationId(),
+      input: input.id,
+      groups,
+      order,
+      rankSlot: rankSlot.id,
+      output: [...source.node.output, rankSlot.id],
+      grain: input.grain,
+    } satisfies LogicalNode;
+    return this.#addNode(node, slots, node.grain, input.temporalDomains);
+  }
+
   limit(input: LogicalRelationHandle, count: number): LogicalRelationHandle {
     const source = this.#owned(input);
     if (!Number.isInteger(count) || count < 0)
@@ -1236,6 +1328,7 @@ export class LogicalPlanBuilder {
         case "absolute":
         case "round":
         case "time-bucket":
+        case "bucket-index":
           visit(value.input);
           return;
         case "page-dimension":

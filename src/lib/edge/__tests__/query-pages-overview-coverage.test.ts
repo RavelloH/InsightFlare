@@ -37,16 +37,20 @@ import {
 import { queryChannelsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/channels";
 import {
   geoTabLabel,
+  type Interval,
   mapDimensionRows,
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   appendSqlConditions,
+  buildTimeBuckets,
   buildVisitFilterSql,
   buildVisitSourceCte,
   queryD1All,
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
+  timeBucketCase,
+  timeBucketTimestamp,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
@@ -77,6 +81,7 @@ import {
   decodePagesCursor,
   pageCursorBinding,
   queryDimensionAggregate,
+  queryPageCardDetailsFromD1,
   queryPageCardMetricsFromD1,
   queryPageCardTitlesFromD1,
   queryPageCardTrendFromD1,
@@ -835,6 +840,276 @@ LIMIT ?
   return { sql, bindings, rows };
 }
 
+function legacyPageCardPathnames(pathnames: readonly unknown[]): string[] {
+  return Array.from(
+    new Set(
+      pathnames
+        .map((pathname) => String(pathname ?? "").trim())
+        .filter((pathname) => pathname.length > 0),
+    ),
+  );
+}
+
+function legacyPageCardSource(
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  filters: FilterDocument,
+  pathnames: readonly string[],
+) {
+  const scopedDataset = scopedDatasetFor(targetSiteId, targetWindow, filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window: targetWindow });
+  const filteredClause = appendSqlConditions(filter?.clause ?? "", [
+    `TRIM(COALESCE(pathname, '')) IN (${pathnames.map(() => "?").join(", ")})`,
+  ]);
+  const sourceBindings = scopedDataset
+    ? scopedDataset.bindings.map((binding) => binding.value)
+    : [
+        ...visitSourceBindings(targetSiteId, targetWindow),
+        ...(filter?.bindings ?? []),
+      ];
+  return {
+    ctes: scopedDataset?.ctes ?? buildVisitSourceCte(),
+    visitRelation: scopedDataset?.visitRelation ?? "visit_source",
+    filteredClause,
+    bindings: [...sourceBindings, ...pathnames] as QueryBinding[],
+  };
+}
+
+/** Frozen pre-Logical Page-card title SQL used for Wave51 differential tests. */
+function legacyPageCardTitlesOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  filters: FilterDocument,
+  pathnames: readonly unknown[],
+  titleLimit: number,
+) {
+  const requestedPathnames = legacyPageCardPathnames(pathnames);
+  if (requestedPathnames.length === 0)
+    return { sql: "", bindings: [] as QueryBinding[], rows: [] as D1Row[] };
+  const source = legacyPageCardSource(
+    targetSiteId,
+    targetWindow,
+    filters,
+    requestedPathnames,
+  );
+  const sql = `
+WITH
+${source.ctes},
+filtered_visits AS (
+  SELECT pathname, title
+  FROM ${source.visitRelation}
+  ${source.filteredClause}
+),
+title_rollup AS (
+  SELECT
+    pathname,
+    TRIM(COALESCE(title, '')) AS title,
+    count(*) AS views
+  FROM filtered_visits
+  WHERE TRIM(COALESCE(title, '')) != ''
+  GROUP BY pathname, TRIM(COALESCE(title, ''))
+),
+ranked_titles AS (
+  SELECT
+    pathname,
+    title,
+    views,
+    ROW_NUMBER() OVER (PARTITION BY pathname ORDER BY views DESC, title ASC) AS titleRank
+  FROM title_rollup
+)
+SELECT pathname, title, views
+FROM ranked_titles
+WHERE titleRank <= ?
+ORDER BY pathname ASC, titleRank ASC
+`;
+  const bindings = [...source.bindings, titleLimit];
+  const rows = database.prepare(sql).all(...bindings) as D1Row[];
+  return { sql, bindings, rows };
+}
+
+/** Frozen pre-Logical Page-card trend SQL used for Wave51 differential tests. */
+function legacyPageCardTrendOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument,
+  pathnames: readonly unknown[],
+) {
+  const requestedPathnames = legacyPageCardPathnames(pathnames);
+  if (requestedPathnames.length === 0)
+    return {
+      sql: "",
+      bindings: [] as QueryBinding[],
+      rows: [] as D1Row[],
+      buckets: [],
+    };
+  const source = legacyPageCardSource(
+    targetSiteId,
+    targetWindow,
+    filters,
+    requestedPathnames,
+  );
+  const buckets = buildTimeBuckets(targetWindow, interval);
+  const bucket = timeBucketCase(buckets, "startedAt");
+  const sql = `
+WITH
+${source.ctes},
+filtered_visits AS (
+  SELECT
+    pathname,
+    started_at AS startedAt,
+    visitor_id AS visitorId
+  FROM ${source.visitRelation}
+  ${source.filteredClause}
+)
+SELECT
+  pathname,
+  ${bucket.sql} AS bucket,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
+FROM filtered_visits
+GROUP BY pathname, bucket
+ORDER BY pathname ASC, bucket ASC
+`;
+  const bindings = [...source.bindings, ...bucket.bindings];
+  const rows = database.prepare(sql).all(...bindings) as D1Row[];
+  return { sql, bindings, rows, buckets };
+}
+
+/** Frozen pre-Logical one-statement title/trend details SQL. */
+function legacyPageCardDetailsOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument,
+  pathnames: readonly unknown[],
+  titleLimit: number,
+) {
+  const requestedPathnames = legacyPageCardPathnames(pathnames);
+  if (requestedPathnames.length === 0)
+    return {
+      sql: "",
+      bindings: [] as QueryBinding[],
+      rows: [] as D1Row[],
+      buckets: [],
+    };
+  const source = legacyPageCardSource(
+    targetSiteId,
+    targetWindow,
+    filters,
+    requestedPathnames,
+  );
+  const buckets = buildTimeBuckets(targetWindow, interval);
+  const bucket = timeBucketCase(buckets, "startedAt");
+  const sql = `
+WITH
+${source.ctes},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    pathname,
+    title,
+    started_at AS startedAt,
+    visitor_id AS visitorId
+  FROM ${source.visitRelation}
+  ${source.filteredClause}
+),
+title_rollup AS (
+  SELECT
+    pathname,
+    TRIM(COALESCE(title, '')) AS title,
+    count(*) AS views
+  FROM filtered_visits
+  WHERE TRIM(COALESCE(title, '')) != ''
+  GROUP BY pathname, TRIM(COALESCE(title, ''))
+),
+ranked_titles AS (
+  SELECT
+    pathname,
+    title,
+    views,
+    ROW_NUMBER() OVER (PARTITION BY pathname ORDER BY views DESC, title ASC) AS titleRank
+  FROM title_rollup
+),
+trend_rollup AS (
+  SELECT
+    pathname,
+    ${bucket.sql} AS bucket,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors
+  FROM filtered_visits
+  GROUP BY pathname, bucket
+)
+SELECT
+  'title' AS rowKind,
+  pathname,
+  title,
+  views,
+  NULL AS bucket,
+  NULL AS visitors,
+  titleRank AS rowOrder
+FROM ranked_titles
+WHERE titleRank <= ?
+UNION ALL
+SELECT
+  'trend' AS rowKind,
+  pathname,
+  NULL AS title,
+  views,
+  bucket,
+  visitors,
+  bucket AS rowOrder
+FROM trend_rollup
+ORDER BY rowKind ASC, pathname ASC, rowOrder ASC
+`;
+  const bindings = [...source.bindings, ...bucket.bindings, titleLimit];
+  const rows = database.prepare(sql).all(...bindings) as D1Row[];
+  return { sql, bindings, rows, buckets };
+}
+
+function pageCardTitlesFromLegacyRows(rows: readonly D1Row[]) {
+  return rows.map((row) => ({
+    pathname: String(row.pathname ?? ""),
+    title: String(row.title ?? ""),
+    views: Number(row.views ?? 0),
+  }));
+}
+
+function pageCardTrendFromLegacyRows(
+  rows: readonly D1Row[],
+  buckets: ReturnType<typeof buildTimeBuckets>,
+) {
+  return rows.map((row) => {
+    const bucket = Number(row.bucket ?? 0);
+    return {
+      pathname: String(row.pathname ?? ""),
+      bucket,
+      timestampMs: timeBucketTimestamp(buckets, bucket),
+      views: Number(row.views ?? 0),
+      visitors: Number(row.visitors ?? 0),
+    };
+  });
+}
+
+function pageCardDetailsFromLegacyRows(
+  rows: readonly D1Row[],
+  buckets: ReturnType<typeof buildTimeBuckets>,
+) {
+  return {
+    titles: pageCardTitlesFromLegacyRows(
+      rows.filter((row) => row.rowKind === "title"),
+    ),
+    trend: pageCardTrendFromLegacyRows(
+      rows.filter((row) => row.rowKind === "trend"),
+      buckets,
+    ),
+  };
+}
+
 function normalizedFilters(root: unknown): FilterDocument {
   return normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
 }
@@ -877,6 +1152,7 @@ function insertPageRow(
     startedAt?: number;
     browser?: string;
     durationMs?: number | null;
+    title?: string | null;
     query?: string;
     hash?: string;
   },
@@ -895,7 +1171,7 @@ function insertPageRow(
         visit_id, site_id, visitor_id, session_id, status, started_at,
         last_activity_at, pathname, hostname, title, query_string,
         hash_fragment, country, browser, site_pk, duration_ms
-      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', '', ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', ?, ?, ?, ?, ?, ?, ?)
     `,
     )
     .run(
@@ -906,6 +1182,7 @@ function insertPageRow(
       input.startedAt ?? baseMs,
       input.startedAt ?? baseMs,
       input.pathname,
+      input.title === undefined ? "" : input.title,
       input.query ?? "",
       input.hash ?? "",
       input.country,
@@ -5533,6 +5810,224 @@ describe("edge pages D1 queries", () => {
     }
   });
 
+  it("compiles the Wave51 combined Page-card detail budget probes", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    const payloadPaths = Array.from(
+      { length: 40 },
+      (_, index) => `/wave51/${index}`,
+    );
+    const prepared = prepareScopedQuery("pages", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        window.timeZone,
+        window.nowMs,
+      ),
+      filters: filterFixture({ country: "US" }),
+      scopePreference: "session",
+    } as never);
+    const metadata = scopedFilterMetadata(prepared.filters);
+    if (!prepared.filters || !metadata)
+      throw new Error("wave51_prepared_session_budget_missing");
+    const preparedSession128 = attachScopedFilterMetadata(prepared.filters, {
+      ...metadata,
+      plan: {
+        ...metadata.plan,
+        advancedMatches: {
+          entityIds: Array.from({ length: 128 }, (_, index) => ({
+            siteId,
+            id: index === 0 ? "wave51-budget-session" : `wave51-${index}`,
+          })),
+        },
+      },
+    });
+    const longPaths = Array.from(
+      { length: 128 },
+      (_, index) =>
+        `/wave51/requested/${String(index).padStart(3, "0")}/${"x".repeat(96)}`,
+    );
+    const details = (filters: FilterDocument, pathnames = ["/page"]) =>
+      queryPageCardDetailsFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        filters,
+        pathnames,
+        3,
+      );
+    const probes = [
+      {
+        name: "plain-titles",
+        run: () =>
+          queryPageCardTitlesFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            ["/page"],
+            3,
+          ),
+      },
+      {
+        name: "plain-trend",
+        run: () =>
+          queryPageCardTrendFromD1(
+            env,
+            siteId,
+            window,
+            "hour",
+            EMPTY_FILTER_DOCUMENT,
+            ["/page"],
+          ),
+      },
+      { name: "plain-details", run: () => details(EMPTY_FILTER_DOCUMENT) },
+      {
+        name: "event-payload-40-details",
+        run: () => details(combinedPayloadFilter(payloadPaths)),
+      },
+      {
+        name: "prepared-session-128-details",
+        run: () => details(preparedSession128),
+      },
+      {
+        name: "long-requested-paths-128-details",
+        run: () => details(EMPTY_FILTER_DOCUMENT, longPaths),
+      },
+    ];
+    try {
+      const metrics: Array<{
+        name: string;
+        sqlBytes: number;
+        bindings: number;
+        statements: number;
+        sha256: string;
+      }> = [];
+      for (const probe of probes) {
+        const start = calls.length;
+        await probe.run();
+        const statements = calls.length - start;
+        const call = calls[start];
+        if (!call) throw new Error("wave51_budget_statement_missing");
+        metrics.push({
+          name: probe.name,
+          sqlBytes: Buffer.byteLength(call.sql, "utf8"),
+          bindings: call.bindings.length,
+          statements,
+          sha256: createHash("sha256").update(call.sql, "utf8").digest("hex"),
+        });
+      }
+      const oldMetrics = [
+        legacyPageCardDetailsOracle(
+          database,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          ["/page"],
+          3,
+        ),
+        legacyPageCardDetailsOracle(
+          database,
+          siteId,
+          window,
+          "hour",
+          combinedPayloadFilter(payloadPaths),
+          ["/page"],
+          3,
+        ),
+        legacyPageCardDetailsOracle(
+          database,
+          siteId,
+          window,
+          "hour",
+          preparedSession128,
+          ["/page"],
+          3,
+        ),
+        legacyPageCardDetailsOracle(
+          database,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          longPaths,
+          3,
+        ),
+      ].map(({ sql, bindings }) => ({
+        sqlBytes: Buffer.byteLength(sql, "utf8"),
+        bindings: bindings.length,
+      }));
+      expect(metrics).toEqual([
+        {
+          name: "plain-titles",
+          sqlBytes: 2_994,
+          bindings: 5,
+          statements: 1,
+          sha256:
+            "5681eb6aa1a3e0ab991655803813f2a96238122ed014a6eacf569f684675c61e",
+        },
+        {
+          name: "plain-trend",
+          sqlBytes: 2_675,
+          bindings: 4,
+          statements: 1,
+          sha256:
+            "f03981c4da6690594eeb99e06b8d4644977f83ef46ced25036ab2164e4b384eb",
+        },
+        {
+          name: "plain-details",
+          sqlBytes: 4_989,
+          bindings: 7,
+          statements: 1,
+          sha256:
+            "4e8d8ac08d5f46019ae3fa531deeefd3dd584ac35cee60daa170bd9e649c9763",
+        },
+        {
+          name: "event-payload-40-details",
+          sqlBytes: 62_667,
+          bindings: 49,
+          statements: 1,
+          sha256:
+            "1a90ede4ffc5658bd5416d3f4526e8ec4b128fa174657cb3cd08c7e5b7518dac",
+        },
+        {
+          name: "prepared-session-128-details",
+          sqlBytes: 6_691,
+          bindings: 9,
+          statements: 1,
+          sha256:
+            "24710fe00e176d6a6652760732a552f1bf0430fd112af22a6a508af07028c754",
+        },
+        {
+          name: "long-requested-paths-128-details",
+          sqlBytes: 5_018,
+          bindings: 7,
+          statements: 1,
+          sha256:
+            "5a9e2b9f4e7d8c5d5e9831e03c6ef7458780ad2a2fd4dd6a62b29e722c9ea460",
+        },
+      ]);
+      expect(oldMetrics).toEqual([
+        { sqlBytes: 2_149, bindings: 5 },
+        { sqlBytes: 19_903, bindings: 47 },
+        { sqlBytes: 15_715, bindings: 264 },
+        { sqlBytes: 2_530, bindings: 132 },
+      ]);
+      expect(
+        metrics.every(
+          ({ sqlBytes, bindings, statements }) =>
+            sqlBytes <= D1_MAX_SQL_UTF8_BYTES &&
+            bindings <= D1_MAX_BOUND_PARAMETERS &&
+            statements === 1,
+        ),
+      ).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
   it("uses each actual reader window with prepared observation and session proofs", async () => {
     const { env, database, calls, close } = createMigratedPagesSqliteEnv();
     const duration = window.endExclusiveMs - window.startMs;
@@ -5876,6 +6371,100 @@ describe("edge pages D1 queries", () => {
       expect(await actualMetrics(window, visitorMatchFilters)).toEqual(
         visitorMatchCurrentLegacy.rows,
       );
+
+      const actualDetails = async (
+        targetWindow: QueryWindow,
+        filters: FilterDocument,
+        pathnames: readonly string[],
+      ) => {
+        const start = calls.length;
+        const rows = await queryPageCardDetailsFromD1(
+          env,
+          siteId,
+          targetWindow,
+          "hour",
+          filters,
+          [...pathnames],
+          3,
+        );
+        expect(calls.length - start).toBe(1);
+        return rows;
+      };
+      const observationPreviousDetailsLegacy = legacyPageCardDetailsOracle(
+        database,
+        siteId,
+        previousWindow,
+        "hour",
+        observationMatchFilters,
+        ["/pricing"],
+        3,
+      );
+      const observationCurrentDetailsLegacy = legacyPageCardDetailsOracle(
+        database,
+        siteId,
+        window,
+        "hour",
+        observationMatchFilters,
+        ["/pricing"],
+        3,
+      );
+      expect(
+        await actualDetails(previousWindow, observationMatchFilters, [
+          "/pricing",
+        ]),
+      ).toEqual(
+        pageCardDetailsFromLegacyRows(
+          observationPreviousDetailsLegacy.rows,
+          observationPreviousDetailsLegacy.buckets,
+        ),
+      );
+      expect(
+        await actualDetails(window, observationMatchFilters, ["/pricing"]),
+      ).toEqual(
+        pageCardDetailsFromLegacyRows(
+          observationCurrentDetailsLegacy.rows,
+          observationCurrentDetailsLegacy.buckets,
+        ),
+      );
+      expect(observationPreviousDetailsLegacy.rows).toEqual([]);
+
+      insertPageRow(database, {
+        visitId: "wave51-detail-session-previous",
+        visitorId: "wave51-detail-session-visitor-previous",
+        sessionId: "wave51-detail-shared",
+        pathname: "/wave51-detail",
+        title: "Shared detail",
+        country: "US",
+        startedAt: previousWindow.startMs + 100,
+      });
+      insertPageRow(database, {
+        visitId: "wave51-detail-session-current",
+        visitorId: "wave51-detail-session-visitor-current",
+        sessionId: "wave51-detail-shared",
+        pathname: "/wave51-detail",
+        title: "Shared detail",
+        country: "US",
+        startedAt: window.startMs + 100,
+      });
+      const detailsSessionFilters = preparedWithMatches("session", {
+        entityIds: [{ siteId, id: "wave51-detail-shared" }],
+      });
+      for (const targetWindow of [previousWindow, window]) {
+        const legacy = legacyPageCardDetailsOracle(
+          database,
+          siteId,
+          targetWindow,
+          "hour",
+          detailsSessionFilters,
+          ["/wave51-detail"],
+          3,
+        );
+        expect(
+          await actualDetails(targetWindow, detailsSessionFilters, [
+            "/wave51-detail",
+          ]),
+        ).toEqual(pageCardDetailsFromLegacyRows(legacy.rows, legacy.buckets));
+      }
       expect(calls.length).toBeGreaterThanOrEqual(7);
     } finally {
       close();
@@ -6156,7 +6745,271 @@ describe("edge pages D1 queries", () => {
     }
   });
 
-  it("returns empty title and trend queries without touching D1 when pathnames are empty", async () => {
+  it("matches frozen Page-card title, trend, and detail SQL over raw pathname bags", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    let index = 0;
+    const add = (
+      pathname: string,
+      title: string,
+      visitorId = `card-visitor-${index}`,
+      startedAt = window.startMs + index * 100,
+      targetSiteId = siteId,
+    ) => {
+      index += 1;
+      insertPageRow(database, {
+        visitId: `wave51-card-${index}`,
+        visitorId,
+        sessionId: `wave51-card-session-${index}`,
+        pathname,
+        title,
+        country: "US",
+        siteId: targetSiteId,
+        startedAt,
+      });
+    };
+
+    try {
+      add("/alpha", " Alpha ", "shared-visitor");
+      add("/alpha", "Alpha", "shared-visitor");
+      add("/alpha", " Beta ", "");
+      add("/alpha", "Beta", " ");
+      add("/alpha", "alpha");
+      add("/alpha", "alpha");
+      add("/alpha", "alpha");
+      add("/alpha", "   ");
+      add("/alpha", "");
+      add("/alpha", "\t");
+      add("/alpha", "\u00a0");
+      add(" /alpha ", "Zeta");
+      add(" /alpha ", "BETA");
+      add("/alpha-not-requested", "Not included");
+      add("/alpha", "Outside", "outside-window", window.endExclusiveMs);
+      add("/alpha", "Other site", "other-site", window.startMs, "site-other");
+
+      const requestPaths = [" /alpha ", "/alpha", "", "   "];
+      const legacyTrend = legacyPageCardTrendOracle(
+        database,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        requestPaths,
+      );
+      const trendStart = calls.length;
+      await expect(
+        queryPageCardTrendFromD1(
+          env,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          requestPaths,
+        ),
+      ).resolves.toEqual(
+        pageCardTrendFromLegacyRows(legacyTrend.rows, legacyTrend.buckets),
+      );
+      expect(calls.length - trendStart).toBe(1);
+
+      for (const titleLimit of [1, 3, 0, -1, 0.5, 1.5]) {
+        const legacyTitles = legacyPageCardTitlesOracle(
+          database,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          requestPaths,
+          titleLimit,
+        );
+        const titleStart = calls.length;
+        await expect(
+          queryPageCardTitlesFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            requestPaths,
+            titleLimit,
+          ),
+        ).resolves.toEqual(pageCardTitlesFromLegacyRows(legacyTitles.rows));
+        expect(calls.length - titleStart).toBe(1);
+
+        const legacyDetails = legacyPageCardDetailsOracle(
+          database,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          requestPaths,
+          titleLimit,
+        );
+        const detailsStart = calls.length;
+        const actual = await queryPageCardDetailsFromD1(
+          env,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          requestPaths,
+          titleLimit,
+        );
+        expect(actual).toEqual(
+          pageCardDetailsFromLegacyRows(
+            legacyDetails.rows,
+            legacyDetails.buckets,
+          ),
+        );
+        expect(calls.length - detailsStart).toBe(1);
+        if (titleLimit <= 0) expect(actual.trend.length).toBeGreaterThan(0);
+      }
+    } finally {
+      close();
+    }
+  });
+
+  it("matches calendar bucket boundaries across partial ranges, DST, offsets, weeks, and months", async () => {
+    const { env, database, calls, close } = createMigratedPagesSqliteEnv();
+    const makeWindow = (
+      startMs: number,
+      endExclusiveMs: number,
+      timeZone: string,
+    ): QueryWindow => ({
+      startMs,
+      endExclusiveMs,
+      nowMs: endExclusiveMs + 1,
+      timeZone,
+    });
+    const cases: Array<{
+      readonly name: string;
+      readonly window: QueryWindow;
+      readonly interval: Interval;
+    }> = [
+      {
+        name: "partial-minute",
+        window: makeWindow(
+          baseMs + 30 * 60_000,
+          baseMs + 2 * 60 * 60_000 + 30 * 60_000,
+          "UTC",
+        ),
+        interval: "minute",
+      },
+      {
+        name: "new-york-spring-forward",
+        window: makeWindow(
+          Date.UTC(2026, 2, 8, 7),
+          Date.UTC(2026, 2, 8, 9, 30),
+          "America/New_York",
+        ),
+        interval: "hour",
+      },
+      {
+        name: "new-york-fall-back",
+        window: makeWindow(
+          Date.UTC(2026, 10, 1, 4, 30),
+          Date.UTC(2026, 10, 1, 8, 30),
+          "America/New_York",
+        ),
+        interval: "hour",
+      },
+      {
+        name: "non-integral-offset",
+        window: makeWindow(
+          Date.UTC(2026, 4, 12, 3, 45),
+          Date.UTC(2026, 4, 12, 8, 15),
+          "Asia/Kolkata",
+        ),
+        interval: "hour",
+      },
+      {
+        name: "calendar-week",
+        window: makeWindow(
+          Date.UTC(2026, 0, 2, 10),
+          Date.UTC(2026, 0, 26, 10),
+          "Asia/Shanghai",
+        ),
+        interval: "week",
+      },
+      {
+        name: "calendar-month",
+        window: makeWindow(
+          Date.UTC(2026, 1, 15, 12),
+          Date.UTC(2026, 4, 15, 12),
+          "UTC",
+        ),
+        interval: "month",
+      },
+    ];
+
+    try {
+      for (const [caseIndex, item] of cases.entries()) {
+        for (const [timeIndex, startedAt] of [
+          item.window.startMs,
+          item.window.startMs + 1,
+          item.window.endExclusiveMs - 1,
+          item.window.endExclusiveMs,
+        ].entries()) {
+          insertPageRow(database, {
+            visitId: `wave51-calendar-${item.name}-${timeIndex}`,
+            visitorId: timeIndex === 1 ? "" : `calendar-visitor-${caseIndex}`,
+            sessionId: `calendar-session-${caseIndex}-${timeIndex}`,
+            pathname: "/calendar",
+            country: "US",
+            startedAt,
+          });
+        }
+
+        const oldTrend = legacyPageCardTrendOracle(
+          database,
+          siteId,
+          item.window,
+          item.interval,
+          EMPTY_FILTER_DOCUMENT,
+          ["/calendar"],
+        );
+        const trendStart = calls.length;
+        await expect(
+          queryPageCardTrendFromD1(
+            env,
+            siteId,
+            item.window,
+            item.interval,
+            EMPTY_FILTER_DOCUMENT,
+            ["/calendar"],
+          ),
+        ).resolves.toEqual(
+          pageCardTrendFromLegacyRows(oldTrend.rows, oldTrend.buckets),
+        );
+        expect(calls.length - trendStart).toBe(1);
+
+        const oldDetails = legacyPageCardDetailsOracle(
+          database,
+          siteId,
+          item.window,
+          item.interval,
+          EMPTY_FILTER_DOCUMENT,
+          ["/calendar"],
+          0,
+        );
+        const detailsStart = calls.length;
+        await expect(
+          queryPageCardDetailsFromD1(
+            env,
+            siteId,
+            item.window,
+            item.interval,
+            EMPTY_FILTER_DOCUMENT,
+            ["/calendar"],
+            0,
+          ),
+        ).resolves.toEqual(
+          pageCardDetailsFromLegacyRows(oldDetails.rows, oldDetails.buckets),
+        );
+        expect(calls.length - detailsStart).toBe(1);
+      }
+    } finally {
+      close();
+    }
+  });
+
+  it("returns empty title, trend, and detail readers without touching D1 for empty paths", async () => {
     const { env, prepare } = createD1Env([]);
 
     await expect(
@@ -6179,6 +7032,17 @@ describe("edge pages D1 queries", () => {
         [],
       ),
     ).resolves.toEqual([]);
+    await expect(
+      queryPageCardDetailsFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        [],
+        3,
+      ),
+    ).resolves.toEqual({ titles: [], trend: [] });
 
     expect(prepare).not.toHaveBeenCalled();
   });
@@ -6236,19 +7100,20 @@ describe("edge pages D1 queries", () => {
 
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
+      ...visitBindings(),
       "desktop",
-      window.startMs,
-      window.endExclusiveMs,
       "desktop",
       "/pricing",
       2,
     ]);
-    expect(calls[1].sql).toContain("CASE WHEN startedAt >=");
+    expect(calls[1].sql).toContain("CASE WHEN");
+    expect(calls[1].sql).toContain(String(window.startMs));
+    expect(calls[1].sql).toContain(String(window.endExclusiveMs));
     expect(calls[1].bindings).toEqual([
       ...visitBindings(),
-      "desktop",
       window.startMs,
       window.endExclusiveMs,
+      "desktop",
       "desktop",
       "/pricing",
     ]);
@@ -6340,8 +7205,12 @@ describe("edge pages D1 queries", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.bindings.length).toBeGreaterThan(3);
     expect(calls[1]?.bindings.length).toBeGreaterThan(3);
-    expect(calls[0]?.sql).toContain("scope_final_visits");
-    expect(calls[1]?.sql).toContain("scope_final_visits");
+    expect(calls[0]?.sql).toContain('"visits"');
+    expect(calls[0]?.sql).toContain('"custom_events"');
+    expect(calls[0]?.sql).toContain("UNION");
+    expect(calls[1]?.sql).toContain('"visits"');
+    expect(calls[1]?.sql).toContain('"custom_events"');
+    expect(calls[1]?.sql).toContain("UNION");
   });
 
   it("uses prepared scoped datasets for top pages and dashboard comparisons", async () => {

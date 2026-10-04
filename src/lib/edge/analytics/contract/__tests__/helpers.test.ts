@@ -105,6 +105,24 @@ describe("query contract time helpers", () => {
         maxBuckets: 0,
       }),
     ).toThrow("maxBuckets");
+
+    const defaultLimit = buildCalendarBucketPlan({
+      range: createTimeRange(0, 2_001 * 60_000),
+      granularity: "minute",
+      reportingTimeZone: normalizeReportingTimeZone("UTC"),
+    });
+    expect(defaultLimit.truncated).toBe(true);
+    expect(defaultLimit.buckets[0]).toEqual({
+      index: 0,
+      startMs: 0,
+      endExclusiveMs: 60_000,
+    });
+    expect(defaultLimit.buckets).toHaveLength(2_000);
+    expect(defaultLimit.buckets.at(-1)).toEqual({
+      index: 1_999,
+      startMs: 1_999 * 60_000,
+      endExclusiveMs: 2_000 * 60_000,
+    });
   });
 
   it("uses typed document filter presence", () => {
