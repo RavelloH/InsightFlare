@@ -61,7 +61,12 @@ export async function queryEventTypeOverviewFromD1(
   const rows = (await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
     outputIds,
     fields: EVENT_TYPE_OVERVIEW_FIELDS.map(({ name }) => name),
-    orderBy: [],
+    orderBy: [
+      { field: "cardType", direction: "asc", nulls: "first" },
+      { field: "events", direction: "desc", nulls: "last" },
+      { field: "sessions", direction: "desc", nulls: "last" },
+      { field: "value", direction: "asc", nulls: "first" },
+    ],
   })) as EventTypeOverviewRow[];
   const summaryRow = rows.find((row) => row.cardType === "summary");
   const readDimension = (cardType: string): DimensionRow[] =>

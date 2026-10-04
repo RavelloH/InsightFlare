@@ -1518,7 +1518,8 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
               node.kind !== "union" &&
               node.kind !== "scan" &&
               node.kind !== "values-relation" &&
-              node.kind !== "json-scalar-array");
+              node.kind !== "json-scalar-array" &&
+              !terminalRootSort);
       visit(
         child.node,
         selectionBoundary,
@@ -1540,6 +1541,13 @@ interface CandidateFacts {
   readonly referencedScopes: RelationScope[];
   selective: boolean;
   forbidden: boolean;
+}
+
+function isConstantExistenceQuery(query: QuerySource): boolean {
+  if (query.node.kind !== "project" || query.node.projections.length !== 1)
+    return false;
+  const expression = query.node.projections[0]!.expression;
+  return expression.kind === "constant" && expression.value === 1;
 }
 
 function candidateFacts(root: LogicalQueryNode): CandidateFacts {
@@ -1573,8 +1581,9 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
           facts.referencedScopes.push(current.scope);
         if (
           current.kind === "unixepoch" ||
-          current.kind === "scalar-subquery" ||
-          current.kind === "in-subquery"
+          current.kind === "in-subquery" ||
+          (current.kind === "scalar-subquery" &&
+            !isConstantExistenceQuery(current.query))
         ) {
           facts.forbidden = true;
         }

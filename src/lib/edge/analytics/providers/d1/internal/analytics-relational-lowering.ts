@@ -458,7 +458,8 @@ function lowerExpression(
     case "literal":
       return {
         kind: "scalar",
-        expression: param(expression.value),
+        expression:
+          expression.value === null ? constant(null) : param(expression.value),
         type: expression.valueType,
         nullable: expression.value === null,
         candidateBounded: false,

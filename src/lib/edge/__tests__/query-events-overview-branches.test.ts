@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { EVENT_TYPE_OVERVIEW_OUTPUTS } from "@/lib/edge/analytics/engine/event-type-overview-plan";
 import type * as AnalyticsReportQuery from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
@@ -100,6 +101,60 @@ describe("edge query event type overview branch coverage", () => {
         browsers: [{ value: "Chrome", views: 1, sessions: 0, visitors: 0 }],
       },
     });
+  });
+
+  it("requests the stable overview order and only the summary when needed", async () => {
+    reportOutputSetMock.mockResolvedValue([]);
+
+    await queryEventTypeOverviewFromD1(
+      env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      "signup",
+    );
+
+    expect(reportOutputSetMock).toHaveBeenCalledTimes(1);
+    const fullSelection = reportOutputSetMock.mock.calls[0]![2] as {
+      readonly outputIds: readonly string[];
+      readonly orderBy: readonly {
+        readonly field: string;
+        readonly direction: "asc" | "desc";
+        readonly nulls: "first" | "last";
+      }[];
+    };
+    expect(fullSelection.outputIds).toEqual([
+      EVENT_TYPE_OVERVIEW_OUTPUTS.summary,
+      EVENT_TYPE_OVERVIEW_OUTPUTS.page,
+      EVENT_TYPE_OVERVIEW_OUTPUTS.country,
+      EVENT_TYPE_OVERVIEW_OUTPUTS.device,
+      EVENT_TYPE_OVERVIEW_OUTPUTS.browser,
+    ]);
+    expect(fullSelection.orderBy).toEqual([
+      { field: "cardType", direction: "asc", nulls: "first" },
+      { field: "events", direction: "desc", nulls: "last" },
+      { field: "sessions", direction: "desc", nulls: "last" },
+      { field: "value", direction: "asc", nulls: "first" },
+    ]);
+
+    reportOutputSetMock.mockClear();
+    await queryEventTypeOverviewFromD1(
+      env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      "signup",
+      { includeBreakdowns: false },
+    );
+    expect(reportOutputSetMock).toHaveBeenCalledTimes(1);
+    const summarySelection = reportOutputSetMock.mock.calls[0]![2] as {
+      readonly outputIds: readonly string[];
+      readonly orderBy: readonly unknown[];
+    };
+    expect(summarySelection.outputIds).toEqual([
+      EVENT_TYPE_OVERVIEW_OUTPUTS.summary,
+    ]);
+    expect(summarySelection.orderBy).toEqual(fullSelection.orderBy);
   });
 
   it("normalizes nullable event overview metrics to zero", async () => {

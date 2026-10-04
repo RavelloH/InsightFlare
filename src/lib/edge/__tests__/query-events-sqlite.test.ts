@@ -1,8 +1,8 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { compileD1Query, lowerLogicalPlan, union } from "@/lib/db";
+import { compileD1Query, lowerLogicalPlan, sort, union } from "@/lib/db";
 import {
   analyticsFilterRegistry,
   attachScopedFilterMetadata,
@@ -19,6 +19,7 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import { createEventReportSourceContext } from "@/lib/edge/analytics/engine/event-source-plan";
 import {
   buildEventTrendOtherPlan,
   buildEventTrendPointsPlan,
@@ -183,8 +184,14 @@ function compileOverviewOutput(input: {
   let combined = branches[0]!;
   for (const branch of branches.slice(1))
     combined = union(combined, branch, true);
-  return compileD1Query(lowerLogicalPlan(combined), {
-    tag: "wave41.event-type-overview-evidence",
+  const ordered = sort(combined, [
+    { expression: combined.columns.cardType!, direction: "ASC" },
+    { expression: combined.columns.events!, direction: "DESC" },
+    { expression: combined.columns.sessions!, direction: "DESC" },
+    { expression: combined.columns.value!, direction: "ASC" },
+  ]);
+  return compileD1Query(lowerLogicalPlan(ordered), {
+    tag: "wave42.event-type-overview-evidence",
   });
 }
 
@@ -865,6 +872,34 @@ function truthCondition(field: string, value: string): FilterExpression {
     operator: "eq",
     value,
   };
+}
+
+function overviewBudgetPayloadPath(index: number): string {
+  return `/wave42-budget/${String(index).padStart(2, "0")}`;
+}
+
+function overviewBudgetPayloadCondition(index: number): FilterExpression {
+  return {
+    kind: "condition",
+    target: {
+      kind: "event-payload",
+      path: overviewBudgetPayloadPath(index) as never,
+    },
+    operator: "exists",
+  };
+}
+
+function overviewBudgetPayloadFilters(count: number): FilterDocument {
+  const conditions = Array.from({ length: count }, (_, index) =>
+    overviewBudgetPayloadCondition(index + 1),
+  );
+  const root =
+    conditions.length === 0
+      ? null
+      : conditions.length === 1
+        ? conditions[0]!
+        : { kind: "and" as const, children: conditions };
+  return normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
 }
 
 function truthPayload(value: string): FilterExpression {
@@ -2815,6 +2850,110 @@ describe("event detail D1 SQL", () => {
     }
   });
 
+  it("matches legacy top-eight tie ordering with an explicit outer order", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const insertVisit = d1.database.prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, pathname,
+        country, device_type, browser
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertEvent = d1.database.prepare(
+      "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    for (let index = 1; index <= 10; index += 1) {
+      const suffix = String(index).padStart(2, "0");
+      const visitId = `ordered-visit-${suffix}`;
+      insertVisit.run(
+        visitId,
+        siteId,
+        `ordered-visitor-${suffix}`,
+        `ordered-session-${suffix}`,
+        eventTime + index,
+        `/ordered-${suffix}`,
+        `country-${suffix}`,
+        `device-${suffix}`,
+        `browser-${suffix}`,
+      );
+      insertEvent.run(
+        100 + index,
+        `ordered-event-${suffix}`,
+        siteId,
+        visitId,
+        1,
+        eventTime + index,
+        eventTime + index,
+        100 + index,
+        1,
+        1,
+        null,
+      );
+    }
+
+    try {
+      const before = d1.calls.length;
+      const actual = await queryEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        eventName,
+      );
+      const actualQuery = d1.calls[before];
+      const expected = await queryLegacyEventTypeOverviewFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        eventName,
+      );
+      expect(actual).toEqual(expected);
+      expect(d1.calls).toHaveLength(before + 2);
+      expect(actual.summary).toMatchObject({ events: 11, sessions: 11 });
+      expect(actual.breakdowns.pages.map(({ value }) => value)).toEqual(
+        Array.from(
+          { length: 8 },
+          (_, index) => `/ordered-${String(index + 1).padStart(2, "0")}`,
+        ),
+      );
+      expect(actual.breakdowns.countries.map(({ value }) => value)).toEqual([
+        "CN",
+        ...Array.from(
+          { length: 7 },
+          (_, index) => `country-${String(index + 1).padStart(2, "0")}`,
+        ),
+      ]);
+      expect(actual.breakdowns.devices.map(({ value }) => value)).toEqual([
+        "desktop",
+        ...Array.from(
+          { length: 7 },
+          (_, index) => `device-${String(index + 1).padStart(2, "0")}`,
+        ),
+      ]);
+      expect(actual.breakdowns.browsers.map(({ value }) => value)).toEqual([
+        "Edge",
+        ...Array.from(
+          { length: 7 },
+          (_, index) => `browser-${String(index + 1).padStart(2, "0")}`,
+        ),
+      ]);
+
+      expect(actualQuery).toBeDefined();
+      const orderByIndex = actualQuery!.sql
+        .toUpperCase()
+        .lastIndexOf("ORDER BY");
+      expect(orderByIndex).toBeGreaterThan(
+        actualQuery!.sql.toUpperCase().lastIndexOf("UNION ALL"),
+      );
+      const terminalOrder = actualQuery!.sql.slice(orderByIndex);
+      expect(terminalOrder).toMatch(
+        /ORDER BY "[^"]+"\."_c0" ASC, "[^"]+"\."_c2" DESC, "[^"]+"\."_c4" DESC, "[^"]+"\."_c1" ASC/u,
+      );
+    } finally {
+      d1.close();
+    }
+  });
+
   it("matches the frozen overview oracle across direct and prepared scopes", async () => {
     const { env, d1 } = createSqliteEventEnv();
     const preparedEvent = preparedOverviewFilters(
@@ -2924,6 +3063,320 @@ describe("event detail D1 SQL", () => {
           );
         }
       }
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("matches row-local payload overview filters and their bounded public SQL", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const insertPath = d1.database.prepare(
+      "INSERT INTO custom_event_json_paths (id, site_id, path) VALUES (?, ?, ?)",
+    );
+    const insertPayload = d1.database.prepare(
+      `INSERT INTO custom_event_json_values (
+        event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+        value_type, string_value, number_value, boolean_value
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, 'budget-value', NULL, NULL)`,
+    );
+    for (let index = 1; index <= 46; index += 1) {
+      const pathId = index + 1;
+      insertPath.run(pathId, siteId, overviewBudgetPayloadPath(index));
+      for (const [eventPk, eventNameId] of [
+        [1, 1],
+        [99, 99],
+      ] as const)
+        insertPayload.run(
+          eventPk,
+          eventPk * 1_000 + pathId,
+          siteId,
+          eventNameId,
+          pathId,
+          eventTime,
+        );
+    }
+
+    const cases = [
+      ...[0, 1, 7, 16].flatMap((count) =>
+        [true, false].map((includeBreakdowns) => ({
+          label: `payload-${count}-breakdowns-${includeBreakdowns}`,
+          filters: overviewBudgetPayloadFilters(count),
+          eventName,
+          includeBreakdowns,
+        })),
+      ),
+      ...[40, 46].map((count) => ({
+        label: `payload-${count}-breakdowns-true`,
+        filters: overviewBudgetPayloadFilters(count),
+        eventName,
+        includeBreakdowns: true,
+      })),
+      {
+        label: "payload-40-and-country",
+        filters: truthFilters({
+          kind: "and",
+          children: [
+            ...Array.from({ length: 40 }, (_, index) =>
+              overviewBudgetPayloadCondition(index + 1),
+            ),
+            truthCondition("geo.country", "CN"),
+          ],
+        }),
+        eventName,
+        includeBreakdowns: true,
+      },
+      {
+        label: "payload-not",
+        filters: truthFilters({
+          kind: "not",
+          child: overviewBudgetPayloadCondition(47),
+        }),
+        eventName,
+        includeBreakdowns: true,
+      },
+      {
+        label: "payload-or",
+        filters: truthFilters({
+          kind: "or",
+          children: [
+            overviewBudgetPayloadCondition(1),
+            overviewBudgetPayloadCondition(2),
+          ],
+        }),
+        eventName,
+        includeBreakdowns: true,
+      },
+      {
+        label: "payload-7-padded-raw-name",
+        filters: overviewBudgetPayloadFilters(7),
+        eventName: " outbound_click ",
+        includeBreakdowns: true,
+      },
+      {
+        label: "payload-1-empty-name",
+        filters: overviewBudgetPayloadFilters(1),
+        eventName: "",
+        includeBreakdowns: false,
+      },
+    ] as const;
+
+    try {
+      for (const testCase of cases) {
+        const before = d1.calls.length;
+        const options = { includeBreakdowns: testCase.includeBreakdowns };
+        const actual = await queryEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          testCase.filters,
+          testCase.eventName,
+          options,
+        );
+        const actualQuery = d1.calls[before];
+        const expected = await queryLegacyEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          testCase.filters,
+          testCase.eventName,
+          options,
+        );
+        const legacyQuery = d1.calls[before + 1];
+
+        expect(actual, testCase.label).toEqual(expected);
+        const expectedNamedEvents =
+          testCase.eventName === ""
+            ? 2
+            : testCase.label === "payload-7-padded-raw-name"
+              ? 0
+              : 1;
+        expect(actual.summary.events, testCase.label).toBe(expectedNamedEvents);
+        expect(actual.summary.shareOfAllEvents, testCase.label).toBe(
+          testCase.eventName === ""
+            ? 1
+            : testCase.label === "payload-7-padded-raw-name"
+              ? 0
+              : 0.5,
+        );
+        expect(d1.calls).toHaveLength(before + 2);
+        for (const query of [actualQuery!, legacyQuery!]) {
+          expect(query.bindings.length, testCase.label).toBeLessThanOrEqual(
+            100,
+          );
+          expect(
+            new TextEncoder().encode(query.sql).byteLength,
+            testCase.label,
+          ).toBeLessThan(100_000);
+        }
+        console.info(
+          `[Wave42 event-type overview public SQL budget] ${JSON.stringify({
+            case: testCase.label,
+            new: {
+              sqlUtf8Bytes: new TextEncoder().encode(actualQuery!.sql)
+                .byteLength,
+              bindings: actualQuery!.bindings.length,
+            },
+            frozenLegacy: {
+              sqlUtf8Bytes: new TextEncoder().encode(legacyQuery!.sql)
+                .byteLength,
+              bindings: legacyQuery!.bindings.length,
+            },
+          })}`,
+        );
+        if (
+          testCase.label === "payload-40-breakdowns-true" ||
+          testCase.label === "payload-46-breakdowns-true" ||
+          testCase.label === "payload-40-and-country"
+        ) {
+          await recordOverviewPhysicalEvidence(
+            testCase.label,
+            testCase,
+            { current: actualQuery!, legacy: legacyQuery! },
+            d1.database,
+          );
+        }
+      }
+
+      const preparedFacts = preparedOverviewFilters(
+        recordFieldFilter("session.events", "gte", 2),
+        "event",
+      );
+      const preparedBoundary = preparedOverviewFilters(
+        filterFixture({ entry: "/entry" }),
+        "event",
+      );
+      for (const [label, filters] of [
+        ["session-fact", preparedFacts.filters!],
+        ["session-boundary", preparedBoundary.filters!],
+      ] as const) {
+        const actual = await queryEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          filters,
+          eventName,
+          { includeBreakdowns: false },
+        );
+        const expected = await queryLegacyEventTypeOverviewFromD1(
+          env,
+          siteId,
+          window,
+          filters,
+          eventName,
+          { includeBreakdowns: false },
+        );
+        expect(actual, label).toEqual(expected);
+      }
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("lowers logical NULL literals without changing their nullable SQL behavior", () => {
+    const { d1 } = createSqliteEventEnv();
+    const context = createEventReportSourceContext({
+      siteId,
+      queryTime: queryWindowToTime(window),
+      filters: EMPTY_FILTER_DOCUMENT,
+    });
+    const builder = context.builder;
+    const events = builder.source("event", {
+      temporalDomain: "candidate",
+      attributes: ["event.report.eventName"],
+    });
+    const eventNameValue = builder.slot(
+      events,
+      "attribute:event.report.eventName",
+    );
+    const nullString = builder.literal(null, {
+      kind: "scalar",
+      scalar: "string",
+    });
+    const direct = builder.project(events, {
+      nullValue: nullString,
+      comparisonNull: builder.compare("eq", nullString, nullString),
+      caseValue: builder.caseWhen(
+        [
+          {
+            when: builder.compare(
+              "eq",
+              eventNameValue,
+              builder.literal(eventName, {
+                kind: "scalar",
+                scalar: "string",
+              }),
+            ),
+            then: nullString,
+          },
+        ],
+        builder.literal("other", { kind: "scalar", scalar: "string" }),
+      ),
+      coalesced: builder.coalesce(
+        nullString,
+        builder.literal("fallback", { kind: "scalar", scalar: "string" }),
+      ),
+    });
+    builder.output("null-expression-contract", direct, [
+      { name: "nullValue", slot: "nullValue" },
+      { name: "comparisonNull", slot: "comparisonNull" },
+      { name: "caseValue", slot: "caseValue" },
+      { name: "coalesced", slot: "coalesced" },
+    ]);
+    const distinctNull = builder.aggregate(events, {}, [
+      {
+        name: "countNull",
+        kind: "count-distinct",
+        expression: nullString,
+      },
+    ]);
+    builder.output("null-distinct-count", distinctNull, [
+      { name: "countNull", slot: "countNull" },
+    ]);
+    const plan = builder.finish();
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId,
+      time: plan.context.time,
+    });
+    const lowered = lowerer.lowerMany(plan.outputs);
+    const [expressionOutput, countOutput] = plan.outputs;
+    const expressionResult = lowerer.projectOutput(
+      lowered[0]!,
+      expressionOutput!.fields.map(({ name, slot }) => ({ name, slot })),
+    );
+    const countResult = lowerer.projectOutput(
+      lowered[1]!,
+      countOutput!.fields.map(({ name, slot }) => ({ name, slot })),
+    );
+    const expressionQuery = compileD1Query(lowerLogicalPlan(expressionResult));
+    const countQuery = compileD1Query(lowerLogicalPlan(countResult));
+
+    try {
+      expect(
+        plan.slots.find(({ id }) => id === direct.slots.nullValue)?.nullable,
+      ).toBe(true);
+      expect(expressionQuery.bindings).not.toContain(null);
+      expect(countQuery.bindings).not.toContain(null);
+      const expressionRows = d1.database
+        .prepare(expressionQuery.sql)
+        .all(...((expressionQuery.bindings ?? []) as SQLInputValue[]));
+      expect(expressionRows).toHaveLength(2);
+      expect(expressionRows).toContainEqual({
+        nullValue: null,
+        comparisonNull: null,
+        caseValue: null,
+        coalesced: "fallback",
+      });
+      expect(expressionRows).toContainEqual({
+        nullValue: null,
+        comparisonNull: null,
+        caseValue: "other",
+        coalesced: "fallback",
+      });
+      expect(
+        d1.database
+          .prepare(countQuery.sql)
+          .get(...((countQuery.bindings ?? []) as SQLInputValue[])),
+      ).toEqual({ countNull: 0 });
     } finally {
       d1.close();
     }

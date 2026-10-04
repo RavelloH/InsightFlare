@@ -5,14 +5,19 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
+  add,
+  and,
   compileD1Query,
+  constant,
   eq,
   filter,
   gt,
+  isNotNull,
   limit,
   param,
   project,
   rowNumber,
+  scalar,
   scan,
   sort,
   union,
@@ -22,6 +27,7 @@ import {
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression } from "@/lib/db/query/expression";
 import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
+import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
 const databases = new Set<DatabaseSync>();
@@ -63,7 +69,10 @@ afterEach(() => {
   databases.clear();
 });
 
-function repeatedThree(relation: ReturnType<typeof selectedProjection>) {
+function repeatedThree<
+  Row extends object,
+  Columns extends Readonly<Record<string, AnyExpression>>,
+>(relation: Relation<Row, Columns>) {
   return union(union(relation, relation, true), relation, true);
 }
 
@@ -525,6 +534,271 @@ describe("shared relation physical selection", () => {
       })),
     };
     expect(() => compileD1Query(forged)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+  });
+
+  it("shares independent branch Top-N inputs below a terminal root sort", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?), (?)")
+      .run("terminal-top-n-a", "terminal-top-n-b", "terminal-top-n-c");
+
+    const source = selectedProjection(5);
+    const branches = [
+      limit(
+        sort(source, [
+          { expression: source.columns.field0!, direction: "ASC" },
+        ]),
+        1,
+      ),
+      limit(
+        sort(source, [
+          { expression: source.columns.field1!, direction: "DESC" },
+        ]),
+        1,
+      ),
+      limit(
+        sort(source, [
+          { expression: source.columns.field0!, direction: "DESC" },
+        ]),
+        1,
+      ),
+    ];
+    const combined = union(
+      union(branches[0]!, branches[1]!, true),
+      branches[2]!,
+      true,
+    );
+    const ordered = sort(combined, [
+      { expression: combined.columns.field1!, direction: "ASC" },
+    ]);
+    const physical = lowerLogicalPlan(ordered);
+
+    expect(
+      physical.sharedRelations.find(({ node }) => node === source.node),
+    ).toMatchObject({
+      materialization: "materialized",
+      fields: [{}, {}, {}, {}, {}],
+    });
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(ordered);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(optimized.sql.match(/ AS MATERIALIZED \(/gu)).toHaveLength(1);
+    expect(optimizedRows).toEqual(mechanicalRows);
+    expect(optimizedRows).toHaveLength(3);
+  });
+
+  it("shares correlated constant-existence Top-N inputs without changing rows", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+      .run("constant-existence-site");
+    const { site_pk: sitePk } = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get("constant-existence-site") as { site_pk: number };
+    const insertVisit = database.prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, ended_at, duration_ms, duration_source, exit_reason,
+        pathname, hostname, site_pk
+      ) VALUES (?, 'constant-existence-site', ?, ?, 'complete', ?, ?, ?, ?, 'duration', 'normal', ?, 'example.test', ?)`,
+    );
+    for (const [
+      visitId,
+      sessionId,
+      startedAt,
+      endedAt,
+      durationMs,
+      pathname,
+    ] of [
+      ["exist-empty", "a-empty", 1, null, 10, "/not-match"],
+      ["exist-one", "b-one", 2, 20, 20, "/match"],
+      ["exist-many-1", "c-many", 3, 30, 30, "/match"],
+      ["exist-many-2", "c-many", 4, 30, 30, "/match"],
+    ] as const) {
+      insertVisit.run(
+        visitId,
+        `visitor-${sessionId}`,
+        sessionId,
+        startedAt,
+        startedAt,
+        endedAt,
+        durationMs,
+        pathname,
+        sitePk,
+      );
+    }
+
+    const visits = scan(schema.visits);
+    const selected = filter(
+      visits,
+      eq(visits.columns.status, param("complete")),
+    );
+    const lookup = scan(schema.visits);
+    const matching = filter(
+      lookup,
+      and(
+        eq(lookup.columns.session_id, selected.columns.session_id),
+        eq(lookup.columns.pathname, param("/match")),
+      ),
+    );
+    const source = project(selected, {
+      field0: selected.columns.ended_at,
+      field1: selected.columns.duration_ms,
+      field2: selected.columns.session_id,
+      field3: selected.columns.pathname,
+      field4: isNotNull(scalar(project(matching, { found: constant(1) }))),
+    });
+    const branches = [
+      limit(
+        sort(source, [{ expression: source.columns.field0, direction: "ASC" }]),
+        2,
+      ),
+      limit(
+        sort(source, [
+          { expression: source.columns.field1, direction: "DESC" },
+        ]),
+        2,
+      ),
+      limit(
+        sort(source, [{ expression: source.columns.field2, direction: "ASC" }]),
+        2,
+      ),
+    ];
+    const combined = union(
+      union(branches[0]!, branches[1]!, true),
+      branches[2]!,
+      true,
+    );
+    const ordered = sort(combined, [
+      { expression: combined.columns.field2, direction: "ASC" },
+      { expression: combined.columns.field1, direction: "ASC" },
+    ]);
+    const physical = lowerLogicalPlan(ordered);
+
+    expect(
+      physical.sharedRelations.find(({ node }) => node === source.node),
+    ).toMatchObject({
+      materialization: "materialized",
+      fields: [{}, {}, {}, {}, {}],
+    });
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(ordered);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(optimized.sql.match(/ AS MATERIALIZED \(/gu)).toHaveLength(1);
+    expect(optimizedRows).toEqual(mechanicalRows);
+    expect(optimizedRows).toHaveLength(6);
+    expect(optimizedRows.map((row) => row.field4)).toContain(0);
+    expect(optimizedRows.map((row) => row.field4)).toContain(1);
+    expect(optimizedRows.filter((row) => row.field2 === "c-many")).toHaveLength(
+      2,
+    );
+  });
+
+  it("keeps unsafe scalar-subquery shapes out of shared relations", () => {
+    const expectUnshared = (candidate: Relation) => {
+      const physical = lowerLogicalPlan(repeatedThree(candidate));
+      expect(
+        physical.sharedRelations.find(({ node }) => node === candidate.node),
+      ).toBeUndefined();
+    };
+    const makeCandidate = (
+      kind: "value" | "computed" | "external" | "limit" | "window" | "volatile",
+    ) => {
+      const visits = scan(schema.visits);
+      const selected = filter(
+        visits,
+        eq(visits.columns.status, param("complete")),
+      );
+      const lookup = scan(schema.visits);
+      let value: AnyExpression;
+      if (kind === "external") {
+        const outside = scan(schema.visits);
+        const matching = filter(
+          lookup,
+          eq(lookup.columns.session_id, outside.columns.session_id),
+        );
+        value = isNotNull(scalar(project(matching, { found: constant(1) })));
+      } else {
+        const matching = filter(
+          lookup,
+          kind === "volatile"
+            ? and(
+                eq(lookup.columns.session_id, selected.columns.session_id),
+                eq(unixepoch(), param(0)),
+              )
+            : eq(lookup.columns.session_id, selected.columns.session_id),
+        );
+        if (kind === "value") {
+          value = isNotNull(
+            scalar(project(matching, { value: matching.columns.visit_id })),
+          );
+        } else if (kind === "computed") {
+          value = isNotNull(
+            scalar(
+              project(matching, {
+                value: add(matching.columns.site_pk, constant(1)),
+              }),
+            ),
+          );
+        } else if (kind === "limit") {
+          value = isNotNull(
+            scalar(project(limit(matching, 1), { found: constant(1) })),
+          );
+        } else if (kind === "window") {
+          const ranked = window(matching, {
+            rank: rowNumber({
+              orderBy: [
+                { expression: matching.columns.visit_id, direction: "ASC" },
+              ],
+            }),
+          });
+          value = isNotNull(scalar(project(ranked, { found: constant(1) })));
+        } else {
+          value = isNotNull(scalar(project(matching, { found: constant(1) })));
+        }
+      }
+      return project(selected, {
+        field0: selected.columns.ended_at,
+        field1: selected.columns.duration_ms,
+        field2: selected.columns.session_id,
+        field3: selected.columns.pathname,
+        field4: value,
+      });
+    };
+    for (const kind of [
+      "value",
+      "computed",
+      "limit",
+      "window",
+      "volatile",
+    ] as const)
+      expectUnshared(makeCandidate(kind));
+
+    expect(() =>
+      lowerLogicalPlan(repeatedThree(makeCandidate("external"))),
+    ).toThrowError(expect.objectContaining({ code: "invalid_plan" }));
+
+    const multipleFields = project(scan(schema.visits), {
+      first: constant(1),
+      second: constant(1),
+    });
+    expect(() => scalar(multipleFields)).toThrowError(
       expect.objectContaining({ code: "invalid_plan" }),
     );
   });

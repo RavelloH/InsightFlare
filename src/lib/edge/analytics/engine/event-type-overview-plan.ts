@@ -73,21 +73,13 @@ export function buildEventTypeOverviewPlan(input: {
   });
   const builder = context.builder;
   const summaryEvents = addEventReportSource(context, {
-    attributes: EVENT_REPORT_BASE_ATTRIBUTES,
+    attributes: includeBreakdowns
+      ? [...EVENT_REPORT_BASE_ATTRIBUTES, ...Object.values(OVERVIEW_ATTRIBUTES)]
+      : EVENT_REPORT_BASE_ATTRIBUTES,
     eventName: input.eventName,
     eventNameInputSemantics: "defined-raw-value",
   });
-  const breakdownEvents = includeBreakdowns
-    ? addEventReportSource(context, {
-        attributes: [
-          "event.report.ownerSessionId",
-          "event.report.ownerVisitorId",
-          ...Object.values(OVERVIEW_ATTRIBUTES),
-        ],
-        eventName: input.eventName,
-        eventNameInputSemantics: "defined-raw-value",
-      })
-    : undefined;
+  const breakdownEvents = includeBreakdowns ? summaryEvents : undefined;
   const denominatorEvents =
     input.denominatorSource === "raw-event-domain"
       ? builder.source("event", { temporalDomain: "candidate" })
