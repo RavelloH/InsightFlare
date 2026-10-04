@@ -2961,7 +2961,6 @@ export class AnalyticsLogicalToDbLowerer {
         "Ranked members require a unique keyed grain.",
       );
     if (
-      node.groups.length === 0 ||
       new Set(node.groups).size !== node.groups.length ||
       node.order.length === 0 ||
       new Set(node.order.map((key) => key.slot)).size !== node.order.length
@@ -3048,8 +3047,8 @@ export class AnalyticsLogicalToDbLowerer {
     if (rankNeeded) {
       const partitionBy = this.#windowPartitionBy(node.groups, input, path);
       const orderBy = this.#windowOrderBy(node.order, input, path);
-      if (partitionBy.length === 0 || orderBy.length === 0)
-        reject(path, "Ranked members require groups and order keys.");
+      if (orderBy.length === 0)
+        reject(path, "Ranked members require order keys.");
       relation = windowRelation(input.relation, {
         __analytics_ranked_member_ordinal: rowNumber({
           partitionBy,

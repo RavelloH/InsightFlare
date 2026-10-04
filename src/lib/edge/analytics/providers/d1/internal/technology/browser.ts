@@ -1,4 +1,3 @@
-import { browserEngineCaseSql } from "@/lib/browser-engine";
 import type {
   BrowserCrossAggregateRow,
   BrowserCrossBreakdownDimensionDataRow,
@@ -46,7 +45,6 @@ export async function queryBrowserTrendFromD1(
     interval,
     filters,
     limit,
-    "TRIM(COALESCE(browser, ''))",
     "browser",
   );
 }
@@ -69,8 +67,7 @@ export async function queryBrowserEngineTrendFromD1(
     interval,
     filters,
     limit,
-    browserEngineCaseSql("browser", "os"),
-    "engine",
+    "browserEngine",
   );
 }
 

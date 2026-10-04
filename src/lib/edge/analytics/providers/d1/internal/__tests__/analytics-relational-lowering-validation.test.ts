@@ -879,6 +879,45 @@ describe("relational lowerer validation guards", () => {
     expect(() => lower(incompleteRanking)).toThrow(
       "Ranked-member keys must cover and preserve input grain.",
     );
+    expect(() =>
+      lower(
+        withNode(rankedPlan, ranked.id, (node) =>
+          node.kind === "ranked-members" ? { ...node, groups: [] } : node,
+        ),
+      ),
+    ).toThrow("Ranked-member keys must cover and preserve input grain.");
+
+    const globalRankBuilder = createBuilder();
+    const globalPages = globalRankBuilder.source("page", {
+      temporalDomain: "read",
+      attributes: ["page.report.pathname", "page.report.title"],
+    });
+    const globalRollup = globalRankBuilder.aggregate(
+      globalPages,
+      {
+        pathname: globalRankBuilder.slot(
+          globalPages,
+          "attribute:page.report.pathname",
+        ),
+        title: globalRankBuilder.slot(
+          globalPages,
+          "attribute:page.report.title",
+        ),
+      },
+      [{ name: "views", kind: "count-rows" }],
+    );
+    const globalRank = globalRankBuilder.rankedMembers(globalRollup, {
+      groups: [],
+      order: [
+        { slot: "views", direction: "desc", nulls: "last" },
+        { slot: "pathname", direction: "asc", nulls: "first" },
+        { slot: "title", direction: "asc", nulls: "first" },
+      ],
+    });
+    globalRankBuilder.output("global-ranked", globalRank, [
+      { name: "rank", slot: "rank" },
+    ]);
+    expect(() => lower(globalRankBuilder.finish())).not.toThrow();
 
     const rankedNode = rankedPlan.nodes.find((node) => node.id === ranked.id);
     if (!rankedNode || rankedNode.kind !== "ranked-members")

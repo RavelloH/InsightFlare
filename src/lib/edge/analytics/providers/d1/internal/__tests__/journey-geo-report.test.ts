@@ -1147,7 +1147,7 @@ describe("Journey Geo Page report D1 migration", () => {
       return {
         sqlBytes,
         bindings,
-        physicalPlanHash: observations[index]!.data.physicalPlanHash,
+        physicalPlanHash: observations[index]!.data?.physicalPlanHash,
       };
     });
     expect(diagnostics.rowsReadAvailable).toBe(false);
@@ -1218,12 +1218,12 @@ describe("Journey Geo Page report D1 migration", () => {
         return {
           sqlBytes,
           bindings,
-          physicalPlanHash: compileObservations[index]!.data.physicalPlanHash,
+          physicalPlanHash: compileObservations[index]!.data?.physicalPlanHash,
         };
       });
       summaryBudgets.push({
         level,
-        statements: compileRecord.performance.d1Statements,
+        statements: compileRecord.performance.d1Statements ?? 0,
         reads,
         compileOnly: true,
       });

@@ -93,7 +93,7 @@ function mapLegacyRows(
   dimension: "browser" | "referrer",
 ): ComparableRadarRow[] {
   return rows
-    .map((row) => ({
+    .map((row): ComparableRadarRow => ({
       ...(dimension === "browser"
         ? { browser: String(row.browser ?? "").trim() }
         : { referrer: String(row.referrer ?? "").trim() }),

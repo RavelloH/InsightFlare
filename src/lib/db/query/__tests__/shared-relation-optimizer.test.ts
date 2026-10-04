@@ -33,6 +33,7 @@ import {
   unixepoch,
   valuesRelation,
   window,
+  windowCountRows,
 } from "@/lib/db";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression } from "@/lib/db/query/expression";
@@ -336,6 +337,75 @@ describe("shared relation physical selection", () => {
     }
   });
 
+  it("recognizes certified aggregate rankings nested in outer relation graphs", () => {
+    const database = new DatabaseSync(":memory:");
+    databases.add(database);
+    const base = buildAggregateRankingQuery();
+    const supplemental = valuesRelation(
+      { pathname: { affinity: "text", nullable: false } },
+      [{ pathname: "/a" }],
+    );
+
+    const nestedTerminalRanking = join(
+      base.output,
+      supplemental,
+      eq(base.output.columns.pathname, supplemental.columns.pathname),
+    );
+    const nestedTerminalPhysical = lowerLogicalPlan(nestedTerminalRanking);
+    expect(
+      nestedTerminalPhysical.sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
+
+    const globalRanked = window(base.metrics, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: base.metrics.columns.views, direction: "DESC" },
+        ],
+      }),
+    });
+    const globalSorted = sort(globalRanked, [
+      { expression: globalRanked.columns.rank, direction: "ASC" },
+    ]);
+    const globalLimited = limit(globalSorted, 2);
+    const globalOutput = project(globalLimited, {
+      pathname: globalLimited.columns.pathname,
+      rank: globalLimited.columns.rank,
+    });
+    const nestedGlobalRanking = join(
+      globalOutput,
+      supplemental,
+      eq(globalOutput.columns.pathname, supplemental.columns.pathname),
+    );
+    const nestedGlobalPhysical = lowerLogicalPlan(nestedGlobalRanking);
+    expect(
+      nestedGlobalPhysical.sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
+
+    const expectEquivalentRows = <
+      Row extends object,
+      Columns extends Readonly<Record<string, AnyExpression>>,
+    >(
+      query: Relation<Row, Columns>,
+    ) => {
+      const physical = lowerLogicalPlan(query);
+      const optimized = compileD1Query(physical);
+      const mechanical = compileD1QueryUnoptimizedForTest(query);
+      const optimizedRows = database
+        .prepare(optimized.sql)
+        .all(...(optimized.bindings as SQLInputValue[]));
+      const mechanicalRows = database
+        .prepare(mechanical.sql)
+        .all(...(mechanical.bindings as SQLInputValue[]));
+      expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+    };
+    expectEquivalentRows(nestedTerminalRanking);
+    expectEquivalentRows(nestedGlobalRanking);
+  });
+
   it("rejects aggregate ranking shapes outside the local wrapper and closed aggregate graph", () => {
     const base = buildAggregateRankingQuery();
     const assertNotShared = (query: Parameters<typeof lowerLogicalPlan>[0]) => {
@@ -350,7 +420,11 @@ describe("shared relation physical selection", () => {
       pathname: base.output.columns.pathname,
       views: add(base.output.columns.views, constant(0)),
     });
-    assertNotShared(computedRoot);
+    expect(
+      lowerLogicalPlan(computedRoot).sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
 
     const offsetLimited = limit(base.sorted, 3, 1);
     const offsetOutput = project(offsetLimited, {
@@ -424,7 +498,29 @@ describe("shared relation physical selection", () => {
       pathname: windowSorted.columns.pathname,
       rank: windowSorted.columns.rank,
     });
-    assertNotShared(windowOutput);
+    expect(
+      lowerLogicalPlan(windowOutput).sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
+
+    const partitionedRankingInput = window(base.metrics, {
+      rank: rowNumber({
+        partitionBy: [base.metrics.columns.pathname],
+        orderBy: [
+          { expression: base.metrics.columns.views, direction: "DESC" },
+        ],
+      }),
+    });
+    const partitionedRankingSort = sort(partitionedRankingInput, [
+      { expression: partitionedRankingInput.columns.rank, direction: "ASC" },
+    ]);
+    const partitionedRankingLimit = limit(partitionedRankingSort, 2);
+    const partitionedRankingOutput = project(partitionedRankingLimit, {
+      pathname: partitionedRankingLimit.columns.pathname,
+      rank: partitionedRankingLimit.columns.rank,
+    });
+    assertNotShared(partitionedRankingOutput);
 
     const scalarSource = project(scan(schema.site_identities), {
       value: constant(1),
@@ -731,6 +827,46 @@ describe("shared relation physical selection", () => {
     expect(
       lowerLogicalPlan(union(rankOne, sortedBranch, true)).sharedRelations,
     ).toEqual([]);
+  });
+
+  it("materializes a narrow selective candidate containing only row-number windows", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)")
+      .run("row-number-site-b", "row-number-site-a");
+
+    const source = selectedProjection(2);
+    const ranked = window(source, {
+      rank: rowNumber({
+        orderBy: [{ expression: source.columns.field0, direction: "ASC" }],
+      }),
+    });
+    const candidate = filter(ranked, gt(ranked.columns.rank, param(0)));
+    const query = repeatedThree(candidate);
+    const physical = lowerLogicalPlan(query);
+    expect(
+      physical.sharedRelations.find(({ node }) => node === candidate.node),
+    ).toMatchObject({ materialization: "materialized", fields: [{}, {}, {}] });
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(query);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(optimized.sql).toContain("AS MATERIALIZED (");
+    expect(optimizedRows).toEqual(mechanicalRows);
+
+    const counted = window(source, { rows: windowCountRows() });
+    const countCandidate = filter(counted, gt(counted.columns.rows, param(0)));
+    expect(
+      lowerLogicalPlan(repeatedThree(countCandidate)).sharedRelations.some(
+        ({ node }) => node === countCandidate.node,
+      ),
+    ).toBe(false);
   });
 
   it("shares selective inputs below independent branch-local top-N sorts", () => {

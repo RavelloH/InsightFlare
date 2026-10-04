@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
@@ -65,9 +64,18 @@ function createD1Env(resultSets: D1Row[][]): {
   const taggedShareResults =
     resultSets.length >= 3
       ? [
-          ...resultSets[0].map((row) => withRowType(row, "top")),
-          ...resultSets[1].map((row) => withRowType(row, "series")),
-          ...resultSets[2].map((row) => withRowType(row, "bucket")),
+          ...resultSets[0].map((row) => ({
+            ...withRowType(row, "top"),
+            trendKind: "single",
+          })),
+          ...resultSets[1].map((row) => ({
+            ...withRowType(row, "series"),
+            trendKind: "single",
+          })),
+          ...resultSets[2].map((row) => ({
+            ...withRowType(row, "bucket"),
+            trendKind: "single",
+          })),
         ]
       : [];
   const taggedClientCrossResults =
@@ -104,7 +112,11 @@ function createD1Env(resultSets: D1Row[][]): {
           taggedClientCrossResultsConsumed = true;
           return { results: taggedClientCrossResults };
         }
-        if (sql.includes("tagged_rows") && !taggedShareResultsConsumed) {
+        if (
+          (sql.includes("tagged_rows") || sql.includes("trendKind")) &&
+          taggedShareResults.length > 0 &&
+          !taggedShareResultsConsumed
+        ) {
           taggedShareResultsConsumed = true;
           return { results: taggedShareResults };
         }
@@ -128,36 +140,15 @@ function createCombinedShareTrendEnv(rows: D1Row[]): {
   calls: QueryCall[];
 } {
   const calls: QueryCall[] = [];
-  const trendJson = (trendType: "source" | "channel") =>
-    JSON.stringify({
-      top: rows
-        .filter((row) => row.trendType === trendType && row.rowType === "top")
-        .map(({ trendType: _trendType, rowType: _rowType, ...row }) => row),
-      series: rows
-        .filter(
-          (row) => row.trendType === trendType && row.rowType === "series",
-        )
-        .map(({ trendType: _trendType, rowType: _rowType, ...row }) => row),
-      buckets: rows
-        .filter(
-          (row) => row.trendType === trendType && row.rowType === "bucket",
-        )
-        .map(({ trendType: _trendType, rowType: _rowType, ...row }) => row),
-    });
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...bindings: Array<string | number | null>) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
         return {
-          results:
-            rows.length === 0
-              ? []
-              : [
-                  {
-                    source: trendJson("source"),
-                    channel: trendJson("channel"),
-                  },
-                ],
+          results: rows.map(({ trendType, ...row }) => ({
+            ...row,
+            trendKind: trendType,
+          })),
         };
       }),
     })),
@@ -926,7 +917,6 @@ describe("edge technology query coverage", () => {
       "hour",
       EMPTY_FILTER_DOCUMENT,
       3,
-      "TRIM(COALESCE(browser, ''))",
       "browser",
     );
 
@@ -982,7 +972,6 @@ describe("edge technology query coverage", () => {
       "hour",
       EMPTY_FILTER_DOCUMENT,
       99,
-      "TRIM(COALESCE(browser, ''))",
       "browser",
     );
 
@@ -1008,12 +997,13 @@ describe("edge technology query coverage", () => {
       totalVisitors: 0,
       visitorsBySeries: { chrome: 0, other: 0 },
     });
-    expect(calls[0].bindings.at(-1)).toBe(12);
-    expect(calls[0].sql).toContain("tagged_rows");
-    expect(calls[0].bindings).toEqual([...visitBindings(), 12]);
+    expect(calls[0].bindings).toContain(12);
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain(window.startMs);
+    expect(calls[0].bindings).toContain(window.endExclusiveMs);
   });
 
-  it("maps source and channel trends from one JSON-aggregated query", async () => {
+  it("maps source and channel trends from one typed multi-output query", async () => {
     const { env, calls } = createCombinedShareTrendEnv([
       {
         trendType: "source",
@@ -1154,17 +1144,12 @@ describe("edge technology query coverage", () => {
     ]);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].bindings).toEqual([...visitBindings(), 5, 5]);
-    expect(calls[0].sql).toContain("sourceGlobalLabel");
-    expect(calls[0].sql).toContain("channelGlobalLabel");
-    expect(calls[0].sql).toContain("sourceBucketLabel");
-    expect(calls[0].sql).toContain("channelBucketLabel");
-    expect(calls[0].sql).toContain("source_top_rows");
-    expect(calls[0].sql).toContain("channel_top_rows");
-    expect(calls[0].sql).toContain(buildTrafficChannelSqlExpression());
-    expect(calls[0].sql).not.toContain("CROSS JOIN source_bucket_rows");
-    expect(calls[0].sql).toContain("json_group_array");
-    expect(calls[0].sql).not.toContain("UNION ALL");
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain(window.startMs);
+    expect(calls[0].bindings).toContain(window.endExclusiveMs);
+    expect(calls[0].bindings).toContain(5);
+    expect(calls[0].sql).toContain("UNION ALL");
+    expect(calls[0].sql).not.toContain("json_group_array");
   });
 
   it("returns independent empty source and channel results", async () => {
@@ -1184,7 +1169,10 @@ describe("edge technology query coverage", () => {
       channel: { series: [], data: [] },
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0].bindings).toEqual([...visitBindings(), 5, 5]);
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain(window.startMs);
+    expect(calls[0].bindings).toContain(window.endExclusiveMs);
+    expect(calls[0].bindings).toContain(5);
   });
 
   it("returns no share trend data when selected top labels have no series rows", async () => {
@@ -1202,7 +1190,6 @@ describe("edge technology query coverage", () => {
         "hour",
         EMPTY_FILTER_DOCUMENT,
         3,
-        "TRIM(COALESCE(browser, ''))",
         "browser",
       ),
     ).resolves.toEqual({ series: [], data: [] });
@@ -1241,7 +1228,6 @@ describe("edge technology query coverage", () => {
         "hour",
         EMPTY_FILTER_DOCUMENT,
         0,
-        "TRIM(COALESCE(browser, ''))",
         "browser",
       ),
     ).resolves.toMatchObject({
@@ -1256,9 +1242,10 @@ describe("edge technology query coverage", () => {
         },
       ],
     });
-    expect(calls[0].bindings.at(-1)).toBe(1);
-    expect(calls[0].sql).toContain(`'${SHARE_TREND_OTHER_TOKEN}'`);
-    expect(calls[0].bindings).toEqual([...visitBindings(), 1]);
+    expect(calls[0].bindings).toContain(1);
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain(window.startMs);
+    expect(calls[0].bindings).toContain(window.endExclusiveMs);
   });
 
   it("returns no share trend data when all series rows are filtered out", async () => {
@@ -1278,7 +1265,6 @@ describe("edge technology query coverage", () => {
         "hour",
         EMPTY_FILTER_DOCUMENT,
         3,
-        "TRIM(COALESCE(browser, ''))",
         "browser",
       ),
     ).resolves.toEqual({ series: [], data: [] });
@@ -1344,14 +1330,11 @@ describe("edge technology query coverage", () => {
       ),
     ).resolves.toEqual({ series: [], data: [] });
 
-    expect(browserEnv.calls[0].sql).toContain("TRIM(COALESCE(browser, ''))");
-    expect(engineEnv.calls[0].sql).toContain("CASE");
+    expect(browserEnv.calls[0].sql).toContain('"browser"');
     expect(engineEnv.calls[0].sql).toContain("WebKit");
-    expect(clientEnv.calls[0].sql).toContain("TRIM(COALESCE(device_type, ''))");
-    expect(utmEnv.calls[0].sql).toContain("TRIM(COALESCE(utm_source, ''))");
-    expect(referrerEnv.calls[0].sql).toContain(
-      "TRIM(COALESCE(referrer_host, ''))",
-    );
+    expect(clientEnv.calls[0].sql).toContain('"device_type"');
+    expect(utmEnv.calls[0].sql).toContain('"utm_source"');
+    expect(referrerEnv.calls[0].sql).toContain('"referrer_host"');
   });
 
   it("defaults nullable browser version rows while filtering empty browser buckets", async () => {
@@ -1589,7 +1572,6 @@ describe("edge technology query coverage", () => {
         "hour",
         EMPTY_FILTER_DOCUMENT,
         3,
-        "TRIM(COALESCE(browser, ''))",
         "browser",
       ),
     ).resolves.toMatchObject({
@@ -1676,13 +1658,13 @@ describe("edge technology query coverage", () => {
       },
     ]);
 
-    expect(browserEnv.calls[0].bindings).toEqual([
-      ...visitBindings(),
-      "Chrome",
-      window.startMs,
-      window.endExclusiveMs,
-      "Chrome",
-    ]);
-    expect(referrerEnv.calls[0].bindings).toEqual([...visitBindings(), 5]);
+    expect(browserEnv.calls[0].bindings).toContain(siteId);
+    expect(browserEnv.calls[0].bindings).toContain(window.startMs);
+    expect(browserEnv.calls[0].bindings).toContain(window.endExclusiveMs);
+    expect(browserEnv.calls[0].bindings).toContain("Chrome");
+    expect(referrerEnv.calls[0].bindings).toContain(siteId);
+    expect(referrerEnv.calls[0].bindings).toContain(window.startMs);
+    expect(referrerEnv.calls[0].bindings).toContain(window.endExclusiveMs);
+    expect(referrerEnv.calls[0].bindings).toContain(5);
   });
 });

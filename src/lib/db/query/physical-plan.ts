@@ -1505,6 +1505,23 @@ function isAggregateRankingInput(root: LogicalQueryNode): boolean {
             (expression) => expressionSources(expression).length === 0,
           ) && visit(node.input.node);
         break;
+      case "window":
+        result =
+          node.windows.length === 1 &&
+          node.windows.every(
+            ({ specification }) =>
+              specification.kind === "row-number" &&
+              specification.partitionBy.length === 0 &&
+              specification.orderBy.length > 0 &&
+              specification.orderBy.every(
+                ({ direction }) => direction === "ASC" || direction === "DESC",
+              ),
+          ) &&
+          nodeExpressions(node).every(
+            (expression) => expressionSources(expression).length === 0,
+          ) &&
+          visit(node.input.node);
+        break;
       case "join":
         result =
           (node.joinType === "inner" || node.joinType === "left") &&
@@ -1520,7 +1537,6 @@ function isAggregateRankingInput(root: LogicalQueryNode): boolean {
       case "semi-join":
       case "anti-join":
       case "distinct":
-      case "window":
       case "sort":
       case "limit":
       case "union":
@@ -1567,7 +1583,20 @@ function terminalAggregateRanking(
 function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
   const forbidden = new Set<LogicalQueryNode>();
   const windowInput = new Set<LogicalQueryNode>();
-  const aggregateRanking = terminalAggregateRanking(root);
+  const rankingSorts = new Set<LogicalQueryNode>();
+  const rankingLimits = new Set<LogicalQueryNode>();
+  const rankingVisited = new Set<LogicalQueryNode>();
+  const collectRanking = (node: LogicalQueryNode): void => {
+    if (rankingVisited.has(node)) return;
+    rankingVisited.add(node);
+    const ranking = terminalAggregateRanking(node);
+    if (ranking) {
+      rankingSorts.add(ranking.sort);
+      if (ranking.limit) rankingLimits.add(ranking.limit);
+    }
+    nodeChildren(node).forEach((child) => collectRanking(child.node));
+  };
+  collectRanking(root);
   const visited = new Map<LogicalQueryNode, Set<string>>();
   const visit = (
     node: LogicalQueryNode,
@@ -1590,8 +1619,8 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
       windowInput.add(node);
 
     const terminalRootSort = node === root && node.kind === "sort";
-    const terminalAggregateRankingSort = node === aggregateRanking?.sort;
-    const terminalAggregateRankingLimit = node === aggregateRanking?.limit;
+    const terminalAggregateRankingSort = rankingSorts.has(node);
+    const terminalAggregateRankingLimit = rankingLimits.has(node);
     const branchTopN =
       branchOperandPath &&
       !topNSearchBlocked &&
@@ -1653,6 +1682,7 @@ interface CandidateFacts {
   readonly referencedScopes: RelationScope[];
   selective: boolean;
   forbidden: boolean;
+  rowNumberWindow: boolean;
 }
 
 function isConstantExistenceQuery(query: QuerySource): boolean {
@@ -1668,11 +1698,17 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
     referencedScopes: [],
     selective: false,
     forbidden: false,
+    rowNumberWindow: false,
   };
-  const visited = new Set<LogicalQueryNode>();
-  const visit = (node: LogicalQueryNode): void => {
-    if (visited.has(node)) return;
-    visited.add(node);
+  const visited = new Map<LogicalQueryNode, Set<boolean>>();
+  const visit = (node: LogicalQueryNode, querySourcePath: boolean): void => {
+    let contexts = visited.get(node);
+    if (!contexts) {
+      contexts = new Set();
+      visited.set(node, contexts);
+    }
+    if (contexts.has(querySourcePath)) return;
+    contexts.add(querySourcePath);
     facts.scopes.add(node.scope);
     if (
       node.kind === "filter" ||
@@ -1683,10 +1719,20 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
     if (
       node.kind === "sort" ||
       node.kind === "limit" ||
-      node.kind === "window" ||
       node.kind === "recursive-closure"
     )
       facts.forbidden = true;
+    if (node.kind === "window") {
+      if (
+        !querySourcePath &&
+        node.windows.length > 0 &&
+        node.windows.every(
+          ({ specification }) => specification.kind === "row-number",
+        )
+      )
+        facts.rowNumberWindow = true;
+      else facts.forbidden = true;
+    }
     for (const expression of nodeExpressions(node)) {
       const inspect = (current: SqlExpression): void => {
         if (current.kind === "column")
@@ -1763,9 +1809,12 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
       };
       inspect(expression);
     }
-    nodeSources(node).forEach((source) => visit(source.node));
+    nodeChildren(node).forEach((source) => visit(source.node, querySourcePath));
+    nodeExpressions(node)
+      .flatMap(expressionSources)
+      .forEach((source) => visit(source.node, true));
   };
-  visit(root);
+  visit(root, false);
   return facts;
 }
 
@@ -1834,7 +1883,9 @@ function sharedRelationDefinitions(
     if (node.fields.length <= MAX_SHARED_RELATION_FIELDS) {
       sharedMaterializations.set(
         node,
-        hoist.windowInput.has(node) ? "materialized" : "auto",
+        hoist.windowInput.has(node) || facts.rowNumberWindow
+          ? "materialized"
+          : "auto",
       );
       continue;
     }

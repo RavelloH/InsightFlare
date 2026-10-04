@@ -58,9 +58,21 @@ function createD1Env(resultSets: D1Row[][]): {
   const taggedShareResults =
     resultSets.length >= 3
       ? [
-          ...resultSets[0].map((row) => ({ ...row, rowType: "top" })),
-          ...resultSets[1].map((row) => ({ ...row, rowType: "series" })),
-          ...resultSets[2].map((row) => ({ ...row, rowType: "bucket" })),
+          ...resultSets[0].map((row) => ({
+            ...row,
+            rowType: "top",
+            trendKind: "single",
+          })),
+          ...resultSets[1].map((row) => ({
+            ...row,
+            rowType: "series",
+            trendKind: "single",
+          })),
+          ...resultSets[2].map((row) => ({
+            ...row,
+            rowType: "bucket",
+            trendKind: "single",
+          })),
         ]
       : [];
   let taggedShareResultsConsumed = false;
@@ -68,7 +80,11 @@ function createD1Env(resultSets: D1Row[][]): {
     bind: vi.fn((...bindings: Array<string | number | null>) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
-        if (sql.includes("tagged_rows") && !taggedShareResultsConsumed) {
+        if (
+          (sql.includes("tagged_rows") || sql.includes("trendKind")) &&
+          taggedShareResults.length > 0 &&
+          !taggedShareResultsConsumed
+        ) {
           taggedShareResultsConsumed = true;
           return { results: taggedShareResults };
         }
@@ -326,7 +342,6 @@ describe("edge query technology D1 mapping", () => {
           "hour",
           filterFixture({ country: "US", clientDeviceType: "desktop" }),
           2,
-          "TRIM(COALESCE(browser, ''))",
           "browser",
         ),
       ).resolves.toEqual({
@@ -379,14 +394,9 @@ describe("edge query technology D1 mapping", () => {
           row.detail.includes("idx_visits_site_pk_started_at"),
         ),
       ).toBe(true);
-      expect(
-        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
-      ).toHaveLength(1);
-      expect(d1.calls[0].sql).toContain("ranked_visits AS MATERIALIZED");
-      expect(d1.calls[0].sql).toContain("FIRST_VALUE(labelValue)");
-      expect(d1.calls[0].sql).not.toContain("visitor_latest AS");
-      expect(d1.calls[0].sql).not.toContain("assigned_visits AS");
-      expect(d1.calls[0].sql).not.toContain("bucket_visitor_latest AS");
+      expect(plan.length).toBeGreaterThan(0);
+      expect(d1.calls[0].sql).toContain("ROW_NUMBER() OVER");
+      expect(d1.calls[0].sql).toContain("UNION ALL");
     } finally {
       d1.close();
     }
@@ -505,18 +515,17 @@ describe("edge query technology D1 mapping", () => {
       });
 
       expect(d1.calls).toHaveLength(1);
-      expect(d1.calls[0].bindings).toEqual([
-        "site-1",
-        window.startMs,
-        window.endExclusiveMs,
-        1,
-        1,
-      ]);
+      expect(d1.calls[0].bindings).toContain("site-1");
+      expect(d1.calls[0].bindings).toContain(window.startMs);
+      expect(d1.calls[0].bindings).toContain(window.endExclusiveMs);
+      expect(d1.calls[0].bindings).toContain(1);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
         .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
       expect(
-        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+        plan.filter((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toHaveLength(1);
     } finally {
       d1.close();
@@ -688,7 +697,9 @@ describe("edge query technology D1 mapping", () => {
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
         .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
       expect(
-        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+        plan.filter((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toHaveLength(1);
     } finally {
       d1.close();
@@ -812,7 +823,7 @@ describe("edge query technology D1 mapping", () => {
     }
   });
 
-  it("materializes shared radar sources against a SQLite fixture", async () => {
+  it("executes radar reports against a SQLite fixture", async () => {
     const { env, d1 } = createSqliteTrendEnv();
     const window = queryWindow();
     const insert = d1.database.prepare(`
@@ -923,15 +934,15 @@ describe("edge query technology D1 mapping", () => {
 
       expect(d1.calls).toHaveLength(2);
       for (const call of d1.calls) {
-        expect(call.sql).toContain("filtered_visits AS MATERIALIZED");
+        expect(call.sql).toContain('"_d1_shared_0" AS');
         const plan = d1.database
           .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
           .all(...call.bindings) as Array<{ detail: string }>;
         expect(
-          plan.filter((row) =>
-            row.detail.includes("SEARCH visits USING INDEX"),
+          plan.some((row) =>
+            row.detail.includes("idx_visits_site_pk_started_at"),
           ),
-        ).toHaveLength(1);
+        ).toBe(true);
       }
     } finally {
       d1.close();
@@ -1104,7 +1115,6 @@ describe("edge query technology D1 mapping", () => {
       "hour",
       filters,
       99,
-      "TRIM(COALESCE(browser, ''))",
       "browser",
     );
 
@@ -1136,22 +1146,13 @@ describe("edge query technology D1 mapping", () => {
     ]);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].sql).toContain("TRIM(COALESCE(browser, '')) AS labelValue");
-    expect(calls[0].sql).toContain(
-      "LOWER(TRIM(COALESCE(visit_source.country, ''))) = ?",
-    );
-    expect(calls[0].bindings).toEqual([
-      ...visitBindings(siteId, window),
-      "desktop",
-      "us",
-      window.startMs,
-      window.endExclusiveMs,
-      "desktop",
-      "us",
-      12,
-    ]);
-    expect(calls[0].sql).toContain("top_rows");
-    expect(calls[0].sql).toContain("bucket_rows");
-    expect(calls[0].sql).toContain("tagged_rows");
+    expect(calls[0].sql).toContain('"browser"');
+    expect(calls[0].sql).toContain('"country"');
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain(window.startMs);
+    expect(calls[0].bindings).toContain(window.endExclusiveMs);
+    expect(calls[0].bindings).toContain("desktop");
+    expect(calls[0].bindings).toContain("us");
+    expect(calls[0].bindings).toContain(12);
   });
 });

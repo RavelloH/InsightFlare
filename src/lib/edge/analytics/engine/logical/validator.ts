@@ -1727,12 +1727,6 @@ function validateNode(
           `${path}.input`,
           "Ranked members require an input with a non-empty keyed grain.",
         );
-      if (node.groups.length === 0)
-        fail(
-          "invalid-topology",
-          `${path}.groups`,
-          "Ranked members require at least one partition key.",
-        );
       if (new Set(node.groups).size !== node.groups.length)
         fail(
           "invalid-topology",

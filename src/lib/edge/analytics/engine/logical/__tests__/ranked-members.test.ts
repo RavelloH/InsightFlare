@@ -181,7 +181,7 @@ describe("logical ranked-members and bucket-index", () => {
     );
 
     expect(() => validateLogicalPlan(withRankedNode({ groups: [] }))).toThrow(
-      "at least one partition key",
+      "cover the complete scalar input grain",
     );
     expect(() =>
       validateLogicalPlan(
@@ -266,7 +266,10 @@ describe("logical ranked-members and bucket-index", () => {
     };
 
     const validOrder = [{ slot: "views", direction: "desc", nulls: "last" }];
-    assertBuilderRejects({ groups: [], order: validOrder }, "requires_groups");
+    assertBuilderRejects(
+      { groups: [], order: validOrder },
+      "incomplete_grain_order",
+    );
     assertBuilderRejects({ groups: ["pathname"], order: [] }, "requires_order");
     assertBuilderRejects(
       { groups: ["missing"], order: validOrder },
@@ -343,6 +346,34 @@ describe("logical ranked-members and bucket-index", () => {
         order: [{ slot: "entity", direction: "asc", nulls: "last" }],
       }),
     ).toThrow("requires_scalar_slots");
+  });
+
+  it("allows global ranked-members only when ordering covers its full grain", () => {
+    const { builder, grouped } = rankedPlan();
+    const ranked = builder.rankedMembers(grouped, {
+      groups: [],
+      order: [
+        { slot: "views", direction: "desc", nulls: "last" },
+        { slot: "pathname", direction: "asc", nulls: "first" },
+        { slot: "title", direction: "asc", nulls: "first" },
+      ],
+    });
+    builder.output("global-ranked", ranked, [{ name: "rank", slot: "rank" }]);
+
+    const plan = builder.finish();
+    const node = plan.nodes.find((item) => item.id === ranked.id);
+    expect(node).toMatchObject({ kind: "ranked-members", groups: [] });
+    expect(
+      validateLogicalPlan(JSON.parse(JSON.stringify(plan)) as LogicalPlan),
+    ).toEqual(plan);
+
+    const invalid = rankedPlan();
+    expect(() =>
+      invalid.builder.rankedMembers(invalid.grouped, {
+        groups: [],
+        order: [{ slot: "views", direction: "desc", nulls: "last" }],
+      }),
+    ).toThrow("logical_builder_ranked_members_incomplete_grain_order");
   });
 
   it("exposes calendar bucket indexes as nullable unitless numbers only", () => {

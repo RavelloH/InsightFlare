@@ -1061,8 +1061,6 @@ export class LogicalPlanBuilder {
     const source = this.#owned(input);
     if (input.grain.kind !== "keyed" || input.grain.keys.length === 0)
       throw new Error("logical_builder_ranked_members_requires_keyed_input");
-    if (selection.groups.length === 0)
-      throw new Error("logical_builder_ranked_members_requires_groups");
     if (selection.order.length === 0)
       throw new Error("logical_builder_ranked_members_requires_order");
     if (Object.hasOwn(input.slots, "rank"))
