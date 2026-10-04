@@ -5,7 +5,7 @@ import {
   type FilterDocument,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
+import { resolveCrossBreakdownPageDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
 import type { Env } from "@/lib/edge/types";
 
@@ -24,8 +24,10 @@ export interface ReadSiteCrossBreakdownInput {
 export async function readSiteCrossBreakdown(
   input: ReadSiteCrossBreakdownInput,
 ): Promise<CrossBreakdownResult> {
-  const primary = resolveCrossBreakdownDimension(input.primaryDimension);
-  const secondary = resolveCrossBreakdownDimension(input.secondaryDimension);
+  const primary = resolveCrossBreakdownPageDimension(input.primaryDimension);
+  const secondary = resolveCrossBreakdownPageDimension(
+    input.secondaryDimension,
+  );
   if (
     !primary ||
     !secondary ||

@@ -1,7 +1,7 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
-import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
+import { resolveCrossBreakdownPageDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
   queryBrowserCrossBreakdownFromD1,
   queryBrowserEngineTrendFromD1,
@@ -146,10 +146,10 @@ export function registerTechnologyProviders(
           );
           return { value };
         }
-        const primaryDimension = resolveCrossBreakdownDimension(
+        const primaryDimension = resolveCrossBreakdownPageDimension(
           request.primaryDimension,
         );
-        const secondaryDimension = resolveCrossBreakdownDimension(
+        const secondaryDimension = resolveCrossBreakdownPageDimension(
           request.secondaryDimension,
         );
         if (

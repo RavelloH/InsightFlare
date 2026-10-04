@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
   handleBrowserCrossBreakdownContract as handleBrowserCrossBreakdown,
   handleBrowserEngineTrendContract as handleBrowserEngineTrend,
@@ -639,11 +640,11 @@ describe("edge query technology handlers", () => {
       12,
       1,
       {
-        labelExpr: "TRIM(COALESCE(browser, ''))",
+        selection: PAGE_DIMENSION_SELECTIONS.browser,
         fallbackKeyBase: "browser",
       },
       {
-        labelExpr: "TRIM(COALESCE(device_type, ''))",
+        selection: PAGE_DIMENSION_SELECTIONS.deviceType,
         fallbackKeyBase: "device",
       },
     );
@@ -674,11 +675,11 @@ describe("edge query technology handlers", () => {
       5,
       6,
       {
-        labelExpr: "TRIM(COALESCE(device_type, ''))",
+        selection: PAGE_DIMENSION_SELECTIONS.deviceType,
         fallbackKeyBase: "device",
       },
       {
-        labelExpr: "TRIM(COALESCE(os, ''))",
+        selection: PAGE_DIMENSION_SELECTIONS.operatingSystem,
         fallbackKeyBase: "os",
       },
     );

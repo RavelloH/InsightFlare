@@ -4,7 +4,18 @@ import {
   BROWSER_VERSION_BREAKDOWN_OUTPUT,
   buildBrowserVersionBreakdownPlan,
 } from "@/lib/edge/analytics/engine/browser-version-breakdown-report-plan";
-import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
+import {
+  PAGE_DIMENSION_SELECTIONS,
+  type PageDimensionSelection,
+} from "@/lib/edge/analytics/engine/dimension-report-plan";
+import {
+  buildTechnologyCrossBreakdownPlan,
+  TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS,
+} from "@/lib/edge/analytics/engine/technology-cross-breakdown-report-plan";
+import {
+  queryAnalyticsReportOutputRowsFromD1,
+  queryAnalyticsReportOutputSetRowsFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type {
   BrowserCrossAggregateRow,
   BrowserCrossBreakdownDimensionDataRow,
@@ -24,13 +35,11 @@ import {
   BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
   BROWSER_CROSS_UNKNOWN_TOKEN,
   BROWSER_VERSION_UNKNOWN_TOKEN,
-  queryD1All,
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
-import { technologyVisitSource } from "./scoped-source";
 import { queryShareTrendFromD1 } from "./share-trend";
 
 export async function queryBrowserTrendFromD1(
@@ -200,146 +209,44 @@ export async function queryBrowserCrossDimensionFromD1(
   filters: FilterDocument,
   browserLimit: number,
   dimensionLimit: number,
-  dimensionExpr: string,
+  dimensionSelection: PageDimensionSelection,
   fallbackKeyBase: string,
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
-  const source = technologyVisitSource(siteId, window, filters);
-  const normalizedBrowserLimit = Math.min(Math.max(1, browserLimit), 12);
-  const normalizedDimensionLimit = Math.min(Math.max(1, dimensionLimit), 8);
-  const browserExpr = "TRIM(COALESCE(browser, ''))";
-  const normalizedDimensionExpr = `CASE WHEN ${dimensionExpr} != '' THEN ${dimensionExpr} ELSE '${BROWSER_CROSS_UNKNOWN_TOKEN}' END`;
-  const sql = `
-WITH
-${source.ctes},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    ${browserExpr} AS browser,
-    ${normalizedDimensionExpr} AS dimension,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM ${source.relation}
-  ${source.filterClause}
-),
-top_browser_aggregate AS (
-  SELECT
-    browser,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-  FROM filtered_visits
-  WHERE browser != ''
-  GROUP BY browser
-),
-top_browser_rows AS (
-  SELECT
-    browser,
-    views,
-    visitors,
-    sessions,
-    ROW_NUMBER() OVER (
-      ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
-    ) AS rowOrder
-  FROM top_browser_aggregate
-  ORDER BY visitors DESC, views DESC, sessions DESC, browser ASC
-  LIMIT ?
-),
-top_dimension_aggregate AS (
-  SELECT
-    dimension,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-  FROM filtered_visits
-  WHERE browser != ''
-  GROUP BY dimension
-),
-top_dimension_rows AS (
-  SELECT
-    dimension,
-    views,
-    visitors,
-    sessions,
-    ROW_NUMBER() OVER (
-      ORDER BY visitors DESC, views DESC, sessions DESC, dimension ASC
-    ) AS rowOrder
-  FROM top_dimension_aggregate
-  ORDER BY visitors DESC, views DESC, sessions DESC, dimension ASC
-  LIMIT ?
-),
-normalized_visits AS (
-  SELECT
-    CASE
-      WHEN browser IN (
-        SELECT browser
-        FROM top_browser_rows
-        WHERE browser != '' AND visitors > 0
-      ) THEN browser
-      ELSE '${BROWSER_CROSS_OTHER_BROWSER_TOKEN}'
-    END AS browserBucket,
-    CASE
-      WHEN dimension IN (
-        SELECT dimension
-        FROM top_dimension_rows
-        WHERE visitors > 0
-      ) THEN dimension
-      ELSE '${BROWSER_CROSS_OTHER_DIMENSION_TOKEN}'
-    END AS dimensionBucket,
-    visitorId,
-    sessionId
-  FROM filtered_visits
-  WHERE browser != ''
-),
-pair_rows AS (
-  SELECT
-    browserBucket AS browser,
-    dimensionBucket AS dimension,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-  FROM normalized_visits
-  GROUP BY browserBucket, dimensionBucket
-),
-tagged_rows AS (
-  SELECT
-    'browser' AS rowType,
-    browser,
-    NULL AS dimension,
-    views,
-    visitors,
-    sessions,
-    rowOrder
-  FROM top_browser_rows
-  UNION ALL
-  SELECT
-    'dimension' AS rowType,
-    NULL AS browser,
-    dimension,
-    views,
-    visitors,
-    sessions,
-    rowOrder
-  FROM top_dimension_rows
-  UNION ALL
-  SELECT
-    'pair' AS rowType,
-    browser,
-    dimension,
-    views,
-    visitors,
-    sessions,
-    0 AS rowOrder
-  FROM pair_rows
-)
-SELECT rowType, browser, dimension, views, visitors, sessions
-FROM tagged_rows
-ORDER BY rowType ASC, rowOrder ASC, browser ASC, dimension ASC
-`;
-  const queryRows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...source.bindings,
-    ...source.filterBindings,
-    normalizedBrowserLimit,
-    normalizedDimensionLimit,
-  ]);
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildTechnologyCrossBreakdownPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    family: "browser",
+    primarySelection: PAGE_DIMENSION_SELECTIONS.browser,
+    secondarySelection: dimensionSelection,
+    primaryLimit: browserLimit,
+    secondaryLimit: dimensionLimit,
+    tokens: {
+      unknown: BROWSER_CROSS_UNKNOWN_TOKEN,
+      otherPrimary: BROWSER_CROSS_OTHER_BROWSER_TOKEN,
+      otherSecondary: BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
+    },
+  });
+  const queryRows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+    outputIds: Object.values(TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS),
+    fields: [
+      "rowType",
+      "browser",
+      "dimension",
+      "views",
+      "visitors",
+      "sessions",
+      "rowOrder",
+    ],
+    orderBy: [
+      { field: "rowType", direction: "asc", nulls: "first" },
+      { field: "rowOrder", direction: "asc", nulls: "first" },
+      { field: "browser", direction: "asc", nulls: "first" },
+      { field: "dimension", direction: "asc", nulls: "first" },
+    ],
+  });
   const topBrowsers = queryRows
     .filter((row) => row.rowType === "browser")
     .map((row) => ({
@@ -599,7 +506,7 @@ export async function queryBrowserCrossBreakdownFromD1(
       filters,
       browserLimit,
       osLimit,
-      "TRIM(COALESCE(os, ''))",
+      PAGE_DIMENSION_SELECTIONS.operatingSystem,
       "os",
     ),
     queryBrowserCrossDimensionFromD1(
@@ -609,7 +516,7 @@ export async function queryBrowserCrossBreakdownFromD1(
       filters,
       browserLimit,
       deviceTypeLimit,
-      "TRIM(COALESCE(device_type, ''))",
+      PAGE_DIMENSION_SELECTIONS.deviceType,
       "device",
     ),
   ]);

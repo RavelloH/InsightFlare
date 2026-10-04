@@ -1,4 +1,9 @@
 import { browserEngineCaseSql } from "@/lib/browser-engine";
+import type { CrossBreakdownDimension } from "@/lib/edge/analytics/contract/dimensions";
+import {
+  crossBreakdownPageDimensionSelection,
+  type PageDimensionSelection,
+} from "@/lib/edge/analytics/engine/dimension-report-plan";
 
 import {
   type ClientDimensionKey,
@@ -268,4 +273,62 @@ export function resolveCrossBreakdownDimension(
 
   // ── event (requires events table join, not supported) ─────────────────
   return null;
+}
+
+const CROSS_BREAKDOWN_FALLBACK_KEYS: Readonly<
+  Record<CrossBreakdownDimension, string>
+> = {
+  "page.path": "page",
+  "page.title": "title",
+  "page.hostname": "hostname",
+  "page.query": "query",
+  "page.hash": "hash",
+  "referrer.domain": "referrer-domain",
+  "referrer.url": "referrer-url",
+  "utm.source": "utm-source",
+  "utm.medium": "utm-medium",
+  "utm.campaign": "utm-campaign",
+  "utm.term": "utm-term",
+  "utm.content": "utm-content",
+  "client.browser": "browser",
+  browser: "browser",
+  "client.browserVersion": "browser-version",
+  "client.browserEngine": "engine",
+  "client.os": "os",
+  operatingSystem: "os",
+  "client.osVersion": "os-version",
+  osVersion: "os-version",
+  "client.deviceType": "device",
+  deviceType: "device",
+  "client.language": "language",
+  language: "language",
+  "client.screenSize": "screen",
+  screenSize: "screen",
+  "geo.country": "country",
+  "geo.region": "region",
+  "geo.city": "city",
+  "geo.continent": "continent",
+  "geo.timeZone": "timezone",
+  "geo.organization": "organization",
+  "user.id": "user-id",
+  "user.name": "user-name",
+};
+
+export interface CrossBreakdownPageDimensionDefinition {
+  readonly selection: PageDimensionSelection;
+  readonly fallbackKeyBase: string;
+}
+
+/** Resolves only registered Cross dimensions to typed Page selections. */
+export function resolveCrossBreakdownPageDimension(
+  dimension: string,
+): CrossBreakdownPageDimensionDefinition | null {
+  const selection = crossBreakdownPageDimensionSelection(dimension);
+  if (!selection || !Object.hasOwn(CROSS_BREAKDOWN_FALLBACK_KEYS, dimension))
+    return null;
+  return {
+    selection,
+    fallbackKeyBase:
+      CROSS_BREAKDOWN_FALLBACK_KEYS[dimension as CrossBreakdownDimension],
+  };
 }

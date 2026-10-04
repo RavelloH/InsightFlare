@@ -4,13 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   BROWSER_VERSION_UNKNOWN_TOKEN,
-  clientDimensionDefinition,
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { resolveCrossBreakdownPageDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
   queryBrowserCrossDimensionFromD1,
   queryBrowserVersionBreakdownFromD1,
@@ -390,11 +391,10 @@ describe("edge query technology D1 mapping", () => {
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
         .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
       expect(
-        plan.some((row) =>
+        plan.filter((row) =>
           row.detail.includes("idx_visits_site_pk_started_at"),
         ),
-      ).toBe(true);
-      expect(plan.length).toBeGreaterThan(0);
+      ).toHaveLength(1);
       expect(d1.calls[0].sql).toContain("ROW_NUMBER() OVER");
       expect(d1.calls[0].sql).toContain("UNION ALL");
     } finally {
@@ -593,8 +593,8 @@ describe("edge query technology D1 mapping", () => {
           EMPTY_FILTER_DOCUMENT,
           2,
           1,
-          clientDimensionDefinition("browser"),
-          clientDimensionDefinition("deviceType"),
+          resolveCrossBreakdownPageDimension("browser")!,
+          resolveCrossBreakdownPageDimension("deviceType")!,
         ),
       ).resolves.toEqual({
         columns: [
@@ -759,7 +759,7 @@ describe("edge query technology D1 mapping", () => {
         EMPTY_FILTER_DOCUMENT,
         2,
         1,
-        "TRIM(COALESCE(os, ''))",
+        PAGE_DIMENSION_SELECTIONS.operatingSystem,
         "os",
       );
 
@@ -816,8 +816,18 @@ describe("edge query technology D1 mapping", () => {
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
         .all(...d1.calls[0].bindings) as Array<{ detail: string }>;
       expect(
-        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
+        plan.filter((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
       ).toHaveLength(1);
+      expect(
+        plan.filter((row) => row.detail.includes("LEFT-JOIN")),
+      ).toHaveLength(2);
+      expect(
+        plan.filter((row) =>
+          row.detail.includes("USE TEMP B-TREE FOR GROUP BY"),
+        ),
+      ).toHaveLength(5);
     } finally {
       d1.close();
     }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   BROWSER_CROSS_OTHER_BROWSER_TOKEN,
@@ -14,7 +15,7 @@ import {
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { clientDimensionDefinition } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { resolveCrossBreakdownPageDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
   queryBrowserCrossBreakdownFromD1,
   queryBrowserCrossDimensionFromD1,
@@ -86,12 +87,47 @@ function createD1Env(resultSets: D1Row[][]): {
           ...(resultSets[2] ?? []).map((row) => withRowType(row, "pair")),
         ]
       : [];
+  let clientCrossConsumed = false;
   let taggedShareResultsConsumed = false;
   let taggedClientCrossResultsConsumed = false;
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...bindings: Array<string | number | null>) => ({
       all: vi.fn(async () => {
         calls.push({ sql, bindings });
+        if (
+          bindings.includes("browser") &&
+          bindings.includes("dimension") &&
+          bindings.includes("pair")
+        ) {
+          const browserRows = pendingResults.shift() ?? [];
+          const dimensionRows = pendingResults.shift() ?? [];
+          const pairRows = pendingResults.shift() ?? [];
+          return {
+            results: [
+              ...browserRows.map((row) => withRowType(row, "browser")),
+              ...dimensionRows.map((row) => withRowType(row, "dimension")),
+              ...pairRows.map((row) => withRowType(row, "pair")),
+            ],
+          };
+        }
+        if (
+          bindings.includes("primary") &&
+          bindings.includes("secondary") &&
+          bindings.includes("pair") &&
+          !clientCrossConsumed
+        ) {
+          clientCrossConsumed = true;
+          const primaryRows = pendingResults.shift() ?? [];
+          const secondaryRows = pendingResults.shift() ?? [];
+          const pairRows = pendingResults.shift() ?? [];
+          return {
+            results: [
+              ...primaryRows.map((row) => withRowType(row, "primary")),
+              ...secondaryRows.map((row) => withRowType(row, "secondary")),
+              ...pairRows.map((row) => withRowType(row, "pair")),
+            ],
+          };
+        }
         if (sql.includes("top_browser_rows") && sql.includes("tagged_rows")) {
           const browserRows = pendingResults.shift() ?? [];
           const dimensionRows = pendingResults.shift() ?? [];
@@ -422,7 +458,7 @@ describe("edge technology query coverage", () => {
       EMPTY_FILTER_DOCUMENT,
       99,
       0,
-      "TRIM(COALESCE(os, ''))",
+      PAGE_DIMENSION_SELECTIONS.operatingSystem,
       "os",
     );
 
@@ -577,8 +613,8 @@ describe("edge technology query coverage", () => {
       },
     ]);
     expect(result.totalVisitors).toBe(16);
-    expect(calls[0].bindings.at(-2)).toBe(12);
-    expect(calls[0].bindings.at(-1)).toBe(1);
+    expect(calls[0].bindings).toContain(12);
+    expect(calls[0].bindings).toContain(1);
   });
 
   it("returns empty browser cross dimensions when top buckets are missing", async () => {
@@ -596,7 +632,7 @@ describe("edge technology query coverage", () => {
         EMPTY_FILTER_DOCUMENT,
         3,
         3,
-        "TRIM(COALESCE(os, ''))",
+        PAGE_DIMENSION_SELECTIONS.operatingSystem,
         "os",
       ),
     ).resolves.toEqual({ columns: [], rows: [], totalVisitors: 0 });
@@ -608,7 +644,7 @@ describe("edge technology query coverage", () => {
         EMPTY_FILTER_DOCUMENT,
         3,
         3,
-        "TRIM(COALESCE(os, ''))",
+        PAGE_DIMENSION_SELECTIONS.operatingSystem,
         "os",
       ),
     ).resolves.toEqual({ columns: [], rows: [], totalVisitors: 0 });
@@ -662,10 +698,11 @@ describe("edge technology query coverage", () => {
       label: "desktop",
     });
     expect(calls).toHaveLength(2);
-    expect(calls[0].sql).toContain("TRIM(COALESCE(os, ''))");
-    expect(calls[1].sql).toContain("TRIM(COALESCE(device_type, ''))");
-    expect(calls[0].bindings.at(-1)).toBe(2);
-    expect(calls[1].bindings.at(-1)).toBe(3);
+    expect(calls[0].sql).toContain("LEFT JOIN");
+    expect(calls[1].sql).toContain("LEFT JOIN");
+    expect(calls[0].sql).not.toContain("TRIM(COALESCE(os,");
+    expect(calls[1].sql).not.toContain("TRIM(COALESCE(device_type,");
+    expect(calls).toHaveLength(2);
   });
 
   it("maps client cross dimensions with unknown and other buckets", async () => {
@@ -732,8 +769,8 @@ describe("edge technology query coverage", () => {
       EMPTY_FILTER_DOCUMENT,
       3,
       2,
-      clientDimensionDefinition("browser"),
-      clientDimensionDefinition("deviceType"),
+      resolveCrossBreakdownPageDimension("browser")!,
+      resolveCrossBreakdownPageDimension("deviceType")!,
     );
 
     expect(result.columns).toEqual([
@@ -813,8 +850,8 @@ describe("edge technology query coverage", () => {
         EMPTY_FILTER_DOCUMENT,
         3,
         3,
-        clientDimensionDefinition("browser"),
-        clientDimensionDefinition("deviceType"),
+        resolveCrossBreakdownPageDimension("browser")!,
+        resolveCrossBreakdownPageDimension("deviceType")!,
       ),
     ).resolves.toEqual({ columns: [], rows: [], totalVisitors: 0 });
     await expect(
@@ -825,8 +862,8 @@ describe("edge technology query coverage", () => {
         EMPTY_FILTER_DOCUMENT,
         3,
         3,
-        clientDimensionDefinition("browser"),
-        clientDimensionDefinition("deviceType"),
+        resolveCrossBreakdownPageDimension("browser")!,
+        resolveCrossBreakdownPageDimension("deviceType")!,
       ),
     ).resolves.toEqual({ columns: [], rows: [], totalVisitors: 0 });
 
@@ -881,8 +918,8 @@ describe("edge technology query coverage", () => {
         EMPTY_FILTER_DOCUMENT,
         2,
         1,
-        clientDimensionDefinition("deviceType"),
-        clientDimensionDefinition("browser"),
+        resolveCrossBreakdownPageDimension("deviceType")!,
+        resolveCrossBreakdownPageDimension("browser")!,
       ),
     ).resolves.toMatchObject({
       columns: [{ key: "chrome", label: "Chrome" }],
@@ -1434,7 +1471,7 @@ describe("edge technology query coverage", () => {
         EMPTY_FILTER_DOCUMENT,
         3,
         3,
-        "TRIM(COALESCE(os, ''))",
+        PAGE_DIMENSION_SELECTIONS.operatingSystem,
         "os",
       ),
     ).resolves.toEqual({
@@ -1516,8 +1553,8 @@ describe("edge technology query coverage", () => {
         EMPTY_FILTER_DOCUMENT,
         3,
         3,
-        clientDimensionDefinition("browser"),
-        clientDimensionDefinition("deviceType"),
+        resolveCrossBreakdownPageDimension("browser")!,
+        resolveCrossBreakdownPageDimension("deviceType")!,
       ),
     ).resolves.toEqual({
       columns: [

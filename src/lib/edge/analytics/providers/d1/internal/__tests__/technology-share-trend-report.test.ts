@@ -20,11 +20,13 @@ import {
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import { CROSS_BREAKDOWN_DIMENSIONS } from "@/lib/edge/analytics/contract/dimensions";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type {
   QueryInput,
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
+import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { buildTechnologyReferrerChannelTrendPlan } from "@/lib/edge/analytics/engine/technology-share-trend-report-plan";
 import type {
   BrowserVersionAggregateRow,
@@ -34,12 +36,27 @@ import type {
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
+  BROWSER_CROSS_OTHER_BROWSER_TOKEN,
+  BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
+  BROWSER_CROSS_UNKNOWN_TOKEN,
   BROWSER_VERSION_UNKNOWN_TOKEN,
   browserMajorVersionExpr,
+  CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
+  CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
+  CLIENT_CROSS_UNKNOWN_TOKEN,
+  clientDimensionDefinition,
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { queryBrowserVersionBreakdownFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/browser";
+import {
+  resolveCrossBreakdownDimension,
+  resolveCrossBreakdownPageDimension,
+} from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
+import {
+  queryBrowserCrossDimensionFromD1,
+  queryBrowserVersionBreakdownFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/technology/browser";
+import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
 import { technologyVisitSource } from "@/lib/edge/analytics/providers/d1/internal/technology/scoped-source";
 import {
   queryReferrerAndChannelTrendFromD1,
@@ -812,6 +829,145 @@ async function compileOnly(
   };
 }
 
+type CrossFamily = "browser" | "client";
+
+function legacyCrossStatement(input: {
+  readonly family: CrossFamily;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly primaryExpr: string;
+  readonly secondaryExpr: string;
+  readonly primaryLimit: number;
+  readonly secondaryLimit: number;
+}) {
+  const source = technologyVisitSource(
+    input.siteId,
+    input.window,
+    input.filters,
+  );
+  const browser = input.family === "browser";
+  const primaryField = browser ? "browser" : "primaryValue";
+  const secondaryField = browser ? "dimension" : "secondaryValue";
+  const rowTypes = browser
+    ? { primary: "browser", secondary: "dimension", pairs: "pair" }
+    : { primary: "primary", secondary: "secondary", pairs: "pair" };
+  const tokens = browser
+    ? {
+        unknown: BROWSER_CROSS_UNKNOWN_TOKEN,
+        otherPrimary: BROWSER_CROSS_OTHER_BROWSER_TOKEN,
+        otherSecondary: BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
+      }
+    : {
+        unknown: CLIENT_CROSS_UNKNOWN_TOKEN,
+        otherPrimary: CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
+        otherSecondary: CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
+      };
+  const secondaryExpr = `CASE WHEN ${input.secondaryExpr} != '' THEN ${input.secondaryExpr} ELSE '${tokens.unknown}' END`;
+  const sql = `
+WITH
+${source.ctes},
+filtered_visits AS MATERIALIZED (
+  SELECT
+    ${input.primaryExpr} AS primaryValue,
+    ${secondaryExpr} AS secondaryValue,
+    visitor_id AS visitorId,
+    session_id AS sessionId
+  FROM ${source.relation}
+  ${source.filterClause}
+),
+top_primary_aggregate AS (
+  SELECT primaryValue, count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM filtered_visits WHERE primaryValue != '' GROUP BY primaryValue
+),
+top_primary_rows AS (
+  SELECT primaryValue, views, visitors, sessions,
+    ROW_NUMBER() OVER (ORDER BY visitors DESC, views DESC, sessions DESC, primaryValue ASC) AS rowOrder
+  FROM top_primary_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, primaryValue ASC LIMIT ?
+),
+top_secondary_aggregate AS (
+  SELECT secondaryValue, count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM filtered_visits WHERE primaryValue != '' GROUP BY secondaryValue
+),
+top_secondary_rows AS (
+  SELECT secondaryValue, views, visitors, sessions,
+    ROW_NUMBER() OVER (ORDER BY visitors DESC, views DESC, sessions DESC, secondaryValue ASC) AS rowOrder
+  FROM top_secondary_aggregate
+  ORDER BY visitors DESC, views DESC, sessions DESC, secondaryValue ASC LIMIT ?
+),
+normalized_visits AS (
+  SELECT
+    CASE WHEN primaryValue IN (SELECT primaryValue FROM top_primary_rows WHERE primaryValue != '' AND visitors > 0)
+      THEN primaryValue ELSE '${tokens.otherPrimary}' END AS primaryBucket,
+    CASE WHEN secondaryValue IN (SELECT secondaryValue FROM top_secondary_rows WHERE visitors > 0)
+      THEN secondaryValue ELSE '${tokens.otherSecondary}' END AS secondaryBucket,
+    visitorId, sessionId
+  FROM filtered_visits WHERE primaryValue != ''
+),
+pair_rows AS (
+  SELECT primaryBucket, secondaryBucket, count(*) AS views,
+    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
+    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
+  FROM normalized_visits GROUP BY primaryBucket, secondaryBucket
+),
+tagged_rows AS (
+  SELECT '${rowTypes.primary}' AS rowType, primaryValue AS ${primaryField}, NULL AS ${secondaryField},
+    views, visitors, sessions, rowOrder FROM top_primary_rows
+  UNION ALL
+  SELECT '${rowTypes.secondary}' AS rowType, NULL AS ${primaryField}, secondaryValue AS ${secondaryField},
+    views, visitors, sessions, rowOrder FROM top_secondary_rows
+  UNION ALL
+  SELECT '${rowTypes.pairs}' AS rowType, primaryBucket AS ${primaryField}, secondaryBucket AS ${secondaryField},
+    views, visitors, sessions, 0 AS rowOrder FROM pair_rows
+)
+SELECT rowType, ${primaryField}, ${secondaryField}, views, visitors, sessions, rowOrder
+FROM tagged_rows
+ORDER BY rowType ASC, rowOrder ASC, ${primaryField} ASC, ${secondaryField} ASC
+`;
+  return {
+    sql,
+    bindings: [
+      ...source.bindings,
+      ...source.filterBindings,
+      Math.min(Math.max(1, input.primaryLimit), 12),
+      Math.min(Math.max(1, input.secondaryLimit), 8),
+    ],
+  };
+}
+
+function normalizeLegacyCrossRows(
+  rows: readonly Record<string, unknown>[],
+  family: CrossFamily,
+) {
+  const primaryField = family === "browser" ? "browser" : "primaryValue";
+  const secondaryField = family === "browser" ? "dimension" : "secondaryValue";
+  return rows.map((row) => ({
+    rowType: String(row.rowType),
+    primaryValue: row[primaryField] ?? null,
+    secondaryValue: row[secondaryField] ?? null,
+    views: Number(row.views),
+    visitors: Number(row.visitors),
+    sessions: Number(row.sessions),
+    rowOrder: Number(row.rowOrder),
+  }));
+}
+
+function rowsFromSqlite(
+  db: DatabaseSync,
+  sql: string,
+  bindings: readonly unknown[],
+) {
+  return db.prepare(sql).all(...(bindings as SQLInputValue[])) as Record<
+    string,
+    unknown
+  >[];
+}
+
 describe("technology share trend Logical report budgets", () => {
   afterAll(() => {
     vi.restoreAllMocks();
@@ -841,6 +997,25 @@ describe("technology share trend Logical report budgets", () => {
     ).toHaveLength(2);
     expect(plan.nodes.filter((node) => node.kind === "join")).toHaveLength(6);
     expect(plan.outputs).toHaveLength(6);
+  });
+
+  it("resolves only the finite Cross dimension registry and preserves fallback keys", () => {
+    for (const dimension of CROSS_BREAKDOWN_DIMENSIONS) {
+      const typed = resolveCrossBreakdownPageDimension(dimension);
+      const legacy = resolveCrossBreakdownDimension(dimension);
+      expect(typed, dimension).not.toBeNull();
+      expect(legacy, dimension).not.toBeNull();
+      expect(typed?.fallbackKeyBase, dimension).toBe(legacy?.fallbackKeyBase);
+    }
+    expect(resolveCrossBreakdownPageDimension("session.entryPath")).toBeNull();
+    expect(resolveCrossBreakdownPageDimension("event.name")).toBeNull();
+    expect(resolveCrossBreakdownPageDimension("unknown.dimension")).toBeNull();
+    expect(resolveCrossBreakdownPageDimension("browser")?.selection).toEqual(
+      resolveCrossBreakdownPageDimension("client.browser")?.selection,
+    );
+    expect(
+      resolveCrossBreakdownPageDimension("operatingSystem")?.selection,
+    ).toEqual(resolveCrossBreakdownPageDimension("client.os")?.selection);
   });
 
   it("executes 40-payload matches and rejects partial matches in both readers", async () => {
@@ -1549,5 +1724,599 @@ describe("browser version breakdown Logical report", () => {
         parentWithinBudget,
       }),
     );
+  });
+
+  it("matches the frozen Cross SQL for both readers and source profiles", async () => {
+    const preparedPage128 = withAdvancedMatches(
+      prepareTrendFilters(pagePathFilter("/prepared-match")),
+      {
+        visitIds: [
+          { siteId: SITE_ID, id: "prepared-page-match" },
+          ...Array.from({ length: 127 }, (_unused, index) => ({
+            siteId: SITE_ID,
+            id: `wave57-cross-missing-${index}`,
+          })),
+        ],
+      },
+    );
+    const sourceCases = [
+      { label: "plain", filters: EMPTY_FILTER_DOCUMENT },
+      { label: "direct-40-exists", filters: directPayloadExistsFilters() },
+      { label: "prepared-page-128", filters: preparedPage128 },
+    ] as const;
+
+    for (const sourceCase of sourceCases) {
+      for (const family of ["browser", "client"] as const) {
+        const primaryExpr =
+          family === "browser"
+            ? "TRIM(COALESCE(browser, ''))"
+            : clientDimensionDefinition("browser").labelExpr;
+        const secondaryExpr =
+          family === "browser"
+            ? "TRIM(COALESCE(os, ''))"
+            : clientDimensionDefinition("deviceType").labelExpr;
+        const parent = legacyCrossStatement({
+          family,
+          siteId: SITE_ID,
+          window: WINDOW,
+          filters: sourceCase.filters,
+          primaryExpr,
+          secondaryExpr,
+          primaryLimit: 12,
+          secondaryLimit: 8,
+        });
+        const parentRows = rowsFromSqlite(
+          database,
+          parent.sql,
+          parent.bindings,
+        );
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const env = sqliteEnv(database, trace);
+        const dto =
+          family === "browser"
+            ? await queryBrowserCrossDimensionFromD1(
+                env,
+                SITE_ID,
+                WINDOW,
+                sourceCase.filters,
+                12,
+                8,
+                PAGE_DIMENSION_SELECTIONS.operatingSystem,
+                "os",
+              )
+            : await queryCrossDimensionFromD1(
+                env,
+                SITE_ID,
+                WINDOW,
+                sourceCase.filters,
+                12,
+                8,
+                resolveCrossBreakdownPageDimension("browser")!,
+                resolveCrossBreakdownPageDimension("deviceType")!,
+              );
+        expect(dto).toBeDefined();
+        expect(trace.preparedSql).toHaveLength(1);
+        const newRows = rowsFromSqlite(
+          database,
+          trace.preparedSql[0]!,
+          trace.bindings[0]!,
+        );
+        expect(normalizeLegacyCrossRows(newRows, family)).toEqual(
+          normalizeLegacyCrossRows(parentRows, family),
+        );
+        if (sourceCase.label === "direct-40-exists") {
+          const topRowType = family === "browser" ? "browser" : "primary";
+          expect(
+            parentRows
+              .filter((row) => row.rowType === topRowType)
+              .reduce((sum, row) => sum + Number(row.views), 0),
+          ).toBe(1);
+        }
+        if (sourceCase.label === "prepared-page-128") {
+          const topRowType = family === "browser" ? "browser" : "primary";
+          expect(
+            parentRows
+              .filter((row) => row.rowType === topRowType)
+              .reduce((sum, row) => sum + Number(row.views), 0),
+          ).toBe(1);
+        }
+      }
+    }
+  });
+
+  it("preserves Cross ranking ties, unknown collisions, Other re-deduplication, and empty identities", async () => {
+    const crossDatabase = createMigratedDatabase();
+    try {
+      crossDatabase
+        .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+        .run(SITE_ID);
+      const crossSitePk = Number(
+        (
+          crossDatabase
+            .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+            .get(SITE_ID) as { readonly site_pk: number }
+        ).site_pk,
+      );
+      const insert = crossDatabase.prepare(`
+        INSERT INTO visits (
+          visit_id, site_id, site_pk, visitor_id, session_id, status,
+          started_at, last_activity_at, pathname, hostname, browser, os, device_type
+        ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, '', 'cross.test', ?, ?, ?)
+      `);
+      const at = WINDOW.startMs + 30;
+      const rows = [
+        [
+          "chrome-one",
+          "chrome-one",
+          "chrome-session-one",
+          " Chrome ",
+          " Windows ",
+          " desktop ",
+        ],
+        [
+          "chrome-two",
+          "chrome-two",
+          "chrome-session-two",
+          "Chrome",
+          "Windows",
+          "desktop",
+        ],
+        [
+          "edge-one",
+          "shared-other",
+          "shared-other-session",
+          "Edge",
+          "Linux",
+          "tablet",
+        ],
+        [
+          "edge-two",
+          "shared-other",
+          "shared-other-session",
+          "Edge",
+          "Linux",
+          "tablet",
+        ],
+        [
+          "safari-one",
+          "shared-other",
+          "shared-other-session",
+          "Safari",
+          "macOS",
+          "phone",
+        ],
+        [
+          "safari-two",
+          "shared-other",
+          "shared-other-session",
+          "Safari",
+          "macOS",
+          "phone",
+        ],
+        [
+          "unknown-token",
+          "unknown-token-visitor",
+          "unknown-token-session",
+          "Chrome",
+          BROWSER_CROSS_UNKNOWN_TOKEN,
+          CLIENT_CROSS_UNKNOWN_TOKEN,
+        ],
+        ["unknown-empty", "", "", "Chrome", "", ""],
+        ["zero-identities", "", "", "Chrome", "ZeroOS", "zero-device"],
+        [
+          "empty-primary",
+          "excluded-visitor",
+          "excluded-session",
+          "",
+          "Excluded",
+          "excluded",
+        ],
+      ] as const;
+      for (const [index, row] of rows.entries())
+        insert.run(
+          row[0],
+          SITE_ID,
+          crossSitePk,
+          row[1],
+          row[2],
+          at + index,
+          at + index,
+          row[3],
+          row[4],
+          row[5],
+        );
+
+      for (const family of ["browser", "client"] as const) {
+        const dimensionLimit = family === "browser" ? 3 : 2;
+        const primaryExpr =
+          family === "browser"
+            ? "TRIM(COALESCE(browser, ''))"
+            : clientDimensionDefinition("browser").labelExpr;
+        const secondaryExpr =
+          family === "browser"
+            ? "TRIM(COALESCE(os, ''))"
+            : clientDimensionDefinition("deviceType").labelExpr;
+        const parent = legacyCrossStatement({
+          family,
+          siteId: SITE_ID,
+          window: WINDOW,
+          filters: EMPTY_FILTER_DOCUMENT,
+          primaryExpr,
+          secondaryExpr,
+          primaryLimit: 1,
+          secondaryLimit: dimensionLimit,
+        });
+        const parentRows = rowsFromSqlite(
+          crossDatabase,
+          parent.sql,
+          parent.bindings,
+        );
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const env = sqliteEnv(crossDatabase, trace);
+        const dto =
+          family === "browser"
+            ? await queryBrowserCrossDimensionFromD1(
+                env,
+                SITE_ID,
+                WINDOW,
+                EMPTY_FILTER_DOCUMENT,
+                1,
+                dimensionLimit,
+                PAGE_DIMENSION_SELECTIONS.operatingSystem,
+                "os",
+              )
+            : await queryCrossDimensionFromD1(
+                env,
+                SITE_ID,
+                WINDOW,
+                EMPTY_FILTER_DOCUMENT,
+                1,
+                dimensionLimit,
+                resolveCrossBreakdownPageDimension("browser")!,
+                resolveCrossBreakdownPageDimension("deviceType")!,
+              );
+        const rawRows = normalizeLegacyCrossRows(
+          rowsFromSqlite(
+            crossDatabase,
+            trace.preparedSql[0]!,
+            trace.bindings[0]!,
+          ),
+          family,
+        );
+        expect(rawRows).toEqual(normalizeLegacyCrossRows(parentRows, family));
+        const otherPrimary =
+          family === "browser"
+            ? BROWSER_CROSS_OTHER_BROWSER_TOKEN
+            : CLIENT_CROSS_OTHER_PRIMARY_TOKEN;
+        const otherSecondary =
+          family === "browser"
+            ? BROWSER_CROSS_OTHER_DIMENSION_TOKEN
+            : CLIENT_CROSS_OTHER_SECONDARY_TOKEN;
+        const unknown =
+          family === "browser"
+            ? BROWSER_CROSS_UNKNOWN_TOKEN
+            : CLIENT_CROSS_UNKNOWN_TOKEN;
+        const rowsForFamily = rawRows.filter((row) => row.rowType === "pair");
+        expect(
+          rowsForFamily.find(
+            (row) =>
+              row.primaryValue === otherPrimary &&
+              row.secondaryValue === otherSecondary,
+          ),
+        ).toMatchObject({
+          views: family === "browser" ? 2 : 4,
+          visitors: 1,
+          sessions: 1,
+        });
+        expect(
+          rowsForFamily.find(
+            (row) =>
+              row.primaryValue === "Chrome" &&
+              row.secondaryValue === otherSecondary,
+          ),
+        ).toMatchObject({ views: 1, visitors: 0, sessions: 0 });
+        expect(
+          rawRows.find(
+            (row) =>
+              row.rowType ===
+                (family === "browser" ? "dimension" : "secondary") &&
+              row.secondaryValue === unknown,
+          ),
+        ).toMatchObject({ views: 2, visitors: 1, sessions: 1 });
+        expect(dto.columns.find((column) => column.isUnknown)).toMatchObject({
+          views: 2,
+          visitors: 1,
+          sessions: 1,
+        });
+        expect(dto.rows.flatMap((row) => row.cells)).not.toContainEqual(
+          expect.objectContaining({ views: 1, visitors: 0, sessions: 0 }),
+        );
+
+        const tieParent = legacyCrossStatement({
+          family,
+          siteId: SITE_ID,
+          window: WINDOW,
+          filters: EMPTY_FILTER_DOCUMENT,
+          primaryExpr,
+          secondaryExpr,
+          primaryLimit: 3,
+          secondaryLimit: 2,
+        });
+        const tieTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const tieEnv = sqliteEnv(crossDatabase, tieTrace);
+        if (family === "browser")
+          await queryBrowserCrossDimensionFromD1(
+            tieEnv,
+            SITE_ID,
+            WINDOW,
+            EMPTY_FILTER_DOCUMENT,
+            3,
+            2,
+            PAGE_DIMENSION_SELECTIONS.operatingSystem,
+            "os",
+          );
+        else
+          await queryCrossDimensionFromD1(
+            tieEnv,
+            SITE_ID,
+            WINDOW,
+            EMPTY_FILTER_DOCUMENT,
+            3,
+            2,
+            resolveCrossBreakdownPageDimension("browser")!,
+            resolveCrossBreakdownPageDimension("deviceType")!,
+          );
+        const tieRows = normalizeLegacyCrossRows(
+          rowsFromSqlite(
+            crossDatabase,
+            tieTrace.preparedSql[0]!,
+            tieTrace.bindings[0]!,
+          ),
+          family,
+        );
+        expect(
+          tieRows
+            .filter(
+              (row) =>
+                row.rowType === (family === "browser" ? "browser" : "primary"),
+            )
+            .map((row) => row.primaryValue),
+        ).toEqual(["Chrome", "Edge", "Safari"]);
+        expect(
+          normalizeLegacyCrossRows(
+            rowsFromSqlite(crossDatabase, tieParent.sql, tieParent.bindings),
+            family,
+          ),
+        ).toEqual(tieRows);
+      }
+    } finally {
+      crossDatabase.close();
+    }
+  });
+
+  it("preserves Cross limit clamping and rejects fractional and NaN limits", async () => {
+    const env = capturedEnv([]);
+    await expect(
+      queryBrowserCrossDimensionFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        Number.NaN,
+        8,
+        PAGE_DIMENSION_SELECTIONS.operatingSystem,
+        "os",
+      ),
+    ).rejects.toThrow("logical_builder_invalid_limit");
+    await expect(
+      queryCrossDimensionFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        8,
+        1.5,
+        resolveCrossBreakdownPageDimension("browser")!,
+        resolveCrossBreakdownPageDimension("deviceType")!,
+      ),
+    ).rejects.toThrow("logical_builder_invalid_limit");
+
+    const clamped = await compileOnly(
+      "infinite-limits",
+      (limitedEnv) =>
+        queryBrowserCrossDimensionFromD1(
+          limitedEnv,
+          SITE_ID,
+          WINDOW,
+          EMPTY_FILTER_DOCUMENT,
+          Number.POSITIVE_INFINITY,
+          Number.NEGATIVE_INFINITY,
+          PAGE_DIMENSION_SELECTIONS.operatingSystem,
+          "os",
+        ),
+      "wave57.technology_cross_breakdown",
+    );
+    expect(clamped).not.toHaveProperty("budgetFailure");
+  });
+
+  it("keeps Cross dimensions within the parent SQL and D1 budgets", async () => {
+    const direct40 = directPayloadExistsFilters();
+    const preparedPage128 = withAdvancedMatches(
+      prepareTrendFilters(pagePathFilter("/prepared-match")),
+      {
+        visitIds: [
+          { siteId: SITE_ID, id: "prepared-page-match" },
+          ...Array.from({ length: 127 }, (_unused, index) => ({
+            siteId: SITE_ID,
+            id: `wave57-cross-budget-${index}`,
+          })),
+        ],
+      },
+    );
+    const scenarios = [
+      { label: "plain", filters: EMPTY_FILTER_DOCUMENT },
+      { label: "direct40", filters: direct40 },
+      { label: "prepared128", filters: preparedPage128 },
+    ] as const;
+    const results: Array<{
+      label: string;
+      family: CrossFamily;
+      new: Awaited<ReturnType<typeof compileOnly>>;
+      parent: {
+        sqlBytes: number;
+        bindings: number;
+        withinBudget: boolean;
+      };
+    }> = [];
+
+    for (const scenario of scenarios) {
+      for (const family of ["browser", "client"] as const) {
+        const invoke = (env: Env) =>
+          family === "browser"
+            ? queryBrowserCrossDimensionFromD1(
+                env,
+                SITE_ID,
+                WINDOW,
+                scenario.filters,
+                8,
+                6,
+                PAGE_DIMENSION_SELECTIONS.operatingSystem,
+                "os",
+              )
+            : queryCrossDimensionFromD1(
+                env,
+                SITE_ID,
+                WINDOW,
+                scenario.filters,
+                8,
+                6,
+                resolveCrossBreakdownPageDimension("page.path")!,
+                resolveCrossBreakdownPageDimension("deviceType")!,
+              );
+        const result = await compileOnly(
+          `${scenario.label}-${family}`,
+          invoke,
+          "wave57.technology_cross_breakdown",
+        );
+        const parentStatement = legacyCrossStatement({
+          family,
+          siteId: SITE_ID,
+          window: WINDOW,
+          filters: scenario.filters,
+          primaryExpr:
+            family === "browser"
+              ? "TRIM(COALESCE(browser, ''))"
+              : "TRIM(COALESCE(pathname, ''))",
+          secondaryExpr:
+            family === "browser"
+              ? "TRIM(COALESCE(os, ''))"
+              : clientDimensionDefinition("deviceType").labelExpr,
+          primaryLimit: 8,
+          secondaryLimit: 6,
+        });
+        const parentBudget = {
+          sqlBytes: new TextEncoder().encode(parentStatement.sql).byteLength,
+          bindings: parentStatement.bindings.length,
+          withinBudget:
+            new TextEncoder().encode(parentStatement.sql).byteLength <=
+              D1_MAX_SQL_UTF8_BYTES &&
+            parentStatement.bindings.length <= D1_MAX_BOUND_PARAMETERS,
+        };
+        expect(result).not.toHaveProperty("budgetFailure");
+        if ("budgetFailure" in result) continue;
+        expect(result.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(result.bindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+        expect(result.physicalPlanHash).toMatch(/^v\d+:[a-f0-9]{64}$/u);
+        results.push({
+          label: scenario.label,
+          family,
+          new: result,
+          parent: parentBudget,
+        });
+      }
+    }
+    console.info(
+      "wave57_technology_cross_breakdown_budget",
+      JSON.stringify(results),
+    );
+  });
+
+  it("compiles representative derived Cross selections through the finite registry", async () => {
+    const pairs = [
+      ["client.browserEngine", "client.osVersion"],
+      ["referrer.domain", "geo.region"],
+      ["client.screenSize", "geo.city"],
+    ] as const;
+    for (const [index, [primary, secondary]] of pairs.entries()) {
+      const primaryDefinition = resolveCrossBreakdownPageDimension(primary);
+      const secondaryDefinition = resolveCrossBreakdownPageDimension(secondary);
+      expect(primaryDefinition).not.toBeNull();
+      expect(secondaryDefinition).not.toBeNull();
+      const result = await compileOnly(
+        `derived-${index}`,
+        (env) =>
+          queryCrossDimensionFromD1(
+            env,
+            SITE_ID,
+            WINDOW,
+            EMPTY_FILTER_DOCUMENT,
+            8,
+            6,
+            primaryDefinition!,
+            secondaryDefinition!,
+          ),
+        "wave57.technology_cross_breakdown",
+      );
+      expect(result).not.toHaveProperty("budgetFailure");
+      if ("budgetFailure" in result) continue;
+      expect(result.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(result.bindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+      expect(result.physicalPlanHash).toMatch(/^v\d+:[a-f0-9]{64}$/u);
+    }
+  });
+
+  it("matches frozen SQL for derived browser, referrer, screen, region, and city pairs", async () => {
+    const pairs = [
+      ["client.browserEngine", "client.osVersion"],
+      ["referrer.domain", "geo.region"],
+      ["client.screenSize", "geo.city"],
+    ] as const;
+    for (const [primary, secondary] of pairs) {
+      const legacyPrimary = resolveCrossBreakdownDimension(primary)!;
+      const legacySecondary = resolveCrossBreakdownDimension(secondary)!;
+      const parent = legacyCrossStatement({
+        family: "client",
+        siteId: SITE_ID,
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        primaryExpr: legacyPrimary.labelExpr,
+        secondaryExpr: legacySecondary.labelExpr,
+        primaryLimit: 12,
+        secondaryLimit: 8,
+      });
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      await queryCrossDimensionFromD1(
+        sqliteEnv(database, trace),
+        SITE_ID,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        12,
+        8,
+        resolveCrossBreakdownPageDimension(primary)!,
+        resolveCrossBreakdownPageDimension(secondary)!,
+      );
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(
+        normalizeLegacyCrossRows(
+          rowsFromSqlite(database, trace.preparedSql[0]!, trace.bindings[0]!),
+          "client",
+        ),
+      ).toEqual(
+        normalizeLegacyCrossRows(
+          rowsFromSqlite(database, parent.sql, parent.bindings),
+          "client",
+        ),
+      );
+    }
   });
 });

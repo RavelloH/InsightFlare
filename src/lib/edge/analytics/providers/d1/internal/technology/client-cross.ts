@@ -1,3 +1,11 @@
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
+import {
+  buildTechnologyCrossBreakdownPlan,
+  TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS,
+} from "@/lib/edge/analytics/engine/technology-cross-breakdown-report-plan";
+import { queryAnalyticsReportOutputSetRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type {
   BrowserCrossBreakdownDimensionDataRow,
   BrowserCrossBreakdownDimensionRow,
@@ -10,16 +18,13 @@ import {
   CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
   CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
   CLIENT_CROSS_UNKNOWN_TOKEN,
-  queryD1All,
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
-import { technologyVisitSource } from "./scoped-source";
-
 interface DimensionDefinition {
-  labelExpr: string;
+  selection: PageDimensionSelection;
   fallbackKeyBase: string;
 }
 
@@ -33,144 +38,41 @@ export async function queryCrossDimensionFromD1(
   primaryDimension: DimensionDefinition,
   secondaryDimension: DimensionDefinition,
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
-  const source = technologyVisitSource(siteId, window, filters);
-  const normalizedPrimaryLimit = Math.min(Math.max(1, primaryLimit), 12);
-  const normalizedSecondaryLimit = Math.min(Math.max(1, secondaryLimit), 8);
-  const primaryExpr = primaryDimension.labelExpr;
-  const normalizedSecondaryExpr = `CASE WHEN ${secondaryDimension.labelExpr} != '' THEN ${secondaryDimension.labelExpr} ELSE '${CLIENT_CROSS_UNKNOWN_TOKEN}' END`;
-
-  const sql = `
-WITH
-${source.ctes},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    ${primaryExpr} AS primaryValue,
-    ${normalizedSecondaryExpr} AS secondaryValue,
-    visitor_id AS visitorId,
-    session_id AS sessionId
-  FROM ${source.relation}
-  ${source.filterClause}
-),
-top_primary_aggregate AS (
-  SELECT
-    primaryValue,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-  FROM filtered_visits
-  WHERE primaryValue != ''
-  GROUP BY primaryValue
-),
-top_primary_rows AS (
-  SELECT
-    primaryValue,
-    views,
-    visitors,
-    sessions,
-    ROW_NUMBER() OVER (
-      ORDER BY visitors DESC, views DESC, sessions DESC, primaryValue ASC
-    ) AS rowOrder
-  FROM top_primary_aggregate
-  ORDER BY visitors DESC, views DESC, sessions DESC, primaryValue ASC
-  LIMIT ?
-),
-top_secondary_aggregate AS (
-  SELECT
-    secondaryValue,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-  FROM filtered_visits
-  WHERE primaryValue != ''
-  GROUP BY secondaryValue
-),
-top_secondary_rows AS (
-  SELECT
-    secondaryValue,
-    views,
-    visitors,
-    sessions,
-    ROW_NUMBER() OVER (
-      ORDER BY visitors DESC, views DESC, sessions DESC, secondaryValue ASC
-    ) AS rowOrder
-  FROM top_secondary_aggregate
-  ORDER BY visitors DESC, views DESC, sessions DESC, secondaryValue ASC
-  LIMIT ?
-),
-normalized_visits AS (
-  SELECT
-    CASE
-      WHEN primaryValue IN (
-        SELECT primaryValue
-        FROM top_primary_rows
-        WHERE primaryValue != '' AND visitors > 0
-      ) THEN primaryValue
-      ELSE '${CLIENT_CROSS_OTHER_PRIMARY_TOKEN}'
-    END AS primaryBucket,
-    CASE
-      WHEN secondaryValue IN (
-        SELECT secondaryValue
-        FROM top_secondary_rows
-        WHERE visitors > 0
-      ) THEN secondaryValue
-      ELSE '${CLIENT_CROSS_OTHER_SECONDARY_TOKEN}'
-    END AS secondaryBucket,
-    visitorId,
-    sessionId
-  FROM filtered_visits
-  WHERE primaryValue != ''
-),
-pair_rows AS (
-  SELECT
-    primaryBucket AS primaryValue,
-    secondaryBucket AS secondaryValue,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
-    count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
-  FROM normalized_visits
-  GROUP BY primaryBucket, secondaryBucket
-),
-tagged_rows AS (
-  SELECT
-    'primary' AS rowType,
-    primaryValue,
-    NULL AS secondaryValue,
-    views,
-    visitors,
-    sessions,
-    rowOrder
-  FROM top_primary_rows
-  UNION ALL
-  SELECT
-    'secondary' AS rowType,
-    NULL AS primaryValue,
-    secondaryValue,
-    views,
-    visitors,
-    sessions,
-    rowOrder
-  FROM top_secondary_rows
-  UNION ALL
-  SELECT
-    'pair' AS rowType,
-    primaryValue,
-    secondaryValue,
-    views,
-    visitors,
-    sessions,
-    0 AS rowOrder
-  FROM pair_rows
-)
-SELECT rowType, primaryValue, secondaryValue, views, visitors, sessions
-FROM tagged_rows
-ORDER BY rowType ASC, rowOrder ASC, primaryValue ASC, secondaryValue ASC
-`;
-  const queryRows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...source.bindings,
-    ...source.filterBindings,
-    normalizedPrimaryLimit,
-    normalizedSecondaryLimit,
-  ]);
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildTechnologyCrossBreakdownPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    family: "client",
+    primarySelection: primaryDimension.selection,
+    secondarySelection: secondaryDimension.selection,
+    primaryLimit,
+    secondaryLimit,
+    tokens: {
+      unknown: CLIENT_CROSS_UNKNOWN_TOKEN,
+      otherPrimary: CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
+      otherSecondary: CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
+    },
+  });
+  const queryRows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
+    outputIds: Object.values(TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS),
+    fields: [
+      "rowType",
+      "primaryValue",
+      "secondaryValue",
+      "views",
+      "visitors",
+      "sessions",
+      "rowOrder",
+    ],
+    orderBy: [
+      { field: "rowType", direction: "asc", nulls: "first" },
+      { field: "rowOrder", direction: "asc", nulls: "first" },
+      { field: "primaryValue", direction: "asc", nulls: "first" },
+      { field: "secondaryValue", direction: "asc", nulls: "first" },
+    ],
+  });
   const topPrimaryRows = queryRows
     .filter((row) => row.rowType === "primary")
     .map((row) => ({
