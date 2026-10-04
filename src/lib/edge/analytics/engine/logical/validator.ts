@@ -30,6 +30,7 @@ import {
   validateResolvedAnalyticsScope,
 } from "@/lib/edge/analytics/engine/semantic/entities";
 import { semanticMetric } from "@/lib/edge/analytics/engine/semantic/metrics";
+import { semanticPageDimension } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
 import {
   isSemanticRelationshipId,
   semanticRelationship,
@@ -442,6 +443,58 @@ function infer(
         ]);
       }
       return { type: scalar("string"), nullable: input.nullable };
+    }
+    case "page-dimension": {
+      const definition = semanticPageDimension(expression.dimension);
+      const dependencyNames = expression.dependencies.map(
+        (dependency) => dependency.attribute,
+      );
+      if (
+        !definition ||
+        dependencyNames.length !== definition.dependencies.length ||
+        new Set(dependencyNames).size !== dependencyNames.length ||
+        definition.dependencies.some(
+          (attribute) => !dependencyNames.includes(attribute),
+        )
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path: `${path}.dependencies`,
+            message:
+              "Page dimension dependencies must exactly match the finite semantic definition.",
+          },
+        ]);
+      }
+      const dependencies = expression.dependencies.map((dependency, index) => {
+        const attribute = semanticAttribute(dependency.attribute);
+        const inferred = infer(
+          dependency.expression,
+          resolveSlot,
+          `${path}.dependencies[${index}].expression`,
+        );
+        if (
+          !attribute ||
+          attribute.valueType.kind !== "scalar" ||
+          !isSameLogicalValueType(inferred.type, attribute.valueType)
+        ) {
+          throw new LogicalPlanError([
+            {
+              code: "invalid-expression",
+              path: `${path}.dependencies[${index}]`,
+              message:
+                "Page dimension dependency type does not match its semantic attribute.",
+            },
+          ]);
+        }
+        return inferred;
+      });
+      return {
+        type: scalar("string"),
+        nullable:
+          definition.nullableFromDependencies &&
+          dependencies.some((dependency) => dependency.nullable),
+      };
     }
     case "arithmetic": {
       if (

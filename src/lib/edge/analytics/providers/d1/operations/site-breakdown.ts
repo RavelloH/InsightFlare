@@ -4,8 +4,8 @@ import {
   type BreakdownResult,
   type FilterDocument,
 } from "@/lib/edge/analytics/contract";
+import { crossBreakdownPageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
   queryDimensionFromD1,
   querySessionBoundaryDimensionFromD1,
@@ -58,17 +58,17 @@ export async function readSiteBreakdown(
               input.limit,
             )
           : await (() => {
-              const definition = resolveCrossBreakdownDimension(
+              const selection = crossBreakdownPageDimensionSelection(
                 input.dimension,
               );
-              if (!definition) unsupportedDimension(input.dimension);
+              if (!selection) unsupportedDimension(input.dimension);
               return queryDimensionFromD1(
                 input.env,
                 input.siteId,
                 input.window,
                 input.filters,
                 input.limit,
-                definition.labelExpr,
+                selection,
                 { excludeEmpty: true },
               );
             })();

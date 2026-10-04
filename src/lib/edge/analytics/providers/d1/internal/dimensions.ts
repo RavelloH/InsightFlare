@@ -1,3 +1,4 @@
+import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import {
   analyticsFilterRegistry,
   effectiveScopeForPagination,
@@ -6,6 +7,13 @@ import {
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildDimensionPagePlan,
+  buildDimensionTopPlan,
+  type PageDimensionSelection,
+  type PageDimensionSelectionId,
+  validatePageDimensionSelection,
+} from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { buildTopReferrersPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
 import type { Env } from "@/lib/edge/types";
 
@@ -28,6 +36,11 @@ import {
   regionValueExpr,
   visitSourceBindings,
 } from "./core";
+import {
+  clientDimensionDefinition,
+  resolveCrossBreakdownDimension,
+  utmDimensionDefinition,
+} from "./core-dimensions";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import {
   decodePageCursor,
@@ -93,6 +106,58 @@ function dimensionCursor(value: unknown): DimensionAggregateCursor | null {
     : null;
 }
 
+function legacyDimensionCursorToken(selection: PageDimensionSelection): string {
+  const fromCrossBreakdown = (dimension: string) => {
+    const definition = resolveCrossBreakdownDimension(dimension);
+    if (!definition)
+      throw new Error(`missing-legacy-dimension-token:${dimension}`);
+    return definition.labelExpr;
+  };
+  const tokens: Record<PageDimensionSelectionId, string> = {
+    pagePath: "pathname",
+    pagePathTrimmed: fromCrossBreakdown("page.path"),
+    pageTitle: "title",
+    pageTitleTrimmed: fromCrossBreakdown("page.title"),
+    pageHostname: "hostname",
+    pageHostnameTrimmed: fromCrossBreakdown("page.hostname"),
+    pageQuery: "query_string",
+    pageQueryTrimmed: fromCrossBreakdown("page.query"),
+    pageHash: "hash_fragment",
+    pageHashTrimmed: fromCrossBreakdown("page.hash"),
+    referrerUrl: fromCrossBreakdown("referrer.url"),
+    utmSource: utmDimensionDefinition("source").labelExpr,
+    utmMedium: utmDimensionDefinition("medium").labelExpr,
+    utmCampaign: utmDimensionDefinition("campaign").labelExpr,
+    utmTerm: utmDimensionDefinition("term").labelExpr,
+    utmContent: utmDimensionDefinition("content").labelExpr,
+    country: "country",
+    countryTrimmed: fromCrossBreakdown("geo.country"),
+    region: regionValueExpr(),
+    city: cityValueExpr(),
+    continent: "continent",
+    continentTrimmed: fromCrossBreakdown("geo.continent"),
+    timezone: "timezone",
+    timezoneTrimmed: fromCrossBreakdown("geo.timeZone"),
+    organization: "as_organization",
+    organizationTrimmed: fromCrossBreakdown("geo.organization"),
+    browser: clientDimensionDefinition("browser").labelExpr,
+    browserVersion: fromCrossBreakdown("client.browserVersion"),
+    browserEngine: fromCrossBreakdown("client.browserEngine"),
+    operatingSystem: clientDimensionDefinition("operatingSystem").labelExpr,
+    osVersion: clientDimensionDefinition("osVersion").labelExpr,
+    deviceType: clientDimensionDefinition("deviceType").labelExpr,
+    language: clientDimensionDefinition("language").labelExpr,
+    screenSize: clientDimensionDefinition("screenSize").labelExpr,
+    userId: fromCrossBreakdown("user.id"),
+    userName: fromCrossBreakdown("user.name"),
+    referrerDomain: fromCrossBreakdown("referrer.domain"),
+    trafficChannel: buildTrafficChannelSqlExpression(),
+  };
+  const token = tokens[selection.id];
+  if (!token) throw new Error("unsupported-page-dimension-selection");
+  return token;
+}
+
 function sessionPathDimensionCursor(
   value: unknown,
 ): SessionPathDimensionCursor | null {
@@ -123,7 +188,7 @@ function dimensionCursorBinding(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
-  selectExpr: string,
+  selection: PageDimensionSelection,
   search?: string,
   audience: QueryAudience = "private-dashboard",
   sortBy: DimensionPageSortKey = "views",
@@ -138,7 +203,7 @@ function dimensionCursorBinding(
     window.timeZone,
     filterFingerprint(filters, analyticsFilterRegistry),
     effectiveScopeForPagination(filters),
-    selectExpr,
+    legacyDimensionCursorToken(selection),
     search?.trim().toLowerCase() ?? "",
     sortBy,
     sortDirection,
@@ -159,7 +224,7 @@ export async function queryDimensionFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
-  selectExpr: string,
+  selectionInput: PageDimensionSelection,
   options?: {
     excludeEmpty?: boolean;
     search?: string;
@@ -168,61 +233,28 @@ export async function queryDimensionFromD1(
   },
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
+  const selection = validatePageDimensionSelection(selectionInput);
   const sortBy = dimensionSortKey(options?.sortBy);
   const sortDirection = dimensionSortDirection(options?.sortDirection);
-  const { primary, secondary } = dimensionSortColumns(sortBy);
-  const limitClause = limit > 0 ? "\nLIMIT ?" : "";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-dimension_rollup AS (
-  SELECT
-    COALESCE(${selectExpr}, '') AS value,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_visits
-  GROUP BY value
-)
-SELECT value, views, sessions, visitors
-FROM dimension_rollup
-${options?.excludeEmpty ? "WHERE TRIM(value) != ''" : ""}
-${options?.search ? `${options?.excludeEmpty ? "AND" : "WHERE"} LOWER(value) LIKE ? ESCAPE '\\'` : ""}
-ORDER BY ${primary} ${sortDirection}, ${secondary} ${sortDirection}, value ASC
-${limitClause}
-`;
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildDimensionTopPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+    selection,
+    excludeEmpty: options?.excludeEmpty,
+    search: options?.search,
+    sortBy,
+    sortDirection,
+  });
   return (
-    await queryD1All<Record<string, unknown>>(
+    await queryAnalyticsReportOutputRowsFromD1(
       env,
-      sql,
-      [
-        ...(scopedDataset
-          ? scopedDataset.bindings.map((binding) => binding.value)
-          : [
-              ...visitSourceBindings(siteId, window),
-              ...(filter?.bindings ?? []),
-            ]),
-        ...(options?.search
-          ? [
-              `%${options.search
-                .trim()
-                .toLowerCase()
-                .replaceAll("\\", "\\\\")
-                .replaceAll("%", "\\%")
-                .replaceAll("_", "\\_")}%`,
-            ]
-          : []),
-        ...(limit > 0 ? [limit] : []),
-      ],
+      plan,
+      "dimension-top",
+      undefined,
       diagnostics,
     )
   ).map((row) => ({
@@ -240,7 +272,7 @@ export async function queryDimensionPageFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
-  selectExpr: string,
+  selectionInput: PageDimensionSelection,
   options?: {
     excludeEmpty?: boolean;
     search?: string;
@@ -251,85 +283,29 @@ export async function queryDimensionPageFromD1(
   diagnostics?: D1ReadDiagnostics,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<DimensionRow>> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
+  const selection = validatePageDimensionSelection(selectionInput);
   const sortBy = dimensionSortKey(options?.sortBy);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
   const sortDirection = dimensionSortDirection(options?.sortDirection);
   const { primary, secondary } = dimensionSortColumns(sortBy);
-  const operator = sortDirection === "asc" ? ">" : "<";
-  const cursorClause = cursor
-    ? `
-AND (
-  ${primary} ${operator} ?
-  OR (${primary} = ? AND ${secondary} ${operator} ?)
-  OR (${primary} = ? AND ${secondary} = ? AND value > ?)
-)`
-    : "";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-dimension_rollup AS (
-  SELECT
-    COALESCE(${selectExpr}, '') AS value,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_visits
-  GROUP BY value
-)
-SELECT value, views, sessions, visitors
-FROM dimension_rollup
-WHERE 1 = 1
-${options?.excludeEmpty ? "AND TRIM(value) != ''" : ""}
-${options?.search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
-${cursorClause}
-ORDER BY views DESC, sessions DESC, value ASC
-LIMIT ?
-`;
-  const orderedSql = sql.replace(
-    "ORDER BY views DESC, sessions DESC, value ASC",
-    `ORDER BY ${primary} ${sortDirection}, ${secondary} ${sortDirection}, value ASC`,
-  );
-  const cursorBindings = cursor
-    ? [
-        cursor.primary,
-        cursor.primary,
-        cursor.secondary,
-        cursor.primary,
-        cursor.secondary,
-        cursor.value,
-      ]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildDimensionPagePlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+    selection,
+    excludeEmpty: options?.excludeEmpty,
+    search: options?.search,
+    sortBy,
+    sortDirection,
+    cursor,
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    orderedSql,
-    [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...(filter?.bindings ?? []),
-          ]),
-      ...(options?.search
-        ? [
-            `%${options.search
-              .trim()
-              .toLowerCase()
-              .replaceAll("\\", "\\\\")
-              .replaceAll("%", "\\%")
-              .replaceAll("_", "\\_")}%`,
-          ]
-        : []),
-      ...cursorBindings,
-      limit + 1,
-    ],
+    plan,
+    "dimension-page",
+    undefined,
     diagnostics,
   );
   const mapped = rows.map((row) => ({
@@ -344,7 +320,7 @@ LIMIT ?
     siteId,
     window,
     filters,
-    selectExpr,
+    selection,
     options?.search,
     audience,
     sortBy,
@@ -374,13 +350,14 @@ export async function decodeDimensionCursor(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
-  selectExpr: string,
+  selectionInput: PageDimensionSelection,
   search?: string,
   cursor?: string | null,
   audience: QueryAudience = "private-dashboard",
   sortBy: DimensionPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
 ): Promise<DimensionAggregateCursor | null> {
+  const selection = validatePageDimensionSelection(selectionInput);
   return decodePageCursor<DimensionAggregateCursor>(
     env,
     await dimensionCursorBinding(
@@ -388,7 +365,7 @@ export async function decodeDimensionCursor(
       siteId,
       window,
       filters,
-      selectExpr,
+      selection,
       search,
       audience,
       sortBy,
@@ -749,7 +726,7 @@ export async function queryVisitDimensionFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
-  selectExpr: string,
+  selection: PageDimensionSelection,
   options?: {
     excludeEmpty?: boolean;
     search?: string;
@@ -764,7 +741,7 @@ export async function queryVisitDimensionFromD1(
     window,
     filters,
     limit,
-    selectExpr,
+    selection,
     options,
     diagnostics,
   );

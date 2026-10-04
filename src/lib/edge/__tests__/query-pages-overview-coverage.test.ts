@@ -5,15 +5,22 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
+import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import {
   attachScopedFilterMetadata,
   createQueryTime,
+  effectiveScopeForPagination,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
+  filterFingerprint,
   prepareScopedQuery,
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import {
+  analyticsPageDimensionSelection,
+  PAGE_DIMENSION_SELECTIONS,
+} from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { handleFilterValuesContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/filter-values";
 import {
   handleOverviewContract as handleOverview,
@@ -37,6 +44,18 @@ import {
   scopedDatasetFor,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  cityValueExpr,
+  clientDimensionDefinition,
+  regionValueExpr,
+  resolveCrossBreakdownDimension,
+  utmDimensionDefinition,
+} from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
+import {
+  decodeDimensionCursor,
+  queryDimensionFromD1,
+  queryDimensionPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/dimensions";
 import { queryRetentionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import {
   queryLatestSiteActivity,
@@ -57,6 +76,10 @@ import {
   queryTopPagesFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
 import { queryPagesDashboard } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard";
+import {
+  encodePageCursor,
+  paginationBindingForWindow,
+} from "@/lib/edge/analytics/providers/d1/internal/pagination";
 import {
   decodeReferrersCursor,
   queryReferrerAggregate,
@@ -427,6 +450,393 @@ function insertPageRow(
 }
 function visitBindings(targetWindow = window): QueryBinding[] {
   return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
+}
+type PageDimensionSelection =
+  (typeof PAGE_DIMENSION_SELECTIONS)[keyof typeof PAGE_DIMENSION_SELECTIONS];
+type DimensionSortKey = "views" | "sessions" | "visitors";
+function legacyDimensionExpression(selection: PageDimensionSelection): string {
+  const cross = (dimension: string) => {
+    const definition = resolveCrossBreakdownDimension(dimension);
+    if (!definition) throw new Error(`missing-frozen-dimension:${dimension}`);
+    return definition.labelExpr;
+  };
+  switch (selection.id) {
+    case "pagePath":
+      return "pathname";
+    case "pagePathTrimmed":
+      return cross("page.path");
+    case "pageTitle":
+      return "title";
+    case "pageTitleTrimmed":
+      return cross("page.title");
+    case "pageHostname":
+      return "hostname";
+    case "pageHostnameTrimmed":
+      return cross("page.hostname");
+    case "pageQuery":
+      return "query_string";
+    case "pageQueryTrimmed":
+      return cross("page.query");
+    case "pageHash":
+      return "hash_fragment";
+    case "pageHashTrimmed":
+      return cross("page.hash");
+    case "referrerUrl":
+      return cross("referrer.url");
+    case "utmSource":
+      return utmDimensionDefinition("source").labelExpr;
+    case "utmMedium":
+      return utmDimensionDefinition("medium").labelExpr;
+    case "utmCampaign":
+      return utmDimensionDefinition("campaign").labelExpr;
+    case "utmTerm":
+      return utmDimensionDefinition("term").labelExpr;
+    case "utmContent":
+      return utmDimensionDefinition("content").labelExpr;
+    case "country":
+      return "country";
+    case "countryTrimmed":
+      return cross("geo.country");
+    case "region":
+      return regionValueExpr();
+    case "city":
+      return cityValueExpr();
+    case "continent":
+      return "continent";
+    case "continentTrimmed":
+      return cross("geo.continent");
+    case "timezone":
+      return "timezone";
+    case "timezoneTrimmed":
+      return cross("geo.timeZone");
+    case "organization":
+      return "as_organization";
+    case "organizationTrimmed":
+      return cross("geo.organization");
+    case "browser":
+      return clientDimensionDefinition("browser").labelExpr;
+    case "browserVersion":
+      return cross("client.browserVersion");
+    case "browserEngine":
+      return cross("client.browserEngine");
+    case "operatingSystem":
+      return clientDimensionDefinition("operatingSystem").labelExpr;
+    case "osVersion":
+      return clientDimensionDefinition("osVersion").labelExpr;
+    case "deviceType":
+      return clientDimensionDefinition("deviceType").labelExpr;
+    case "language":
+      return clientDimensionDefinition("language").labelExpr;
+    case "screenSize":
+      return clientDimensionDefinition("screenSize").labelExpr;
+    case "userId":
+      return cross("user.id");
+    case "userName":
+      return cross("user.name");
+    case "referrerDomain":
+      return cross("referrer.domain");
+    case "trafficChannel":
+      return buildTrafficChannelSqlExpression();
+  }
+}
+interface LegacyDimensionOracleOptions {
+  excludeEmpty?: boolean;
+  search?: string;
+  sortBy?: DimensionSortKey;
+  sortDirection?: "asc" | "desc";
+  cursor?: { primary: number; secondary: number; value: string } | null;
+  limit?: number;
+  paginated?: boolean;
+}
+function legacyDimensionRowsOracle(
+  database: DatabaseSync,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  selection: PageDimensionSelection,
+  options: LegacyDimensionOracleOptions = {},
+) {
+  const expression = legacyDimensionExpression(selection);
+  const sortBy = options.sortBy ?? "views";
+  const secondaryBy = sortBy === "views" ? "sessions" : "views";
+  const direction = options.sortDirection === "asc" ? "ASC" : "DESC";
+  const directional = direction === "ASC" ? ">" : "<";
+  const predicates: string[] = [];
+  const bindings: QueryBinding[] = visitSourceBindings(
+    targetSiteId,
+    targetWindow,
+  );
+  if (options.excludeEmpty) predicates.push("TRIM(value) != ''");
+  const normalizedSearch = options.search?.trim().toLowerCase() ?? "";
+  if (normalizedSearch) {
+    predicates.push("LOWER(value) LIKE ? ESCAPE '\\'");
+    bindings.push(`%${normalizedSearch.replace(/[\\%_]/g, "\\$&")}%`);
+  }
+  if (options.cursor) {
+    predicates.push(
+      `("${sortBy}" ${directional} ? OR ("${sortBy}" = ? AND "${secondaryBy}" ${directional} ?) OR ("${sortBy}" = ? AND "${secondaryBy}" = ? AND value > ?))`,
+    );
+    bindings.push(
+      options.cursor.primary,
+      options.cursor.primary,
+      options.cursor.secondary,
+      options.cursor.primary,
+      options.cursor.secondary,
+      options.cursor.value,
+    );
+  }
+  const where = predicates.length ? `WHERE ${predicates.join(" AND ")}` : "";
+  const limit = options.limit;
+  const limitClause =
+    limit === undefined || (limit <= 0 && !options.paginated) ? "" : "LIMIT ?";
+  if (limitClause) bindings.push(options.paginated ? limit! + 1 : limit!);
+  const sql = `
+WITH
+${buildVisitSourceCte()},
+rollup AS (
+  SELECT
+    COALESCE(${expression}, '') AS value,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM visit_source
+  GROUP BY COALESCE(${expression}, '')
+)
+SELECT value, views, sessions, visitors
+FROM rollup
+${where}
+ORDER BY "${sortBy}" ${direction}, "${secondaryBy}" ${direction}, value ASC
+${limitClause}
+`;
+  return (database.prepare(sql).all(...bindings) as D1Row[]).map((row) => ({
+    value: String(row.value ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
+}
+function seedDimensionReportFixture(database: DatabaseSync): void {
+  const records = [
+    {
+      visitId: "dimension-1",
+      visitorId: "visitor-a",
+      sessionId: "session-a",
+      pathname: " /alpha ",
+      country: " US ",
+      title: "  Alpha  ",
+      hostname: " example.test ",
+      query_string: " q=one ",
+      hash_fragment: " h1 ",
+      referrer_url: " https://google.com/a ",
+      referrer_host: "google.com",
+      utm_source: " news ",
+      utm_medium: " cpc ",
+      utm_campaign: " spring ",
+      utm_term: " term ",
+      utm_content: " content ",
+      region: " California ",
+      region_code: "CA",
+      city: "San::Jose",
+      continent: " NA ",
+      timezone: " UTC ",
+      as_organization: " Org A ",
+      browser: " Chrome ",
+      browser_version: "124.0",
+      os: " Android ",
+      os_version: "14",
+      device_type: " mobile ",
+      screen_width: 1280,
+      screen_height: 720,
+      language: " en ",
+      user_id: " user-a ",
+      user_name: " Alice ",
+    },
+    {
+      visitId: "dimension-2",
+      visitorId: "visitor-b",
+      sessionId: "session-a",
+      pathname: "/alpha",
+      country: "US",
+      title: "Alpha",
+      hostname: "example.test",
+      query_string: "q=one",
+      hash_fragment: "h1",
+      referrer_url: "https://news.example/post",
+      referrer_host: "news.example",
+      utm_source: "",
+      utm_medium: "social",
+      utm_campaign: "",
+      utm_term: "",
+      utm_content: "",
+      region: "California",
+      region_code: "",
+      city: "San::Jose",
+      continent: "NA",
+      timezone: "UTC",
+      as_organization: "Org A",
+      browser: "Firefox",
+      browser_version: "125.2",
+      os: "Linux",
+      os_version: "6.1",
+      device_type: "desktop",
+      screen_width: 0,
+      screen_height: 720,
+      language: "fr",
+      user_id: "user-b",
+      user_name: "Bob",
+    },
+    {
+      visitId: "dimension-3",
+      visitorId: "visitor-a",
+      sessionId: "session-c",
+      pathname: "\tspace\u00a0",
+      country: "CA",
+      title: "\u00a0Title\t",
+      hostname: "example.test",
+      query_string: "q=two",
+      hash_fragment: "h2",
+      referrer_url: "",
+      referrer_host: "",
+      utm_source: " newsletter ",
+      utm_medium: " email ",
+      utm_campaign: " autumn ",
+      utm_term: "",
+      utm_content: "",
+      region: "\t",
+      region_code: "",
+      city: " City ",
+      continent: " EU ",
+      timezone: " Europe/Paris ",
+      as_organization: " Org B ",
+      browser: "Safari",
+      browser_version: "17",
+      os: "iOS",
+      os_version: "17.4",
+      device_type: "tablet",
+      screen_width: null,
+      screen_height: 900,
+      language: " zh-CN ",
+      user_id: "",
+      user_name: "\u00a0",
+    },
+    {
+      visitId: "dimension-4",
+      visitorId: "visitor-d",
+      sessionId: "session-d",
+      pathname: "/beta",
+      country: "DE",
+      title: "Beta",
+      hostname: "example.test",
+      query_string: "",
+      hash_fragment: "",
+      referrer_url: "",
+      referrer_host: "",
+      utm_source: "",
+      utm_medium: "",
+      utm_campaign: "tagged",
+      utm_term: "",
+      utm_content: "",
+      region: "",
+      region_code: "",
+      city: "",
+      continent: "EU",
+      timezone: "Europe/Berlin",
+      as_organization: "",
+      browser: "Edge",
+      browser_version: "126.0",
+      os: "Windows",
+      os_version: "11",
+      device_type: "desktop",
+      screen_width: -1,
+      screen_height: 768,
+      language: "de",
+      user_id: "user-d",
+      user_name: "Dana",
+    },
+    {
+      visitId: "dimension-5",
+      visitorId: " ",
+      sessionId: " ",
+      pathname: "   ",
+      country: "",
+      title: "",
+      hostname: "",
+      query_string: "",
+      hash_fragment: "",
+      referrer_url: "",
+      referrer_host: "",
+      utm_source: "",
+      utm_medium: "",
+      utm_campaign: "",
+      utm_term: "",
+      utm_content: "",
+      region: "",
+      region_code: "",
+      city: "",
+      continent: "",
+      timezone: "",
+      as_organization: "",
+      browser: "",
+      browser_version: "",
+      os: "",
+      os_version: "",
+      device_type: "",
+      screen_width: 1920,
+      screen_height: 1080,
+      language: "",
+      user_id: " ",
+      user_name: "",
+    },
+    {
+      visitId: "dimension-6",
+      visitorId: "",
+      sessionId: "",
+      pathname: "/special%/_\\\u0000token",
+      country: "JP",
+      title: "Special",
+      hostname: "example.test",
+      query_string: "x=100%",
+      hash_fragment: "slash\\",
+      referrer_url: "https://search.example/?q=%25",
+      referrer_host: "search.example",
+      utm_source: "x%_\\",
+      utm_medium: "affiliate",
+      utm_campaign: "",
+      utm_term: "",
+      utm_content: "",
+      region: "Tokyo::East",
+      region_code: "13",
+      city: "Tokyo",
+      continent: "AS",
+      timezone: "Asia/Tokyo",
+      as_organization: "Search",
+      browser: "Chrome Mobile",
+      browser_version: "125",
+      os: "Android",
+      os_version: "15",
+      device_type: "mobile",
+      screen_width: 360,
+      screen_height: 800,
+      language: "ja",
+      user_id: "",
+      user_name: "",
+    },
+  ] as const;
+  const attributes = Object.keys(records[0]).filter(
+    (key) =>
+      !["visitId", "visitorId", "sessionId", "pathname", "country"].includes(
+        key,
+      ),
+  );
+  const update = database.prepare(
+    `UPDATE visits SET ${attributes.map((key) => `${key} = ?`).join(", ")} WHERE visit_id = ?`,
+  );
+  for (const record of records) {
+    insertPageRow(database, record);
+    update.run(
+      ...attributes.map((key) => record[key as keyof typeof record] ?? null),
+      record.visitId,
+    );
+  }
 }
 function url(path: string, params: Record<string, string | number | boolean>) {
   const parsed = new URL(`https://edge.test${path}`);
@@ -1098,6 +1508,348 @@ describe("edge pages D1 queries", () => {
     } finally {
       close();
     }
+  });
+
+  it("matches frozen pre-migration SQL for every finite Page dimension selector", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    seedDimensionReportFixture(database);
+    const selections = Object.values(PAGE_DIMENSION_SELECTIONS);
+    try {
+      expect(analyticsPageDimensionSelection("geo.timezone")).toBe(
+        PAGE_DIMENSION_SELECTIONS.timezoneTrimmed,
+      );
+      for (const selection of selections) {
+        const actual = await queryDimensionFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          0,
+          selection,
+        );
+        const expected = legacyDimensionRowsOracle(
+          database,
+          siteId,
+          window,
+          selection,
+        );
+        expect(actual, selection.id).toEqual(expected);
+      }
+    } finally {
+      close();
+    }
+  });
+
+  it("preserves typed dimension grouping, search, and six keyset sort orders", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    seedDimensionReportFixture(database);
+    const selection = PAGE_DIMENSION_SELECTIONS.pagePath;
+    try {
+      for (const [sortBy, sortDirection] of [
+        ["views", "asc"],
+        ["views", "desc"],
+        ["sessions", "asc"],
+        ["sessions", "desc"],
+        ["visitors", "asc"],
+        ["visitors", "desc"],
+      ] as const) {
+        let cursor: {
+          primary: number;
+          secondary: number;
+          value: string;
+        } | null = null;
+        const actualRows: Array<{
+          value: string;
+          views: number;
+          sessions: number;
+          visitors: number;
+        }> = [];
+        for (let pageIndex = 0; pageIndex < 10; pageIndex += 1) {
+          const actual = await queryDimensionPageFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            2,
+            selection,
+            { sortBy, sortDirection },
+            cursor,
+          );
+          const expectedWithLookahead = legacyDimensionRowsOracle(
+            database,
+            siteId,
+            window,
+            selection,
+            { sortBy, sortDirection, cursor, limit: 2, paginated: true },
+          );
+          expect(
+            actual.items,
+            `${sortBy}/${sortDirection}/${pageIndex}`,
+          ).toEqual(expectedWithLookahead.slice(0, 2));
+          expect(actual.pagination.hasMore).toBe(
+            expectedWithLookahead.length > 2,
+          );
+          actualRows.push(...actual.items);
+          if (!actual.pagination.nextCursor) break;
+          cursor = await decodeDimensionCursor(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            selection,
+            undefined,
+            actual.pagination.nextCursor,
+            "private-dashboard",
+            sortBy,
+            sortDirection,
+          );
+          expect(
+            cursor,
+            `${sortBy}/${sortDirection}/${pageIndex} cursor`,
+          ).not.toBeNull();
+        }
+        expect(actualRows).toEqual(
+          legacyDimensionRowsOracle(database, siteId, window, selection, {
+            sortBy,
+            sortDirection,
+          }),
+        );
+      }
+
+      for (const search of ["%/_\\", "\u0000"]) {
+        const options = { search, excludeEmpty: true };
+        await expect(
+          queryDimensionFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            0,
+            selection,
+            options,
+          ),
+        ).resolves.toEqual(
+          legacyDimensionRowsOracle(
+            database,
+            siteId,
+            window,
+            selection,
+            options,
+          ),
+        );
+      }
+      await expect(
+        queryDimensionFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          0,
+          selection,
+          { excludeEmpty: true },
+        ),
+      ).resolves.toEqual(
+        legacyDimensionRowsOracle(database, siteId, window, selection, {
+          excludeEmpty: true,
+        }),
+      );
+    } finally {
+      close();
+    }
+  });
+
+  it("decodes an existing signed legacy dimension cursor with its frozen selector token", async () => {
+    const { env } = createD1Env([[]]);
+    const selection = PAGE_DIMENSION_SELECTIONS.pagePathTrimmed;
+    const legacyToken = resolveCrossBreakdownDimension("page.path")!.labelExpr;
+    const binding = await paginationBindingForWindow(window, [
+      "analytics-dimensions-v1",
+      "private-dashboard",
+      siteId,
+      window.startMs,
+      window.endExclusiveMs,
+      window.timeZone,
+      filterFingerprint(EMPTY_FILTER_DOCUMENT, analyticsFilterRegistry),
+      effectiveScopeForPagination(EMPTY_FILTER_DOCUMENT),
+      legacyToken,
+      "",
+      "views",
+      "desc",
+    ]);
+    const legacyCursor = await encodePageCursor(env, binding, {
+      primary: 4,
+      secondary: 3,
+      value: "/frozen",
+    });
+    await expect(
+      decodeDimensionCursor(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        selection,
+        undefined,
+        legacyCursor,
+      ),
+    ).resolves.toEqual({ primary: 4, secondary: 3, value: "/frozen" });
+  });
+
+  it("keeps typed dimension readers within one-statement SQL and binding budgets", async () => {
+    const payloadForty = normalizedFilters({
+      kind: "and",
+      children: Array.from(
+        { length: 40 },
+        (_, index) =>
+          ({
+            kind: "condition",
+            target: {
+              kind: "event-payload",
+              path: `/dimension-budget/${index}`,
+            },
+            operator: "exists",
+          }) as const,
+      ),
+    });
+    const prepared = prepareScopedQuery("pages", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: filterFixture({ country: "US" }),
+      scopePreference: "event",
+    } as never) as { filters?: FilterDocument };
+    if (!prepared.filters)
+      throw new Error("wave45_dimension_budget_preparation_failed");
+    const metadata = scopedFilterMetadata(prepared.filters);
+    if (!metadata) throw new Error("wave45_dimension_budget_metadata_missing");
+    const advanced = (count: number) =>
+      attachScopedFilterMetadata(prepared.filters!, {
+        ...metadata,
+        plan: {
+          ...metadata.plan,
+          advancedMatches: {
+            visitIds: Array.from({ length: count }, (_, index) => ({
+              siteId,
+              id: `dimension-budget-visit-${index}`,
+            })),
+          },
+        },
+      });
+    const requests = [
+      {
+        name: "stored-raw",
+        run: (env: Env) =>
+          queryDimensionFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            PAGE_DIMENSION_SELECTIONS.pagePath,
+          ),
+      },
+      {
+        name: "derived-traffic-channel",
+        run: (env: Env) =>
+          queryDimensionFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            PAGE_DIMENSION_SELECTIONS.trafficChannel,
+          ),
+      },
+      {
+        name: "search-cursor-page",
+        run: (env: Env) =>
+          queryDimensionPageFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            PAGE_DIMENSION_SELECTIONS.browserEngine,
+            { excludeEmpty: true, search: "chrome" },
+            { primary: 4, secondary: 2, value: "Chromium" },
+          ),
+      },
+      {
+        name: "event-payload-40-independent",
+        run: (env: Env) =>
+          queryDimensionFromD1(
+            env,
+            siteId,
+            window,
+            payloadForty,
+            10,
+            PAGE_DIMENSION_SELECTIONS.pagePath,
+          ),
+      },
+      {
+        name: "prepared-observation",
+        run: (env: Env) =>
+          queryDimensionFromD1(
+            env,
+            siteId,
+            window,
+            prepared.filters!,
+            10,
+            PAGE_DIMENSION_SELECTIONS.pagePath,
+          ),
+      },
+      {
+        name: "advanced-128-visit-ids",
+        run: (env: Env) =>
+          queryDimensionFromD1(
+            env,
+            siteId,
+            window,
+            advanced(128),
+            10,
+            PAGE_DIMENSION_SELECTIONS.pagePath,
+          ),
+      },
+      {
+        name: "advanced-empty-visit-ids",
+        run: (env: Env) =>
+          queryDimensionFromD1(
+            env,
+            siteId,
+            window,
+            advanced(0),
+            10,
+            PAGE_DIMENSION_SELECTIONS.pagePath,
+          ),
+      },
+    ];
+    const metrics: Array<{
+      name: string;
+      statements: number;
+      sqlBytes: number;
+      bindings: number;
+      hash: string;
+    }> = [];
+    for (const request of requests) {
+      const captured = createD1Env([[]]);
+      await request.run(captured.env);
+      expect(captured.calls, request.name).toHaveLength(1);
+      const call = captured.calls[0]!;
+      const sqlBytes = new TextEncoder().encode(call.sql).byteLength;
+      expect(sqlBytes, request.name).toBeLessThanOrEqual(100_000);
+      expect(call.bindings.length, request.name).toBeLessThanOrEqual(100);
+      metrics.push({
+        name: request.name,
+        statements: captured.calls.length,
+        sqlBytes,
+        bindings: call.bindings.length,
+        hash: createHash("sha256").update(call.sql).digest("hex").slice(0, 16),
+      });
+    }
+    console.info("wave45_dimension_query_budget", JSON.stringify(metrics));
   });
 
   it("records one-statement Page query size, bind, hash, and query plans", async () => {
@@ -2305,6 +3057,199 @@ describe("edge paginated page and referrer readers", () => {
     });
   });
 
+  it("matches the frozen referrer summary for 40 independent Event payload predicates", async () => {
+    const { env: baseEnv, database, close } = createMigratedPagesSqliteEnv();
+    const matchingVisitId = "summary-payload-match";
+    insertPageRow(database, {
+      visitId: matchingVisitId,
+      visitorId: "summary-payload-visitor",
+      sessionId: "summary-payload-session",
+      pathname: "/summary-match",
+      country: "US",
+    });
+    insertPageRow(database, {
+      visitId: "summary-payload-no-match",
+      visitorId: "summary-no-match-visitor",
+      sessionId: "summary-no-match-session",
+      pathname: "/summary-no-match",
+      country: "CA",
+    });
+    database
+      .prepare(
+        "UPDATE visits SET referrer_host = ?, referrer_url = ? WHERE visit_id = ?",
+      )
+      .run(" google.com ", " https://google.com/plan ", matchingVisitId);
+    database
+      .prepare(
+        "UPDATE visits SET referrer_host = ?, referrer_url = ? WHERE visit_id = ?",
+      )
+      .run(
+        "news.example",
+        "https://news.example/other",
+        "summary-payload-no-match",
+      );
+    const siteIdentity = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get(siteId) as { site_pk: number };
+    database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name, last_seen_at, site_pk) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(71, siteId, "payload", baseMs, siteIdentity.site_pk);
+    const paths = Array.from({ length: 40 }, (_, index) => ({
+      id: 700 + index,
+      path: `/summary-payload/${index}`,
+      eventPk: 800 + index,
+    }));
+    const addPath = database.prepare(
+      "INSERT INTO custom_event_json_paths (id, site_id, path, last_seen_at, site_pk) VALUES (?, ?, ?, ?, ?)",
+    );
+    const addEvent = database.prepare(`
+      INSERT INTO custom_events (
+        event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+        received_at, sequence, node_count, value_count, site_pk
+      ) VALUES (?, ?, ?, ?, 71, ?, ?, 1, 1, 1, ?)
+    `);
+    const addNode = database.prepare(`
+      INSERT INTO custom_event_json_nodes (
+        event_pk, node_id, parent_node_id, key_id, path_id, value_type,
+        member_order, array_index, depth
+      ) VALUES (?, 1, NULL, NULL, ?, 1, NULL, NULL, 1)
+    `);
+    const addValue = database.prepare(`
+      INSERT INTO custom_event_json_values (
+        event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+        value_type, string_value, number_value, boolean_value, site_pk
+      ) VALUES (?, 1, ?, 71, ?, ?, 1, 'match', NULL, NULL, ?)
+    `);
+    for (const path of paths) {
+      addPath.run(path.id, siteId, path.path, baseMs, siteIdentity.site_pk);
+      addEvent.run(
+        path.eventPk,
+        `summary-payload-${path.eventPk}`,
+        siteId,
+        matchingVisitId,
+        baseMs + 10,
+        baseMs + 10,
+        siteIdentity.site_pk,
+      );
+      addNode.run(path.eventPk, path.id);
+      addValue.run(
+        path.eventPk,
+        siteId,
+        path.id,
+        baseMs + 10,
+        siteIdentity.site_pk,
+      );
+    }
+    const filters = normalizedFilters({
+      kind: "and",
+      children: paths.map(
+        (path) =>
+          ({
+            kind: "condition",
+            target: { kind: "event-payload", path: path.path },
+            operator: "exists",
+          }) as const,
+      ),
+    });
+    const dataset = scopedDatasetFor(siteId, window, filters);
+    const filter = dataset
+      ? null
+      : buildVisitFilterSql(filters, "visit_source", { window });
+    const source = dataset?.visitRelation ?? "visit_source";
+    const ctes = dataset?.ctes ?? buildVisitSourceCte();
+    const bindings = dataset
+      ? dataset.bindings.map((binding) => binding.value)
+      : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])];
+    const filterClause = filter?.clause ?? "";
+    const summary = database
+      .prepare(
+        `
+        WITH ${ctes}, filtered AS (SELECT * FROM ${source} ${filterClause})
+        SELECT
+          count(*) AS totalViews,
+          sum(CASE WHEN TRIM(COALESCE(referrer_host, '')) = '' THEN 1 ELSE 0 END) AS directViews,
+          sum(CASE WHEN TRIM(COALESCE(referrer_host, '')) != '' THEN 1 ELSE 0 END) AS externalViews,
+          count(DISTINCT NULLIF(TRIM(COALESCE(referrer_host, '')), '')) AS uniqueDomains,
+          count(DISTINCT NULLIF(TRIM(COALESCE(referrer_url, '')), '')) AS uniqueLinks
+        FROM filtered
+      `,
+      )
+      .get(...bindings) as D1Row;
+    const topRows = database
+      .prepare(
+        `
+        WITH ${ctes}, filtered AS (SELECT * FROM ${source} ${filterClause})
+        SELECT TRIM(COALESCE(referrer_host, '')) AS referrer, count(*) AS views
+        FROM filtered
+        WHERE TRIM(COALESCE(referrer_host, '')) != ''
+        GROUP BY referrer
+        ORDER BY views DESC, referrer ASC
+        LIMIT 11
+      `,
+      )
+      .all(...bindings) as D1Row[];
+    const legacyResult = {
+      totalViews: Number(summary.totalViews ?? 0),
+      directViews: Number(summary.directViews ?? 0),
+      externalViews: Number(summary.externalViews ?? 0),
+      uniqueDomains: Number(summary.uniqueDomains ?? 0),
+      uniqueLinks: Number(summary.uniqueLinks ?? 0),
+      truncated: topRows.length > 10,
+      topSources: topRows.slice(0, 10).map((row) => ({
+        referrer: String(row.referrer ?? ""),
+        views: Number(row.views ?? 0),
+      })),
+    };
+    const calls: QueryCall[] = [];
+    const env = {
+      ...baseEnv,
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind(...queryBindings: QueryBinding[]) {
+              return {
+                async all() {
+                  calls.push({ sql, bindings: queryBindings });
+                  return {
+                    results: database
+                      .prepare(sql)
+                      .all(...queryBindings) as D1Row[],
+                  };
+                },
+              };
+            },
+          };
+        },
+      } as unknown as D1Database,
+    } as Env;
+    try {
+      await expect(
+        queryReferrerSummaryFromD1(env, siteId, window, filters, 10),
+      ).resolves.toEqual(legacyResult);
+      expect(calls).toHaveLength(1);
+      expect(
+        new TextEncoder().encode(calls[0]!.sql).byteLength,
+      ).toBeLessThanOrEqual(100_000);
+      expect(calls[0]!.bindings.length).toBeLessThanOrEqual(100);
+      console.info(
+        "wave45_referrer_summary_40_payload_budget",
+        JSON.stringify({
+          statements: calls.length,
+          sqlBytes: new TextEncoder().encode(calls[0]!.sql).byteLength,
+          bindings: calls[0]!.bindings.length,
+          hash: createHash("sha256")
+            .update(calls[0]!.sql)
+            .digest("hex")
+            .slice(0, 16),
+        }),
+      );
+    } finally {
+      close();
+    }
+  });
+
   it("returns an empty dashboard page without loading comparison details", async () => {
     const { env, calls } = createD1Env([[]]);
     await expect(
@@ -2944,7 +3889,7 @@ describe("edge pages handlers", () => {
       window,
       filterFixture({ device: "desktop" }),
       4,
-      "browser",
+      PAGE_DIMENSION_SELECTIONS.browser,
     );
 
     expect(mapDimensionRows(rows)).toEqual([
@@ -2956,15 +3901,11 @@ describe("edge pages handlers", () => {
         visitors: 2,
       },
     ]);
-    expect(calls[0].sql).toContain("COALESCE(browser, '') AS value");
-    expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
-      "desktop",
-      window.startMs,
-      window.endExclusiveMs,
-      "desktop",
-      4,
-    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sql).toContain("GROUP BY COALESCE(");
+    expect(calls[0].bindings).toEqual(
+      expect.arrayContaining([...visitBindings(), "desktop", 4]),
+    );
   });
 
   it("returns an empty dashboard page without loading previous, titles, or trend rows", async () => {
@@ -4238,11 +5179,11 @@ describe("edge overview D1 queries and handlers", () => {
       },
     });
     expect(calls.map((call) => call.bindings.at(-1))).toEqual([3, 4, 4, 4, 4]);
-    expect(calls[2].sql).toContain("dimension_rollup AS");
-    for (const call of [calls[0], calls[3], calls[4]]) {
-      expect(call.sql).toContain("GROUP BY value");
-      expect(call.sql).toContain("TRIM(value) != ''");
-    }
+    expect(calls).toHaveLength(5);
+    expect(calls[0].sql).toContain("GROUP BY COALESCE(");
+    expect(calls[2].sql).toContain("organic_search");
+    expect(calls[3].sql).toContain("screen_width");
+    expect(calls[4].sql).toContain("country");
   });
 
   it("routes comparison requests for every dimension tab and validates controls", async () => {
@@ -4579,8 +5520,9 @@ describe("edge overview D1 queries and handlers", () => {
         },
       },
     });
-    expect(calls[0].sql).toContain("TRIM(COALESCE(device_type, ''))");
-    expect(calls[1].sql).toContain("TRIM(COALESCE(browser, ''))");
+    expect(calls).toHaveLength(2);
+    expect(calls[0].sql).toContain("device_type");
+    expect(calls[1].sql).toContain("browser");
     expect(calls.map((call) => call.bindings.at(-1))).toEqual([5, 5]);
   });
 

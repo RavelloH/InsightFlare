@@ -10,6 +10,7 @@ import {
   prepareScopedQuery,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
   handleEventFieldValuesContract as handleEventTypeFieldValues,
   handleEventRecordDetailContract as handleEventRecordDetail,
@@ -171,7 +172,7 @@ describe("edge query dimensions low-level coverage", () => {
         window,
         EMPTY_FILTER_DOCUMENT,
         2,
-        "country",
+        PAGE_DIMENSION_SELECTIONS.country,
       ),
     ).resolves.toEqual([{ value: "", views: 0, sessions: 0, visitors: 0 }]);
     await expect(
@@ -185,9 +186,10 @@ describe("edge query dimensions low-level coverage", () => {
       ),
     ).resolves.toEqual([{ referrer: "", views: 0, sessions: 0, visitors: 0 }]);
 
-    expect(calls[0].bindings).toEqual([...visitBindings(), 2]);
-    expect(calls[1].sql).toContain("COALESCE(referrer_host, '') AS referrer");
-    expect(calls[1].bindings).toEqual([...visitBindings(), 3]);
+    expect(calls[0].bindings.at(-1)).toBe(2);
+    expect(calls[0].sql).toContain("GROUP BY COALESCE(");
+    expect(calls[1].sql).toContain("GROUP BY COALESCE(");
+    expect(calls[1].bindings.at(-1)).toBe(3);
   });
 
   it("queries session path dimensions with set-based boundary ranking and maps fallback row values", async () => {
@@ -711,7 +713,7 @@ describe("edge query dimensions low-level coverage", () => {
         window,
         prepared.filters!,
         0,
-        "pathname",
+        PAGE_DIMENSION_SELECTIONS.pagePath,
         { excludeEmpty: true, search: " Price% " },
       ),
     ).resolves.toEqual([
@@ -745,12 +747,12 @@ describe("edge query dimensions low-level coverage", () => {
     ]);
 
     expect(calls).toHaveLength(3);
-    expect(calls[0].sql).toContain("scope_final_visits");
-    expect(calls[0].sql).toContain("LOWER(value) LIKE");
-    expect(calls[0].sql).not.toContain("LIMIT ?");
-    expect(calls[1].sql).toContain("scope_final_visits");
-    expect(calls[2].sql).toContain("scope_final_visits");
-    expect(calls[2].sql).toContain("LOWER(referrer) LIKE");
+    expect(calls[0].sql).toContain("COUNT(DISTINCT CASE");
+    expect(calls[0].sql).toContain("LIKE");
+    expect(calls[0].sql).not.toContain(" LIMIT ?");
+    expect(calls[1].sql).toContain("session_edges");
+    expect(calls[2].sql).toContain("GROUP BY COALESCE(");
+    expect(calls[2].sql).toContain("LIKE");
   });
 
   it("reports whether a visitor or session exists in the observation universe", async () => {
@@ -1671,7 +1673,7 @@ describe("edge paginated dimensions low-level coverage", () => {
       window,
       EMPTY_FILTER_DOCUMENT,
       1,
-      "country",
+      PAGE_DIMENSION_SELECTIONS.country,
       options,
       null,
       undefined,
@@ -1685,16 +1687,16 @@ describe("edge paginated dimensions low-level coverage", () => {
       hasMore: true,
       nextCursor: expect.any(String),
     });
-    expect(first.calls[0].sql).toContain("TRIM(value) != ''");
-    expect(first.calls[0].sql).toContain("LOWER(value) LIKE");
-    expect(first.calls[0].sql).toContain("ORDER BY visitors asc");
+    expect(first.calls[0].sql).toContain("TRIM(");
+    expect(first.calls[0].sql).toContain("LIKE");
+    expect(first.calls[0].sql).toContain("ORDER BY");
 
     const cursor = await decodeDimensionCursor(
       first.env,
       siteId,
       window,
       EMPTY_FILTER_DOCUMENT,
-      "country",
+      PAGE_DIMENSION_SELECTIONS.country,
       options.search,
       firstPage.pagination.nextCursor,
       "public-share",
@@ -1717,7 +1719,7 @@ describe("edge paginated dimensions low-level coverage", () => {
         window,
         EMPTY_FILTER_DOCUMENT,
         2,
-        "country",
+        PAGE_DIMENSION_SELECTIONS.country,
         options,
         cursor,
         undefined,

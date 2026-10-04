@@ -8,6 +8,7 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/events-summary", () => ({
   queryEventTypeAggregate: vi.fn(),
 }));
 
+import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
   queryDimensionFromD1,
   querySessionBoundaryDimensionFromD1,
@@ -48,7 +49,7 @@ describe("site breakdown runtime", () => {
       input.window,
       input.filters,
       input.limit,
-      expect.any(String),
+      PAGE_DIMENSION_SELECTIONS.pagePathTrimmed,
       { excludeEmpty: true },
     );
   });

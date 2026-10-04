@@ -5,7 +5,9 @@ import {
   avg,
   callFunction,
   caseWhen,
+  castText,
   coalesce,
+  concatText,
   constant,
   count,
   countDistinct,
@@ -77,9 +79,16 @@ import type {
   LogicalValueType,
 } from "@/lib/edge/analytics/engine/logical/slots";
 import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
+import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
+import { semanticPageDimension } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
 import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
+import {
+  browserEngineExpression,
+  osVersionExpression,
+  trafficChannelExpression,
+} from "./analytics-legacy-scalar-filter-lowering";
 import { AnalyticsLegacyScopedStorage } from "./analytics-legacy-scoped-storage";
 import {
   type AnalyticsDbRelation,
@@ -88,6 +97,7 @@ import {
   type LoweredAnalyticsSource,
   normalizeAnalyticsRelationalSiteIds,
 } from "./analytics-relational-storage";
+import { DIRECT_REFERRER_FILTER_VALUE } from "./core-types";
 
 type SlotLayout =
   | {
@@ -928,6 +938,188 @@ function lowerExpression(
         type: { kind: "scalar", scalar: "string" },
         nullable: input.nullable,
         candidateBounded: input.candidateBounded,
+      };
+    }
+    case "page-dimension": {
+      const definition = semanticPageDimension(expression.dimension);
+      const names = expression.dependencies.map(
+        (dependency) => dependency.attribute,
+      );
+      if (
+        !definition ||
+        names.length !== definition.dependencies.length ||
+        new Set(names).size !== names.length ||
+        definition.dependencies.some((attribute) => !names.includes(attribute))
+      )
+        reject(
+          path,
+          "Page dimension dependencies do not match its definition.",
+        );
+
+      const dependencies = new Map<string, SqlExpression>();
+      const nullableDependencies = new Map<string, boolean>();
+      for (const dependency of expression.dependencies) {
+        const attribute = semanticAttribute(dependency.attribute);
+        const value = lowerExpression(
+          dependency.expression,
+          relation,
+          logicalSlots,
+          visible,
+          `${path}.dependencies.${dependency.attribute}`,
+          time,
+        );
+        if (
+          !attribute ||
+          attribute.valueType.kind !== "scalar" ||
+          value.kind !== "scalar" ||
+          value.type.kind !== "scalar" ||
+          !isSameLogicalValueType(value.type, attribute.valueType)
+        )
+          reject(
+            `${path}.dependencies.${dependency.attribute}`,
+            "Page dimension dependency has an incompatible scalar type.",
+          );
+        const expectedAffinity = attribute.valueType.scalar;
+        const actualAffinity = value.expression.resultType.affinity;
+        if (
+          (expectedAffinity === "string" && actualAffinity !== "text") ||
+          (expectedAffinity === "number" &&
+            !["integer", "real", "numeric"].includes(actualAffinity))
+        )
+          reject(
+            `${path}.dependencies.${dependency.attribute}`,
+            "Page dimension dependency has an incompatible SQL affinity.",
+          );
+        dependencies.set(
+          dependency.attribute,
+          value.expression as SqlExpression,
+        );
+        nullableDependencies.set(dependency.attribute, value.nullable);
+      }
+      const get = (attribute: string): SqlExpression => {
+        const value = dependencies.get(attribute);
+        if (!value)
+          reject(path, `Missing page dimension dependency ${attribute}.`);
+        return value;
+      };
+      const text = (attribute: string) =>
+        get(attribute) as SqlExpression<string | null>;
+      let result: AnyExpression;
+      switch (expression.dimension) {
+        case "trafficChannel":
+          result = trafficChannelExpression({
+            referrer_host: get("page.report.referrerHost"),
+            utm_source: get("page.report.utmSource"),
+            utm_medium: get("page.report.utmMedium"),
+            utm_campaign: get("page.report.utmCampaign"),
+          });
+          break;
+        case "browserEngine":
+          result = browserEngineExpression(
+            get("page.report.browser"),
+            get("page.report.os"),
+          );
+          break;
+        case "osVersion":
+          result = osVersionExpression(
+            get("page.report.os"),
+            get("page.report.osVersion"),
+          );
+          break;
+        case "screenSize": {
+          const width = get("page.report.screenWidth") as SqlExpression<
+            number | null,
+            ExpressionResultType<"integer" | "real" | "numeric", boolean>
+          >;
+          const height = get("page.report.screenHeight") as SqlExpression<
+            number | null,
+            ExpressionResultType<"integer" | "real" | "numeric", boolean>
+          >;
+          result = caseWhen(
+            [
+              {
+                when: and(gt(width, constant(0)), gt(height, constant(0))),
+                then: coalesce(
+                  concatText(castText(width), constant("x"), castText(height)),
+                  constant(""),
+                ),
+              },
+            ],
+            constant(""),
+          );
+          break;
+        }
+        case "referrerDomain": {
+          const host = trimSpaces(
+            coalesce(text("page.report.referrerHost"), constant("")),
+          );
+          result = caseWhen(
+            [{ when: neq(host, constant("")), then: host }],
+            constant(DIRECT_REFERRER_FILTER_VALUE),
+          );
+          break;
+        }
+        case "geoRegion":
+        case "geoCity": {
+          const country = trimSpaces(text("page.report.country"));
+          const regionCode = trimSpaces(text("page.report.regionCode"));
+          const region = trimSpaces(text("page.report.region"));
+          const selectedRegion = caseWhen(
+            [{ when: neq(regionCode, constant("")), then: regionCode }],
+            region,
+          );
+          const allEmpty = [
+            eq(country, constant("")),
+            eq(regionCode, constant("")),
+            eq(region, constant("")),
+          ];
+          if (expression.dimension === "geoCity") {
+            const city = trimSpaces(text("page.report.city"));
+            allEmpty.push(eq(city, constant("")));
+          }
+          const separator = constant("::");
+          const combined =
+            expression.dimension === "geoCity"
+              ? concatText(
+                  country,
+                  separator,
+                  selectedRegion,
+                  separator,
+                  region,
+                  separator,
+                  trimSpaces(text("page.report.city")),
+                )
+              : concatText(
+                  country,
+                  separator,
+                  selectedRegion,
+                  separator,
+                  region,
+                );
+          result = caseWhen(
+            [
+              {
+                when: and(...(allEmpty as [Predicate, ...Predicate[]])),
+                then: constant(""),
+              },
+            ],
+            combined,
+          );
+          break;
+        }
+        default:
+          return reject(path, "The page dimension is unsupported.");
+      }
+      if (result.resultType.affinity !== "text")
+        reject(path, "Page dimension expression must have text affinity.");
+      return {
+        kind: "scalar",
+        expression: result,
+        type: { kind: "scalar", scalar: "string" },
+        nullable:
+          definition.nullableFromDependencies &&
+          [...nullableDependencies.values()].some(Boolean),
+        candidateBounded: false,
       };
     }
     case "absolute": {
@@ -2922,6 +3114,10 @@ export class AnalyticsLogicalToDbLowerer {
       case "round":
       case "time-bucket":
         return this.#expressionSlots(expression.input);
+      case "page-dimension":
+        return expression.dependencies.flatMap((dependency) =>
+          this.#expressionSlots(dependency.expression),
+        );
       case "set-membership":
         return this.#expressionSlots(expression.input);
       case "coalesce":

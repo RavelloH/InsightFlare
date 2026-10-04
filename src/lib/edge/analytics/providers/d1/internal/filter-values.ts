@@ -1,15 +1,17 @@
-import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import {
   analyticsFilterDefinition,
   type FilterDocument,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
+import {
+  crossBreakdownPageDimensionSelection,
+  PAGE_DIMENSION_SELECTIONS,
+} from "@/lib/edge/analytics/engine/dimension-report-plan";
 import type { Env } from "@/lib/edge/types";
 import { InvalidCursorError } from "@/lib/pagination";
 
 import type { DimensionRow, QueryWindow } from "./core";
 import { DIRECT_REFERRER_FILTER_VALUE } from "./core";
-import { resolveCrossBreakdownDimension } from "./core-dimensions";
 import {
   decodeDimensionCursor,
   decodeSessionPathDimensionCursor,
@@ -128,19 +130,19 @@ export async function queryFilterValuesFromD1(
       window,
       filters,
       readLimit,
-      buildTrafficChannelSqlExpression(),
+      PAGE_DIMENSION_SELECTIONS.trafficChannel,
       { excludeEmpty: true, search },
     );
   } else {
-    const dimension = resolveCrossBreakdownDimension(field);
-    if (!dimension) return [];
+    const selection = crossBreakdownPageDimensionSelection(field);
+    if (!selection) return [];
     rows = await queryDimensionFromD1(
       env,
       siteId,
       window,
       filters,
       readLimit,
-      dimension.labelExpr,
+      selection,
       { excludeEmpty: true, search },
     );
   }
@@ -288,11 +290,11 @@ export async function queryFilterValuesPageFromD1(
     };
   }
 
-  const selectExpr =
+  const selection =
     field === "traffic.channel"
-      ? buildTrafficChannelSqlExpression()
-      : resolveCrossBreakdownDimension(field)?.labelExpr;
-  if (!selectExpr) {
+      ? PAGE_DIMENSION_SELECTIONS.trafficChannel
+      : crossBreakdownPageDimensionSelection(field);
+  if (!selection) {
     return {
       items: [],
       pagination: { limit, returned: 0, hasMore: false, nextCursor: null },
@@ -303,7 +305,7 @@ export async function queryFilterValuesPageFromD1(
     siteId,
     window,
     filters,
-    selectExpr,
+    selection,
     search,
     cursor,
     audience,
@@ -315,7 +317,7 @@ export async function queryFilterValuesPageFromD1(
     window,
     filters,
     limit,
-    selectExpr,
+    selection,
     { excludeEmpty: true, search },
     dimensionCursor,
     undefined,

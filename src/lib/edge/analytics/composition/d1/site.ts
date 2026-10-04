@@ -10,6 +10,11 @@ import type {
   QueryInput,
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  analyticsPageDimensionSelection,
+  PAGE_DIMENSION_SELECTIONS,
+  type PageDimensionSelection,
+} from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
 import {
   decodeComparisonDimensionCursor,
@@ -97,6 +102,37 @@ function overviewTabExpression(tab: string): string | null {
   if (tab === "geo.timezone") return "TRIM(COALESCE(timezone, ''))";
   if (tab === "geo.organization") return "TRIM(COALESCE(as_organization, ''))";
   return null;
+}
+
+function overviewDimensionSelection(
+  tab: string,
+): PageDimensionSelection | null {
+  if (tab === "source.channel") return PAGE_DIMENSION_SELECTIONS.trafficChannel;
+  const overviewSelections: Readonly<Record<string, PageDimensionSelection>> = {
+    "page.path": PAGE_DIMENSION_SELECTIONS.pagePath,
+    "page.query": PAGE_DIMENSION_SELECTIONS.pageQuery,
+    "page.title": PAGE_DIMENSION_SELECTIONS.pageTitle,
+    "page.hostname": PAGE_DIMENSION_SELECTIONS.pageHostname,
+    "client.browser": PAGE_DIMENSION_SELECTIONS.browser,
+    "client.osVersion": PAGE_DIMENSION_SELECTIONS.osVersion,
+    "client.deviceType": PAGE_DIMENSION_SELECTIONS.deviceType,
+    "client.language": PAGE_DIMENSION_SELECTIONS.language,
+    "client.screenSize": PAGE_DIMENSION_SELECTIONS.screenSize,
+    "utm.source": PAGE_DIMENSION_SELECTIONS.utmSource,
+    "utm.medium": PAGE_DIMENSION_SELECTIONS.utmMedium,
+    "utm.campaign": PAGE_DIMENSION_SELECTIONS.utmCampaign,
+    "utm.term": PAGE_DIMENSION_SELECTIONS.utmTerm,
+    "utm.content": PAGE_DIMENSION_SELECTIONS.utmContent,
+    "geo.country": PAGE_DIMENSION_SELECTIONS.country,
+    "geo.region": PAGE_DIMENSION_SELECTIONS.region,
+    "geo.city": PAGE_DIMENSION_SELECTIONS.city,
+    "geo.continent": PAGE_DIMENSION_SELECTIONS.continent,
+    "geo.timezone": PAGE_DIMENSION_SELECTIONS.timezone,
+    "geo.organization": PAGE_DIMENSION_SELECTIONS.organization,
+  };
+  return Object.hasOwn(overviewSelections, tab)
+    ? overviewSelections[tab]!
+    : analyticsPageDimensionSelection(tab);
 }
 function isPerformanceQuery(input: QueryInput): input is PerformanceQuery {
   if (!("time" in input) || !("mode" in input)) return false;
@@ -262,13 +298,13 @@ export async function overviewTabData(
     }
   }
   if (tab === "source.channel") {
-    const selectExpr = buildTrafficChannelSqlExpression();
+    const selection = PAGE_DIMENSION_SELECTIONS.trafficChannel;
     const cursor = await decodeDimensionCursor(
       options.env,
       options.siteId,
       window,
       filters,
-      selectExpr,
+      selection,
       search,
       cursorText,
       audience,
@@ -282,7 +318,7 @@ export async function overviewTabData(
       window,
       filters,
       limit,
-      selectExpr,
+      selection,
       {
         excludeEmpty: true,
         search,
@@ -381,18 +417,14 @@ export async function overviewTabData(
         },
       };
     }
-    const selectExpr = {
-      path: "pathname",
-      query: "query_string",
-      title: "title",
-      hostname: "hostname",
-    }[pageTab]!;
+    const selection = overviewDimensionSelection(`page.${pageTab}`);
+    if (!selection) throw new Error(`unsupported-dimension:page.${pageTab}`);
     const cursor = await decodeDimensionCursor(
       options.env,
       options.siteId,
       window,
       filters,
-      selectExpr,
+      selection,
       search,
       cursorText,
       audience,
@@ -406,7 +438,7 @@ export async function overviewTabData(
       window,
       filters,
       limit,
-      selectExpr,
+      selection,
       { excludeEmpty: true, search, sortBy, sortDirection },
       cursor,
       undefined,
@@ -427,13 +459,15 @@ export async function overviewTabData(
   if (kind === "client") {
     const clientTab = tab.slice("client.".length) as
       "browser" | "osVersion" | "deviceType" | "language" | "screenSize";
-    const selectExpr = clientDimensionDefinition(clientTab).labelExpr;
+    const selection = overviewDimensionSelection(`client.${clientTab}`);
+    if (!selection)
+      throw new Error(`unsupported-dimension:client.${clientTab}`);
     const cursor = await decodeDimensionCursor(
       options.env,
       options.siteId,
       window,
       filters,
-      selectExpr,
+      selection,
       search,
       cursorText,
       audience,
@@ -447,7 +481,7 @@ export async function overviewTabData(
       window,
       filters,
       limit,
-      selectExpr,
+      selection,
       { excludeEmpty: true, search, sortBy, sortDirection },
       cursor,
       undefined,
@@ -461,8 +495,8 @@ export async function overviewTabData(
     };
   }
   if (kind === "utm") {
-    const expression = overviewTabExpression(tab);
-    if (!expression) {
+    const selection = overviewDimensionSelection(tab);
+    if (!selection) {
       return {
         data: {
           items: [],
@@ -480,7 +514,7 @@ export async function overviewTabData(
       options.siteId,
       window,
       filters,
-      expression,
+      selection,
       search,
       cursorText,
       audience,
@@ -494,7 +528,7 @@ export async function overviewTabData(
       window,
       filters,
       limit,
-      expression,
+      selection,
       { excludeEmpty: false, search, sortBy, sortDirection },
       cursor,
       undefined,
@@ -509,20 +543,14 @@ export async function overviewTabData(
   }
   const geoTab = tab.slice("geo.".length) as
     "country" | "region" | "city" | "continent" | "timezone" | "organization";
-  const expression = {
-    country: "country",
-    region: regionValueExpr(),
-    city: cityValueExpr(),
-    continent: "continent",
-    timezone: "timezone",
-    organization: "as_organization",
-  }[geoTab];
+  const selection = overviewDimensionSelection(`geo.${geoTab}`);
+  if (!selection) throw new Error(`unsupported-dimension:geo.${geoTab}`);
   const cursor = await decodeDimensionCursor(
     options.env,
     options.siteId,
     window,
     filters,
-    expression,
+    selection,
     search,
     cursorText,
     audience,
@@ -536,7 +564,7 @@ export async function overviewTabData(
     window,
     filters,
     limit,
-    expression,
+    selection,
     { excludeEmpty: true, search, sortBy, sortDirection },
     cursor,
     undefined,
@@ -554,16 +582,12 @@ export async function overviewTabData(
     },
   };
 }
-export function dimensionExpression(dimension: string): string {
-  if (dimension === "country") return "country";
-  if (dimension === "page.query") return "query_string";
-  if (dimension === "page.hash") return "hash_fragment";
-  if (dimension.startsWith("utm.")) {
-    const key = dimension.slice("utm.".length) as
-      "source" | "medium" | "campaign" | "term" | "content";
-    return utmDimensionDefinition(key).labelExpr;
-  }
-  return dimension;
+export function dimensionSelection(
+  dimension: string,
+): PageDimensionSelection | null {
+  if (dimension === "traffic.channel")
+    return PAGE_DIMENSION_SELECTIONS.trafficChannel;
+  return analyticsPageDimensionSelection(dimension);
 }
 export function registerSiteContractProviders(
   registry: AnalyticsProviderRegistry,
@@ -633,13 +657,14 @@ export function registerSiteContractProviders(
             );
             return { value: { items: mapDimensionRows(rows) } };
           }
-          const selectExpr = dimensionExpression(dimension);
+          const selection = dimensionSelection(dimension);
+          if (!selection) throw new Error(`unsupported-dimension:${dimension}`);
           const cursor = await decodeDimensionCursor(
             options.env,
             options.siteId,
             window,
             filters,
-            selectExpr,
+            selection,
             search,
             cursorText,
             request.context.policy.audience,
@@ -653,7 +678,7 @@ export function registerSiteContractProviders(
             window,
             filters,
             limit,
-            selectExpr,
+            selection,
             {
               excludeEmpty: false,
               search,

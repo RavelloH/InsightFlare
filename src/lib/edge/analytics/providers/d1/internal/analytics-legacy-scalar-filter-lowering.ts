@@ -1024,7 +1024,7 @@ function domainMatch(
     .reduce((left, right) => or(left, right), predicates[0]!);
 }
 
-function trafficChannelExpression(
+export function trafficChannelExpression(
   columns: Readonly<
     Record<
       "referrer_host" | "utm_source" | "utm_medium" | "utm_campaign",
@@ -1093,7 +1093,7 @@ function trafficChannelExpression(
   );
 }
 
-function browserEngineExpression(
+export function browserEngineExpression(
   browser: SqlExpression,
   os: SqlExpression,
 ): SqlExpression {
@@ -1148,7 +1148,7 @@ function browserEngineExpression(
   );
 }
 
-function osVersionExpression(
+export function osVersionExpression(
   os: SqlExpression,
   version: SqlExpression,
 ): SqlExpression {
@@ -1180,7 +1180,7 @@ function osVersionExpression(
   );
 }
 
-function screenSizeExpression(
+export function screenSizeExpression(
   width: SqlExpression,
   height: SqlExpression,
 ): SqlExpression {

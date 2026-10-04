@@ -49,7 +49,7 @@ vi.mock(
 );
 import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import {
-  dimensionExpression,
+  dimensionSelection,
   registerSiteContractProviders,
 } from "@/lib/edge/analytics/composition/d1/site";
 import {
@@ -342,10 +342,24 @@ describe("D1 site contract provider pagination routing", () => {
   });
 
   it("maps dimension aliases used by API v1 and shared clients", () => {
-    expect(dimensionExpression("country")).toBe("country");
-    expect(dimensionExpression("page.query")).toBe("query_string");
-    expect(dimensionExpression("page.hash")).toBe("hash_fragment");
-    expect(dimensionExpression("utm.source")).not.toBe("utm.source");
-    expect(dimensionExpression("custom.dimension")).toBe("custom.dimension");
+    expect(dimensionSelection("country")).toMatchObject({
+      id: "country",
+      kind: "stored",
+      attribute: "page.report.country",
+      normalization: "raw",
+    });
+    expect(dimensionSelection("page.query")).toMatchObject({
+      id: "pageQuery",
+      normalization: "raw",
+    });
+    expect(dimensionSelection("page.hash")).toMatchObject({
+      id: "pageHash",
+      normalization: "raw",
+    });
+    expect(dimensionSelection("utm.source")).toMatchObject({
+      id: "utmSource",
+      normalization: "trim-ascii-space",
+    });
+    expect(dimensionSelection("custom.dimension")).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ import {
   type SortDirection,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
   buildPagesPagePlan,
   buildTopPagesPlan,
@@ -997,7 +998,7 @@ export async function queryDimensionAggregate(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
-  d1Expr: string,
+  selection: PageDimensionSelection,
   options?: { excludeEmpty?: boolean },
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
@@ -1007,7 +1008,7 @@ export async function queryDimensionAggregate(
     window,
     filters,
     limit,
-    d1Expr,
+    selection,
     options,
     diagnostics,
   );

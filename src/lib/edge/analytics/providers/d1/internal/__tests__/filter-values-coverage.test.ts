@@ -12,16 +12,13 @@ const mocks = vi.hoisted(() => ({
   decodeReferrersCursor: vi.fn(),
   queryReferrerAggregate: vi.fn(),
   queryReferrersPageFromD1: vi.fn(),
-  resolveCrossBreakdownDimension: vi.fn(),
 }));
 vi.mock("../dimensions", () => mocks);
 vi.mock("../events-summary", () => mocks);
 vi.mock("../pages", () => mocks);
 vi.mock("../referrers", () => mocks);
-vi.mock("../core-dimensions", () => ({
-  resolveCrossBreakdownDimension: mocks.resolveCrossBreakdownDimension,
-}));
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryFilterValuesFromD1,
@@ -107,9 +104,6 @@ describe("filter-values dispatch coverage", () => {
     mocks.querySessionBoundaryDimensionFromD1.mockResolvedValue([
       { value: " /entry ", views: 3 },
     ]);
-    mocks.resolveCrossBreakdownDimension.mockReturnValue({
-      labelExpr: "v.country",
-    });
     mocks.queryDimensionFromD1.mockResolvedValue([
       { value: " US ", views: 5 },
       { value: null, views: 8 },
@@ -162,7 +156,7 @@ describe("filter-values dispatch coverage", () => {
       window,
       EMPTY_FILTER_DOCUMENT,
       1,
-      "v.country",
+      PAGE_DIMENSION_SELECTIONS.countryTrimmed,
       { excludeEmpty: true, search: "us" },
     );
     await expect(
@@ -198,9 +192,6 @@ describe("filter-values dispatch coverage", () => {
     mocks.queryDimensionPageFromD1.mockResolvedValue(
       page([{ value: " US ", views: 5 }]),
     );
-    mocks.resolveCrossBreakdownDimension.mockReturnValue({
-      labelExpr: "v.country",
-    });
 
     await expect(
       queryFilterValuesPageFromD1(

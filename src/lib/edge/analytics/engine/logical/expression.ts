@@ -3,6 +3,8 @@ import type {
   ReportingTimeZone,
 } from "@/lib/edge/analytics/contract/types";
 import type { SlotId } from "@/lib/edge/analytics/engine/logical/ids";
+import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
+import type { SemanticPageDimensionId } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
 import type {
   CalendarPeriodUnit,
   ElapsedDurationUnit,
@@ -89,6 +91,15 @@ export interface LogicalStringNormalizeExpression {
   readonly normalization: "trim-ascii-space";
 }
 
+export interface LogicalPageDimensionExpression {
+  readonly kind: "page-dimension";
+  readonly dimension: SemanticPageDimensionId;
+  readonly dependencies: readonly {
+    readonly attribute: SemanticAttributeId;
+    readonly expression: LogicalExpr;
+  }[];
+}
+
 export interface LogicalArithmeticExpression {
   readonly kind: "arithmetic";
   readonly operator: "add" | "subtract" | "multiply" | "divide";
@@ -141,6 +152,7 @@ export type LogicalExpr =
   | LogicalSetMembershipExpression
   | LogicalStringMatchExpression
   | LogicalStringNormalizeExpression
+  | LogicalPageDimensionExpression
   | LogicalArithmeticExpression
   | LogicalAbsoluteExpression
   | LogicalRoundExpression

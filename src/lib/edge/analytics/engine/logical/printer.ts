@@ -96,6 +96,8 @@ function expression(value: LogicalExpr): string {
       return `(${expression(value.input)} ${value.operator}${value.caseSensitive ? " case-sensitive" : " case-insensitive"}${value.stringNormalization ? ` normalization=${value.stringNormalization}` : ""} ${JSON.stringify(value.value)})`;
     case "string-normalize":
       return `NORMALIZE_STRING<${value.normalization}>(${expression(value.input)})`;
+    case "page-dimension":
+      return `PAGE_DIMENSION<${value.dimension}>(${value.dependencies.map((dependency) => `${dependency.attribute}=${expression(dependency.expression)}`).join(", ")})`;
     case "arithmetic":
       return `(${expression(value.left)} ${value.operator}${value.operator === "divide" ? " NULL_ON_ZERO" : ""} ${expression(value.right)})`;
     case "round":

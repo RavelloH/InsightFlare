@@ -52,6 +52,10 @@ import {
   type AnalyticsEntityKind,
   validateResolvedAnalyticsScope,
 } from "@/lib/edge/analytics/engine/semantic/entities";
+import {
+  semanticPageDimension,
+  type SemanticPageDimensionId,
+} from "@/lib/edge/analytics/engine/semantic/page-dimensions";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import { semanticRelationship } from "@/lib/edge/analytics/engine/semantic/relationships";
 import {
@@ -437,6 +441,33 @@ export class LogicalPlanBuilder {
       kind: "string-normalize",
       input: input.expression,
       normalization,
+    });
+  }
+
+  pageDimension(
+    dimension: SemanticPageDimensionId,
+    dependencies: Readonly<Record<string, LogicalExpressionHandle>>,
+  ): LogicalExpressionHandle {
+    const definition = semanticPageDimension(dimension);
+    const actual = Object.keys(dependencies).sort();
+    const expected = definition
+      ? [...definition.dependencies].sort()
+      : undefined;
+    if (
+      !definition ||
+      !expected ||
+      actual.length !== expected.length ||
+      actual.some((attribute, index) => attribute !== expected[index])
+    ) {
+      throw new Error(`logical_builder_invalid_page_dimension:${dimension}`);
+    }
+    return this.#expression({
+      kind: "page-dimension",
+      dimension,
+      dependencies: definition.dependencies.map((attribute) => ({
+        attribute: attribute as SemanticAttributeId,
+        expression: dependencies[attribute]!.expression,
+      })),
     });
   }
 
@@ -1206,6 +1237,11 @@ export class LogicalPlanBuilder {
         case "round":
         case "time-bucket":
           visit(value.input);
+          return;
+        case "page-dimension":
+          value.dependencies.forEach((dependency) =>
+            visit(dependency.expression),
+          );
           return;
         case "set-membership":
           visit(value.input);
