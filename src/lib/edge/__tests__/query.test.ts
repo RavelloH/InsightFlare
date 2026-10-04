@@ -380,6 +380,178 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
 }
 function commonQueryMatches(): SqlMatch[] {
   return [
+    allMatch(
+      ['AS "cohortBucket"', 'AS "visitBucket"', 'AS "visitors"'],
+      [
+        { cohortBucket: 0, visitBucket: 0, visitors: 10 },
+        { cohortBucket: 0, visitBucket: 1, visitors: 4 },
+      ],
+    ),
+    allMatch(
+      ['AS "trendKind"', 'AS "rowType"', 'AS "bucket"', 'AS "label"'],
+      [
+        {
+          trendKind: "single",
+          rowType: "top",
+          label: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+          rowOrder: 1,
+        },
+        {
+          trendKind: "single",
+          rowType: "series",
+          label: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+          rowOrder: 0,
+        },
+        {
+          trendKind: "single",
+          rowType: "series",
+          label: "__share_trend_other__",
+          views: 3,
+          visitors: 2,
+          sessions: 2,
+          rowOrder: 0,
+        },
+        {
+          trendKind: "single",
+          rowType: "bucket",
+          bucket: 0,
+          label: "Chrome",
+          views: 5,
+          visitors: 3,
+          sessions: 2,
+          rowOrder: 0,
+        },
+        {
+          trendKind: "single",
+          rowType: "bucket",
+          bucket: 0,
+          label: "__share_trend_other__",
+          views: 1,
+          visitors: 1,
+          sessions: 1,
+          rowOrder: 0,
+        },
+      ],
+    ),
+    allMatch(
+      [
+        'AS "browserRank"',
+        'AS "versionViews"',
+        'AS "versionVisitors"',
+        'AS "versionSessions"',
+      ],
+      [
+        {
+          browser: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+          browserRank: 1,
+          version: "124",
+          versionViews: 6,
+          versionVisitors: 4,
+          versionSessions: 3,
+        },
+        {
+          browser: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+          browserRank: 1,
+          version: "__browser_version_unknown__",
+          versionViews: 2,
+          versionVisitors: 1,
+          versionSessions: 1,
+        },
+        {
+          browser: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+          browserRank: 1,
+          version: "122",
+          versionViews: 1,
+          versionVisitors: 1,
+          versionSessions: 1,
+        },
+      ],
+    ),
+    allMatch(
+      [
+        'AS "timestampMs"',
+        'AS "latitude"',
+        'AS "longitude"',
+        'AS "pointCount"',
+      ],
+      [
+        {
+          latitude: 37.77,
+          longitude: -122.42,
+          timestampMs: from,
+          country: "US",
+          region: "CA",
+          regionCode: "CA",
+          city: "San Francisco",
+          pointCount: 1,
+        },
+      ],
+    ),
+    allMatch(
+      ['AS "country"', 'AS "views"', 'AS "sessions"', 'AS "visitors"'],
+      [],
+    ),
+    allMatch(
+      ['AS "regionCode"', 'AS "region"', 'AS "views"', 'AS "visitors"'],
+      [],
+    ),
+    allMatch(
+      [
+        'AS "browser"',
+        'AS "avgDurationMs"',
+        'AS "avgDepth"',
+        'AS "trafficShare"',
+      ],
+      [
+        {
+          browser: "Chrome",
+          sessions: 4,
+          bounces: 1,
+          avgDurationMs: 1250,
+          avgDepth: 2,
+          visitors: 6,
+          returningVisitors: 3,
+          avgFrequency: 1.5,
+          trafficShare: 0.75,
+        },
+      ],
+    ),
+    allMatch(
+      [
+        'AS "referrer"',
+        'AS "avgDurationMs"',
+        'AS "avgDepth"',
+        'AS "trafficShare"',
+      ],
+      [
+        {
+          referrer: "news.example",
+          sessions: 5,
+          bounces: 1,
+          avgDurationMs: 1500,
+          avgDepth: 2.5,
+          visitors: 4,
+          returningVisitors: 1,
+          avgFrequency: 1.25,
+          trafficShare: 0.5,
+        },
+      ],
+    ),
     overviewMatch(),
     allMatch(["visit_bucket_rollup AS", "session_bucket_rollup AS"], trendRows),
     allMatch(
@@ -799,20 +971,6 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
-      ["latitude", "longitude", "ORDER BY timestampMs"],
-      [
-        {
-          latitude: 37.77,
-          longitude: -122.42,
-          timestampMs: from,
-          country: "US",
-          region: "CA",
-          regionCode: "CA",
-          city: "San Francisco",
-        },
-      ],
-    ),
-    allMatch(
       ["cohort_bucket AS cohortBucket"],
       [
         { cohortBucket: 0, visitBucket: 0, visitors: 10 },
@@ -862,7 +1020,12 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
-      ["browser_rollup AS", "version_rollup AS", "browserRank"],
+      [
+        'AS "browserRank"',
+        'AS "versionViews"',
+        'AS "versionVisitors"',
+        'AS "versionSessions"',
+      ],
       [
         {
           browser: "Chrome",
