@@ -1318,7 +1318,7 @@ describe("edge query handlers", () => {
   });
 
   it("returns overview metrics, comparison, detail trend, and normalized filter bindings", async () => {
-    const { env } = createEnv({
+    const { env, statements } = createEnv({
       matches: [...authMatches(), ...commonQueryMatches()],
     });
 
@@ -1795,7 +1795,7 @@ describe("edge query handlers", () => {
   });
 
   it("routes visitor, session, retention, and page dashboard handlers", async () => {
-    const { env, statements } = createEnv({
+    const { env } = createEnv({
       matches: [...authMatches(), ...commonQueryMatches()],
     });
 
