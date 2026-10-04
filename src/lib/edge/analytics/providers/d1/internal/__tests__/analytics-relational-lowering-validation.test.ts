@@ -553,6 +553,173 @@ describe("relational lowerer validation guards", () => {
     );
   });
 
+  it("rejects invalid scalar, predicate, and time-bucket inputs", () => {
+    const absoluteBuilder = createBuilder();
+    const absolutePages = absoluteBuilder.source("page", {
+      attributes: ["page.report.durationMs", "page.report.status"],
+    });
+    const absolute = absoluteBuilder.absolute(
+      absoluteBuilder.slot(absolutePages, "attribute:page.report.durationMs"),
+    );
+    const absoluteProjection = absoluteBuilder.project(absolutePages, {
+      value: absolute,
+    });
+    const statusExpression = absoluteBuilder.slot(
+      absolutePages,
+      "attribute:page.report.status",
+    ).expression;
+    absoluteBuilder.output("absolute", absoluteProjection, [
+      { name: "value", slot: "value" },
+    ]);
+    const absolutePlan = absoluteBuilder.finish();
+    const nonNumericAbsolute = withNode(
+      absolutePlan,
+      absoluteProjection.id,
+      (node) =>
+        node.kind === "project"
+          ? {
+              ...node,
+              projections: node.projections.map((projection) =>
+                projection.expression.kind === "absolute"
+                  ? {
+                      ...projection,
+                      expression: {
+                        ...projection.expression,
+                        input: statusExpression,
+                      },
+                    }
+                  : projection,
+              ),
+            }
+          : node,
+    );
+    expect(() => lower(nonNumericAbsolute)).toThrow(
+      "ABS requires a numeric scalar expression.",
+    );
+
+    const bucketBuilder = createBuilder();
+    const bucketPages = bucketBuilder.source("page", {
+      attributes: ["page.report.durationMs", "page.report.status"],
+    });
+    const bucket = bucketBuilder.timeBucket(
+      bucketBuilder.slot(bucketPages, "attribute:page.report.durationMs"),
+      "day",
+    );
+    const bucketProjection = bucketBuilder.project(bucketPages, {
+      value: bucket,
+    });
+    const bucketStringInput = bucketBuilder.slot(
+      bucketPages,
+      "attribute:page.report.status",
+    ).expression;
+    bucketBuilder.output("bucket", bucketProjection, [
+      { name: "value", slot: "value" },
+    ]);
+    const bucketPlan = bucketBuilder.finish();
+    const nonTemporalBucket = withNode(
+      bucketPlan,
+      bucketProjection.id,
+      (node) =>
+        node.kind === "project"
+          ? {
+              ...node,
+              projections: node.projections.map((projection) =>
+                projection.expression.kind === "time-bucket"
+                  ? {
+                      ...projection,
+                      expression: {
+                        ...projection.expression,
+                        input: bucketStringInput,
+                      },
+                    }
+                  : projection,
+              ),
+            }
+          : node,
+    );
+    expect(() => lower(nonTemporalBucket)).toThrow(
+      "Time bucketing requires a temporal or epoch scalar.",
+    );
+
+    const wrongZone = withNode(bucketPlan, bucketProjection.id, (node) =>
+      node.kind === "project"
+        ? {
+            ...node,
+            projections: node.projections.map((projection) =>
+              projection.expression.kind === "time-bucket"
+                ? {
+                    ...projection,
+                    expression: {
+                      ...projection.expression,
+                      reportingTimeZone: "Pacific/Honolulu" as never,
+                    },
+                  }
+                : projection,
+            ),
+          }
+        : node,
+    );
+    expect(() => lower(wrongZone)).toThrow(
+      "Time buckets must use the Semantic reporting time zone.",
+    );
+
+    const aggregateBuilder = createBuilder();
+    const aggregatePages = aggregateBuilder.source("page", {
+      attributes: ["page.report.durationMs", "page.report.status"],
+    });
+    const total = aggregateBuilder.aggregate(aggregatePages, {}, [
+      {
+        name: "total",
+        kind: "sum",
+        expression: aggregateBuilder.slot(
+          aggregatePages,
+          "attribute:page.report.durationMs",
+        ),
+      },
+    ]);
+    const aggregateStringInput = aggregateBuilder.slot(
+      aggregatePages,
+      "attribute:page.report.status",
+    ).expression;
+    aggregateBuilder.output("total", total, [{ name: "total", slot: "total" }]);
+    const aggregatePlan = aggregateBuilder.finish();
+    const nonNumericSum = withNode(aggregatePlan, total.id, (node) =>
+      node.kind === "aggregate"
+        ? {
+            ...node,
+            measures: node.measures.map((measure) =>
+              measure.kind === "sum"
+                ? { ...measure, input: aggregateStringInput }
+                : measure,
+            ),
+          }
+        : node,
+    );
+    expect(() => lower(nonNumericSum)).toThrow(
+      "SUM and AVG require numeric scalar values.",
+    );
+
+    const predicatePlan = createComparisonPlan(false);
+    const predicateFilter = predicatePlan.nodes.find(
+      (node) => node.kind === "filter",
+    )!;
+    const textPredicate = withNode(predicatePlan, predicateFilter.id, (node) =>
+      node.kind === "filter"
+        ? {
+            ...node,
+            predicate: {
+              kind: "literal",
+              value: "not-a-predicate",
+              valueType: STRING,
+            },
+          }
+        : node,
+    );
+    expect(() => lower(textPredicate)).toThrow(
+      "A relational predicate must lower to an integer expression.",
+    );
+  });
+
   it("rejects forged ordered-member group and order slots", () => {
     const { plan, memberId, entitySlot } = createOrderedPlan();
     const member = plan.nodes.find((node) => node.id === memberId)!;
