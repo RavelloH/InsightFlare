@@ -9,6 +9,7 @@ import {
   isNotNull,
   join,
   neq,
+  or,
   param,
   type Predicate,
   project,
@@ -48,6 +49,7 @@ import {
 import type {
   AnalyticsLegacyEventRow,
   AnalyticsLegacyFactRelation,
+  AnalyticsLegacyFilterField,
   AnalyticsLegacyPageRow,
   AnalyticsLegacyScopedPredicateContext,
   AnalyticsLegacyText,
@@ -58,9 +60,21 @@ import type {
   AnalyticsSourceValue,
   LoweredAnalyticsSource,
 } from "./analytics-relational-storage";
+import { analyticsPageReportStorageColumn } from "./analytics-relational-storage";
 
 type EntityKind = "session" | "visitor";
 type IdentityRelation = AnalyticsDbRelation;
+function relationColumn(
+  relation: AnalyticsDbRelation,
+  name: string,
+): AnyExpression {
+  const value = (relation.columns as Readonly<Record<string, AnyExpression>>)[
+    name
+  ];
+  if (!value) throw new Error(`Missing scoped Page column ${name}.`);
+  return value;
+}
+
 const rowLocalDerivedStrategies = new Set([
   "derived.trafficChannel",
   "derived.browserEngine",
@@ -312,12 +326,23 @@ function filterExpression(
     readonly context: AnalyticsLegacyScopedPredicateContext;
   },
 ): AnalyticsDbRelation {
-  const predicate = lowerLegacyScalarFilterDocument(
+  const predicate = filterPredicate(row, expression, input);
+  if (!predicate) return row.relation;
+  return filter(row.relation, predicate);
+}
+
+function filterPredicate(
+  row: AnalyticsLegacyPageRow | AnalyticsLegacyEventRow,
+  expression: FilterExpression,
+  input: {
+    readonly selection: SemanticScopedSourceSelection;
+    readonly context: AnalyticsLegacyScopedPredicateContext;
+  },
+): Predicate | undefined {
+  return lowerLegacyScalarFilterDocument(
     { version: 1, root: expression },
     scalarContext(input.selection, row, input.context),
   );
-  if (!predicate) return row.relation;
-  return filter(row.relation, predicate);
 }
 
 function selectedPageOrEventEntities(
@@ -833,6 +858,302 @@ function entityEventMatches(
   );
 }
 
+function pagePairIdentityRows(pages: AnalyticsLegacyPageRow): IdentityRelation {
+  return distinct(
+    project(pages.relation, {
+      site_pk: pages.relation.columns.site_pk!,
+      visit_id: pages.relation.columns.visit_id!,
+    }),
+  );
+}
+
+function eventOwnerPairIdentityRows(
+  events: AnalyticsLegacyEventRow,
+): IdentityRelation {
+  return distinct(
+    project(events.relation, {
+      site_pk: events.relation.columns.site_pk!,
+      visit_id: events.relation.columns.visit_id!,
+    }),
+  );
+}
+
+function eventOwnerPairsForObservationFilter(
+  dataset: AnalyticsLegacyScopedDataset,
+  selection: SemanticScopedSourceSelection,
+  expression: FilterExpression | null,
+): IdentityRelation {
+  const universe = eventOwnerPairIdentityRows(dataset.readEvents);
+  const plan = planObservationFilter(expression).event;
+  if (plan.kind === "all") return universe;
+  if (plan.kind === "none") return emptyIdentities(universe);
+  const context: AnalyticsLegacyScopedPredicateContext = {
+    selection,
+    storage: dataset.storage,
+    readPages: dataset.readPages,
+    candidatePages: dataset.candidatePages,
+    readEvents: dataset.readEvents,
+  };
+  const matching = filterExpression(dataset.readEvents, plan.expression, {
+    selection,
+    context,
+  });
+  return distinct(
+    project(matching, {
+      site_pk: matching.columns.site_pk!,
+      visit_id: matching.columns.visit_id!,
+    }),
+  );
+}
+
+function observationPagePairMatches(
+  dataset: AnalyticsLegacyScopedDataset,
+  selection: SemanticScopedSourceSelection,
+): IdentityRelation {
+  if (selection.preparedMatches) {
+    const explicit = explicitIdentityRelation(
+      dataset,
+      selection.preparedMatches.identities,
+      "page",
+    );
+    return project(explicit, {
+      site_pk: explicit.columns.site_pk!,
+      visit_id: explicit.columns.entity_id!,
+    });
+  }
+  const observation = planObservationFilter(selection.filter.root);
+  const pageUniverse = pagePairIdentityRows(dataset.readPages);
+  if (observation.visit.kind === "all" && observation.event.kind === "all")
+    return pageUniverse;
+  const context: AnalyticsLegacyScopedPredicateContext = {
+    selection,
+    storage: dataset.storage,
+    readPages: dataset.readPages,
+    candidatePages: dataset.candidatePages,
+    readEvents: dataset.readEvents,
+  };
+  const pagePlan = observation.visit;
+  const pageMatches =
+    pagePlan.kind === "all"
+      ? pageUniverse
+      : pagePlan.kind === "none"
+        ? emptyIdentities(pageUniverse)
+        : (() => {
+            const matching = filterExpression(
+              dataset.readPages,
+              pagePlan.expression,
+              { selection, context },
+            );
+            return distinct(
+              project(matching, {
+                site_pk: matching.columns.site_pk!,
+                visit_id: matching.columns.visit_id!,
+              }),
+            );
+          })();
+  const eventPlan = observation.event;
+  const eventMatches =
+    eventPlan.kind === "none"
+      ? emptyIdentities(pageUniverse)
+      : eventOwnerPairsForObservationFilter(
+          dataset,
+          selection,
+          selection.filter.root,
+        );
+  return distinct(union(pageMatches, eventMatches));
+}
+
+function entityPageRows(
+  dataset: AnalyticsLegacyScopedDataset,
+  selection: SemanticScopedSourceSelection,
+): AnalyticsDbRelation {
+  const kind = selection.entityKind;
+  if (!kind) throw new TypeError("Scoped entity mode requires an entity kind.");
+  const universe = entityUniverse(dataset, kind);
+  const selected = selection.preparedMatches
+    ? explicitIdentityRelation(
+        dataset,
+        selection.preparedMatches.identities,
+        kind,
+      )
+    : selection.filter.root
+      ? lowerEntityExpression(
+          selection.filter.root,
+          dataset,
+          selection,
+          kind,
+          universe,
+        )
+      : universe;
+  const pageValue = entityId(dataset.candidatePages, kind);
+  const nonblankPages = filter(
+    dataset.candidatePages.relation,
+    nonBlank(pageValue),
+  );
+  return joinMembership(
+    nonblankPages,
+    selected,
+    and(
+      eq(nonblankPages.columns.site_pk!, selected.columns.site_pk!),
+      eq(
+        nonblankPages.columns[entityColumnName(dataset.candidatePages, kind)]!,
+        selected.columns.entity_id!,
+      ),
+    ),
+  );
+}
+
+function pageRowsForVisitIds(
+  pages: AnalyticsLegacyPageRow,
+  visitIds: IdentityRelation,
+): AnalyticsDbRelation {
+  return joinMembership(
+    pages.relation,
+    visitIds,
+    and(
+      eq(pages.relation.columns.site_pk!, visitIds.columns.site_pk!),
+      eq(pages.relation.columns.visit_id!, visitIds.columns.visit_id!),
+    ),
+  );
+}
+
+function pageRowWithRelation(
+  pages: AnalyticsLegacyPageRow,
+  relation: AnalyticsDbRelation,
+): AnalyticsLegacyPageRow {
+  const visitColumns = Object.fromEntries(
+    Object.keys(pages.visitColumns).map((name) => [
+      name,
+      relationColumn(relation, `visit_${name}`),
+    ]),
+  ) as AnalyticsLegacyPageRow["visitColumns"];
+  const filterValues: Partial<
+    Record<AnalyticsLegacyFilterField, AnyExpression>
+  > = {};
+  for (const fieldId of Object.keys(pages.filterValues)) {
+    const definition = analyticsFilterDefinition(
+      fieldId as AnalyticsLegacyFilterField,
+    );
+    const strategy = definition?.compilerStrategy;
+    if (!strategy?.startsWith("column.")) continue;
+    const expression =
+      visitColumns[
+        strategy.slice("column.".length) as keyof typeof visitColumns
+      ];
+    if (expression)
+      filterValues[fieldId as AnalyticsLegacyFilterField] = expression;
+  }
+  return {
+    ...pages,
+    relation,
+    sitePk: relationColumn(
+      relation,
+      "site_pk",
+    ) as AnalyticsLegacyPageRow["sitePk"],
+    rawSiteId: relationColumn(
+      relation,
+      "raw_site_id",
+    ) as AnalyticsLegacyPageRow["rawSiteId"],
+    visitId: relationColumn(
+      relation,
+      "visit_id",
+    ) as AnalyticsLegacyPageRow["visitId"],
+    sessionId: relationColumn(
+      relation,
+      "visit_session_id",
+    ) as AnalyticsLegacyPageRow["sessionId"],
+    visitorId: relationColumn(
+      relation,
+      "visit_visitor_id",
+    ) as AnalyticsLegacyPageRow["visitorId"],
+    startedAt: relationColumn(
+      relation,
+      "visit_started_at",
+    ) as AnalyticsLegacyPageRow["startedAt"],
+    pathname: relationColumn(
+      relation,
+      "visit_pathname",
+    ) as AnalyticsLegacyPageRow["pathname"],
+    durationMs: relationColumn(
+      relation,
+      "visit_duration_ms",
+    ) as AnalyticsLegacyPageRow["durationMs"],
+    visitColumns,
+    filterValues,
+  };
+}
+
+function directPageRows(
+  dataset: AnalyticsLegacyScopedDataset,
+  selection: SemanticScopedSourceSelection,
+): AnalyticsDbRelation {
+  const pagePlan = planObservationFilter(selection.filter.root).visit;
+  const eventPlan = planObservationFilter(selection.filter.root).event;
+  const pages = dataset.candidatePages;
+  const pageTerm = pagePlan.kind !== "all";
+  const eventTerm = eventPlan.kind !== "all";
+  if (!pageTerm && !eventTerm)
+    return pagePlan.kind === "all"
+      ? pages.relation
+      : filter(pages.relation, eq(constant(1), constant(0)));
+  const context: AnalyticsLegacyScopedPredicateContext = {
+    selection,
+    storage: dataset.storage,
+    readPages: dataset.readPages,
+    candidatePages: dataset.candidatePages,
+    readEvents: dataset.readEvents,
+  };
+  if (pageTerm && !eventTerm) {
+    if (pagePlan.kind === "none")
+      return filter(pages.relation, eq(constant(1), constant(0)));
+    return filterExpression(pages, pagePlan.expression, { selection, context });
+  }
+  const eventPairs =
+    eventPlan.kind === "none"
+      ? emptyIdentities(pagePairIdentityRows(pages))
+      : eventOwnerPairsForObservationFilter(
+          dataset,
+          selection,
+          selection.filter.root,
+        );
+  if (!pageTerm) return pageRowsForVisitIds(pages, eventPairs);
+
+  const joined = join(
+    pages.relation,
+    eventPairs,
+    and(
+      eq(pages.relation.columns.site_pk!, eventPairs.columns.site_pk!),
+      eq(pages.relation.columns.visit_id!, eventPairs.columns.visit_id!),
+    ),
+    "left",
+  );
+  const pageFieldNames = Object.keys(pages.relation.columns);
+  const annotated: AnalyticsDbRelation = project(joined, {
+    ...Object.fromEntries(
+      pageFieldNames.map((name) => [name, joined.columns[`left_${name}`]!]),
+    ),
+    event_owner_site_pk: joined.columns.right_site_pk!,
+  });
+  const joinedPages = pageRowWithRelation(pages, annotated);
+  const pagePredicate =
+    pagePlan.kind === "none"
+      ? eq(constant(1), constant(0))
+      : (filterPredicate(joinedPages, pagePlan.expression, {
+          selection,
+          context,
+        }) ?? eq(constant(1), constant(1)));
+  const selected = filter(
+    annotated,
+    or(pagePredicate, isNotNull(annotated.columns.event_owner_site_pk!)),
+  );
+  return project(
+    selected,
+    Object.fromEntries(
+      pageFieldNames.map((name) => [name, selected.columns[name]!]),
+    ),
+  );
+}
+
 function eventAttributeColumn(
   attributeId: string,
   relation: AnalyticsDbRelation,
@@ -874,6 +1195,57 @@ function eventAttributeColumn(
     if (column) return column;
   }
   return undefined;
+}
+
+function pageAttributeColumn(
+  attributeId: string,
+  relation: AnalyticsDbRelation,
+): AnyExpression | undefined {
+  const physical = analyticsPageReportStorageColumn(attributeId);
+  return physical ? relation.columns[`visit_${physical}`] : undefined;
+}
+
+function remapPageSourceValues(
+  node: SourceNode,
+  relation: AnalyticsDbRelation,
+  values: ReadonlyMap<
+    SourceNode["values"][number]["slot"],
+    AnalyticsSourceValue
+  >,
+): ReadonlyMap<SourceNode["values"][number]["slot"], AnalyticsSourceValue> {
+  const remapped = new Map<
+    SourceNode["values"][number]["slot"],
+    AnalyticsSourceValue
+  >();
+  for (const binding of node.values) {
+    const value = values.get(binding.slot);
+    if (!value) continue;
+    if (
+      binding.kind === "self" &&
+      value.kind === "entity" &&
+      value.entity === "page"
+    ) {
+      remapped.set(binding.slot, {
+        ...value,
+        keys: [relation.columns.site_pk!, relation.columns.visit_id!],
+        present: isNotNull(relation.columns.site_pk!),
+      });
+      continue;
+    }
+    if (binding.kind === "attribute" && value.kind === "scalar") {
+      const expression = pageAttributeColumn(binding.attribute, relation);
+      if (!expression)
+        throw new Error(
+          `Scoped Page source cannot remap attribute ${binding.attribute}.`,
+        );
+      remapped.set(binding.slot, { ...value, value: expression });
+      continue;
+    }
+    throw new Error(
+      `Scoped Page source cannot remap the ${binding.kind} binding for ${String(binding.slot)}.`,
+    );
+  }
+  return remapped;
 }
 
 function remapEventSourceValues(
@@ -929,6 +1301,69 @@ export class AnalyticsLegacyScopedStorage {
 
   constructor(storage: AnalyticsRelationalStorageContext) {
     this.#storage = storage;
+  }
+
+  lowerSelectedReportSource(
+    node: SourceNode,
+    path: string,
+    source: LoweredAnalyticsSource,
+  ): LoweredAnalyticsSource {
+    if (!node.selection) return source;
+    if (node.entity === "page")
+      return this.lowerPageReportSource(node, path, source);
+    if (node.entity === "event")
+      return this.lowerEventReportSource(node, path, source);
+    throw new Error(
+      `${path}.selection: Scoped selection is supported only on Page and Event report Sources.`,
+    );
+  }
+
+  lowerPageReportSource(
+    node: SourceNode,
+    path: string,
+    source: LoweredAnalyticsSource,
+  ): LoweredAnalyticsSource {
+    const selection = node.selection;
+    if (!selection) return source;
+    if (node.entity !== "page")
+      throw new Error(
+        `${path}.selection: Scoped Page selection requires a Page report Source.`,
+      );
+    if (node.temporalDomain !== "candidate")
+      throw new Error(
+        `${path}.temporalDomain: Scoped Page report Sources currently require the candidate domain.`,
+      );
+    if (
+      selection.profile !== "direct-page-analytics-v1" &&
+      selection.profile !== "prepared-scoped-v1"
+    )
+      throw new Error(`${path}.selection: Invalid Page source profile.`);
+    if (selection.eventNameGate)
+      throw new Error(
+        `${path}.selection: Page report Sources do not support Event-name gates.`,
+      );
+
+    const pageAttributes = node.values.flatMap((binding) =>
+      binding.kind === "attribute" ? [binding.attribute] : [],
+    );
+    const dataset = buildLegacyScopedDataset({
+      selection,
+      storage: this.#storage,
+      requiredPageAttributes: pageAttributes,
+    });
+    const relation =
+      selection.profile === "direct-page-analytics-v1"
+        ? directPageRows(dataset, selection)
+        : selection.mode === "observation"
+          ? pageRowsForVisitIds(
+              dataset.candidatePages,
+              observationPagePairMatches(dataset, selection),
+            )
+          : entityPageRows(dataset, selection);
+    return {
+      relation,
+      values: remapPageSourceValues(node, relation, source.values),
+    };
   }
 
   lowerEventReportSource(

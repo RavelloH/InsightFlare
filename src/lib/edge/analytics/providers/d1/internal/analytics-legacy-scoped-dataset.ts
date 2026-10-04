@@ -40,6 +40,7 @@ import {
 } from "./analytics-legacy-scoped-types";
 import {
   type AnalyticsDbRelation,
+  analyticsPageReportStorageColumn,
   type AnalyticsRelationalStorageContext,
   normalizeAnalyticsRelationalSiteIds,
 } from "./analytics-relational-storage";
@@ -112,6 +113,7 @@ const legacyDirectEventRecordVisitColumnSet = new Set<string>(
 
 function requiredLegacyVisitColumnNames(
   selection: SemanticScopedSourceSelection,
+  requiredColumns: readonly string[] = [],
 ): readonly string[] {
   const required = new Set([
     "site_pk",
@@ -170,6 +172,7 @@ function requiredLegacyVisitColumnNames(
     for (const child of expression.children) visitFilter(child);
   };
   visitFilter(selection.filter.root);
+  for (const name of requiredColumns) addColumn(name);
   return [...required]
     .filter((name) => Object.hasOwn(schema.visits.columns, name))
     .sort();
@@ -231,11 +234,18 @@ function buildSites(siteIds: readonly string[]): AnalyticsDbRelation {
 function buildPages(
   sites: AnalyticsDbRelation,
   selection: SemanticScopedSourceSelection,
+  requiredAttributes: readonly string[] = [],
 ): AnalyticsLegacyPageRow {
   const source = scan(schema.visits);
   const visitColumns = selectColumns(
     source,
-    requiredLegacyVisitColumnNames(selection),
+    requiredLegacyVisitColumnNames(
+      selection,
+      requiredAttributes.flatMap((attribute) => {
+        const columnName = analyticsPageReportStorageColumn(attribute);
+        return columnName ? [columnName] : [];
+      }),
+    ),
   );
   const visits = project(source, visitColumns);
   const scoped: AnalyticsDbRelation = join(
@@ -514,6 +524,7 @@ function buildEvents(
 export function buildLegacyScopedDataset(input: {
   readonly selection: SemanticScopedSourceSelection;
   readonly storage: AnalyticsRelationalStorageContext;
+  readonly requiredPageAttributes?: readonly string[];
 }): AnalyticsLegacyScopedDataset {
   const siteIds = normalizeAnalyticsRelationalSiteIds(input.storage);
   if (
@@ -525,7 +536,11 @@ export function buildLegacyScopedDataset(input: {
     throw new Error("legacy_scoped_storage_sites_must_match_semantic_subject");
   const sites = buildSites(siteIds);
   const subjectEventNames = buildEventNames(sites);
-  const pages = buildPages(sites, input.selection);
+  const pages = buildPages(
+    sites,
+    input.selection,
+    input.requiredPageAttributes,
+  );
   const events = buildEvents(sites, subjectEventNames, input.selection);
   return {
     sites,

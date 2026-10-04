@@ -1007,11 +1007,23 @@ function validateNode(
   switch (node.kind) {
     case "source": {
       if (node.selection) {
-        if (node.entity !== "event")
+        if (node.entity !== "event" && node.entity !== "page")
           fail(
             "invalid-source",
             path + ".selection",
-            "Scoped selections are currently supported only on Event Sources.",
+            "Scoped selections are currently supported only on Page and Event Sources.",
+          );
+        if (
+          (node.entity === "page" &&
+            node.selection.profile !== "prepared-scoped-v1" &&
+            node.selection.profile !== "direct-page-analytics-v1") ||
+          (node.entity === "event" &&
+            node.selection.profile === "direct-page-analytics-v1")
+        )
+          fail(
+            "invalid-source",
+            path + ".selection",
+            "The scoped selection profile does not match its Source entity.",
           );
         try {
           validateSemanticScopedSourceSelection(node.selection, plan.context);

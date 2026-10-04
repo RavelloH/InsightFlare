@@ -4,10 +4,18 @@ import {
   filterFingerprint,
   type PagesDashboardMetric,
   type QueryAudience,
+  scopedFilterMetadata,
   type SortDirection,
 } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildPagesPagePlan,
+  buildTopPagesPlan,
+  type PageAggregateCursor,
+} from "@/lib/edge/analytics/engine/page-report-plan";
 import type { Env } from "@/lib/edge/types";
 
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   DimensionRow,
   FilterDocument,
@@ -43,13 +51,6 @@ import {
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
 } from "./scoped-dataset";
-export interface PageAggregateCursor {
-  readonly views: number;
-  readonly sessions: number;
-  readonly pathname: string;
-  readonly query: string;
-  readonly hash: string;
-}
 function pageAggregateCursor(value: unknown): PageAggregateCursor | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
@@ -98,42 +99,21 @@ export async function queryTopPagesFromD1(
   includeDetails: boolean,
   filters: FilterDocument,
 ): Promise<PageRow[]> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const queryExpr = includeDetails ? "query_string" : "''";
-  const hashExpr = includeDetails ? "hash_fragment" : "''";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-)
-SELECT
-  pathname,
-  ${queryExpr} AS queryValue,
-  ${hashExpr} AS hashValue,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
-FROM filtered_visits
-GROUP BY pathname, queryValue, hashValue
-ORDER BY views DESC, pathname ASC
-LIMIT ?
-`;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...(filter?.bindings ?? []),
-          ]),
-      limit,
-    ])
-  ).map((row) => ({
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildTopPagesPlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+    includeDetails,
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    "top-pages",
+  );
+  return rows.map((row) => ({
     pathname: String(row.pathname ?? ""),
     query: String(row.queryValue ?? ""),
     hash: String(row.hashValue ?? ""),
@@ -180,70 +160,21 @@ export async function queryPagesPageFromD1(
   cursor?: PageAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<PageRow>> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const queryExpr = includeDetails ? "query_string" : "''";
-  const hashExpr = includeDetails ? "hash_fragment" : "''";
-  const cursorClause = cursor
-    ? `
-WHERE views < ?
-   OR (views = ? AND sessions < ?)
-   OR (views = ? AND sessions = ? AND pathname > ?)
-   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue > ?)
-   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue = ? AND hashValue > ?)`
-    : "";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
-  SELECT *
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-rollup AS (
-  SELECT
-    pathname,
-    ${queryExpr} AS queryValue,
-    ${hashExpr} AS hashValue,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
-  FROM filtered_visits
-  GROUP BY pathname, queryValue, hashValue
-)
-SELECT pathname, queryValue, hashValue, views, sessions
-FROM rollup
-${cursorClause}
-ORDER BY views DESC, sessions DESC, pathname ASC, queryValue ASC, hashValue ASC
-LIMIT ?
-`;
-  const cursorBindings = cursor
-    ? [
-        cursor.views,
-        cursor.views,
-        cursor.sessions,
-        cursor.views,
-        cursor.sessions,
-        cursor.pathname,
-        cursor.views,
-        cursor.sessions,
-        cursor.pathname,
-        cursor.query,
-        cursor.views,
-        cursor.sessions,
-        cursor.pathname,
-        cursor.query,
-        cursor.hash,
-      ]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...(scopedDataset
-      ? scopedDataset.bindings.map((binding) => binding.value)
-      : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])]),
-    ...cursorBindings,
-    limit + 1,
-  ]);
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildPagesPagePlan({
+    siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    limit,
+    includeDetails,
+    ...(cursor ? { cursor } : {}),
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    "pages-page",
+  );
   const mapped = rows.map((row) => ({
     pathname: String(row.pathname ?? ""),
     query: String(row.queryValue ?? ""),

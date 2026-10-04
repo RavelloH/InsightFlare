@@ -220,6 +220,13 @@ const pageReportColumnByAttribute: Readonly<Record<string, string>> = {
   "page.report.perfInpMs": "perf_inp_ms",
 };
 
+/** Returns the generated visits column behind a stored Page report attribute. */
+export function analyticsPageReportStorageColumn(
+  attributeId: string,
+): string | undefined {
+  return pageReportColumnByAttribute[attributeId];
+}
+
 function observationReportColumn(attributeId: string): string | undefined {
   const direct = observationReportColumnByAttribute[attributeId];
   if (direct) return direct;

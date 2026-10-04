@@ -1,13 +1,17 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
+  attachScopedFilterMetadata,
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   prepareScopedQuery,
+  scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { handleFilterValuesContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/filter-values";
@@ -25,6 +29,13 @@ import {
 import {
   mapDimensionRows,
   type QueryWindow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  buildVisitFilterSql,
+  buildVisitSourceCte,
+  queryD1All,
+  scopedDatasetFor,
+  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryRetentionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import {
@@ -54,6 +65,9 @@ import {
   queryTopReferrersFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import type { Env } from "@/lib/edge/types";
+import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
 
 import { filterFixture } from "./filter-fixtures";
 import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
@@ -174,8 +188,242 @@ function createScopedOverviewSqliteEnv(): {
         }),
       }),
     },
+    DAILY_SALT_SECRET: "test-secret",
+    INGEST_DO: {} as DurableObjectNamespace,
   } as unknown as Env;
   return { env, database, close: () => database.close() };
+}
+function createMigratedPagesSqliteEnv(): {
+  env: Env;
+  database: DatabaseSync;
+  close: () => void;
+} {
+  const database = createMigratedDatabase();
+  const env = {
+    DB: {
+      prepare: (sql: string) => ({
+        bind: (...bindings: QueryBinding[]) => ({
+          all: async () => ({
+            results: database.prepare(sql).all(...bindings) as D1Row[],
+          }),
+        }),
+      }),
+    },
+    DAILY_SALT_SECRET: "test-secret",
+    INGEST_DO: {} as DurableObjectNamespace,
+  } as unknown as Env;
+  return { env, database, close: () => database.close() };
+}
+interface LegacyPageAggregateRow {
+  pathname: unknown;
+  queryValue: unknown;
+  hashValue: unknown;
+  views: unknown;
+  sessions: unknown;
+}
+function legacyPageAggregateRow(row: LegacyPageAggregateRow) {
+  return {
+    pathname: String(row.pathname ?? ""),
+    query: String(row.queryValue ?? ""),
+    hash: String(row.hashValue ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+  };
+}
+/** Frozen pre-Logical reader SQL used as a differential oracle for Wave43. */
+async function legacyTopPagesOracle(
+  env: Env,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  limit: number,
+  includeDetails: boolean,
+  filters: FilterDocument,
+) {
+  const dataset = scopedDatasetFor(targetSiteId, targetWindow, filters);
+  const filter = dataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", {
+        window: targetWindow,
+      });
+  const queryExpr = includeDetails ? "query_string" : "''";
+  const hashExpr = includeDetails ? "hash_fragment" : "''";
+  const sql = `
+WITH
+${dataset?.ctes ?? buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT *
+  FROM ${dataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
+)
+SELECT
+  pathname,
+  ${queryExpr} AS queryValue,
+  ${hashExpr} AS hashValue,
+  count(*) AS views,
+  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
+FROM filtered_visits
+GROUP BY pathname, queryValue, hashValue
+ORDER BY views DESC, pathname ASC
+LIMIT ?
+`;
+  const rows = await queryD1All<LegacyPageAggregateRow>(env, sql, [
+    ...(dataset
+      ? dataset.bindings.map((binding) => binding.value)
+      : [
+          ...visitSourceBindings(targetSiteId, targetWindow),
+          ...(filter?.bindings ?? []),
+        ]),
+    limit,
+  ]);
+  return rows.map(legacyPageAggregateRow);
+}
+/** Frozen pre-Logical paginated reader SQL, including all 15 cursor bindings. */
+async function legacyPagesPageRowsOracle(
+  env: Env,
+  targetSiteId: string,
+  targetWindow: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  includeDetails: boolean,
+  cursor?: {
+    views: number;
+    sessions: number;
+    pathname: string;
+    query: string;
+    hash: string;
+  } | null,
+) {
+  const dataset = scopedDatasetFor(targetSiteId, targetWindow, filters);
+  const filter = dataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", {
+        window: targetWindow,
+      });
+  const queryExpr = includeDetails ? "query_string" : "''";
+  const hashExpr = includeDetails ? "hash_fragment" : "''";
+  const cursorClause = cursor
+    ? `
+WHERE views < ?
+   OR (views = ? AND sessions < ?)
+   OR (views = ? AND sessions = ? AND pathname > ?)
+   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue > ?)
+   OR (views = ? AND sessions = ? AND pathname = ? AND queryValue = ? AND hashValue > ?)`
+    : "";
+  const sql = `
+WITH
+${dataset?.ctes ?? buildVisitSourceCte()},
+filtered_visits AS (
+  SELECT *
+  FROM ${dataset?.visitRelation ?? "visit_source"}
+  ${filter?.clause ?? ""}
+),
+rollup AS (
+  SELECT
+    pathname,
+    ${queryExpr} AS queryValue,
+    ${hashExpr} AS hashValue,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions
+  FROM filtered_visits
+  GROUP BY pathname, queryValue, hashValue
+)
+SELECT pathname, queryValue, hashValue, views, sessions
+FROM rollup
+${cursorClause}
+ORDER BY views DESC, sessions DESC, pathname ASC, queryValue ASC, hashValue ASC
+LIMIT ?
+`;
+  const cursorBindings = cursor
+    ? [
+        cursor.views,
+        cursor.views,
+        cursor.sessions,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.query,
+        cursor.views,
+        cursor.sessions,
+        cursor.pathname,
+        cursor.query,
+        cursor.hash,
+      ]
+    : [];
+  const rows = await queryD1All<LegacyPageAggregateRow>(env, sql, [
+    ...(dataset
+      ? dataset.bindings.map((binding) => binding.value)
+      : [
+          ...visitSourceBindings(targetSiteId, targetWindow),
+          ...(filter?.bindings ?? []),
+        ]),
+    ...cursorBindings,
+    limit + 1,
+  ]);
+  return rows.map(legacyPageAggregateRow);
+}
+function normalizedFilters(root: unknown): FilterDocument {
+  return normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
+}
+function filterCondition(
+  target:
+    | { readonly kind: "field"; readonly field: string }
+    | {
+        readonly kind: "event-payload";
+        readonly path: string;
+      },
+  value: string,
+) {
+  return {
+    kind: "condition",
+    target,
+    operator: "eq",
+    value,
+  } as const;
+}
+function insertPageRow(
+  database: DatabaseSync,
+  input: {
+    visitId: string | null;
+    visitorId: string;
+    sessionId: string;
+    pathname: string;
+    country: string;
+    query?: string;
+    hash?: string;
+  },
+): void {
+  database
+    .prepare("INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)")
+    .run(siteId);
+  const siteIdentity = database
+    .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+    .get(siteId) as { site_pk: number };
+  database
+    .prepare(
+      `
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, hostname, title, query_string,
+        hash_fragment, country, site_pk
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', '', ?, ?, ?, ?)
+    `,
+    )
+    .run(
+      input.visitId,
+      siteId,
+      input.visitorId,
+      input.sessionId,
+      baseMs,
+      baseMs,
+      input.pathname,
+      input.query ?? "",
+      input.hash ?? "",
+      input.country,
+      siteIdentity.site_pk,
+    );
 }
 function visitBindings(targetWindow = window): QueryBinding[] {
   return [siteId, targetWindow.startMs, targetWindow.endExclusiveMs];
@@ -225,21 +473,626 @@ describe("edge pages D1 queries", () => {
     ]);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].sql).toContain("query_string AS queryValue");
-    expect(calls[0].sql).toContain("hash_fragment AS hashValue");
-    expect(calls[0].sql).toContain("GROUP BY pathname, queryValue, hashValue");
-    expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
-      "us",
-      "example.com",
-      "/pricing",
+    expect(calls[0].sql).toContain("queryValue");
+    expect(calls[0].sql).toContain("hashValue");
+    expect(calls[0].sql).toContain("GROUP BY");
+    expect(calls[0].bindings.at(-1)).toBe(15);
+    expect(calls[0].bindings).toEqual(
+      expect.arrayContaining([
+        ...visitBindings(),
+        "us",
+        "example.com",
+        "/pricing",
+      ]),
+    );
+  });
+
+  it("preserves direct Page row bags and prepared Page membership for null visit IDs", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    insertPageRow(database, {
+      visitId: null,
+      visitorId: "null-visitor-us",
+      sessionId: "null-session-us",
+      pathname: "/null-us",
+      country: "US",
+    });
+    insertPageRow(database, {
+      visitId: null,
+      visitorId: "null-visitor-ca",
+      sessionId: "null-session-ca",
+      pathname: "/null-ca",
+      country: "CA",
+    });
+    insertPageRow(database, {
+      visitId: "page-normal-us",
+      visitorId: "normal-visitor-us",
+      sessionId: "normal-session-us",
+      pathname: "/normal-us",
+      country: "US",
+    });
+
+    try {
+      const directAll = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        EMPTY_FILTER_DOCUMENT,
+      );
+      expect(directAll).toEqual(
+        await legacyTopPagesOracle(
+          env,
+          siteId,
+          window,
+          10,
+          false,
+          EMPTY_FILTER_DOCUMENT,
+        ),
+      );
+      expect(directAll.map((row) => row.pathname)).toEqual([
+        "/normal-us",
+        "/null-ca",
+        "/null-us",
+      ]);
+
+      const countryFilters = filterFixture({ country: "US" });
+      const directCountry = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        countryFilters,
+      );
+      expect(directCountry).toEqual(
+        await legacyTopPagesOracle(
+          env,
+          siteId,
+          window,
+          10,
+          false,
+          countryFilters,
+        ),
+      );
+      expect(directCountry.map((row) => row.pathname)).toEqual([
+        "/normal-us",
+        "/null-us",
+      ]);
+
+      const prepared = prepareScopedQuery("pages", {
+        context: siteQueryContext(siteId, "private-dashboard"),
+        time: createQueryTime(
+          window.startMs,
+          window.endExclusiveMs,
+          "UTC",
+          window.nowMs,
+        ),
+        filters: countryFilters,
+        scopePreference: "event",
+      });
+      expect(prepared.filters).toBeDefined();
+      const preparedPages = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        prepared.filters!,
+      );
+      expect(preparedPages).toEqual(
+        await legacyTopPagesOracle(
+          env,
+          siteId,
+          window,
+          10,
+          false,
+          prepared.filters!,
+        ),
+      );
+      expect(preparedPages.map((row) => row.pathname)).toEqual(["/normal-us"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("uses prepared Page visit snapshots without event expansion and entity snapshots by kind", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    insertPageRow(database, {
+      visitId: "page-id-selected",
+      visitorId: "selected-visitor",
+      sessionId: "selected-session",
+      pathname: "/selected-page",
+      country: "US",
+    });
+    insertPageRow(database, {
+      visitId: "event-owner-page",
+      visitorId: "event-owner-visitor",
+      sessionId: "event-owner-session",
+      pathname: "/event-owner",
+      country: "CA",
+    });
+    const siteIdentity = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get(siteId) as { site_pk: number };
+    database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name, last_seen_at, site_pk) VALUES (41, ?, 'purchase', ?, ?)",
+      )
+      .run(siteId, baseMs, siteIdentity.site_pk);
+    database
+      .prepare(
+        `
+        INSERT INTO custom_events (
+          event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+          received_at, sequence, node_count, value_count, site_pk
+        ) VALUES (41, 'advanced-event-id', ?, 'event-owner-page', 41, ?, ?, 1, 1, 1, ?)
+      `,
+      )
+      .run(siteId, baseMs + 10, baseMs + 10, siteIdentity.site_pk);
+
+    const time = createQueryTime(
       window.startMs,
       window.endExclusiveMs,
-      "us",
-      "example.com",
-      "/pricing",
-      15,
-    ]);
+      "UTC",
+      window.nowMs,
+    );
+    const context = siteQueryContext(siteId, "private-dashboard");
+    const baseFilters = filterFixture({ country: "US" });
+    const preparedObservation = prepareScopedQuery("pages", {
+      context,
+      time,
+      filters: baseFilters,
+      scopePreference: "event",
+    } as never) as { filters?: FilterDocument };
+    const observationMetadata = scopedFilterMetadata(
+      preparedObservation.filters,
+    );
+    if (!preparedObservation.filters || !observationMetadata)
+      throw new Error("wave43_prepared_observation_incomplete");
+    const observationFilters = attachScopedFilterMetadata(
+      preparedObservation.filters,
+      {
+        ...observationMetadata,
+        plan: {
+          ...observationMetadata.plan,
+          advancedMatches: {
+            visitIds: [{ siteId, id: "page-id-selected" }],
+            eventIds: [{ siteId, id: "advanced-event-id" }],
+          },
+        },
+      },
+    );
+    const preparedSession = prepareScopedQuery("pages", {
+      context,
+      time,
+      filters: baseFilters,
+      scopePreference: "session",
+    } as never) as { filters?: FilterDocument };
+    const sessionMetadata = scopedFilterMetadata(preparedSession.filters);
+    if (!preparedSession.filters || !sessionMetadata)
+      throw new Error("wave43_prepared_session_incomplete");
+    const sessionFilters = attachScopedFilterMetadata(preparedSession.filters, {
+      ...sessionMetadata,
+      plan: {
+        ...sessionMetadata.plan,
+        advancedMatches: {
+          entityIds: [{ siteId, id: "event-owner-session" }],
+        },
+      },
+    });
+
+    try {
+      const observationRows = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        observationFilters,
+      );
+      expect(observationRows).toEqual(
+        await legacyTopPagesOracle(
+          env,
+          siteId,
+          window,
+          10,
+          false,
+          observationFilters,
+        ),
+      );
+      expect(observationRows.map((row) => row.pathname)).toEqual([
+        "/selected-page",
+      ]);
+
+      const sessionRows = await queryTopPagesFromD1(
+        env,
+        siteId,
+        window,
+        10,
+        false,
+        sessionFilters,
+      );
+      expect(sessionRows).toEqual(
+        await legacyTopPagesOracle(
+          env,
+          siteId,
+          window,
+          10,
+          false,
+          sessionFilters,
+        ),
+      );
+      expect(sessionRows.map((row) => row.pathname)).toEqual(["/event-owner"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("matches the frozen reader for Event payload and mixed Page/Event predicates", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    insertPageRow(database, {
+      visitId: "page-event-country",
+      visitorId: "page-event-visitor",
+      sessionId: "page-event-session",
+      pathname: "/page-country",
+      country: "US",
+    });
+    insertPageRow(database, {
+      visitId: "payload-event-owner",
+      visitorId: "payload-event-visitor",
+      sessionId: "payload-event-session",
+      pathname: "/event-owner",
+      country: "CA",
+    });
+    const siteIdentity = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get(siteId) as { site_pk: number };
+    database
+      .prepare(
+        "INSERT INTO custom_event_names (id, site_id, name, last_seen_at, site_pk) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(31, siteId, "purchase", baseMs, siteIdentity.site_pk);
+    database
+      .prepare(
+        `
+        INSERT INTO custom_events (
+          event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+          received_at, sequence, node_count, value_count, site_pk
+        ) VALUES (1, 'payload-event-1', ?, 'payload-event-owner', 31, ?, ?, 1, 1, 1, ?)
+      `,
+      )
+      .run(siteId, baseMs + 10, baseMs + 10, siteIdentity.site_pk);
+    database
+      .prepare(
+        "INSERT INTO custom_event_json_paths (id, site_id, path, last_seen_at, site_pk) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(51, siteId, "/plan", baseMs, siteIdentity.site_pk);
+    database
+      .prepare(
+        `
+        INSERT INTO custom_event_json_nodes (
+          event_pk, node_id, parent_node_id, key_id, path_id, value_type,
+          member_order, array_index, depth
+        ) VALUES (1, 1, NULL, NULL, 51, 1, NULL, NULL, 1)
+      `,
+      )
+      .run();
+    database
+      .prepare(
+        `
+        INSERT INTO custom_event_json_values (
+          event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+          value_type, string_value, number_value, boolean_value, site_pk
+        ) VALUES (1, 1, ?, 31, 51, ?, 1, 'pro', NULL, NULL, ?)
+      `,
+      )
+      .run(siteId, baseMs + 10, siteIdentity.site_pk);
+
+    const payloadOnly = normalizedFilters(
+      filterCondition({ kind: "event-payload", path: "/plan" }, "pro"),
+    );
+    const mixedCases = [
+      normalizedFilters({
+        kind: "or",
+        children: [
+          filterCondition({ kind: "field", field: "geo.country" }, "US"),
+          filterCondition({ kind: "field", field: "event.name" }, "purchase"),
+        ],
+      }),
+      normalizedFilters({
+        kind: "and",
+        children: [
+          filterCondition({ kind: "field", field: "geo.country" }, "US"),
+          filterCondition({ kind: "field", field: "event.name" }, "purchase"),
+        ],
+      }),
+      normalizedFilters({
+        kind: "not",
+        child: filterCondition(
+          { kind: "field", field: "event.name" },
+          "refund",
+        ),
+      }),
+    ];
+
+    try {
+      for (const filters of [payloadOnly, ...mixedCases]) {
+        await expect(
+          queryTopPagesFromD1(env, siteId, window, 10, true, filters),
+        ).resolves.toEqual(
+          await legacyTopPagesOracle(env, siteId, window, 10, true, filters),
+        );
+      }
+      await expect(
+        queryTopPagesFromD1(env, siteId, window, 10, true, payloadOnly),
+      ).resolves.toMatchObject([{ pathname: "/event-owner", views: 1 }]);
+    } finally {
+      close();
+    }
+  });
+
+  it("keeps paginated Page groups in the legacy keyset order without gaps", async () => {
+    const { env, database, close } = createMigratedPagesSqliteEnv();
+    const rows = [
+      ["page-a-1", "session-a", "/same", "plan=a", "x"],
+      ["page-a-2", "session-a", "/same", "plan=a", "x"],
+      ["page-b-1", "session-b1", "/same", "plan=b", "x"],
+      ["page-b-2", "session-b2", "/same", "plan=b", "x"],
+      ["page-next", "session-next", "/next", "", ""],
+      ["page-other", "session-other", "/other", "", ""],
+    ] as const;
+    for (const [visitId, sessionId, pathname, query, hash] of rows) {
+      insertPageRow(database, {
+        visitId,
+        visitorId: `visitor-${sessionId}`,
+        sessionId,
+        pathname,
+        country: "US",
+        query,
+        hash,
+      });
+    }
+
+    try {
+      const first = await queryPagesPageFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        true,
+      );
+      const firstOracle = await legacyPagesPageRowsOracle(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        true,
+      );
+      expect(first.items).toEqual(firstOracle.slice(0, 2));
+      expect(first.pagination.hasMore).toBe(true);
+      const firstCursor = await decodePagesCursor(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        true,
+        first.pagination.nextCursor,
+      );
+      expect(firstCursor).toEqual({
+        views: 2,
+        sessions: 1,
+        pathname: "/same",
+        query: "plan=a",
+        hash: "x",
+      });
+
+      const second = await queryPagesPageFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        true,
+        firstCursor,
+      );
+      const secondOracle = await legacyPagesPageRowsOracle(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        true,
+        firstCursor,
+      );
+      expect(second.items).toEqual(secondOracle.slice(0, 2));
+      expect(second.items.map((row) => row.pathname)).toEqual([
+        "/next",
+        "/other",
+      ]);
+      expect(second.pagination).toMatchObject({
+        returned: 2,
+        hasMore: false,
+        nextCursor: null,
+      });
+      expect([
+        ...first.items.map((row) => `${row.pathname}|${row.query}|${row.hash}`),
+        ...second.items.map(
+          (row) => `${row.pathname}|${row.query}|${row.hash}`,
+        ),
+      ]).toEqual(["/same|plan=b|x", "/same|plan=a|x", "/next||", "/other||"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("records one-statement Page query size, bind, hash, and query plans", async () => {
+    const deepPath = `/${Array.from({ length: 40 }, () => "x").join("/")}`;
+    const payload40 = normalizedFilters(
+      filterCondition({ kind: "event-payload", path: deepPath }, "value"),
+    );
+    const payloadMulti = normalizedFilters({
+      kind: "and",
+      children: Array.from({ length: 6 }, (_, index) =>
+        filterCondition(
+          { kind: "event-payload", path: `/budget/${index}` },
+          `value-${index}`,
+        ),
+      ),
+    });
+    const prepared = prepareScopedQuery("pages", {
+      context: siteQueryContext(siteId, "private-dashboard"),
+      time: createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        "UTC",
+        window.nowMs,
+      ),
+      filters: parseFilterDsl("count(page) gte 1", analyticsFilterRegistry),
+      scopePreference: "event",
+    } as never) as { filters?: FilterDocument };
+    if (!prepared.filters)
+      throw new Error("wave43_page_budget_preparation_failed");
+    const metadata = scopedFilterMetadata(prepared.filters);
+    if (!metadata) throw new Error("wave43_page_budget_metadata_missing");
+    const advancedPrepared = (count: number) =>
+      attachScopedFilterMetadata(prepared.filters!, {
+        ...metadata,
+        plan: {
+          ...metadata.plan,
+          advancedMatches: {
+            visitIds: Array.from({ length: count }, (_, index) => ({
+              siteId,
+              id: `budget-visit-${index}`,
+            })),
+          },
+        },
+      });
+    const requests = [
+      {
+        name: "plain",
+        run: (env: Env) =>
+          queryTopPagesFromD1(
+            env,
+            siteId,
+            window,
+            10,
+            false,
+            EMPTY_FILTER_DOCUMENT,
+          ),
+      },
+      {
+        name: "event-payload-40-level",
+        run: (env: Env) =>
+          queryTopPagesFromD1(env, siteId, window, 10, true, payload40),
+      },
+      {
+        name: "event-payload-multi",
+        run: (env: Env) =>
+          queryTopPagesFromD1(env, siteId, window, 10, true, payloadMulti),
+      },
+      {
+        name: "advanced-128-visit-ids",
+        run: (env: Env) =>
+          queryTopPagesFromD1(
+            env,
+            siteId,
+            window,
+            10,
+            false,
+            advancedPrepared(128),
+          ),
+      },
+      {
+        name: "advanced-empty-visit-ids",
+        run: (env: Env) =>
+          queryTopPagesFromD1(
+            env,
+            siteId,
+            window,
+            10,
+            false,
+            advancedPrepared(0),
+          ),
+      },
+      {
+        name: "page-cursor",
+        run: (env: Env) =>
+          queryPagesPageFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            true,
+            {
+              views: 3,
+              sessions: 2,
+              pathname: "/cursor",
+              query: "q=1",
+              hash: "details",
+            },
+          ),
+      },
+    ];
+    const databases: DatabaseSync[] = [];
+
+    try {
+      const metrics: Array<{
+        name: string;
+        statements: number;
+        sqlBytes: number;
+        bindings: number;
+        hash: string;
+      }> = [];
+      const explainCounts: Record<string, number> = {};
+      for (const request of requests) {
+        const captured = createD1Env([[]]);
+        try {
+          await request.run(captured.env);
+        } catch (error) {
+          throw new Error(`wave43_page_budget_compile_failed:${request.name}`, {
+            cause: error,
+          });
+        }
+        expect(captured.calls).toHaveLength(1);
+        const call = captured.calls[0]!;
+        const sqlBytes = new TextEncoder().encode(call.sql).byteLength;
+        expect(sqlBytes).toBeLessThanOrEqual(100_000);
+        expect(call.bindings.length).toBeLessThanOrEqual(100);
+        metrics.push({
+          name: request.name,
+          statements: captured.calls.length,
+          sqlBytes,
+          bindings: call.bindings.length,
+          hash: createHash("sha256")
+            .update(call.sql)
+            .digest("hex")
+            .slice(0, 16),
+        });
+        if (
+          request.name === "plain" ||
+          request.name === "event-payload-multi"
+        ) {
+          const { database } = createMigratedPagesSqliteEnv();
+          databases.push(database);
+          const explain = database
+            .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
+            .all(...call.bindings) as Array<{ detail?: string }>;
+          expect(explain.length).toBeGreaterThan(0);
+          explainCounts[request.name] = explain.length;
+        }
+      }
+      console.info("wave43_page_query_budget", JSON.stringify(metrics));
+      console.info(
+        "wave43_page_query_plan_rows",
+        JSON.stringify(explainCounts),
+      );
+    } finally {
+      for (const database of databases) database.close();
+    }
   });
 
   it("keeps the combined page and tabs reader read-only for empty and scoped pages", async () => {
@@ -457,9 +1310,10 @@ describe("edge pages D1 queries", () => {
       { pathname: "/docs", query: "", hash: "", views: 3, sessions: 0 },
     ]);
 
-    expect(calls[0].sql).toContain("'' AS queryValue");
-    expect(calls[0].sql).toContain("'' AS hashValue");
-    expect(calls[0].bindings).toEqual([...visitBindings(), 5]);
+    expect(calls[0].sql).toContain("queryValue");
+    expect(calls[0].sql).toContain("hashValue");
+    expect(calls[0].sql).not.toMatch(/query_string|hash_fragment/u);
+    expect(calls[0].bindings.at(-1)).toBe(5);
   });
 
   it("keeps the combined path tab normalization identical to the legacy reader", async () => {
@@ -1011,7 +1865,9 @@ describe("edge pages D1 queries", () => {
       false,
       prepared.filters!,
     );
-    expect(topPages.calls[0]?.sql).toContain("scope_final_visits");
+    expect(topPages.calls).toHaveLength(1);
+    expect(topPages.calls[0]?.sql).toContain("GROUP BY");
+    expect(topPages.calls[0]?.bindings).toContain("/pricing");
 
     const dashboard = createD1Env([
       [
@@ -1147,8 +2003,9 @@ describe("edge paginated page and referrer readers", () => {
       items: [{ pathname: "/pricing", views: 4 }],
       pagination: { hasMore: false, nextCursor: null },
     });
-    expect(second.calls[0].sql).toContain("query_string AS queryValue");
+    expect(second.calls[0].sql).toContain("queryValue");
     expect(second.calls[0].bindings).toContain(6);
+    expect(second.calls[0].bindings.at(-1)).toBe(3);
   });
 
   it("paginates referrers with search, alternate sorting, and full URLs", async () => {

@@ -1426,7 +1426,11 @@ export class AnalyticsLogicalToDbLowerer {
         path,
         this.#requiredOutput(node),
       );
-      lowered = this.#scopedStorage.lowerEventReportSource(node, path, source);
+      lowered = this.#scopedStorage.lowerSelectedReportSource(
+        node,
+        path,
+        source,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const separator = message.indexOf(": ");
