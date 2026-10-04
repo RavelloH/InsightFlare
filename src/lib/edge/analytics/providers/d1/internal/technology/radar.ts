@@ -1,12 +1,67 @@
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildTechnologyRadarPlan,
+  TECHNOLOGY_RADAR_OUTPUTS,
+  type TechnologyRadarDimension,
+} from "@/lib/edge/analytics/engine/technology-radar-report-plan";
+import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type {
   FilterDocument,
   QueryWindow,
   ReferrerRadarRow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { queryD1All } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
-import { technologyVisitSource } from "./scoped-source";
+interface TechnologyRadarRow {
+  readonly browser?: string;
+  readonly referrer?: string;
+  readonly sessions: number;
+  readonly bounces: number;
+  readonly avgDurationMs: number;
+  readonly avgDepth: number;
+  readonly visitors: number;
+  readonly returningVisitors: number;
+  readonly avgFrequency: number;
+  readonly trafficShare: number;
+}
+
+async function queryTechnologyRadarFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  dimension: TechnologyRadarDimension,
+  limit?: number,
+): Promise<TechnologyRadarRow[]> {
+  const metadata = scopedFilterMetadata(filters);
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    buildTechnologyRadarPlan({
+      siteId,
+      // Prepared Page reads honor the current reader window.
+      queryTime: queryWindowToTime(window),
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      dimension,
+      ...(limit === undefined ? {} : { limit }),
+    }),
+    TECHNOLOGY_RADAR_OUTPUTS[dimension],
+  );
+  return rows.map((row) => ({
+    ...(dimension === "browser"
+      ? { browser: String(row.browser ?? "").trim() }
+      : { referrer: String(row.referrer ?? "").trim() }),
+    sessions: Number(row.sessions ?? 0),
+    bounces: Number(row.bounces ?? 0),
+    avgDurationMs: Number(row.avgDurationMs ?? 0),
+    avgDepth: Number(row.avgDepth ?? 0),
+    visitors: Number(row.visitors ?? 0),
+    returningVisitors: Number(row.returningVisitors ?? 0),
+    avgFrequency: Number(row.avgFrequency ?? 0),
+    trafficShare: Number(row.trafficShare ?? 0),
+  }));
+}
 
 export async function queryBrowserRadarFromD1(
   env: Env,
@@ -26,114 +81,21 @@ export async function queryBrowserRadarFromD1(
     trafficShare: number;
   }>
 > {
-  const source = technologyVisitSource(siteId, window, filters);
-
-  const sql = `
-WITH
-${source.ctes},
-
-filtered_visits AS MATERIALIZED (
-  SELECT
-    visit_id,
-    visitor_id,
-    session_id,
-    TRIM(COALESCE(browser, '')) AS browser,
-    CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0
-         THEN duration_ms ELSE 0 END AS safe_duration_ms
-  FROM ${source.relation}
-  ${source.filterClause}
-),
-
-session_level AS (
-  SELECT
-    browser,
-    session_id,
-    count(*) AS visit_count,
-    sum(safe_duration_ms) AS session_duration
-  FROM filtered_visits
-  WHERE browser != '' AND session_id != ''
-  GROUP BY browser, session_id
-),
-
-browser_session_agg AS (
-  SELECT
-    browser,
-    count(*) AS sessions,
-    sum(CASE WHEN visit_count = 1 THEN 1 ELSE 0 END) AS bounces,
-    CASE WHEN count(*) > 0
-         THEN CAST(sum(session_duration) AS REAL) / count(*)
-         ELSE 0 END AS avgDurationMs,
-    CASE WHEN count(*) > 0
-         THEN CAST(sum(visit_count) AS REAL) / count(*)
-         ELSE 0 END AS avgDepth
-  FROM session_level
-  GROUP BY browser
-),
-
-visitor_level AS (
-  SELECT
-    browser,
-    visitor_id,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS session_count
-  FROM filtered_visits
-  WHERE browser != '' AND visitor_id != ''
-  GROUP BY browser, visitor_id
-),
-
-browser_visitor_agg AS (
-  SELECT
-    browser,
-    count(*) AS visitors,
-    sum(CASE WHEN session_count > 1 THEN 1 ELSE 0 END) AS returningVisitors,
-    CASE WHEN count(*) > 0
-         THEN CAST(sum(session_count) AS REAL) / count(*)
-         ELSE 0 END AS avgFrequency
-  FROM visitor_level
-  GROUP BY browser
-),
-
-total_visitors AS (
-  SELECT count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS total
-  FROM filtered_visits
-  WHERE browser != ''
-)
-
-SELECT
-  bsa.browser,
-  bsa.sessions,
-  bsa.bounces,
-  bsa.avgDurationMs,
-  bsa.avgDepth,
-  bva.visitors,
-  bva.returningVisitors,
-  bva.avgFrequency,
-  CASE WHEN tv.total > 0
-       THEN CAST(bva.visitors AS REAL) / tv.total
-       ELSE 0 END AS trafficShare
-FROM browser_session_agg bsa
-INNER JOIN browser_visitor_agg bva ON bsa.browser = bva.browser
-CROSS JOIN total_visitors tv
-ORDER BY bva.visitors DESC
-`;
-
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...source.bindings,
-    ...source.filterBindings,
-  ]);
-
-  return rows
+  return (
+    await queryTechnologyRadarFromD1(env, siteId, window, filters, "browser")
+  )
+    .filter((row) => row.browser!.length > 0 && row.visitors > 0)
     .map((row) => ({
-      browser: String(row.browser ?? "").trim(),
-      sessions: Number(row.sessions ?? 0),
-      bounces: Number(row.bounces ?? 0),
-      avgDurationMs: Number(row.avgDurationMs ?? 0),
-      avgDepth: Number(row.avgDepth ?? 0),
-      visitors: Number(row.visitors ?? 0),
-      returningVisitors: Number(row.returningVisitors ?? 0),
-      avgFrequency: Number(row.avgFrequency ?? 0),
-      trafficShare: Number(row.trafficShare ?? 0),
-    }))
-    .filter((row) => row.browser.length > 0 && row.visitors > 0);
+      browser: row.browser!,
+      sessions: row.sessions,
+      bounces: row.bounces,
+      avgDurationMs: row.avgDurationMs,
+      avgDepth: row.avgDepth,
+      visitors: row.visitors,
+      returningVisitors: row.returningVisitors,
+      avgFrequency: row.avgFrequency,
+      trafficShare: row.trafficShare,
+    }));
 }
 
 export async function queryReferrerRadarFromD1(
@@ -143,113 +105,26 @@ export async function queryReferrerRadarFromD1(
   filters: FilterDocument,
   limit: number,
 ): Promise<ReferrerRadarRow[]> {
-  const source = technologyVisitSource(siteId, window, filters);
-
-  const sql = `
-WITH
-${source.ctes},
-
-filtered_visits AS MATERIALIZED (
-  SELECT
-    visit_id,
-    visitor_id,
-    session_id,
-    TRIM(COALESCE(referrer_host, '')) AS referrer,
-    CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0
-         THEN duration_ms ELSE 0 END AS safe_duration_ms
-  FROM ${source.relation}
-  ${source.filterClause}
-),
-
-session_level AS (
-  SELECT
-    referrer,
-    session_id,
-    count(*) AS visit_count,
-    sum(safe_duration_ms) AS session_duration
-  FROM filtered_visits
-  WHERE session_id != ''
-  GROUP BY referrer, session_id
-),
-
-referrer_session_agg AS (
-  SELECT
-    referrer,
-    count(*) AS sessions,
-    sum(CASE WHEN visit_count = 1 THEN 1 ELSE 0 END) AS bounces,
-    CASE WHEN count(*) > 0
-         THEN CAST(sum(session_duration) AS REAL) / count(*)
-         ELSE 0 END AS avgDurationMs,
-    CASE WHEN count(*) > 0
-         THEN CAST(sum(visit_count) AS REAL) / count(*)
-         ELSE 0 END AS avgDepth
-  FROM session_level
-  GROUP BY referrer
-),
-
-visitor_level AS (
-  SELECT
-    referrer,
-    visitor_id,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS session_count
-  FROM filtered_visits
-  WHERE visitor_id != ''
-  GROUP BY referrer, visitor_id
-),
-
-referrer_visitor_agg AS (
-  SELECT
-    referrer,
-    count(*) AS visitors,
-    sum(CASE WHEN session_count > 1 THEN 1 ELSE 0 END) AS returningVisitors,
-    CASE WHEN count(*) > 0
-         THEN CAST(sum(session_count) AS REAL) / count(*)
-         ELSE 0 END AS avgFrequency
-  FROM visitor_level
-  GROUP BY referrer
-),
-
-total_visitors AS (
-  SELECT count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS total
-  FROM filtered_visits
-)
-
-SELECT
-  rsa.referrer,
-  rsa.sessions,
-  rsa.bounces,
-  rsa.avgDurationMs,
-  rsa.avgDepth,
-  rva.visitors,
-  rva.returningVisitors,
-  rva.avgFrequency,
-  CASE WHEN tv.total > 0
-       THEN CAST(rva.visitors AS REAL) / tv.total
-       ELSE 0 END AS trafficShare
-FROM referrer_session_agg rsa
-INNER JOIN referrer_visitor_agg rva ON rsa.referrer = rva.referrer
-CROSS JOIN total_visitors tv
-ORDER BY rva.visitors DESC, rsa.sessions DESC, rsa.referrer ASC
-LIMIT ?
-`;
-
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...source.bindings,
-    ...source.filterBindings,
-    limit,
-  ]);
-
-  return rows
+  return (
+    await queryTechnologyRadarFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      "referrer",
+      limit,
+    )
+  )
+    .filter((row) => row.visitors > 0)
     .map((row) => ({
-      referrer: String(row.referrer ?? "").trim(),
-      sessions: Number(row.sessions ?? 0),
-      bounces: Number(row.bounces ?? 0),
-      avgDurationMs: Number(row.avgDurationMs ?? 0),
-      avgDepth: Number(row.avgDepth ?? 0),
-      visitors: Number(row.visitors ?? 0),
-      returningVisitors: Number(row.returningVisitors ?? 0),
-      avgFrequency: Number(row.avgFrequency ?? 0),
-      trafficShare: Number(row.trafficShare ?? 0),
-    }))
-    .filter((row) => row.visitors > 0);
+      referrer: row.referrer!,
+      sessions: row.sessions,
+      bounces: row.bounces,
+      avgDurationMs: row.avgDurationMs,
+      avgDepth: row.avgDepth,
+      visitors: row.visitors,
+      returningVisitors: row.returningVisitors,
+      avgFrequency: row.avgFrequency,
+      trafficShare: row.trafficShare,
+    }));
 }
