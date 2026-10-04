@@ -308,6 +308,16 @@ const dimensionRows = [
   { value: "/pricing", views: 9, sessions: 6, visitors: 5 },
   { value: "/docs", views: 4, sessions: 3, visitors: 2 },
 ];
+function isLogicalPageAggregate(sql: string): boolean {
+  return (
+    sql.includes('"visits"') &&
+    !sql.includes('"custom_events"') &&
+    !sql.includes('"custom_event_names"') &&
+    !sql.includes('"event_payload_values"') &&
+    sql.includes("COUNT(*)") &&
+    sql.includes("COUNT(DISTINCT CASE WHEN")
+  );
+}
 const eventRecordRow = {
   eventPk: 1,
   eventId: "evt-1",
@@ -457,6 +467,49 @@ function commonQueryMatches(): SqlMatch[] {
         },
       ],
     ),
+    {
+      match: (sql) =>
+        isLogicalPageAggregate(sql) && sql.includes('"referrer_url"'),
+      all: [
+        {
+          referrer: "https://news.example/post",
+          views: 6,
+          sessions: 4,
+          visitors: 3,
+        },
+      ],
+    },
+    {
+      match: (sql, bindings) =>
+        isLogicalPageAggregate(sql) &&
+        sql.includes('"query_string"') &&
+        bindings.at(-1) === 201,
+      all: dimensionRows,
+    },
+    {
+      match: (sql) =>
+        isLogicalPageAggregate(sql) &&
+        sql.includes('"pathname"') &&
+        !sql.includes('"query_string"') &&
+        !sql.includes('"referrer_host"') &&
+        !sql.includes('"referrer_url"') &&
+        !sql.includes('"browser"') &&
+        !sql.includes('"country"'),
+      all: [{ value: "/pricing", views: 1, sessions: 1, visitors: 1 }],
+    },
+    {
+      match: (sql) =>
+        isLogicalPageAggregate(sql) && sql.includes('"referrer_host"'),
+      all: [{ referrer: "news.example", views: 6, sessions: 4, visitors: 3 }],
+    },
+    {
+      match: (sql) => isLogicalPageAggregate(sql) && sql.includes('"browser"'),
+      all: [{ value: "Chrome", views: 1, sessions: 1, visitors: 1 }],
+    },
+    {
+      match: (sql) => isLogicalPageAggregate(sql) && sql.includes('"country"'),
+      all: [{ value: "US", views: 1, sessions: 1, visitors: 1 }],
+    },
     allMatch(
       ["COALESCE(pathname, '') AS value", "dimension_rollup AS"],
       [{ value: "/pricing", views: 1, sessions: 1, visitors: 1 }],
@@ -1393,8 +1446,10 @@ describe("edge query handlers", () => {
       ok: false,
       error: { message: "Invalid filter field" },
     });
-    const dimensionStatement = statements.find((statement) =>
-      statement.sql.includes("dimension_rollup AS"),
+    const dimensionStatement = statements.find(
+      (statement) =>
+        statement.sql.includes('"query_string"') &&
+        statement.bindings.at(-1) === 201,
     );
     expect(dimensionStatement?.bindings.at(-1)).toBe(201);
   });

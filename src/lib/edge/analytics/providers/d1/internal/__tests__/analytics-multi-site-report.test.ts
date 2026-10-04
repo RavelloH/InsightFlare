@@ -669,9 +669,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           window: WINDOW,
         }),
         output: "journey-observation-detail-source",
-        bytes: 25293,
-        bindings: 25,
-        hash: "v1:bc9eaab74c2644176c2c700a5e2251349bf8796681b9ab62637d2e528615dc81",
+        bytes: 25305,
+        bindings: 21,
+        hash: "v1:223759fd29897411834e31eade5b80b8a81eee9caa24216340acdd39f5a55428",
       },
     ];
 

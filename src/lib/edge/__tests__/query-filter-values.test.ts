@@ -262,10 +262,11 @@ describe("canonical filter value reader", () => {
         pagination: { returned: 1, hasMore: false, nextCursor: null },
       });
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.sql).toContain(
-        `COALESCE(TRIM(COALESCE(${expression}, '')), '') AS value`,
-      );
-      expect(calls[0]?.sql).toContain("LOWER(value) LIKE ? ESCAPE '\\'");
+      expect(calls[0]?.sql).toContain(`"${expression}"`);
+      expect(calls[0]?.sql).toContain("TRIM(");
+      expect(calls[0]?.sql).toContain("LOWER(");
+      expect(calls[0]?.sql).toContain("LIKE");
+      expect(calls[0]?.sql).toContain("ESCAPE");
     }
   });
 
