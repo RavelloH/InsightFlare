@@ -1103,6 +1103,70 @@ function aggregateExpectedGrain(node: AggregateNode): LogicalGrain {
     : { kind: "keyed", keys: node.groups.map((group) => group.slot) };
 }
 
+function logicalExpressionSlotReferences(expression: LogicalExpr): SlotId[] {
+  const slots = new Set<SlotId>();
+  const visit = (value: LogicalExpr): void => {
+    switch (value.kind) {
+      case "slot":
+        slots.add(value.slot);
+        break;
+      case "literal":
+      case "elapsed-duration-literal":
+      case "calendar-period-literal":
+        break;
+      case "comparison":
+      case "arithmetic":
+        visit(value.left);
+        visit(value.right);
+        break;
+      case "boolean":
+        value.terms.forEach(visit);
+        break;
+      case "not":
+      case "null-test":
+      case "set-membership":
+      case "string-match":
+      case "string-normalize":
+      case "absolute":
+      case "round":
+      case "time-bucket":
+      case "bucket-index":
+        visit(value.input);
+        break;
+      case "page-dimension":
+        value.dependencies.forEach((dependency) =>
+          visit(dependency.expression),
+        );
+        break;
+      case "coalesce":
+        value.values.forEach(visit);
+        break;
+      case "case":
+        value.branches.forEach((branch) => {
+          visit(branch.when);
+          visit(branch.then);
+        });
+        visit(value.otherwise);
+        break;
+    }
+  };
+  visit(expression);
+  return [...slots];
+}
+
+function hasDerivedLineage(
+  slot: LogicalSlot | undefined,
+  operation: string,
+  inputs: readonly SlotId[],
+): boolean {
+  return (
+    slot?.lineage.kind === "derived" &&
+    slot.lineage.operation === operation &&
+    slot.lineage.inputs.length === inputs.length &&
+    slot.lineage.inputs.every((input, index) => input === inputs[index])
+  );
+}
+
 function validateNode(
   node: LogicalNode,
   path: string,
@@ -1402,6 +1466,136 @@ function validateNode(
         ...node.measures.map((measure) => measure.output),
       ];
       expectedGrain = aggregateExpectedGrain(node);
+      break;
+    }
+    case "sample-statistics": {
+      const input = assertRelation(node.input, states, `${path}.input`);
+      const outputNames = new Set<string>(["samples", "avg"]);
+      node.groups.forEach((group, index) => {
+        const groupPath = `${path}.groups[${index}]`;
+        if (
+          typeof group.name !== "string" ||
+          !group.name ||
+          outputNames.has(group.name)
+        )
+          fail(
+            "invalid-topology",
+            `${groupPath}.name`,
+            "Sample statistics output names must be non-empty and unique.",
+          );
+        outputNames.add(group.name);
+        const inferred = inferLogicalExpression(
+          group.expression,
+          (id, slotPath) => resolveVisibleSlot(input, id, slotPath),
+          `${groupPath}.expression`,
+        );
+        if (inferred.type.kind !== "scalar" && inferred.type.kind !== "bucket")
+          fail(
+            "invalid-expression",
+            `${groupPath}.expression`,
+            "Sample statistics groups must be scalar or bucket values.",
+          );
+        const output = types.get(group.slot);
+        if (!output)
+          fail(
+            "invalid-topology",
+            `${groupPath}.slot`,
+            "Group output slot is not declared.",
+          );
+        compareSlot(output, inferred, `${groupPath}.slot`);
+        if (
+          !hasDerivedLineage(
+            output,
+            "group",
+            logicalExpressionSlotReferences(group.expression),
+          )
+        )
+          fail(
+            "invalid-expression",
+            `${groupPath}.slot`,
+            "Group output lineage does not match its expression.",
+          );
+      });
+      const value = inferLogicalExpression(
+        node.value,
+        (id, slotPath) => resolveVisibleSlot(input, id, slotPath),
+        `${path}.value`,
+      );
+      if (value.type.kind !== "scalar" || value.type.scalar !== "number")
+        fail(
+          "invalid-expression",
+          `${path}.value`,
+          "Sample statistics require a numeric scalar value.",
+        );
+      const valueInputs = logicalExpressionSlotReferences(node.value);
+      const samples = types.get(node.samplesOutput);
+      if (
+        !samples ||
+        !sameType(samples.type, scalar("number")) ||
+        samples.nullable ||
+        !hasDerivedLineage(samples, "sample-statistics:count", valueInputs)
+      )
+        fail(
+          "invalid-expression",
+          `${path}.samplesOutput`,
+          "Sample count must be a non-null unitless numeric derived slot.",
+        );
+      const average = types.get(node.averageOutput);
+      if (
+        !average ||
+        !sameType(average.type, value.type) ||
+        !average.nullable ||
+        !hasDerivedLineage(average, "sample-statistics:avg", valueInputs)
+      )
+        fail(
+          "invalid-expression",
+          `${path}.averageOutput`,
+          "Average must preserve the numeric input type and be nullable.",
+        );
+      node.percentiles.forEach((item, index) => {
+        const percentilePath = `${path}.percentiles[${index}]`;
+        if (
+          typeof item.name !== "string" ||
+          !item.name ||
+          outputNames.has(item.name) ||
+          !Number.isFinite(item.percentile) ||
+          !Number.isInteger(item.percentile) ||
+          item.percentile < 0 ||
+          item.percentile > 100
+        )
+          fail(
+            "invalid-topology",
+            percentilePath,
+            "Percentiles require a unique output name and an integer from 0 through 100.",
+          );
+        outputNames.add(item.name);
+        const output = types.get(item.output);
+        if (
+          !output ||
+          !sameType(output.type, value.type) ||
+          !output.nullable ||
+          !hasDerivedLineage(
+            output,
+            `sample-statistics:quantile:${item.percentile}`,
+            valueInputs,
+          )
+        )
+          fail(
+            "invalid-expression",
+            `${percentilePath}.output`,
+            "Quantile output must preserve the numeric input type and be nullable.",
+          );
+      });
+      expectedOutput = [
+        ...node.groups.map((group) => group.slot),
+        node.samplesOutput,
+        node.averageOutput,
+        ...node.percentiles.map((item) => item.output),
+      ];
+      expectedGrain =
+        node.groups.length === 0
+          ? { kind: "scalar" }
+          : { kind: "keyed", keys: node.groups.map((group) => group.slot) };
       break;
     }
     case "distinct": {
@@ -1957,6 +2151,13 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
           return [
             ...node.groups.map((binding) => binding.slot),
             ...node.measures.map((measure) => measure.output),
+          ];
+        case "sample-statistics":
+          return [
+            ...node.groups.map((binding) => binding.slot),
+            node.samplesOutput,
+            node.averageOutput,
+            ...node.percentiles.map((item) => item.output),
           ];
         case "distinct":
           return node.keys.map((key) => key.output);

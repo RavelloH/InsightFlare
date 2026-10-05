@@ -1,5 +1,14 @@
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildPerformanceSummariesPlan,
+  buildPerformanceTrendPlan,
+  PERFORMANCE_SUMMARY_OUTPUT_ID,
+  PERFORMANCE_TREND_OUTPUT_ID,
+} from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
 import type { Env } from "@/lib/edge/types";
 
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   FilterDocument,
   Interval,
@@ -12,7 +21,6 @@ import type {
   QueryWindow,
 } from "./core";
 import {
-  appendSqlConditions,
   buildTimeBuckets,
   buildVisitFilterSql,
   buildVisitSourceCte,
@@ -20,7 +28,6 @@ import {
   normalizePathname,
   PERFORMANCE_METRIC_COLUMNS,
   PERFORMANCE_METRIC_KEYS,
-  performanceMetricColumn,
   queryD1All,
   roundPerformanceValue,
   timeBucketCase,
@@ -94,6 +101,26 @@ function mapPerformanceSummaries(
   rows: Record<string, unknown>[],
 ): Record<PerformanceMetricKey, PerformanceSummaryRow> {
   const summaries = emptyPerformanceSummaries();
+  const row = rows[0];
+  if (!row) return summaries;
+  for (const metric of PERFORMANCE_METRIC_KEYS) {
+    const samples = Number(row[`${metric}Samples`] ?? 0);
+    if (samples === 0) continue;
+    summaries[metric] = {
+      avg: roundPerformanceValue(row[`${metric}AvgValue`]),
+      p50: roundPerformanceValue(row[`${metric}P50`]),
+      p75: roundPerformanceValue(row[`${metric}P75`]),
+      p95: roundPerformanceValue(row[`${metric}P95`]),
+      samples,
+    };
+  }
+  return summaries;
+}
+
+function mapLegacyPerformanceSummaries(
+  rows: Record<string, unknown>[],
+): Record<PerformanceMetricKey, PerformanceSummaryRow> {
+  const summaries = emptyPerformanceSummaries();
   for (const row of rows) {
     const metric = String(row.metric ?? "") as PerformanceMetricKey;
     if (!(metric in PERFORMANCE_METRIC_COLUMNS)) continue;
@@ -106,6 +133,25 @@ function mapPerformanceSummaries(
     };
   }
   return summaries;
+}
+
+function performancePlanInput(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+) {
+  const metadata = scopedFilterMetadata(filters);
+  return {
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+    ...(metadata
+      ? {
+          scopePlan: metadata.plan,
+          preparedTimePolicy: "reader-window-v1" as const,
+        }
+      : {}),
+  };
 }
 function emptyPerformanceTrends(): Record<
   PerformanceMetricKey,
@@ -190,58 +236,14 @@ export async function queryPerformanceSummariesFromD1(
   window: QueryWindow,
   filters: FilterDocument,
 ): Promise<Record<PerformanceMetricKey, PerformanceSummaryRow>> {
-  const source = performanceVisitSource(siteId, window, filters);
-  const sql = `
-WITH
-${source.ctes},
-filtered_visits AS MATERIALIZED (
-  SELECT
-    perf_ttfb_ms,
-    perf_fcp_ms,
-    perf_lcp_ms,
-    perf_cls,
-    perf_inp_ms
-  FROM ${source.relation}
-  ${source.filterClause}
-),
-metric_visits AS (
-  ${performanceMetricVisitsSql("filtered_visits")}
-),
-ordered_values AS (
-  SELECT
-    metric,
-    metricValue,
-    ROW_NUMBER() OVER (PARTITION BY metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (PARTITION BY metric) AS sampleCount
-  FROM metric_visits
-),
-metric_thresholds AS (
-  SELECT
-    metric,
-    sampleCount,
-    AVG(metricValue) AS avgValue,
-    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
-    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
-    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
-  FROM ordered_values
-  GROUP BY metric, sampleCount
-)
-SELECT
-  thresholds.metric AS metric,
-  thresholds.sampleCount AS samples,
-  thresholds.avgValue AS avgValue,
-  MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
-  MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
-  MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
-FROM metric_thresholds thresholds
-JOIN ordered_values ordered
-  ON ordered.metric = thresholds.metric
-GROUP BY thresholds.metric, thresholds.sampleCount, thresholds.avgValue
-`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...source.bindings,
-    ...source.filterBindings,
-  ]);
+  const plan = buildPerformanceSummariesPlan(
+    performancePlanInput(siteId, window, filters),
+  );
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    PERFORMANCE_SUMMARY_OUTPUT_ID,
+  );
   return mapPerformanceSummaries(rows);
 }
 export async function queryPerformanceTrendFromD1(
@@ -252,70 +254,33 @@ export async function queryPerformanceTrendFromD1(
   filters: FilterDocument,
   metric: PerformanceMetricKey,
 ): Promise<PerformanceTrendPointRow[]> {
-  const source = performanceVisitSource(siteId, window, filters);
+  const plan = buildPerformanceTrendPlan({
+    ...performancePlanInput(siteId, window, filters),
+    interval,
+    metric,
+  });
   const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "started_at");
-  const column = performanceMetricColumn(metric);
-  const filteredClause = appendSqlConditions(source.filterClause, [
-    `${column} IS NOT NULL`,
-  ]);
-  const sql = `
-WITH
-${source.ctes},
-metric_visits AS (
-  SELECT
-    ${bucket.sql} AS bucket,
-    ${column} AS metricValue
-  FROM ${source.relation}
-  ${filteredClause}
-),
-ordered_values AS (
-  SELECT
-    bucket,
-    metricValue,
-    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (PARTITION BY bucket) AS sampleCount
-  FROM metric_visits
-),
-bucket_thresholds AS (
-  SELECT
-    bucket,
-    sampleCount,
-    AVG(metricValue) AS avgValue,
-    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
-    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
-    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
-  FROM ordered_values
-  GROUP BY bucket, sampleCount
-)
-SELECT
-  thresholds.bucket AS bucket,
-  thresholds.sampleCount AS samples,
-  thresholds.avgValue AS avgValue,
-  MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
-  MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
-  MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
-FROM bucket_thresholds thresholds
-JOIN ordered_values ordered
-  ON ordered.bucket = thresholds.bucket
-GROUP BY thresholds.bucket, thresholds.sampleCount, thresholds.avgValue
-ORDER BY thresholds.bucket ASC
-`;
-  return (
-    await queryD1All<Record<string, unknown>>(env, sql, [
-      ...source.bindings,
-      ...bucket.bindings,
-      ...source.filterBindings,
-    ])
-  ).map((row) => ({
-    bucket: Number(row.bucket ?? 0),
-    timestampMs: timeBucketTimestamp(buckets, Number(row.bucket ?? 0)),
-    avg: roundPerformanceValue(row.avgValue),
-    p50: roundPerformanceValue(row.p50),
-    p75: roundPerformanceValue(row.p75),
-    p95: roundPerformanceValue(row.p95),
-    samples: Number(row.samples ?? 0),
-  }));
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    PERFORMANCE_TREND_OUTPUT_ID,
+  );
+  return rows.flatMap((row) => {
+    if (row.bucket === null || row.bucket === undefined) return [];
+    const bucketIndex = Number(row.bucket);
+    if (!Number.isInteger(bucketIndex)) return [];
+    return [
+      {
+        bucket: bucketIndex,
+        timestampMs: timeBucketTimestamp(buckets, bucketIndex),
+        avg: roundPerformanceValue(row.avgValue),
+        p50: roundPerformanceValue(row.p50),
+        p75: roundPerformanceValue(row.p75),
+        p95: roundPerformanceValue(row.p95),
+        samples: Number(row.samples ?? 0),
+      },
+    ];
+  });
 }
 export async function queryAllPerformanceTrendsFromD1(
   env: Env,
@@ -885,7 +850,7 @@ ORDER BY rowType ASC, metric ASC, bucket ASC, pathname ASC, country ASC
     routeLimit,
   ]);
   return {
-    summaries: mapPerformanceSummaries(
+    summaries: mapLegacyPerformanceSummaries(
       rows.filter((row) => row.rowType === "summary"),
     ),
     trends: mapPerformanceTrends(

@@ -6,6 +6,7 @@ import {
   avg,
   callFunction,
   caseWhen,
+  castInteger,
   castReal,
   castText,
   coalesce,
@@ -49,6 +50,7 @@ import {
   trimSpaces,
   union,
   window as windowRelation,
+  windowCountRows,
 } from "@/lib/db";
 import type {
   AnyExpression,
@@ -73,6 +75,7 @@ import type {
   ProjectNode,
   RankedMembersNode,
   RelationshipLookupNode,
+  SampleStatisticsNode,
   SemiJoinNode,
   SetOperationNode,
   SortKey,
@@ -1492,6 +1495,7 @@ function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
     case "filter":
     case "project":
     case "aggregate":
+    case "sample-statistics":
     case "distinct":
     case "ordered-member":
     case "ranked-members":
@@ -1812,6 +1816,9 @@ export class AnalyticsLogicalToDbLowerer {
         break;
       case "aggregate":
         result = this.#lowerAggregate(node, path);
+        break;
+      case "sample-statistics":
+        result = this.#lowerSampleStatistics(node, path);
         break;
       case "join":
         result = this.#lowerJoin(node, path);
@@ -2714,6 +2721,7 @@ export class AnalyticsLogicalToDbLowerer {
         });
       }
       case "aggregate":
+      case "sample-statistics":
       case "join":
         // Aggregates and joins do not supply a storage-backed Observation key.
         return false;
@@ -2876,6 +2884,220 @@ export class AnalyticsLogicalToDbLowerer {
       aggregates,
     });
     return { relation, slots, candidateActivitySessionRestricted: false };
+  }
+
+  #lowerSampleStatistics(
+    node: SampleStatisticsNode,
+    path: string,
+  ): LoweredRelation {
+    const input = this.#lowerNode(node.input);
+    const visible = new Map(input.slots);
+    const selected: Record<string, AnyExpression> = {};
+    const groupColumns = node.groups.map((group, index) => {
+      const groupPath = `${path}.groups[${index}]`;
+      const value = scalarAggregateValue(
+        lowerExpression(
+          group.expression,
+          input.relation,
+          this.#logicalSlots,
+          visible,
+          `${groupPath}.expression`,
+          this.#plan.context.time,
+        ),
+        `${groupPath}.expression`,
+      );
+      const outputSlot = logicalSlot(
+        this.#logicalSlots,
+        group.slot,
+        `${groupPath}.slot`,
+      );
+      if (
+        (outputSlot.type.kind !== "scalar" &&
+          outputSlot.type.kind !== "bucket") ||
+        !isSameLogicalValueType(outputSlot.type, value.type) ||
+        outputSlot.nullable !== value.nullable
+      )
+        reject(
+          groupPath,
+          "Sample statistics group metadata must match its expression.",
+        );
+      const column = slotColumn(index, "g");
+      selected[column] = value.expression;
+      return {
+        slot: group.slot,
+        column,
+        type: outputSlot.type,
+        nullable: outputSlot.nullable,
+      };
+    });
+    const numericValue = scalarAggregateValue(
+      lowerExpression(
+        node.value,
+        input.relation,
+        this.#logicalSlots,
+        visible,
+        `${path}.value`,
+        this.#plan.context.time,
+      ),
+      `${path}.value`,
+    );
+    if (
+      numericValue.type.kind !== "scalar" ||
+      numericValue.type.scalar !== "number"
+    )
+      reject(
+        `${path}.value`,
+        "Sample statistics require numeric scalar values.",
+      );
+    const valueColumn = slotColumn(node.groups.length, "v");
+    selected[valueColumn] = numericValue.expression;
+
+    const projected = project(input.relation, selected);
+    const projectedValue = projected.columns[valueColumn] as AnyExpression;
+    const nonNull = filter(projected, isNotNull(projectedValue));
+    const partitionBy = groupColumns.map(
+      ({ column }) => nonNull.columns[column] as SqlExpression,
+    );
+    const ordinalColumn = slotColumn(node.groups.length + 1, "ordinal");
+    const partitionCountColumn = slotColumn(node.groups.length + 2, "count");
+    const ordered = windowRelation(nonNull, {
+      [ordinalColumn]: rowNumber({
+        partitionBy,
+        orderBy: [
+          {
+            expression: nonNull.columns[valueColumn] as SqlExpression,
+            direction: "ASC",
+          },
+        ],
+      }),
+      [partitionCountColumn]: windowCountRows({ partitionBy }),
+    } as never);
+    const groupBy: Record<string, AnyExpression> = Object.fromEntries(
+      groupColumns.map(({ column }) => [
+        column,
+        ordered.columns[column] as AnyExpression,
+      ]),
+    );
+    const aggregates: Record<string, AnyExpression> = {};
+    const outputLayouts = new Map<SlotId, SlotLayout>();
+    for (const group of groupColumns) {
+      outputLayouts.set(group.slot, {
+        kind: "scalar",
+        type: group.type,
+        nullable: group.nullable,
+        valueColumn: group.column,
+        candidateBounded: false,
+      });
+    }
+
+    const samplesSlot = logicalSlot(
+      this.#logicalSlots,
+      node.samplesOutput,
+      `${path}.samplesOutput`,
+    );
+    const averageSlot = logicalSlot(
+      this.#logicalSlots,
+      node.averageOutput,
+      `${path}.averageOutput`,
+    );
+    if (
+      samplesSlot.type.kind !== "scalar" ||
+      samplesSlot.type.scalar !== "number" ||
+      samplesSlot.type.unit !== undefined ||
+      samplesSlot.nullable ||
+      averageSlot.type.kind !== "scalar" ||
+      !isSameLogicalValueType(averageSlot.type, numericValue.type) ||
+      !averageSlot.nullable
+    )
+      reject(path, "Sample statistics output metadata is invalid.");
+
+    const samplesColumn = slotColumn(node.groups.length, "samples");
+    const averageColumn = slotColumn(node.groups.length + 1, "avg");
+    aggregates[samplesColumn] = count();
+    aggregates[averageColumn] = avg(
+      ordered.columns[valueColumn] as SqlExpression<number | null>,
+    );
+    outputLayouts.set(node.samplesOutput, {
+      kind: "scalar",
+      type: samplesSlot.type,
+      nullable: false,
+      valueColumn: samplesColumn,
+      candidateBounded: false,
+    });
+    outputLayouts.set(node.averageOutput, {
+      kind: "scalar",
+      type: averageSlot.type,
+      nullable: true,
+      valueColumn: averageColumn,
+      candidateBounded: false,
+    });
+
+    node.percentiles.forEach((item, index) => {
+      const outputSlot = logicalSlot(
+        this.#logicalSlots,
+        item.output,
+        `${path}.percentiles[${index}].output`,
+      );
+      if (
+        outputSlot.type.kind !== "scalar" ||
+        !isSameLogicalValueType(outputSlot.type, numericValue.type) ||
+        !outputSlot.nullable
+      )
+        reject(
+          `${path}.percentiles[${index}].output`,
+          "Quantile output metadata must preserve the numeric input type and be nullable.",
+        );
+      const threshold = castInteger(
+        div(
+          add(
+            mul(
+              ordered.columns[partitionCountColumn] as SqlExpression<number>,
+              constant(item.percentile),
+            ),
+            constant(99),
+          ),
+          constant(100),
+        ),
+      );
+      const column = slotColumn(node.groups.length + index + 2, "quantile");
+      aggregates[column] = min(
+        caseWhen(
+          [
+            {
+              when: gte(
+                ordered.columns[ordinalColumn] as SqlExpression<
+                  number,
+                  ExpressionResultType<"integer", false>
+                >,
+                threshold,
+              ),
+              then: ordered.columns[valueColumn] as SqlExpression<
+                number | null,
+                ExpressionResultType<"numeric", true>
+              >,
+            },
+          ],
+          constant(null),
+        ),
+      );
+      outputLayouts.set(item.output, {
+        kind: "scalar",
+        type: outputSlot.type,
+        nullable: true,
+        valueColumn: column,
+        candidateBounded: false,
+      });
+    });
+
+    const relation: AnalyticsDbRelation = aggregate(ordered, {
+      groupBy,
+      aggregates,
+    });
+    return {
+      relation,
+      slots: outputLayouts,
+      candidateActivitySessionRestricted: false,
+    };
   }
 
   #windowPartitionBy(
@@ -3415,6 +3637,14 @@ export class AnalyticsLogicalToDbLowerer {
             ]);
             break;
           }
+          case "sample-statistics":
+            add(node.input, [
+              ...node.groups.flatMap((group) =>
+                this.#expressionSlots(group.expression),
+              ),
+              ...this.#expressionSlots(node.value),
+            ]);
+            break;
           case "join": {
             const left = this.#nodes.get(node.left);
             const right = this.#nodes.get(node.right);

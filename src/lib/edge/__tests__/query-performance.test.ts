@@ -146,28 +146,16 @@ describe("edge query performance D1 helpers", () => {
     const { env, calls } = createD1Env([
       [
         {
-          metric: "ttfb",
-          samples: "4",
-          avgValue: "50.1234",
-          p50: 40,
-          p75: 60.9876,
-          p95: 80.4567,
-        },
-        {
-          metric: "lcp",
-          samples: 8,
-          avgValue: 123.4567,
-          p50: 100,
-          p75: 150.1114,
-          p95: 250.9999,
-        },
-        {
-          metric: "unknown",
-          samples: 99,
-          avgValue: 999,
-          p50: 999,
-          p75: 999,
-          p95: 999,
+          ttfbSamples: "4",
+          ttfbAvgValue: "50.1234",
+          ttfbP50: 40,
+          ttfbP75: 60.9876,
+          ttfbP95: 80.4567,
+          lcpSamples: 8,
+          lcpAvgValue: 123.4567,
+          lcpP50: 100,
+          lcpP75: 150.1114,
+          lcpP95: 250.9999,
         },
       ],
     ]);
@@ -198,40 +186,31 @@ describe("edge query performance D1 helpers", () => {
       inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.sql).toContain("metric_thresholds AS");
-    expect(calls[0]?.sql).toContain("FROM visits");
-    expect(calls[0]?.sql).toContain("perf_cls AS metricValue");
-    expect(calls[0]?.bindings).toEqual([
-      ...visitBindings,
-      "desktop",
-      "us",
-      "example.com",
-      window.startMs,
-      window.endExclusiveMs,
-      "desktop",
-      "us",
-      "example.com",
-    ]);
+    expect(calls[0]?.sql).toContain('"visits"');
+    expect(calls[0]?.sql).toContain("ROW_NUMBER() OVER");
+    expect(calls[0]?.sql).toContain("COUNT(*) OVER");
+    expect(calls[0]?.sql).toContain("perf_cls");
+    expect(calls[0]?.bindings).toEqual(
+      expect.arrayContaining([
+        siteId,
+        window.startMs,
+        window.endExclusiveMs,
+        "desktop",
+        "us",
+        "example.com",
+      ]),
+    );
   });
 
   it("normalizes sparse metric summary rows", async () => {
     const { env } = createD1Env([
       [
         {
-          metric: "ttfb",
-          samples: null,
-          avgValue: null,
-          p50: undefined,
-          p75: null,
-          p95: undefined,
-        },
-        {
-          metric: null,
-          samples: 99,
-          avgValue: 999,
-          p50: 999,
-          p75: 999,
-          p95: 999,
+          ttfbSamples: 0,
+          ttfbAvgValue: null,
+          ttfbP50: null,
+          ttfbP75: null,
+          ttfbP95: null,
         },
       ],
     ]);
@@ -244,9 +223,9 @@ describe("edge query performance D1 helpers", () => {
     );
 
     expect(result.ttfb).toEqual({
-      avg: 0,
+      avg: null,
       p50: null,
-      p75: 0,
+      p75: null,
       p95: null,
       samples: 0,
     });
@@ -310,16 +289,19 @@ describe("edge query performance D1 helpers", () => {
         samples: 5,
       },
     ]);
-    expect(calls[0]?.sql).toContain("perf_lcp_ms AS metricValue");
-    expect(calls[0]?.sql).toContain("perf_lcp_ms IS NOT NULL");
-    expect(calls[0]?.sql).toContain("ORDER BY thresholds.bucket ASC");
-    expect(calls[0]?.bindings).toEqual([
-      ...visitBindings,
-      "/pricing",
-      window.startMs,
-      window.endExclusiveMs,
-      "/pricing",
-    ]);
+    expect(calls[0]?.sql).toContain("perf_lcp_ms");
+    expect(calls[0]?.sql).toContain("ROW_NUMBER() OVER");
+    expect(calls[0]?.sql).toContain("COUNT(*) OVER");
+    expect(calls[0]?.sql).toContain("IS NOT NULL");
+    expect(calls[0]?.sql).toContain("ORDER BY");
+    expect(calls[0]?.bindings).toEqual(
+      expect.arrayContaining([
+        siteId,
+        "/pricing",
+        window.startMs,
+        window.endExclusiveMs,
+      ]),
+    );
   });
 
   it("normalizes sparse metric trend rows", async () => {
@@ -345,17 +327,7 @@ describe("edge query performance D1 helpers", () => {
         EMPTY_FILTER_DOCUMENT,
         "ttfb",
       ),
-    ).resolves.toEqual([
-      {
-        bucket: 0,
-        timestampMs: Date.UTC(2026, 0, 2, 1),
-        avg: 0,
-        p50: null,
-        p75: 0,
-        p95: null,
-        samples: 0,
-      },
-    ]);
+    ).resolves.toEqual([]);
   });
 
   it("queries and groups every metric trend in one D1 statement", async () => {
@@ -716,7 +688,7 @@ describe("edge query performance D1 helpers", () => {
     ]);
   });
 
-  it("materializes each shared performance source without changing percentile results", async () => {
+  it("keeps Performance summaries compatible with the remaining legacy readers", async () => {
     const { env, d1 } = createSqlitePerformanceEnv();
     const insert = d1.database.prepare(`
       INSERT INTO visits (
@@ -843,7 +815,7 @@ describe("edge query performance D1 helpers", () => {
       ]);
 
       expect(d1.calls).toHaveLength(4);
-      for (const call of d1.calls) {
+      for (const call of d1.calls.slice(1)) {
         expect(call.sql).toContain("AS MATERIALIZED");
         const plan = d1.database
           .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)

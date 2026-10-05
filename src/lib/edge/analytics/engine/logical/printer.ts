@@ -139,6 +139,8 @@ function nodeHeader(node: LogicalNode): string {
       return `${relation(node.id)} Project grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "aggregate":
       return `${relation(node.id)} Aggregate grain=${grain(node.grain)} input=${relation(node.input)}`;
+    case "sample-statistics":
+      return `${relation(node.id)} SampleStatistics grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "ordered-member":
       return `${relation(node.id)} OrderedMember grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "ranked-members":
@@ -202,6 +204,21 @@ function nodeLines(
       );
       node.measures.forEach((_, index) =>
         lines.push(`  MEASURE ${aggregateMeasure(node, index)}`),
+      );
+      break;
+    case "sample-statistics":
+      node.groups.forEach((group) =>
+        lines.push(
+          `  GROUP ${formatSlot(group.slot, slots)} := ${expression(group.expression)}`,
+        ),
+      );
+      lines.push(`  VALUE ${expression(node.value)}`);
+      lines.push(`  SAMPLES ${formatSlot(node.samplesOutput, slots)}`);
+      lines.push(`  AVG ${formatSlot(node.averageOutput, slots)}`);
+      node.percentiles.forEach((item) =>
+        lines.push(
+          `  P${item.percentile} ${JSON.stringify(item.name)} -> ${formatSlot(item.output, slots)}`,
+        ),
       );
       break;
     case "ordered-member":

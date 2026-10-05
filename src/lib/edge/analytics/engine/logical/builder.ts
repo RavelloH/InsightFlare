@@ -22,6 +22,8 @@ import {
   type LogicalAggregateMeasure,
   type LogicalNode,
   type ProjectBinding,
+  type SampleStatisticsGroupBinding,
+  type SampleStatisticsPercentile,
   setOperationResultNullable,
   type SortKey,
 } from "@/lib/edge/analytics/engine/logical/nodes";
@@ -729,6 +731,127 @@ export class LogicalPlanBuilder {
       output: [
         ...groupSlots,
         ...measureBindings.map((measure) => measure.output),
+      ],
+      grain,
+    } satisfies LogicalNode;
+    return this.#addNode(node, slots, grain, input.temporalDomains);
+  }
+
+  sampleStatistics(
+    input: LogicalRelationHandle,
+    groups: Readonly<Record<string, LogicalExpressionHandle>>,
+    value: LogicalExpressionHandle,
+    percentiles: readonly {
+      readonly name: string;
+      readonly percentile: number;
+    }[],
+  ): LogicalRelationHandle {
+    this.#owned(input);
+    this.#assertExpressionVisible(
+      input,
+      value.expression,
+      "sampleStatistics.value",
+    );
+    if (value.type.kind !== "scalar" || value.type.scalar !== "number")
+      throw new Error(
+        "logical_builder_sample_statistics_requires_numeric_value",
+      );
+
+    const groupBindings: SampleStatisticsGroupBinding[] = [];
+    const slots: Record<string, SlotId> = {};
+    const names = new Set<string>(["samples", "avg"]);
+    for (const [name, expression] of Object.entries(groups)) {
+      this.#assertExpressionVisible(
+        input,
+        expression.expression,
+        `sampleStatistics.groups.${name}`,
+      );
+      if (typeof name !== "string" || !name || names.has(name))
+        throw new Error(
+          "logical_builder_sample_statistics_output_name_collision",
+        );
+      if (
+        expression.type.kind !== "scalar" &&
+        expression.type.kind !== "bucket"
+      )
+        throw new Error(
+          "logical_builder_sample_statistics_requires_scalar_groups",
+        );
+      names.add(name);
+      const slot = this.#newSlot(expression.type, expression.nullable, {
+        kind: "derived",
+        operation: "group",
+        inputs: this.#referencedSlots(expression.expression),
+      });
+      groupBindings.push({
+        name,
+        slot: slot.id,
+        expression: expression.expression,
+      });
+      slots[name] = slot.id;
+    }
+
+    const validatePercentile = (item: {
+      readonly name: string;
+      readonly percentile: number;
+    }) => {
+      if (
+        typeof item.name !== "string" ||
+        !item.name ||
+        names.has(item.name) ||
+        !Number.isInteger(item.percentile) ||
+        item.percentile < 0 ||
+        item.percentile > 100
+      )
+        throw new Error("logical_builder_sample_statistics_invalid_percentile");
+      names.add(item.name);
+    };
+    percentiles.forEach(validatePercentile);
+
+    const valueInputs = this.#referencedSlots(value.expression);
+    const samples = this.#newSlot({ kind: "scalar", scalar: "number" }, false, {
+      kind: "derived",
+      operation: "sample-statistics:count",
+      inputs: valueInputs,
+    });
+    const average = this.#newSlot(value.type, true, {
+      kind: "derived",
+      operation: "sample-statistics:avg",
+      inputs: valueInputs,
+    });
+    slots.samples = samples.id;
+    slots.avg = average.id;
+
+    const percentileBindings: SampleStatisticsPercentile[] = percentiles.map(
+      ({ name, percentile }) => {
+        const output = this.#newSlot(value.type, true, {
+          kind: "derived",
+          operation: `sample-statistics:quantile:${percentile}`,
+          inputs: valueInputs,
+        });
+        slots[name] = output.id;
+        return { name, percentile, output: output.id };
+      },
+    );
+    const groupSlots = groupBindings.map((group) => group.slot);
+    const grain: LogicalGrain =
+      groupSlots.length === 0
+        ? { kind: "scalar" }
+        : { kind: "keyed", keys: groupSlots };
+    const node = {
+      kind: "sample-statistics",
+      id: this.#newRelationId(),
+      input: input.id,
+      groups: groupBindings,
+      value: value.expression,
+      samplesOutput: samples.id,
+      averageOutput: average.id,
+      percentiles: percentileBindings,
+      output: [
+        ...groupSlots,
+        samples.id,
+        average.id,
+        ...percentileBindings.map((item) => item.output),
       ],
       grain,
     } satisfies LogicalNode;

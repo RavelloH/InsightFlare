@@ -85,6 +85,27 @@ export interface AggregateNode extends LogicalNodeBase {
   readonly measures: readonly LogicalAggregateMeasure[];
 }
 
+export interface SampleStatisticsGroupBinding extends ProjectBinding {
+  readonly name: string;
+}
+
+export interface SampleStatisticsPercentile {
+  readonly name: string;
+  readonly percentile: number;
+  readonly output: SlotId;
+}
+
+/** Exact nearest-rank statistics over a bag of non-NULL numeric samples. */
+export interface SampleStatisticsNode extends LogicalNodeBase {
+  readonly kind: "sample-statistics";
+  readonly input: RelationId;
+  readonly groups: readonly SampleStatisticsGroupBinding[];
+  readonly value: LogicalExpr;
+  readonly samplesOutput: SlotId;
+  readonly averageOutput: SlotId;
+  readonly percentiles: readonly SampleStatisticsPercentile[];
+}
+
 export interface DistinctKeyBinding {
   readonly input: SlotId;
   readonly output: SlotId;
@@ -192,6 +213,7 @@ export type LogicalNode =
   | FilterNode
   | ProjectNode
   | AggregateNode
+  | SampleStatisticsNode
   | DistinctNode
   | SetOperationNode
   | SemiJoinNode
