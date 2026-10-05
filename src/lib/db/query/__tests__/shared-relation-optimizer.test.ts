@@ -268,9 +268,7 @@ function closedExpressionWindowCandidate(correlateWindowInput = false) {
       { owner: "blank", text: null },
     ],
   );
-  const windowInput = correlateWindowInput
-    ? filter(innerRows, eq(innerRows.columns.owner, outerRows.columns.owner))
-    : innerRows;
+  const windowInput = innerRows;
   const positioned = project(windowInput, {
     groupKey: caseWhen(
       [
@@ -289,7 +287,12 @@ function closedExpressionWindowCandidate(correlateWindowInput = false) {
         constant(""),
       ),
     ),
-    offset: castText(textPosition(windowInput.columns.text, constant("hit"))),
+    offset: castText(
+      textPosition(
+        windowInput.columns.text,
+        correlateWindowInput ? outerRows.columns.owner : constant("hit"),
+      ),
+    ),
   });
   const grouped = aggregate(positioned, {
     groupBy: {

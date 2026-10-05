@@ -89,6 +89,13 @@ describe("logical relational IR", () => {
     const text = builder.reportNumberText(nullableNumber);
     expect(text.type).toEqual({ kind: "scalar", scalar: "string" });
     expect(text.nullable).toBe(true);
+    const rows = builder.project(builder.source("page"), { value: text });
+    builder.output("number-report-text", rows, [
+      { name: "value", slot: "value" },
+    ]);
+    expect(printLogicalPlan(builder.finish())).toContain(
+      "NUMBER_REPORT_TEXT<legacy-report-number-v1>",
+    );
     expect(() =>
       builder.reportNumberText(
         builder.literal(2, {
@@ -124,6 +131,14 @@ describe("logical relational IR", () => {
     expect(
       node?.kind === "event-payload-occurrences" ? node.fields : [],
     ).toHaveLength(7);
+    if (node?.kind !== "event-payload-occurrences")
+      throw new Error("wave64_event_payload_occurrence_node_missing");
+    const explanation = printLogicalPlan(plan);
+    expect(explanation).toContain(
+      `EventPayloadOccurrences grain=Bag input=r${selected.id} eventKey=s${node.eventKey} eventPk=s${node.eventPk}`,
+    );
+    for (const { field, slot } of node.fields)
+      expect(explanation).toContain(`  ${field} -> s${slot}:`);
     expect(() => builder.eventPayloadOccurrences(occurrences)).toThrow(
       "logical_builder_event_payload_occurrences_requires_event_entity",
     );
@@ -190,8 +205,6 @@ describe("logical relational IR", () => {
       ),
     } satisfies LogicalPlan;
     expect(() => validateLogicalPlan(forged)).toThrow(LogicalPlanError);
-    if (node?.kind !== "event-payload-occurrences")
-      throw new Error("wave64_event_payload_occurrence_node_missing");
     const pathSlot = node.fields.find((field) => field.field === "path")?.slot;
     if (!pathSlot) throw new Error("wave64_event_payload_path_slot_missing");
     const forgedNullable = {

@@ -964,7 +964,7 @@ describe("Logical sample statistics and migrated performance readers", () => {
       },
       {
         segment: "US",
-        ...expectedStatistics([9, 9, 1, null]),
+        ...expectedStatistics([9, 9, 1]),
       },
     ].map(({ segment, samples, avg, p50, p75, p100 }) => ({
       segment,
