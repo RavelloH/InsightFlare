@@ -172,6 +172,7 @@ function requiredLegacyVisitColumnNames(
     for (const child of expression.children) visitFilter(child);
   };
   visitFilter(selection.filter.root);
+  visitFilter(selection.postObservationFilter?.filter.root ?? null);
   for (const name of requiredColumns) addColumn(name);
   return [...required]
     .filter((name) => Object.hasOwn(schema.visits.columns, name))

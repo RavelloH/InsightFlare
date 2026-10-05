@@ -65,7 +65,6 @@ describe("site Goal analytics operations", () => {
       inputBase.window,
       inputBase.filters,
       expect.objectContaining({ version: 1, root: expect.any(Object) }),
-      undefined,
     );
   });
 

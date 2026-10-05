@@ -48,12 +48,14 @@ import {
   LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS,
 } from "./analytics-legacy-scoped-dataset";
 import type {
+  AnalyticsLegacyEventColumnName,
   AnalyticsLegacyEventRow,
   AnalyticsLegacyFactRelation,
   AnalyticsLegacyFilterField,
   AnalyticsLegacyPageRow,
   AnalyticsLegacyScopedPredicateContext,
   AnalyticsLegacyText,
+  AnalyticsLegacyVisitColumnName,
 } from "./analytics-legacy-scoped-types";
 import type {
   AnalyticsDbRelation,
@@ -1202,6 +1204,33 @@ function directPageRows(
   );
 }
 
+/** Apply the second-stage observation predicate to the selected Page bag. */
+function postObservationPageRows(
+  dataset: AnalyticsLegacyScopedDataset,
+  selection: SemanticScopedSourceSelection,
+): AnalyticsDbRelation {
+  const pagePlan = planObservationFilter(selection.filter.root).visit;
+  if (pagePlan.kind === "all") return dataset.candidatePages.relation;
+  if (pagePlan.kind === "none")
+    return filter(
+      dataset.candidatePages.relation,
+      eq(constant(1), constant(0)),
+    );
+  const context: AnalyticsLegacyScopedPredicateContext = {
+    selection,
+    storage: dataset.storage,
+    readPages: dataset.readPages,
+    candidatePages: dataset.candidatePages,
+    readEvents: dataset.readEvents,
+  };
+  return (
+    filterExpression(dataset.candidatePages, pagePlan.expression, {
+      selection,
+      context,
+    }) ?? dataset.candidatePages.relation
+  );
+}
+
 /**
  * Legacy unprepared Session-boundary filters first matched candidate Page
  * rows, then expanded the selected raw Session IDs back to the candidate Page
@@ -1421,6 +1450,168 @@ function remapEventSourceValues(
   return remapped;
 }
 
+function selectedPageRows(
+  dataset: AnalyticsLegacyScopedDataset,
+  selection: SemanticScopedSourceSelection,
+  matchingEventOwnerPairs?: IdentityRelation,
+): AnalyticsLegacyPageRow {
+  const relation =
+    selection.profile === "direct-page-analytics-v1"
+      ? directPageRows(dataset, selection, matchingEventOwnerPairs)
+      : selection.profile === "direct-page-session-compat-v1"
+        ? factEntityKindsForFilter(selection.filter.root).size === 0
+          ? compatibilitySessionPageRows(
+              dataset,
+              selection,
+              matchingEventOwnerPairs,
+            )
+          : entityPageRows(dataset, selection)
+        : selection.mode === "observation"
+          ? pageRowsForVisitIds(
+              dataset.candidatePages,
+              observationPagePairMatches(dataset, selection),
+            )
+          : entityPageRows(dataset, selection);
+  return pageRowWithRelation(dataset.candidatePages, relation);
+}
+
+function selectedEventRelation(
+  report: AnalyticsDbRelation,
+  matches: IdentityRelation,
+): AnalyticsDbRelation {
+  const ownerPresent = report.columns.owner_site_pk;
+  if (!ownerPresent)
+    throw new Error("legacy_scoped_event_owner_presence_missing");
+  const inLegacyReportDomain = filter(report, isNotNull(ownerPresent));
+  const matchSet = distinct(
+    project(matches, {
+      site_pk: matches.columns.site_pk!,
+      event_id: matches.columns.event_id!,
+    }),
+  );
+  return joinMembership(
+    inLegacyReportDomain,
+    matchSet,
+    and(
+      eq(inLegacyReportDomain.columns.site_pk!, matchSet.columns.site_pk!),
+      eq(inLegacyReportDomain.columns.event_id!, matchSet.columns.event_id!),
+    ),
+  );
+}
+
+function selectedEventRows(
+  dataset: AnalyticsLegacyScopedDataset,
+  matches: IdentityRelation,
+): AnalyticsLegacyEventRow {
+  const selected = selectedEventRelation(dataset.readEvents.relation, matches);
+  const source = dataset.readEvents;
+  const eventColumns = Object.fromEntries(
+    Object.keys(source.eventColumns).map((name) => [
+      name,
+      relationColumn(selected, `event_${name}`),
+    ]),
+  ) as Partial<Record<AnalyticsLegacyEventColumnName, AnyExpression>>;
+  const ownerVisitColumns = Object.fromEntries(
+    Object.keys(source.ownerVisitColumns).map((name) => [
+      name,
+      relationColumn(selected, `owner_${name}`),
+    ]),
+  ) as Partial<Record<AnalyticsLegacyVisitColumnName, AnyExpression>>;
+  const eventName = relationColumn(
+    selected,
+    "event_name",
+  ) as AnalyticsLegacyText;
+  const filterValues: Partial<
+    Record<AnalyticsLegacyFilterField, AnyExpression>
+  > = {};
+  for (const field of Object.keys(
+    source.filterValues,
+  ) as AnalyticsLegacyFilterField[]) {
+    const strategy = analyticsFilterDefinition(field)?.compilerStrategy;
+    const expression = strategy?.startsWith("column.")
+      ? ownerVisitColumns[
+          strategy.slice("column.".length) as AnalyticsLegacyVisitColumnName
+        ]
+      : strategy === "event.name"
+        ? eventName
+        : undefined;
+    if (expression) filterValues[field] = expression;
+  }
+  return {
+    ...source,
+    relation: selected,
+    sitePk: relationColumn(
+      selected,
+      "site_pk",
+    ) as AnalyticsLegacyEventRow["sitePk"],
+    rawSiteId: relationColumn(
+      selected,
+      "event_site_id",
+    ) as AnalyticsLegacyEventRow["rawSiteId"],
+    eventPk: relationColumn(
+      selected,
+      "event_event_pk",
+    ) as AnalyticsLegacyEventRow["eventPk"],
+    eventId: relationColumn(
+      selected,
+      "event_event_id",
+    ) as AnalyticsLegacyEventRow["eventId"],
+    nameId: relationColumn(
+      selected,
+      "event_event_name_id",
+    ) as AnalyticsLegacyEventRow["nameId"],
+    visitId: relationColumn(
+      selected,
+      "event_visit_id",
+    ) as AnalyticsLegacyEventRow["visitId"],
+    sessionId: relationColumn(
+      selected,
+      "session_id",
+    ) as AnalyticsLegacyEventRow["sessionId"],
+    visitorId: relationColumn(
+      selected,
+      "visitor_id",
+    ) as AnalyticsLegacyEventRow["visitorId"],
+    occurredAt: relationColumn(
+      selected,
+      "event_occurred_at",
+    ) as AnalyticsLegacyEventRow["occurredAt"],
+    eventName,
+    eventColumns,
+    ownerVisitColumns,
+    filterValues,
+  };
+}
+
+function selectionWithoutPostObservationFilter(
+  selection: SemanticScopedSourceSelection,
+): SemanticScopedSourceSelection {
+  const { postObservationFilter: _postObservationFilter, ...baseSelection } =
+    selection;
+  return baseSelection;
+}
+
+function selectionForPostObservationFilter(
+  selection: SemanticScopedSourceSelection,
+): SemanticScopedSourceSelection {
+  const stage = selection.postObservationFilter;
+  if (!stage) throw new Error("legacy_post_observation_filter_missing");
+  const {
+    preparedMatches: _preparedMatches,
+    eventNameGate: _eventNameGate,
+    postObservationFilter: _postObservationFilter,
+    ...baseSelection
+  } = selection;
+  return { ...baseSelection, filter: stage.filter };
+}
+
+interface PostObservationBundle {
+  readonly dataset: AnalyticsLegacyScopedDataset;
+  readonly pages: AnalyticsLegacyPageRow;
+  readonly events: AnalyticsLegacyEventRow;
+  readonly stageSelection: SemanticScopedSourceSelection;
+}
+
 /**
  * Apply the immutable legacy Filter selection to an Event report Source.
  * The Source's output layout comes from the regular semantic storage path;
@@ -1430,6 +1621,7 @@ export class AnalyticsLegacyScopedStorage {
   readonly #storage: AnalyticsRelationalStorageContext;
   readonly #rowLocalEventMatches = new Map<string, IdentityRelation>();
   readonly #pageEventOwnerPairs = new Map<string, IdentityRelation>();
+  readonly #postObservationBundles = new Map<string, PostObservationBundle>();
 
   constructor(storage: AnalyticsRelationalStorageContext) {
     this.#storage = storage;
@@ -1450,6 +1642,96 @@ export class AnalyticsLegacyScopedStorage {
     );
     this.#pageEventOwnerPairs.set(key, matching);
     return matching;
+  }
+
+  #matchingEventRows(
+    dataset: AnalyticsLegacyScopedDataset,
+    selection: SemanticScopedSourceSelection,
+  ): IdentityRelation {
+    if (canReuseRowLocalEventMatches(selection)) {
+      const baseSelection = withoutEventNameGate(selection);
+      const key = JSON.stringify(baseSelection);
+      let baseMatches = this.#rowLocalEventMatches.get(key);
+      if (!baseMatches) {
+        const baseDataset =
+          baseSelection === selection
+            ? dataset
+            : buildLegacyScopedDataset({
+                selection: baseSelection,
+                storage: this.#storage,
+              });
+        baseMatches = observationEventMatches(baseDataset, baseSelection);
+        this.#rowLocalEventMatches.set(key, baseMatches);
+      }
+      if (selection.eventNameGate) {
+        const nameGatedIds = eventIdentityRows(dataset.readEvents);
+        return joinMembership(
+          baseMatches,
+          nameGatedIds,
+          and(
+            eq(baseMatches.columns.site_pk!, nameGatedIds.columns.site_pk!),
+            eq(baseMatches.columns.event_id!, nameGatedIds.columns.event_id!),
+          ),
+        );
+      }
+      return baseMatches;
+    }
+    return selection.mode === "entity"
+      ? entityEventMatches(dataset, selection)
+      : observationEventMatches(dataset, selection);
+  }
+
+  #postObservationBundle(
+    selection: SemanticScopedSourceSelection,
+    requiredPageAttributes: readonly string[] = [],
+  ): PostObservationBundle {
+    const stage = selection.postObservationFilter;
+    if (!stage) throw new Error("legacy_post_observation_filter_missing");
+    const baseSelection = selectionWithoutPostObservationFilter(selection);
+    const basePageAttributes = new Set([
+      "page.report.localId",
+      "page.report.rawSiteId",
+      "page.report.sessionId",
+      "page.report.visitorId",
+      "page.report.startedAt",
+      "page.report.durationMs",
+      "page.report.pathname",
+    ]);
+    const extraPageAttributes = requiredPageAttributes
+      .filter((attribute) => !basePageAttributes.has(attribute))
+      .sort();
+    const key = JSON.stringify([baseSelection, stage, extraPageAttributes]);
+    const existing = this.#postObservationBundles.get(key);
+    if (existing) return existing;
+
+    const rawDataset = buildLegacyScopedDataset({
+      selection,
+      storage: this.#storage,
+      requiredPageAttributes,
+    });
+    const pages = selectedPageRows(
+      rawDataset,
+      baseSelection,
+      this.#matchingPageEventOwnerPairs(rawDataset, baseSelection),
+    );
+    const events = selectedEventRows(
+      rawDataset,
+      this.#matchingEventRows(rawDataset, baseSelection),
+    );
+    const dataset: AnalyticsLegacyScopedDataset = {
+      ...rawDataset,
+      readPages: pages,
+      candidatePages: pages,
+      readEvents: events,
+    };
+    const bundle = {
+      dataset,
+      pages,
+      events,
+      stageSelection: selectionForPostObservationFilter(selection),
+    };
+    this.#postObservationBundles.set(key, bundle);
+    return bundle;
   }
 
   lowerSelectedReportSource(
@@ -1498,32 +1780,22 @@ export class AnalyticsLegacyScopedStorage {
     const pageAttributes = node.values.flatMap((binding) =>
       binding.kind === "attribute" ? [binding.attribute] : [],
     );
-    const dataset = buildLegacyScopedDataset({
-      selection,
-      storage: this.#storage,
-      requiredPageAttributes: pageAttributes,
-    });
-    const matchingEventOwnerPairs = this.#matchingPageEventOwnerPairs(
-      dataset,
-      selection,
-    );
-    const relation =
-      selection.profile === "direct-page-analytics-v1"
-        ? directPageRows(dataset, selection, matchingEventOwnerPairs)
-        : selection.profile === "direct-page-session-compat-v1"
-          ? factEntityKindsForFilter(selection.filter.root).size === 0
-            ? compatibilitySessionPageRows(
-                dataset,
-                selection,
-                matchingEventOwnerPairs,
-              )
-            : entityPageRows(dataset, selection)
-          : selection.mode === "observation"
-            ? pageRowsForVisitIds(
-                dataset.candidatePages,
-                observationPagePairMatches(dataset, selection),
-              )
-            : entityPageRows(dataset, selection);
+    let relation: AnalyticsDbRelation;
+    if (selection.postObservationFilter) {
+      const bundle = this.#postObservationBundle(selection, pageAttributes);
+      relation = postObservationPageRows(bundle.dataset, bundle.stageSelection);
+    } else {
+      const dataset = buildLegacyScopedDataset({
+        selection,
+        storage: this.#storage,
+        requiredPageAttributes: pageAttributes,
+      });
+      relation = selectedPageRows(
+        dataset,
+        selection,
+        this.#matchingPageEventOwnerPairs(dataset, selection),
+      ).relation;
+    }
     return {
       relation,
       values: remapPageSourceValues(node, relation, source.values),
@@ -1549,45 +1821,6 @@ export class AnalyticsLegacyScopedStorage {
       throw new Error(
         `${path}.temporalDomain: Scoped Event report Sources currently require the candidate domain.`,
       );
-    const dataset = buildLegacyScopedDataset({
-      selection,
-      storage: this.#storage,
-    });
-    let matches: IdentityRelation;
-    if (canReuseRowLocalEventMatches(selection)) {
-      const baseSelection = withoutEventNameGate(selection);
-      const key = JSON.stringify(baseSelection);
-      let baseMatches = this.#rowLocalEventMatches.get(key);
-      if (!baseMatches) {
-        const baseDataset =
-          baseSelection === selection
-            ? dataset
-            : buildLegacyScopedDataset({
-                selection: baseSelection,
-                storage: this.#storage,
-              });
-        baseMatches = observationEventMatches(baseDataset, baseSelection);
-        this.#rowLocalEventMatches.set(key, baseMatches);
-      }
-      if (selection.eventNameGate) {
-        const nameGatedIds = eventIdentityRows(dataset.readEvents);
-        matches = joinMembership(
-          baseMatches,
-          nameGatedIds,
-          and(
-            eq(baseMatches.columns.site_pk!, nameGatedIds.columns.site_pk!),
-            eq(baseMatches.columns.event_id!, nameGatedIds.columns.event_id!),
-          ),
-        );
-      } else {
-        matches = baseMatches;
-      }
-    } else {
-      matches =
-        selection.mode === "entity"
-          ? entityEventMatches(dataset, selection)
-          : observationEventMatches(dataset, selection);
-    }
     const report = source.relation;
     const sitePk = report.columns.site_pk;
     const eventId = report.columns.event_id;
@@ -1602,21 +1835,24 @@ export class AnalyticsLegacyScopedStorage {
     // presence here; consumers such as summaries need raw NULL labels to
     // remain in the row domain for COUNT(*) while applying their own
     // COALESCE/TRIM behavior.
-    const inLegacyReportDomain = filter(report, isNotNull(ownerPresent));
-    const matchSet = distinct(
-      project(matches, {
-        site_pk: matches.columns.site_pk!,
-        event_id: matches.columns.event_id!,
-      }),
-    );
-    const selected = joinMembership(
-      inLegacyReportDomain,
-      matchSet,
-      and(
-        eq(inLegacyReportDomain.columns.site_pk!, matchSet.columns.site_pk!),
-        eq(inLegacyReportDomain.columns.event_id!, matchSet.columns.event_id!),
-      ),
-    );
+    let selected: AnalyticsDbRelation;
+    if (selection.postObservationFilter) {
+      const bundle = this.#postObservationBundle(selection);
+      const matches = observationEventMatches(
+        bundle.dataset,
+        bundle.stageSelection,
+      );
+      selected = selectedEventRows(bundle.dataset, matches).relation;
+    } else {
+      const dataset = buildLegacyScopedDataset({
+        selection,
+        storage: this.#storage,
+      });
+      const matches = this.#matchingEventRows(dataset, selection);
+      // Preserve the logical Event Source carrier. It can expose projection
+      // columns (for example owner page title) absent from the scoped dataset.
+      selected = selectedEventRelation(source.relation, matches);
+    }
     return {
       relation: selected,
       values: remapEventSourceValues(node, selected, source.values),

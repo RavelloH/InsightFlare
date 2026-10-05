@@ -11,7 +11,6 @@ import type {
 import type { GoalTimeseriesAggregateRow } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
 import { queryGoalTimeseriesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
 import { queryGoalDefinition } from "@/lib/edge/analytics/providers/d1/internal/goals";
-import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 
 export interface SiteGoalTimeseriesInput {
@@ -21,7 +20,6 @@ export interface SiteGoalTimeseriesInput {
   readonly interval: Interval;
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
-  readonly scopedDataset?: ScopedDatasetSql;
 }
 
 export interface SiteGoalTimeseriesPoint {
@@ -70,7 +68,6 @@ export async function readSiteGoalTimeseries(
     input.interval,
     input.filters,
     parseGoalFilter(goal),
-    input.scopedDataset,
   );
   const rowsByBucket = new Map<number, GoalTimeseriesAggregateRow>(
     rows.map((row) => [row.bucket, row]),

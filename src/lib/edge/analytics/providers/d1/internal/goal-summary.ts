@@ -1,18 +1,12 @@
+import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import {
-  createScopedFilterPlan,
-  EMPTY_FILTER_DOCUMENT,
-  type FilterDocument,
-} from "@/lib/edge/analytics/contract";
+  buildGoalSummaryReportPlan,
+  GOAL_SUMMARY_REPORT_OUTPUT,
+} from "@/lib/edge/analytics/engine/goal-observation-report-plan";
 import type { Env } from "@/lib/edge/types";
 
-import { queryD1All } from "./core-sources";
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type { QueryWindow } from "./core-types";
-import {
-  compileScopedDatasetSql,
-  executeObservationFilterOnScopedDataset,
-  scopedDatasetFor,
-  type ScopedDatasetSql,
-} from "./scoped-dataset";
 
 /** The one-row aggregate returned by the summary statement. */
 export interface GoalSummaryAggregateRow {
@@ -22,85 +16,29 @@ export interface GoalSummaryAggregateRow {
   readonly convertedVisitors: number;
 }
 
-/**
- * The base dataset is normally prepared by the typed-query application
- * service and attached to the query's filter metadata.  Keep the empty-filter
- * compatibility path identical to Funnel: only an unprepared empty document
- * may compile a new base dataset here.
- */
-function baseGoalDataset(
-  siteId: string,
-  window: QueryWindow,
-  globalFilters: FilterDocument,
-  preparedDataset?: ScopedDatasetSql | null,
-): ScopedDatasetSql {
-  if (preparedDataset) return preparedDataset;
-
-  const dataset = scopedDatasetFor(siteId, window, globalFilters);
-  if (dataset) return dataset;
-  if (globalFilters.root !== null) {
-    throw new Error("scoped_dataset_required");
-  }
-
-  const plan = createScopedFilterPlan(
-    "goal-summary",
-    EMPTY_FILTER_DOCUMENT,
-    "event",
-  );
-  if (!plan) throw new Error("goal_scope_unavailable");
-  return compileScopedDatasetSql({
-    filters: EMPTY_FILTER_DOCUMENT,
-    plan,
-    siteIds: [siteId],
-    window,
-  });
-}
-
 function countValue(value: unknown): number {
   const count = Number(value ?? 0);
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
-/**
- * Execute Goal summary as one D1 statement.  The goal filter is already
- * parsed by the Goal codec before it reaches this engine.  Both global and
- * goal scopes stay in SQL; only the four scalar counts cross the worker
- * boundary.
- */
+/** Execute Goal summary as one typed logical report output. */
 export async function queryGoalSummaryFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
   globalFilters: FilterDocument,
   goalFilter: FilterDocument,
-  preparedDataset?: ScopedDatasetSql | null,
 ): Promise<GoalSummaryAggregateRow> {
-  const dataset = baseGoalDataset(
+  const plan = buildGoalSummaryReportPlan({
     siteId,
     window,
-    globalFilters,
-    preparedDataset,
-  );
-  const goal = executeObservationFilterOnScopedDataset(
-    dataset,
+    filters: globalFilters,
     goalFilter,
-    "goal",
-  );
-  const rows = await queryD1All<Record<string, unknown>>(
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    `WITH
-${dataset.ctes.trim()},
-${goal.ctes.trim()}
-SELECT
-  (SELECT COUNT(*) FROM ${dataset.sessionRelation}) AS totalSessions,
-  (SELECT COUNT(*) FROM ${goal.sessionRelation}) AS convertedSessions,
-  (SELECT COUNT(*) FROM ${dataset.visitorRelation}) AS totalVisitors,
-  (SELECT COUNT(*) FROM ${goal.visitorRelation}) AS convertedVisitors
-`,
-    [
-      ...dataset.bindings.map((binding) => binding.value),
-      ...goal.bindings.map((binding) => binding.value),
-    ],
+    plan,
+    GOAL_SUMMARY_REPORT_OUTPUT,
   );
   const row = rows[0] ?? {};
   return {

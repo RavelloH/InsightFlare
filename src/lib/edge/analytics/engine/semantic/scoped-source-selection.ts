@@ -1,3 +1,4 @@
+import { assertObservationFilterCompatible } from "@/lib/edge/analytics/contract/observation-planner";
 import {
   createScopedFilterPlan,
   scopedFilterMetadata,
@@ -52,6 +53,15 @@ export interface SemanticEventNameGate {
     | "direct-subject-local-exact-name-v1";
 }
 
+export const SEMANTIC_POST_OBSERVATION_FILTER =
+  "legacy-projected-observation-v1" as const;
+
+/** A value-only second filter applied after the Source's authorized selection. */
+export interface SemanticPostObservationFilter {
+  readonly semantics: typeof SEMANTIC_POST_OBSERVATION_FILTER;
+  readonly filter: FilterDocument;
+}
+
 /**
  * A value-only snapshot of the legacy Filter contract applied to one Source.
  * It deliberately has no storage identifiers, SQL, or D1 planning hints.
@@ -65,6 +75,7 @@ export interface SemanticScopedSourceSelection {
   readonly entityKind?: "session" | "visitor";
   readonly preparedMatches?: SemanticPreparedMatches;
   readonly eventNameGate?: SemanticEventNameGate;
+  readonly postObservationFilter?: SemanticPostObservationFilter;
   readonly subject: SemanticSubjectDomain;
   /** Upstream authorization proof; subject sites may be a subset. */
   readonly authorizedSiteIds: readonly string[];
@@ -84,6 +95,7 @@ export interface CreateSemanticScopedSourceSelectionInput {
   /** Event analytics preserves the legacy truthy raw value; record detail trims. */
   readonly eventNameInputSemantics?:
     "trimmed-nonempty" | "legacy-truthy-raw" | "defined-raw-value";
+  readonly postObservationFilter?: SemanticPostObservationFilter;
 }
 
 function fail(reason: string): never {
@@ -141,6 +153,71 @@ function snapshotSelectionFilter(
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function snapshotPostObservationFilter(
+  value: SemanticPostObservationFilter,
+): SemanticPostObservationFilter {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    value.semantics !== SEMANTIC_POST_OBSERVATION_FILTER ||
+    Object.keys(value).length !== 2 ||
+    !Object.prototype.hasOwnProperty.call(value, "semantics") ||
+    !Object.prototype.hasOwnProperty.call(value, "filter")
+  )
+    return fail("post_observation_filter_descriptor_invalid");
+  const filter = normalizeFilterDocument(value.filter, analyticsFilterRegistry);
+  assertObservationFilterCompatible(filter);
+  return deepFreeze({
+    semantics: SEMANTIC_POST_OBSERVATION_FILTER,
+    filter,
+  });
+}
+
+/** Create the finite observation-only stage descriptor shared by readers. */
+export function createSemanticPostObservationFilter(input: {
+  readonly filter: FilterDocument;
+}): SemanticPostObservationFilter {
+  return snapshotPostObservationFilter({
+    semantics: SEMANTIC_POST_OBSERVATION_FILTER,
+    filter: input.filter,
+  });
+}
+
+/** Revalidate a stage descriptor at the logical-source trust boundary. */
+export function validateSemanticPostObservationFilter(
+  value: SemanticPostObservationFilter,
+): void {
+  const snapshot = snapshotPostObservationFilter(value);
+  if (!sameJsonValue(snapshot, value))
+    fail("post_observation_filter_snapshot_not_normalized");
+}
+
+function validatePostObservationProfile(
+  selection: Pick<
+    SemanticScopedSourceSelection,
+    "profile" | "filter" | "eventNameGate" | "postObservationFilter"
+  >,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(selection, "postObservationFilter"))
+    return;
+  const stage = selection.postObservationFilter;
+  if (!stage) return fail("post_observation_filter_descriptor_invalid");
+  validateSemanticPostObservationFilter(stage);
+  if (
+    selection.profile === "direct-page-analytics-v1" ||
+    selection.profile === "direct-event-analytics-v1"
+  ) {
+    if (selection.filter.root !== null || selection.eventNameGate !== undefined)
+      fail("direct_post_observation_filter_requires_empty_base");
+    return;
+  }
+  if (selection.profile !== "prepared-scoped-reader-window-v1")
+    fail("post_observation_filter_profile_unsupported");
+  if (selection.eventNameGate !== undefined)
+    fail("prepared_post_observation_filter_event_name_unsupported");
 }
 
 function canonicalSiteIds(siteIds: readonly string[]): readonly string[] {
@@ -245,6 +322,9 @@ export function createSemanticScopedSourceSelection(
   input: CreateSemanticScopedSourceSelectionInput,
 ): SemanticScopedSourceSelection {
   const filters = snapshotSelectionFilter(input.profile, input.filters);
+  const postObservationFilter = input.postObservationFilter
+    ? snapshotPostObservationFilter(input.postObservationFilter)
+    : undefined;
   const subject = snapshotSubject(input.subject);
   const time = snapshotTime(input.time);
   const metadata = scopedFilterMetadata(input.filters);
@@ -406,7 +486,7 @@ export function createSemanticScopedSourceSelection(
         }
       : undefined;
 
-  return deepFreeze({
+  const selection = deepFreeze({
     version: 1 as const,
     profile: input.profile,
     filter: filters,
@@ -415,11 +495,14 @@ export function createSemanticScopedSourceSelection(
     ...(entityKind ? { entityKind } : {}),
     ...(preparedMatches ? { preparedMatches } : {}),
     ...(eventNameGate ? { eventNameGate } : {}),
+    ...(postObservationFilter ? { postObservationFilter } : {}),
     subject,
     authorizedSiteIds,
     time,
     ...(preparationTime ? { preparationTime } : {}),
   });
+  validatePostObservationProfile(selection);
+  return selection;
 }
 
 export function validateSemanticScopedSourceSelection(
@@ -446,6 +529,8 @@ export function validateSemanticScopedSourceSelection(
     !["observation", "entity"].includes(selection.mode)
   )
     fail("invalid_descriptor");
+  if (Object.prototype.hasOwnProperty.call(selection, "postObservationFilter"))
+    validatePostObservationProfile(selection);
   const compatibilityEmptyAnd =
     selection.profile === "direct-page-session-compat-v1" &&
     isEmptyAndFilter(selection.filter);
@@ -631,6 +716,13 @@ export function snapshotSemanticScopedSourceSelection(
       : {}),
     ...(selection.eventNameGate
       ? { eventNameGate: Object.freeze({ ...selection.eventNameGate }) }
+      : {}),
+    ...(selection.postObservationFilter
+      ? {
+          postObservationFilter: snapshotPostObservationFilter(
+            selection.postObservationFilter,
+          ),
+        }
       : {}),
   });
 }

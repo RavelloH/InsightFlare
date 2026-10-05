@@ -9,10 +9,10 @@ import {
   analyticsFilterRegistry,
   type FilterDocument,
 } from "@/lib/edge/analytics/contract";
+import { queryGoalSummaryParentOracle as queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-summary-parent-oracle";
+import { queryGoalTimeseriesParentOracle as queryGoalTimeseriesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-timeseries-parent-oracle";
 import { buildTimeBuckets } from "@/lib/edge/analytics/providers/d1/internal/core-time";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
-import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
-import { queryGoalTimeseriesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
 import { parseFilterDsl } from "@/lib/filter-contract";
 
 type Binding = string | number | null;
@@ -110,7 +110,7 @@ base_visitors AS (
   };
 }
 
-describe("Goal D1 performance fixture", () => {
+describe("Goal legacy SQL parent performance fixture", () => {
   it("records SQL shape, bindings, EXPLAIN, and execution for simple/complex summary and timeseries", async () => {
     const d1 = new ExplainableSqliteD1();
     const dataset = highCardinalityDataset();

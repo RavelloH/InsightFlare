@@ -9,7 +9,6 @@ import {
   queryGoalSummaryFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
 import { queryGoalDefinition } from "@/lib/edge/analytics/providers/d1/internal/goals";
-import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 
 export interface GoalMetricSummary {
@@ -24,7 +23,6 @@ export interface SiteGoalSummaryInput {
   readonly goalId: string;
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
-  readonly scopedDataset?: ScopedDatasetSql;
 }
 
 export interface SiteGoalSummaryResult {
@@ -73,7 +71,6 @@ export async function readSiteGoalSummary(
     input.window,
     input.filters,
     parseGoalFilter(goal),
-    input.scopedDataset,
   );
   return summary(goal, aggregate);
 }

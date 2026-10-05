@@ -11,13 +11,13 @@ import {
   type FilterFieldId,
   normalizeFilterDocument,
 } from "@/lib/edge/analytics/contract";
+import { queryGoalSummaryParentOracle as queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-summary-parent-oracle";
+import {
+  queryGoalTimeseriesParentOracle as queryGoalTimeseriesFromD1,
+  withGoalTimeseriesTimestamps,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-timeseries-parent-oracle";
 import { buildTimeBuckets } from "@/lib/edge/analytics/providers/d1/internal/core-time";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
-import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
-import {
-  queryGoalTimeseriesFromD1,
-  withGoalTimeseriesTimestamps,
-} from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
 import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { parseFilterDsl } from "@/lib/filter-contract";
 
@@ -102,7 +102,7 @@ base_visitors AS (
   };
 }
 
-describe("Goal D1 analytics", () => {
+describe("Goal legacy SQL parent oracle", () => {
   it("reuses a prepared dataset compiled from scoped filter metadata", async () => {
     const d1 = {
       prepare: () => ({

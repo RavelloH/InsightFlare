@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   attachScopedFilterMetadata,
   EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
   prepareScopedQuery,
   scopedFilterMetadata,
   siteQueryContext,
@@ -14,7 +15,9 @@ import type {
 } from "@/lib/edge/analytics/contract/types";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import {
+  createSemanticPostObservationFilter,
   createSemanticScopedSourceSelection,
+  SEMANTIC_POST_OBSERVATION_FILTER,
   type SemanticScopedSourceSelection,
   snapshotSemanticScopedSourceSelection,
   validateSemanticScopedSourceSelection,
@@ -123,6 +126,132 @@ function withPreparedMatches(
 }
 
 describe("semantic scoped source selection", () => {
+  it("snapshots a finite post-observation stage without changing the base selection", () => {
+    const mutableFilter = {
+      version: 1,
+      root: {
+        kind: "condition",
+        target: { kind: "field", field: "page.path" },
+        operator: "eq",
+        value: "/goal",
+      },
+    };
+    const stage = createSemanticPostObservationFilter({
+      filter: mutableFilter as FilterDocument,
+    });
+    mutableFilter.root.value = "/changed";
+    expect(stage).toEqual({
+      semantics: SEMANTIC_POST_OBSERVATION_FILTER,
+      filter: expect.objectContaining({
+        root: expect.objectContaining({ value: "/goal" }),
+      }),
+    });
+    expect(Object.isFrozen(stage)).toBe(true);
+    expect(Object.isFrozen(stage.filter)).toBe(true);
+    expect(Object.isFrozen(stage.filter.root)).toBe(true);
+
+    const direct = createSemanticScopedSourceSelection({
+      profile: "direct-page-analytics-v1",
+      filters: EMPTY_FILTER_DOCUMENT,
+      postObservationFilter: stage,
+      subject: SUBJECT,
+      time: TIME,
+    });
+    expect(direct.filter).toEqual(EMPTY_FILTER_DOCUMENT);
+    expect(direct.postObservationFilter).toEqual(stage);
+    expect(Object.isFrozen(direct.postObservationFilter?.filter.root)).toBe(
+      true,
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-event-analytics-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        postObservationFilter: stage,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).not.toThrow();
+  });
+
+  it("allows prepared reader-window stages and rejects untrusted or widened stage profiles", () => {
+    const prepared = preparedSelectionInput(
+      "session",
+      simpleSessionFilter("US"),
+    );
+    const stage = createSemanticPostObservationFilter({
+      filter: parseFilterDsl(
+        'event.name eq "purchase"',
+        analyticsFilterRegistry,
+      ),
+    });
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-reader-window-v1",
+        filters: prepared.filters,
+        expectedPlan: prepared.plan,
+        postObservationFilter: stage,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-analytics-v1",
+        filters: simpleSessionFilter("US"),
+        postObservationFilter: stage,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:direct_post_observation_filter_requires_empty_base",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-event-records-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        postObservationFilter: stage,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:post_observation_filter_profile_unsupported",
+    );
+    expect(() =>
+      createSemanticPostObservationFilter({
+        filter: parseFilterDsl(
+          "session.durationMs gt 1",
+          analyticsFilterRegistry,
+        ),
+      }),
+    ).toThrow();
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-analytics-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        postObservationFilter: {
+          ...stage,
+          semantics: "future-filter-profile-v2",
+        } as never,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:post_observation_filter_descriptor_invalid",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-analytics-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        postObservationFilter: { ...stage, extra: true } as never,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:post_observation_filter_descriptor_invalid",
+    );
+  });
+
   it("snapshots and sorts prepared observation and entity matches", () => {
     const observations = withPreparedMatches("event", {
       visitIds: [
