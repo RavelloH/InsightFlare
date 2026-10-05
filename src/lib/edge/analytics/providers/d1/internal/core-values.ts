@@ -1,3 +1,9 @@
+import {
+  type EventPayloadValueTypeCode,
+  eventPayloadValueTypeCode,
+  eventPayloadValueTypeLabel,
+} from "@/lib/edge/analytics/engine/semantic/event-payload-value-type";
+
 export function normalizeFilterValue(value: string | null): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim().slice(0, 120);
@@ -5,20 +11,11 @@ export function normalizeFilterValue(value: string | null): string | undefined {
 }
 
 export function customEventJsonTypeLabel(valueType: number): string {
-  if (valueType === 1) return "string";
-  if (valueType === 2) return "number";
-  if (valueType === 3) return "boolean";
-  if (valueType === 4) return "object";
-  if (valueType === 5) return "array";
-  return "null";
+  return eventPayloadValueTypeLabel(valueType);
 }
 
-export function customEventJsonTypeCode(valueType: string): number | null {
-  if (valueType === "null") return 0;
-  if (valueType === "string") return 1;
-  if (valueType === "number") return 2;
-  if (valueType === "boolean") return 3;
-  if (valueType === "object") return 4;
-  if (valueType === "array") return 5;
-  return null;
+export function customEventJsonTypeCode(
+  valueType: string,
+): EventPayloadValueTypeCode | null {
+  return eventPayloadValueTypeCode(valueType);
 }

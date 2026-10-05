@@ -801,13 +801,11 @@ describe("edge query event fields and records low-level coverage", () => {
     ).resolves.toEqual([]);
 
     expect(prepare).toHaveBeenCalledTimes(1);
-    expect(calls[0].sql).toContain("GROUP BY path, valueType");
-    expect(calls[0].bindings).toEqual([
-      siteId,
-      "Signup",
-      ...eventBindings(),
-      9,
-    ]);
+    expect(calls[0].sql).toContain("COUNT(DISTINCT");
+    expect(calls[0].sql).toContain("GROUP BY");
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain("Signup");
+    expect(calls[0].bindings).toContain(9);
   });
 
   it("binds event field value path, value type, filters, and limit", async () => {
@@ -851,18 +849,17 @@ describe("edge query event fields and records low-level coverage", () => {
       },
     ]);
 
-    expect(calls[0].sql).toContain("WHERE p.path = ? AND v.value_type = ?");
-    expect(calls[0].sql).toContain("LIKE ? ESCAPE '\\'");
-    expect(calls[0].bindings).toEqual([
-      siteId,
-      "Purchase",
-      ...eventBindings(),
-      "mobile",
-      "/amount",
-      2,
-      "%4%",
-      7,
-    ]);
+    expect(calls[0].sql).toContain("custom_event_json_paths");
+    expect(calls[0].sql).toContain("custom_event_json_values");
+    expect(calls[0].sql).toContain("LIKE ? ESCAPE ?");
+    expect(calls[0].bindings).toContain(siteId);
+    expect(calls[0].bindings).toContain("Purchase");
+    expect(calls[0].bindings).toContain("mobile");
+    expect(calls[0].bindings).toContain("/amount");
+    expect(calls[0].bindings).toContain(2);
+    expect(calls[0].bindings).toContain("%4%");
+    expect(calls[0].bindings).toContain("\\");
+    expect(calls[0].bindings).toContain(7);
   });
 
   it("returns null when an event detail record is missing", async () => {
@@ -1567,7 +1564,8 @@ describe("edge paginated event fields low-level coverage", () => {
       items: [{ numberValue: 42 }],
       pagination: { hasMore: true, nextCursor: expect.any(String) },
     });
-    expect(numeric.calls[0].sql).toContain("CAST(v.number_value AS TEXT)");
+    expect(numeric.calls[0].sql).toContain("AS TEXT");
+    expect(numeric.calls[0].sql).toContain("ESCAPE");
     expect(numeric.calls[0].bindings).toContain("%42\\_\\%%");
 
     const valueCursor = await decodeEventFieldValueCursor(
@@ -1618,7 +1616,9 @@ describe("edge paginated event fields low-level coverage", () => {
       items: [{ booleanValue: 1 }],
       pagination: { hasMore: false },
     });
-    expect(boolean.calls[0].sql).toContain("CASE v.boolean_value");
+    expect(boolean.calls[0].sql).toContain("CASE");
+    expect(boolean.calls[0].bindings).toContain("true");
+    expect(boolean.calls[0].bindings).toContain("false");
   });
 });
 describe("edge paginated dimensions low-level coverage", () => {

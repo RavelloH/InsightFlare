@@ -555,6 +555,17 @@ export class LogicalPlanBuilder {
     });
   }
 
+  reportNumberText(
+    input: LogicalExpressionHandle,
+    semantics: "legacy-report-number-v1" = "legacy-report-number-v1",
+  ): LogicalExpressionHandle {
+    return this.#expression({
+      kind: "number-report-text",
+      input: input.expression,
+      semantics,
+    });
+  }
+
   pageDimension(
     dimension: SemanticPageDimensionId,
     dependencies: Readonly<Record<string, LogicalExpressionHandle>>,
@@ -1637,6 +1648,7 @@ export class LogicalPlanBuilder {
         case "null-test":
         case "string-match":
         case "string-normalize":
+        case "number-report-text":
         case "absolute":
         case "round":
         case "time-bucket":

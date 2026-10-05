@@ -4,6 +4,18 @@ export interface SqliteD1Trace {
   readonly preparedSql: string[];
   readonly bindings: SQLInputValue[][];
   readonly batchStatements?: string[][];
+  /** node:sqlite BigInt reads adapted to D1's JavaScript number rows. */
+  readonly readBigIntsAsNumbers?: boolean;
+}
+
+function d1NumberValue(value: unknown): unknown {
+  if (typeof value === "bigint") return Number(value);
+  if (Array.isArray(value)) return value.map(d1NumberValue);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, d1NumberValue(entry)]),
+    );
+  return value;
 }
 
 function sqliteBindings(values: readonly SQLInputValue[]): SQLInputValue[] {
@@ -24,6 +36,7 @@ export function createSqliteD1Database(
     prepare(sql: string) {
       trace?.preparedSql.push(sql);
       const statement = database.prepare(sql);
+      if (trace?.readBigIntsAsNumbers) statement.setReadBigInts(true);
       let bindings: SQLInputValue[] = [];
       const prepared = {
         bind(...values: SQLInputValue[]) {
@@ -33,14 +46,16 @@ export function createSqliteD1Database(
         },
         async first<Row>() {
           return (
-            (statement.get(...sqliteBindings(bindings)) as Row | undefined) ??
-            null
+            (d1NumberValue(statement.get(...sqliteBindings(bindings))) as
+              Row | undefined) ?? null
           );
         },
         async all<Row>() {
           return {
             success: true,
-            results: statement.all(...sqliteBindings(bindings)) as Row[],
+            results: d1NumberValue(
+              statement.all(...sqliteBindings(bindings)),
+            ) as Row[],
           } as D1Result<Row>;
         },
         async run() {

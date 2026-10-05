@@ -80,6 +80,26 @@ function planWithForgedFilter(predicate: LogicalExpr): LogicalPlan {
 }
 
 describe("logical relational IR", () => {
+  it("keeps legacy report number text limited to unitless nullable numbers", () => {
+    const builder = createBuilder();
+    const nullableNumber = builder.literal(null, {
+      kind: "scalar",
+      scalar: "number",
+    });
+    const text = builder.reportNumberText(nullableNumber);
+    expect(text.type).toEqual({ kind: "scalar", scalar: "string" });
+    expect(text.nullable).toBe(true);
+    expect(() =>
+      builder.reportNumberText(
+        builder.literal(2, {
+          kind: "scalar",
+          scalar: "number",
+          unit: "ratio",
+        }),
+      ),
+    ).toThrow("unitless numeric scalar");
+  });
+
   it("expands selected Event payloads into a guarded occurrence bag", () => {
     const builder = createBuilder();
     const events = builder.source("event", {

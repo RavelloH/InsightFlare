@@ -91,6 +91,12 @@ export interface LogicalStringNormalizeExpression {
   readonly normalization: "trim-ascii-space";
 }
 
+export interface LogicalNumberReportTextExpression {
+  readonly kind: "number-report-text";
+  readonly input: LogicalExpr;
+  readonly semantics: "legacy-report-number-v1";
+}
+
 export interface LogicalPageDimensionExpression {
   readonly kind: "page-dimension";
   readonly dimension: SemanticPageDimensionId;
@@ -159,6 +165,7 @@ export type LogicalExpr =
   | LogicalSetMembershipExpression
   | LogicalStringMatchExpression
   | LogicalStringNormalizeExpression
+  | LogicalNumberReportTextExpression
   | LogicalPageDimensionExpression
   | LogicalArithmeticExpression
   | LogicalAbsoluteExpression

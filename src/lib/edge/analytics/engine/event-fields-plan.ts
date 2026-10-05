@@ -1,6 +1,6 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import { buildEventReportSource } from "@/lib/edge/analytics/engine/event-source-plan";
+import { buildEventPayloadReportSource } from "@/lib/edge/analytics/engine/event-payload-report-source";
 import type {
   LogicalExpressionHandle,
   LogicalPlanBuilder,
@@ -52,29 +52,13 @@ function expression(
 }
 
 function source(input: EventFieldsPlanInput) {
-  return buildEventReportSource({
-    siteId: input.siteId,
-    queryTime: input.queryTime,
-    filters: input.filters,
-    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
-    ...(input.scopePlan
-      ? { preparedTimePolicy: "reader-window" as const }
-      : {}),
-    attributes: ["event.report.eventName", "event.report.internalPk"],
-    ...(input.eventName !== undefined
-      ? {
-          eventName: input.eventName,
-          eventNameInputSemantics: "legacy-truthy-raw",
-        }
-      : {}),
-  });
+  return buildEventPayloadReportSource(input);
 }
 
 function aggregateFields(
   builder: LogicalPlanBuilder,
-  events: LogicalRelationHandle,
+  occurrences: LogicalRelationHandle,
 ): LogicalRelationHandle {
-  const occurrences = builder.eventPayloadOccurrences(events);
   return builder.aggregate(
     occurrences,
     {
@@ -178,14 +162,17 @@ function afterCursor(
 export function buildEventFieldsPlan(
   input: EventFieldsPlanInput & { readonly limit: number },
 ): ValidatedLogicalPlan {
-  const { builder, events } = source(input);
-  const grouped = aggregateFields(builder, events);
+  const { builder, occurrences } = source(input);
+  const grouped = aggregateFields(builder, occurrences);
   const sorted = builder.sort(grouped, [
     { slot: "events", direction: "desc", nulls: "last" },
     { slot: "occurrences", direction: "desc", nulls: "last" },
     { slot: "path", direction: "asc", nulls: "first" },
   ]);
-  const limited = input.limit < 0 ? sorted : builder.limit(sorted, input.limit);
+  const limited =
+    Number.isInteger(input.limit) && input.limit < 0
+      ? sorted
+      : builder.limit(sorted, input.limit);
   addOutput(builder, limited, EVENT_FIELDS_OUTPUT);
   return builder.finish();
 }
@@ -196,8 +183,8 @@ export function buildEventFieldsPagePlan(
     readonly cursor?: EventFieldCursorValue | null;
   },
 ): ValidatedLogicalPlan {
-  const { builder, events } = source(input);
-  const grouped = aggregateFields(builder, events);
+  const { builder, occurrences } = source(input);
+  const grouped = aggregateFields(builder, occurrences);
   const after = input.cursor
     ? builder.filter(grouped, afterCursor(builder, grouped, input.cursor))
     : grouped;

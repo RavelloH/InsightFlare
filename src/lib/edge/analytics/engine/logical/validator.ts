@@ -449,6 +449,25 @@ function infer(
       }
       return { type: scalar("string"), nullable: input.nullable };
     }
+    case "number-report-text": {
+      const input = infer(expression.input, resolveSlot, `${path}.input`);
+      if (
+        expression.semantics !== "legacy-report-number-v1" ||
+        input.type.kind !== "scalar" ||
+        input.type.scalar !== "number" ||
+        input.type.unit !== undefined
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path,
+            message:
+              "Legacy report number text requires a unitless numeric scalar.",
+          },
+        ]);
+      }
+      return { type: scalar("string"), nullable: input.nullable };
+    }
     case "page-dimension": {
       const definition = semanticPageDimension(expression.dimension);
       const dependencyNames = expression.dependencies.map(
@@ -1141,6 +1160,7 @@ function logicalExpressionSlotReferences(expression: LogicalExpr): SlotId[] {
       case "set-membership":
       case "string-match":
       case "string-normalize":
+      case "number-report-text":
       case "absolute":
       case "round":
       case "time-bucket":

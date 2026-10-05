@@ -7,11 +7,18 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import {
+  buildEventFieldValuesPagePlan,
+  buildEventFieldValuesPlan,
+  EVENT_FIELD_VALUES_OUTPUT,
+  EVENT_FIELD_VALUES_PAGE_OUTPUT,
+} from "@/lib/edge/analytics/engine/event-field-values-plan";
+import {
   buildEventFieldsPagePlan,
   buildEventFieldsPlan,
   EVENT_FIELDS_OUTPUT,
   EVENT_FIELDS_PAGE_OUTPUT,
 } from "@/lib/edge/analytics/engine/event-fields-plan";
+import { buildEventPayloadReportSource } from "@/lib/edge/analytics/engine/event-payload-report-source";
 import type { Env } from "@/lib/edge/types";
 
 import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
@@ -114,11 +121,7 @@ function eventFieldBinding(
     search?.trim().toLowerCase() ?? "",
   ]);
 }
-import {
-  buildEventFilteredSourceCte,
-  customEventJsonTypeCode,
-  queryD1All,
-} from "./core";
+import { customEventJsonTypeCode } from "./core";
 
 export async function queryEventFieldsFromD1(
   env: Env,
@@ -241,65 +244,29 @@ export async function queryEventFieldValuesFromD1(
   limit: number,
   search?: string,
 ): Promise<EventFieldValueRow[]> {
-  const source = buildEventFilteredSourceCte(
+  const metadata = scopedFilterMetadata(filters);
+  const source = buildEventPayloadReportSource({
     siteId,
-    window,
+    queryTime: queryWindowToTime(window),
     filters,
-    eventName,
-  );
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(eventName !== undefined ? { eventName } : {}),
+  });
   const valueTypeCode = customEventJsonTypeCode(fieldValueType);
   if (valueTypeCode === null) return [];
-  const normalizedSearch = search?.trim().toLowerCase();
-  const searchExpression =
-    valueTypeCode === 1
-      ? "v.string_value"
-      : valueTypeCode === 2
-        ? "CAST(v.number_value AS TEXT)"
-        : valueTypeCode === 3
-          ? "CASE v.boolean_value WHEN 1 THEN 'true' ELSE 'false' END"
-          : "''";
-  const searchPattern = normalizedSearch
-    ? `%${normalizedSearch.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
-    : null;
-  const sql = `
-${source.cte},
-field_rows AS (
-  SELECT
-    v.value_type AS valueType,
-    v.event_pk,
-    v.occurred_at,
-    v.string_value AS stringValue,
-    v.number_value AS numberValue,
-    v.boolean_value AS booleanValue
-  FROM custom_event_json_values v
-  INNER JOIN custom_event_json_paths p
-    ON p.id = v.path_id
-  INNER JOIN filtered_events fe
-    ON fe.event_pk = v.event_pk
-  WHERE p.path = ? AND v.value_type = ?
-  ${searchPattern ? `AND LOWER(TRIM(COALESCE(${searchExpression}, ''))) LIKE ? ESCAPE '\\'` : ""}
-)
-SELECT
-  valueType,
-  count(DISTINCT event_pk) AS events,
-  count(*) AS occurrences,
-  MIN(occurred_at) AS firstSeenAt,
-  MAX(occurred_at) AS lastSeenAt,
-  MIN(stringValue) AS stringValue,
-  MIN(numberValue) AS numberValue,
-  MIN(booleanValue) AS booleanValue
-FROM field_rows
-GROUP BY valueType, stringValue, numberValue, booleanValue
-ORDER BY occurrences DESC, events DESC, stringValue ASC, numberValue ASC, booleanValue ASC
-LIMIT ?
-  `;
-  return queryD1All<EventFieldValueRow>(env, sql, [
-    ...source.bindings,
+  const plan = buildEventFieldValuesPlan({
+    source,
     fieldPath,
     valueTypeCode,
-    ...(searchPattern ? [searchPattern] : []),
     limit,
-  ]);
+    ...(search !== undefined ? { search } : {}),
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    EVENT_FIELD_VALUES_OUTPUT,
+  );
+  return rows as unknown as EventFieldValueRow[];
 }
 
 export async function queryEventFieldValuesPageFromD1(
@@ -315,12 +282,14 @@ export async function queryEventFieldValuesPageFromD1(
   cursor?: EventFieldValueCursor | null,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<EventFieldValueRow>> {
-  const source = buildEventFilteredSourceCte(
+  const metadata = scopedFilterMetadata(filters);
+  const source = buildEventPayloadReportSource({
     siteId,
-    window,
+    queryTime: queryWindowToTime(window),
     filters,
-    eventName,
-  );
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(eventName !== undefined ? { eventName } : {}),
+  });
   const valueTypeCode = customEventJsonTypeCode(fieldValueType);
   if (valueTypeCode === null) {
     return {
@@ -328,95 +297,19 @@ export async function queryEventFieldValuesPageFromD1(
       pagination: { limit, returned: 0, hasMore: false, nextCursor: null },
     };
   }
-  const normalizedSearch = search?.trim().toLowerCase();
-  const searchExpression =
-    valueTypeCode === 1
-      ? "v.string_value"
-      : valueTypeCode === 2
-        ? "CAST(v.number_value AS TEXT)"
-        : valueTypeCode === 3
-          ? "CASE v.boolean_value WHEN 1 THEN 'true' ELSE 'false' END"
-          : "''";
-  const searchPattern = normalizedSearch
-    ? `%${normalizedSearch.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
-    : null;
-  const cursorClause = cursor
-    ? `
-AND (
-  occurrences < ?
-  OR (occurrences = ? AND events < ?)
-  OR (occurrences = ? AND events = ? AND valueString > ?)
-  OR (occurrences = ? AND events = ? AND valueString = ? AND valueNumber > ?)
-  OR (occurrences = ? AND events = ? AND valueString = ? AND valueNumber = ? AND valueBoolean > ?)
-)`
-    : "";
-  const sql = `
-${source.cte},
-field_rows AS (
-  SELECT
-    v.value_type AS valueType,
-    v.event_pk,
-    v.occurred_at,
-    v.string_value AS stringValue,
-    v.number_value AS numberValue,
-    v.boolean_value AS booleanValue
-  FROM custom_event_json_values v
-  INNER JOIN custom_event_json_paths p ON p.id = v.path_id
-  INNER JOIN filtered_events fe ON fe.event_pk = v.event_pk
-  WHERE p.path = ? AND v.value_type = ?
-  ${searchPattern ? `AND LOWER(TRIM(COALESCE(${searchExpression}, ''))) LIKE ? ESCAPE '\\'` : ""}
-),
-rollup AS (
-  SELECT
-    valueType,
-    count(DISTINCT event_pk) AS events,
-    count(*) AS occurrences,
-    MIN(occurred_at) AS firstSeenAt,
-    MAX(occurred_at) AS lastSeenAt,
-    MIN(stringValue) AS stringValue,
-    MIN(numberValue) AS numberValue,
-    MIN(booleanValue) AS booleanValue
-  FROM field_rows
-  GROUP BY valueType, stringValue, numberValue, booleanValue
-)
-SELECT valueType, events, occurrences, firstSeenAt, lastSeenAt,
-  stringValue, numberValue, booleanValue,
-  COALESCE(stringValue, '') AS valueString,
-  COALESCE(numberValue, -9223372036854775808) AS valueNumber,
-  COALESCE(booleanValue, -1) AS valueBoolean
-FROM rollup
-WHERE 1 = 1
-${cursorClause}
-ORDER BY occurrences DESC, events DESC, valueString ASC, valueNumber ASC, valueBoolean ASC
-LIMIT ?
-`;
-  const cursorBindings = cursor
-    ? [
-        cursor.occurrences,
-        cursor.occurrences,
-        cursor.events,
-        cursor.occurrences,
-        cursor.events,
-        cursor.stringValue,
-        cursor.occurrences,
-        cursor.events,
-        cursor.stringValue,
-        cursor.numberValue,
-        cursor.occurrences,
-        cursor.events,
-        cursor.stringValue,
-        cursor.numberValue,
-        cursor.booleanValue,
-      ]
-    : [];
-  const rows = await queryD1All<EventFieldValueRow>(env, sql, [
-    ...source.bindings,
+  const plan = buildEventFieldValuesPagePlan({
+    source,
     fieldPath,
     valueTypeCode,
-    ...(searchPattern ? [searchPattern] : []),
-    ...cursorBindings,
-    limit + 1,
-  ]);
+    limit,
+    ...(search !== undefined ? { search } : {}),
+    ...(cursor ? { cursor } : {}),
+  });
+  const rows = (await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    EVENT_FIELD_VALUES_PAGE_OUTPUT,
+  )) as unknown as EventFieldValueRow[];
   const page = pageResult(rows, limit);
   const binding = await eventFieldBinding(
     "event-field-values",

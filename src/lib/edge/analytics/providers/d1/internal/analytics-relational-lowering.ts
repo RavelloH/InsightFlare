@@ -962,6 +962,41 @@ function lowerExpression(
         candidateBounded: input.candidateBounded,
       };
     }
+    case "number-report-text": {
+      const input = lowerExpression(
+        expression.input,
+        relation,
+        logicalSlots,
+        visible,
+        `${path}.input`,
+        time,
+      );
+      if (
+        expression.semantics !== "legacy-report-number-v1" ||
+        input.kind !== "scalar" ||
+        input.type.kind !== "scalar" ||
+        input.type.scalar !== "number" ||
+        input.type.unit !== undefined ||
+        !["integer", "real", "numeric"].includes(
+          input.expression.resultType.affinity,
+        )
+      )
+        reject(
+          path,
+          "Legacy report number text requires a unitless numeric scalar.",
+        );
+      const numericExpression = input.expression as SqlExpression<
+        number | null,
+        ExpressionResultType<"integer" | "real" | "numeric", boolean>
+      >;
+      return {
+        kind: "scalar",
+        expression: castText(numericExpression),
+        type: { kind: "scalar", scalar: "string" },
+        nullable: input.nullable,
+        candidateBounded: input.candidateBounded,
+      };
+    }
     case "page-dimension": {
       const definition = semanticPageDimension(expression.dimension);
       const names = expression.dependencies.map(
@@ -3919,6 +3954,7 @@ export class AnalyticsLogicalToDbLowerer {
       case "null-test":
       case "string-match":
       case "string-normalize":
+      case "number-report-text":
       case "absolute":
       case "round":
       case "time-bucket":

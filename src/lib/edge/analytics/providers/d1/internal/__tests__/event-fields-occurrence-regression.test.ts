@@ -22,14 +22,19 @@ import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/i
 import {
   buildEventFilteredSourceCte,
   type EventFieldRow,
+  type EventFieldValueRow,
   type FilterDocument,
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   decodeEventFieldCursor,
+  decodeEventFieldValueCursor,
   type EventFieldCursor,
+  type EventFieldValueCursor,
   queryEventFieldsFromD1,
   queryEventFieldsPageFromD1,
+  queryEventFieldValuesFromD1,
+  queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
@@ -539,6 +544,156 @@ function stableRows(rows: readonly EventFieldRow[]): EventFieldRow[] {
   );
 }
 
+function frozenValueSql(input: {
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly eventName?: string;
+  readonly fieldPath: string;
+  readonly valueTypeCode: number;
+  readonly search?: string;
+  readonly page?: boolean;
+  readonly cursor?: EventFieldValueCursor | null;
+  readonly limit: number;
+}): {
+  readonly sql: string;
+  readonly bindings: readonly (string | number | null)[];
+} {
+  const source = buildEventFilteredSourceCte(
+    SITE,
+    input.window,
+    input.filters,
+    input.eventName,
+  );
+  const normalizedSearch = input.search?.trim().toLowerCase();
+  const display =
+    input.valueTypeCode === 1
+      ? "v.string_value"
+      : input.valueTypeCode === 2
+        ? "CAST(v.number_value AS TEXT)"
+        : input.valueTypeCode === 3
+          ? "CASE v.boolean_value WHEN 1 THEN 'true' ELSE 'false' END"
+          : "''";
+  const searchPattern = normalizedSearch
+    ? `%${normalizedSearch.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`
+    : undefined;
+  const searchClause = searchPattern
+    ? `AND LOWER(TRIM(COALESCE(${display}, ''))) LIKE ? ESCAPE '\\'`
+    : "";
+  const bindings: (string | number | null)[] = [
+    ...source.bindings,
+    input.fieldPath,
+    input.valueTypeCode,
+    ...(searchPattern ? [searchPattern] : []),
+  ];
+  if (!input.page)
+    return {
+      sql: `
+${source.cte},
+field_rows AS (
+  SELECT v.value_type AS valueType, v.event_pk, v.occurred_at,
+    v.string_value AS stringValue, v.number_value AS numberValue,
+    v.boolean_value AS booleanValue
+  FROM custom_event_json_values v
+  INNER JOIN custom_event_json_paths p ON p.id = v.path_id
+  INNER JOIN filtered_events fe ON fe.event_pk = v.event_pk
+  WHERE p.path = ? AND v.value_type = ?
+  ${searchClause}
+)
+SELECT valueType, count(DISTINCT event_pk) AS events,
+  count(*) AS occurrences, MIN(occurred_at) AS firstSeenAt,
+  MAX(occurred_at) AS lastSeenAt, MIN(stringValue) AS stringValue,
+  MIN(numberValue) AS numberValue, MIN(booleanValue) AS booleanValue
+FROM field_rows
+GROUP BY valueType, stringValue, numberValue, booleanValue
+ORDER BY occurrences DESC, events DESC, stringValue ASC, numberValue ASC, booleanValue ASC
+LIMIT ?`,
+      bindings: [...bindings, input.limit],
+    };
+  const cursor = input.cursor;
+  const cursorClause = cursor
+    ? `
+WHERE occurrences < ?
+  OR (occurrences = ? AND events < ?)
+  OR (occurrences = ? AND events = ? AND valueString > ?)
+  OR (occurrences = ? AND events = ? AND valueString = ? AND valueNumber > ?)
+  OR (occurrences = ? AND events = ? AND valueString = ? AND valueNumber = ? AND valueBoolean > ?)`
+    : "";
+  const cursorBindings = cursor
+    ? [
+        cursor.occurrences,
+        cursor.occurrences,
+        cursor.events,
+        cursor.occurrences,
+        cursor.events,
+        cursor.stringValue,
+        cursor.occurrences,
+        cursor.events,
+        cursor.stringValue,
+        cursor.numberValue,
+        cursor.occurrences,
+        cursor.events,
+        cursor.stringValue,
+        cursor.numberValue,
+        cursor.booleanValue,
+      ]
+    : [];
+  return {
+    sql: `
+${source.cte},
+field_rows AS (
+  SELECT v.value_type AS valueType, v.event_pk, v.occurred_at,
+    v.string_value AS stringValue, v.number_value AS numberValue,
+    v.boolean_value AS booleanValue
+  FROM custom_event_json_values v
+  INNER JOIN custom_event_json_paths p ON p.id = v.path_id
+  INNER JOIN filtered_events fe ON fe.event_pk = v.event_pk
+  WHERE p.path = ? AND v.value_type = ?
+  ${searchClause}
+),
+rollup AS (
+  SELECT valueType, count(DISTINCT event_pk) AS events,
+    count(*) AS occurrences, MIN(occurred_at) AS firstSeenAt,
+    MAX(occurred_at) AS lastSeenAt, MIN(stringValue) AS stringValue,
+    MIN(numberValue) AS numberValue, MIN(booleanValue) AS booleanValue
+  FROM field_rows
+  GROUP BY valueType, stringValue, numberValue, booleanValue
+)
+SELECT valueType, events, occurrences, firstSeenAt, lastSeenAt,
+  stringValue, numberValue, booleanValue,
+  COALESCE(stringValue, '') AS valueString,
+  COALESCE(numberValue, -9223372036854775808) AS valueNumber,
+  COALESCE(booleanValue, -1) AS valueBoolean
+FROM rollup
+${cursorClause}
+ORDER BY occurrences DESC, events DESC, valueString ASC, valueNumber ASC, valueBoolean ASC
+LIMIT ?`,
+    bindings: [...bindings, ...cursorBindings, input.limit + 1],
+  };
+}
+
+function frozenValueRows(
+  database: DatabaseSync,
+  input: Parameters<typeof frozenValueSql>[0],
+): EventFieldValueRow[] {
+  const query = frozenValueSql(input);
+  const statement = database.prepare(query.sql);
+  statement.setReadBigInts(true);
+  return (
+    statement.all(...(query.bindings as SQLInputValue[])) as Record<
+      string,
+      unknown
+    >[]
+  ).map(
+    (row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+          key,
+          typeof value === "bigint" ? Number(value) : value,
+        ]),
+      ) as unknown as EventFieldValueRow,
+  );
+}
+
 function queryPlanDetails(
   database: DatabaseSync,
   sql: string,
@@ -558,8 +713,10 @@ function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
   } as unknown as Env;
 }
 
-function traceFor(): SqliteD1Trace {
-  return { preparedSql: [], bindings: [] };
+function traceFor(
+  options: Pick<SqliteD1Trace, "readBigIntsAsNumbers"> = {},
+): SqliteD1Trace {
+  return { preparedSql: [], bindings: [], ...options };
 }
 
 afterAll(() => {
@@ -1080,6 +1237,693 @@ describe("Event field occurrence report migration", () => {
     }
   });
 
+  it("matches the frozen Event field-value aggregates and legacy search behavior", async () => {
+    const { database, site } = createDatabase();
+    const searchStrings = [
+      "  Alpha  ",
+      "A\tBeta",
+      "x\u00a0y",
+      "café",
+      "literal\\%_",
+      "",
+    ];
+    for (const [index, stringValue] of searchStrings.entries())
+      addPayload(database, site, "event-one", "/search/string", {
+        valueType: 1,
+        occurredAt: 100 + index,
+        stringValue,
+      });
+    addPayload(database, site, "event-two", "/search/string", {
+      valueType: 1,
+      occurredAt: 111,
+      stringValue: "  Alpha  ",
+    });
+    for (const [index, numberValue] of [
+      1.0,
+      1e20,
+      -2.25,
+      null,
+      -9223372036854775808,
+    ].entries())
+      addPayload(database, site, "event-one", "/search/number", {
+        valueType: 2,
+        occurredAt: 120 + index,
+        numberValue,
+      });
+    for (const [index, booleanValue] of [1, 0, null].entries())
+      addPayload(database, site, "event-one", "/search/boolean", {
+        valueType: 3,
+        occurredAt: 125 + index,
+        booleanValue,
+      });
+
+    for (const [fieldValueType, valueTypeCode] of [
+      ["null", 0],
+      ["string", 1],
+      ["number", 2],
+      ["boolean", 3],
+      ["object", 4],
+      ["array", 5],
+    ] as const) {
+      const trace = traceFor();
+      const actual = await queryEventFieldValuesFromD1(
+        testEnv(database, trace),
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/a",
+        fieldValueType,
+        100,
+      );
+      const parent = frozenValueRows(database, {
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        fieldPath: "/a",
+        valueTypeCode,
+        limit: 100,
+      });
+      expect(actual).toEqual(parent);
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(
+        new TextEncoder().encode(trace.preparedSql[0]!).byteLength,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(trace.bindings[0]!.length).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+    }
+
+    for (const [fieldPath, fieldValueType, valueTypeCode, searches] of [
+      [
+        "/search/string",
+        "string",
+        1,
+        [" ALPHA ", "alpha", "x", "CAF", "\\%", "_", "\t", "\u00a0x\u00a0"],
+      ],
+      ["/search/number", "number", 2, ["1.0", "1e+20", "-2.25", "null"]],
+      ["/search/boolean", "boolean", 3, ["true", "false"]],
+    ] as const) {
+      for (const search of searches) {
+        const actual = await queryEventFieldValuesFromD1(
+          testEnv(database, traceFor()),
+          SITE,
+          WINDOW,
+          EMPTY_FILTER_DOCUMENT,
+          undefined,
+          fieldPath,
+          fieldValueType,
+          100,
+          search,
+        );
+        expect(actual).toEqual(
+          frozenValueRows(database, {
+            window: WINDOW,
+            filters: EMPTY_FILTER_DOCUMENT,
+            fieldPath,
+            valueTypeCode,
+            search,
+            limit: 100,
+          }),
+        );
+      }
+    }
+
+    const noSearchTrace = traceFor();
+    const noSearchRows = await queryEventFieldValuesFromD1(
+      testEnv(database, noSearchTrace),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/search/string",
+      "string",
+      100,
+    );
+    const emptySearchTrace = traceFor();
+    expect(
+      await queryEventFieldValuesFromD1(
+        testEnv(database, emptySearchTrace),
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/search/string",
+        "string",
+        100,
+        "\t",
+      ),
+    ).toEqual(noSearchRows);
+    expect(emptySearchTrace.preparedSql).toEqual(noSearchTrace.preparedSql);
+    expect(emptySearchTrace.bindings).toEqual(noSearchTrace.bindings);
+
+    const directFactFilters = filtersFor({
+      kind: "condition",
+      target: { kind: "field", field: "event.name" },
+      operator: "eq",
+      value: "signup",
+    } as never);
+    for (const scenario of [
+      { filters: EMPTY_FILTER_DOCUMENT, eventName: "signup" },
+      { filters: directFactFilters, eventName: undefined },
+    ]) {
+      for (const page of [false, true]) {
+        const trace = traceFor();
+        if (page) {
+          const actual = await queryEventFieldValuesPageFromD1(
+            testEnv(database, trace),
+            SITE,
+            WINDOW,
+            scenario.filters,
+            scenario.eventName,
+            "/a",
+            "string",
+            100,
+          );
+          expect(actual.items).toEqual(
+            frozenValueRows(database, {
+              window: WINDOW,
+              filters: scenario.filters,
+              ...(scenario.eventName !== undefined
+                ? { eventName: scenario.eventName }
+                : {}),
+              fieldPath: "/a",
+              valueTypeCode: 1,
+              page: true,
+              limit: 100,
+            }).slice(0, 100),
+          );
+        } else {
+          const actual = await queryEventFieldValuesFromD1(
+            testEnv(database, trace),
+            SITE,
+            WINDOW,
+            scenario.filters,
+            scenario.eventName,
+            "/a",
+            "string",
+            100,
+          );
+          expect(actual).toEqual(
+            frozenValueRows(database, {
+              window: WINDOW,
+              filters: scenario.filters,
+              ...(scenario.eventName !== undefined
+                ? { eventName: scenario.eventName }
+                : {}),
+              fieldPath: "/a",
+              valueTypeCode: 1,
+              limit: 100,
+            }),
+          );
+        }
+        expect(trace.preparedSql).toHaveLength(1);
+        expect(
+          new TextEncoder().encode(trace.preparedSql[0]!).byteLength,
+        ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(trace.bindings[0]!.length).toBeLessThanOrEqual(
+          D1_MAX_BOUND_PARAMETERS,
+        );
+      }
+    }
+    const falseBooleanRows = await queryEventFieldValuesFromD1(
+      testEnv(database, traceFor()),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/search/boolean",
+      "boolean",
+      100,
+      "false",
+    );
+    expect(falseBooleanRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ booleanValue: null }),
+        expect.objectContaining({ booleanValue: 0 }),
+      ]),
+    );
+    const noNameTrace = traceFor();
+    const noNameRows = await queryEventFieldValuesFromD1(
+      testEnv(database, noNameTrace),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/a",
+      "string",
+      100,
+    );
+    expect(noNameRows).toEqual(
+      frozenValueRows(database, {
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        fieldPath: "/a",
+        valueTypeCode: 1,
+        limit: 100,
+      }),
+    );
+    const emptyNameTrace = traceFor();
+    expect(
+      await queryEventFieldValuesFromD1(
+        testEnv(database, emptyNameTrace),
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        "",
+        "/a",
+        "string",
+        100,
+      ),
+    ).toEqual(noNameRows);
+    expect(emptyNameTrace.preparedSql).toEqual(noNameTrace.preparedSql);
+    expect(emptyNameTrace.bindings).toEqual(noNameTrace.bindings);
+
+    for (const [fieldPath, fieldValueType, valueTypeCode] of [
+      ["/a", "null", 0],
+      ["/a", "object", 4],
+      ["/a", "array", 5],
+    ] as const) {
+      expect(
+        await queryEventFieldValuesFromD1(
+          testEnv(database, traceFor()),
+          SITE,
+          WINDOW,
+          EMPTY_FILTER_DOCUMENT,
+          undefined,
+          fieldPath,
+          fieldValueType,
+          100,
+          "search",
+        ),
+      ).toEqual(
+        frozenValueRows(database, {
+          window: WINDOW,
+          filters: EMPTY_FILTER_DOCUMENT,
+          fieldPath,
+          valueTypeCode,
+          search: "search",
+          limit: 100,
+        }),
+      );
+    }
+
+    const invalidTrace = traceFor();
+    expect(
+      await queryEventFieldValuesFromD1(
+        testEnv(database, invalidTrace),
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/a",
+        "String",
+        100,
+      ),
+    ).toEqual([]);
+    expect(invalidTrace.preparedSql).toHaveLength(0);
+    const invalidPageTrace = traceFor();
+    expect(
+      await queryEventFieldValuesPageFromD1(
+        testEnv(database, invalidPageTrace),
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/a",
+        "unknown",
+        10,
+      ),
+    ).toEqual({
+      items: [],
+      pagination: { limit: 10, returned: 0, hasMore: false, nextCursor: null },
+    });
+    expect(invalidPageTrace.preparedSql).toHaveLength(0);
+  });
+
+  it("keeps Event field-value page aliases, lexicographic cursors, and HMAC bindings", async () => {
+    const { database, site } = createDatabase();
+    addPayload(database, site, "event-one", "/search/string", {
+      valueType: 1,
+      occurredAt: 121,
+      stringValue: "Beta",
+    });
+    addPayload(database, site, "event-one", "/search/string", {
+      valueType: 1,
+      occurredAt: 122,
+      stringValue: "Delta",
+    });
+    addPayload(database, site, "event-one", "/search/number", {
+      valueType: 2,
+      occurredAt: 123,
+      numberValue: null,
+    });
+    addPayload(database, site, "event-one", "/search/number", {
+      valueType: 2,
+      occurredAt: 124,
+      numberValue: -9223372036854775808,
+    });
+    const trace = traceFor({ readBigIntsAsNumbers: true });
+    const first = await queryEventFieldValuesPageFromD1(
+      testEnv(database, trace),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/a",
+      "string",
+      1,
+    );
+    expect(first.items).toEqual(
+      frozenValueRows(database, {
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        fieldPath: "/a",
+        valueTypeCode: 1,
+        page: true,
+        limit: 1,
+      }).slice(0, 1),
+    );
+    expect(first.items[0]).toHaveProperty("valueString");
+    expect(first.items[0]).toHaveProperty("valueNumber");
+    expect(first.items[0]).toHaveProperty("valueBoolean");
+    expect(first.pagination.hasMore).toBe(true);
+    expect(trace.preparedSql).toHaveLength(1);
+
+    const cursor = await decodeEventFieldValueCursor(
+      testEnv(database, traceFor({ readBigIntsAsNumbers: true })),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/a",
+      "string",
+      undefined,
+      first.pagination.nextCursor,
+    );
+    expect(cursor).not.toBeNull();
+    const next = await queryEventFieldValuesPageFromD1(
+      testEnv(database, traceFor({ readBigIntsAsNumbers: true })),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/a",
+      "string",
+      1,
+      undefined,
+      cursor,
+    );
+    expect(next.items).toEqual(
+      frozenValueRows(database, {
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        fieldPath: "/a",
+        valueTypeCode: 1,
+        page: true,
+        cursor,
+        limit: 1,
+      }).slice(0, 1),
+    );
+
+    const searchedTrace = traceFor({ readBigIntsAsNumbers: true });
+    const searchedFirst = await queryEventFieldValuesPageFromD1(
+      testEnv(database, searchedTrace),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/search/string",
+      "string",
+      1,
+      "e",
+    );
+    expect(searchedFirst.items).toEqual(
+      frozenValueRows(database, {
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        fieldPath: "/search/string",
+        valueTypeCode: 1,
+        search: "e",
+        page: true,
+        limit: 1,
+      }).slice(0, 1),
+    );
+    expect(searchedFirst.pagination.hasMore).toBe(true);
+    const searchedCursor = await decodeEventFieldValueCursor(
+      testEnv(database, traceFor()),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/search/string",
+      "string",
+      "e",
+      searchedFirst.pagination.nextCursor,
+    );
+    const searchedNextTrace = traceFor({ readBigIntsAsNumbers: true });
+    const searchedNext = await queryEventFieldValuesPageFromD1(
+      testEnv(database, searchedNextTrace),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/search/string",
+      "string",
+      1,
+      "e",
+      searchedCursor,
+    );
+    expect(searchedNext.items).toEqual(
+      frozenValueRows(database, {
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        fieldPath: "/search/string",
+        valueTypeCode: 1,
+        search: "e",
+        page: true,
+        cursor: searchedCursor,
+        limit: 1,
+      }).slice(0, 1),
+    );
+    expect(
+      new TextEncoder().encode(searchedTrace.preparedSql[0]!).byteLength,
+    ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+    expect(searchedTrace.bindings[0]!.length).toBeLessThanOrEqual(
+      D1_MAX_BOUND_PARAMETERS,
+    );
+    expect(
+      new TextEncoder().encode(searchedNextTrace.preparedSql[0]!).byteLength,
+    ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+    expect(searchedNextTrace.bindings[0]!.length).toBeLessThanOrEqual(
+      D1_MAX_BOUND_PARAMETERS,
+    );
+
+    const sentinelTrace = traceFor({ readBigIntsAsNumbers: true });
+    const sentinelFirst = await queryEventFieldValuesPageFromD1(
+      testEnv(database, sentinelTrace),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/search/number",
+      "number",
+      1,
+    );
+    expect(sentinelFirst.items).toEqual(
+      frozenValueRows(database, {
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        fieldPath: "/search/number",
+        valueTypeCode: 2,
+        page: true,
+        limit: 1,
+      }).slice(0, 1),
+    );
+    expect(sentinelFirst.items[0]).toHaveProperty("valueNumber");
+    expect(sentinelTrace.bindings[0]!.length).toBeLessThanOrEqual(
+      D1_MAX_BOUND_PARAMETERS,
+    );
+    expect(sentinelFirst.pagination.hasMore).toBe(true);
+    const sentinelCursor = await decodeEventFieldValueCursor(
+      testEnv(database, traceFor()),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/search/number",
+      "number",
+      undefined,
+      sentinelFirst.pagination.nextCursor,
+    );
+    expect(sentinelCursor?.numberValue).toBe(-9223372036854775808);
+    const sentinelNext = await queryEventFieldValuesPageFromD1(
+      testEnv(database, traceFor({ readBigIntsAsNumbers: true })),
+      SITE,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      undefined,
+      "/search/number",
+      "number",
+      1,
+      undefined,
+      sentinelCursor,
+    );
+    expect(sentinelNext.items).toEqual(
+      frozenValueRows(database, {
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        fieldPath: "/search/number",
+        valueTypeCode: 2,
+        page: true,
+        cursor: sentinelCursor,
+        limit: 1,
+      }).slice(0, 1),
+    );
+    expect(sentinelNext.items).toEqual([]);
+
+    const token = first.pagination.nextCursor;
+    if (!token) throw new Error("wave65_expected_value_page_cursor");
+    const changedFilters = filtersFor({
+      kind: "condition",
+      target: { kind: "field", field: "event.name" },
+      operator: "eq",
+      value: "signup",
+    } as never);
+    const changedScope = preparedFilters("event");
+    const mismatchCases = [
+      [
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/b",
+        "string",
+        undefined,
+        "private-dashboard",
+      ],
+      [
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/a",
+        "number",
+        undefined,
+        "private-dashboard",
+      ],
+      [
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/a",
+        "string",
+        "x",
+        "private-dashboard",
+      ],
+      [
+        SITE,
+        PREVIOUS_WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/a",
+        "string",
+        undefined,
+        "private-dashboard",
+      ],
+      [
+        SITE,
+        WINDOW,
+        changedFilters,
+        undefined,
+        "/a",
+        "string",
+        undefined,
+        "private-dashboard",
+      ],
+      [
+        SITE,
+        WINDOW,
+        changedScope,
+        undefined,
+        "/a",
+        "string",
+        undefined,
+        "private-dashboard",
+      ],
+      [
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        "other",
+        "/a",
+        "string",
+        undefined,
+        "private-dashboard",
+      ],
+      [
+        SIBLING_SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/a",
+        "string",
+        undefined,
+        "private-dashboard",
+      ],
+      [
+        SITE,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        undefined,
+        "/a",
+        "string",
+        undefined,
+        "api-v1",
+      ],
+    ] as const;
+    for (const [
+      siteId,
+      window,
+      filters,
+      eventName,
+      path,
+      type,
+      search,
+      audience,
+    ] of mismatchCases)
+      await expect(
+        decodeEventFieldValueCursor(
+          testEnv(database, traceFor()),
+          siteId,
+          window,
+          filters,
+          eventName,
+          path,
+          type,
+          search,
+          token,
+          audience,
+        ),
+      ).rejects.toThrow("invalid-cursor");
+
+    const limitSource = buildEventFieldsPlan({
+      siteId: SITE,
+      queryTime: TIME,
+      filters: EMPTY_FILTER_DOCUMENT,
+      limit: -1,
+    });
+    expect(limitSource.nodes.some((node) => node.kind === "limit")).toBe(false);
+    expect(() =>
+      buildEventFieldsPlan({
+        siteId: SITE,
+        queryTime: TIME,
+        filters: EMPTY_FILTER_DOCUMENT,
+        limit: -0.5,
+      }),
+    ).toThrow("logical_builder_invalid_limit");
+  });
+
   it("keeps a non-empty direct-40 payload filter under the D1 statement budgets", async () => {
     const { database, site } = createDatabase();
     addVisit(database, site, {
@@ -1152,6 +1996,66 @@ describe("Event field occurrence report migration", () => {
       D1_MAX_BOUND_PARAMETERS,
     );
 
+    for (const page of [false, true]) {
+      const valueTrace = traceFor({ readBigIntsAsNumbers: page });
+      if (page) {
+        const actualPage = await queryEventFieldValuesPageFromD1(
+          testEnv(database, valueTrace),
+          SITE,
+          WINDOW,
+          filters,
+          undefined,
+          "/wave64/payload-0",
+          "string",
+          100,
+        );
+        expect(actualPage.items).toEqual(
+          frozenValueRows(database, {
+            window: WINDOW,
+            filters,
+            fieldPath: "/wave64/payload-0",
+            valueTypeCode: 1,
+            page: true,
+            limit: 100,
+          }).slice(0, 100),
+        );
+        expect(actualPage.items).toHaveLength(1);
+        expect(actualPage.items[0]).toMatchObject({
+          events: 1,
+          occurrences: 1,
+        });
+      } else {
+        const actualValues = await queryEventFieldValuesFromD1(
+          testEnv(database, valueTrace),
+          SITE,
+          WINDOW,
+          filters,
+          undefined,
+          "/wave64/payload-0",
+          "string",
+          100,
+        );
+        expect(actualValues).toEqual(
+          frozenValueRows(database, {
+            window: WINDOW,
+            filters,
+            fieldPath: "/wave64/payload-0",
+            valueTypeCode: 1,
+            limit: 100,
+          }),
+        );
+        expect(actualValues).toHaveLength(1);
+        expect(actualValues[0]).toMatchObject({ events: 1, occurrences: 1 });
+      }
+      expect(valueTrace.preparedSql).toHaveLength(1);
+      expect(
+        new TextEncoder().encode(valueTrace.preparedSql[0]!).byteLength,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(valueTrace.bindings[0]!.length).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+    }
+
     const prepared128 = preparedFilters("event", {
       entityCount: 128,
       eventIds: Array.from(
@@ -1185,5 +2089,73 @@ describe("Event field occurrence report migration", () => {
     expect(preparedTrace.bindings[0]!.length).toBeLessThanOrEqual(
       D1_MAX_BOUND_PARAMETERS,
     );
+
+    const preparedEmpty = preparedFilters("event");
+    const preparedValueProfiles = [
+      { filters: prepared128, window: WINDOW },
+      { filters: preparedEmpty, window: WINDOW },
+      { filters: preparedEmpty, window: PREVIOUS_WINDOW },
+    ];
+    for (const profile of preparedValueProfiles) {
+      for (const page of [false, true]) {
+        const valueTrace = traceFor();
+        const fieldPath =
+          profile.window === PREVIOUS_WINDOW ? "/previous" : "/a";
+        if (page)
+          expect(
+            (
+              await queryEventFieldValuesPageFromD1(
+                testEnv(database, valueTrace),
+                SITE,
+                profile.window,
+                profile.filters,
+                "signup",
+                fieldPath,
+                "string",
+                100,
+              )
+            ).items,
+          ).toEqual(
+            frozenValueRows(database, {
+              window: profile.window,
+              filters: profile.filters,
+              eventName: "signup",
+              fieldPath,
+              valueTypeCode: 1,
+              page: true,
+              limit: 100,
+            }).slice(0, 100),
+          );
+        else
+          expect(
+            await queryEventFieldValuesFromD1(
+              testEnv(database, valueTrace),
+              SITE,
+              profile.window,
+              profile.filters,
+              "signup",
+              fieldPath,
+              "string",
+              100,
+            ),
+          ).toEqual(
+            frozenValueRows(database, {
+              window: profile.window,
+              filters: profile.filters,
+              eventName: "signup",
+              fieldPath,
+              valueTypeCode: 1,
+              limit: 100,
+            }),
+          );
+        expect(valueTrace.preparedSql).toHaveLength(1);
+        expect(
+          new TextEncoder().encode(valueTrace.preparedSql[0]!).byteLength,
+        ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(valueTrace.bindings[0]!.length).toBeLessThanOrEqual(
+          D1_MAX_BOUND_PARAMETERS,
+        );
+      }
+    }
   });
 });
