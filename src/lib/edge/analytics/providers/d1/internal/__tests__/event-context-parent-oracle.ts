@@ -39,6 +39,18 @@ export const EVENT_CONTEXT_CARD_KEYS = [
   "organization",
 ] as const;
 export type EventContextCardKey = (typeof EVENT_CONTEXT_CARD_KEYS)[number];
+type ParentContextRow = {
+  cardType: string;
+  value: string | null;
+  label: string | null;
+  views: number;
+  sessions: number;
+  visitors: number;
+};
+type ParentContextExecutor = (
+  sql: string,
+  bindings: readonly (string | number | null)[],
+) => Promise<ParentContextRow[]>;
 export async function queryEventAnalyticsContextCardsParentOracleFromD1(
   env: Env,
   siteId: string,
@@ -47,6 +59,7 @@ export async function queryEventAnalyticsContextCardsParentOracleFromD1(
   limit: number,
   eventName?: string,
   selectedKeys: readonly EventContextCardKey[] = EVENT_CONTEXT_CARD_KEYS,
+  executeParentSql?: ParentContextExecutor,
 ): Promise<EventAnalyticsContextCards> {
   const source = buildEventFilteredSourceCte(
     siteId,
@@ -202,16 +215,7 @@ session_edges AS (
   GROUP BY session_id
 )`
     : "";
-  const rows = await queryD1All<{
-    cardType: string;
-    value: string | null;
-    label: string | null;
-    views: number;
-    sessions: number;
-    visitors: number;
-  }>(
-    env,
-    `${source.cte}${sessionEdgeCte},
+  const sql = `${source.cte}${sessionEdgeCte},
 ${cardGroupCtes.join(",")},
 card_rows AS (
 ${cardSourceChunks
@@ -236,15 +240,17 @@ SELECT cardType, value, label, views, sessions, visitors
 FROM ranked_cards
 WHERE card_rank <= ?
 ORDER BY cardType ASC, card_rank ASC
-`,
-    [
-      ...source.bindings,
-      ...(needsSessionEdges && !scoped
-        ? visitSourceBindings(siteId, window)
-        : []),
-      limit,
-    ],
-  );
+`;
+  const bindings = [
+    ...source.bindings,
+    ...(needsSessionEdges && !scoped
+      ? visitSourceBindings(siteId, window)
+      : []),
+    limit,
+  ];
+  const rows = executeParentSql
+    ? await executeParentSql(sql, bindings)
+    : await queryD1All<ParentContextRow>(env, sql, bindings);
   const byCard = new Map<
     string,
     Array<{

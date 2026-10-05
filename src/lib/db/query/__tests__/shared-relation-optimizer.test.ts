@@ -1619,7 +1619,7 @@ describe("shared relation physical selection", () => {
     ).toBe(false);
   });
 
-  it("materializes only bounded wide selective inputs reused by eight independent windows", () => {
+  it("materializes wide inputs reused by independent windows when their only nested window is a closed constant-existence query", () => {
     const database = createMigratedDatabase();
     databases.add(database);
 
@@ -1673,12 +1673,25 @@ describe("shared relation physical selection", () => {
       sitePk,
     );
     const narrowSource = nullablePageProjection();
+    const existencePages = nullablePageProjection();
+    const existenceWindow = window(existencePages, {
+      rank: rowNumber({
+        partitionBy: [existencePages.columns.field3!],
+        orderBy: [
+          { expression: existencePages.columns.field0!, direction: "ASC" },
+        ],
+      }),
+    });
+    const existenceMatch = filter(
+      existenceWindow,
+      eq(existenceWindow.columns.rank, param(1)),
+    );
+    const existence = project(existenceMatch, { found: constant(1) });
+    const selected = filter(narrowSource, eq(scalar(existence), constant(1)));
     const wideFields: Record<string, AnyExpression> = {};
     for (let index = 0; index < 17; index += 1)
-      wideFields[`field${index}`] = Object.values(narrowSource.columns)[
-        index % 5
-      ]!;
-    const source = project(narrowSource, wideFields);
+      wideFields[`field${index}`] = Object.values(selected.columns)[index % 5]!;
+    const source = project(selected, wideFields);
     const windows = independentWindowUnion(source, 8);
     const ordered = sort(windows, [
       { expression: windows.columns.field0!, direction: "ASC" },
@@ -1695,6 +1708,12 @@ describe("shared relation physical selection", () => {
       materialization: "materialized",
       fields: Array.from({ length: 17 }, () => ({})),
     });
+    expect(
+      physical.sharedRelations.some(
+        ({ node }) =>
+          node === existencePages.node || node === existenceWindow.node,
+      ),
+    ).toBe(false);
 
     const optimized = compileD1Query(physical);
     const mechanical = compileD1QueryUnoptimizedForTest(wrapped);
@@ -1715,7 +1734,7 @@ describe("shared relation physical selection", () => {
     expect(
       details.filter((detail) => detail.includes("MATERIALIZE _d1_shared_0")),
     ).toHaveLength(1);
-    expect(optimizedRows).toEqual(mechanicalRows);
+    expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
     expect(optimizedRows).toHaveLength(24);
     expect(optimizedRows.some((row) => Object.values(row).includes(null))).toBe(
       true,

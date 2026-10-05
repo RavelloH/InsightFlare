@@ -1749,6 +1749,7 @@ interface CandidateFacts {
   selective: boolean;
   forbidden: boolean;
   rowNumberWindow: boolean;
+  ordinaryRowNumberWindow: boolean;
 }
 
 function isConstantExistenceQuery(query: QuerySource): boolean {
@@ -1875,6 +1876,7 @@ function candidateFacts(
     selective: false,
     forbidden: false,
     rowNumberWindow: false,
+    ordinaryRowNumberWindow: false,
   };
   const visited = new Map<LogicalQueryNode, Map<boolean, Set<boolean>>>();
   const visit = (
@@ -1917,9 +1919,10 @@ function candidateFacts(
         !querySourcePath ||
         (constantExistencePath &&
           hasClosedWindowSubtreeScopes(node, closedWindowScopeMemo));
-      if (onlyRowNumberWindows && allowedQueryContext)
+      if (onlyRowNumberWindows && allowedQueryContext) {
         facts.rowNumberWindow = true;
-      else facts.forbidden = true;
+        if (!querySourcePath) facts.ordinaryRowNumberWindow = true;
+      } else facts.forbidden = true;
     }
     for (const expression of nodeExpressions(node)) {
       const inspect = (current: SqlExpression): void => {
@@ -2102,7 +2105,7 @@ function sharedRelationDefinitions(
       incomingCount >= MIN_REPEATED_WINDOW_INPUT_PROJECT_REFERENCES &&
       hoist.windowInput.has(node) &&
       repeatedWindowInputs.has(node) &&
-      !facts.rowNumberWindow
+      !facts.ordinaryRowNumberWindow
     )
       sharedMaterializations.set(node, "materialized");
   }

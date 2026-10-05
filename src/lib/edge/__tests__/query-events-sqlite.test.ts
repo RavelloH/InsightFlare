@@ -2324,8 +2324,545 @@ describe("event detail D1 SQL", () => {
     }
   });
 
+  it("matches the parent Event Context oracle across scopes, boundary ties, and empty dimensions", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const insertVisit = d1.database.prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, pathname,
+        browser, country
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insertVisit.run(
+      "a-visit-entry",
+      siteId,
+      "edge-visitor",
+      "session-1",
+      eventTime - 2,
+      "/entry-tie-winner",
+      "",
+      "",
+    );
+    insertVisit.run(
+      "z-visit-exit",
+      siteId,
+      "edge-visitor",
+      "session-1",
+      eventTime + 1,
+      "/exit-tie-winner",
+      "",
+      "",
+    );
+    insertVisit.run(
+      "visit-scope-peer",
+      siteId,
+      "visitor-1",
+      "session-1",
+      eventTime - 1,
+      "/session-peer",
+      " Edge ",
+      "US",
+    );
+    insertVisit.run(
+      "visit-scope-other-owner",
+      siteId,
+      "visitor-3",
+      "session-1",
+      eventTime - 1,
+      "/owner-other",
+      "",
+      "",
+    );
+    insertVisit.run(
+      "visit-visitor-peer",
+      siteId,
+      "visitor-1",
+      "session-2",
+      eventTime,
+      "/visitor-peer",
+      "",
+      "GB",
+    );
+    const insertEvent = d1.database.prepare(
+      `INSERT INTO custom_events (
+        event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+        received_at, sequence, node_count, value_count, ae_synced_at
+      ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, 1, 1, NULL)`,
+    );
+    for (const [eventPk, eventId, visitId, sequence] of [
+      [2, "event-session-peer", "visit-scope-peer", 2],
+      [3, "event-visitor-peer", "visit-visitor-peer", 3],
+      [4, "event-other-owner", "visit-scope-other-owner", 4],
+    ] as const)
+      insertEvent.run(
+        eventPk,
+        eventId,
+        siteId,
+        visitId,
+        eventTime,
+        eventTime,
+        sequence,
+      );
+
+    try {
+      const scopePaths = new Map<TruthScope, string[]>([
+        ["event", ["/posts/minecraft-meteor-guide"]],
+        [
+          "session",
+          ["/owner-other", "/posts/minecraft-meteor-guide", "/session-peer"],
+        ],
+        [
+          "visitor",
+          ["/posts/minecraft-meteor-guide", "/session-peer", "/visitor-peer"],
+        ],
+      ]);
+      for (const scope of ["event", "session", "visitor"] as const) {
+        const prepared = preparedEventRecordFilters(
+          filterFixture({ path: "/posts/minecraft-meteor-guide" }),
+          scope,
+        );
+        const actualStart = d1.calls.length;
+        const actual = await queryEventAnalyticsContextCardsFromD1(
+          env,
+          siteId,
+          window,
+          prepared.filters!,
+          100,
+          eventName,
+        );
+        const actualQuery = d1.calls[actualStart]!;
+        const parent = await queryEventAnalyticsContextCardsParentOracleFromD1(
+          env,
+          siteId,
+          window,
+          prepared.filters!,
+          100,
+          eventName,
+        );
+        const parentQuery = d1.calls[actualStart + 1]!;
+        expect(actual, `scope-${scope}`).toEqual(parent);
+        expect(d1.calls).toHaveLength(actualStart + 2);
+        expect(actual.page.path.map(({ value }) => value).sort()).toEqual(
+          scopePaths.get(scope),
+        );
+        for (const query of [actualQuery, parentQuery]) {
+          expect(Buffer.byteLength(query.sql, "utf8")).toBeLessThanOrEqual(
+            100_000,
+          );
+          expect(query.bindings.length).toBeLessThanOrEqual(100);
+        }
+      }
+
+      const actualStart = d1.calls.length;
+      const actual = await queryEventAnalyticsContextCardsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        100,
+        eventName,
+        ["entry", "exit", "sourceDomain", "sourceLink", "browser", "country"],
+      );
+      const actualQuery = d1.calls[actualStart]!;
+      const parent = await queryEventAnalyticsContextCardsParentOracleFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        100,
+        eventName,
+        ["entry", "exit", "sourceDomain", "sourceLink", "browser", "country"],
+      );
+      expect(actual).toEqual(parent);
+      expect(d1.calls).toHaveLength(actualStart + 2);
+      // These migrated text columns are NOT NULL; this fixture covers their
+      // reachable empty-string grouping without weakening the production DDL.
+      expect(actual.page.entry).toContainEqual({
+        value: "/entry-tie-winner",
+        views: 3,
+        sessions: 1,
+        visitors: 2,
+      });
+      expect(actual.page.exit).toContainEqual({
+        value: "/exit-tie-winner",
+        views: 3,
+        sessions: 1,
+        visitors: 2,
+      });
+      expect(actual.source.domain).toContainEqual({
+        value: "",
+        views: 3,
+        sessions: 2,
+        visitors: 2,
+      });
+      expect(actual.source.link).toContainEqual({
+        value: "",
+        views: 3,
+        sessions: 2,
+        visitors: 2,
+      });
+      expect(actual.client.browser).toContainEqual({
+        value: "Edge",
+        views: 2,
+        sessions: 1,
+        visitors: 1,
+      });
+      expect(actual.geo.country).toContainEqual({
+        value: "US",
+        label: "US",
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+      });
+      expect(Buffer.byteLength(actualQuery.sql, "utf8")).toBeLessThanOrEqual(
+        100_000,
+      );
+      expect(actualQuery.bindings.length).toBeLessThanOrEqual(100);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps entry-filtered default-19 Context queries within the statement budget", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const cases = [
+      filterFixture({ entry: "/entry" }),
+      filterFixture({ entry: "/entry", exit: "/exit" }),
+    ];
+
+    try {
+      for (const filters of cases) {
+        const actualStart = d1.calls.length;
+        const actual = await queryEventAnalyticsContextCardsFromD1(
+          env,
+          siteId,
+          window,
+          filters,
+          100,
+          eventName,
+        );
+        const actualQuery = d1.calls[actualStart]!;
+        const parent = await queryEventAnalyticsContextCardsParentOracleFromD1(
+          env,
+          siteId,
+          window,
+          filters,
+          100,
+          eventName,
+        );
+        const parentQuery = d1.calls[actualStart + 1]!;
+
+        expect(actual).toEqual(parent);
+        expect(d1.calls).toHaveLength(actualStart + 2);
+        for (const query of [actualQuery, parentQuery]) {
+          expect(Buffer.byteLength(query.sql, "utf8")).toBeLessThanOrEqual(
+            100_000,
+          );
+          expect(query.bindings.length).toBeLessThanOrEqual(100);
+        }
+      }
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("matches Context results for prepared identities, previous windows, card subsets, and finite limits", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const insertVisit = d1.database.prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, started_at, pathname
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    const insertEvent = d1.database.prepare(
+      `INSERT INTO custom_events (
+        event_pk, event_id, site_id, visit_id, event_name_id, occurred_at,
+        received_at, sequence, node_count, value_count, ae_synced_at
+      ) VALUES (?, ?, ?, ?, 1, ?, ?, 1, 1, 1, NULL)`,
+    );
+    const previousTime = window.startMs - 30 * 60 * 1000;
+    insertVisit.run(
+      "visit-previous-window",
+      siteId,
+      "visitor-previous",
+      "session-previous",
+      previousTime,
+      "/previous-window",
+    );
+    insertEvent.run(
+      200,
+      "event-previous-window",
+      siteId,
+      "visit-previous-window",
+      previousTime + 1,
+      previousTime + 1,
+    );
+
+    try {
+      const prepared = preparedEventRecordFilters(
+        EMPTY_FILTER_DOCUMENT,
+        "event",
+      );
+      const metadata = scopedFilterMetadata(prepared.filters!)!;
+      const identityFilters = attachScopedFilterMetadata(prepared.filters!, {
+        ...metadata,
+        plan: {
+          ...prepared.scopePlan!,
+          advancedMatches: {
+            eventIds: [
+              { siteId, id: "event-1" },
+              { siteId, id: "event-1" },
+              { siteId, id: "event-other-name" },
+              ...Array.from({ length: 125 }, (_unused, index) => ({
+                siteId,
+                id: `event-unmatched-${index}`,
+              })),
+            ],
+          },
+        },
+      });
+      const emptyIdentityFilters = attachScopedFilterMetadata(
+        prepared.filters!,
+        {
+          ...metadata,
+          plan: {
+            ...prepared.scopePlan!,
+            advancedMatches: { eventIds: [] },
+          },
+        },
+      );
+      for (const [label, filters] of [
+        ["prepared-128", identityFilters],
+        ["prepared-empty", emptyIdentityFilters],
+      ] as const) {
+        let offlineParentQuery:
+          { sql: string; bindings: readonly Binding[] } | undefined;
+        const actualStart = d1.calls.length;
+        const actual = await queryEventAnalyticsContextCardsFromD1(
+          env,
+          siteId,
+          window,
+          filters,
+          100,
+        );
+        const actualQuery = d1.calls[actualStart]!;
+        const parent = await queryEventAnalyticsContextCardsParentOracleFromD1(
+          env,
+          siteId,
+          window,
+          filters,
+          100,
+          undefined,
+          undefined,
+          async (sql, bindings) => {
+            offlineParentQuery = { sql, bindings: [...bindings] };
+            return d1.database.prepare(sql).all(...bindings) as Array<{
+              cardType: string;
+              value: string | null;
+              label: string | null;
+              views: number;
+              sessions: number;
+              visitors: number;
+            }>;
+          },
+        );
+
+        expect(actual, label).toEqual(parent);
+        expect(d1.calls).toHaveLength(actualStart + 1);
+        expect(offlineParentQuery).toBeDefined();
+        expect(
+          Buffer.byteLength(offlineParentQuery!.sql, "utf8"),
+        ).toBeLessThanOrEqual(100_000);
+        if (label === "prepared-128")
+          expect(offlineParentQuery!.bindings.length).toBeGreaterThan(100);
+        else
+          expect(offlineParentQuery!.bindings.length).toBeLessThanOrEqual(100);
+        expect(Buffer.byteLength(actualQuery.sql, "utf8")).toBeLessThanOrEqual(
+          100_000,
+        );
+        expect(actualQuery.bindings.length).toBeLessThanOrEqual(100);
+        if (label === "prepared-128")
+          expect(actual.page.path).toContainEqual({
+            value: "/posts/minecraft-meteor-guide",
+            views: 2,
+            sessions: 1,
+            visitors: 1,
+          });
+        else
+          expect(
+            Object.values(actual).flatMap((group) =>
+              Object.values(group).flat(),
+            ),
+          ).toEqual([]);
+      }
+
+      const previousFilters = preparedEventRecordFilters(
+        filterFixture({ path: "/previous-window" }),
+        "event",
+      );
+      const previousWindow: QueryWindow = {
+        startMs: window.startMs - 60 * 60 * 1000,
+        endExclusiveMs: window.startMs,
+        nowMs: window.startMs,
+        timeZone: window.timeZone,
+      };
+      const previousStart = d1.calls.length;
+      const previousActual = await queryEventAnalyticsContextCardsFromD1(
+        env,
+        siteId,
+        previousWindow,
+        previousFilters.filters!,
+        100,
+        eventName,
+      );
+      const previousQuery = d1.calls[previousStart]!;
+      const previousParent =
+        await queryEventAnalyticsContextCardsParentOracleFromD1(
+          env,
+          siteId,
+          previousWindow,
+          previousFilters.filters!,
+          100,
+          eventName,
+        );
+      expect(previousActual).toEqual(previousParent);
+      expect(previousActual.page.path).toContainEqual({
+        value: "/previous-window",
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+      });
+      expect(d1.calls).toHaveLength(previousStart + 2);
+      expect(Buffer.byteLength(previousQuery.sql, "utf8")).toBeLessThanOrEqual(
+        100_000,
+      );
+      expect(previousQuery.bindings.length).toBeLessThanOrEqual(100);
+
+      for (const keys of [["path"], ["path", "sourceDomain"]] as const) {
+        const selectedStart = d1.calls.length;
+        const selectedActual = await queryEventAnalyticsContextCardsFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          100,
+          eventName,
+          keys,
+        );
+        const selectedQuery = d1.calls[selectedStart]!;
+        const selectedParent =
+          await queryEventAnalyticsContextCardsParentOracleFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            100,
+            eventName,
+            keys,
+          );
+        expect(selectedActual).toEqual(selectedParent);
+        expect(selectedActual.page.entry).toEqual([]);
+        expect(selectedActual.page.exit).toEqual([]);
+        expect(selectedQuery.sql).not.toContain("session_visit_edges");
+        expect(d1.calls).toHaveLength(selectedStart + 2);
+        expect(
+          Buffer.byteLength(selectedQuery.sql, "utf8"),
+        ).toBeLessThanOrEqual(100_000);
+        expect(selectedQuery.bindings.length).toBeLessThanOrEqual(100);
+
+        for (const limit of [0, -1, 1.5]) {
+          const actualStart = d1.calls.length;
+          const actual = await queryEventAnalyticsContextCardsFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            limit,
+            eventName,
+            keys,
+          );
+          const actualQuery = d1.calls[actualStart]!;
+          const parent =
+            await queryEventAnalyticsContextCardsParentOracleFromD1(
+              env,
+              siteId,
+              window,
+              EMPTY_FILTER_DOCUMENT,
+              limit,
+              eventName,
+              keys,
+            );
+          expect(actual, `limit-${limit}-cards-${keys.join("-")}`).toEqual(
+            parent,
+          );
+          if (limit <= 0) expect(actual.page.path).toEqual([]);
+          expect(d1.calls).toHaveLength(actualStart + 2);
+          expect(
+            Buffer.byteLength(actualQuery.sql, "utf8"),
+          ).toBeLessThanOrEqual(100_000);
+          expect(actualQuery.bindings.length).toBeLessThanOrEqual(100);
+        }
+      }
+
+      const noSelectionStart = d1.calls.length;
+      const noSelection = await queryEventAnalyticsContextCardsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        100,
+        eventName,
+        [],
+      );
+      expect(noSelection).toEqual({
+        page: {
+          path: [],
+          query: [],
+          title: [],
+          hostname: [],
+          entry: [],
+          exit: [],
+        },
+        source: { domain: [], link: [] },
+        client: {
+          browser: [],
+          osVersion: [],
+          deviceType: [],
+          language: [],
+          screenSize: [],
+        },
+        geo: {
+          country: [],
+          region: [],
+          city: [],
+          continent: [],
+          timezone: [],
+          organization: [],
+        },
+      });
+      expect(d1.calls).toHaveLength(noSelectionStart);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("matches the frozen context oracle for legal 40- and 39-payload direct filters", async () => {
     const { env, d1 } = createSqliteEventEnv();
+    d1.database
+      .prepare(
+        "INSERT INTO custom_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        2,
+        "event-outbound-click-missing-one-payload",
+        siteId,
+        "visit-1",
+        1,
+        eventTime,
+        eventTime,
+        2,
+        1,
+        1,
+        null,
+      );
     const insertPath = d1.database.prepare(
       "INSERT INTO custom_event_json_paths (id, site_id, path) VALUES (?, ?, ?)",
     );
@@ -2338,18 +2875,9 @@ describe("event detail D1 SQL", () => {
     for (let index = 1; index <= 40; index += 1) {
       const pathId = index + 1;
       insertPath.run(pathId, siteId, overviewBudgetPayloadPath(index));
-      for (const [eventPk, eventNameId] of [
-        [1, 1],
-        [99, 99],
-      ] as const)
-        insertPayload.run(
-          eventPk,
-          eventPk * 1_000 + pathId,
-          siteId,
-          eventNameId,
-          pathId,
-          eventTime,
-        );
+      insertPayload.run(1, 1_000 + pathId, siteId, 1, pathId, eventTime);
+      if (index < 40)
+        insertPayload.run(2, 2_000 + pathId, siteId, 1, pathId, eventTime);
     }
 
     try {
@@ -2383,6 +2911,14 @@ describe("event detail D1 SQL", () => {
         const actualQuery = d1.calls[actualStart]!;
 
         expect(actual, `payload-exists-${count}`).toEqual(expected);
+        expect(actual.page.path).toMatchObject([
+          {
+            value: "/posts/minecraft-meteor-guide",
+            views: count === 39 ? 2 : 1,
+            sessions: 1,
+            visitors: 1,
+          },
+        ]);
         expect(d1.calls).toHaveLength(actualStart + 1);
         for (const query of [actualQuery, parentQuery]) {
           expect(query.bindings.length).toBeLessThanOrEqual(100);
