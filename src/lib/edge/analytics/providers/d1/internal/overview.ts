@@ -1,4 +1,9 @@
-import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
+import {
+  queryWindowToTime,
+  scopedFilterMetadata,
+} from "@/lib/edge/analytics/contract";
+import { buildLatestSiteActivityPlan } from "@/lib/edge/analytics/engine/latest-site-activity-report-plan";
+import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import {
   hasFilterDocument,
   queryOverviewForSitesFromHourlyRollups,
@@ -303,50 +308,20 @@ export async function queryLatestSiteActivity(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<number | null> {
-  const scopedDataset =
-    scopedDatasetFor(siteId, window, filters) ??
-    scopedDatasetForUnpreparedReader(
-      "overview",
-      siteId,
-      window,
-      filters,
-      "session",
-    );
+  const plan = buildLatestSiteActivityPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+  });
   recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
-  const filter = scopedDataset
-    ? { clause: "", bindings: [] as Array<string | number> }
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const visitSource = buildVisitSourceCte().replace(
-    "visit_source AS (",
-    "visit_source AS MATERIALIZED (",
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    "overview-latest-site-activity",
+    undefined,
+    diagnostics,
   );
-  const metricSource = scopedDataset
-    ? scopedDataset.visitRelation
-    : "filtered_visits";
-  const sourceSql = scopedDataset
-    ? `${scopedDataset.ctes},`
-    : `${visitSource},
-filtered_visits AS MATERIALIZED (
-  SELECT *
-  FROM visit_source
-  ${filter.clause}
-),`;
-  const sql = `
-WITH
-${sourceSql}
-SELECT MAX(last_activity_at) AS lastActivityAt
-FROM ${metricSource}
-`;
-  const row = (
-    await queryD1All<Record<string, unknown>>(
-      env,
-      sql,
-      scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [...visitSourceBindings(siteId, window), ...filter.bindings],
-      diagnostics,
-    )
-  )[0];
+  const row = rows[0];
   const raw = row?.lastActivityAt;
   if (raw === null || raw === undefined || raw === "") return null;
   const value = Number(raw);

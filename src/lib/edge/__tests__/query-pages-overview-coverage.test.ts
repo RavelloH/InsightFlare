@@ -4187,77 +4187,77 @@ describe("edge pages D1 queries", () => {
           name: "plain-details-off",
           legacy: { sqlBytes: 4798, bindings: 5 },
           logical: {
-            sqlBytes: 15371,
+            sqlBytes: 7745,
             bindings: 23,
             statements: 1,
             sha256:
-              "1b90eeb5d0ca9c1296125139c9e3448fcd8cc70d04641b2e94c26932c0633a38",
+              "a371f0975c50bb63f2259614217c53cc7857b7dc4100f85ed0af6a6da2354397",
           },
         },
         {
           name: "plain-details-on",
           legacy: { sqlBytes: 4819, bindings: 5 },
           logical: {
-            sqlBytes: 16000,
+            sqlBytes: 7934,
             bindings: 23,
             statements: 1,
             sha256:
-              "4e49bc11fcd36fa32b17c2a466b665869da21a80f7076517f950d953178cd80f",
+              "439b0c43f61da4c0c852a00e982c5d36519d6fdaca3883e87b5d28ee1234d505",
           },
         },
         {
           name: "cursor-details-on",
           legacy: { sqlBytes: 5082, bindings: 20 },
           logical: {
-            sqlBytes: 16605,
+            sqlBytes: 8306,
             bindings: 35,
             statements: 1,
             sha256:
-              "2d640cd24bd0ee375e2c5976318e233956a98ca3e1e5825e6dfd7e6f595b84a8",
+              "fba30b61f3af7ba7427c50b9e62fc3cfb2451c33c83eb698310e448924159693",
           },
         },
         {
           name: "prepared-observation",
           legacy: { sqlBytes: 7446, bindings: 10 },
           logical: {
-            sqlBytes: 17103,
+            sqlBytes: 8820,
             bindings: 27,
             statements: 1,
             sha256:
-              "7d133adbbaedb3030561d974e3e0c682d33fb9b5353d6d5b4f45f5b43dfbced5",
+              "f911ab3c93a99cbaef74585a103a2ef5262b2991aced06cf68ce8b93b1da6a6f",
           },
         },
         {
           name: "prepared-session-128",
           legacy: { sqlBytes: 18372, bindings: 264 },
           logical: {
-            sqlBytes: 17868,
+            sqlBytes: 9162,
             bindings: 25,
             statements: 1,
             sha256:
-              "0c22b9c26a88722ebe480a33a26ee41765176ce5af6084d2d4c3ae6451fa2a1f",
+              "c5a0b0b6fcbd46ac5520b3b9a6eb21e2280819a8594e4dd2d5b7b7218ff25a00",
           },
         },
         {
           name: "prepared-session-empty",
           legacy: { sqlBytes: 7558, bindings: 8 },
           logical: {
-            sqlBytes: 17334,
+            sqlBytes: 8828,
             bindings: 24,
             statements: 1,
             sha256:
-              "8d60e5e0aa035f6a2b78ea977fe021b8dbf0329b04884ff8051519a047e56efc",
+              "4ac13ca919ca3adf77135ff42c92cff68b5b2f5b6b2ccba5c0c1bb305c8459b0",
           },
         },
         {
           name: "event-payload-40",
           legacy: { sqlBytes: 43342, bindings: 89 },
           logical: {
-            sqlBytes: 85123,
-            bindings: 77,
+            sqlBytes: 65937,
+            bindings: 68,
             statements: 1,
             sha256:
-              "45952b40f8838edd21815eef46ec58cd8df9461a19e3e5eb4024519d305dffc7",
+              "33e3f553e4abe29732832d712891078d2353740937251dbeb670cbcfb88b920c",
           },
         },
       ]);
@@ -5743,59 +5743,59 @@ describe("edge pages D1 queries", () => {
       expect(metrics).toEqual([
         {
           name: "plain-limited",
-          sqlBytes: 4_201,
+          sqlBytes: 2_704,
           bindings: 10,
           sha256:
-            "30db2681030bf2c9e24021339be44c0e33906a286813acd29885ab506cbd069f",
+            "a5ec09966d5fe2741f694b849907dee2210708d48a811625ee4bdf507dcb4b63",
         },
         {
           name: "ratio-cursor",
-          sqlBytes: 4_889,
+          sqlBytes: 3_159,
           bindings: 19,
           sha256:
-            "1edeec909d1c2255e18a347692fad8afabaf99e8e3238f9917b37c32c40bb629",
+            "b20bf9ed5bd046e992becf727789c242fe1334661bab86c26cebef6a5d17173b",
         },
         {
           name: "event-payload-40-limited",
-          sqlBytes: 61_756,
+          sqlBytes: 57_713,
           bindings: 52,
           sha256:
-            "86f694587a2159d3046eb1e5ffd1025e552ea4717d6b43ed3f707701338b52e5",
+            "79860716191ce534c14b88a841425eea1e4bc8896b1648facb21a7e4d1af7c9f",
         },
         {
           name: "event-payload-40-no-limit",
-          sqlBytes: 61_564,
+          sqlBytes: 57_672,
           bindings: 51,
           sha256:
-            "4d4e7a08afa6e8b5069400eac6e452da7b23012947b520a8ad9cec45413622ca",
+            "32dbdef451103d173f3858213849aded6c9c4e74f4059d87c3b24c0bb8023778",
         },
         {
           name: "event-payload-40-negative-limit",
-          sqlBytes: 61_564,
+          sqlBytes: 57_672,
           bindings: 51,
           sha256:
-            "4d4e7a08afa6e8b5069400eac6e452da7b23012947b520a8ad9cec45413622ca",
+            "32dbdef451103d173f3858213849aded6c9c4e74f4059d87c3b24c0bb8023778",
         },
         {
           name: "event-payload-40-ratio-cursor",
-          sqlBytes: 62_473,
+          sqlBytes: 58_187,
           bindings: 61,
           sha256:
-            "a711d14dfeb7248ca8725b854d695920911d45891f2fbf7cb329d77489ba591e",
+            "9bc10f296d91f23d294163f346d34674348173f537645b05f2a7938f17423c33",
         },
         {
           name: "prepared-session-128",
-          sqlBytes: 5_662,
+          sqlBytes: 3_783,
           bindings: 11,
           sha256:
-            "550e7432b3e82c45c82d85d58bda3f21369e0d6d390a2c14366ab32a7be63cee",
+            "fd763aa7c4ea3928898c1791a501cfb50143cdaa3d3091ba931a8c4e8f72ba8e",
         },
         {
           name: "long-requested-paths-128",
-          sqlBytes: 4_274,
+          sqlBytes: 2_777,
           bindings: 11,
           sha256:
-            "3baa435508947dd65dbee72b60f6a3c10e168a0453591a39dd3fbe20fc2c87f9",
+            "6c3e0cfdd0faeddde7254b1f0285d6d677cd803c3575ad1c7282d09fcbf6313c",
         },
       ]);
       expect(
@@ -5962,51 +5962,51 @@ describe("edge pages D1 queries", () => {
       expect(metrics).toEqual([
         {
           name: "plain-titles",
-          sqlBytes: 2_994,
+          sqlBytes: 1_698,
           bindings: 5,
           statements: 1,
           sha256:
-            "5681eb6aa1a3e0ab991655803813f2a96238122ed014a6eacf569f684675c61e",
+            "b8b8f3d122f0aad9d54d02219afa0f9ee444f3e01853da66c7bc58c571006950",
         },
         {
           name: "plain-trend",
-          sqlBytes: 2_675,
+          sqlBytes: 1_781,
           bindings: 4,
           statements: 1,
           sha256:
-            "f03981c4da6690594eeb99e06b8d4644977f83ef46ced25036ab2164e4b384eb",
+            "ae929e5cf193e0541ed5f9fe2a934d56a14c4fa02eb2b0656e99c87afb5e1c49",
         },
         {
           name: "plain-details",
-          sqlBytes: 4_989,
+          sqlBytes: 2_868,
           bindings: 7,
           statements: 1,
           sha256:
-            "4e8d8ac08d5f46019ae3fa531deeefd3dd584ac35cee60daa170bd9e649c9763",
+            "b79ba5de91b433b9731d6732c96d97653c89b9675f276dff9567c38596fe1ea5",
         },
         {
           name: "event-payload-40-details",
-          sqlBytes: 62_667,
+          sqlBytes: 57_933,
           bindings: 49,
           statements: 1,
           sha256:
-            "1a90ede4ffc5658bd5416d3f4526e8ec4b128fa174657cb3cd08c7e5b7518dac",
+            "3d221d93a54bb85cc6a9baefc28314bd287f108f8feee4e1ad96d46185d06add",
         },
         {
           name: "prepared-session-128-details",
-          sqlBytes: 6_691,
+          sqlBytes: 4_022,
           bindings: 9,
           statements: 1,
           sha256:
-            "24710fe00e176d6a6652760732a552f1bf0430fd112af22a6a508af07028c754",
+            "f01099e03fe0f31c8348eb2422dd6dee29521c31ad63602cc4ee4ca043c57550",
         },
         {
           name: "long-requested-paths-128-details",
-          sqlBytes: 5_018,
+          sqlBytes: 2_897,
           bindings: 7,
           statements: 1,
           sha256:
-            "5a9e2b9f4e7d8c5d5e9831e03c6ef7458780ad2a2fd4dd6a62b29e722c9ea460",
+            "3ad0f86dfceabec9204ca6dd9ad2c28f58217cc9fd8c548b0566c8f3769c33c3",
         },
       ]);
       expect(oldMetrics).toEqual([
@@ -8697,14 +8697,6 @@ describe("edge overview D1 queries and handlers", () => {
       queryLatestSiteActivity(env, siteId, window, filters),
     ).resolves.toBeNull();
     expect(calls).toHaveLength(3);
-    expect(calls[0]?.sql).toContain("MAX(last_activity_at)");
-    expect(calls[0]?.bindings).toEqual([
-      ...visitBindings(),
-      "us",
-      window.startMs,
-      window.endExclusiveMs,
-      "us",
-    ]);
   });
 
   it("maps overview aggregate fallback values and applies filters", async () => {

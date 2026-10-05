@@ -116,6 +116,28 @@ function snapshotQueryTime(time: QueryTime): SemanticTemporalDomains {
   return semanticTemporalDomainsFromQueryTime(time);
 }
 
+function isEmptyAndFilter(filters: FilterDocument): boolean {
+  return (
+    filters.root?.kind === "and" &&
+    Array.isArray(filters.root.children) &&
+    filters.root.children.length === 0
+  );
+}
+
+function snapshotSelectionFilter(
+  profile: SemanticScopedSourceProfile,
+  filters: FilterDocument,
+): FilterDocument {
+  // Legacy direct Session readers treated an empty conjunction as an
+  // unqualified Session selection. Keep that internal compatibility shape
+  // without allowing it through general user-facing filter normalization.
+  return deepFreeze(
+    profile === "direct-page-session-compat-v1" && isEmptyAndFilter(filters)
+      ? { ...filters, root: { kind: "and", children: [] } }
+      : normalizeFilterDocument(filters, analyticsFilterRegistry),
+  );
+}
+
 function sameJsonValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -221,9 +243,7 @@ function sameResolvedSelection(
 export function createSemanticScopedSourceSelection(
   input: CreateSemanticScopedSourceSelectionInput,
 ): SemanticScopedSourceSelection {
-  const filters = deepFreeze(
-    normalizeFilterDocument(input.filters, analyticsFilterRegistry),
-  );
+  const filters = snapshotSelectionFilter(input.profile, input.filters);
   const subject = snapshotSubject(input.subject);
   const time = snapshotTime(input.time);
   const metadata = scopedFilterMetadata(input.filters);
@@ -416,10 +436,12 @@ export function validateSemanticScopedSourceSelection(
     !["observation", "entity"].includes(selection.mode)
   )
     fail("invalid_descriptor");
-  const normalized = normalizeFilterDocument(
-    selection.filter,
-    analyticsFilterRegistry,
-  );
+  const compatibilityEmptyAnd =
+    selection.profile === "direct-page-session-compat-v1" &&
+    isEmptyAndFilter(selection.filter);
+  const normalized = compatibilityEmptyAnd
+    ? selection.filter
+    : normalizeFilterDocument(selection.filter, analyticsFilterRegistry);
   if (!sameJsonValue(normalized, selection.filter))
     fail("filter_snapshot_not_normalized");
   if (
@@ -562,10 +584,15 @@ export function snapshotSemanticScopedSourceSelection(
   context: LogicalPlanContext,
 ): SemanticScopedSourceSelection {
   validateSemanticScopedSourceSelection(selection, context);
+  const compatibilityEmptyAnd =
+    selection.profile === "direct-page-session-compat-v1" &&
+    isEmptyAndFilter(selection.filter);
   return deepFreeze({
     ...selection,
     filter: deepFreeze(
-      normalizeFilterDocument(selection.filter, analyticsFilterRegistry),
+      compatibilityEmptyAnd
+        ? selection.filter
+        : normalizeFilterDocument(selection.filter, analyticsFilterRegistry),
     ),
     subject: snapshotSubject(selection.subject),
     authorizedSiteIds: canonicalSiteIds(selection.authorizedSiteIds),
